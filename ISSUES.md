@@ -1311,6 +1311,148 @@ enterprise systems ship both.)_
   null-on-role, null-on-permission, both-null, mismatched
   guards, missing parent row). Fast, no feature-test overhead.
 
+### 64. `PolicyRepository` contract is misnamed — should mirror `PrincipalResolver`
+
+- **Files:** `src/Contracts/PolicyRepository.php`;
+  `src/Repositories/DefaultPolicyRepository.php`;
+  `src/AuthorizationServiceProvider.php:100–105`;
+  `src/AuthorizationManager.php:274–281`.
+- **Observation:** the contract exposes a single read method
+  `policiesFor(object $principal): array` — no create, update,
+  delete, or persistence-layer query builder. In DDD and Laravel
+  convention "Repository" implies a CRUD abstraction over a
+  persistence backend (e.g. `UserRepository` with `find`, `save`,
+  `delete`). This contract is a **resolution strategy** that
+  answers "what policies apply right now for this principal?"
+  and composes an optional external `PolicyStore` with the
+  principal's own attached policies.
+- **Asymmetry with `PrincipalResolver`:** the package already has
+  `PrincipalResolver::resolve(): ?object` answering "what
+  principal is in scope?". `PolicyRepository::policiesFor()`
+  answers "what policies are in scope?". Same shape, same job,
+  different suffix. A developer looking at the service-provider
+  bindings sees `PrincipalResolver` and `PolicyRepository` and has
+  to infer that they fill analogous roles — the names don't tell
+  that story.
+- **Impact:** cognitive tax on contract-surface discoverability.
+  Consumers implementing a tenant-scoped policy seam expect to
+  find a `PolicyResolver` alongside `PrincipalResolver`; today
+  they find `PolicyRepository` and an old spec reference.
+- **Options:** (a) rename the contract to `PolicyResolver` and
+  its default implementation to `DefaultPolicyResolver`; move
+  from `src/Repositories/` to `src/Resolvers/` to sit beside
+  `NullPrincipalResolver`. Matches the existing idiom exactly;
+  (b) keep `PolicyRepository` and document the non-standard
+  semantic in a design note; (c) rename to `PolicyAggregator`
+  / `PolicyGatherer` to describe the "union multiple sources"
+  behaviour more precisely than either "Repository" or
+  "Resolver". Option (a) is the symmetric answer and collapses
+  the two mental models consumers need to carry.
+
+### 65. `DecisionJournal` is a misnomer and its API leaks collection semantics onto single-slot storage
+
+- **Files:** `src/DecisionJournal.php`;
+  `src/AuthorizationManager.php:114,138,156–188` (call sites);
+  `src/Facades/Authorization.php:22–23` (facade methods).
+- **Observation:** "Journal" connotes a sequential, append-only
+  record (transaction journal, audit journal, changelog). The
+  class holds exactly **one** `EvaluationResult` at a time —
+  every `record()` overwrites the previous value with no history
+  retained. The method verbs compound the confusion:
+    - `record()` — append-flavoured verb, suggests adding
+    - `last()` — collection-flavoured, suggests "last of many"
+    - `forget()` — single-value mutation verb
+  Three different metaphors for a single-slot container. A
+  reader's mental model on first encounter with
+  `DecisionJournal::record(...)` is "this appends to a log" —
+  which the implementation does not do.
+- **Impact:** naming-driven incorrect mental models. A consumer
+  expecting to read a history of decisions from the "journal"
+  will discover the single-slot semantics only by reading the
+  code. Also blocks a future actual journal — if we later want
+  to record the last N decisions (for debugging, slow-query-style
+  traces, or admin introspection), the name is already taken by
+  the wrong thing.
+- **Options:** (a) rename the class to `LastDecisionStore` (or
+  `CurrentDecision` / `DecisionSlot`) and update the API to
+  match the slot semantics: `set()` / `get()` / `clear()`.
+  Facade becomes `Authorization::lastDecision()` (getter
+  unchanged) and `Authorization::clearLastDecision()` (matches
+  the getter's tense). Test `PolicyRepositoryAndJournalTest`
+  renames too; (b) keep `DecisionJournal` but clarify the
+  docblock that it is a single-slot holder and the verbs are
+  Laravel-idiomatic (`forget` matches Cache / Session). Less
+  churn, more reader-surprise; (c) upgrade the class to an
+  actual journal — record the last N decisions with a ring
+  buffer — and keep the name accurate. Useful for introspection
+  / debugging if #42's expectations are met. Option (a) is the
+  minimum-surprise fix.
+
+### 66. `DecisionJournal` cross-request leakage in Octane / RoadRunner has no shipped auto-reset hook
+
+- **Files:** `src/DecisionJournal.php:58–67` (docblock +
+  `forget()`); `src/AuthorizationManager.php:185–188`
+  (`forgetLastDecision()`); no shipped listener / middleware
+  that calls either.
+- **Observation:** the journal is bound as a container singleton
+  at `src/AuthorizationServiceProvider.php:115`. Under Octane /
+  RoadRunner / Swoole / FrankenPHP (all supported by modern
+  Laravel) the container — and therefore the singleton — is
+  **preserved across requests**. A decision recorded on request
+  A stays readable via `Authorization::lastDecision()` on
+  request B unless the consumer explicitly calls
+  `forgetLastDecision()` between requests. The class docblock
+  acknowledges this ("Long-running workers call this between
+  requests") but no shipped code does it.
+- **Impact:** a production Octane deployment using the journal
+  will see cross-request decision leakage. The "why was this
+  denied?" surface that the journal exists to provide will
+  silently return the **previous request's** answer unless the
+  consumer wires a reset hook. Not a correctness bug in the
+  engine — a correctness bug in the observability surface.
+- **Options:** (a) ship an Octane listener on
+  `Laravel\Octane\Events\RequestReceived` (or the analogous
+  RoadRunner / Swoole hooks) that calls
+  `Authorization::forgetLastDecision()`. Bind only when the
+  Octane package is installed (class_exists guard) to keep the
+  package's zero-runtime-deps contract; (b) register a
+  `TerminatingMiddleware` that calls the reset on HTTP response
+  termination — works for Octane and standard FPM alike; (c)
+  re-scope the journal to a per-request-scope binding rather
+  than a singleton, so Octane's `flush()` clears it naturally.
+  Option (c) is the cleanest architecturally but changes the
+  clone-inheritance semantics the journal currently relies on.
+  Option (b) is the most portable.
+
+### 67. `EvaluatorThroughputTest` budget flakes under parallel contention
+
+- **Files:** `tests/Performance/EvaluatorThroughputTest.php`
+  (0.5s wall-clock budget on a 100-statement evaluation).
+- **Observation:** serial runs clear the budget with wide margin
+  (~0.14s on the reference machine). Under ParaTest's default
+  16-way parallel execution the same test regularly exceeds the
+  budget — observed readings of 0.52s and 1.73s on consecutive
+  `composer test` invocations while other processes saturate the
+  CPU. The evaluator itself is unchanged; the variance is CPU
+  contention between parallel processes competing for a single
+  thread budget.
+- **Impact:** `composer test` is unreliable for the performance
+  tier — a green-on-serial / red-on-parallel outcome trains
+  developers to ignore the tier's signals. CI reproducibility is
+  at risk whenever the runner is shared or noisy.
+- **Options:** (a) exclude the Performance suite from parallel
+  execution in `phpunit.xml.dist` / `paratest` config, running
+  it serially in CI (`composer test:performance` already runs
+  serially via phpunit; the problem is
+  `composer test` which uses ParaTest and pulls Performance in);
+  (b) convert the wall-clock budget into a query-count /
+  operation-count budget that is insensitive to CPU contention —
+  asserts the evaluator performs at most N ops for N statements,
+  not that the wall-clock is under X seconds; (c) widen the
+  budget to absorb parallel contention (masks real regressions,
+  weakens the signal). Option (b) is the most rigorous;
+  option (a) is the fastest fix. Both acceptable.
+
 ---
 
 ## Cross-references
