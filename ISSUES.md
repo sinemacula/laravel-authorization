@@ -1562,127 +1562,13 @@ enterprise systems ship both.)_
   low-friction enterprise answer: no API split, full
   observability.
 
-### 81. `RequireRole` and `RequirePermission` duplicate their handle and expand implementations
-
-- **Files:** `src/Http/Middleware/RequireRole.php:39–85`;
-  `src/Http/Middleware/RequirePermission.php:44–90`.
-- **Observation:** the two middleware classes share a common
-  five-step `handle()` shape (pull user, 401 if null, 403 if
-  wrong capability contract, loop arguments OR-short-circuiting
-  on a check method, 403 if none matched) and an identical
-  15-line `expand()` helper for pipe-vs-comma argument
-  flattening. The only points of variation across the two
-  classes are the capability contract
-  (`SupportsRoles` vs `SupportsPermissions`), the check method
-  (`hasRole` vs `hasPermission`), and the rejection message
-  string. Every other byte is copy-pasted.
-- **Impact:** behavioural drift risk. A future change — say,
-  adding a debug log line on the deny path, or swapping
-  `$request->user()` for a `PrincipalResolver` call (see #82)
-  — has to be applied in two places, and the test suite must
-  mirror the scenarios twice. Also doubles the mutation-testing
-  surface for the same logic.
-- **Options:** (a) introduce an abstract
-  `AbstractAuthorizationMiddleware` with a concrete `handle()`
-  template method and three abstract hooks
-  (`requiredContract(): string`, `matches(object $user, string $needle): bool`,
-  `rejectionMessage(): string`); `RequireRole` /
-  `RequirePermission` become three-line subclasses; (b) extract
-  only `expand()` into a shared
-  `ParsesMiddlewareArguments` trait and leave the handle
-  bodies independent — smaller surface, doesn't change the
-  class topology. Option (a) is the closer DRY fix; option (b)
-  keeps each middleware readable top-to-bottom at the cost of
-  the residual 20-line duplication on the handle path.
-
-### 82. Middleware resolves the principal via `$request->user()` — bypasses the `PrincipalResolver` decoupling
-
-- **Files:** `src/Http/Middleware/RequireRole.php:41`;
-  `src/Http/Middleware/RequirePermission.php:46`.
-- **Observation:** both middleware pull the authenticated user
-  via `$request->user()`. That helper is a thin wrapper over
-  Laravel's auth manager — it resolves the user through the
-  bound auth guard. The package's entire core architecture
-  routes around exactly that coupling: `PrincipalResolver` is
-  the contract that lets the package stay auth-agnostic
-  (§4.3 item 2, §4.1, and the shipped
-  `NullPrincipalResolver` that makes the package
-  anonymous-safe by default). The middleware layer — the
-  single most Laravel-idiomatic surface the package exposes
-  — forfeits that decoupling and pins consumers to Laravel's
-  `Auth` facade for route-middleware to function.
-- **Impact:** inconsistency with the package's own stated
-  contract surface. A consumer who has configured a custom
-  `PrincipalResolver` (tenant-scoped, JWT-derived, SSO-backed,
-  whatever) finds their custom resolution applies to
-  `Authorization::can(...)` but **not** to
-  `->middleware('role:admin')` — the middleware will resolve
-  a different principal, or no principal, depending on what
-  `$request->user()` returns. Silent inconsistency at the
-  route layer.
-- **Options:** (a) inject the bound `PrincipalResolver` and
-  use `$resolver->resolve()` instead of `$request->user()`.
-  Keeps the middleware entirely auth-agnostic and matches
-  every other facade / manager call path; (b) try
-  `PrincipalResolver::resolve()` first, fall back to
-  `$request->user()` when the resolver returns null — gives
-  consumers both paths without a breaking change, but the
-  fallback re-introduces the coupling; (c) accept the coupling
-  and document explicitly that middleware assumes Laravel Auth
-  — honest, but the middleware contradicts the `PrincipalResolver`
-  narrative on §4.1's standalone-mode claim ("The consumer's
-  app may use Laravel's built-in `auth`, another authentication
-  package, or no authentication at all."). Option (a) is the
-  only answer that keeps the package's own invariants.
-
-### 83. Middleware conflates "identity does not support this capability" with "legitimate deny" — both return 403
-
-- **Files:** `src/Http/Middleware/RequireRole.php:47–49,57`;
-  `src/Http/Middleware/RequirePermission.php:52–54,62`.
-- **Observation:** both middleware raise
-  `AccessDeniedHttpException` (HTTP 403) in two distinct
-  situations:
-    1. The authenticated identity does not implement the
-       capability contract (`SupportsRoles` /
-       `SupportsPermissions`) — **programmer error**, the
-       middleware was applied to a route whose user model
-       cannot answer role / permission checks.
-    2. The identity implements the contract but does not hold
-       any of the required roles / permissions —
-       **legitimate deny**, the consumer is simply not
-       authorised.
-       The HTTP status is the same (403) and the exception class is
-       the same (`AccessDeniedHttpException`), so upstream logging
-       and monitoring cannot distinguish the two. A security log
-       analyst sees "403 on /admin" without knowing whether it
-       represents a denied attacker or a misconfigured route.
-- **Impact:** muddy signal for security-audit consumers.
-  Indistinguishable surface also masks programmer bugs during
-  development — a test that wires `RequireRole` onto a route
-  behind an identity that forgot to compose `HasRoles` looks
-  like a deny, not a misconfiguration, and debugging cost
-  balloons. Also complicates metric dashboards that want to
-  track "real denies" vs "setup errors."
-- **Options:** (a) raise a typed
-  `AuthorizationMiddlewareMisconfiguredException` (extending
-  `\LogicException`, HTTP 500) when the identity lacks the
-  required capability contract — "this middleware shouldn't
-  have been applied here", distinct from "access denied".
-  Legitimate denies stay on `AccessDeniedHttpException` / 403;
-  (b) keep the 403 but use two separate exception classes so
-  consumers can pick them apart in their handler
-  (`UnsupportedIdentityException extends AccessDeniedHttpException`,
-  `AuthorizationDeniedException extends AccessDeniedHttpException`);
-  (c) accept the conflation and document the dual meaning of
-  the 403 in the class docblock — honest but still muddy for
-  log analysts. Option (a) is the correct enterprise answer;
-  option (b) is the non-breaking compromise.
-
 ---
 
 ### 84. Check Enums
 
 Ensure we are using enums where appropriate
+
+---
 
 ## Cross-references
 

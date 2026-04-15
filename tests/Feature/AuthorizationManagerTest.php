@@ -352,6 +352,23 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * `Authorization::currentPrincipal()` returns the principal
+     * the resolver currently reports — the single accessor
+     * every surface (middleware, Blade, future consumers)
+     * delegates to (see issue #85).
+     *
+     * @return void
+     */
+    public function testCurrentPrincipalExposesTheResolvedPrincipal(): void
+    {
+        self::assertNull(Authorization::currentPrincipal());
+
+        $user = StubAuthorizable::create(['id' => '01J0000000000000000000USR8']);
+
+        self::assertSame($user, Authorization::for($user)->currentPrincipal());
+    }
+
+    /**
      * Sort an array of strings.
      *
      * @param  array<int, string>  $values

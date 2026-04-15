@@ -22,6 +22,7 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
  * @method static \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult|null lastDecision()
  * @method static void forgetLastDecision()
  * @method static string explain(string $action, string|null $resource = null, array<string, mixed> $context = [])
+ * @method static object|null currentPrincipal()
  *
  * @see AuthorizationManager
  *

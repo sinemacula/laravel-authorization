@@ -360,6 +360,41 @@ final class BladeDirectivesTest extends TestCase
     }
 
     /**
+     * Every canonical and Spatie-compat directive registers a
+     * matching `@endunless<name>` alias — a migrated Spatie view
+     * that uses `@endunlesshasrole`, `@endunlesshasanyrole`,
+     * `@endunlesshasallroles`, `@endunlesspermission`,
+     * `@endunlessanypermission`, or `@endunlessallpermissions`
+     * compiles cleanly alongside `@endunlessrole` (see issue #86).
+     *
+     * @return void
+     */
+    public function testEveryUnlessVariantHasASpatieShapedClosingAlias(): void
+    {
+        Role::create(['id' => (string) Str::uuid(), 'name' => 'admin', 'guard_name' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:draft', 'guard_name' => 'web']);
+
+        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $this->actAs($user);
+
+        $closings = [
+            '@unlessrole(\'admin\') yes @endunlessrole',
+            '@unlessanyrole([\'admin\']) yes @endunlessanyrole',
+            '@unlessallroles([\'admin\']) yes @endunlessallroles',
+            '@unlesshasrole(\'admin\') yes @endunlesshasrole',
+            '@unlesshasanyrole([\'admin\']) yes @endunlesshasanyrole',
+            '@unlesshasallroles([\'admin\']) yes @endunlesshasallroles',
+            '@unlesspermission(\'posts:draft\') yes @endunlesspermission',
+            '@unlessanypermission([\'posts:draft\']) yes @endunlessanypermission',
+            '@unlessallpermissions([\'posts:draft\']) yes @endunlessallpermissions',
+        ];
+
+        foreach ($closings as $template) {
+            self::assertSame('yes', $this->render($template), "Failed template: {$template}");
+        }
+    }
+
+    /**
      * `@hasrole`, `@hasanyrole`, `@hasallroles` are Spatie-compat
      * aliases — they must behave identically to their canonical
      * counterparts so a migrated view renders unchanged.

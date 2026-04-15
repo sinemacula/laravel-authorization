@@ -4,10 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Http\Middleware;
 
-use Illuminate\Auth\AuthenticationException;
-use Illuminate\Http\Request;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
-use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 /**
  * Route middleware that admits only identities holding one of the
@@ -23,63 +20,32 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-class RequireRole
+class RequireRole extends AbstractAuthorizationMiddleware
 {
     /**
-     * Handle an incoming request.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @param  \Closure(\Illuminate\Http\Request): mixed  $next
-     * @param  string  ...$roles
-     * @return mixed
-     *
-     * @throws \Illuminate\Auth\AuthenticationException
-     * @throws \Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException
+     * @return class-string<\SineMacula\Laravel\Authorization\Contracts\SupportsRoles>
      */
-    public function handle(Request $request, \Closure $next, string ...$roles): mixed
+    protected function requiredContract(): string
     {
-        $user = $request->user();
-
-        if ($user === null) {
-            throw new AuthenticationException('Unauthenticated.');
-        }
-
-        if (!$user instanceof SupportsRoles) {
-            throw new AccessDeniedHttpException('This identity does not support role checks.');
-        }
-
-        foreach (self::expand($roles) as $role) {
-            if ($user->hasRole($role)) {
-                return $next($request);
-            }
-        }
-
-        throw new AccessDeniedHttpException('Role required.');
+        return SupportsRoles::class;
     }
 
     /**
-     * Flatten pipe-separated role arguments so a single
-     * middleware declaration like `role:admin|editor` behaves
-     * identically to the native Laravel `role:admin,editor`
-     * form.
-     *
-     * @param  array<int, string>  $arguments
-     * @return array<int, string>
+     * @param  object  $principal
+     * @param  string  $needle
+     * @return bool
      */
-    private static function expand(array $arguments): array
+    protected function matches(object $principal, string $needle): bool
     {
-        $roles = [];
+        /** @var \SineMacula\Laravel\Authorization\Contracts\SupportsRoles $principal */
+        return $principal->hasRole($needle);
+    }
 
-        foreach ($arguments as $argument) {
-            foreach (\explode('|', $argument) as $candidate) {
-                $candidate = \trim($candidate);
-
-                if ($candidate !== '') {
-                    $roles[] = $candidate;
-                }
-            }
-        }
-
-        return $roles;
+    /**
+     * @return string
+     */
+    protected function rejectionMessage(): string
+    {
+        return 'Role required.';
     }
 }

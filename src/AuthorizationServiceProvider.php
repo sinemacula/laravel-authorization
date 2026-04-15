@@ -295,11 +295,15 @@ class AuthorizationServiceProvider extends ServiceProvider
      * `@anypermission`, and `@allpermissions`. Spatie-style
      * aliases (`@hasrole`, `@hasanyrole`, `@hasallroles`) are
      * registered in parallel so consumers migrating from Spatie
-     * can move their views verbatim. An `@endunlessrole` alias is
-     * added explicitly because Spatie's closing tag for
-     * `@unlessrole(...)` is `@endunlessrole`, whereas `Blade::if`
-     * closes its auto-generated unless-variant with `@endrole`;
-     * shipping both spellings lets each idiom work.
+     * can move their views verbatim.
+     *
+     * Spatie closes its unless-variants with `@endunless<name>`,
+     * whereas `Blade::if` closes its auto-generated variant with
+     * `@end<name>`. Every canonical and compat name gets a
+     * matching `@endunless<name>` alias that emits the same
+     * `endif;`, so both idioms compile cleanly regardless of
+     * which closing spelling the consumer reaches for (see issue
+     * #86).
      *
      * The directives are registered only when the `blade.compiler`
      * binding is present, so console-only applications that do not
@@ -313,25 +317,28 @@ class AuthorizationServiceProvider extends ServiceProvider
             return;
         }
 
-        Blade::if('role', static fn (array|string $roles): bool => BladeHelpers::hasRole($roles));
-        Blade::if('permission', static fn (array|string $permissions): bool => BladeHelpers::hasPermission($permissions));
-        Blade::if('anyrole', static fn (array|string $roles): bool => BladeHelpers::hasRole($roles));
-        Blade::if('allroles', static fn (array|string $roles): bool => BladeHelpers::hasAllRoles($roles));
-        Blade::if('anypermission', static fn (array|string $permissions): bool => BladeHelpers::hasPermission($permissions));
-        Blade::if('allpermissions', static fn (array|string $permissions): bool => BladeHelpers::hasAllPermissions($permissions));
+        $roleNames       = ['role', 'anyrole', 'allroles', 'hasrole', 'hasanyrole', 'hasallroles'];
+        $permissionNames = ['permission', 'anypermission', 'allpermissions'];
 
-        // Spatie-compatible aliases. Registering them behind
-        // `Blade::if` keeps the `@else<name>` / `@end<name>` shape
-        // Spatie consumers expect.
-        Blade::if('hasrole', static fn (array|string $roles): bool => BladeHelpers::hasRole($roles));
-        Blade::if('hasanyrole', static fn (array|string $roles): bool => BladeHelpers::hasRole($roles));
-        Blade::if('hasallroles', static fn (array|string $roles): bool => BladeHelpers::hasAllRoles($roles));
+        $anyRole = static fn (array|string $roles): bool => BladeHelpers::hasRole($roles);
+        $allRole = static fn (array|string $roles): bool => BladeHelpers::hasAllRoles($roles);
+        $anyPerm = static fn (array|string $permissions): bool => BladeHelpers::hasPermission($permissions);
+        $allPerm = static fn (array|string $permissions): bool => BladeHelpers::hasAllPermissions($permissions);
 
-        // Spatie's closing tag for `@unlessrole` is
-        // `@endunlessrole`, not `@endrole`. Register it as an
-        // alias emitting the same `endif;` so both conventions
-        // compile cleanly.
-        Blade::directive('endunlessrole', static fn (): string => '<?php endif; ?>');
+        Blade::if('role', $anyRole);
+        Blade::if('anyrole', $anyRole);
+        Blade::if('allroles', $allRole);
+        Blade::if('hasrole', $anyRole);
+        Blade::if('hasanyrole', $anyRole);
+        Blade::if('hasallroles', $allRole);
+
+        Blade::if('permission', $anyPerm);
+        Blade::if('anypermission', $anyPerm);
+        Blade::if('allpermissions', $allPerm);
+
+        foreach ([...$roleNames, ...$permissionNames] as $name) {
+            Blade::directive('endunless' . $name, static fn (): string => '<?php endif; ?>');
+        }
     }
 
     /**

@@ -221,9 +221,16 @@ class AuthorizationManager
     /**
      * Resolve the principal in scope for this invocation.
      *
+     * Honours a `for()` override when one is active; otherwise
+     * defers to the bound `PrincipalResolver`. The method is
+     * public so every surface that needs "the current principal"
+     * — middleware, Blade helpers, custom Gates — can delegate
+     * here instead of re-implementing the override + resolver
+     * trio (see issue #85).
+     *
      * @return object|null
      */
-    private function currentPrincipal(): ?object
+    public function currentPrincipal(): ?object
     {
         if ($this->principalOverridden) {
             return $this->principalOverride;

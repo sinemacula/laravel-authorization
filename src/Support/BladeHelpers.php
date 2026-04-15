@@ -4,7 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Support;
 
-use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 
@@ -26,21 +26,22 @@ final class BladeHelpers
 {
     /**
      * Return the currently resolved principal, or null when the
-     * resolver cannot be constructed (tests that run without the
-     * service provider booted) or reports anonymous.
+     * manager cannot be constructed (tests that run without the
+     * service provider booted) or the resolver reports anonymous.
+     *
+     * Delegates to `AuthorizationManager::currentPrincipal()` so
+     * the Blade surface resolves the same principal as the
+     * facade, Gate, and middleware paths — see issue #85.
      *
      * @return object|null
      */
     public static function currentPrincipal(): ?object
     {
-        if (!\function_exists('app') || !app()->bound(PrincipalResolver::class)) {
+        if (!\function_exists('app') || !app()->bound(AuthorizationManager::class)) {
             return null;
         }
 
-        /** @var \SineMacula\Laravel\Authorization\Contracts\PrincipalResolver $resolver */
-        $resolver = app(PrincipalResolver::class);
-
-        return $resolver->resolve();
+        return app(AuthorizationManager::class)->currentPrincipal();
     }
 
     /**

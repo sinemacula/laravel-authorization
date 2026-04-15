@@ -11,7 +11,11 @@ use Illuminate\Http\Response;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
+use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Exceptions\AuthorizationMiddlewareMisconfiguredException;
+use SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -22,14 +26,15 @@ use Tests\Feature\Stubs\StubAuthorizable;
 use Tests\TestCase;
 
 /**
- * Feature coverage for the shipped route middleware (issue #33).
+ * Feature coverage for the shipped route middleware (issues #33,
+ * #81, #82, #83).
  *
- * `RequireRole` / `RequirePermission` are exercised by constructing
- * a request, attaching a user resolver, and invoking the handle
- * method directly — this keeps the tests orthogonal to the Laravel
- * auth-provider plumbing Testbench would otherwise require. The
- * service-provider aliasing is covered separately via the router
- * binding.
+ * Each test binds a scoped `PrincipalResolver` that returns the
+ * chosen principal, then invokes `handle()` directly — this
+ * verifies the middleware resolves through the package's own
+ * resolver contract (not `$request->user()`) and keeps the tests
+ * orthogonal to Laravel's auth-provider plumbing. Service-provider
+ * aliasing is covered separately via the router binding.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -38,13 +43,15 @@ use Tests\TestCase;
  */
 #[CoversClass(RequireRole::class)]
 #[CoversClass(RequirePermission::class)]
+#[CoversClass(AbstractAuthorizationMiddleware::class)]
+#[CoversClass(AuthorizationMiddlewareMisconfiguredException::class)]
 #[CoversClass(AuthorizationServiceProvider::class)]
 final class RouteMiddlewareTest extends TestCase
 {
     /**
      * Permission string reused across the `permission` middleware
      * coverage. Deduplicated to a constant so the same literal does
-     * not appear inline in eight places.
+     * not appear inline in many places.
      *
      * @var string
      */
@@ -58,33 +65,35 @@ final class RouteMiddlewareTest extends TestCase
      */
     public function testRoleMiddlewareRejectsUnauthenticatedRequest(): void
     {
+        $this->actAs(null);
+
         $middleware = new RequireRole;
 
         $this->expectException(AuthenticationException::class);
-        $middleware->handle($this->requestAs(null), $this->passThrough(), 'admin');
+        $middleware->handle(self::request(), $this->passThrough(), 'admin');
     }
 
     /**
      * An authenticated identity that does not implement
-     * `SupportsRoles` cannot answer role checks — the middleware
-     * must fail closed with a 403, not let the request through.
+     * `SupportsRoles` is a misconfiguration — the middleware
+     * must raise the typed misconfiguration exception (HTTP 500
+     * semantics), not an `AccessDeniedHttpException` that looks
+     * like a legitimate deny.
      *
      * @return void
      */
-    public function testRoleMiddlewareRejectsIdentityWithoutRoleSupport(): void
+    public function testRoleMiddlewareRaisesMisconfigurationWhenIdentityLacksContract(): void
     {
+        $this->actAs(new \stdClass);
+
         $middleware = new RequireRole;
 
-        $this->expectException(AccessDeniedHttpException::class);
-        $middleware->handle(
-            $this->requestAs(new \stdClass),
-            $this->passThrough(),
-            'admin',
-        );
+        $this->expectException(AuthorizationMiddlewareMisconfiguredException::class);
+        $middleware->handle(self::request(), $this->passThrough(), 'admin');
     }
 
     /**
-     * A user missing every required role is denied.
+     * A user missing every required role is denied with a 403.
      *
      * @return void
      */
@@ -97,11 +106,12 @@ final class RouteMiddlewareTest extends TestCase
         ]);
 
         $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $this->actAs($user);
 
         $middleware = new RequireRole;
 
         $this->expectException(AccessDeniedHttpException::class);
-        $middleware->handle($this->requestAs($user), $this->passThrough(), 'admin');
+        $middleware->handle(self::request(), $this->passThrough(), 'admin');
     }
 
     /**
@@ -120,8 +130,10 @@ final class RouteMiddlewareTest extends TestCase
         $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
         $user->assignRole('admin');
 
+        $this->actAs($user);
+
         $response = (new RequireRole)->handle(
-            $this->requestAs($user),
+            self::request(),
             $this->passThrough(),
             'admin',
         );
@@ -152,8 +164,10 @@ final class RouteMiddlewareTest extends TestCase
         $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
         $user->assignRole('editor');
 
+        $this->actAs($user);
+
         $response = (new RequireRole)->handle(
-            $this->requestAs($user),
+            self::request(),
             $this->passThrough(),
             'admin',
             'editor',
@@ -185,8 +199,10 @@ final class RouteMiddlewareTest extends TestCase
         $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
         $user->assignRole('oncall');
 
+        $this->actAs($user);
+
         $response = (new RequireRole)->handle(
-            $this->requestAs($user),
+            self::request(),
             $this->passThrough(),
             'admin|oncall',
         );
@@ -196,8 +212,8 @@ final class RouteMiddlewareTest extends TestCase
     }
 
     /**
-     * Mixed separator forms are tolerated — a `pipe` inside one
-     * argument and a `comma` across arguments should both expand.
+     * Mixed separator forms are tolerated — a pipe inside one
+     * argument and a comma across arguments should both expand.
      *
      * @return void
      */
@@ -212,8 +228,10 @@ final class RouteMiddlewareTest extends TestCase
         $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
         $user->assignRole('captain');
 
+        $this->actAs($user);
+
         $response = (new RequireRole)->handle(
-            $this->requestAs($user),
+            self::request(),
             $this->passThrough(),
             'admin|editor',
             'captain',
@@ -231,28 +249,28 @@ final class RouteMiddlewareTest extends TestCase
      */
     public function testPermissionMiddlewareRejectsUnauthenticatedRequest(): void
     {
+        $this->actAs(null);
+
         $middleware = new RequirePermission;
 
         $this->expectException(AuthenticationException::class);
-        $middleware->handle($this->requestAs(null), $this->passThrough(), self::PERMISSION);
+        $middleware->handle(self::request(), $this->passThrough(), self::PERMISSION);
     }
 
     /**
-     * Identities without `SupportsPermissions` are denied —
-     * anonymous user objects cannot be probed for permissions.
+     * Identities without `SupportsPermissions` raise the typed
+     * misconfiguration exception — same contract as `RequireRole`.
      *
      * @return void
      */
-    public function testPermissionMiddlewareRejectsIdentityWithoutPermissionSupport(): void
+    public function testPermissionMiddlewareRaisesMisconfigurationWhenIdentityLacksContract(): void
     {
+        $this->actAs(new \stdClass);
+
         $middleware = new RequirePermission;
 
-        $this->expectException(AccessDeniedHttpException::class);
-        $middleware->handle(
-            $this->requestAs(new \stdClass),
-            $this->passThrough(),
-            self::PERMISSION,
-        );
+        $this->expectException(AuthorizationMiddlewareMisconfiguredException::class);
+        $middleware->handle(self::request(), $this->passThrough(), self::PERMISSION);
     }
 
     /**
@@ -269,11 +287,12 @@ final class RouteMiddlewareTest extends TestCase
         ]);
 
         $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $this->actAs($user);
 
         $middleware = new RequirePermission;
 
         $this->expectException(AccessDeniedHttpException::class);
-        $middleware->handle($this->requestAs($user), $this->passThrough(), self::PERMISSION);
+        $middleware->handle(self::request(), $this->passThrough(), self::PERMISSION);
     }
 
     /**
@@ -292,8 +311,10 @@ final class RouteMiddlewareTest extends TestCase
         $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
         $user->givePermission(self::PERMISSION);
 
+        $this->actAs($user);
+
         $response = (new RequirePermission)->handle(
-            $this->requestAs($user),
+            self::request(),
             $this->passThrough(),
             self::PERMISSION,
         );
@@ -325,8 +346,10 @@ final class RouteMiddlewareTest extends TestCase
         $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
         $user->assignRole('publisher');
 
+        $this->actAs($user);
+
         $response = (new RequirePermission)->handle(
-            $this->requestAs($user),
+            self::request(),
             $this->passThrough(),
             'posts:publish',
         );
@@ -357,10 +380,12 @@ final class RouteMiddlewareTest extends TestCase
         $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
         $user->givePermission('posts:delete');
 
+        $this->actAs($user);
+
         $response = (new RequirePermission)->handle(
-            $this->requestAs($user),
+            self::request(),
             $this->passThrough(),
-            'posts:edit|posts:delete',
+            self::PERMISSION . '|posts:delete',
         );
 
         self::assertInstanceOf(Response::class, $response);
@@ -406,18 +431,84 @@ final class RouteMiddlewareTest extends TestCase
     }
 
     /**
-     * Build an incoming request carrying the supplied user as the
-     * authenticated identity.
+     * The middleware resolves the principal through the bound
+     * `PrincipalResolver` (see issue #82). A request carrying a
+     * `$request->user()` that does NOT match the resolver's
+     * answer must not leak in — the resolver is the single
+     * source of truth.
      *
-     * @param  object|null  $user
+     * @return void
+     */
+    public function testMiddlewareResolvesPrincipalThroughResolverNotRequestUser(): void
+    {
+        Role::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => 'admin',
+            'guard_name' => 'web',
+        ]);
+
+        $resolverUser = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $resolverUser->assignRole('admin');
+
+        $requestUser = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+
+        $this->actAs($resolverUser);
+
+        $request = Request::create('/test', 'GET');
+        $request->setUserResolver(static fn (): object => $requestUser);
+
+        $response = (new RequireRole)->handle(
+            $request,
+            $this->passThrough(),
+            'admin',
+        );
+
+        self::assertInstanceOf(Response::class, $response);
+        self::assertSame(200, $response->getStatusCode());
+    }
+
+    /**
+     * Bind a scoped `PrincipalResolver` that returns the supplied
+     * principal and drop the memoised manager so the next facade
+     * call picks it up.
+     *
+     * @param  object|null  $principal
+     * @return void
+     */
+    private function actAs(?object $principal): void
+    {
+        $resolver = new class ($principal) implements PrincipalResolver {
+            /**
+             * @param  object|null  $principal
+             */
+            public function __construct(private readonly ?object $principal) {}
+
+            /**
+             * Return the principal bound on this scoped resolver.
+             *
+             * @return object|null
+             */
+            public function resolve(): ?object
+            {
+                return $this->principal;
+            }
+        };
+
+        $this->app->instance(PrincipalResolver::class, $resolver);
+        $this->app->forgetInstance('authorization');
+        $this->app->forgetInstance(AuthorizationManager::class);
+    }
+
+    /**
+     * Build an incoming request. The middleware no longer pulls
+     * the user from `$request->user()`, so the request itself is
+     * just a transport — nothing is attached to it.
+     *
      * @return \Illuminate\Http\Request
      */
-    private function requestAs(?object $user): Request
+    private static function request(): Request
     {
-        $request = Request::create('/test', 'GET');
-        $request->setUserResolver(static fn (): ?object => $user);
-
-        return $request;
+        return Request::create('/test', 'GET');
     }
 
     /**
