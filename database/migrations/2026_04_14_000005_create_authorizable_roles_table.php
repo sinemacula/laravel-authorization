@@ -36,9 +36,10 @@ return new class extends Migration {
 
             // Optional expiry for temporal grants — null means
             // "forever". Rows whose `expires_at` is in the past
-            // are filtered out of the relation on read and
-            // swept by the `authorization:prune-expired-grants`
-            // command or equivalent consumer-scheduled task.
+            // are filtered out of the relation on read; pruning
+            // the expired rows is a consumer-scheduled task. The
+            // authorization package does not ship a sweeper in
+            // v1.0.0.
             $table->timestamp('expires_at')->nullable();
 
             $table->unique(['role_id', 'authorizable_type', 'authorizable_id'], 'authorizable_roles_unique');

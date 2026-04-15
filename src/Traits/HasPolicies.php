@@ -4,16 +4,15 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Traits;
 
-use DateTimeInterface;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
-use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\PolicyAttached;
 use SineMacula\Laravel\Authorization\Events\PolicyDetached;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyDocumentException;
+use SineMacula\Laravel\Authorization\Models\AuthorizableGrantPivot;
 use SineMacula\Laravel\Authorization\Models\Policy;
 
 /**
@@ -56,6 +55,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
             foreignPivotKey: 'authorizable_id',
             relatedPivotKey: 'policy_id',
         )
+            ->using(AuthorizableGrantPivot::class)
             ->withPivot('expires_at')
             ->where(static function ($query) use ($pivot): void {
                 $query->whereNull($pivot . '.expires_at')
@@ -80,11 +80,11 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * sweeper run. Passing null (the default) creates a forever
      * attachment.
      *
-     * @param  \SineMacula\Laravel\Authorization\Models\Policy|\Illuminate\Database\Eloquent\Model  $policy
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @param  \DateTimeInterface|null  $expiresAt
      * @return static
      */
-    public function attachPolicy(Policy|Model $policy, ?DateTimeInterface $expiresAt = null): static
+    public function attachPolicy(Model|Policy $policy, ?\DateTimeInterface $expiresAt = null): static
     {
         $this->policies()->syncWithoutDetaching([
             (string) $policy->getKey() => ['expires_at' => $expiresAt],
@@ -107,10 +107,10 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * Accepts a `Policy` instance or any Eloquent model — same
      * widened contract as `attachPolicy()`.
      *
-     * @param  \SineMacula\Laravel\Authorization\Models\Policy|\Illuminate\Database\Eloquent\Model  $policy
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return static
      */
-    public function detachPolicy(Policy|Model $policy): static
+    public function detachPolicy(Model|Policy $policy): static
     {
         $this->policies()->detach($policy->getKey());
 
@@ -131,13 +131,13 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * Accepts `Policy` instances or any Eloquent model — same
      * widened contract as `attachPolicy()`.
      *
-     * @param  array<int, \SineMacula\Laravel\Authorization\Models\Policy|\Illuminate\Database\Eloquent\Model>  $policies
+     * @param  array<int, \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Models\Policy>  $policies
      * @return static
      */
     public function syncPolicies(array $policies): static
     {
         $ids = \array_values(\array_map(
-            static fn (Policy|Model $policy): string => (string) $policy->getKey(),
+            static fn (Model|Policy $policy): string => (string) $policy->getKey(),
             $policies,
         ));
 

@@ -17,6 +17,7 @@ use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
 use SineMacula\Laravel\Authorization\Contracts\PolicyRepository;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Events\PermissionGranted;
 use SineMacula\Laravel\Authorization\Events\PermissionRevoked;
@@ -385,8 +386,12 @@ class AuthorizationServiceProvider extends ServiceProvider
     {
         /** @var array<int, mixed> $enums */
         $enums = $this->app['config']->get('authorization.permission_enums', []);
-        /** @var string $onConflict */
-        $onConflict = $this->app['config']->get('authorization.gate.on_conflict', 'log');
+
+        /** @var mixed $rawMode */
+        $rawMode    = $this->app['config']->get('authorization.gate.on_conflict', GateConflictMode::LOG->value);
+        $onConflict = $rawMode instanceof GateConflictMode
+            ? $rawMode
+            : (\is_string($rawMode) ? GateConflictMode::tryFrom($rawMode) : null) ?? GateConflictMode::LOG;
 
         foreach ($enums as $enumClass) {
             if (!\is_string($enumClass) || !\is_subclass_of($enumClass, PermissionEnum::class)) {
@@ -406,12 +411,12 @@ class AuthorizationServiceProvider extends ServiceProvider
      * Register a single Gate for the supplied enum case.
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\PermissionEnum  $case
-     * @param  string  $onConflict
+     * @param  \SineMacula\Laravel\Authorization\Enums\GateConflictMode  $onConflict
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\GateConflictException
      */
-    private function registerEnumGate(PermissionEnum $case, string $onConflict): void
+    private function registerEnumGate(PermissionEnum $case, GateConflictMode $onConflict): void
     {
         $permission = $case->toString();
 
@@ -421,13 +426,13 @@ class AuthorizationServiceProvider extends ServiceProvider
         // happy path).
         if (Gate::has($permission)) {
             switch ($onConflict) {
-                case 'throw':
+                case GateConflictMode::THROW:
                     throw new GateConflictException($permission);
 
-                case 'overwrite':
+                case GateConflictMode::OVERWRITE:
                     break;
 
-                default:
+                case GateConflictMode::LOG:
                     $this->logGateConflict($permission);
 
                     return;

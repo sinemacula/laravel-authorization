@@ -4,14 +4,13 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Traits;
 
-use DateTimeInterface;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Events\PermissionGranted;
 use SineMacula\Laravel\Authorization\Events\PermissionRevoked;
-use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
+use SineMacula\Laravel\Authorization\Models\AuthorizableGrantPivot;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 
@@ -57,6 +56,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
             foreignPivotKey: 'authorizable_id',
             relatedPivotKey: 'permission_id',
         )
+            ->using(AuthorizableGrantPivot::class)
             ->withPivot('expires_at')
             ->where(static function ($query) use ($pivot): void {
                 $query->whereNull($pivot . '.expires_at')
@@ -79,7 +79,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
      */
-    public function givePermission(Permission|string $permission, ?DateTimeInterface $expiresAt = null): static
+    public function givePermission(Permission|string $permission, ?\DateTimeInterface $expiresAt = null): static
     {
         $model = $this->resolvePermission($permission);
 
@@ -197,35 +197,6 @@ trait HasPermissions // @phpstan-ignore trait.unused
         return $this->computePermissions();
     }
 
-    /**
-     * Compute the deduplicated permission-name list from the
-     * direct-grant relation and every role-inherited permission.
-     *
-     * @return array<int, string>
-     */
-    private function computePermissions(): array
-    {
-        /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission> $direct */
-        $direct = $this->permissions;
-        $names  = $direct->map(static fn (Permission $p): string => $p->name)->all();
-
-        if (method_exists($this, 'roles')) {
-            /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
-            $roles = $this->roles;
-
-            foreach ($roles as $role) {
-                /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission> $rolePermissions */
-                $rolePermissions = $role->permissions;
-
-                foreach ($rolePermissions as $rolePermission) {
-                    $names[] = $rolePermission->name;
-                }
-            }
-        }
-
-        return \array_values(\array_unique($names));
-    }
-
     // ------------------------------------------------------------------
     // Spatie-compatible aliases
     // ------------------------------------------------------------------
@@ -276,11 +247,12 @@ trait HasPermissions // @phpstan-ignore trait.unused
     /**
      * Resolve a permission identifier to a model instance.
      *
-     * Matches either an exact `guard_name` equal to the configured
-     * default guard or a null `guard_name` (the guard-agnostic
-     * sentinel). Guard-specific rows take precedence over
-     * guard-agnostic rows — the query orders non-null guards first
-     * and returns the first match.
+     * Honours `$this->getAuthorizationGuard()` when the identity
+     * model declares it — a user authenticated under a non-default
+     * guard routes its lookups against its own guard's rows instead
+     * of the package default. Delegates the actual query to
+     * `Permission::resolveByName()` so both identity-side and
+     * role-side lookups share one implementation (see #55).
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return \SineMacula\Laravel\Authorization\Models\Permission
@@ -295,28 +267,40 @@ trait HasPermissions // @phpstan-ignore trait.unused
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
         $class = config('authorization.models.permission', Permission::class);
-        // Honour `$this->getAuthorizationGuard()` when the identity
-        // model declares it — a user authenticated under a
-        // non-default guard routes its lookups against its own
-        // guard's rows instead of the package default.
-        /** @var string $guard */
+
         $guard = \method_exists($this, 'getAuthorizationGuard')
             ? $this->getAuthorizationGuard()
-            : config('authorization.defaults.guard', 'web');
+            : null;
 
-        /** @var \SineMacula\Laravel\Authorization\Models\Permission|null $model */
-        $model = $class::query()
-            ->where('name', $permission)
-            ->where(static function ($query) use ($guard): void {
-                $query->where('guard_name', $guard)->orWhereNull('guard_name');
-            })
-            ->orderByRaw('guard_name IS NULL')
-            ->first();
+        return $class::resolveByName($permission, $guard);
+    }
 
-        if ($model === null) {
-            throw new UnknownPermissionException($permission);
+    /**
+     * Compute the deduplicated permission-name list from the
+     * direct-grant relation and every role-inherited permission.
+     *
+     * @return array<int, string>
+     */
+    private function computePermissions(): array
+    {
+        /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission> $direct */
+        $direct = $this->permissions;
+        $names  = $direct->map(static fn (Permission $p): string => $p->name)->all();
+
+        if (method_exists($this, 'roles')) {
+            /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
+            $roles = $this->roles;
+
+            foreach ($roles as $role) {
+                /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission> $rolePermissions */
+                $rolePermissions = $role->permissions;
+
+                foreach ($rolePermissions as $rolePermission) {
+                    $names[] = $rolePermission->name;
+                }
+            }
         }
 
-        return $model;
+        return \array_values(\array_unique($names));
     }
 }

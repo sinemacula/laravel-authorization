@@ -52,31 +52,6 @@ final class TemporalGrantsTest extends TestCase
     }
 
     /**
-     * Advance the clock and invalidate the resolution cache for
-     * the supplied principal in the same step.
-     *
-     * Temporal grants are filtered at the DB layer on every
-     * relation read, but the `ResolutionCache` has no way to
-     * observe wall-clock advance — when present it memoises the
-     * role / permission list per principal and keeps returning
-     * the cached set until an invalidation event fires. Tests
-     * that walk the clock forward must drop the memoised entry
-     * manually so the next read observes the expiry.
-     *
-     * @param  string  $instant
-     * @param  object  $principal
-     * @return void
-     */
-    private function advanceClockTo(string $instant, object $principal): void
-    {
-        Carbon::setTestNow(Carbon::parse($instant));
-
-        if ($this->app->bound(ResolutionCache::class)) {
-            $this->app->make(ResolutionCache::class)->forget($principal);
-        }
-    }
-
-    /**
      * A role assigned with a future `expiresAt` is present on
      * the relation until the clock passes the expiry.
      *
@@ -181,6 +156,35 @@ final class TemporalGrantsTest extends TestCase
     }
 
     /**
+     * `pivot->expires_at` is cast to a Carbon instance so
+     * consumers can render remaining lifetime without parsing
+     * the string themselves — `withCasts()` on each relation
+     * backs up the claim in the relation docblock (issue #78).
+     *
+     * @return void
+     */
+    public function testPivotExpiresAtIsCastToCarbon(): void
+    {
+        Role::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => 'oncall',
+            'guard_name' => 'web',
+        ]);
+
+        $user    = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $expires = Carbon::parse('2026-06-01 09:00:00');
+
+        Carbon::setTestNow('2026-06-01 08:00:00');
+        $user->assignRole('oncall', expiresAt: $expires);
+
+        $role = $user->fresh()?->roles()->first();
+
+        self::assertNotNull($role);
+        self::assertInstanceOf(Carbon::class, $role->pivot->expires_at);
+        self::assertTrue($expires->equalTo($role->pivot->expires_at));
+    }
+
+    /**
      * A past-dated grant is invisible on the relation the moment
      * it is persisted — the filter evaluates against the current
      * time on every read, not just at load time.
@@ -239,6 +243,31 @@ final class TemporalGrantsTest extends TestCase
             ['staff'],
             $this->sortedRoleNames($user->fresh()),
         );
+    }
+
+    /**
+     * Advance the clock and invalidate the resolution cache for
+     * the supplied principal in the same step.
+     *
+     * Temporal grants are filtered at the DB layer on every
+     * relation read, but the `ResolutionCache` has no way to
+     * observe wall-clock advance — when present it memoises the
+     * role / permission list per principal and keeps returning
+     * the cached set until an invalidation event fires. Tests
+     * that walk the clock forward must drop the memoised entry
+     * manually so the next read observes the expiry.
+     *
+     * @param  string  $instant
+     * @param  object  $principal
+     * @return void
+     */
+    private function advanceClockTo(string $instant, object $principal): void
+    {
+        Carbon::setTestNow(Carbon::parse($instant));
+
+        if ($this->app->bound(ResolutionCache::class)) {
+            $this->app->make(ResolutionCache::class)->forget($principal);
+        }
     }
 
     /**

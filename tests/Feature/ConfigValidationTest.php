@@ -11,7 +11,6 @@ use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
-use stdClass;
 use Tests\Feature\Stubs\PermissionEnum;
 use Tests\TestCase;
 
@@ -81,7 +80,7 @@ final class ConfigValidationTest extends TestCase
             self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
         } catch (InvalidAuthorizationConfigException $exception) {
             self::assertSame('authorization.gate.on_conflict', $exception->getConfigKey());
-            self::assertStringContainsString("'explode'", $exception->getReason());
+            self::assertStringContainsString('\'explode\'', $exception->getReason());
         }
     }
 
@@ -95,7 +94,7 @@ final class ConfigValidationTest extends TestCase
     {
         /** @var \Illuminate\Contracts\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class);
-        $config->set('authorization.permission_enums', ['App\\Does\\Not\\Exist']);
+        $config->set('authorization.permission_enums', ['App\Does\Not\Exist']);
 
         try {
             ConfigValidator::validate((array) $config->get('authorization'), $this->app);
@@ -116,7 +115,7 @@ final class ConfigValidationTest extends TestCase
     {
         /** @var \Illuminate\Contracts\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class);
-        $config->set('authorization.permission_enums', [stdClass::class]);
+        $config->set('authorization.permission_enums', [\stdClass::class]);
 
         $this->expectException(InvalidAuthorizationConfigException::class);
 
@@ -154,7 +153,7 @@ final class ConfigValidationTest extends TestCase
     {
         /** @var \Illuminate\Contracts\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class);
-        $config->set('authorization.principal_resolver', stdClass::class);
+        $config->set('authorization.principal_resolver', \stdClass::class);
 
         $this->expectException(InvalidAuthorizationConfigException::class);
 
@@ -187,7 +186,7 @@ final class ConfigValidationTest extends TestCase
     {
         /** @var \Illuminate\Contracts\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class);
-        $config->set('authorization.policy_store', stdClass::class);
+        $config->set('authorization.policy_store', \stdClass::class);
 
         $this->expectException(InvalidAuthorizationConfigException::class);
 
@@ -233,6 +232,19 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
+     * Non-string / non-empty samples for the data provider.
+     *
+     * @return iterable<string, array{0: mixed}>
+     */
+    public static function malformedPermissionEnumEntries(): iterable
+    {
+        yield 'empty-string' => [''];
+        yield 'integer' => [42];
+        yield 'array' => [[]];
+        yield 'null' => [null];
+    }
+
+    /**
      * Non-string `permission_enums` entries are caught before any
      * class lookup runs.
      *
@@ -254,15 +266,47 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * Non-string / non-empty samples for the data provider.
+     * Passing an already-coerced `GateConflictMode` value skips
+     * the string path and passes validation. Covers the enum-type
+     * migration in issue #58.
      *
-     * @return iterable<string, array{0: mixed}>
+     * @return void
      */
-    public static function malformedPermissionEnumEntries(): iterable
+    public function testGateOnConflictAcceptsEnumInstance(): void
     {
-        yield 'empty-string' => [''];
-        yield 'integer'      => [42];
-        yield 'array'        => [[]];
-        yield 'null'         => [null];
+        /** @var \Illuminate\Contracts\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class);
+        $config->set('authorization.gate.on_conflict', \SineMacula\Laravel\Authorization\Enums\GateConflictMode::THROW);
+
+        ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+
+        self::assertTrue(true);
+    }
+
+    /**
+     * The validator lists every enum-backed sentinel in its
+     * rejection message — the operator gets the accepted set
+     * verbatim without having to find the enum source. Covers
+     * #58 together with the consistent describe-shape fix (#74).
+     *
+     * @return void
+     */
+    public function testGateOnConflictRejectionListsEveryEnumSentinel(): void
+    {
+        /** @var \Illuminate\Contracts\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class);
+        $config->set('authorization.gate.on_conflict', 'Log');
+
+        try {
+            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            $reason = $exception->getReason();
+
+            self::assertStringContainsString('\'log\'', $reason);
+            self::assertStringContainsString('\'throw\'', $reason);
+            self::assertStringContainsString('\'overwrite\'', $reason);
+            self::assertStringContainsString('\'Log\' (string)', $reason);
+        }
     }
 }

@@ -4,7 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Traits;
 
-use DateTimeInterface;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
@@ -12,6 +11,7 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Events\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\RoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
+use SineMacula\Laravel\Authorization\Models\AuthorizableGrantPivot;
 use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
@@ -57,6 +57,7 @@ trait HasRoles // @phpstan-ignore trait.unused
             foreignPivotKey: 'authorizable_id',
             relatedPivotKey: 'role_id',
         )
+            ->using(AuthorizableGrantPivot::class)
             ->withPivot('expires_at')
             ->where(static function ($query) use ($pivot): void {
                 $query->whereNull($pivot . '.expires_at')
@@ -79,7 +80,7 @@ trait HasRoles // @phpstan-ignore trait.unused
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
      */
-    public function assignRole(Role|string $role, ?DateTimeInterface $expiresAt = null): static
+    public function assignRole(Role|string $role, ?\DateTimeInterface $expiresAt = null): static
     {
         $model = $this->resolveRole($role);
 
@@ -197,21 +198,6 @@ trait HasRoles // @phpstan-ignore trait.unused
         return $this->computeRoles();
     }
 
-    /**
-     * Compute the role-name list directly from the relation.
-     *
-     * @return array<int, string>
-     */
-    private function computeRoles(): array
-    {
-        /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
-        $roles = $this->roles;
-
-        $names = $roles->map(static fn (Role $role): string => $role->name)->all();
-
-        return \array_values($names);
-    }
-
     // ------------------------------------------------------------------
     // Spatie-compatible aliases
     // ------------------------------------------------------------------
@@ -287,5 +273,20 @@ trait HasRoles // @phpstan-ignore trait.unused
         }
 
         return $model;
+    }
+
+    /**
+     * Compute the role-name list directly from the relation.
+     *
+     * @return array<int, string>
+     */
+    private function computeRoles(): array
+    {
+        /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
+        $roles = $this->roles;
+
+        $names = $roles->map(static fn (Role $role): string => $role->name)->all();
+
+        return \array_values($names);
     }
 }

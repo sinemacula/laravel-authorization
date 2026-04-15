@@ -8,6 +8,7 @@ use Illuminate\Contracts\Container\Container;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 
 /**
@@ -29,9 +30,6 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  */
 final class ConfigValidator
 {
-    /** Accepted sentinels for `gate.on_conflict`. */
-    private const array GATE_ON_CONFLICT_VALUES = ['log', 'throw', 'overwrite'];
-
     /**
      * Validate the supplied authorization config. Throws on the
      * first failure encountered — consumers fix one key at a time.
@@ -63,39 +61,27 @@ final class ConfigValidator
     private static function validatePermissionEnums(mixed $value): void
     {
         if (!\is_array($value)) {
-            throw new InvalidAuthorizationConfigException(
-                'authorization.permission_enums',
-                'expected an array of enum class names, got ' . \get_debug_type($value) . '.',
-            );
+            throw new InvalidAuthorizationConfigException('authorization.permission_enums', 'expected an array of enum class names, got ' . \get_debug_type($value) . '.');
         }
 
         foreach ($value as $index => $class) {
             if (!\is_string($class) || $class === '') {
-                throw new InvalidAuthorizationConfigException(
-                    "authorization.permission_enums.{$index}",
-                    'entry must be a non-empty class-string.',
-                );
+                throw new InvalidAuthorizationConfigException("authorization.permission_enums.{$index}", 'entry must be a non-empty class-string.');
             }
 
             if (!\class_exists($class) && !\interface_exists($class) && !\enum_exists($class)) {
-                throw new InvalidAuthorizationConfigException(
-                    "authorization.permission_enums.{$index}",
-                    "class '{$class}' does not exist.",
-                );
+                throw new InvalidAuthorizationConfigException("authorization.permission_enums.{$index}", "class '{$class}' does not exist.");
             }
 
             if (!\is_subclass_of($class, PermissionEnum::class)) {
-                throw new InvalidAuthorizationConfigException(
-                    "authorization.permission_enums.{$index}",
-                    "class '{$class}' does not implement " . PermissionEnum::class . '.',
-                );
+                throw new InvalidAuthorizationConfigException("authorization.permission_enums.{$index}", "class '{$class}' does not implement " . PermissionEnum::class . '.');
             }
         }
     }
 
     /**
      * Validate that `gate.on_conflict` is one of the three accepted
-     * sentinels.
+     * sentinels backing `GateConflictMode`.
      *
      * @param  mixed  $value
      * @return void
@@ -104,14 +90,19 @@ final class ConfigValidator
      */
     private static function validateGateOnConflict(mixed $value): void
     {
-        if ($value === null) {
+        if ($value === null || $value instanceof GateConflictMode) {
             return;
         }
 
-        if (!\is_string($value) || !\in_array($value, self::GATE_ON_CONFLICT_VALUES, true)) {
+        if (!\is_string($value) || GateConflictMode::tryFrom($value) === null) {
+            $accepted = \array_map(
+                static fn (GateConflictMode $case): string => "'{$case->value}'",
+                GateConflictMode::cases(),
+            );
+
             throw new InvalidAuthorizationConfigException(
                 'authorization.gate.on_conflict',
-                "expected one of ['log', 'throw', 'overwrite'], got " . self::describe($value) . '.',
+                'expected one of [' . \implode(', ', $accepted) . '], got ' . self::describe($value) . '.',
             );
         }
     }
@@ -184,10 +175,7 @@ final class ConfigValidator
         }
 
         if (!\is_string($value) || $value === '') {
-            throw new InvalidAuthorizationConfigException(
-                'authorization.cache.store',
-                'expected a cache-store name string, got ' . self::describe($value) . '.',
-            );
+            throw new InvalidAuthorizationConfigException('authorization.cache.store', 'expected a cache-store name string, got ' . self::describe($value) . '.');
         }
 
         if (!$container->bound('cache')) {
@@ -197,10 +185,7 @@ final class ConfigValidator
         try {
             $container->make('cache')->store($value);
         } catch (\Throwable $exception) {
-            throw new InvalidAuthorizationConfigException(
-                'authorization.cache.store',
-                "cache store '{$value}' is not configured: " . $exception->getMessage(),
-            );
+            throw new InvalidAuthorizationConfigException('authorization.cache.store', "cache store '{$value}' is not configured: " . $exception->getMessage());
         }
     }
 
@@ -218,24 +203,15 @@ final class ConfigValidator
     private static function assertImplementsContract(mixed $value, string $contract, string $configKey): void
     {
         if (!\is_string($value) || $value === '') {
-            throw new InvalidAuthorizationConfigException(
-                $configKey,
-                'expected a class-string, got ' . self::describe($value) . '.',
-            );
+            throw new InvalidAuthorizationConfigException($configKey, 'expected a class-string, got ' . self::describe($value) . '.');
         }
 
         if (!\class_exists($value)) {
-            throw new InvalidAuthorizationConfigException(
-                $configKey,
-                "class '{$value}' does not exist.",
-            );
+            throw new InvalidAuthorizationConfigException($configKey, "class '{$value}' does not exist.");
         }
 
         if (!\is_subclass_of($value, $contract) && !\is_a($value, $contract, allow_string: true)) {
-            throw new InvalidAuthorizationConfigException(
-                $configKey,
-                "class '{$value}' does not implement {$contract}.",
-            );
+            throw new InvalidAuthorizationConfigException($configKey, "class '{$value}' does not implement {$contract}.");
         }
     }
 
@@ -243,19 +219,21 @@ final class ConfigValidator
      * Render a short debug description of a mixed value for use
      * inside exception messages.
      *
+     * Every value — scalar or otherwise — is rendered in the same
+     * shape: the literal followed by the parenthesised debug type.
+     * Operators grepping production logs for misconfiguration get
+     * predictable output regardless of the value's runtime type
+     * (see issue #74).
+     *
      * @param  mixed  $value
      * @return string
      */
     private static function describe(mixed $value): string
     {
-        if (\is_string($value)) {
-            return "'{$value}' (string)";
-        }
+        $literal = \is_scalar($value)
+            ? \var_export($value, true)
+            : \var_export(\get_debug_type($value), true);
 
-        if (\is_scalar($value)) {
-            return \var_export($value, true);
-        }
-
-        return \get_debug_type($value);
+        return $literal . ' (' . \get_debug_type($value) . ')';
     }
 }

@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Events\PermissionCreated;
 use SineMacula\Laravel\Authorization\Events\PermissionDeleted;
 use SineMacula\Laravel\Authorization\Events\PermissionUpdated;
+use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
 
 /**
@@ -60,6 +61,77 @@ class Permission extends Model
     }
 
     /**
+     * Roles that carry this permission.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany<\SineMacula\Laravel\Authorization\Models\Role, $this>
+     */
+    public function roles(): BelongsToMany
+    {
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $roleModel */
+        $roleModel = config('authorization.models.role', Role::class);
+
+        /** @var string $pivot */
+        $pivot = config('authorization.tables.role_permissions', 'role_permissions');
+
+        return $this->belongsToMany(
+            related: $roleModel,
+            table: $pivot,
+            foreignPivotKey: 'permission_id',
+            relatedPivotKey: 'role_id',
+        );
+    }
+
+    /**
+     * Resolve a permission by name under the supplied guard,
+     * favouring guard-specific rows over guard-agnostic rows.
+     *
+     * Centralises the guard-precedence query shared by
+     * `HasPermissions::resolvePermission()` and
+     * `Role::resolvePermission()` — a single owner for the
+     * guard-agnostic disjunction so evolution of the matching
+     * rules happens in one place (see issue #55). Consumers
+     * calling `$class::resolveByName(...)` where `$class` is
+     * read from `authorization.models.permission` get correct
+     * late-static-binding against their swapped model.
+     *
+     * @param  string  $name
+     * @param  string|null  $guard
+     * @return self
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
+     */
+    public static function resolveByName(string $name, ?string $guard = null): self
+    {
+        if ($guard === null) {
+            /** @var string $guard */
+            $guard = config('authorization.defaults.guard', 'web');
+        }
+
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
+        $class = config('authorization.models.permission', static::class);
+
+        /**
+         * @var \SineMacula\Laravel\Authorization\Models\Permission|null $model
+         *
+         * @phpstan-ignore staticMethod.dynamicCall
+         */
+        $model = $class::query()
+            ->where('name', $name)
+            ->where(static function ($query) use ($guard): void {
+                // @phpstan-ignore staticMethod.dynamicCall
+                $query->where('guard_name', $guard)->orWhereNull('guard_name');
+            })
+            ->orderByRaw('guard_name IS NULL')
+            ->first();
+
+        if ($model === null) {
+            throw new UnknownPermissionException($name);
+        }
+
+        return $model;
+    }
+
+    /**
      * Register the row-lifecycle listeners that translate
      * Eloquent's native `created` / `updated` / `deleted` events
      * into the package's typed CRUD events.
@@ -79,27 +151,6 @@ class Permission extends Model
         static::deleted(static function (self $permission): void {
             Event::dispatch(new PermissionDeleted($permission));
         });
-    }
-
-    /**
-     * Roles that carry this permission.
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany<\SineMacula\Laravel\Authorization\Models\Role, $this>
-     */
-    public function roles(): BelongsToMany
-    {
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $roleModel */
-        $roleModel = config('authorization.models.role', Role::class);
-
-        /** @var string $pivot */
-        $pivot = config('authorization.tables.role_permissions', 'role_permissions');
-
-        return $this->belongsToMany(
-            related: $roleModel,
-            table: $pivot,
-            foreignPivotKey: 'permission_id',
-            relatedPivotKey: 'role_id',
-        );
     }
 
     /**
