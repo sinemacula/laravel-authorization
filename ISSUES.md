@@ -1,10 +1,9 @@
 # `sinemacula/laravel-authorization` — Open Issues
 
-**Traces to:** `SPECS.md`
-**Source of truth for gap analysis, not a roadmap.** Each entry cites the
-SPECS.md section that defines the target state and names the file(s) where
-the gap manifests today. Tests and benches are grouped separately so the
-implementation work can be sequenced.
+**Source of truth for v1.0 scope.** Every item listed here is in scope for
+the initial release. Historical references to `SPECS.md` / the PRD remain
+inline where they add design context; the documents themselves have been
+consumed into this file and removed from the repo.
 
 ---
 

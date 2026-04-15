@@ -13,7 +13,7 @@ Each note is intentionally short and follows the same structure:
 - `Authoritative Tests`
 - `Change Triggers`
 
-The planned note set (populated during implementation — see `SPECS.md` §11) is:
+The planned note set (populated during implementation — see `ISSUES.md` item #7) is:
 
 - `evaluation-order-and-deny-precedence.md`: the AWS IAM 4-step decision order and why an explicit DENY always wins over
   an RBAC allow.
