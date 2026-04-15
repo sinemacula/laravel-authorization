@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
@@ -33,6 +34,7 @@ use SineMacula\Laravel\Authorization\Listeners\InvalidateResolutionCache;
 use SineMacula\Laravel\Authorization\Repositories\CachingPolicyRepository;
 use SineMacula\Laravel\Authorization\Repositories\DefaultPolicyRepository;
 use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
+use SineMacula\Laravel\Authorization\Support\BladeHelpers;
 
 /**
  * Service provider for the authorization package.
@@ -77,6 +79,7 @@ class AuthorizationServiceProvider extends ServiceProvider
         $this->registerGates();
         $this->registerCacheInvalidationListeners();
         $this->registerRouteMiddleware();
+        $this->registerBladeDirectives();
     }
 
     /**
@@ -281,6 +284,54 @@ class AuthorizationServiceProvider extends ServiceProvider
         if (!isset($existing['permission'])) {
             $router->aliasMiddleware('permission', RequirePermission::class);
         }
+    }
+
+    /**
+     * Register Blade directives for role and permission checks.
+     *
+     * `Blade::if('role', …)` auto-generates the paired
+     * `@role / @unlessrole / @elserole / @endrole` quartet; the
+     * same pattern covers `@permission`, `@anyrole`, `@allroles`,
+     * `@anypermission`, and `@allpermissions`. Spatie-style
+     * aliases (`@hasrole`, `@hasanyrole`, `@hasallroles`) are
+     * registered in parallel so consumers migrating from Spatie
+     * can move their views verbatim. An `@endunlessrole` alias is
+     * added explicitly because Spatie's closing tag for
+     * `@unlessrole(...)` is `@endunlessrole`, whereas `Blade::if`
+     * closes its auto-generated unless-variant with `@endrole`;
+     * shipping both spellings lets each idiom work.
+     *
+     * The directives are registered only when the `blade.compiler`
+     * binding is present, so console-only applications that do not
+     * resolve the view layer never pay the registration cost.
+     *
+     * @return void
+     */
+    protected function registerBladeDirectives(): void
+    {
+        if (!$this->app->bound('blade.compiler')) {
+            return;
+        }
+
+        Blade::if('role', static fn (array|string $roles): bool => BladeHelpers::hasRole($roles));
+        Blade::if('permission', static fn (array|string $permissions): bool => BladeHelpers::hasPermission($permissions));
+        Blade::if('anyrole', static fn (array|string $roles): bool => BladeHelpers::hasRole($roles));
+        Blade::if('allroles', static fn (array|string $roles): bool => BladeHelpers::hasAllRoles($roles));
+        Blade::if('anypermission', static fn (array|string $permissions): bool => BladeHelpers::hasPermission($permissions));
+        Blade::if('allpermissions', static fn (array|string $permissions): bool => BladeHelpers::hasAllPermissions($permissions));
+
+        // Spatie-compatible aliases. Registering them behind
+        // `Blade::if` keeps the `@else<name>` / `@end<name>` shape
+        // Spatie consumers expect.
+        Blade::if('hasrole', static fn (array|string $roles): bool => BladeHelpers::hasRole($roles));
+        Blade::if('hasanyrole', static fn (array|string $roles): bool => BladeHelpers::hasRole($roles));
+        Blade::if('hasallroles', static fn (array|string $roles): bool => BladeHelpers::hasAllRoles($roles));
+
+        // Spatie's closing tag for `@unlessrole` is
+        // `@endunlessrole`, not `@endrole`. Register it as an
+        // alias emitting the same `endif;` so both conventions
+        // compile cleanly.
+        Blade::directive('endunlessrole', static fn (): string => '<?php endif; ?>');
     }
 
     /**
