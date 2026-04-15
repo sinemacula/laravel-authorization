@@ -5,7 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization;
 
 use Illuminate\Contracts\Events\Dispatcher;
-use SineMacula\Laravel\Authorization\Contracts\Authorizable;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
@@ -200,7 +200,7 @@ class AuthorizationManager
         $decisive = $result->reason === EvaluationResult::REASON_EXPLICIT_DENY
             || $result->reason      === EvaluationResult::REASON_EXPLICIT_ALLOW;
 
-        if (!$decisive && $principal instanceof Authorizable && $principal->hasPermission($action)) {
+        if (!$decisive && $principal instanceof AuthorizableIdentity && $principal->hasPermission($action)) {
             return EvaluationResult::rbacAllowed($result->trace);
         }
 
@@ -229,7 +229,7 @@ class AuthorizationManager
             $policies = $this->store->policiesFor($principal);
         }
 
-        if ($principal instanceof Authorizable) {
+        if ($principal instanceof AuthorizableIdentity) {
             $policies = \array_merge($policies, $principal->getPolicies());
         }
 

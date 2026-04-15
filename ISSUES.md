@@ -14,11 +14,11 @@ consumed into this file and removed from the repo.
 - **Spec reference:** §3 (target `src/` layout) — lists
   `Contracts/PolicyRepository.php` as the internal abstraction over the
   Eloquent `Policy` model.
-- **Observed state:** `src/Contracts/` contains `Authorizable`,
+- **Observed state:** `src/Contracts/` contains `AuthorizableIdentity`,
   `PermissionEnum`, `PolicyStore`, and `PrincipalResolver` only. There is
   no `PolicyRepository` contract, and the `AuthorizationManager` reaches
-  the Eloquent layer via `Authorizable::getPolicies()` and an optional
-  `PolicyStore` binding only.
+  the Eloquent layer via `AuthorizableIdentity::getPolicies()` and an
+  optional `PolicyStore` binding only.
 - **Impact:** No seam for a DB-backed policy cache, policy preloader, or
   test fake that is distinct from `PolicyStore` (which is documented as
   an external source, not an internal one). The spec treats this as an
@@ -243,9 +243,9 @@ minimal configuration. Each entry is a usability friction point for the
 "pure RBAC, no policies, standard Laravel Auth" consumer, which is the
 most likely first-use path.
 
-### 16. `Authorizable` contract forces policy methods on pure-RBAC consumers
+### 16. `AuthorizableIdentity` contract forces policy methods on pure-RBAC consumers
 
-- **File:** `src/Contracts/Authorizable.php:113–137`.
+- **File:** `src/Contracts/AuthorizableIdentity.php`.
 - **Observation:** the contract mandates `attachPolicy`, `detachPolicy`,
   `syncPolicies`, and `getPolicies`. A consumer who only wants
   roles + permissions (RBAC-only) must either `use HasPolicies` — which
@@ -256,7 +256,7 @@ most likely first-use path.
   not reflect that the policy surface is optional.
 - **Options:** split the contract into narrower sibling interfaces
   (e.g. `SupportsRoles`, `SupportsPermissions`, `SupportsPolicies`) and
-  have `Authorizable` extend whichever are mandatory, or document
+  have `AuthorizableIdentity` extend whichever are mandatory, or document
   `HasPolicies` as non-optional even for RBAC-only use and accept the
   unused pivot table. First option preserves drop-in purity; second is
   a one-line doc fix.
@@ -453,7 +453,7 @@ most likely first-use path.
   (#19), the closure's lookup still needs to prefer the caller's
   actual guard when known. If guards remain hard-partitioned, a
   guard-resolution hook must be introduced.
-- **Options:** (a) require `Authorizable` implementers to expose a
+- **Options:** (a) require `AuthorizableIdentity` implementers to expose a
   `getAuthorizationGuard(): string` method (Spatie's shim idiom);
   closure calls `$user->getAuthorizationGuard()` to select the lookup
   scope — leaks auth semantics onto the identity model but is
@@ -465,38 +465,6 @@ most likely first-use path.
   idioms but requires the container to know which guard
   authenticated the request, which is only true inside an HTTP
   request scope.
-
-### 25. Trait name `Authorizable` collides with Laravel's built-in trait
-
-- **Files:** `src/Traits/Authorizable.php:16`;
-  `src/Contracts/Authorizable.php:25`.
-- **Observation:** Laravel ships `Illuminate\Foundation\Auth\Access\Authorizable`
-  as a trait and `Illuminate\Contracts\Auth\Access\Authorizable` as
-  a contract. Every `User` model that extends
-  `Illuminate\Foundation\Auth\User` already has the Laravel trait
-  imported and in use. A consumer wiring this package onto the
-  standard `User` model must either:
-    1. Alias one of the two imports —
-       `use SineMacula\Laravel\Authorization\Traits\Authorizable as AuthorizesActions;`
-    2. Use both names fully-qualified in the `use` block, which
-       trips PHP's trait-resolution rules for same-short-name traits.
-- **Impact:** the "drop-in" promise is slightly undercut on the
-  single most common target — the built-in `User` model. IDE
-  autocomplete on "Authorizable" now shows two options; a distracted
-  consumer picks the wrong one and gets a silent no-op. For a
-  package that aspires to be enterprise-ready with minimal
-  configuration, shipping a name collision with a Laravel standard
-  class is an avoidable footgun.
-- **Options:** (a) rename the trait and contract to
-  `HasAuthorization` / `AuthorizesActions` (trait) and
-  `AuthorizableIdentity` (contract), eliminating the collision
-  entirely; (b) keep `Authorizable` as the contract name (it matches
-  the domain term) but rename only the trait to `HasAuthorization`;
-  (c) document the alias idiom prominently in the README and accept
-  the friction. Option (a) is the strongest — the contract name is
-  also Laravel's contract name, and users who typehint on it will
-  hit the same collision pain a reader-of-code will hit on the
-  trait. Option (b) is the middle ground.
 
 ---
 
@@ -757,7 +725,7 @@ enterprise systems ship both.)_
   run before `fnmatch` / operator evaluation.
 - **Namespace pattern (locked):** three namespaces —
   `${principal.*}` for the resolved principal's attributes
-  (`principal.id`, `principal.type`, any `Authorizable` helper
+  (`principal.id`, `principal.type`, any `AuthorizableIdentity` helper
   returning scalar metadata), `${context.*}` for the caller-
   supplied context array, and `${resource.*}` for attributes of the
   resource object when it implements the proposed
@@ -1171,7 +1139,7 @@ enterprise systems ship both.)_
   from the package. They either do it wrong or build their own
   resolver.
 - **Options:** (a) add
-  `Authorizable::effectivePermissions(?EnumScope $universe = null): array`
+  `AuthorizableIdentity::effectivePermissions(?EnumScope $universe = null): array`
   that returns the concrete, deduplicated action list. When
   called with a universe (the registered `PermissionEnum` cases)
   it expands wildcards against that universe and merges in

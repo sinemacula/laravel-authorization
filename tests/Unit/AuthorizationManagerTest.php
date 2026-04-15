@@ -9,7 +9,7 @@ use Mockery;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
-use SineMacula\Laravel\Authorization\Contracts\Authorizable;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
@@ -396,16 +396,16 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * Build a stubbed Authorizable principal returning the supplied
+     * Build a stubbed authorizable principal returning the supplied
      * permissions and policies.
      *
      * @param  array<int, string>  $permissions
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
-     * @return \SineMacula\Laravel\Authorization\Contracts\Authorizable
+     * @return \SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity
      */
-    private function stubAuthorizable(array $permissions = [], array $policies = []): Authorizable
+    private function stubAuthorizable(array $permissions = [], array $policies = []): AuthorizableIdentity
     {
-        $principal = \Mockery::mock(Authorizable::class);
+        $principal = \Mockery::mock(AuthorizableIdentity::class);
 
         $principal->shouldReceive('hasPermission')
             ->andReturnUsing(static fn (mixed $permission): bool => \in_array($permission, $permissions, true));

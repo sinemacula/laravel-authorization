@@ -15,9 +15,10 @@ Standalone authorization core. Sibling IAM packages (Authentication, MFA, SSO, A
 own repositories — this package has zero runtime dependencies on them. The `PrincipalResolver` contract is the only
 coupling point with authentication; the shipped `NullPrincipalResolver` makes the package anonymous-safe by default.
 
-Core model: **Authorizable → Roles → Permissions** for RBAC, plus per-identity **Policies** (JSON documents with
-`effect`, `actions`, `resources`, `conditions`) evaluated in-memory by `PolicyEvaluator`. Any Eloquent model can opt
-in by implementing `Authorizable` and composing the shipped traits (`HasRoles`, `HasPermissions`, `HasPolicies`).
+Core model: **AuthorizableIdentity → Roles → Permissions** for RBAC, plus per-identity **Policies** (JSON documents
+with `effect`, `actions`, `resources`, `conditions`) evaluated in-memory by `PolicyEvaluator`. Any Eloquent model can
+opt in by implementing `AuthorizableIdentity` and using the `HasAuthorization` trait (which composes `HasRoles`,
+`HasPermissions`, `HasPolicies`).
 
 ## Commands
 

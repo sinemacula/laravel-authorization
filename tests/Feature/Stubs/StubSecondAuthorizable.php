@@ -5,8 +5,8 @@ declare(strict_types = 1);
 namespace Tests\Feature\Stubs;
 
 use Illuminate\Database\Eloquent\Model;
-use SineMacula\Laravel\Authorization\Contracts\Authorizable as AuthorizableContract;
-use SineMacula\Laravel\Authorization\Traits\Authorizable;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Traits\HasAuthorization;
 
 /**
  * Second stub model used to exercise polymorphic pivots with two
@@ -17,9 +17,9 @@ use SineMacula\Laravel\Authorization\Traits\Authorizable;
  *
  * @internal
  */
-class StubSecondAuthorizable extends Model implements AuthorizableContract
+class StubSecondAuthorizable extends Model implements AuthorizableIdentity
 {
-    use Authorizable;
+    use HasAuthorization;
 
     /**
      * Disable auto-incrementing — stubs use explicit IDs.

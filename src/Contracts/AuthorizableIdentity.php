@@ -9,16 +9,18 @@ use SineMacula\Laravel\Authorization\Models\Policy as PolicyModel;
 use SineMacula\Laravel\Authorization\Models\Role as RoleModel;
 
 /**
- * Authorizable contract.
+ * Authorizable identity contract.
  *
  * Implemented by any identity model that participates in the
  * authorization system. Concrete models typically satisfy the
- * contract by composing the package's shipped traits.
+ * contract by composing the package's shipped traits. The explicit
+ * `Identity` suffix avoids a name collision with Laravel's built-in
+ * `Illuminate\Contracts\Auth\Access\Authorizable` contract.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-interface Authorizable
+interface AuthorizableIdentity
 {
     /**
      * Assign the given role to this identity.
