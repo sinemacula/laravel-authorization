@@ -121,14 +121,19 @@ return [
     | Resolution cache
     |---------------------------------------------------------------------------
     |
-    | Optional in-memory / shared cache for principal roles, permissions, and
-    | policies. Disabled by default. Consumers are responsible for invalidating
-    | entries when role, permission, or policy assignments change.
+    | Two-tier cache for principal roles, permissions, and policies. The
+    | in-memory tier is always on and memoises results per-request. The
+    | optional persistent tier kicks in when `store` is set to one of the
+    | configured cache connections — results are written there with the
+    | supplied TTL (0 = forever) under a namespaced key prefix, and the
+    | shipped `InvalidateResolutionCache` listener drops entries when the
+    | package's events fire.
     |
     */
 
     'cache' => [
-        'store' => env('AUTHORIZATION_CACHE_STORE'),
-        'ttl'   => (int) env('AUTHORIZATION_CACHE_TTL_SECONDS', 0),
+        'store'  => env('AUTHORIZATION_CACHE_STORE'),
+        'ttl'    => (int) env('AUTHORIZATION_CACHE_TTL_SECONDS', 0),
+        'prefix' => env('AUTHORIZATION_CACHE_PREFIX', 'authorization'),
     ],
 ];

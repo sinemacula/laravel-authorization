@@ -4,19 +4,32 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization;
 
+use Illuminate\Cache\CacheManager;
+use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
 use SineMacula\Laravel\Authorization\Contracts\PolicyRepository;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
+use SineMacula\Laravel\Authorization\Events\PermissionGranted;
+use SineMacula\Laravel\Authorization\Events\PermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\PolicyAttached;
+use SineMacula\Laravel\Authorization\Events\PolicyDetached;
+use SineMacula\Laravel\Authorization\Events\RoleAssigned;
+use SineMacula\Laravel\Authorization\Events\RolePermissionGranted;
+use SineMacula\Laravel\Authorization\Events\RolePermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\RoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\GateConflictException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
+use SineMacula\Laravel\Authorization\Listeners\InvalidateResolutionCache;
+use SineMacula\Laravel\Authorization\Repositories\CachingPolicyRepository;
 use SineMacula\Laravel\Authorization\Repositories\DefaultPolicyRepository;
 use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
 
@@ -44,6 +57,7 @@ class AuthorizationServiceProvider extends ServiceProvider
 
         $this->registerPrincipalResolver();
         $this->registerPolicyStore();
+        $this->registerResolutionCache();
         $this->registerPolicyRepository();
         $this->registerDecisionJournal();
         $this->registerPolicyEvaluator();
@@ -59,6 +73,7 @@ class AuthorizationServiceProvider extends ServiceProvider
     {
         $this->offerPublishing();
         $this->registerGates();
+        $this->registerCacheInvalidationListeners();
     }
 
     /**
@@ -90,18 +105,89 @@ class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
+     * Bind the resolution cache that memoises policy, permission,
+     * and role lookups per-principal. Always on for in-memory
+     * memoisation; consults `authorization.cache.store` for
+     * optional cross-request persistence.
+     *
+     * @return void
+     */
+    protected function registerResolutionCache(): void
+    {
+        $this->app->singleton(ResolutionCache::class, static function (Application $app): ResolutionCache {
+            /** @var string|null $storeName */
+            $storeName = $app['config']->get('authorization.cache.store');
+            /** @var int $ttl */
+            $ttl = (int) $app['config']->get('authorization.cache.ttl', 0);
+            /** @var string $prefix */
+            $prefix = (string) $app['config']->get('authorization.cache.prefix', 'authorization');
+
+            $store = null;
+
+            if ($storeName !== null && $app->bound('cache')) {
+                /** @var \Illuminate\Cache\CacheManager $manager */
+                $manager = $app->make('cache');
+                $store   = $manager->store($storeName);
+            }
+
+            return new ResolutionCache(store: $store, ttl: $ttl, prefix: $prefix);
+        });
+    }
+
+    /**
      * Bind the policy repository — the internal policy-gathering
-     * seam the manager consults on every evaluation. Defaults to
-     * `DefaultPolicyRepository`, which unions an optional
-     * `PolicyStore` with the principal's own attached policies.
+     * seam the manager consults on every evaluation. The default
+     * implementation unions an optional `PolicyStore` with the
+     * principal's own attached policies; the caching decorator
+     * wraps it so the `ResolutionCache` memoises the result.
      *
      * @return void
      */
     protected function registerPolicyRepository(): void
     {
-        $this->app->singleton(PolicyRepository::class, static fn (Application $app): PolicyRepository => new DefaultPolicyRepository(
-            store: $app->bound(PolicyStore::class) ? $app->make(PolicyStore::class) : null,
-        ));
+        $this->app->singleton(PolicyRepository::class, static function (Application $app): PolicyRepository {
+            $default = new DefaultPolicyRepository(
+                store: $app->bound(PolicyStore::class) ? $app->make(PolicyStore::class) : null,
+            );
+
+            return new CachingPolicyRepository(
+                inner: $default,
+                cache: $app->make(ResolutionCache::class),
+            );
+        });
+    }
+
+    /**
+     * Wire the invalidation listener to every event that mutates
+     * a principal's cached lookups.
+     *
+     * @return void
+     */
+    protected function registerCacheInvalidationListeners(): void
+    {
+        if (!$this->app->bound(Dispatcher::class)) {
+            return;
+        }
+
+        /** @var \Illuminate\Contracts\Events\Dispatcher $dispatcher */
+        $dispatcher = $this->app->make(Dispatcher::class);
+
+        $principalEvents = [
+            RoleAssigned::class,
+            RoleRevoked::class,
+            PermissionGranted::class,
+            PermissionRevoked::class,
+            PolicyAttached::class,
+            PolicyDetached::class,
+        ];
+
+        foreach ($principalEvents as $event) {
+            $dispatcher->listen($event, [InvalidateResolutionCache::class, 'handlePrincipalMutation']);
+        }
+
+        foreach ([RolePermissionGranted::class, RolePermissionRevoked::class] as $event) {
+            $dispatcher->listen($event, [InvalidateResolutionCache::class, 'handleRoleMutation']);
+        }
     }
 
     /**

@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Traits;
 
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Facades\Event;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Events\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\RoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
@@ -116,6 +117,14 @@ trait HasRoles // @phpstan-ignore trait.unused
             unset($this->relations['roles']);
         }
 
+        // sync() bypasses assignRole / revokeRole and so fires
+        // no RoleAssigned / RoleRevoked events — invalidate the
+        // resolution cache directly so the next getRoles()
+        // observes the fresh set.
+        if (app()->bound(ResolutionCache::class)) {
+            app(ResolutionCache::class)->forget($this);
+        }
+
         return $this;
     }
 
@@ -144,9 +153,33 @@ trait HasRoles // @phpstan-ignore trait.unused
     /**
      * Return the names of every role assigned to this identity.
      *
+     * When the resolution cache is bound in the container, the
+     * result is memoised per-request and optionally persisted
+     * cross-request. Cache entries are invalidated by the
+     * `InvalidateResolutionCache` listener on
+     * `RoleAssigned` / `RoleRevoked`.
+     *
      * @return array<int, string>
      */
     public function getRoles(): array
+    {
+        $cache = app()->bound(ResolutionCache::class)
+            ? app(ResolutionCache::class)
+            : null;
+
+        if ($cache instanceof ResolutionCache) {
+            return $cache->rememberRoles($this, fn (): array => $this->computeRoles());
+        }
+
+        return $this->computeRoles();
+    }
+
+    /**
+     * Compute the role-name list directly from the relation.
+     *
+     * @return array<int, string>
+     */
+    private function computeRoles(): array
     {
         /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
         $roles = $this->roles;

@@ -620,31 +620,6 @@ enterprise systems ship both.)_
   consumers can plug in their own. Option (a) is the honest
   minimum for "enterprise IAM-style policy engine."
 
-### 40. Cache config block is advertised but never consumed
-
-- **Files:** `config/authorization.php:119–133` (advertises
-  `cache.store` and `cache.ttl`); `Grep` across `src/` for
-  `authorization.cache` / `cache.store` / `cache.ttl` returns
-  **zero** matches.
-- **Observation:** the config block is documented and published as
-  if the package supports a resolution cache, but nothing in the
-  codebase reads either key. It is dead config. The README's
-  performance narrative assumes caching; in practice every
-  `->can()` call re-queries the identity's roles, permissions, and
-  policies.
-- **Impact:** false promise in the README. Consumers setting
-  `AUTHORIZATION_CACHE_STORE=redis` in their env expecting a
-  performance boost get nothing. For a hot-path authorization
-  engine, per-request memoisation at minimum is non-negotiable.
-- **Options:** (a) implement a `ResolutionCache` layer: per-request
-  memoisation by default (in-memory, cleared on principal change),
-  with optional persistent cache keyed on
-  `auth:{principal_type}:{principal_id}` using the configured
-  store and TTL; invalidated on `RoleAssigned` / `PermissionGranted`
-  / `PolicyAttached` events. (b) remove the config block until
-  implemented. Option (a) is required for production performance —
-  option (b) is a holding action.
-
 ### 41. No composite index on `(name, guard_name)` lookups
 
 - **Files:** `database/migrations/2026_04_14_000001_create_roles_table.php:42`;
@@ -1452,6 +1427,43 @@ enterprise systems ship both.)_
   budget to absorb parallel contention (masks real regressions,
   weakens the signal). Option (b) is the most rigorous;
   option (a) is the fastest fix. Both acceptable.
+
+### 68. Role-pivot mutations leave persistent cache entries stale until TTL
+
+- **Files:** `src/Cache/ResolutionCache.php` (`flush()` documents
+  the behaviour explicitly);
+  `src/Listeners/InvalidateResolutionCache.php` (`handleRoleMutation`
+  calls `flush()` on `RolePermissionGranted` / `Revoked`).
+- **Observation:** when a role gains or loses a permission, every
+  identity carrying the role has a stale cached
+  `getPermissions()` list. The in-memory tier is cleared via
+  `flush()`, but the persistent tier is **not** — flushing the
+  configured cache store would wipe unrelated entries. With no
+  reverse index from role to the identities carrying it, the
+  listener cannot target only the affected principals, so the
+  stale entries sit in the store until the configured TTL expires
+  or until a principal-scoped event (assign / revoke / attach)
+  fires for each affected identity.
+- **Impact:** a production deployment with cross-request caching
+  enabled and role-pivot mutations flowing through the admin UI
+  will serve stale permission lists to affected users until TTL.
+  For a token-lifetime TTL (e.g. 30 minutes) this is tolerable;
+  for forever-caching (`ttl = 0`) the stale window is unbounded
+  unless the consumer manually bumps each identity.
+- **Options:** (a) use cache tags — Redis and Memcached support
+  them, Laravel's `Cache::tags(['authorization', "role:{$id}"])`
+  gives us a reverse index. Invalidate by role tag on pivot
+  mutation. Only works for tag-capable stores; fall back to the
+  current flush-in-memory-only behaviour otherwise; (b) walk
+  the `authorizable_roles` pivot in the listener and forget each
+  principal individually. Expensive for roles held by many
+  identities; acceptable when pivot mutations are rare admin
+  operations; (c) record a "generation number" for each role and
+  bump it on pivot mutation; compose the cache key from
+  `(principal, role-generation)` so stale entries are naturally
+  superseded. Elegant but adds a second storage layer for the
+  generation map. Option (a) plus option (b) fallback is the
+  honest enterprise path.
 
 ---
 

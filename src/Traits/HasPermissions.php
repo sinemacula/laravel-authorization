@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Traits;
 
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Facades\Event;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Events\PermissionGranted;
 use SineMacula\Laravel\Authorization\Events\PermissionRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
@@ -118,6 +119,14 @@ trait HasPermissions // @phpstan-ignore trait.unused
             unset($this->relations['permissions']);
         }
 
+        // sync() bypasses givePermission / revokePermission and so
+        // fires no PermissionGranted / PermissionRevoked events —
+        // invalidate the resolution cache directly so the next
+        // getPermissions() observes the fresh set.
+        if (app()->bound(ResolutionCache::class)) {
+            app(ResolutionCache::class)->forget($this);
+        }
+
         return $this;
     }
 
@@ -155,6 +164,25 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * @return array<int, string>
      */
     public function getPermissions(): array
+    {
+        $cache = app()->bound(ResolutionCache::class)
+            ? app(ResolutionCache::class)
+            : null;
+
+        if ($cache instanceof ResolutionCache) {
+            return $cache->rememberPermissions($this, fn (): array => $this->computePermissions());
+        }
+
+        return $this->computePermissions();
+    }
+
+    /**
+     * Compute the deduplicated permission-name list from the
+     * direct-grant relation and every role-inherited permission.
+     *
+     * @return array<int, string>
+     */
+    private function computePermissions(): array
     {
         /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission> $direct */
         $direct = $this->permissions;

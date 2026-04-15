@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Traits;
 
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Facades\Event;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\PolicyAttached;
 use SineMacula\Laravel\Authorization\Events\PolicyDetached;
@@ -102,6 +103,14 @@ trait HasPolicies // @phpstan-ignore trait.unused
 
         if (isset($this->relations['policies'])) {
             unset($this->relations['policies']);
+        }
+
+        // sync() bypasses attachPolicy / detachPolicy and so fires
+        // no PolicyAttached / PolicyDetached events — invalidate
+        // the resolution cache directly so the next evaluation
+        // observes the fresh policy set.
+        if (app()->bound(ResolutionCache::class)) {
+            app(ResolutionCache::class)->forget($this);
         }
 
         return $this;
