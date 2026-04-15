@@ -104,52 +104,7 @@ consumed into this file and removed from the repo.
 
 ---
 
-## P1 — Minor deviations from the spec
-
-### 9. `Authorization::for()` documented as `self`, implemented as `static`
-
-- **Spec reference:** §5.1 — `Authorization::for(object $principal): self`.
-- **Observed state:** `AuthorizationManager::for()` returns `static`
-  (src/AuthorizationManager.php:136).
-- **Assessment:** functionally compatible — `static` is strictly more
-  precise than `self` for subclasses — but the facade's PHPDoc
-  `@method` line advertises the return as `AuthorizationManager`, so a
-  subclassing consumer will see a type-narrowing warning from Psalm /
-  PHPStan. Either tighten the facade's `@method` line to `static` or
-  accept the status quo explicitly in the spec.
-
-### 10. `AuthorizationFailed` fires only on the `authorize()` throw path
-
-- **Spec reference:** §12.4 — "All decisions are emittable via Laravel
-  events … consumers can subscribe and forward to
-  `sinemacula/laravel-audit-log` without the authorization package
-  depending on it."
-- **Observed state:** `AuthorizationManager::authorize()` dispatches
-  both `DecisionEvaluated` and `AuthorizationFailed`, but
-  `AuthorizationManager::can()` / `::evaluate()` dispatch only
-  `DecisionEvaluated` — a `can()` that returns `false` does not emit
-  `AuthorizationFailed`.
-- **Assessment:** arguably intentional (`AuthorizationFailed` tracks
-  the "hard denial" path), but the spec does not clarify this. Either:
-  - Document the split in §12.4, or
-  - Emit `AuthorizationFailed` from `can()` / `evaluate()` whenever
-    the result is not allowed.
-
----
-
 ## Observations (not spec gaps)
-
-### 11. `Gate::has()` log-conflict path relies on string key ordering
-
-- **File:** `src/AuthorizationServiceProvider.php:174–199`.
-- **Observation:** the `match` in `registerEnumGate()` runs for all
-  three conflict modes, but the subsequent
-  `if ($onConflict === 'log') { return; }` guard is what prevents the
-  `overwrite` arm from falling through. A future change that moves the
-  `return` into the `match` arms (matching the pattern used elsewhere)
-  would be clearer and remove the second branch.
-- **Low-risk fix:** collapse the flow into a single `match` that either
-  returns early (`'log'`, `'throw'`) or falls through (`'overwrite'`).
 
 ### 12. `HasPolicies::getPolicies()` is not fail-closed on a single bad row
 

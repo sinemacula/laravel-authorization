@@ -313,15 +313,22 @@ class AuthorizationServiceProvider extends ServiceProvider
     {
         $permission = $case->toString();
 
+        // Single decision point for every conflict mode. Each arm
+        // either short-circuits (log / throw) or falls through to
+        // the define call below (overwrite, and the no-conflict
+        // happy path).
         if (Gate::has($permission)) {
-            match ($onConflict) {
-                'throw'     => throw new GateConflictException($permission),
-                'overwrite' => null,
-                default     => $this->logGateConflict($permission),
-            };
+            switch ($onConflict) {
+                case 'throw':
+                    throw new GateConflictException($permission);
 
-            if ($onConflict === 'log') {
-                return;
+                case 'overwrite':
+                    break;
+
+                default:
+                    $this->logGateConflict($permission);
+
+                    return;
             }
         }
 
