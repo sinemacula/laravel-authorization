@@ -7,6 +7,10 @@ namespace SineMacula\Laravel\Authorization\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Support\Facades\Event;
+use SineMacula\Laravel\Authorization\Events\RolePermissionGranted;
+use SineMacula\Laravel\Authorization\Events\RolePermissionRevoked;
+use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 
 /**
  * Eloquent model for role rows.
@@ -72,5 +76,188 @@ class Role extends Model
             foreignPivotKey: 'role_id',
             relatedPivotKey: 'permission_id',
         );
+    }
+
+    /**
+     * Attach the given permission to this role.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
+     * @return static
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
+     */
+    public function givePermission(Permission|string $permission): static
+    {
+        $model = $this->resolvePermission($permission);
+
+        $this->permissions()->syncWithoutDetaching([$model->getKey()]);
+
+        if (isset($this->relations['permissions'])) {
+            unset($this->relations['permissions']);
+        }
+
+        Event::dispatch(new RolePermissionGranted($this, $model));
+
+        return $this;
+    }
+
+    /**
+     * Detach the given permission from this role.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
+     * @return static
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
+     */
+    public function revokePermission(Permission|string $permission): static
+    {
+        $model = $this->resolvePermission($permission);
+
+        $this->permissions()->detach($model->getKey());
+
+        if (isset($this->relations['permissions'])) {
+            unset($this->relations['permissions']);
+        }
+
+        Event::dispatch(new RolePermissionRevoked($this, $model));
+
+        return $this;
+    }
+
+    /**
+     * Replace this role's permission set with the supplied list.
+     *
+     * @param  array<int, \SineMacula\Laravel\Authorization\Models\Permission|string>  $permissions
+     * @return static
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
+     */
+    public function syncPermissions(array $permissions): static
+    {
+        $ids = \array_values(\array_map(
+            fn (Permission|string $permission): string => (string) $this->resolvePermission($permission)->getKey(),
+            $permissions,
+        ));
+
+        $this->permissions()->sync($ids);
+
+        if (isset($this->relations['permissions'])) {
+            unset($this->relations['permissions']);
+        }
+
+        return $this;
+    }
+
+    /**
+     * Determine whether this role carries the given permission.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
+     * @return bool
+     */
+    public function hasPermission(Permission|string $permission): bool
+    {
+        $name = $permission instanceof Permission ? $permission->name : $permission;
+
+        return \in_array($name, $this->getPermissions(), true);
+    }
+
+    /**
+     * Return the names of every permission attached to this role.
+     *
+     * @return array<int, string>
+     */
+    public function getPermissions(): array
+    {
+        /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission> $permissions */
+        $permissions = $this->permissions;
+
+        $names = $permissions->map(static fn (Permission $permission): string => $permission->name)->all();
+
+        return \array_values(\array_unique($names));
+    }
+
+    // ------------------------------------------------------------------
+    // Spatie-compatible aliases
+    // ------------------------------------------------------------------
+
+    /**
+     * Spatie alias for the canonical `givePermission()` helper.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
+     * @return static
+     */
+    public function givePermissionTo(Permission|string $permission): static
+    {
+        return $this->givePermission($permission);
+    }
+
+    /**
+     * Spatie alias for the canonical `revokePermission()` helper.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
+     * @return static
+     */
+    public function revokePermissionTo(Permission|string $permission): static
+    {
+        return $this->revokePermission($permission);
+    }
+
+    /**
+     * Spatie alias for the canonical `hasPermission()` helper.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
+     * @return bool
+     */
+    public function hasPermissionTo(Permission|string $permission): bool
+    {
+        return $this->hasPermission($permission);
+    }
+
+    /**
+     * Spatie alias for the canonical `getPermissions()` helper.
+     *
+     * @return array<int, string>
+     */
+    public function getPermissionNames(): array
+    {
+        return $this->getPermissions();
+    }
+
+    /**
+     * Resolve a permission identifier to a model instance.
+     *
+     * Mirrors `HasPermissions::resolvePermission()` so a role string
+     * lookup honours the same guard-agnostic precedence rules.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
+     * @return \SineMacula\Laravel\Authorization\Models\Permission
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
+     */
+    protected function resolvePermission(Permission|string $permission): Permission
+    {
+        if ($permission instanceof Permission) {
+            return $permission;
+        }
+
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
+        $class = config('authorization.models.permission', Permission::class);
+        /** @var string $guard */
+        $guard = config('authorization.defaults.guard', 'web');
+
+        /** @var \SineMacula\Laravel\Authorization\Models\Permission|null $model */
+        $model = $class::query()
+            ->where('name', $permission)
+            ->where(static function ($query) use ($guard): void {
+                $query->where('guard_name', $guard)->orWhereNull('guard_name');
+            })
+            ->orderByRaw('guard_name IS NULL')
+            ->first();
+
+        if ($model === null) {
+            throw new UnknownPermissionException($permission);
+        }
+
+        return $model;
     }
 }

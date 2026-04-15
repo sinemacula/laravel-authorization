@@ -27,25 +27,6 @@ consumed into this file and removed from the repo.
 - **Decision needed:** confirm the interface shape before adding it — the
   spec names the class but does not fix its method signatures.
 
-### 2. `Role` model is missing the permission-management API
-
-- **Spec reference:** §5.3 — requires `$role->givePermission(...)`,
-  `$role->revokePermission(...)`, `$role->syncPermissions([...])`, and
-  `$role->getPermissions(): array`.
-- **Observed state:** `src/Models/Role.php` exposes the `permissions()`
-  `BelongsToMany` relation and nothing else. None of the four
-  spec-mandated helpers exist on the model, and there is no Spatie-style
-  alias (`givePermissionTo`) either.
-- **Impact:** Role → permission attachment in §3.2 item 4 is unsatisfied.
-  Consumers are forced to drop into the relation manually
-  (`$role->permissions()->sync(...)`) and lose the typed exception
-  (`UnknownPermissionException`) behaviour that the authorizable traits
-  provide. The Spatie migration story in §12.5 is also incomplete
-  because `Role::givePermissionTo()` is part of the Spatie idiom.
-- **Related:** no corresponding events are dispatched on role-level
-  permission mutations. `PermissionGranted` / `PermissionRevoked`
-  currently fire only from `HasPermissions` on the authorizable side.
-
 ---
 
 ## P0 — Test coverage gaps
