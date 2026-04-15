@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
 use SineMacula\Laravel\Authorization\Contracts\PolicyRepository;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
@@ -71,9 +72,28 @@ class AuthorizationServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        $this->validateConfig();
         $this->offerPublishing();
         $this->registerGates();
         $this->registerCacheInvalidationListeners();
+    }
+
+    /**
+     * Fail fast on a malformed `authorization` config. Runs before
+     * any binding is resolved so a typo surfaces as a clear typed
+     * exception rather than a deep stack trace from the first
+     * `can()` call in production.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    protected function validateConfig(): void
+    {
+        /** @var array<string, mixed> $config */
+        $config = (array) $this->app['config']->get('authorization', []);
+
+        ConfigValidator::validate($config, $this->app);
     }
 
     /**

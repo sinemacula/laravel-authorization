@@ -640,29 +640,6 @@ enterprise systems ship both.)_
   the MySQL / PostgreSQL / SQLite CI matrix and document the
   guarantee.
 
-### 43. No configuration validation at boot
-
-- **File:** `src/AuthorizationServiceProvider.php:38–46`,
-  `:140–163`.
-- **Observation:** boot-time config is taken on trust.
-  Misspelled class names in `permission_enums`, non-enum classes,
-  invalid `gate.on_conflict` values (anything other than `log` /
-  `throw` / `overwrite`), missing `principal_resolver` class all
-  either silently misbehave or throw deep in the boot cycle with
-  unhelpful messages.
-- **Impact:** consumers lose a day to typos or miswired config.
-  For a package aiming at enterprise drop-in, boot-time config
-  validation is a must.
-- **Options:** (a) introduce a `ConfigValidator` run at service
-  provider boot (after `mergeConfigFrom`) that verifies: each
-  `permission_enums` entry is a string, resolves to an existing
-  class, and implements `PermissionEnum`; `gate.on_conflict` is
-  one of the three sentinels; `principal_resolver` resolves and
-  implements `PrincipalResolver`; `policy_store` resolves and
-  implements `PolicyStore` when non-null. Fail fast with a typed
-  `InvalidAuthorizationConfigException` carrying the specific
-  offending key.
-
 ### 44. No CRUD events for role / permission / policy rows (promotes #15)
 
 - **Files:** `src/Models/Role.php`, `src/Models/Permission.php`,
@@ -1464,6 +1441,124 @@ enterprise systems ship both.)_
   superseded. Elegant but adds a second storage layer for the
   generation map. Option (a) plus option (b) fallback is the
   honest enterprise path.
+
+### 69. Model traits reach `app()` service locator for cache access
+
+- **Files:** `src/Traits/HasRoles.php:124–126,166–169`;
+  `src/Traits/HasPermissions.php:126–127,168–172`;
+  `src/Traits/HasPolicies.php:112–114` (and analogous
+  `getPolicies` path where applicable).
+- **Observation:** every cache touchpoint from the model traits
+  follows the pattern:
+  ```php
+  if (app()->bound(ResolutionCache::class)) {
+      app(ResolutionCache::class)->forget($this);
+  }
+  ```
+  The `app()` global helper is a service-locator call inside a
+  trait that mixes into Eloquent models. It couples the model
+  layer to the container, makes the trait impossible to test in
+  isolation without booting a Laravel app, and hides the cache as
+  a concrete dependency of every `sync*` / `get*` method. The
+  guard (`bound(...)`) papers over the coupling — the cache isn't
+  declared as a dependency, it's opportunistically looked up.
+- **Impact:** classic Service Locator anti-pattern at the trait
+  layer. Unit-testing `syncRoles` now requires either a full
+  container boot or a mock via `App::instance()`. Also
+  architecturally inconsistent with the event-based listener
+  (`InvalidateResolutionCache`) that *is* cleanly
+  dependency-injected — the same job is done twice, once via DI
+  and once via service locator, only because the `sync*` methods
+  bypass the single-event dispatch path.
+- **Impact on #56 (sync-event gap):** this commit resolved the
+  cache-invalidation side of the bypass by reaching for `app()`
+  directly, but the audit-observability side remains open —
+  consumers subscribing to `RoleAssigned` / `PermissionGranted`
+  / `PolicyAttached` still get nothing from bulk `sync*` calls.
+  Both gaps should be closed together.
+- **Options:** (a) dispatch bulk-diff events from each `sync*`
+  method (`RolesSynced`, `PermissionsSynced`, `PoliciesSynced`)
+  carrying `attached` / `detached` ID arrays from Eloquent's
+  `sync()` return; extend `InvalidateResolutionCache` to handle
+  those events. Fixes #56 and removes the service-locator call
+  in one move; (b) dispatch the existing single-item events
+  (`RoleAssigned` / `RoleRevoked` etc.) from `sync*` for each
+  attached / detached pivot row. Heavier but replays through
+  every existing subscriber without new event classes.
+  Option (b) is the least-new-surface fix and dovetails with
+  #56's option (a).
+
+### 70. Non-Model principals silently lose the persistent-cache tier
+
+- **File:** `src/Cache/ResolutionCache.php:220–230` (`key()`).
+- **Observation:** when the principal is not an Eloquent `Model`,
+  the cache key falls back to `spl_object_hash($principal)`.
+  That hash is stable only within a single request and — because
+  PHP can recycle hashes when the originating object is garbage
+  collected — not even reliably unique within a single request.
+  The persistent-cache tier is therefore useless for non-Model
+  principals: every request produces a new hash, every `get()`
+  misses, every `put()` writes a fresh entry that no subsequent
+  request will read. Worst case, a recycled hash collides with a
+  different principal in the in-memory tier and serves the wrong
+  cached payload.
+- **Impact:** the cache narrative in the README / config block
+  implies cross-request benefit for all principals. Consumers
+  using custom principal shapes (value objects representing a
+  service account, a non-Eloquent identity class) get only the
+  in-memory tier and a silently-filling persistent cache that
+  never hits. Silent under-performance with no log to flag it.
+- **Options:** (a) skip the persistent tier entirely for
+  non-Model principals — early-return from both `get()` and
+  `put()` paths when the principal has no stable identifier —
+  and document the limitation in the class / config block;
+  (b) introduce a `CacheKey` contract
+  (`cacheKeyForAuthorization(): string`) that any principal can
+  implement to provide a stable, request-independent key
+  (UUID-like); Model implements it via `getMorphClass()` +
+  `getKey()`, custom principals implement it themselves; (c)
+  require every principal to be an Eloquent Model — blunt, also
+  contradicts the spec's "plain `object` to the engine"
+  compatibility contract (§4.3 item 2). Option (b) matches the
+  package's "contract for every decoupling" idiom.
+
+### 71. Corrupt persistent-cache entry throws instead of falling through to the resolver
+
+- **File:** `src/Cache/ResolutionCache.php:86–94`
+  (`rememberPolicies` store path); also `Policy::fromArray`
+  invariants.
+- **Observation:** `rememberPolicies()` trusts the persistent
+  cache to return a valid serialised policy list. When the store
+  returns `array`, the code maps every element through
+  `Policy::fromArray($document)` without a try/catch. A single
+  corrupt document in the stored payload — version bump during
+  deploy, a manual cache edit, a partial write, a corrupt
+  serialiser — raises
+  `InvalidPolicyDocumentException` from inside the map, which
+  propagates all the way up through the manager and becomes a
+  500-class error for every subsequent `can()` call against that
+  principal until the cache entry is flushed. Compare to
+  `rememberStringList` at `:198` which is defensively
+  `array_filter($raw, 'is_string')` — silently drops garbage.
+  The two tiers use opposite failure policies.
+- **Impact:** violates the package-wide "fail closed"
+  invariant pinned in the design notes and the body of #12.
+  A corrupt cache state shouldn't become a live-site outage —
+  it should deny and log, letting the request proceed with the
+  resolver's freshly-gathered output. Also inconsistent with the
+  sibling `rememberStringList`, which fails soft.
+- **Options:** (a) wrap the `array_map(... Policy::fromArray ...)`
+  call in a try/catch on `InvalidPolicyDocumentException`; on
+  catch, `$this->store?->forget($key)`, log the corruption
+  through the `authorization` channel (already used for Gate
+  conflicts), and fall through to `$resolver()` so the caller
+  gets a fresh, valid policy list. Matches fail-closed +
+  self-healing intent; (b) tighten `rememberStringList` to
+  fail-fast so the two paths are symmetric and corrupt caches
+  always surface loudly. Option (a) is the honest
+  production-grade answer; option (b) is the symmetric-but-louder
+  alternative and works less well in long-running workers that
+  cannot tolerate a 500 on transient cache corruption.
 
 ---
 
