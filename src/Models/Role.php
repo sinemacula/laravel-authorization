@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Events\RolePermissionGranted;
 use SineMacula\Laravel\Authorization\Events\RolePermissionRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
+use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
 
 /**
  * Eloquent model for role rows.
@@ -30,7 +31,7 @@ use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
  */
 class Role extends Model
 {
-    use HasUuids;
+    use HasUuids, ValidatesAuthorizationName;
 
     /**
      * The attributes that are mass assignable.
@@ -151,14 +152,28 @@ class Role extends Model
     /**
      * Determine whether this role carries the given permission.
      *
+     * A held permission name is treated as an `fnmatch` pattern
+     * against the asked name — so a role that holds `posts:*`
+     * satisfies `hasPermission('posts:create')`, and a role that
+     * holds `*:*` satisfies every check. The reverse direction does
+     * not match: holding `posts:create` does not satisfy an asked
+     * `posts:*`. Backslashes are compared literally via
+     * `FNM_NOESCAPE`.
+     *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return bool
      */
     public function hasPermission(Permission|string $permission): bool
     {
-        $name = $permission instanceof Permission ? $permission->name : $permission;
+        $asked = $permission instanceof Permission ? $permission->name : $permission;
 
-        return \in_array($name, $this->getPermissions(), true);
+        foreach ($this->getPermissions() as $held) {
+            if (\fnmatch($held, $asked, \FNM_NOESCAPE)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -259,5 +274,16 @@ class Role extends Model
         }
 
         return $model;
+    }
+
+    /**
+     * Human-readable label used in a name-validation exception
+     * message.
+     *
+     * @return string
+     */
+    protected function getAuthorizationNameKind(): string
+    {
+        return 'role';
     }
 }

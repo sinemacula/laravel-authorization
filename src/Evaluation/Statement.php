@@ -249,13 +249,18 @@ final readonly class Statement
     /**
      * Determine whether the action matches any configured pattern.
      *
+     * Patterns use `fnmatch` with `FNM_NOESCAPE` so backslashes are
+     * compared literally — fully-qualified class names appearing in
+     * action or resource strings (`App\Models\Post:42`) stay intact
+     * instead of being consumed as shell-glob escape sequences.
+     *
      * @param  string  $action
      * @return bool
      */
     private function matchesAction(string $action): bool
     {
         foreach ($this->actions as $pattern) {
-            if (\fnmatch($pattern, $action)) {
+            if (\fnmatch($pattern, $action, \FNM_NOESCAPE)) {
                 return true;
             }
         }
@@ -272,7 +277,7 @@ final readonly class Statement
     private function matchesResource(string $resource): bool
     {
         foreach ($this->resources as $pattern) {
-            if (\fnmatch($pattern, $resource)) {
+            if (\fnmatch($pattern, $resource, \FNM_NOESCAPE)) {
                 return true;
             }
         }

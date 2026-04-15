@@ -125,14 +125,28 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * Determine whether the identity holds the supplied permission via
      * a direct grant or any role-inherited grant.
      *
+     * A held permission name is treated as an `fnmatch` pattern
+     * against the asked name — so an identity holding `posts:*`
+     * satisfies `hasPermission('posts:create')`, and an identity
+     * holding `*:*` satisfies every check (the super-admin path).
+     * The reverse direction does not match: holding `posts:create`
+     * does not satisfy an asked `posts:*`. Backslashes are compared
+     * literally via `FNM_NOESCAPE`.
+     *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return bool
      */
     public function hasPermission(Permission|string $permission): bool
     {
-        $name = $permission instanceof Permission ? $permission->name : $permission;
+        $asked = $permission instanceof Permission ? $permission->name : $permission;
 
-        return in_array($name, $this->getPermissions(), true);
+        foreach ($this->getPermissions() as $held) {
+            if (\fnmatch($held, $asked, \FNM_NOESCAPE)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -449,53 +449,6 @@ These are not spec deviations — they are features or surfaces a serious
 enterprise consumer expects on day 1–30 that this package does not
 ship. All items are in-scope for v1.0.0.
 
-### 26. Super-admin bypass via explicit `*:*` wildcard permission (decision made)
-
-- **Status:** design decision — implement.
-- **Files to touch:** `src/Evaluation/Statement.php` (already wildcards
-  via `fnmatch`), `src/Traits/HasPermissions.php:131–136` (needs
-  wildcard support — see #27), docs.
-- **Decision:** super-admin is not a `Gate::before()` hook or a
-  hard-coded role; it is a principal that holds the literal
-  `*:*` permission. The evaluator then resolves any check against
-  that principal as allowed via the normal RBAC branch. This keeps
-  the bypass visible, auditable, revocable like any other grant,
-  and subject to explicit deny policies if needed.
-- **Dependencies:** requires #27 (RBAC wildcard matching) to be
-  implemented first; without wildcards in `hasPermission()`, the
-  `*:*` string would only match a literal asked action of `*:*`.
-- **Alternatives rejected:** `Gate::before()` hook (invisible
-  escalation, not auditable); hard-coded role name (leaks a
-  magic string into the evaluator).
-
-### 27. RBAC `hasPermission()` must support wildcard matching (decision made)
-
-- **Status:** design decision — implement.
-- **File:** `src/Traits/HasPermissions.php:131–136` — `hasPermission()`
-  currently does exact-match `in_array($name, $this->getPermissions(), true)`.
-- **Decision:** change `hasPermission()` to walk the held-permission
-  list with `fnmatch`, matching the semantics policies already use
-  in `src/Evaluation/Statement.php:255–264`. A **held** permission of
-  `posts:*` matches an **asked** action of `posts:create`. The
-  reverse is not true: an asked `posts:*` does not match a held
-  `posts:create`. Directional rule: "broader-held grants
-  narrower-asked."
-- **Guardrails (both required):**
-    1. Permission-name validation (issue #39 below): forbid
-       `fnmatch` metacharacters (`?`, `[`, `]`, `{`, `}`) in
-       permission names. Allow only alphanumerics, `:`, `_`, `-`,
-       `*`. Prevents accidental wildcards from malformed names.
-    2. Document the directional semantics in
-       `wildcard-and-condition-semantics.md` (tracked under #7).
-- **Performance note:** `in_array` → `fnmatch` walk is still O(n)
-  over held names with slightly more work per comparison.
-  Acceptable for the hot path; per-request memoisation (blocked on
-  #40 — cache config is currently dead) will amortise.
-- **Consequence:** unlocks #26 (super-admin via `*:*`), reduces
-  permission-row explosion for role definitions (a `content-admin`
-  role can hold `posts:*`, `pages:*`, `media:*` instead of 30+
-  explicit rows).
-
 ### 28. No role hierarchy / inheritance
 
 _(Not to be confused with role rank — see #45. Hierarchy governs
@@ -726,24 +679,6 @@ enterprise systems ship both.)_
   authoritatively; (c) introduce an operator-registration API so
   consumers can plug in their own. Option (a) is the honest
   minimum for "enterprise IAM-style policy engine."
-
-### 39. No permission name validation
-
-- **File:** `src/Traits/HasPermissions.php:62–75` (`givePermission()`);
-  `src/Models/Permission.php` (no boot-time validator).
-- **Observation:** nothing prevents creating a permission named
-  `"weird permission"` (spaces), `""` (empty), `"posts:?"`
-  (`fnmatch` metachar), or any other malformed string. The package
-  happily writes the row and lookups silently fail later.
-- **Impact:** silent misconfiguration. Permission names are
-  effectively a small DSL (the `resource:action` convention,
-  plus wildcards under #27), so consumers need a validator. Also a
-  prerequisite for #27 — without it, wildcards could be ambiguous.
-- **Options:** (a) on Permission model boot, validate `name`
-  against `/^[A-Za-z0-9_\-:*]+$/` (alphanumerics, `:`, `_`, `-`,
-  `*`) and raise `InvalidPermissionNameException` on save;
-  (b) apply the same rule on Role `name`. Align with the
-  naming-convention guardrail from #27.
 
 ### 40. Cache config block is advertised but never consumed
 
@@ -1209,36 +1144,6 @@ enterprise systems ship both.)_
   removing is major-bumped; (b) additionally mark each event
   class `@api` in docblocks so static-analysis consumers can
   detect breakage. Do both.
-
-### 55. `fnmatch` treats backslashes in resource patterns as escape characters
-
-- **Files:** `src/Evaluation/Statement.php` (action + resource
-  matching); surfaced while implementing #23.
-- **Observation:** PHP's `fnmatch()` defaults to Unix shell glob
-  semantics, including treating `\` as an escape character for the
-  following character in the pattern. Resource identifiers that
-  include namespaced class names (the default
-  `Model::getMorphClass()` output when no morph alias is
-  registered — e.g. `App\Models\Post:42`) break matching: the
-  pattern `App\Models\Post:42` is interpreted as `AppModelsPost:42`
-  and fails to match the literal string `App\Models\Post:42`.
-- **Impact:** consumers who policy-match on `getMorphClass()`
-  output directly (reasonable since that is how the polymorphic
-  pivots store types) hit silent non-matches whenever the morph
-  class retains backslashes. Gate-forwarded Eloquent models
-  (#23) are the primary path affected. Today the
-  `GateArgumentForwardingTest` works around the issue with a
-  morph alias — a workaround, not a fix.
-- **Options:** (a) pass `FNM_NOESCAPE` to every `fnmatch()` call
-  in the evaluator so backslashes are compared literally. Correct
-  for resource identifiers where shell-glob escape semantics add
-  no value; (b) document a hard requirement that consumers
-  register morph aliases before relying on Eloquent-based resource
-  matching (shifts the burden onto every consumer); (c) normalise
-  backslashes to a sentinel before passing through `fnmatch`
-  (fragile and surprising). Option (a) is the right answer —
-  should land alongside or before #27 so the combined wildcard
-  semantics are coherent.
 
 ---
 

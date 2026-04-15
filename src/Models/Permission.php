@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
 
 /**
  * Eloquent model for permission rows.
@@ -27,7 +28,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
  */
 class Permission extends Model
 {
-    use HasUuids;
+    use HasUuids, ValidatesAuthorizationName;
 
     /**
      * The attributes that are mass assignable.
@@ -73,5 +74,16 @@ class Permission extends Model
             foreignPivotKey: 'permission_id',
             relatedPivotKey: 'role_id',
         );
+    }
+
+    /**
+     * Human-readable label used in a name-validation exception
+     * message.
+     *
+     * @return string
+     */
+    protected function getAuthorizationNameKind(): string
+    {
+        return 'permission';
     }
 }
