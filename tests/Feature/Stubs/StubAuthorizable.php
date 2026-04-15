@@ -1,0 +1,58 @@
+<?php
+
+declare(strict_types = 1);
+
+namespace Tests\Feature\Stubs;
+
+use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Contracts\Authorizable as AuthorizableContract;
+use SineMacula\Laravel\Authorization\Traits\Authorizable;
+
+/**
+ * Minimal Eloquent model used by feature tests to verify role,
+ * permission, and policy assignment through the shipped traits.
+ *
+ * @author      Ben Carey <bdmc@sinemacula.co.uk>
+ * @copyright   2026 Sine Macula Limited
+ *
+ * @internal
+ */
+class StubAuthorizable extends Model implements AuthorizableContract
+{
+    use Authorizable;
+
+    /**
+     * Primary key column.
+     *
+     * @var string
+     */
+    protected $primaryKey = 'id';
+
+    /**
+     * Primary key type.
+     *
+     * @var string
+     */
+    protected $keyType = 'string';
+
+    /**
+     * Disable auto-incrementing — stubs use explicit IDs.
+     *
+     * @var bool
+     */
+    public $incrementing = false;
+
+    /**
+     * Mass-assignable attributes.
+     *
+     * @var list<string>
+     */
+    protected $fillable = ['id', 'name'];
+
+    /**
+     * Backing table.
+     *
+     * @var string
+     */
+    protected $table = 'stub_authorizables';
+}

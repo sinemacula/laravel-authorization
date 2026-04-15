@@ -2,63 +2,90 @@
 
 declare(strict_types = 1);
 
-namespace SineMacula\Laravel\Iam\Permissions\Evaluation;
+namespace SineMacula\Laravel\Authorization\Evaluation;
 
-use SineMacula\Laravel\Iam\Permissions\Enums\PolicyEffect;
+use SineMacula\Laravel\Authorization\Enums\PolicyEffect;
 
 /**
- * Policy evaluator.
+ * AWS IAM-style policy evaluator.
  *
- * Evaluates a set of IAM-style policies against a given action,
- * resource, and context. Follows AWS IAM evaluation logic:
- *
- * 1. Start with an implicit DENY
- * 2. Evaluate all applicable policy statements
- * 3. If any matching statement has an explicit DENY, return DENY
- * 4. If any matching statement has an ALLOW, return ALLOW
- * 5. Otherwise, return implicit DENY
+ * The evaluator walks every statement from every supplied policy in
+ * order, building up a trace as it goes. Behaviour mirrors AWS IAM's
+ * four-step decision order — implicit deny → explicit deny → allow →
+ * implicit deny — so an explicit deny always wins, regardless of how
+ * many allows preceded it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
- * @copyright   2026 Sine Macula Limited.
+ * @copyright   2026 Sine Macula Limited
  */
 final class PolicyEvaluator
 {
     /**
-     * Evaluate the given policies for the specified action and
-     * resource.
+     * Evaluate the supplied policies against the action, resource and
+     * context.
      *
-     * @param  array<int, \SineMacula\Laravel\Iam\Permissions\Evaluation\Policy>  $policies
+     * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
      * @param  string  $action
      * @param  string|null  $resource
      * @param  array<string, mixed>  $context
-     * @return \SineMacula\Laravel\Iam\Permissions\Evaluation\EvaluationResult
+     * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult
      */
     public function evaluate(array $policies, string $action, ?string $resource = null, array $context = []): EvaluationResult
     {
+        /** @var list<array{policy: string, statement_index: int, decision: 'matched'|'skipped', reason: string}> $trace */
+        $trace          = [];
         $allowStatement = null;
 
         foreach ($policies as $policy) {
-            foreach ($policy->statements as $statement) {
+            foreach ($policy->statements as $index => $statement) {
                 if (!$statement->matches($action, $resource)) {
+                    $trace[] = [
+                        'policy'          => $policy->name,
+                        'statement_index' => $index,
+                        'decision'        => 'skipped',
+                        'reason'          => 'action/resource did not match',
+                    ];
+
                     continue;
                 }
 
                 if (!$statement->evaluateConditions($context)) {
+                    $trace[] = [
+                        'policy'          => $policy->name,
+                        'statement_index' => $index,
+                        'decision'        => 'skipped',
+                        'reason'          => 'conditions not satisfied',
+                    ];
+
                     continue;
                 }
 
                 if ($statement->effect === PolicyEffect::DENY) {
-                    return EvaluationResult::explicitlyDenied($statement);
+                    $trace[] = [
+                        'policy'          => $policy->name,
+                        'statement_index' => $index,
+                        'decision'        => 'matched',
+                        'reason'          => 'explicit deny',
+                    ];
+
+                    return EvaluationResult::explicitlyDenied($statement, $trace);
                 }
+
+                $trace[] = [
+                    'policy'          => $policy->name,
+                    'statement_index' => $index,
+                    'decision'        => 'matched',
+                    'reason'          => 'explicit allow',
+                ];
 
                 $allowStatement ??= $statement;
             }
         }
 
         if ($allowStatement !== null) {
-            return EvaluationResult::allowed($allowStatement);
+            return EvaluationResult::allowed($allowStatement, $trace);
         }
 
-        return EvaluationResult::implicitlyDenied();
+        return EvaluationResult::implicitlyDenied($trace);
     }
 }

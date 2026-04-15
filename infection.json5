@@ -13,6 +13,7 @@
             "Contracts",
             "Database",
             "Enums",
+            "Events",
             "Exceptions",
             "Facades",
             "Models",

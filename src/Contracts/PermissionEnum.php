@@ -2,23 +2,24 @@
 
 declare(strict_types = 1);
 
-namespace SineMacula\Laravel\Iam\Permissions\Contracts;
+namespace SineMacula\Laravel\Authorization\Contracts;
 
 /**
  * Permission enum contract.
  *
- * Defines the interface for permission enums. Each case represents
- * a discrete permission that can be checked via Laravel's Gate or
- * the permission manager. Implementing classes must be backed
- * enums.
+ * Implemented by application-defined enums whose cases represent
+ * discrete permission strings. The package's service provider walks
+ * every case in every configured enum at boot and registers a
+ * matching Laravel Gate, eliminating hand-wired Gate definitions for
+ * enum-driven permission catalogues.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
- * @copyright   2026 Sine Macula Limited.
+ * @copyright   2026 Sine Macula Limited
  */
 interface PermissionEnum extends \UnitEnum
 {
     /**
-     * Get the string representation of the permission.
+     * Return the permission string used by the authorization engine.
      *
      * @return string
      */

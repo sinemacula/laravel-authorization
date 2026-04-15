@@ -5,18 +5,20 @@ declare(strict_types = 1);
 namespace Tests;
 
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use Orchestra\Testbench\TestCase as OrchestraTestCase;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 
 /**
- * Shared base test case for the package's integration tests.
+ * Shared base test case for the package's Testbench-powered tests.
  *
  * Boots a minimal Testbench application with the authorization service
- * provider registered, an in-memory sqlite connection, and the package's
- * default `authorization` config block seeded. Subclasses may override
- * `defineEnvironment` to adjust per-test config and `defineDatabaseMigrations`
- * (or `setUp`) to create additional tables.
+ * provider registered, an in-memory SQLite connection, and the shipped
+ * `authorization` config block seeded. Subclasses may override
+ * {@see self::defineEnvironment()} to adjust per-test config and
+ * {@see self::defineDatabaseMigrations()} (or `setUp`) to create
+ * additional tables.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,8 +44,8 @@ abstract class TestCase extends OrchestraTestCase
      * Seed the database connection and package config defaults.
      *
      * Reads `DB_CONNECTION` from the environment to select the driver.
-     * Defaults to in-memory SQLite when unset, so local development needs
-     * no extra configuration.
+     * Defaults to in-memory SQLite when unset, so local development
+     * needs no extra configuration.
      *
      * @param  mixed  $app
      * @return void
@@ -64,6 +66,7 @@ abstract class TestCase extends OrchestraTestCase
      */
     private function databaseConnection(): array
     {
+        /** @var string $driver */
         $driver = env('DB_CONNECTION', 'sqlite');
 
         if ($driver === 'sqlite') {
@@ -88,12 +91,9 @@ abstract class TestCase extends OrchestraTestCase
     }
 
     /**
-     * Run the package's shipped migrations so the default authorization
-     * tables exist for tests that persist roles, permissions, or policies.
-     *
-     * With persistent databases (MySQL, PostgreSQL) the tables survive
-     * between test classes, so they must be dropped on teardown to prevent
-     * the migration collision guard from throwing on the next class.
+     * Run the package's shipped migrations and any fixture tables so
+     * tests that persist roles, permissions, or policies have a
+     * working schema.
      *
      * @return void
      */
@@ -101,16 +101,33 @@ abstract class TestCase extends OrchestraTestCase
     {
         $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
 
+        Schema::create('stub_authorizables', static function (Blueprint $table): void {
+            $table->string('id')->primary();
+            $table->string('name')->nullable();
+            $table->timestamps();
+        });
+
+        Schema::create('stub_second_authorizables', static function (Blueprint $table): void {
+            $table->string('id')->primary();
+            $table->string('name')->nullable();
+            $table->timestamps();
+        });
+
         if (env('DB_CONNECTION', 'sqlite') !== 'sqlite') {
             $this->beforeApplicationDestroyed(function (): void {
                 /** @var \Illuminate\Config\Repository $config */
                 $config = app(ConfigRepository::class);
+                /** @var array<string, mixed> $tables */
+                $tables = $config->array('authorization.tables', []);
 
-                foreach ($config->array('authorization.tables', []) as $table) {
+                foreach ($tables as $table) {
                     if (is_string($table)) {
                         Schema::dropIfExists($table);
                     }
                 }
+
+                Schema::dropIfExists('stub_authorizables');
+                Schema::dropIfExists('stub_second_authorizables');
             });
         }
     }

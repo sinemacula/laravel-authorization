@@ -2,27 +2,33 @@
 
 declare(strict_types = 1);
 
-namespace SineMacula\Laravel\Iam\Permissions\Evaluation;
+namespace SineMacula\Laravel\Authorization\Evaluation;
 
-use SineMacula\Laravel\Iam\Permissions\Enums\PolicyEffect;
+use SineMacula\Laravel\Authorization\Enums\PolicyEffect;
 
 /**
- * Policy statement.
+ * Immutable policy statement.
  *
- * An immutable value object representing a single statement within
- * an IAM-style policy. Each statement declares an effect (allow or
- * deny), the actions and resources it applies to, and optional
- * conditions that must be met.
+ * A statement binds an effect ({@see \SineMacula\Laravel\Authorization\Enums\PolicyEffect::ALLOW} or
+ * {@see \SineMacula\Laravel\Authorization\Enums\PolicyEffect::DENY}) to one or more action and resource
+ * patterns and an optional condition map. The evaluator walks every
+ * statement in order, asking each one whether it applies to the
+ * inbound `(action, resource, context)` tuple.
+ *
+ * Conditions are expressed as a map of context keys to an operator
+ * map, for example `['tenant' => ['eq' => 'org-1']]`. Missing context
+ * keys cause the condition to fail without throwing, and unknown
+ * operators short-circuit to false while emitting a debug log line.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
- * @copyright   2026 Sine Macula Limited.
+ * @copyright   2026 Sine Macula Limited
  */
 final readonly class Statement
 {
     /**
      * Create a new statement instance.
      *
-     * @param  \SineMacula\Laravel\Iam\Permissions\Enums\PolicyEffect  $effect
+     * @param  \SineMacula\Laravel\Authorization\Enums\PolicyEffect  $effect
      * @param  array<int, string>  $actions
      * @param  array<int, string>  $resources
      * @param  array<string, mixed>  $conditions
@@ -35,32 +41,46 @@ final readonly class Statement
     ) {}
 
     /**
-     * Create a statement from an associative array.
+     * Hydrate a statement from its array representation.
      *
-     * @param  array{effect: string, actions: array<int, string>, resources?: array<int, string>, conditions?: array<string, mixed>}  $data
+     * @param  array<string, mixed>  $data
      * @return self
      *
      * @throws \InvalidArgumentException
      */
     public static function fromArray(array $data): self
     {
-        $effect = PolicyEffect::tryFrom($data['effect'])
-            ?? throw new \InvalidArgumentException("Invalid policy effect: '{$data['effect']}'");
-
         return new self(
-            effect: $effect,
-            actions: $data['actions'],
-            resources: $data['resources']   ?? ['*'],
-            conditions: $data['conditions'] ?? [],
+            effect: self::resolveEffect($data),
+            actions: self::resolveActions($data),
+            resources: self::resolveResources($data),
+            conditions: self::resolveConditions($data),
         );
     }
 
     /**
-     * Determine whether the statement matches the given action and
-     * optional resource.
+     * Serialise the statement for persistence.
      *
-     * Uses fnmatch for wildcard pattern matching so that patterns
-     * like 'posts:*' will match 'posts:create'.
+     * @return array<string, mixed>
+     */
+    public function toArray(): array
+    {
+        $payload = [
+            'effect'    => $this->effect->value,
+            'actions'   => $this->actions,
+            'resources' => $this->resources,
+        ];
+
+        if ($this->conditions !== []) {
+            $payload['conditions'] = $this->conditions;
+        }
+
+        return $payload;
+    }
+
+    /**
+     * Determine whether the statement applies to the supplied action
+     * and optional resource.
      *
      * @param  string  $action
      * @param  string|null  $resource
@@ -72,14 +92,11 @@ final readonly class Statement
             return false;
         }
 
-        return !($resource !== null && !$this->matchesResource($resource));
+        return $resource === null || $this->matchesResource($resource);
     }
 
     /**
-     * Evaluate the statement conditions against the given context.
-     *
-     * Returns true when there are no conditions or when all
-     * conditions are satisfied by the provided context values.
+     * Evaluate every condition against the supplied context.
      *
      * @param  array<string, mixed>  $context
      * @return bool
@@ -87,11 +104,7 @@ final readonly class Statement
     public function evaluateConditions(array $context): bool
     {
         foreach ($this->conditions as $key => $expected) {
-            if (!array_key_exists($key, $context)) {
-                return false;
-            }
-
-            if (!$this->evaluateCondition($expected, $context[$key])) {
+            if (!$this->evaluateConditionEntry($key, $expected, $context)) {
                 return false;
             }
         }
@@ -100,8 +113,133 @@ final readonly class Statement
     }
 
     /**
-     * Determine whether the given action matches any of the
-     * statement's action patterns.
+     * Decide whether a single condition key/value pair is satisfied.
+     *
+     * @param  int|string  $key
+     * @param  mixed  $expected
+     * @param  array<string, mixed>  $context
+     * @return bool
+     */
+    private function evaluateConditionEntry(int|string $key, mixed $expected, array $context): bool
+    {
+        if (!\is_string($key) || !\array_key_exists($key, $context)) {
+            return false;
+        }
+
+        return $this->evaluateCondition($expected, $context[$key]);
+    }
+
+    /**
+     * Extract the effect from the array representation.
+     *
+     * @param  array<string, mixed>  $data
+     * @return \SineMacula\Laravel\Authorization\Enums\PolicyEffect
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function resolveEffect(array $data): PolicyEffect
+    {
+        if (!isset($data['effect']) || !\is_string($data['effect'])) {
+            throw new \InvalidArgumentException('Policy statement requires a string effect.');
+        }
+
+        return PolicyEffect::tryFrom($data['effect'])
+            ?? throw new \InvalidArgumentException("Invalid policy effect: '{$data['effect']}'");
+    }
+
+    /**
+     * Extract the actions list from the array representation.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<int, string>
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function resolveActions(array $data): array
+    {
+        if (!isset($data['actions']) || !\is_array($data['actions']) || $data['actions'] === []) {
+            throw new \InvalidArgumentException('Policy statement requires at least one action.');
+        }
+
+        return self::normaliseStringList($data['actions'], 'actions');
+    }
+
+    /**
+     * Extract the resources list from the array representation.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<int, string>
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function resolveResources(array $data): array
+    {
+        if (!\array_key_exists('resources', $data)) {
+            return ['*'];
+        }
+
+        if (!\is_array($data['resources'])) {
+            throw new \InvalidArgumentException('Policy statement resources must be an array of strings.');
+        }
+
+        $resources = self::normaliseStringList($data['resources'], 'resources');
+
+        return $resources === [] ? ['*'] : $resources;
+    }
+
+    /**
+     * Extract the conditions map from the array representation.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function resolveConditions(array $data): array
+    {
+        if (!\array_key_exists('conditions', $data)) {
+            return [];
+        }
+
+        if (!\is_array($data['conditions'])) {
+            throw new \InvalidArgumentException('Policy statement conditions must be an associative array.');
+        }
+
+        $conditions = [];
+
+        foreach ($data['conditions'] as $key => $value) {
+            if (!\is_string($key)) {
+                throw new \InvalidArgumentException('Policy statement conditions must use string keys.');
+            }
+
+            $conditions[$key] = $value;
+        }
+
+        return $conditions;
+    }
+
+    /**
+     * Validate that every member of the supplied list is a string.
+     *
+     * @param  array<int|string, mixed>  $values
+     * @param  string  $fieldName
+     * @return array<int, string>
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function normaliseStringList(array $values, string $fieldName): array
+    {
+        return \array_values(\array_map(static function (mixed $value) use ($fieldName): string {
+            if (!\is_string($value)) {
+                throw new \InvalidArgumentException("Policy statement {$fieldName} must be strings.");
+            }
+
+            return $value;
+        }, $values));
+    }
+
+    /**
+     * Determine whether the action matches any configured pattern.
      *
      * @param  string  $action
      * @return bool
@@ -109,7 +247,7 @@ final readonly class Statement
     private function matchesAction(string $action): bool
     {
         foreach ($this->actions as $pattern) {
-            if (fnmatch($pattern, $action)) {
+            if (\fnmatch($pattern, $action)) {
                 return true;
             }
         }
@@ -118,8 +256,7 @@ final readonly class Statement
     }
 
     /**
-     * Determine whether the given resource matches any of the
-     * statement's resource patterns.
+     * Determine whether the resource matches any configured pattern.
      *
      * @param  string  $resource
      * @return bool
@@ -127,7 +264,7 @@ final readonly class Statement
     private function matchesResource(string $resource): bool
     {
         foreach ($this->resources as $pattern) {
-            if (fnmatch($pattern, $resource)) {
+            if (\fnmatch($pattern, $resource)) {
                 return true;
             }
         }
@@ -136,11 +273,7 @@ final readonly class Statement
     }
 
     /**
-     * Evaluate a single condition value against the context value.
-     *
-     * Supports simple equality checks and associative array
-     * conditions for extensible operator-based matching (e.g.
-     * CIDR range checks).
+     * Evaluate a single condition entry against the context value.
      *
      * @param  mixed  $expected
      * @param  mixed  $actual
@@ -148,12 +281,12 @@ final readonly class Statement
      */
     private function evaluateCondition(mixed $expected, mixed $actual): bool
     {
-        if (!is_array($expected)) {
+        if (!\is_array($expected)) {
             return $expected === $actual;
         }
 
         foreach ($expected as $operator => $operand) {
-            if (!$this->evaluateOperator($operator, $operand, $actual)) {
+            if (!\is_string($operator) || !self::evaluateOperator($operator, $operand, $actual)) {
                 return false;
             }
         }
@@ -162,50 +295,27 @@ final readonly class Statement
     }
 
     /**
-     * Evaluate a condition operator.
+     * Evaluate a single operator against the context value.
      *
      * @param  string  $operator
      * @param  mixed  $operand
      * @param  mixed  $actual
      * @return bool
      */
-    private function evaluateOperator(string $operator, mixed $operand, mixed $actual): bool
+    private static function evaluateOperator(string $operator, mixed $operand, mixed $actual): bool
     {
         return match ($operator) {
             'eq'          => $actual === $operand,
             'neq'         => $actual !== $operand,
-            'in'          => is_array($operand) && in_array($actual, $operand, true),
-            'not_in'      => is_array($operand) && !in_array($actual, $operand, true),
-            'cidr'        => is_string($actual) && is_string($operand) && $this->matchesCidr($actual, $operand),
-            'starts_with' => is_string($actual) && is_string($operand) && str_starts_with($actual, $operand),
-            'ends_with'   => is_string($actual) && is_string($operand) && str_ends_with($actual, $operand),
-            default       => false,
+            'in'          => \is_array($operand) && \in_array($actual, $operand, true),
+            'not_in'      => \is_array($operand) && !\in_array($actual, $operand, true),
+            'cidr'        => \is_string($actual) && \is_string($operand) && ConditionEvaluator::matchesCidr($actual, $operand),
+            'starts_with' => \is_string($actual) && \is_string($operand) && \str_starts_with($actual, $operand),
+            'ends_with'   => \is_string($actual) && \is_string($operand) && \str_ends_with($actual, $operand),
+            'before'      => ConditionEvaluator::compareTimes($actual, $operand, '<'),
+            'after'       => ConditionEvaluator::compareTimes($actual, $operand, '>'),
+            'between'     => ConditionEvaluator::matchesBetween($actual, $operand),
+            default       => ConditionEvaluator::logUnknownOperator($operator),
         };
-    }
-
-    /**
-     * Determine whether an IP address falls within a CIDR range.
-     *
-     * @param  string  $ip
-     * @param  string  $cidr
-     * @return bool
-     */
-    private function matchesCidr(string $ip, string $cidr): bool
-    {
-        if (!str_contains($cidr, '/')) {
-            return $ip === $cidr;
-        }
-
-        [$subnet, $bits] = explode('/', $cidr, 2);
-
-        $ipLong     = ip2long($ip);
-        $subnetLong = ip2long($subnet);
-        $mask       = -1 << (32 - (int) $bits);
-
-        if ($ipLong === false || $subnetLong === false) {
-            return false;
-        }
-
-        return ($ipLong & $mask) === ($subnetLong & $mask);
     }
 }

@@ -2,27 +2,29 @@
 
 declare(strict_types = 1);
 
-namespace SineMacula\Laravel\Iam\Permissions\Contracts;
+namespace SineMacula\Laravel\Authorization\Contracts;
 
-use SineMacula\Laravel\Iam\Permissions\Evaluation\Policy;
+use SineMacula\Laravel\Authorization\Evaluation\Policy;
 
 /**
  * Policy store contract.
  *
- * Defines the interface for retrieving IAM-style policies for a
- * given principal. Implementations may load policies from a
- * database, cache, or external service.
+ * Optional extension point for sourcing policies from an external
+ * system — a cache, a remote service, or an audit log — in addition
+ * to the policies attached directly to an identity. When the service
+ * container has a binding for this contract, the authorization
+ * manager consults it on every evaluation.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
- * @copyright   2026 Sine Macula Limited.
+ * @copyright   2026 Sine Macula Limited
  */
 interface PolicyStore
 {
     /**
-     * Retrieve all policies for the given principal identifier.
+     * Return the policies that apply to the supplied principal.
      *
-     * @param  mixed  $principalIdentifier
-     * @return array<int, \SineMacula\Laravel\Iam\Permissions\Evaluation\Policy>
+     * @param  object  $principal
+     * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
      */
-    public function policiesFor(mixed $principalIdentifier): array;
+    public function policiesFor(object $principal): array;
 }

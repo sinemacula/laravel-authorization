@@ -2,17 +2,18 @@
 
 declare(strict_types = 1);
 
-namespace SineMacula\Laravel\Iam\Permissions\Enums;
+namespace SineMacula\Laravel\Authorization\Enums;
 
 /**
- * Policy effect enum.
+ * Policy effect.
  *
- * Defines the two possible effects of a policy statement: allow
- * or deny. Used during IAM-style policy evaluation to determine
- * whether a given action is permitted.
+ * Represents the two possible outcomes of a matching policy statement
+ * under AWS IAM-style evaluation. A statement with effect {@see self::ALLOW}
+ * contributes an allow decision; a statement with effect {@see self::DENY}
+ * contributes an explicit deny and short-circuits the evaluator.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
- * @copyright   2026 Sine Macula Limited.
+ * @copyright   2026 Sine Macula Limited
  */
 enum PolicyEffect: string
 {
