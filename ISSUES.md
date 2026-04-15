@@ -207,30 +207,6 @@ enterprise systems ship both.)_
   policies. Option (a) is the lowest-friction and the standard
   idiom; option (b) matters only at very large role catalogues.
 
-### 30. No expiring or temporal role assignments
-
-- **Files:** `database/migrations/2026_04_14_000005_create_authorizable_roles_table.php`
-  (pivot has `role_id`, `authorizable_type`, `authorizable_id`
-  only); `src/Traits/HasRoles.php` (no temporal awareness);
-  similarly for `authorizable_permissions` and
-  `authorizable_policies`.
-- **Observation:** role / permission / policy grants are forever.
-  There is no `expires_at`, `granted_at`, or `granted_by` column on
-  any pivot. Break-glass access ("give me admin for one hour"),
-  just-in-time elevation, and on-call rotations all require custom
-  scheduling outside the package today.
-- **Impact:** every enterprise IAM deployment eventually wants
-  time-bounded grants. Without schema support, consumers build their
-  own side table or hack an expiry into a policy condition — both
-  of which defeat the point of the assignment model.
-- **Options:** (a) add nullable `expires_at` to all three
-  `authorizable_*` pivots; assignment read paths filter out expired
-  rows with `whereNull('expires_at')->orWhere('expires_at', '>', now())`
-  and a scheduled sweeper garbage-collects them; (b) additionally
-  add `granted_at`, `granted_by` (polymorphic) for audit trail
-  (ties to issue #43 CRUD event hooks and the future audit
-  package). Option (b) is the enterprise-grade path.
-
 ### 31. No permission categorisation / grouping
 
 - **Files:** `database/migrations/2026_04_14_000002_create_permissions_table.php`;
@@ -1381,6 +1357,128 @@ enterprise systems ship both.)_
   across the board; (b) drop the `(string)` suffix from the
   string case so all three shapes are bare values. Option (a)
   keeps the type tag and makes it uniform.
+
+### 75. `forceSystem()` bypass flag persists across intervening non-protected saves
+
+- **File:** `src/Models/Role.php:67–75` (flag declaration),
+  `:100–123` (`booted()` hooks), `:156–179`
+  (`assertSystemProtectionAllows`), `:126–143` (`forceSystem`).
+- **Observation:** the bypass flag is consumed **only** when
+  `assertSystemProtectionAllows()` runs — which fires from
+  `deleting` or from `updating` **when `wasSystemRoleRenamed()`
+  returns true**. An intervening non-protected save (description
+  change, `guard_name` bump, `is_system` toggle itself) does
+  not trip the guard, so the flag stays armed across it. The
+  following sequence leaves the bypass live for an unrelated
+  later rename:
+  ```php
+  $role->forceSystem();                    // flag = true
+  $role->description = 'tidy copy';
+  $role->save();                           // updating fires,
+                                           // name not dirty, guard
+                                           // skipped, flag UNCONSUMED
+  // ... minutes of unrelated code ...
+  $role->name = 'different-name';
+  $role->save();                           // flag consumed here —
+                                           // rename succeeds silently
+  ```
+  The class docblock calls the bypass "single-use" — a label
+  that most readers parse as "arm once, expires after the next
+  save." The actual semantics are "arm once, expires the next
+  time the guard runs." The gap between those two readings is a
+  footgun, and the existing test suite does not cover the
+  intervening-non-protected-save scenario.
+- **Impact:** consumers who arm the bypass and then forget to
+  complete the protected operation leave a latent escape hatch
+  on the instance. A later rename that the consumer expected to
+  be blocked silently succeeds. Pair that with long-lived
+  Eloquent instances in jobs / schedulers and the footgun
+  compounds.
+- **Options:** (a) consume the flag at the start of every
+  `deleting` / `updating` hook regardless of whether the
+  mutation is protected — the flag truly becomes "next save,
+  win or lose"; (b) tighten the docblock to state
+  "expires on the next protected mutation" and add a test
+  pinning the current behaviour so nobody accidentally
+  tightens it; (c) eliminate the instance flag entirely and
+  introduce a static `Role::withoutSystemProtection(closure)`
+  boundary that disables the guard for a closure's duration,
+  matching Eloquent's `withoutEvents` idiom. Option (c) is the
+  most Laravel-native and makes the bypass scope explicit.
+
+### 76. System-role protection has no equivalent for Permission or Policy
+
+- **Files:** `src/Models/Permission.php`,
+  `src/Models/Policy.php` — neither carries an `is_system`
+  column, a protection hook, nor a matching exception; only
+  `Role` is protected.
+- **Observation:** enterprise IAM deployments routinely ship
+  system-owned permissions (`*:*` super-admin, `iam:manage`
+  platform-admin surface) and system-owned policies
+  (platform-defined deny policies, compliance-mandated policies).
+  A caller with raw Eloquent access can delete either today
+  without the same speed bump that now guards roles. The
+  rationale that applies to `super-admin` / `auditor` roles —
+  "cascades into broken authorization across the application"
+  — applies identically to system-owned permissions and
+  policies, arguably more so for policies since a deleted
+  platform deny policy removes a security control.
+- **Impact:** protection is half-implemented at the authorization
+  primitives layer. The commit message describes the invariant
+  as "platform-shipped roles are delete-protected"; the
+  enterprise-ready framing requires "platform-shipped
+  authorization primitives are delete-protected" covering all
+  three tables.
+- **Options:** (a) extend the same pattern to `Permission` and
+  `Policy`: `is_system` column, `deleting` guard, `updating`
+  guard that blocks `name` rename (and, for `Policy`, document
+  mutation as well — policy `document` changes are the
+  authorization-impacting edit, analogous to role rename), and
+  sibling exception classes
+  `SystemPermissionProtectedException` /
+  `SystemPolicyProtectedException`; (b) lift the protection
+  logic into a shared trait
+  (`ProtectsSystemFlaggedRows`) that all three models compose,
+  with per-model overrides for which mutations are "protected"
+  (role = rename/delete; permission = rename/delete; policy =
+  document-change/delete). Option (b) avoids the three-way
+  duplication that would otherwise appear alongside the
+  `ValidatesAuthorizationName` trait.
+
+### 77. Resolution cache returns stale role / permission / policy sets across temporal-grant expiry
+
+- **Files:** `src/Cache/ResolutionCache.php` (memoises
+  per-principal lookups); `src/Traits/HasRoles.php`,
+  `src/Traits/HasPermissions.php`, `src/Traits/HasPolicies.php`
+  (relations filter `expires_at` at read time).
+- **Observation:** temporal grants (#30, now shipped) rely on a
+  DB-level filter — `expires_at IS NULL OR expires_at > now()`
+  evaluated on every relation read. The resolution cache sits
+  above that filter and memoises the result per principal, so a
+  list populated at 12:00 still reports an entry that expired at
+  12:30 until an invalidation event fires on that principal
+  (assign / revoke / attach / detach on the identity, or a role
+  pivot change). The cache is correct on every write path, but
+  wall-clock advance alone does not invalidate it.
+- **Impact:** deployments that combine the persistent cache tier
+  with temporal grants can report stale membership for up to the
+  cache TTL past the expiry. For short-lived break-glass grants
+  (e.g. "admin for one hour") a 30-minute TTL means up to 30
+  minutes of drift between "actually expired" and "observably
+  expired."
+- **Options:** (a) compute an entry TTL bounded by the nearest
+  `expires_at` across the stored rows — requires one extra read
+  per populate path and a min() over the pivot. Cleanest, works
+  across both tiers. (b) Ship a scheduled
+  `authorization:prune-expired-grants` command that bumps the
+  cache per affected principal when a row crosses its expiry —
+  requires a generation / sweeper pattern. (c) Document the
+  caveat (already done in `ResolutionCache`'s docblock), advise
+  consumers using temporal grants to either disable the
+  persistent tier or pair it with a short TTL, and close the
+  gap in a follow-on release once option (a) is scoped.
+  Option (a) is the honest enterprise path; option (c) is the
+  current behaviour.
 
 ---
 

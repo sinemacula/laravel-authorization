@@ -34,8 +34,16 @@ return new class extends Migration {
             $table->string('authorizable_type');
             $table->string('authorizable_id');
 
+            // Optional expiry for temporal grants — null means
+            // "forever". Rows whose `expires_at` is in the past
+            // are filtered out of the relation on read and
+            // swept by the `authorization:prune-expired-grants`
+            // command or equivalent consumer-scheduled task.
+            $table->timestamp('expires_at')->nullable();
+
             $table->unique(['role_id', 'authorizable_type', 'authorizable_id'], 'authorizable_roles_unique');
             $table->index(['authorizable_type', 'authorizable_id'], 'authorizable_roles_morph_index');
+            $table->index('expires_at', 'authorizable_roles_expires_at_index');
 
             $table->foreign('role_id')->references('id')->on($rolesTable)->cascadeOnDelete();
         });

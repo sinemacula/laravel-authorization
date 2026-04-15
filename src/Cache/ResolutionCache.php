@@ -36,6 +36,18 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy;
  * `Policy::toArray()` / `fromArray()` to stay forward-compatible
  * with policy-document schema bumps.
  *
+ * **Temporal-grant caveat:** `expires_at` on the `authorizable_*`
+ * pivots is filtered at the database layer on every relation
+ * read, but the cache has no way to observe wall-clock advance.
+ * A memoised role / permission list reflects the state at
+ * population time — if an entry expires after the cache was
+ * populated, the stale entry is still returned until an
+ * invalidation event fires (assign / revoke / attach / detach
+ * on the same identity, or a role-pivot mutation). Deployments
+ * that lean heavily on temporal grants should either disable
+ * the persistent tier or pair it with a short TTL.
+ * Tracked as ISSUES.md #77.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */

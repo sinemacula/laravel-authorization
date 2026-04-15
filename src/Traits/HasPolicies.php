@@ -4,8 +4,10 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Traits;
 
+use DateTimeInterface;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
@@ -31,6 +33,12 @@ trait HasPolicies // @phpstan-ignore trait.unused
     /**
      * Morph-to-many relation onto policies.
      *
+     * Filters out pivot rows whose `expires_at` is in the past —
+     * temporal policy attachments disappear from the relation
+     * automatically at expiry without requiring a sweeper run.
+     * The pivot's `expires_at` column is surfaced via
+     * `withPivot()`.
+     *
      * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy, static>
      */
     public function policies(): MorphToMany
@@ -47,7 +55,12 @@ trait HasPolicies // @phpstan-ignore trait.unused
             table: $pivot,
             foreignPivotKey: 'authorizable_id',
             relatedPivotKey: 'policy_id',
-        );
+        )
+            ->withPivot('expires_at')
+            ->where(static function ($query) use ($pivot): void {
+                $query->whereNull($pivot . '.expires_at')
+                    ->orWhere($pivot . '.expires_at', '>', Carbon::now());
+            });
     }
 
     /**
@@ -61,12 +74,21 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * instance, so non-Policy models are attached silently; use
      * a Policy-shaped class when event wiring matters.
      *
+     * An optional `$expiresAt` makes the attachment temporal — the
+     * row is filtered out of `$user->policies` the moment the
+     * clock passes the supplied instant, without requiring a
+     * sweeper run. Passing null (the default) creates a forever
+     * attachment.
+     *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy|\Illuminate\Database\Eloquent\Model  $policy
+     * @param  \DateTimeInterface|null  $expiresAt
      * @return static
      */
-    public function attachPolicy(Policy|Model $policy): static
+    public function attachPolicy(Policy|Model $policy, ?DateTimeInterface $expiresAt = null): static
     {
-        $this->policies()->syncWithoutDetaching([$policy->getKey()]);
+        $this->policies()->syncWithoutDetaching([
+            (string) $policy->getKey() => ['expires_at' => $expiresAt],
+        ]);
 
         if (isset($this->relations['policies'])) {
             unset($this->relations['policies']);

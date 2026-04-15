@@ -4,7 +4,9 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Traits;
 
+use DateTimeInterface;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Events\RoleAssigned;
@@ -31,6 +33,13 @@ trait HasRoles // @phpstan-ignore trait.unused
     /**
      * Morph-to-many relation onto roles.
      *
+     * Filters out pivot rows whose `expires_at` is in the past —
+     * temporal assignments disappear from the relation
+     * automatically at expiry without requiring a sweeper run.
+     * The pivot's `expires_at` column is surfaced via
+     * `withPivot()` so consumers can inspect remaining lifetime
+     * on the cast `pivot` attribute.
+     *
      * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, static>
      */
     public function roles(): MorphToMany
@@ -47,22 +56,36 @@ trait HasRoles // @phpstan-ignore trait.unused
             table: $pivot,
             foreignPivotKey: 'authorizable_id',
             relatedPivotKey: 'role_id',
-        );
+        )
+            ->withPivot('expires_at')
+            ->where(static function ($query) use ($pivot): void {
+                $query->whereNull($pivot . '.expires_at')
+                    ->orWhere($pivot . '.expires_at', '>', Carbon::now());
+            });
     }
 
     /**
      * Assign the given role to this identity.
      *
+     * An optional `$expiresAt` makes the grant temporal — the
+     * assignment is filtered out of `$user->roles` automatically
+     * the moment the clock passes the supplied instant, without
+     * requiring a sweeper run. Passing null (the default) creates
+     * a forever grant.
+     *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
+     * @param  \DateTimeInterface|null  $expiresAt
      * @return static
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
      */
-    public function assignRole(Role|string $role): static
+    public function assignRole(Role|string $role, ?DateTimeInterface $expiresAt = null): static
     {
         $model = $this->resolveRole($role);
 
-        $this->roles()->syncWithoutDetaching([$model->getKey()]);
+        $this->roles()->syncWithoutDetaching([
+            (string) $model->getKey() => ['expires_at' => $expiresAt],
+        ]);
 
         if (isset($this->relations['roles'])) {
             unset($this->relations['roles']);
