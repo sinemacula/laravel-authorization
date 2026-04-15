@@ -288,8 +288,13 @@ class Role extends Model
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
         $class = config('authorization.models.permission', Permission::class);
+        // Role rows carry their own `guard_name`; use it as the
+        // lookup scope so a web-scoped role resolves permissions
+        // against the web guard and an api-scoped role against
+        // the api guard. Fall back to the package default when the
+        // role itself is guard-agnostic (null `guard_name`).
         /** @var string $guard */
-        $guard = config('authorization.defaults.guard', 'web');
+        $guard = $this->guard_name ?? config('authorization.defaults.guard', 'web');
 
         /** @var \SineMacula\Laravel\Authorization\Models\Permission|null $model */
         $model = $class::query()

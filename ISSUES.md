@@ -167,55 +167,6 @@ most likely first-use path.
   is wide — SPECS.md and the PRD should be amended to call out
   every touch point before implementation begins.
 
-### 24. Gate dispatch has no way to route by the caller's guard
-
-- **Files:** `src/AuthorizationServiceProvider.php:190–199`;
-  `src/Traits/HasRoles.php:204–211`; `src/Traits/HasPermissions.php:236–244`.
-- **Observation:** Laravel's `Gate` is global and guard-agnostic —
-  when `$user->can('posts:edit')` fires, the Gate closure receives
-  `$user` with no indication of which guard the user authenticated
-  under. This package's closure then calls
-  `Authorization::for($user)->can($permission)`, whose string-based
-  permission lookup is hard-coded to
-  `config('authorization.defaults.guard', 'web')`. For a multi-guard
-  application, a user authenticated under `api` will have their
-  permission check resolved against the `web`-guard permission row
-  (or fail to find one entirely). This is the core reason full
-  Laravel `->can()` compatibility with multi-guard support is
-  architecturally hard.
-- **Impact:** multi-guard deployments cannot trust the standard
-  Laravel authorization surface (`->can()`, `Gate::allows`, `@can`,
-  `can:` middleware) to return the correct answer. They are forced
-  to call `Authorization::for($user)->can($permission)` directly,
-  which defeats the Laravel-compat narrative on exactly the workloads
-  that need guard scoping most.
-- **Guard model (landed).** The nullable-`guard_name` sentinel has
-  shipped (commits `cf0772b` + `0aa8cd2`). This narrows the problem
-  but does not solve it: the lookup in
-  `HasRoles::resolveRole()` / `HasPermissions::resolvePermission()`
-  now falls back to null-guard rows when the configured default
-  guard has no match, but the Gate closure still hardcodes
-  `config('authorization.defaults.guard')`. A user authenticated
-  under a non-default guard (e.g. `api` when default is `web`)
-  therefore still misses their own guard-specific rows and is
-  served only the `web` row or the null-guard row. The routing
-  hook is still required; cross-refs to #21 remain valid because
-  attachment-layer enforcement and Gate-layer routing are the two
-  separate integrity checks the guard model needs to reach parity
-  with Spatie.
-- **Options:** (a) require `AuthorizableIdentity` implementers to expose a
-  `getAuthorizationGuard(): string` method (Spatie's shim idiom);
-  closure calls `$user->getAuthorizationGuard()` to select the lookup
-  scope — leaks auth semantics onto the identity model but is
-  explicit; (b) introduce a `GuardResolver` contract (mirrors
-  `PrincipalResolver`) that the closure consults; (c) bind a stack
-  of Gates at boot — one per configured guard — and teach the
-  closure to pick the active guard via the container's current
-  `Auth::guard()->name`. Option (c) is the cleanest for Laravel
-  idioms but requires the container to know which guard
-  authenticated the request, which is only true inside an HTTP
-  request scope.
-
 ---
 
 ## Enterprise readiness gaps

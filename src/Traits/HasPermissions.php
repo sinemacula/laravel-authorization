@@ -274,8 +274,14 @@ trait HasPermissions // @phpstan-ignore trait.unused
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
         $class = config('authorization.models.permission', Permission::class);
+        // Honour `$this->getAuthorizationGuard()` when the identity
+        // model declares it — a user authenticated under a
+        // non-default guard routes its lookups against its own
+        // guard's rows instead of the package default.
         /** @var string $guard */
-        $guard = config('authorization.defaults.guard', 'web');
+        $guard = \method_exists($this, 'getAuthorizationGuard')
+            ? $this->getAuthorizationGuard()
+            : config('authorization.defaults.guard', 'web');
 
         /** @var \SineMacula\Laravel\Authorization\Models\Permission|null $model */
         $model = $class::query()

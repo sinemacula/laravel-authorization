@@ -217,11 +217,20 @@ trait HasRoles // @phpstan-ignore trait.unused
     /**
      * Resolve a role identifier to a model instance.
      *
-     * Matches either an exact `guard_name` equal to the configured
-     * default guard or a null `guard_name` (the guard-agnostic
+     * Matches either an exact `guard_name` equal to the identity's
+     * authorization guard or a null `guard_name` (the guard-agnostic
      * sentinel). Guard-specific rows take precedence over
      * guard-agnostic rows — the query orders non-null guards first
      * and returns the first match.
+     *
+     * The guard is resolved in priority order:
+     *
+     * 1. `$this->getAuthorizationGuard()` when the identity model
+     *    declares it (the opt-in hook for multi-guard deployments —
+     *    a user authenticated under `api` returns `'api'` so its
+     *    assignments resolve against `api`-guard rows instead of
+     *    the package default).
+     * 2. `authorization.defaults.guard` otherwise.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @return \SineMacula\Laravel\Authorization\Models\Role
@@ -237,7 +246,9 @@ trait HasRoles // @phpstan-ignore trait.unused
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
         $class = config('authorization.models.role', Role::class);
         /** @var string $guard */
-        $guard = config('authorization.defaults.guard', 'web');
+        $guard = \method_exists($this, 'getAuthorizationGuard')
+            ? $this->getAuthorizationGuard()
+            : config('authorization.defaults.guard', 'web');
 
         /** @var \SineMacula\Laravel\Authorization\Models\Role|null $model */
         $model = $class::query()
