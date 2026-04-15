@@ -112,26 +112,6 @@ minimal configuration. Each entry is a usability friction point for the
 "pure RBAC, no policies, standard Laravel Auth" consumer, which is the
 most likely first-use path.
 
-### 17. Gate auto-wiring requires a populated `permission_enums` config
-
-- **File:** `src/AuthorizationServiceProvider.php:144–163`.
-- **Observation:** `registerGates()` iterates `authorization.permission_enums`
-  and registers one Gate per enum case. The config ships empty, so a
-  consumer who calls `Gate::allows('posts:edit', $user)` out of the box
-  gets no match — the check returns false regardless of RBAC state. The
-  facade API (`Authorization::for($user)->can('posts:edit')`) works as
-  expected; it is only the Laravel `Gate` integration that is silent
-  until an enum is defined and registered.
-- **Impact:** the "drop-in RBAC" narrative in README / CLAUDE.md implies
-  Gate integration is automatic. It is, but only after the consumer
-  writes a `PermissionEnum` class and lists it in config. For a
-  string-only RBAC consumer this is unexpected friction.
-- **Options:** (a) document the enum requirement explicitly in README's
-  quickstart, (b) add an opt-in config flag that registers one Gate per
-  `Permission` row at boot (introduces a DB query on boot — weigh
-  carefully), or (c) ship a lightweight "StringPermissionEnum"
-  convenience that consumers can register without defining their own.
-
 ### 22. No row-level multi-tenant role / permission scoping
 
 - **Files:** `database/migrations/2026_04_14_000001_create_roles_table.php`

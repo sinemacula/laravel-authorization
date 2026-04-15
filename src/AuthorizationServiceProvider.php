@@ -272,8 +272,18 @@ class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Walk every configured permission enum and register a Gate per
-     * case.
+     * Walk every configured permission enum and register a Gate
+     * per case.
+     *
+     * Laravel's Gate never dispatches to an action it has not
+     * been told about, so an empty `authorization.permission_enums`
+     * config leaves `Gate::allows(...)`, `$user->can(...)`,
+     * `@can(...)`, and the `can:` middleware silent — they
+     * return false for every action. The `Authorization` facade
+     * still works out of the box; the Gate surface only lights
+     * up once a `PermissionEnum` is registered here. Consumers
+     * using the facade exclusively can leave the config empty
+     * and the method is a no-op.
      *
      * @return void
      *

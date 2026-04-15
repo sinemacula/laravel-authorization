@@ -66,7 +66,16 @@ return [
     |
     | Backed or unit enums implementing `PermissionEnum`. Every case is wired
     | into a Laravel Gate on boot, so a permission defined here is immediately
-    | callable via `Gate::allows(...)` or `$user->can(...)`.
+    | callable via `Gate::allows(...)`, `$user->can(...)`, `@can(...)`, and the
+    | `can:` route middleware.
+    |
+    | **Required for Laravel's Gate surface.** The `Authorization` facade
+    | (`Authorization::can(...)`, `Authorization::for($user)->can(...)`) works
+    | out of the box, but Laravel's Gate never dispatches to an action it has
+    | not been told about — `Gate::allows('posts:edit')` silently returns false
+    | until a `PermissionEnum` case is listed here. Consumers who want the
+    | standard Laravel authorization surface must register at least one enum;
+    | consumers who only use the facade can leave this empty.
     |
     */
 
