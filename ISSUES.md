@@ -106,20 +106,6 @@ consumed into this file and removed from the repo.
 
 ## Observations (not spec gaps)
 
-### 12. `HasPolicies::getPolicies()` is not fail-closed on a single bad row
-
-- **File:** `src/Traits/HasPolicies.php:116–124`.
-- **Observation:** `getPolicies()` maps every attached `Policy` through
-  `toEvaluationPolicy()`, which throws `InvalidPolicyDocumentException`
-  on a malformed document. A single bad row raises at the trait
-  boundary, which aborts the entire evaluation for that principal. §12.3
-  mandates "fail closed (denied)" — the current behaviour produces a
-  500-class exception rather than a denied decision. Consider wrapping
-  the per-row hydration in a try/catch that logs the failure and
-  excludes the policy (still fail-closed because the excluded `ALLOW`
-  cannot win) or converting the exception into a guaranteed implicit
-  deny inside the manager.
-
 ### 13. `ConditionEvaluator::logUnknownOperator()` swallows logger errors silently
 
 - **File:** `src/Evaluation/ConditionEvaluator.php:108–120`.
