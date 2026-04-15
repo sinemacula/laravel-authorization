@@ -247,23 +247,6 @@ enterprise systems ship both.)_
   how much of the historical-reconstruction responsibility is
   pushed to the audit package.
 
-### 33. No `role:` / `permission:` route middleware shipped
-
-- **Files:** no `src/Http/Middleware/` directory exists.
-- **Observation:** Laravel's built-in `can:` middleware works
-  because the package registers Gates. But `->middleware('role:admin')`
-  or `->middleware('permission:posts:edit|posts:delete')` requires
-  middleware this package does not ship.
-- **Impact:** route-level RBAC is a standard Laravel idiom.
-  Consumers either drop down to `can:` (which requires every role
-  to also be a Gate — extra config burden) or write their own
-  middleware.
-- **Options:** (a) ship `RequireRole` and `RequirePermission`
-  middleware with support for OR-piped arguments
-  (`role:admin|editor`) and AND-comma arguments, register aliases
-  in the service provider. Matches Spatie's shape for easy
-  migration.
-
 ### 34. No Blade directives (`@role`, `@permission`, etc.)
 
 - **Files:** `src/AuthorizationServiceProvider.php` — no
@@ -1479,6 +1462,121 @@ enterprise systems ship both.)_
   gap in a follow-on release once option (a) is scoped.
   Option (a) is the honest enterprise path; option (c) is the
   current behaviour.
+
+### 78. Pivot `expires_at` is not cast to Carbon — docblocks claim otherwise
+
+- **Files:** `src/Traits/HasRoles.php:34–40` (relation docblock);
+  `src/Traits/HasPermissions.php:35–40` (relation docblock);
+  `src/Traits/HasPolicies.php:34–40` (relation docblock).
+- **Observation:** each relation docblock promises that "the
+  pivot's `expires_at` column is surfaced via `withPivot()` so
+  consumers can inspect remaining lifetime on the cast `pivot`
+  attribute." No cast is actually declared. The pivot is the
+  default `Illuminate\Database\Eloquent\Relations\MorphPivot`,
+  which casts only `created_at` and `updated_at` by convention
+  — any other `*_at` timestamp-named column comes through as a
+  raw database string (`'2026-04-20 13:00:00'`), not as a
+  `Carbon` instance. A consumer reading
+  `$user->roles->first()?->pivot->expires_at` gets `string|null`,
+  not `Carbon|null`, despite the docblock implying the latter.
+- **Impact:** silent mismatch between documented and actual
+  types. Admin UIs rendering "role expires in X hours" need to
+  parse the string themselves. Callers depending on Carbon
+  arithmetic (`->diffInHours(now())` etc.) get a
+  `BadMethodCallException`. Either the docblock is wrong or the
+  implementation is missing the cast.
+- **Options:** (a) ship a small `AuthorizableGrantPivot` class
+  under `src/Models/` that extends `MorphPivot` with
+  `protected $casts = ['expires_at' => 'datetime']`, and
+  register it on all three relations via `->using(...)`. Gives
+  consumers a real `Carbon|null` and keeps the pivot layer
+  package-owned; (b) declare the cast via a `withCasts()` call
+  alongside `withPivot()` — Laravel 11+ supports this on the
+  `MorphToMany` builder without a custom pivot class. Shorter,
+  no new class. Option (b) is the minimum change; option (a)
+  matches the `RolePermission` custom-pivot pattern already
+  established for #21's guard-parity invariant and would
+  centralise future pivot-column work (tenant scoping,
+  granted-by audit, etc.).
+
+### 79. Migration comment references nonexistent `authorization:prune-expired-grants` command
+
+- **File:** `database/migrations/2026_04_14_000005_create_authorizable_roles_table.php:38–42`
+  (and identical comment in `..._permissions_table.php`,
+  `..._policies_table.php`).
+- **Observation:** the inline comment reads "Rows whose
+  `expires_at` is in the past are filtered out of the relation
+  on read and swept by the `authorization:prune-expired-grants`
+  command or equivalent consumer-scheduled task." No such
+  command exists — `src/Console/` doesn't exist at all (see
+  still-open #35), and `grep` for `prune-expired-grants` finds
+  only the migration comment and a single ISSUES.md option
+  entry (#77 option (b)). The hedge "or equivalent
+  consumer-scheduled task" softens the claim but does not
+  remove it: a reader lands on an apparently-named CLI command
+  and reasonably expects `php artisan authorization:*` to work.
+- **Impact:** confusing documentation at the schema layer.
+  Consumers reading the migration to understand operational
+  burden think an official sweeper ships; they then either
+  waste time hunting for it or silently accumulate expired
+  pivot rows indefinitely. Also primes a future name
+  collision: if the command is eventually shipped under a
+  different name, the migration comment will have been
+  misleading for the intervening period.
+- **Options:** (a) remove the command name from the migration
+  comment and reframe as "pruning the expired rows is a
+  consumer-scheduled task; the authorization package does not
+  ship a sweeper in v1.0.0" — honest and future-proof; (b)
+  commit to the command name now (locks the naming decision),
+  ship a stub Artisan command scaffolding alongside this migration
+  — closes part of #35 preemptively; (c) replace the specific
+  command name with a generic pointer ("see ISSUES.md #35 for
+  the shipped command") — works but builds a forward reference
+  from schema to issue tracker that will age poorly. Option (a)
+  is the minimum-churn fix; option (b) is the enterprise-grade
+  answer and kills the aspiration-vs-reality gap.
+
+### 80. `assignRole(role, expiry)` silently shortens an existing forever grant — one verb covers two semantics
+
+- **Files:** `src/Traits/HasRoles.php:68–82` (`assignRole`);
+  `src/Traits/HasPermissions.php:68–82` (`givePermission`);
+  `src/Traits/HasPolicies.php:82–97` (`attachPolicy`).
+- **Observation:** all three grant methods use
+  `syncWithoutDetaching([$id => ['expires_at' => $expiresAt]])`,
+  which updates the existing pivot row when one is present.
+  Consequence: a consumer who holds a forever grant
+  (`expires_at = null`) and then calls
+  `$user->assignRole('admin', Carbon::parse('2026-06-01'))` —
+  perhaps to add a new temporal admin grant, unaware the user
+  already holds one — **silently shortens the forever grant
+  to expire on 2026-06-01**. No event, no exception, no return
+  value hint. The "assign" verb reads as additive but the
+  behaviour is mutative.
+- **Impact:** audit-visible privilege loss with no signal.
+  Enterprise security workflows specifically ask "was this
+  user's admin ever shortened?" and the answer from the events
+  alone is "no" — the `RoleAssigned` event fires with the new
+  expiry as if it were a fresh grant. Separately, the inverse
+  surprise (extending a temporal grant to forever by calling
+  `assignRole(role)` with no expiry on an existing expiring
+  grant) **does** happen: `$expiresAt = null` writes `null` to
+  the pivot, bumping the expiry to forever. Both directions
+  have silent mutation.
+- **Options:** (a) split the API into two verbs:
+  `assignRole(role)` stays forever-only and throws when the
+  row already exists; a new
+  `scheduleRole(role, expiresAt)` creates or updates temporal
+  grants explicitly. `extendRoleGrant` /
+  `shortenRoleGrant` helpers for lifetime changes. Three-way
+  surface, clear semantics; (b) keep the single-verb API but
+  emit a distinct event (`RoleExpiryChanged`) when the pivot's
+  existing `expires_at` differs from the supplied one, so
+  audit consumers can detect shortening / extension separately
+  from fresh grants; (c) keep the current behaviour and
+  document that `assignRole` is an upsert over the pivot —
+  honest but still the audit-blind footgun. Option (b) is the
+  low-friction enterprise answer: no API split, full
+  observability.
 
 ---
 

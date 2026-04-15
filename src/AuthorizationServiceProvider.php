@@ -4,8 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization;
 
-use Illuminate\Cache\CacheManager;
-use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Database\Eloquent\Model;
@@ -29,6 +27,8 @@ use SineMacula\Laravel\Authorization\Events\RolePermissionRevoked;
 use SineMacula\Laravel\Authorization\Events\RoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\GateConflictException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
+use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
+use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Listeners\InvalidateResolutionCache;
 use SineMacula\Laravel\Authorization\Repositories\CachingPolicyRepository;
 use SineMacula\Laravel\Authorization\Repositories\DefaultPolicyRepository;
@@ -76,6 +76,7 @@ class AuthorizationServiceProvider extends ServiceProvider
         $this->offerPublishing();
         $this->registerGates();
         $this->registerCacheInvalidationListeners();
+        $this->registerRouteMiddleware();
     }
 
     /**
@@ -247,6 +248,39 @@ class AuthorizationServiceProvider extends ServiceProvider
         ));
 
         $this->app->alias('authorization', AuthorizationManager::class);
+    }
+
+    /**
+     * Register the `role` and `permission` route-middleware aliases.
+     *
+     * The aliases only light up when the `router` binding is
+     * available (Laravel's default HTTP kernel), so console-only
+     * applications that do not resolve the router never pay the
+     * registration cost. Existing aliases on the same keys are
+     * respected — a consumer that has already wired their own
+     * `role` or `permission` middleware keeps theirs untouched.
+     *
+     * @return void
+     */
+    protected function registerRouteMiddleware(): void
+    {
+        if (!$this->app->bound('router')) {
+            return;
+        }
+
+        /** @var \Illuminate\Routing\Router $router */
+        $router = $this->app->make('router');
+
+        /** @var array<string, class-string> $existing */
+        $existing = $router->getMiddleware();
+
+        if (!isset($existing['role'])) {
+            $router->aliasMiddleware('role', RequireRole::class);
+        }
+
+        if (!isset($existing['permission'])) {
+            $router->aliasMiddleware('permission', RequirePermission::class);
+        }
     }
 
     /**
