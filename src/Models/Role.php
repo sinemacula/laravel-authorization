@@ -8,8 +8,11 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Support\Facades\Event;
+use SineMacula\Laravel\Authorization\Events\RoleCreated;
+use SineMacula\Laravel\Authorization\Events\RoleDeleted;
 use SineMacula\Laravel\Authorization\Events\RolePermissionGranted;
 use SineMacula\Laravel\Authorization\Events\RolePermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\RoleUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
 
@@ -56,6 +59,28 @@ class Role extends Model
         /** @var string $table */
         $table       = config('authorization.tables.roles', 'roles');
         $this->table = $table;
+    }
+
+    /**
+     * Register the row-lifecycle listeners that translate
+     * Eloquent's native `created` / `updated` / `deleted` events
+     * into the package's typed CRUD events.
+     *
+     * @return void
+     */
+    protected static function booted(): void
+    {
+        static::created(static function (self $role): void {
+            Event::dispatch(new RoleCreated($role));
+        });
+
+        static::updated(static function (self $role): void {
+            Event::dispatch(new RoleUpdated($role, $role->getChanges()));
+        });
+
+        static::deleted(static function (self $role): void {
+            Event::dispatch(new RoleDeleted($role));
+        });
     }
 
     /**

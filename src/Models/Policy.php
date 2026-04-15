@@ -6,7 +6,11 @@ namespace SineMacula\Laravel\Authorization\Models;
 
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
+use SineMacula\Laravel\Authorization\Events\PolicyCreated;
+use SineMacula\Laravel\Authorization\Events\PolicyDeleted;
+use SineMacula\Laravel\Authorization\Events\PolicyUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyDocumentException;
 
 /**
@@ -65,6 +69,28 @@ class Policy extends Model
         /** @var string $table */
         $table       = config('authorization.tables.policies', 'policies');
         $this->table = $table;
+    }
+
+    /**
+     * Register the row-lifecycle listeners that translate
+     * Eloquent's native `created` / `updated` / `deleted` events
+     * into the package's typed CRUD events.
+     *
+     * @return void
+     */
+    protected static function booted(): void
+    {
+        static::created(static function (self $policy): void {
+            Event::dispatch(new PolicyCreated($policy));
+        });
+
+        static::updated(static function (self $policy): void {
+            Event::dispatch(new PolicyUpdated($policy, $policy->getChanges()));
+        });
+
+        static::deleted(static function (self $policy): void {
+            Event::dispatch(new PolicyDeleted($policy));
+        });
     }
 
     /**

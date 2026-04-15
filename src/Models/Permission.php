@@ -7,6 +7,10 @@ namespace SineMacula\Laravel\Authorization\Models;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Support\Facades\Event;
+use SineMacula\Laravel\Authorization\Events\PermissionCreated;
+use SineMacula\Laravel\Authorization\Events\PermissionDeleted;
+use SineMacula\Laravel\Authorization\Events\PermissionUpdated;
 use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
 
 /**
@@ -53,6 +57,28 @@ class Permission extends Model
         /** @var string $table */
         $table       = config('authorization.tables.permissions', 'permissions');
         $this->table = $table;
+    }
+
+    /**
+     * Register the row-lifecycle listeners that translate
+     * Eloquent's native `created` / `updated` / `deleted` events
+     * into the package's typed CRUD events.
+     *
+     * @return void
+     */
+    protected static function booted(): void
+    {
+        static::created(static function (self $permission): void {
+            Event::dispatch(new PermissionCreated($permission));
+        });
+
+        static::updated(static function (self $permission): void {
+            Event::dispatch(new PermissionUpdated($permission, $permission->getChanges()));
+        });
+
+        static::deleted(static function (self $permission): void {
+            Event::dispatch(new PermissionDeleted($permission));
+        });
     }
 
     /**

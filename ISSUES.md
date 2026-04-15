@@ -202,15 +202,6 @@ consumed into this file and removed from the repo.
   an open question — it should be resolved and a compatibility test
   added before v1.0.0 so future schema changes are observable.
 
-### 15. `Permission` model has no events for direct CRUD
-
-- **Observation:** the event catalogue in §12.4 fires on assignment
-  transitions (`RoleAssigned`, `PermissionGranted`, etc.) but not on
-  permission/role/policy row CRUD itself. This is consistent with the
-  spec — but audit consumers that want a full trail of "who created
-  the `posts:create` permission row" will need model-observer wiring
-  that the package does not ship. Flag for product decision.
-
 ---
 
 ## Drop-in / DX friction (not spec gaps)
@@ -639,32 +630,6 @@ enterprise systems ship both.)_
   engines but belt-and-braces; (b) verify the index is present on
   the MySQL / PostgreSQL / SQLite CI matrix and document the
   guarantee.
-
-### 44. No CRUD events for role / permission / policy rows (promotes #15)
-
-- **Files:** `src/Models/Role.php`, `src/Models/Permission.php`,
-  `src/Models/Policy.php` — no boot observers, no dispatched
-  events on creation / update / deletion.
-- **Observation:** promotes the existing observation #15 from
-  "flag for product decision" to an in-scope gap. The
-  `laravel-audit-log` package will need to reconstruct the full
-  row-lifecycle trail (who created `posts:create` on which day,
-  who renamed `admin` to `administrator`). Today it has no events
-  to subscribe to — it would have to install its own model
-  observers on package-internal classes, which is brittle.
-- **Impact:** enterprise audit requirements (SOC 2 control
-  CC7.2 — change management) expect a complete activity trail
-  over authorization primitives. This is a must-have for any IAM
-  system, and deferring it means the audit package duplicates work
-  the authorization package should have surfaced as events.
-- **Options:** (a) ship `RoleCreated`, `RoleUpdated`, `RoleDeleted`,
-  `PermissionCreated`, `PermissionUpdated`, `PermissionDeleted`,
-  `PolicyCreated`, `PolicyUpdated`, `PolicyDeleted` events, wired
-  via model observers in each model's `booted()`; (b) ship a
-  single generic `AuthorizationPrimitiveMutated` event carrying
-  the model and change set. Option (a) matches the existing event
-  naming (one class per transition) and is clearer for
-  subscribers.
 
 ### 45. No role rank / level / seniority model
 
