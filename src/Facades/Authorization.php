@@ -19,6 +19,9 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
  * @method static \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult evaluate(string $action, string|null $resource = null, array<string, mixed> $context = [])
  * @method static \SineMacula\Laravel\Authorization\AuthorizationManager for(object $principal)
  * @method static \SineMacula\Laravel\Authorization\AuthorizationManager withPolicies(array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy> $policies)
+ * @method static \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult|null lastDecision()
+ * @method static void forgetLastDecision()
+ * @method static string explain(string $action, string|null $resource = null, array<string, mixed> $context = [])
  *
  * @see AuthorizationManager
  *

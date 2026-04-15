@@ -11,11 +11,13 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
+use SineMacula\Laravel\Authorization\Contracts\PolicyRepository;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Exceptions\GateConflictException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
+use SineMacula\Laravel\Authorization\Repositories\DefaultPolicyRepository;
 use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
 
 /**
@@ -42,6 +44,8 @@ class AuthorizationServiceProvider extends ServiceProvider
 
         $this->registerPrincipalResolver();
         $this->registerPolicyStore();
+        $this->registerPolicyRepository();
+        $this->registerDecisionJournal();
         $this->registerPolicyEvaluator();
         $this->registerAuthorizationManager();
     }
@@ -86,6 +90,32 @@ class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
+     * Bind the policy repository — the internal policy-gathering
+     * seam the manager consults on every evaluation. Defaults to
+     * `DefaultPolicyRepository`, which unions an optional
+     * `PolicyStore` with the principal's own attached policies.
+     *
+     * @return void
+     */
+    protected function registerPolicyRepository(): void
+    {
+        $this->app->singleton(PolicyRepository::class, static fn (Application $app): PolicyRepository => new DefaultPolicyRepository(
+            store: $app->bound(PolicyStore::class) ? $app->make(PolicyStore::class) : null,
+        ));
+    }
+
+    /**
+     * Bind the decision journal that holds the most recent
+     * evaluation result across every scoped clone of the manager.
+     *
+     * @return void
+     */
+    protected function registerDecisionJournal(): void
+    {
+        $this->app->singleton(DecisionJournal::class);
+    }
+
+    /**
      * Bind the policy evaluator.
      *
      * @return void
@@ -105,7 +135,8 @@ class AuthorizationServiceProvider extends ServiceProvider
         $this->app->singleton('authorization', static fn (Application $app): AuthorizationManager => new AuthorizationManager(
             evaluator: $app->make(PolicyEvaluator::class),
             resolver: $app->make(PrincipalResolver::class),
-            store: $app->bound(PolicyStore::class) ? $app->make(PolicyStore::class) : null,
+            repository: $app->make(PolicyRepository::class),
+            journal: $app->make(DecisionJournal::class),
             events: $app->bound(Dispatcher::class) ? $app->make(Dispatcher::class) : null,
         ));
 

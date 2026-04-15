@@ -6,7 +6,7 @@ namespace SineMacula\Laravel\Authorization;
 
 use Illuminate\Contracts\Events\Dispatcher;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
-use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
+use SineMacula\Laravel\Authorization\Contracts\PolicyRepository;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
@@ -58,7 +58,8 @@ class AuthorizationManager
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator  $evaluator
      * @param  \SineMacula\Laravel\Authorization\Contracts\PrincipalResolver  $resolver
-     * @param  \SineMacula\Laravel\Authorization\Contracts\PolicyStore|null  $store
+     * @param  \SineMacula\Laravel\Authorization\Contracts\PolicyRepository  $repository
+     * @param  \SineMacula\Laravel\Authorization\DecisionJournal  $journal
      * @param  \Illuminate\Contracts\Events\Dispatcher|null  $events
      */
     public function __construct(
@@ -69,8 +70,11 @@ class AuthorizationManager
         /** Bridge to the host application's concept of the current principal. */
         private readonly PrincipalResolver $resolver,
 
-        /** Optional external policy source unioned with a principal's attached policies. */
-        private readonly ?PolicyStore $store = null,
+        /** Gathers the policy set applicable to a principal on each evaluation. */
+        private readonly PolicyRepository $repository,
+
+        /** Shared journal holding the most recent evaluation result across every scoped clone. */
+        private readonly DecisionJournal $journal,
 
         /** Event dispatcher used to emit decision events, or null when unavailable. */
         private readonly ?Dispatcher $events = null,
@@ -107,6 +111,7 @@ class AuthorizationManager
         $principal = $this->currentPrincipal();
         $result    = $this->evaluateFor($principal, $action, $resource, $context);
 
+        $this->journal->record($result);
         $this->dispatch(new DecisionEvaluated($principal, $action, $resource, $context, $result));
 
         if (!$result->allowed) {
@@ -130,9 +135,56 @@ class AuthorizationManager
         $principal = $this->currentPrincipal();
         $result    = $this->evaluateFor($principal, $action, $resource, $context);
 
+        $this->journal->record($result);
         $this->dispatch(new DecisionEvaluated($principal, $action, $resource, $context, $result));
 
         return $result;
+    }
+
+    /**
+     * Return the most recent evaluation result produced by this
+     * process — across every scoped clone and Gate-dispatched path.
+     * Request-layer error handlers use this to answer "why was the
+     * last check denied?" without re-running the evaluation.
+     *
+     * Returns null when the process has not yet produced a
+     * decision or when the journal was explicitly cleared between
+     * requests in a long-running worker.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult|null
+     */
+    public function lastDecision(): ?EvaluationResult
+    {
+        return $this->journal->last();
+    }
+
+    /**
+     * Evaluate the supplied action and return the human-readable
+     * explanation produced by the resulting trace. Convenience
+     * shortcut over `evaluate(...)->explain()` for error-handler
+     * output and the future `authorization:why-can` Artisan
+     * command.
+     *
+     * @param  string  $action
+     * @param  string|null  $resource
+     * @param  array<string, mixed>  $context
+     * @return string
+     */
+    public function explain(string $action, ?string $resource = null, array $context = []): string
+    {
+        return $this->evaluate($action, $resource, $context)->explain();
+    }
+
+    /**
+     * Clear the recorded last decision. Long-running workers call
+     * this between requests so a stale decision does not leak
+     * across the request boundary.
+     *
+     * @return void
+     */
+    public function forgetLastDecision(): void
+    {
+        $this->journal->forget();
     }
 
     /**
@@ -210,9 +262,11 @@ class AuthorizationManager
     /**
      * Gather the policies applicable to the supplied principal.
      *
-     * When a per-call override is in effect, it is returned verbatim.
-     * Otherwise the manager unions policies from an optional policy
-     * store binding with the principal's own attached policies.
+     * When a per-call override is in effect, it is returned
+     * verbatim. Otherwise the manager delegates to the bound
+     * `PolicyRepository` — consumers swap the repository to
+     * introduce caching, tenant scoping, or other gathering
+     * strategies without touching the manager.
      *
      * @param  object  $principal
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
@@ -223,17 +277,7 @@ class AuthorizationManager
             return $this->policyOverride;
         }
 
-        $policies = [];
-
-        if ($this->store !== null) {
-            $policies = $this->store->policiesFor($principal);
-        }
-
-        if ($principal instanceof AuthorizableIdentity) {
-            $policies = \array_merge($policies, $principal->getPolicies());
-        }
-
-        return \array_values($policies);
+        return $this->repository->policiesFor($principal);
     }
 
     /**

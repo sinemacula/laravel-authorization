@@ -7,28 +7,6 @@ consumed into this file and removed from the repo.
 
 ---
 
-## P0 — Spec gaps blocking v1.0.0
-
-### 1. `Contracts/PolicyRepository` interface is missing
-
-- **Spec reference:** §3 (target `src/` layout) — lists
-  `Contracts/PolicyRepository.php` as the internal abstraction over the
-  Eloquent `Policy` model.
-- **Observed state:** `src/Contracts/` contains `AuthorizableIdentity`,
-  `PermissionEnum`, `PolicyStore`, and `PrincipalResolver` only. There is
-  no `PolicyRepository` contract, and the `AuthorizationManager` reaches
-  the Eloquent layer via `AuthorizableIdentity::getPolicies()` and an
-  optional `PolicyStore` binding only.
-- **Impact:** No seam for a DB-backed policy cache, policy preloader, or
-  test fake that is distinct from `PolicyStore` (which is documented as
-  an external source, not an internal one). The spec treats this as an
-  internal abstraction contract — its absence locks consumers into the
-  current gathering flow inside `AuthorizationManager::gatherPolicies()`.
-- **Decision needed:** confirm the interface shape before adding it — the
-  spec names the class but does not fix its method signatures.
-
----
-
 ## P0 — Test coverage gaps
 
 ### 3. Feature suite missing spec-mandated scenarios
@@ -687,37 +665,6 @@ enterprise systems ship both.)_
   the MySQL / PostgreSQL / SQLite CI matrix and document the
   guarantee.
 
-### 42. Gate-path decisions drop the evaluator trace
-
-- **Files:** `src/AuthorizationServiceProvider.php:190–199` (Gate
-  closure); `src/Evaluation/EvaluationResult.php:127–156`
-  (`explain()` + trace exist).
-- **Observation:** `EvaluationResult` carries a rich decision trace
-  and an `explain()` method, but the Gate closure reduces the
-  result to a bool and discards the trace. The `DecisionEvaluated`
-  event is dispatched from the manager, but consumers who want to
-  answer "why was this denied?" at the request layer (middleware,
-  exception handlers) cannot get at the trace without bypassing
-  the Gate.
-- **Impact:** debugging authorization failures via Laravel idioms
-  (`$user->can()`, `Gate::allows`, `@can`) is opaque. Consumers
-  see "false" with no reason.
-- **Options:** (a) stash the latest result on the
-  `AuthorizationManager` instance (bound as singleton) and expose
-  `Authorization::lastDecision(): ?EvaluationResult`; document its
-  use in error handlers; (b) attach the trace to the dispatched
-  `DecisionEvaluated` event (already done) and document that
-  subscribers can use it — forces consumers to wire an
-  event-listener to surface denial reasons; (c) a dedicated
-  `AuthorizationDebugBar` / Telescope integration for request-scope
-  inspection; (d) ship
-  `Authorization::explain(action, resource?, context?): string` as
-  a facade shortcut equivalent to
-  `Authorization::evaluate(...)->explain()` — particularly useful
-  for the `authorization:why-can` Artisan command under #35 and
-  for error-handler output. Options (a) and (d) are complementary
-  and both low-cost; ship both.
-
 ### 43. No configuration validation at boot
 
 - **File:** `src/AuthorizationServiceProvider.php:38–46`,
@@ -1251,6 +1198,118 @@ enterprise systems ship both.)_
   current names and add a one-line class comment citing the
   rationale. Option (a) is the minimal-friction path and matches
   the shortened `*Identity` shape the contract uses.
+
+### 60. `RolePermission` pivot re-queries both parents on every save — 2 extra DB round-trips per attach
+
+- **Files:** `src/Models/RolePermission.php:54–94`
+  (`ensureGuardParity`); called from the `saving` hook at line 38.
+- **Observation:** on every pivot save the hook issues two fresh
+  `find()` queries — one for the role, one for the permission —
+  to read their `guard_name` columns. A typed
+  `$role->givePermission($permission)` call already holds both
+  Eloquent instances with `guard_name` loaded in memory, but the
+  pivot discards that context and goes back to the database
+  anyway. `$role->syncPermissions([... 50 permissions ...])` at
+  typical scale therefore produces **~100 extra point-lookups**
+  in addition to the sync itself.
+- **Impact:** real performance cliff on bulk role
+  configuration. Enterprise consumers seeding or re-syncing large
+  role catalogues (platform-admin tooling, multi-tenant role
+  templates) will feel it immediately. Also multiplies the
+  cost of every Artisan seeder / test fixture creation path.
+- **Options:** (a) short-circuit the check when the pivot is
+  saved through a `BelongsToMany` relation path — Laravel passes
+  the parent model to the pivot via `setPivotKeys()` /
+  `$pivot->pivotParent`, so the role-side `guard_name` is
+  reachable without a query; fetch only the permission side (one
+  query) and only when its `guard_name` isn't already loaded in
+  the current request via `Permission::find()` cache; (b) move
+  the invariant to a DB-level trigger or a composite FK that
+  includes `guard_name` on the pivot (heaviest, mirrors the
+  option (c) of the now-resolved #21 discussion); (c) require
+  the caller to have both models in hand and hydrate the pivot's
+  `guard_name` attributes explicitly before save — the pivot
+  validates against its own attributes only, zero extra queries.
+  Option (a) is the minimum-change performance fix; (c) is the
+  cleanest but is invasive.
+
+### 61. `RolePermission` pivot silently passes when either parent row is missing
+
+- **File:** `src/Models/RolePermission.php:75–77`.
+- **Observation:** `ensureGuardParity()` bails out (`return;`)
+  when either `$role` or `$permission` is null — i.e. when the
+  `find()` call didn't resolve the FK'd row. The FK constraint
+  on the pivot table catches the missing-parent case at DB layer,
+  so the save ultimately fails, but the validator itself
+  classifies a missing-parent row as "no guard mismatch" rather
+  than "unknown parent." The two failure modes should not surface
+  the same way to the caller.
+- **Impact:** if a consumer ever disables FK enforcement
+  (SQLite default, some CI matrices, testcontainers with
+  `foreign_key_checks = OFF`), a pivot row pointing at a
+  non-existent role or permission saves silently. Also masks the
+  root cause in error output — the raw DB error will reference
+  the FK column names, not the guard semantics, so the caller
+  debugging a seeder sees a foreign-key error when the real issue
+  might be a stale cache of IDs.
+- **Options:** (a) raise a typed
+  `UnknownRoleException` / `UnknownPermissionException` when the
+  corresponding `find()` returns null, reusing the existing
+  exception hierarchy; (b) accept the silent-pass behaviour and
+  document in the class docblock that the pivot assumes FK
+  integrity is enforced at the DB layer.
+
+### 62. `RolePermission` hardcodes column names `role_id` and `permission_id`
+
+- **File:** `src/Models/RolePermission.php:57,59`.
+- **Observation:** the pivot reads its FK attributes via
+  `$this->getAttribute('role_id')` and
+  `$this->getAttribute('permission_id')` — literal strings.
+  `Role::permissions()` at `src/Models/Role.php:75–82` passes
+  `foreignPivotKey: 'role_id'` and
+  `relatedPivotKey: 'permission_id'` explicitly. If a consumer
+  (or a future refactor) overrides those pivot key names, the
+  pivot's guard-parity check silently breaks — the `getAttribute`
+  calls return null, the early-return at line 61 fires, and the
+  invariant is no longer enforced.
+- **Impact:** fragile coupling between the pivot model and the
+  relation definition. Any future move toward configurable pivot
+  column names — the rest of the package reads table names from
+  `authorization.tables.*` but hardcodes pivot column names —
+  silently disables this invariant without any test catching it.
+- **Options:** (a) read the column names from the relation
+  itself via `$this->pivotParent?->getRelation('permissions')`
+  or have `Role::permissions()` register the names on the pivot
+  model; (b) promote the two column names to
+  `config('authorization.pivots.role_permissions.role_column', 'role_id')`
+  (etc.) and read through config, mirroring the existing
+  `authorization.tables.*` pattern; (c) accept the coupling and
+  add a comment on the relation and the pivot documenting that
+  the column names are load-bearing.
+
+### 63. No direct unit test on the `RolePermission` pivot — coverage goes entirely through Role API
+
+- **Files:** `tests/Feature/RoleGuardParityTest.php` (end-to-end
+  scenarios); no corresponding unit test under `tests/Unit/Models/`.
+- **Observation:** every test scenario exercises the pivot
+  through `Role::givePermission()`, `permissions()->attach()`,
+  or `permissions()->sync()`. The pivot's `ensureGuardParity()`
+  logic is never unit-tested with the pivot attributes set
+  directly — if the relation wiring changes and stops routing
+  through the pivot, the feature tests still pass against the
+  (silently disabled) invariant.
+- **Impact:** coverage is tight at the integration layer but
+  loose at the model layer. A future refactor to Role's
+  `permissions()` relation could drop the `->using(...)` call
+  and every guard-parity feature test would still pass because
+  it bypasses the pivot entirely. The unit test on the pivot is
+  the safety net.
+- **Options:** (a) add `tests/Unit/Models/RolePermissionTest.php`
+  that instantiates `RolePermission` with explicit `role_id` /
+  `permission_id` attributes and calls `save()` directly,
+  pinning each branch of `ensureGuardParity()` (same guards,
+  null-on-role, null-on-permission, both-null, mismatched
+  guards, missing parent row). Fast, no feature-test overhead.
 
 ---
 

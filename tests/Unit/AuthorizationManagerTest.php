@@ -10,14 +10,17 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Contracts\PolicyRepository;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\DecisionJournal;
 use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Repositories\DefaultPolicyRepository;
 use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
 
 /**
@@ -54,6 +57,8 @@ final class AuthorizationManagerTest extends TestCase
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
             resolver: new NullPrincipalResolver,
+            repository: new DefaultPolicyRepository,
+            journal: new DecisionJournal,
         );
 
         self::assertFalse($manager->can('posts:create'));
@@ -69,6 +74,8 @@ final class AuthorizationManagerTest extends TestCase
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
             resolver: new NullPrincipalResolver,
+            repository: new DefaultPolicyRepository,
+            journal: new DecisionJournal,
         );
 
         $this->expectException(AuthorizationException::class);
@@ -86,6 +93,8 @@ final class AuthorizationManagerTest extends TestCase
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
             resolver: new NullPrincipalResolver,
+            repository: new DefaultPolicyRepository,
+            journal: new DecisionJournal,
         );
 
         $principal = $this->stubAuthorizable(['posts:create']);
@@ -106,6 +115,8 @@ final class AuthorizationManagerTest extends TestCase
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
             resolver: new NullPrincipalResolver,
+            repository: new DefaultPolicyRepository,
+            journal: new DecisionJournal,
         );
 
         $principal = $this->stubAuthorizable(['posts:create'], [
@@ -131,6 +142,8 @@ final class AuthorizationManagerTest extends TestCase
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
             resolver: new NullPrincipalResolver,
+            repository: new DefaultPolicyRepository,
+            journal: new DecisionJournal,
         );
 
         $principal = $this->stubAuthorizable([], [
@@ -156,6 +169,8 @@ final class AuthorizationManagerTest extends TestCase
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
             resolver: new NullPrincipalResolver,
+            repository: new DefaultPolicyRepository,
+            journal: new DecisionJournal,
         );
 
         $principal = $this->stubAuthorizable(['posts:delete'], [
@@ -187,6 +202,8 @@ final class AuthorizationManagerTest extends TestCase
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
             resolver: new NullPrincipalResolver,
+            repository: new DefaultPolicyRepository,
+            journal: new DecisionJournal,
         );
 
         $principal = $this->stubAuthorizable(['rbac:do']);
@@ -222,6 +239,8 @@ final class AuthorizationManagerTest extends TestCase
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
             resolver: new NullPrincipalResolver,
+            repository: new DefaultPolicyRepository,
+            journal: new DecisionJournal,
         );
 
         $principal = $this->stubAuthorizable(['x']);
@@ -240,7 +259,8 @@ final class AuthorizationManagerTest extends TestCase
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
             resolver: new NullPrincipalResolver,
-            store: $store,
+            repository: new DefaultPolicyRepository(store: $store),
+            journal: new DecisionJournal,
         );
 
         $principal = $this->stubAuthorizable([], [
@@ -283,7 +303,8 @@ final class AuthorizationManagerTest extends TestCase
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
             resolver: new NullPrincipalResolver,
-            store: $store,
+            repository: new DefaultPolicyRepository(store: $store),
+            journal: new DecisionJournal,
         );
 
         self::assertTrue($manager->for($principal)->can('from:store'));
@@ -304,6 +325,8 @@ final class AuthorizationManagerTest extends TestCase
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
             resolver: new NullPrincipalResolver,
+            repository: new DefaultPolicyRepository,
+            journal: new DecisionJournal,
             events: $events,
         );
 
@@ -331,6 +354,8 @@ final class AuthorizationManagerTest extends TestCase
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
             resolver: new NullPrincipalResolver,
+            repository: new DefaultPolicyRepository,
+            journal: new DecisionJournal,
             events: $events,
         );
 
@@ -349,6 +374,8 @@ final class AuthorizationManagerTest extends TestCase
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
             resolver: new NullPrincipalResolver,
+            repository: new DefaultPolicyRepository,
+            journal: new DecisionJournal,
         );
 
         $principal = $this->stubAuthorizable(['ok']);
@@ -373,6 +400,8 @@ final class AuthorizationManagerTest extends TestCase
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
             resolver: $resolver,
+            repository: new DefaultPolicyRepository,
+            journal: new DecisionJournal,
         );
 
         self::assertTrue($manager->can('from:resolver'));
@@ -388,6 +417,8 @@ final class AuthorizationManagerTest extends TestCase
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
             resolver: new NullPrincipalResolver,
+            repository: new DefaultPolicyRepository,
+            journal: new DecisionJournal,
         );
 
         $plain = (object) ['id' => 1];
