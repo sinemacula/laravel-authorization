@@ -106,23 +106,6 @@ consumed into this file and removed from the repo.
 
 ## P1 — Minor deviations from the spec
 
-### 8. `HasPolicies` mutators accept only the concrete `Policy` model
-
-- **Spec reference:** §5.2 —
-  `attachPolicy(Policy|Model $policy): self;` (and equivalent for
-  `detachPolicy` / `syncPolicies`).
-- **Observed state:** `src/Traits/HasPolicies.php` types every parameter
-  as the concrete `Policy` model. A consumer that swaps the model via
-  `authorization.models.policy` cannot pass their subclass instance
-  without also satisfying Laravel's relation typing — which is fine in
-  practice (subclasses pass the type check), but the spec explicitly
-  widens to `Model` and the current narrower signature will break if a
-  consumer ever wants to pass a duck-typed value object.
-- **Low-risk fix:** broaden to
-  `Policy|\Illuminate\Database\Eloquent\Model` or rely on the
-  `config('authorization.models.policy')` resolution, matching the
-  pattern used for `Role` / `Permission` in `HasRoles` / `HasPermissions`.
-
 ### 9. `Authorization::for()` documented as `self`, implemented as `static`
 
 - **Spec reference:** §5.1 — `Authorization::for(object $principal): self`.
@@ -1504,6 +1487,107 @@ enterprise systems ship both.)_
   production-grade answer; option (b) is the symmetric-but-louder
   alternative and works less well in long-running workers that
   cannot tolerate a 500 on transient cache corruption.
+
+### 72. `permission_enums` validator accepts any `PermissionEnum` implementer, not specifically an enum
+
+- **File:** `src/Config/ConfigValidator.php:63–94`.
+- **Observation:** the validator checks that every entry in
+  `permission_enums` exists (via `class_exists || interface_exists
+  || enum_exists`) and implements `PermissionEnum` (via
+  `is_subclass_of`). It does **not** check that the entry is
+  specifically an enum. A consumer who registers a plain class
+  that implements `PermissionEnum` (no `cases()` method,
+  not a `UnitEnum`) sails past validation. At the use site —
+  `AuthorizationServiceProvider::registerGates()` — the code calls
+  `$className::cases()` which throws a `TypeError` on a non-enum,
+  with no reference back to the `permission_enums` config key the
+  validator was supposed to guard.
+- **Impact:** the validator's purpose is "boot-time clarity over
+  deep stack trace"; this gap leaves one class of misconfiguration
+  (right contract, wrong shape) producing exactly the deep stack
+  trace it was supposed to prevent. The config-docblock already
+  says "Backed or unit enums implementing `PermissionEnum`" — the
+  validator should enforce the enum half of that sentence.
+- **Options:** (a) tighten the enum check: after the existence
+  check, require `enum_exists($class)` (not just
+  `class_exists`) before the contract assertion. A class
+  implementing `PermissionEnum` that is not an enum fails
+  validation with a specific message; (b) assert that the class
+  is a subclass of `\UnitEnum` (the PHP core interface every enum
+  implements) alongside the `PermissionEnum` check. Option (b)
+  is the more precise invariant — it catches both backed and
+  unit enums with no enum-family guessing.
+
+### 73. Row-lifecycle `*Updated` events carry only post-save state — the stated before/after diff is unreconstructable
+
+- **Files:** `src/Models/Role.php:77–79` (and identical shape in
+  `src/Models/Permission.php`, `src/Models/Policy.php`);
+  `src/Events/RoleUpdated.php:29–35` (and identical shape on
+  `PermissionUpdated` / `PolicyUpdated`).
+- **Observation:** the `*Updated` events are dispatched from
+  `static::updated(...)` with `$role->getChanges()` passed as
+  the `$changes` payload. `getChanges()` in Eloquent returns an
+  `array<string, new_value>` — only the post-save values of the
+  attributes that were modified. The class docblocks on
+  `RoleUpdated`, `PermissionUpdated`, and `PolicyUpdated` all
+  promise that "audit consumers can render a before/after diff
+  without a second round-trip". They cannot — the **before**
+  state is not in the payload, and by the time `updated` fires
+  the model's `getOriginal()` returns the new values (the save
+  has already refreshed them). A downstream audit subscriber
+  wanting the pre-save state has to re-query the audit history
+  or the journaled prior row from its own side.
+- **Impact:** the SOC 2 / ISO 27001 narrative in the commit
+  message ("reconstructing the 'who changed what' trail") fails
+  on the 'what' half for update transitions — consumers have
+  only the destination, not the delta. The event payload is
+  shaped as if it contains a diff but contains a half-diff. A
+  consumer reading the event class will expect the fuller
+  contract the docblock promises.
+- **Options:** (a) switch the hook from `static::updated` to
+  `static::saving` (or `updating`) and capture both
+  `$role->getDirty()` (for the incoming changes) and a loop over
+  `$role->getOriginal($attribute)` for the baseline at the
+  moment of the save; pass both as `before` / `after` arrays on
+  the event. The event dispatches on the successful save path
+  after the row persists; (b) change the event payload to a
+  single `{attribute => [before, after]}` map captured via the
+  `updating` hook and dispatched from the `updated` hook using
+  a pre-save snapshot the model holds during the transition;
+  (c) narrow the docblock claim to reflect the as-is payload —
+  "updated row + new values" instead of "before/after diff" —
+  and let consumers implement their own baseline capture via a
+  `saving` listener. Option (a) keeps the SOC 2 promise and is
+  the enterprise-grade answer.
+
+### 74. `ConfigValidator::describe()` renders inconsistent value shapes in error messages
+
+- **File:** `src/Config/ConfigValidator.php:249–260`.
+- **Observation:** the debug-renderer returns three different
+  shapes depending on input:
+  - `string` →  `"'foo' (string)"`
+  - other scalars → `var_export($value, true)` (e.g. `true`,
+    `42`, `1.5`)
+  - non-scalars → `get_debug_type($value)` (e.g. `array`,
+    `object`, `null`)
+  Error messages therefore read inconsistently: a bad
+  `gate.on_conflict` value of `42` produces
+  `"expected one of [...], got 42."` while a bad value of
+  `"LOG"` produces `"expected one of [...], got 'LOG' (string)"`
+  and a bad value of `null` produces
+  `"expected one of [...], got null."` — three different
+  punctuations of the type hint.
+- **Impact:** minor, but for an enterprise-grade boot validator
+  the error-message UX is part of the surface. Operators
+  grepping production logs for a specific misconfiguration want
+  predictable output. Also the `(string)` suffix on strings
+  stands out because no other type gets the same treatment.
+- **Options:** (a) render every value as
+  `"{var_export($value, true)} ({get_debug_type($value)})"` —
+  predictable `'foo' (string)` / `42 (int)` / `NULL (null)`
+  across the board; (b) drop the `(string)` suffix from the
+  string case so all three shapes are bare values. Option (a)
+  keeps the type tag and makes it uniform.
 
 ---
 

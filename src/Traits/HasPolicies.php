@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Traits;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
@@ -51,10 +52,18 @@ trait HasPolicies // @phpstan-ignore trait.unused
     /**
      * Attach the given policy to this identity.
      *
-     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * Accepts a `Policy` instance or any Eloquent model — consumers
+     * who swap the policy model via `authorization.models.policy`
+     * may pass their own subclass (or a duck-typed model persisted
+     * in the same pivot) without jumping through inheritance
+     * hoops. The shipped `PolicyAttached` event expects a `Policy`
+     * instance, so non-Policy models are attached silently; use
+     * a Policy-shaped class when event wiring matters.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy|\Illuminate\Database\Eloquent\Model  $policy
      * @return static
      */
-    public function attachPolicy(Policy $policy): static
+    public function attachPolicy(Policy|Model $policy): static
     {
         $this->policies()->syncWithoutDetaching([$policy->getKey()]);
 
@@ -62,7 +71,9 @@ trait HasPolicies // @phpstan-ignore trait.unused
             unset($this->relations['policies']);
         }
 
-        Event::dispatch(new PolicyAttached($this, $policy));
+        if ($policy instanceof Policy) {
+            Event::dispatch(new PolicyAttached($this, $policy));
+        }
 
         return $this;
     }
@@ -70,10 +81,13 @@ trait HasPolicies // @phpstan-ignore trait.unused
     /**
      * Detach the given policy from this identity.
      *
-     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * Accepts a `Policy` instance or any Eloquent model — same
+     * widened contract as `attachPolicy()`.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy|\Illuminate\Database\Eloquent\Model  $policy
      * @return static
      */
-    public function detachPolicy(Policy $policy): static
+    public function detachPolicy(Policy|Model $policy): static
     {
         $this->policies()->detach($policy->getKey());
 
@@ -81,7 +95,9 @@ trait HasPolicies // @phpstan-ignore trait.unused
             unset($this->relations['policies']);
         }
 
-        Event::dispatch(new PolicyDetached($this, $policy));
+        if ($policy instanceof Policy) {
+            Event::dispatch(new PolicyDetached($this, $policy));
+        }
 
         return $this;
     }
@@ -89,13 +105,16 @@ trait HasPolicies // @phpstan-ignore trait.unused
     /**
      * Replace the identity's attached policies with the supplied set.
      *
-     * @param  array<int, \SineMacula\Laravel\Authorization\Models\Policy>  $policies
+     * Accepts `Policy` instances or any Eloquent model — same
+     * widened contract as `attachPolicy()`.
+     *
+     * @param  array<int, \SineMacula\Laravel\Authorization\Models\Policy|\Illuminate\Database\Eloquent\Model>  $policies
      * @return static
      */
     public function syncPolicies(array $policies): static
     {
         $ids = \array_values(\array_map(
-            static fn (Policy $policy): string => (string) $policy->getKey(),
+            static fn (Policy|Model $policy): string => (string) $policy->getKey(),
             $policies,
         ));
 

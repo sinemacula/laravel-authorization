@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Contracts;
 
+use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Models\Permission as PermissionModel;
 use SineMacula\Laravel\Authorization\Models\Policy as PolicyModel;
 use SineMacula\Laravel\Authorization\Models\Role as RoleModel;
@@ -105,23 +106,23 @@ interface AuthorizableIdentity
     /**
      * Attach the given policy to this identity.
      *
-     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy|\Illuminate\Database\Eloquent\Model  $policy
      * @return static
      */
-    public function attachPolicy(PolicyModel $policy): static;
+    public function attachPolicy(PolicyModel|Model $policy): static;
 
     /**
      * Detach the given policy from this identity.
      *
-     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy|\Illuminate\Database\Eloquent\Model  $policy
      * @return static
      */
-    public function detachPolicy(PolicyModel $policy): static;
+    public function detachPolicy(PolicyModel|Model $policy): static;
 
     /**
      * Replace the identity's attached policies with the supplied set.
      *
-     * @param  array<int, \SineMacula\Laravel\Authorization\Models\Policy>  $policies
+     * @param  array<int, \SineMacula\Laravel\Authorization\Models\Policy|\Illuminate\Database\Eloquent\Model>  $policies
      * @return static
      */
     public function syncPolicies(array $policies): static;
