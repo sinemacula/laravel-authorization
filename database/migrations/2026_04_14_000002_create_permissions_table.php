@@ -40,6 +40,15 @@ return new class extends Migration {
             $table->string('guard_name')->nullable();
             $table->string('description')->nullable();
             $table->timestamps();
+
+            // Explicit lookup index on `(name, guard_name)`.
+            // Every `resolvePermission()` / `hasPermission()`
+            // query filters on both columns; most engines back
+            // unique constraints with an index already but older
+            // MySQL storage engines and some managed databases do
+            // not. The explicit declaration is belt-and-braces
+            // insurance for the hot path.
+            $table->index(['name', 'guard_name'], 'permissions_name_guard_index');
         });
 
         // Functional unique index on `(name, COALESCE(guard_name, ''))`.

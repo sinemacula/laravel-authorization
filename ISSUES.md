@@ -611,26 +611,6 @@ enterprise systems ship both.)_
   consumers can plug in their own. Option (a) is the honest
   minimum for "enterprise IAM-style policy engine."
 
-### 41. No composite index on `(name, guard_name)` lookups
-
-- **Files:** `database/migrations/2026_04_14_000001_create_roles_table.php:42`;
-  `database/migrations/2026_04_14_000002_create_permissions_table.php:37`.
-- **Observation:** the migrations declare a unique constraint on
-  `(name, guard_name)`. Most databases implicitly back unique
-  constraints with an index, but this is not guaranteed for every
-  MySQL storage engine / version the spec's CI matrix covers.
-  Every string-based lookup (`resolveRole` / `resolvePermission`)
-  uses both columns in the `where` clause, so the composite index
-  is the hot path.
-- **Impact:** at scale (10K+ permissions × multi-tenant), a missing
-  composite index degrades every `->can()` string-lookup into a
-  scan. Typically invisible in unit tests but bites in production.
-- **Options:** (a) add an explicit `$table->index(['name', 'guard_name'])`
-  in both migrations — redundant with the unique constraint on most
-  engines but belt-and-braces; (b) verify the index is present on
-  the MySQL / PostgreSQL / SQLite CI matrix and document the
-  guarantee.
-
 ### 45. No role rank / level / seniority model
 
 - **Files:** `database/migrations/2026_04_14_000001_create_roles_table.php`
