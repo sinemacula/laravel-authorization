@@ -61,6 +61,12 @@ class Role extends Model
     /**
      * Permissions attached to this role.
      *
+     * The relation is bound to the `RolePermission` pivot so every
+     * attachment path — the typed Role API, a direct
+     * `$role->permissions()->attach(...)`, or a raw
+     * `sync(...)` — runs through the pivot's `saving` hook and the
+     * guard-parity invariant it enforces.
+     *
      * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany<\SineMacula\Laravel\Authorization\Models\Permission, $this>
      */
     public function permissions(): BelongsToMany
@@ -76,7 +82,7 @@ class Role extends Model
             table: $pivot,
             foreignPivotKey: 'role_id',
             relatedPivotKey: 'permission_id',
-        );
+        )->using(RolePermission::class);
     }
 
     /**

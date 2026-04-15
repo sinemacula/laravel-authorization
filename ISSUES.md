@@ -298,44 +298,6 @@ most likely first-use path.
   document the opt-in as the recommended wiring when the application
   uses Laravel Auth. Non-breaking.
 
-### 21. Role ↔ permission guard mismatch is not prevented
-
-- **Files:** `src/Models/Role.php:60–74` (`permissions()` relation, no
-  hooks); `database/migrations/2026_04_14_000004_create_role_permissions_table.php`
-  (pivot has `role_id` + `permission_id` only, no guard column or
-  composite constraint).
-- **Observation:** attaching a permission to a role performs no guard
-  parity check. A role created under the `web` guard can have a
-  permission created under the `api` guard attached to it via
-  `$role->permissions()->attach(...)` or `sync(...)`. Spatie's
-  `laravel-permission` throws `GuardDoesNotMatch` to prevent exactly
-  this; this package accepts the attachment silently and the lookup
-  layer then produces confusing results (the `api` permission is
-  enumerable through the role but is effectively dead weight for a
-  `web`-guard identity).
-- **Impact:** data-integrity gap. Silent cross-guard attachment
-  produces no runtime error but corrupts the mental model — the
-  `web`-guard role's permission set no longer means "permissions a
-  `web` user can inherit via this role." It also hides bugs at the
-  caller: a fat-fingered guard selection in a role seeder will persist
-  without complaint and only surface as a mysterious authorization
-  failure in production.
-- **Guard model (landed).** The nullable-`guard_name` decision has
-  shipped (commits `cf0772b` + `0aa8cd2`) — null means
-  guard-agnostic. The enforcement rule for this issue is therefore
-  concrete: **a role may attach a permission if and only if
-  `role.guard_name === permission.guard_name` OR either side is
-  null.** No further blocking on guard-model questions; the
-  attachment-layer enforcement can be built directly against this
-  rule.
-- **Options:** (a) raise a typed exception
-  (e.g. `GuardMismatchException`) from the role permission-management
-  API when it lands (blocked on issue #2), (b) add a
-  `Role::permissions()` `attaching` / `syncing` model event listener
-  that throws on mismatch, or (c) enforce at the DB layer via a
-  composite foreign key that includes `guard_name` (heaviest option;
-  would require duplicating `guard_name` onto the pivot).
-
 ### 22. No row-level multi-tenant role / permission scoping
 
 - **Files:** `database/migrations/2026_04_14_000001_create_roles_table.php`
@@ -1144,6 +1106,151 @@ enterprise systems ship both.)_
   removing is major-bumped; (b) additionally mark each event
   class `@api` in docblocks so static-analysis consumers can
   detect breakage. Do both.
+
+### 55. Duplicate `resolvePermission()` logic on `Role` and `HasPermissions`
+
+- **Files:** `src/Models/Role.php:252–…` (`resolvePermission`);
+  `src/Traits/HasPermissions.php:228–…` (`resolvePermission`).
+- **Observation:** `Role::resolvePermission()` is a verbatim copy
+  of `HasPermissions::resolvePermission()`. Same config reads,
+  same closure-scoped guard/null disjunction, same
+  `orderByRaw('guard_name IS NULL')`, same
+  `UnknownPermissionException` throw. The only tell today is the
+  inline comment "Mirrors `HasPermissions::resolvePermission()`"
+  on the Role copy.
+- **Impact:** drift risk. When guard-model rules evolve —
+  wildcard sentinels, case sensitivity, rank tie-breakers — both
+  copies must change together. The duplication introduces a silent
+  path where role-side and identity-side lookups disagree, and the
+  resulting authorization decisions diverge between Role catalogue
+  mutations and identity hasPermission checks.
+- **Options:** (a) promote the lookup to a static factory on the
+  `Permission` model
+  (`Permission::resolveByName(string $name, ?string $guard = null): self`),
+  and have both Role and HasPermissions delegate. The model owns
+  its own lookup semantics; (b) introduce a `PermissionResolver`
+  service bound in the container and inject where needed —
+  cleaner for testability but heavier. Option (a) is the
+  low-ceremony fix.
+
+### 56. `sync*` methods dispatch no events — audit trail has a bulk-operation blind spot
+
+- **Files:** `src/Traits/HasRoles.php` (`syncRoles`);
+  `src/Traits/HasPermissions.php:108–…` (`syncPermissions`);
+  `src/Traits/HasPolicies.php:94–…` (`syncPolicies`);
+  `src/Models/Role.php:136–…` (`syncPermissions`).
+- **Observation:** every `sync*` method across the authorizable
+  traits and the Role API calls Eloquent's `sync()` and returns
+  — no `Event::dispatch(...)` calls at all. Single-item
+  counterparts (`assignRole` / `revokeRole`,
+  `givePermission` / `revokePermission`,
+  `attachPolicy` / `detachPolicy`,
+  `Role::givePermission` / `revokePermission`) all emit dedicated
+  events. A bulk `syncRoles([...])` that adds two roles and
+  removes one emits nothing.
+- **Impact:** the future `laravel-audit-log` sibling cannot
+  reconstruct state transitions from the event stream alone —
+  anything the caller flushes via `sync*` is invisible.
+  Contradicts the observability guarantee that every assignment
+  transition is emittable.
+- **Options:** (a) inside each `sync*`, diff the
+  before-vs-after pivot IDs using the return of Eloquent's
+  `sync()` (`['attached' => [...], 'detached' => [...],
+  'updated' => [...]]`), then dispatch the corresponding
+  single-item events for each attached / detached row — replays
+  cleanly through existing subscribers; (b) introduce bulk
+  variant events (`RolesSynced`, `PermissionsSynced`,
+  `PoliciesSynced`, `RolePermissionsSynced`) carrying the full
+  delta — expands the event surface but is more economical for
+  bulk-focused consumers. Option (a) leaves the event catalogue
+  as-is and closes the audit gap.
+
+### 57. Asymmetric event-class naming between identity-level and role-level mutations
+
+- **Files:** `src/Events/PermissionGranted.php`,
+  `src/Events/PermissionRevoked.php`, `src/Events/RoleAssigned.php`,
+  `src/Events/RoleRevoked.php`, `src/Events/PolicyAttached.php`,
+  `src/Events/PolicyDetached.php` (identity-level, unprefixed);
+  `src/Events/RolePermissionGranted.php`,
+  `src/Events/RolePermissionRevoked.php` (role-level,
+  `Role`-prefixed).
+- **Observation:** every identity-level event is unprefixed
+  (`PermissionGranted`, `RoleAssigned`, `PolicyAttached`); the
+  role-level events introduced in commit `e3699c0` carry an
+  explicit `Role` prefix. An audit consumer subscribing to
+  `PermissionGranted` expecting "all permission grants" silently
+  misses role-to-permission mutations. The naming convention
+  carries hidden context — "unprefixed = identity-scoped" — that
+  the event class names do not communicate.
+- **Impact:** SemVer-stable event contracts (tracked in #54) need
+  names that discoverable-without-docs. The current asymmetry is
+  a subscription footgun for enterprise audit.
+- **Options:** (a) rename every identity-level event with an
+  `Identity` prefix for symmetry:
+  `IdentityPermissionGranted` / `IdentityPermissionRevoked`,
+  `IdentityRoleAssigned` / `IdentityRoleRevoked`,
+  `IdentityPolicyAttached` / `IdentityPolicyDetached`. Role-level
+  events keep their current names. Both contexts become explicit
+  with no default; (b) accept the asymmetry and document the
+  "unprefixed = identity-scoped" convention in a design note.
+  Option (a) is the enterprise-grade default and matches the
+  `AuthorizableIdentity` contract's naming shift.
+
+### 58. `gate.on_conflict` is stringly-typed; should be a backed enum
+
+- **Files:** `config/authorization.php:88–90` (default `'log'`);
+  `src/AuthorizationServiceProvider.php:174–188`
+  (`registerEnumGate` `match` on the raw string).
+- **Observation:** the legal values for
+  `authorization.gate.on_conflict` are `'log'`, `'throw'`,
+  `'overwrite'`. They are compared against string literals inside
+  a `match` expression, with `default` silently routing to the
+  log path. A typo — `AUTHORIZATION_GATE_ON_CONFLICT=Log`
+  (capitalised) — falls into `default` and logs when the
+  consumer asked for `throw` or `overwrite`. No type hint, no
+  discoverability from the config comment, no way for an IDE to
+  flag an invalid value.
+- **Impact:** silent misconfiguration with security adjacency. A
+  consumer setting `throw` to catch collisions at boot who
+  typos the value gets every collision silently logged instead
+  of a failing boot — the opposite of their intent. Ties into
+  #47's outstanding decision on the default.
+- **Options:** (a) introduce
+  `SineMacula\Laravel\Authorization\Enums\GateConflictMode` as a
+  string-backed enum (`Log = 'log'`, `Throw = 'throw'`,
+  `Overwrite = 'overwrite'`); coerce the config value to the
+  enum in `boot()` via `GateConflictMode::tryFrom($value)` and
+  raise a typed config-validation exception (see #43) when
+  `tryFrom` returns null; `registerEnumGate` then matches on
+  the enum. Parallels the existing `PolicyEffect` enum idiom
+  used for `allow` / `deny`.
+
+### 59. Test fixture class names retain pre-rename terminology
+
+- **Files:** `tests/Feature/Stubs/StubAuthorizable.php`;
+  `tests/Feature/Stubs/StubSecondAuthorizable.php`; the stubs'
+  backing table `stub_authorizables` in `tests/TestCase.php`.
+- **Observation:** issue #25 renamed the contract to
+  `AuthorizableIdentity` and the trait to `HasAuthorization`.
+  Both fixtures were updated internally (their `implements` and
+  `use` clauses cite the new names) but the class names
+  themselves — `StubAuthorizable`, `StubSecondAuthorizable` —
+  and the backing table `stub_authorizables` retain the
+  pre-rename term. A grep for `AuthorizableIdentity` test
+  coverage silently skips the fixture layer.
+- **Impact:** minor readability and discoverability friction in
+  the test suite. Not a correctness bug, but three different
+  spellings of the same concept (`AuthorizableIdentity`,
+  `HasAuthorization`, `StubAuthorizable`) coexist in a small
+  surface area.
+- **Options:** (a) rename to `StubIdentity` /
+  `StubSecondIdentity` with backing table `stub_identities`
+  (concise, symmetric with `AuthorizableIdentity`); (b) rename
+  to `StubAuthorizableIdentity` / `StubSecondAuthorizableIdentity`
+  (verbose but mirrors the contract exactly); (c) keep the
+  current names and add a one-line class comment citing the
+  rationale. Option (a) is the minimal-friction path and matches
+  the shortened `*Identity` shape the contract uses.
 
 ---
 
