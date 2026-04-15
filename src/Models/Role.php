@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Events\RoleDeleted;
 use SineMacula\Laravel\Authorization\Events\RolePermissionGranted;
 use SineMacula\Laravel\Authorization\Events\RolePermissionRevoked;
 use SineMacula\Laravel\Authorization\Events\RoleUpdated;
+use SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
 
@@ -22,12 +23,18 @@ use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
  * Roles are named buckets of permissions shared across authorizable
  * identities. The `guard_name` column is nullable: a null value
  * marks the role as guard-agnostic (applies to every guard), a
- * concrete string scopes the role to a single guard.
+ * concrete string scopes the role to a single guard. The
+ * `is_system` flag marks platform-shipped roles as
+ * delete-protected: deletion or a rename of an `is_system = true`
+ * row raises `SystemRoleProtectedException` unless
+ * `forceSystem()` is invoked to unlock the next operation on the
+ * instance.
  *
  * @property string $id
  * @property string $name
  * @property string|null $guard_name
  * @property string|null $description
+ * @property bool $is_system
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -45,7 +52,27 @@ class Role extends Model
         'name',
         'guard_name',
         'description',
+        'is_system',
     ];
+
+    /**
+     * The attribute casts.
+     *
+     * @var array<string, string>
+     */
+    protected $casts = [
+        'is_system' => 'boolean',
+    ];
+
+    /**
+     * Per-instance escape-hatch flag. When true, the next delete
+     * or rename bypasses the system-role protection and resets to
+     * false on completion. Invoked via `forceSystem()` — never
+     * persisted, never inherited across instances.
+     *
+     * @var bool
+     */
+    private bool $systemProtectionBypassed = false;
 
     /**
      * Create a new Eloquent model instance.
@@ -64,12 +91,24 @@ class Role extends Model
     /**
      * Register the row-lifecycle listeners that translate
      * Eloquent's native `created` / `updated` / `deleted` events
-     * into the package's typed CRUD events.
+     * into the package's typed CRUD events, and enforce the
+     * system-role protection invariant on `deleting` / `updating`
+     * before the row reaches the database.
      *
      * @return void
      */
     protected static function booted(): void
     {
+        static::deleting(static function (self $role): void {
+            $role->assertSystemProtectionAllows('delete');
+        });
+
+        static::updating(static function (self $role): void {
+            if ($role->wasSystemRoleRenamed()) {
+                $role->assertSystemProtectionAllows('rename');
+            }
+        });
+
         static::created(static function (self $role): void {
             Event::dispatch(new RoleCreated($role));
         });
@@ -81,6 +120,81 @@ class Role extends Model
         static::deleted(static function (self $role): void {
             Event::dispatch(new RoleDeleted($role));
         });
+    }
+
+    /**
+     * Unlock the next protected mutation (delete or rename) on
+     * this instance. Returns `$this` for chaining:
+     *
+     *     $role->forceSystem()->delete();
+     *
+     * The bypass is **per-instance, single-use, and in-memory** —
+     * it never persists to the database, never leaks across
+     * instances (a `$role->fresh()` drops it), and resets to
+     * false the moment the guard clause consults it.
+     *
+     * @return static
+     */
+    public function forceSystem(): static
+    {
+        $this->systemProtectionBypassed = true;
+
+        return $this;
+    }
+
+    /**
+     * Decide whether the supplied mutation is allowed against the
+     * current instance. Consumes the bypass flag so a second
+     * protected operation on the same instance re-arms the
+     * protection.
+     *
+     * @param  string  $operation
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException
+     */
+    private function assertSystemProtectionAllows(string $operation): void
+    {
+        if ((bool) $this->getAttribute('is_system') === false) {
+            return;
+        }
+
+        if ($this->systemProtectionBypassed) {
+            $this->systemProtectionBypassed = false;
+
+            return;
+        }
+
+        // Use the ORIGINAL name — on a rename, `getAttribute('name')`
+        // already reflects the mutated value. Audit consumers want
+        // "which role was targeted" (the canonical persisted name),
+        // not "what the attempted rename would produce."
+        /** @var string $roleName */
+        $roleName = $this->getOriginal('name', $this->getAttribute('name'));
+
+        throw new SystemRoleProtectedException(
+            roleName: (string) $roleName,
+            operation: $operation,
+        );
+    }
+
+    /**
+     * Test whether the pending update renames a system role.
+     * Only rename operations go through the protection check;
+     * description and guard_name bumps pass unconditionally.
+     *
+     * @return bool
+     */
+    private function wasSystemRoleRenamed(): bool
+    {
+        if (!(bool) $this->getAttribute('is_system')) {
+            return false;
+        }
+
+        /** @var array<string, mixed> $dirty */
+        $dirty = $this->getDirty();
+
+        return \array_key_exists('name', $dirty);
     }
 
     /**

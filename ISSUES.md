@@ -207,26 +207,6 @@ enterprise systems ship both.)_
   policies. Option (a) is the lowest-friction and the standard
   idiom; option (b) matters only at very large role catalogues.
 
-### 29. No system / built-in role protection flag
-
-- **Files:** `database/migrations/2026_04_14_000001_create_roles_table.php`;
-  `src/Models/Role.php`.
-- **Observation:** the `roles` table has `name`, `guard_name`,
-  `description`, timestamps only. There is no `is_system`,
-  `is_protected`, or `is_deletable` column. A platform-shipped role
-  (e.g. `super-admin`, `auditor`) can be renamed or deleted by any
-  caller with raw Eloquent access, with no model-level guard.
-- **Impact:** accidental deletion or rename of a foundational role
-  cascades into authorization failures across the application.
-  Enterprise deployments want a "this role is part of the platform,
-  hands off" signal.
-- **Options:** (a) add a boolean `is_system` column, default false;
-  a Role model observer rejects delete / name-change when the flag
-  is true unless a `forceSystem()` escape hatch is invoked;
-  (b) introduce a typed `RoleKind` enum column (`system`, `managed`,
-  `custom`) for finer-grained protection; (c) document an
-  observer-only convention and ship no schema change.
-
 ### 30. No expiring or temporal role assignments
 
 - **Files:** `database/migrations/2026_04_14_000005_create_authorizable_roles_table.php`

@@ -39,6 +39,12 @@ return new class extends Migration {
             $table->string('name');
             $table->string('guard_name')->nullable();
             $table->string('description')->nullable();
+            // Platform-protection marker. Roles flagged system
+            // refuse delete / rename unless the model-layer
+            // `forceSystem()` escape hatch is invoked, so a
+            // platform-shipped `super-admin` cannot be casually
+            // removed by a caller with raw Eloquent access.
+            $table->boolean('is_system')->default(false);
             $table->timestamps();
 
             // Explicit lookup index on `(name, guard_name)`.
