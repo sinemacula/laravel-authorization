@@ -4,7 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Models;
 
-use Illuminate\Database\Eloquent\Concerns\HasUlids;
+use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyDocumentException;
@@ -28,7 +28,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyDocumentException;
  */
 class Policy extends Model
 {
-    use HasUlids;
+    use HasUuids;
 
     /** Placeholder name used when exception context has no policy name available. */
     private const string UNNAMED_PLACEHOLDER = '[unnamed]';

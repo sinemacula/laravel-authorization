@@ -140,9 +140,9 @@ src/
 ├── Facades/
 │   └── Authorization.php              # Static proxy to AuthorizationManager
 ├── Models/
-│   ├── Permission.php                 # Eloquent — ULID PK, name, guard_name, description
-│   ├── Policy.php                     # Eloquent — ULID PK, name, document (JSON)
-│   └── Role.php                       # Eloquent — ULID PK, name, guard_name, description
+│   ├── Permission.php                 # Eloquent — UUID PK, name, guard_name, description
+│   ├── Policy.php                     # Eloquent — UUID PK, name, document (JSON)
+│   └── Role.php                       # Eloquent — UUID PK, name, guard_name, description
 ├── Resolvers/
 │   └── NullPrincipalResolver.php      # Anonymous-safe default (returns null)
 └── Traits/
@@ -171,7 +171,7 @@ Config key moves from `iam-permissions.*` to `authorization.*`; container alias 
 
 The seed ships only the evaluator and a thin facade. The following P0 capabilities from PRD #04 are **not yet implemented** and are required for v1.0.0:
 
-1. Eloquent `Role`, `Permission`, `Policy` models + published migrations with ULID primary keys and polymorphic pivots (`role_permissions`, `authorizable_roles`, `authorizable_permissions`, `authorizable_policies`).
+1. Eloquent `Role`, `Permission`, `Policy` models + published migrations with UUID primary keys and polymorphic pivots (`role_permissions`, `authorizable_roles`, `authorizable_permissions`, `authorizable_policies`).
 2. Role assignment/revocation API on any `Authorizable` model (`$user->assignRole($role)`, `->revokeRole($role)`, `->syncRoles([...])`, `->hasRole($name)`).
 3. Direct permission assignment/revocation API (`->givePermission($permission)`, `->revokePermission($permission)`, `->syncPermissions([...])`).
 4. Role → permission attachment (`$role->givePermission(...)`, `$role->syncPermissions(...)`).
@@ -336,13 +336,13 @@ Missing context keys evaluate to false (no exception). Unknown operators short-c
 
 ## 7. Database schema
 
-Published migrations (ULID primary keys throughout; same `MigrationCollisionGuard` pattern as authentication):
+Published migrations (UUID primary keys throughout; same `MigrationCollisionGuard` pattern as authentication):
 
 | Table                       | Columns                                                                                                                                                      |
 |-----------------------------|--------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `roles`                     | `id` ULID PK, `name` unique-with-guard, `guard_name`, `description?`, timestamps                                                                             |
-| `permissions`               | `id` ULID PK, `name` unique-with-guard, `guard_name`, `description?`, timestamps                                                                             |
-| `policies`                  | `id` ULID PK, `name` unique, `document` JSON (statements), `description?`, timestamps                                                                        |
+| `roles`                     | `id` UUID PK, `name` unique-with-guard, `guard_name`, `description?`, timestamps                                                                             |
+| `permissions`               | `id` UUID PK, `name` unique-with-guard, `guard_name`, `description?`, timestamps                                                                             |
+| `policies`                  | `id` UUID PK, `name` unique, `document` JSON (statements), `description?`, timestamps                                                                        |
 | `role_permissions`          | `role_id`, `permission_id` composite PK; FKs both sides, cascade delete                                                                                      |
 | `authorizable_roles`        | `role_id`, polymorphic `authorizable_type` + `authorizable_id`; composite unique; indexed on `(authorizable_type, authorizable_id)`                           |
 | `authorizable_permissions`  | `permission_id`, polymorphic `authorizable_type` + `authorizable_id`; composite unique; indexed                                                              |

@@ -30,7 +30,7 @@ return new class extends Migration {
         MigrationCollisionGuard::ensureNotExists($table);
 
         Schema::create($table, static function (Blueprint $table) use ($policiesTable): void {
-            $table->ulid('policy_id');
+            $table->uuid('policy_id');
             $table->string('authorizable_type');
             $table->string('authorizable_id');
 

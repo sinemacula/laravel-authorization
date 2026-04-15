@@ -33,7 +33,7 @@ return new class extends Migration {
         MigrationCollisionGuard::ensureNotExists($table);
 
         Schema::create($table, static function (Blueprint $table): void {
-            $table->ulid('id')->primary();
+            $table->uuid('id')->primary();
             $table->string('name');
             $table->string('guard_name');
             $table->string('description')->nullable();
