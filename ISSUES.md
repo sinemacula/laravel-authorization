@@ -320,13 +320,14 @@ most likely first-use path.
   caller: a fat-fingered guard selection in a role seeder will persist
   without complaint and only surface as a mysterious authorization
   failure in production.
-- **Coupling to #19 / #20:** the enforcement rule depends on how cross
-  guard support lands. If a `null` / `'*'` wildcard sentinel is
-  introduced (#19), the invariant becomes "role.guard ==
-  permission.guard OR either side is the wildcard." If guards are
-  disabled altogether for single-guard apps (#20), there is nothing
-  to enforce. This issue should be resolved **after** #19 / #20 so
-  the rule is consistent with the final guard model.
+- **Guard model (landed).** The nullable-`guard_name` decision has
+  shipped (commits `cf0772b` + `0aa8cd2`) — null means
+  guard-agnostic. The enforcement rule for this issue is therefore
+  concrete: **a role may attach a permission if and only if
+  `role.guard_name === permission.guard_name` OR either side is
+  null.** No further blocking on guard-model questions; the
+  attachment-layer enforcement can be built directly against this
+  rule.
 - **Options:** (a) raise a typed exception
   (e.g. `GuardMismatchException`) from the role permission-management
   API when it lands (blocked on issue #2), (b) add a
@@ -390,41 +391,6 @@ most likely first-use path.
   is wide — SPECS.md and the PRD should be amended to call out
   every touch point before implementation begins.
 
-### 23. Gate closure drops `$resource` and `$context` arguments
-
-- **File:** `src/AuthorizationServiceProvider.php:190–199`.
-- **Observation:** the registered Gate closure signature is
-  `static function (?object $user = null) use ($permission): bool`.
-  It receives only the user and forwards nothing else to the
-  authorization manager. Laravel, however, dispatches additional
-  arguments to Gate callbacks: `$user->can('posts:edit', $post)` or
-  `Gate::allows('posts:edit', [$post, $context])` reaches the closure
-  as `(?object $user, Post $post, ...)`. The closure drops every
-  argument after `$user` on the floor and calls
-  `Authorization::for($user)->can($permission)` with no resource or
-  context — even though `AuthorizationManager::can()` accepts
-  `string $action, ?string $resource = null, array $context = []`.
-- **Impact:** resource-aware and context-aware authorization is
-  unreachable via Laravel's standard `->can()` / `Gate::allows` /
-  `@can` / `can:` middleware surfaces. A policy statement that
-  conditions on `resources: ['post:{id}']` or
-  `conditions: { owner_id: {eq: '${principal.id}'} }` cannot be
-  exercised through Gates — only through the `Authorization` facade
-  directly. This silently breaks the core promise of policy
-  evaluation whenever a consumer reaches for the idiomatic Laravel
-  API.
-- **Options:** (a) change the closure signature to
-  `static function (?object $user, ...$arguments) use ($permission)`
-  and translate `$arguments` into the manager's `$resource` / `$context`
-  parameters (convention: first positional argument is the resource
-  identifier — stringify an Eloquent model via a `toAuthorizableResource()`
-  method or its ULID, subsequent named arguments form context);
-  (b) document the limitation and steer consumers away from `->can()`
-  for resource-bound checks (weakens the Laravel-compat story); (c)
-  introduce a companion Gate registration for each permission that
-  accepts a resource and register both signatures. Option (a) is the
-  right answer and aligns with Laravel's normal closure contract.
-
 ### 24. Gate dispatch has no way to route by the caller's guard
 
 - **Files:** `src/AuthorizationServiceProvider.php:190–199`;
@@ -447,12 +413,20 @@ most likely first-use path.
   to call `Authorization::for($user)->can($permission)` directly,
   which defeats the Laravel-compat narrative on exactly the workloads
   that need guard scoping most.
-- **Coupling to #19 / #20 / #21:** whatever guard model lands
-  determines the fix. If guards collapse to a single universe (#20 /
-  option (a)), this issue dissolves. If a wildcard sentinel lands
-  (#19), the closure's lookup still needs to prefer the caller's
-  actual guard when known. If guards remain hard-partitioned, a
-  guard-resolution hook must be introduced.
+- **Guard model (landed).** The nullable-`guard_name` sentinel has
+  shipped (commits `cf0772b` + `0aa8cd2`). This narrows the problem
+  but does not solve it: the lookup in
+  `HasRoles::resolveRole()` / `HasPermissions::resolvePermission()`
+  now falls back to null-guard rows when the configured default
+  guard has no match, but the Gate closure still hardcodes
+  `config('authorization.defaults.guard')`. A user authenticated
+  under a non-default guard (e.g. `api` when default is `web`)
+  therefore still misses their own guard-specific rows and is
+  served only the `web` row or the null-guard row. The routing
+  hook is still required; cross-refs to #21 remain valid because
+  attachment-layer enforcement and Gate-layer routing are the two
+  separate integrity checks the guard model needs to reach parity
+  with Spatie.
 - **Options:** (a) require `AuthorizableIdentity` implementers to expose a
   `getAuthorizationGuard(): string` method (Spatie's shim idiom);
   closure calls `$user->getAuthorizationGuard()` to select the lookup
@@ -1235,6 +1209,36 @@ enterprise systems ship both.)_
   removing is major-bumped; (b) additionally mark each event
   class `@api` in docblocks so static-analysis consumers can
   detect breakage. Do both.
+
+### 55. `fnmatch` treats backslashes in resource patterns as escape characters
+
+- **Files:** `src/Evaluation/Statement.php` (action + resource
+  matching); surfaced while implementing #23.
+- **Observation:** PHP's `fnmatch()` defaults to Unix shell glob
+  semantics, including treating `\` as an escape character for the
+  following character in the pattern. Resource identifiers that
+  include namespaced class names (the default
+  `Model::getMorphClass()` output when no morph alias is
+  registered — e.g. `App\Models\Post:42`) break matching: the
+  pattern `App\Models\Post:42` is interpreted as `AppModelsPost:42`
+  and fails to match the literal string `App\Models\Post:42`.
+- **Impact:** consumers who policy-match on `getMorphClass()`
+  output directly (reasonable since that is how the polymorphic
+  pivots store types) hit silent non-matches whenever the morph
+  class retains backslashes. Gate-forwarded Eloquent models
+  (#23) are the primary path affected. Today the
+  `GateArgumentForwardingTest` works around the issue with a
+  morph alias — a workaround, not a fix.
+- **Options:** (a) pass `FNM_NOESCAPE` to every `fnmatch()` call
+  in the evaluator so backslashes are compared literally. Correct
+  for resource identifiers where shell-glob escape semantics add
+  no value; (b) document a hard requirement that consumers
+  register morph aliases before relying on Eloquent-based resource
+  matching (shifts the burden onto every consumer); (c) normalise
+  backslashes to a sentinel before passing through `fnmatch`
+  (fragile and surprising). Option (a) is the right answer —
+  should land alongside or before #27 so the combined wildcard
+  semantics are coherent.
 
 ---
 

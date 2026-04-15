@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization;
 
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
@@ -189,14 +190,109 @@ class AuthorizationServiceProvider extends ServiceProvider
 
         Gate::define(
             $permission,
-            static function (?object $user = null) use ($permission): bool {
+            static function (?object $user = null, mixed ...$arguments) use ($permission): bool {
+                [$resource, $context] = self::translateGateArguments($arguments);
+
                 if ($user === null) {
-                    return Authorization::can($permission);
+                    return Authorization::can($permission, $resource, $context);
                 }
 
-                return Authorization::for($user)->can($permission);
+                return Authorization::for($user)->can($permission, $resource, $context);
             },
         );
+    }
+
+    /**
+     * Translate the arguments Laravel hands to a Gate callback into
+     * the `(resource, context)` pair the authorization manager
+     * accepts.
+     *
+     * Laravel's Gate spreads the argument tail into the callback
+     * with PHP's `...` operator, so an associative array ends up in
+     * the variadic parameter under its original string keys rather
+     * than at numeric index 0. The translation treats positional
+     * entries (integer keys) and named entries (string keys)
+     * separately:
+     *
+     * - The first positional argument is the resource identifier.
+     *   Strings pass through unchanged, Eloquent models become
+     *   `{morphClass}:{key}` (matching the polymorphic pivots'
+     *   convention — register a morph alias on the consumer side
+     *   to avoid FQN backslashes leaking into resource strings),
+     *   stringable objects are cast via `__toString`, and anything
+     *   else yields a null resource.
+     * - A positional array at index 0 that is string-keyed is
+     *   treated as a context map with no resource, covering the
+     *   `Gate::allows('edit', ['tenant' => '…'])` idiom.
+     * - Any string-keyed array found after the resource slot is
+     *   merged into the context. String-keyed entries in the
+     *   variadic itself (PHP spread of an assoc array) flow
+     *   directly into the context.
+     * - Unmappable trailing positional values are discarded rather
+     *   than guessed at.
+     *
+     * @param  array<int|string, mixed>  $arguments
+     * @return array{0: string|null, 1: array<string, mixed>}
+     */
+    private static function translateGateArguments(array $arguments): array
+    {
+        if ($arguments === []) {
+            return [null, []];
+        }
+
+        $resource = null;
+        $context  = [];
+
+        foreach ($arguments as $key => $value) {
+            if (\is_string($key)) {
+                $context[$key] = $value;
+
+                continue;
+            }
+
+            if ($key === 0) {
+                if (\is_array($value) && !\array_is_list($value)) {
+                    /** @var array<string, mixed> $value */
+                    $context = \array_merge($context, $value);
+                } else {
+                    $resource = self::stringifyGateResource($value);
+                }
+
+                continue;
+            }
+
+            if (\is_array($value) && !\array_is_list($value)) {
+                /** @var array<string, mixed> $value */
+                $context = \array_merge($context, $value);
+            }
+        }
+
+        return [$resource, $context];
+    }
+
+    /**
+     * Coerce a Gate-callback argument into a resource identifier
+     * string. Returns null when the value is not a resource the
+     * evaluator can reason about.
+     *
+     * @param  mixed  $value
+     * @return string|null
+     */
+    private static function stringifyGateResource(mixed $value): ?string
+    {
+        if (\is_string($value)) {
+            return $value;
+        }
+
+        if ($value instanceof Model) {
+            return $value->getMorphClass() . ':' . (string) $value->getKey();
+        }
+
+        if (\is_object($value) && \method_exists($value, '__toString')) {
+            return (string) $value;
+        }
+
+        return null;
     }
 
     /**
