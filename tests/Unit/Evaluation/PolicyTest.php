@@ -180,4 +180,67 @@ final class PolicyTest extends TestCase
         // @phpstan-ignore-next-line
         Policy::fromArray(['name' => 42, 'statements' => []]);
     }
+
+    /**
+     * Lock the v1 document shape. The fixture exercises every
+     * slot — effect, actions, resources, and a condition map
+     * with multiple operators — and round-trips it through
+     * `fromArray` / `toArray`. If a future schema change alters
+     * the canonical layout without bumping `Policy::CURRENT_VERSION`,
+     * this test fails loudly and forces the change to land
+     * deliberately.
+     *
+     * @return void
+     */
+    public function testVersion1DocumentShapeIsLocked(): void
+    {
+        $document = [
+            'version'    => 1,
+            'name'       => 'v1-fixture',
+            'statements' => [
+                [
+                    'effect'     => 'allow',
+                    'actions'    => ['posts:create', 'posts:update'],
+                    'resources'  => ['arn:posts:*'],
+                    'conditions' => [
+                        'tenant' => ['eq' => 'org-1'],
+                        'ip'     => ['cidr' => '10.0.0.0/8'],
+                    ],
+                ],
+                [
+                    'effect'    => 'deny',
+                    'actions'   => ['posts:delete'],
+                    'resources' => ['arn:posts:42'],
+                ],
+            ],
+        ];
+
+        $policy   = Policy::fromArray($document);
+        $rendered = $policy->toArray();
+
+        self::assertSame(1, $policy->version);
+        self::assertSame(Policy::CURRENT_VERSION, $policy->version);
+        self::assertSame($document, $rendered);
+    }
+
+    /**
+     * An explicit future `version` is preserved on the round
+     * trip. This pins the forward-compatibility contract: even if
+     * the current engine would evaluate a v2 document identically
+     * to v1, the persisted version number must flow through
+     * untouched so downstream tooling can detect the bump.
+     *
+     * @return void
+     */
+    public function testFutureVersionIsPreservedThroughRoundTrip(): void
+    {
+        $policy = Policy::fromArray([
+            'version'    => 2,
+            'name'       => 'forward-compat',
+            'statements' => [['effect' => 'allow', 'actions' => ['x']]],
+        ]);
+
+        self::assertSame(2, $policy->version);
+        self::assertSame(2, $policy->toArray()['version']);
+    }
 }

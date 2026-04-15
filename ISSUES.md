@@ -104,19 +104,6 @@ consumed into this file and removed from the repo.
 
 ---
 
-## Observations (not spec gaps)
-
-### 14. Policy document versioning is present but unexercised
-
-- **File:** `src/Evaluation/Policy.php:20–34`, §15 open question 3.
-- **Observation:** `Policy::CURRENT_VERSION = 1` and `fromArray()`
-  accepts a `version` key, but no migration path exists for bumping
-  the version, and no test pins the current shape. §15 leaves this as
-  an open question — it should be resolved and a compatibility test
-  added before v1.0.0 so future schema changes are observable.
-
----
-
 ## Drop-in / DX friction (not spec gaps)
 
 These are not violations of `SPECS.md` — they surfaced during exploratory
