@@ -112,24 +112,6 @@ minimal configuration. Each entry is a usability friction point for the
 "pure RBAC, no policies, standard Laravel Auth" consumer, which is the
 most likely first-use path.
 
-### 16. `AuthorizableIdentity` contract forces policy methods on pure-RBAC consumers
-
-- **File:** `src/Contracts/AuthorizableIdentity.php`.
-- **Observation:** the contract mandates `attachPolicy`, `detachPolicy`,
-  `syncPolicies`, and `getPolicies`. A consumer who only wants
-  roles + permissions (RBAC-only) must either `use HasPolicies` — which
-  is inert but pulls in the morph pivot and event wiring — or stub all
-  four methods by hand. The architecture already supports policy-free
-  operation at the evaluator level (empty policy set falls through to
-  RBAC in `AuthorizationManager::evaluateFor()`), but the contract does
-  not reflect that the policy surface is optional.
-- **Options:** split the contract into narrower sibling interfaces
-  (e.g. `SupportsRoles`, `SupportsPermissions`, `SupportsPolicies`) and
-  have `AuthorizableIdentity` extend whichever are mandatory, or document
-  `HasPolicies` as non-optional even for RBAC-only use and accept the
-  unused pivot table. First option preserves drop-in purity; second is
-  a one-line doc fix.
-
 ### 17. Gate auto-wiring requires a populated `permission_enums` config
 
 - **File:** `src/AuthorizationServiceProvider.php:144–163`.
