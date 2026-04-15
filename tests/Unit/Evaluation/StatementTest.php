@@ -13,7 +13,7 @@ use SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 
 /**
- * Unit tests for {@see \SineMacula\Laravel\Authorization\Evaluation\Statement}.
+ * Unit tests for the policy statement value object.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

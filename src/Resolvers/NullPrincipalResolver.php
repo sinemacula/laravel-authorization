@@ -9,11 +9,11 @@ use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 /**
  * Anonymous-safe default principal resolver.
  *
- * Always returns {@see null}, which makes the authorization engine
- * deny every check that reaches it. Applications wire their own
- * resolver — typically one backed by an authentication package or
- * framework guard — through the `authorization.principal_resolver`
- * config entry or by binding {@see PrincipalResolver} directly.
+ * Always returns null, which makes the authorization engine deny
+ * every check that reaches it. Applications wire their own resolver
+ * — typically one backed by an authentication package or framework
+ * guard — through the `authorization.principal_resolver` config
+ * entry or by binding the resolver contract directly.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

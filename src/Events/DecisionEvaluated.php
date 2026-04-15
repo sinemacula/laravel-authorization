@@ -11,8 +11,8 @@ use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
  * evaluation.
  *
  * Carries the principal, action, resource, context, and the full
- * {@see EvaluationResult} — including the reproducible trace — so
- * audit listeners can persist the decision verbatim.
+ * evaluation result — including the reproducible trace — so audit
+ * listeners can persist the decision verbatim.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,10 +29,21 @@ final readonly class DecisionEvaluated
      * @param  \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult  $result
      */
     public function __construct(
+
+        /** Acting principal at the time of evaluation, or null when anonymous. */
         public ?object $principal,
+
+        /** Action string that was checked. */
         public string $action,
+
+        /** Resource identifier the action targets, or null for resource-less checks. */
         public ?string $resource,
+
+        /** Evaluation context passed through to policy statements. */
         public array $context,
+
+        /** Final evaluation result, including the reproducible statement trace. */
         public EvaluationResult $result,
+
     ) {}
 }

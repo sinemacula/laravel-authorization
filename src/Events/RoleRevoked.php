@@ -21,7 +21,12 @@ final readonly class RoleRevoked
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      */
     public function __construct(
+
+        /** Authorizable identity that the role was revoked from. */
         public object $authorizable,
+
+        /** Role that was revoked from the identity. */
         public Role $role,
+
     ) {}
 }

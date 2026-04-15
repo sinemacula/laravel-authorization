@@ -9,7 +9,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Enums\PolicyEffect;
 
 /**
- * Unit tests for the {@see \SineMacula\Laravel\Authorization\Enums\PolicyEffect} enum.
+ * Unit tests for the policy effect enum.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

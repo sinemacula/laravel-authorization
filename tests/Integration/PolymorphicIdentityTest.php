@@ -14,9 +14,9 @@ use Tests\Feature\Stubs\StubSecondAuthorizable;
 use Tests\TestCase;
 
 /**
- * Integration tests covering the P0 "polymorphic identity support"
- * acceptance criterion — two unrelated models sharing the same role
- * and producing identical decisions.
+ * Integration tests covering polymorphic identity support — two
+ * unrelated models share the same role and produce identical
+ * decisions without model-class collisions.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

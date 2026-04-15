@@ -11,7 +11,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use Tests\TestCase;
 
 /**
- * Feature tests for the {@see Policy} Eloquent model.
+ * Feature tests for the policy Eloquent model.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -161,7 +161,7 @@ trait HasRoles // @phpstan-ignore trait.unused
     // ------------------------------------------------------------------
 
     /**
-     * Spatie alias for {@see self::revokeRole()}.
+     * Spatie alias for the canonical `revokeRole()` helper.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @return static
@@ -172,7 +172,7 @@ trait HasRoles // @phpstan-ignore trait.unused
     }
 
     /**
-     * Spatie alias for {@see self::getRoles()}.
+     * Spatie alias for the canonical `getRoles()` helper.
      *
      * @return array<int, string>
      */

@@ -15,9 +15,8 @@ use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
  *
  * Boots a minimal Testbench application with the authorization service
  * provider registered, an in-memory SQLite connection, and the shipped
- * `authorization` config block seeded. Subclasses may override
- * {@see self::defineEnvironment()} to adjust per-test config and
- * {@see self::defineDatabaseMigrations()} (or `setUp`) to create
+ * `authorization` config block seeded. Subclasses may override the
+ * environment and migration hooks to adjust per-test config or create
  * additional tables.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

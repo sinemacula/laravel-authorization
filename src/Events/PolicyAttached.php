@@ -21,7 +21,12 @@ final readonly class PolicyAttached
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      */
     public function __construct(
+
+        /** Authorizable identity that the policy was attached to. */
         public object $authorizable,
+
+        /** Policy row that was attached to the identity. */
         public Policy $policy,
+
     ) {}
 }

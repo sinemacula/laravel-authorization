@@ -11,7 +11,7 @@ use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 
 /**
- * Unit tests for {@see \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult}.
+ * Unit tests for the evaluation result value object.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

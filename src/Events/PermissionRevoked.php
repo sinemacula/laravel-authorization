@@ -22,7 +22,12 @@ final readonly class PermissionRevoked
      * @param  \SineMacula\Laravel\Authorization\Models\Permission  $permission
      */
     public function __construct(
+
+        /** Authorizable identity that the direct permission was revoked from. */
         public object $authorizable,
+
+        /** Permission that was revoked from the identity. */
         public Permission $permission,
+
     ) {}
 }

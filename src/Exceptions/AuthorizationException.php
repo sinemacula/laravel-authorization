@@ -7,12 +7,12 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
 use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
 
 /**
- * Thrown when {@see \SineMacula\Laravel\Authorization\AuthorizationManager::authorize()}
+ * Thrown when the authorization manager's `authorize()` entry point
  * denies a request.
  *
- * Carries the full {@see EvaluationResult}, including the
- * reproducible statement trace, so consumers can persist the
- * decision to an audit log without re-running the check.
+ * Carries the full evaluation result, including the reproducible
+ * statement trace, so consumers can persist the decision to an audit
+ * log without re-running the check.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -27,9 +27,16 @@ class AuthorizationException extends \RuntimeException
      * @param  \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult  $result
      */
     public function __construct(
+
+        /** Action string that triggered the denial. */
         private readonly string $action,
+
+        /** Resource identifier the action targeted, or null when omitted. */
         private readonly ?string $resource,
+
+        /** Full evaluation result captured at the moment of denial. */
         private readonly EvaluationResult $result,
+
     ) {
         $message = $resource !== null
             ? "Unauthorized action '{$action}' on resource '{$resource}'"

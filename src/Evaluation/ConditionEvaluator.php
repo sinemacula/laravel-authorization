@@ -6,7 +6,7 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
 
 /**
  * Internal helper responsible for evaluating the condition operators
- * supported by {@see Statement}.
+ * supported by the policy statement.
  *
  * The helper keeps the statement class within its complexity budget by
  * lifting the CIDR, time and unknown-operator fallbacks into small,
@@ -159,7 +159,7 @@ final class ConditionEvaluator
     }
 
     /**
-     * Safely invoke {@see \strtotime()}, catching any parser throwables.
+     * Safely invoke PHP's `strtotime()`, catching any parser throwables.
      *
      * @param  string  $value
      * @return false|int

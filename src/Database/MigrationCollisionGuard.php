@@ -10,9 +10,9 @@ use SineMacula\Laravel\Authorization\Exceptions\MigrationCollisionException;
 /**
  * Idempotency guard for shipped migrations.
  *
- * Each published migration calls {@see self::ensureNotExists()} on
- * `up()` so subsequent matrix runs against a persistent database do
- * not silently collide with an unrelated table of the same name.
+ * Each published migration invokes the guard on `up()` so subsequent
+ * matrix runs against a persistent database do not silently collide
+ * with an unrelated table of the same name.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

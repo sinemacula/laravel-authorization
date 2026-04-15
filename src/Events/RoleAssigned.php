@@ -21,7 +21,12 @@ final readonly class RoleAssigned
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      */
     public function __construct(
+
+        /** Authorizable identity that received the role assignment. */
         public object $authorizable,
+
+        /** Role that was assigned to the identity. */
         public Role $role,
+
     ) {}
 }

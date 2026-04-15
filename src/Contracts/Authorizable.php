@@ -13,10 +13,7 @@ use SineMacula\Laravel\Authorization\Models\Role as RoleModel;
  *
  * Implemented by any identity model that participates in the
  * authorization system. Concrete models typically satisfy the
- * contract by composing the package's shipped traits
- * ({@see \SineMacula\Laravel\Authorization\Traits\HasRoles},
- * {@see \SineMacula\Laravel\Authorization\Traits\HasPermissions},
- * {@see \SineMacula\Laravel\Authorization\Traits\HasPolicies}).
+ * contract by composing the package's shipped traits.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

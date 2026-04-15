@@ -18,8 +18,12 @@ class UnknownPermissionException extends \RuntimeException
      *
      * @param  string  $permission
      */
-    public function __construct(private readonly string $permission)
-    {
+    public function __construct(
+
+        /** Permission name that could not be resolved. */
+        private readonly string $permission,
+
+    ) {
         parent::__construct("Unknown permission '{$permission}'.", 404);
     }
 

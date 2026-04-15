@@ -15,9 +15,8 @@ use SineMacula\Laravel\Authorization\Models\Policy;
  * Policy attachment trait for authorizable models.
  *
  * Manages the polymorphic pivot between an identity and one or more
- * {@see Policy} rows. The `getPolicies()` helper hydrates each
- * attached row into an evaluation-ready
- * {@see EvaluationPolicy} value object.
+ * policy rows. The `getPolicies()` helper hydrates each attached row
+ * into an evaluation-ready value object.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

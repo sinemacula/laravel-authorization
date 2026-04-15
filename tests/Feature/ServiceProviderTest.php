@@ -51,7 +51,7 @@ final class ServiceProviderTest extends TestCase
      */
     public function testMergesDefaultConfig(): void
     {
-        /** @var ConfigRepository $config */
+        /** @var \Illuminate\Contracts\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class);
 
         self::assertSame('web', $config->get('authorization.defaults.guard'));
@@ -66,7 +66,7 @@ final class ServiceProviderTest extends TestCase
      */
     public function testRegistersGateForEachEnumCase(): void
     {
-        /** @var ConfigRepository $config */
+        /** @var \Illuminate\Contracts\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class);
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
@@ -87,7 +87,7 @@ final class ServiceProviderTest extends TestCase
     {
         Gate::define('posts:create', static fn (): bool => true);
 
-        /** @var ConfigRepository $config */
+        /** @var \Illuminate\Contracts\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class);
         $config->set('authorization.gate.on_conflict', 'throw');
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
@@ -107,7 +107,7 @@ final class ServiceProviderTest extends TestCase
     {
         Gate::define('posts:create', static fn (?object $user = null): bool => true);
 
-        /** @var ConfigRepository $config */
+        /** @var \Illuminate\Contracts\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class);
         $config->set('authorization.gate.on_conflict', 'log');
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
@@ -129,7 +129,7 @@ final class ServiceProviderTest extends TestCase
     {
         Gate::define('posts:create', static fn (): bool => true);
 
-        /** @var ConfigRepository $config */
+        /** @var \Illuminate\Contracts\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class);
         $config->set('authorization.gate.on_conflict', 'overwrite');
         $config->set('authorization.permission_enums', [PermissionEnum::class]);

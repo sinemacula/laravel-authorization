@@ -21,7 +21,12 @@ final readonly class PolicyDetached
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      */
     public function __construct(
+
+        /** Authorizable identity that the policy was detached from. */
         public object $authorizable,
+
+        /** Policy row that was detached from the identity. */
         public Policy $policy,
+
     ) {}
 }

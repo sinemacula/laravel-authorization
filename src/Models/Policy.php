@@ -13,10 +13,10 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyDocumentException;
  * Eloquent model for policy rows.
  *
  * The `document` column persists the full statement body as JSON.
- * Reads round-trip the column through
- * {@see EvaluationPolicy::fromArray()}; a failing round-trip raises
- * {@see InvalidPolicyDocumentException} rather than leaving the
- * consumer with a partial object.
+ * Reads round-trip the column through the evaluation policy's
+ * `fromArray()` factory; a failing round-trip raises an invalid
+ * policy document exception rather than leaving the consumer with a
+ * partial object.
  *
  * @property string $id
  * @property string $name
@@ -69,7 +69,7 @@ class Policy extends Model
 
     /**
      * Set the document attribute, validating it round-trips through
-     * {@see EvaluationPolicy::fromArray()}.
+     * the evaluation policy factory.
      *
      * @param  mixed  $value
      * @return void

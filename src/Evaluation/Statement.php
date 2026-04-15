@@ -9,11 +9,10 @@ use SineMacula\Laravel\Authorization\Enums\PolicyEffect;
 /**
  * Immutable policy statement.
  *
- * A statement binds an effect ({@see \SineMacula\Laravel\Authorization\Enums\PolicyEffect::ALLOW} or
- * {@see \SineMacula\Laravel\Authorization\Enums\PolicyEffect::DENY}) to one or more action and resource
- * patterns and an optional condition map. The evaluator walks every
- * statement in order, asking each one whether it applies to the
- * inbound `(action, resource, context)` tuple.
+ * A statement binds an effect (allow or deny) to one or more action
+ * and resource patterns and an optional condition map. The evaluator
+ * walks every statement in order, asking each one whether it applies
+ * to the inbound `(action, resource, context)` tuple.
  *
  * Conditions are expressed as a map of context keys to an operator
  * map, for example `['tenant' => ['eq' => 'org-1']]`. Missing context
@@ -34,10 +33,19 @@ final readonly class Statement
      * @param  array<string, mixed>  $conditions
      */
     public function __construct(
+
+        /** Effect contributed when this statement matches — allow or deny. */
         public PolicyEffect $effect,
+
+        /** Action patterns this statement matches against, evaluated with fnmatch. */
         public array $actions,
+
+        /** Resource patterns this statement applies to; defaults to `['*']`. */
         public array $resources = ['*'],
+
+        /** Condition map keyed by context key, each mapped to an operator payload. */
         public array $conditions = [],
+
     ) {}
 
     /**

@@ -168,7 +168,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
     // ------------------------------------------------------------------
 
     /**
-     * Spatie alias for {@see self::givePermission()}.
+     * Spatie alias for the canonical `givePermission()` helper.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return static
@@ -179,7 +179,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
     }
 
     /**
-     * Spatie alias for {@see self::revokePermission()}.
+     * Spatie alias for the canonical `revokePermission()` helper.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return static
@@ -190,7 +190,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
     }
 
     /**
-     * Spatie alias for {@see self::hasPermission()}.
+     * Spatie alias for the canonical `hasPermission()` helper.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return bool
@@ -201,7 +201,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
     }
 
     /**
-     * Spatie alias for {@see self::getPermissions()}.
+     * Spatie alias for the canonical `getPermissions()` helper.
      *
      * @return array<int, string>
      */

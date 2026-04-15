@@ -6,7 +6,7 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
 
 /**
  * Thrown when a persisted policy document cannot be parsed into a
- * valid {@see \SineMacula\Laravel\Authorization\Evaluation\Policy}.
+ * valid policy value object.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -21,9 +21,13 @@ class InvalidPolicyDocumentException extends \RuntimeException
      * @param  \Throwable|null  $previous
      */
     public function __construct(
+
+        /** Name of the policy whose document failed to parse. */
         private readonly string $policyName,
+
         string $reason,
         ?\Throwable $previous = null,
+
     ) {
         parent::__construct(
             "Invalid policy document '{$policyName}': {$reason}",

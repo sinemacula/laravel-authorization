@@ -20,10 +20,10 @@ use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
  *
  * Coordinates principal resolution, policy gathering, evaluation, and
  * RBAC fallback into a single API. The manager is deliberately small
- * and delegates the actual statement walking to
- * {@see PolicyEvaluator}; all four evaluation branches ultimately
- * return an {@see EvaluationResult}, with the reason code and trace
- * recorded for audit consumers.
+ * and delegates the actual statement walking to the policy evaluator;
+ * all four evaluation branches ultimately return an evaluation
+ * result, with the reason code and trace recorded for audit
+ * consumers.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,24 +31,23 @@ use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 class AuthorizationManager
 {
     /**
-     * Explicit principal supplied via {@see self::for()}. Ignored
-     * unless {@see self::$principalOverridden} is true.
+     * Explicit principal supplied via `for()`. Ignored unless the
+     * override flag is true.
      *
      * @var object|null
      */
     private ?object $principalOverride = null;
 
     /**
-     * Whether {@see self::for()} has produced the current scope. When
-     * false, the manager defers principal resolution to
-     * {@see PrincipalResolver::resolve()}.
+     * Whether `for()` has produced the current scope. When false, the
+     * manager defers principal resolution to the bound resolver.
      *
      * @var bool
      */
     private bool $principalOverridden = false;
 
     /**
-     * Per-call policy override supplied via {@see self::withPolicies()}.
+     * Per-call policy override supplied via `withPolicies()`.
      *
      * @var array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>|null
      */
@@ -63,10 +62,19 @@ class AuthorizationManager
      * @param  \Illuminate\Contracts\Events\Dispatcher|null  $events
      */
     public function __construct(
+
+        /** Policy evaluator used to walk statements for every check. */
         private readonly PolicyEvaluator $evaluator,
+
+        /** Bridge to the host application's concept of the current principal. */
         private readonly PrincipalResolver $resolver,
+
+        /** Optional external policy source unioned with a principal's attached policies. */
         private readonly ?PolicyStore $store = null,
+
+        /** Event dispatcher used to emit decision events, or null when unavailable. */
         private readonly ?Dispatcher $events = null,
+
     ) {}
 
     /**
@@ -85,7 +93,7 @@ class AuthorizationManager
 
     /**
      * Authorize the current principal for the supplied action, raising
-     * an {@see AuthorizationException} when denied.
+     * an authorization exception when denied.
      *
      * @param  string  $action
      * @param  string|null  $resource
@@ -145,7 +153,7 @@ class AuthorizationManager
     /**
      * Return a scoped manager that evaluates only the supplied
      * policies, bypassing the principal's own attached policies and
-     * any configured {@see PolicyStore}.
+     * any configured policy store.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
      * @return static
@@ -203,9 +211,8 @@ class AuthorizationManager
      * Gather the policies applicable to the supplied principal.
      *
      * When a per-call override is in effect, it is returned verbatim.
-     * Otherwise the manager unions policies from an optional
-     * {@see PolicyStore} binding with the principal's own attached
-     * policies.
+     * Otherwise the manager unions policies from an optional policy
+     * store binding with the principal's own attached policies.
      *
      * @param  object  $principal
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>

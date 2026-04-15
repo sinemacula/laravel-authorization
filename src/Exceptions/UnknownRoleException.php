@@ -18,8 +18,12 @@ class UnknownRoleException extends \RuntimeException
      *
      * @param  string  $role
      */
-    public function __construct(private readonly string $role)
-    {
+    public function __construct(
+
+        /** Role name that could not be resolved. */
+        private readonly string $role,
+
+    ) {
         parent::__construct("Unknown role '{$role}'.", 404);
     }
 

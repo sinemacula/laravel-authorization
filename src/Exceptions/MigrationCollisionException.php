@@ -18,8 +18,12 @@ class MigrationCollisionException extends \RuntimeException
      *
      * @param  string  $table
      */
-    public function __construct(private readonly string $table)
-    {
+    public function __construct(
+
+        /** Table name that already existed when the migration tried to create it. */
+        private readonly string $table,
+
+    ) {
         parent::__construct(
             "Table '{$table}' already exists — authorization migrations refuse to overwrite it."
                 . ' Drop the table or rename it via the authorization.tables config before re-running migrate.',

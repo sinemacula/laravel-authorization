@@ -40,10 +40,19 @@ final readonly class EvaluationResult
      * @param  list<EvaluationTraceEntry>  $trace
      */
     public function __construct(
+
+        /** Whether the check resolved to an allow decision. */
         public bool $allowed,
+
+        /** Reason code describing how the decision was reached. */
         public string $reason,
+
+        /** Statement that produced the decision, or null for implicit/RBAC outcomes. */
         public ?Statement $matchedStatement = null,
+
+        /** Ordered, serialisable trace of every statement the evaluator considered. */
         public array $trace = [],
+
     ) {}
 
     /**

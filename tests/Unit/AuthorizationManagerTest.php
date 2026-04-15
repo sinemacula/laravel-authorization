@@ -21,8 +21,8 @@ use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
 
 /**
- * Unit tests for {@see \SineMacula\Laravel\Authorization\AuthorizationManager}
- * using stub principals and a real evaluator — no Laravel boot required.
+ * Unit tests for the authorization manager using stub principals and
+ * a real evaluator — no Laravel boot required.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

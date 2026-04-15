@@ -22,7 +22,12 @@ final readonly class PermissionGranted
      * @param  \SineMacula\Laravel\Authorization\Models\Permission  $permission
      */
     public function __construct(
+
+        /** Authorizable identity that received the direct permission grant. */
         public object $authorizable,
+
+        /** Permission that was granted directly to the identity. */
         public Permission $permission,
+
     ) {}
 }

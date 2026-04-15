@@ -19,8 +19,12 @@ class GateConflictException extends \RuntimeException
      *
      * @param  string  $permission
      */
-    public function __construct(private readonly string $permission)
-    {
+    public function __construct(
+
+        /** Permission whose Gate registration collided with an existing Gate. */
+        private readonly string $permission,
+
+    ) {
         parent::__construct(
             "Gate '{$permission}' is already registered and authorization.gate.on_conflict is set to 'throw'.",
         );

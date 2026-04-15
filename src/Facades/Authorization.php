@@ -10,10 +10,9 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 /**
  * Authorization facade.
  *
- * Static proxy to the container-bound
- * {@see AuthorizationManager}. Every call is forwarded to a fresh
- * manager scope so `for()` / `withPolicies()` chains do not leak
- * between requests.
+ * Static proxy to the container-bound authorization manager. Every
+ * call is forwarded to a fresh manager scope so `for()` /
+ * `withPolicies()` chains do not leak between requests.
  *
  * @method static bool can(string $action, string|null $resource = null, array<string, mixed> $context = [])
  * @method static void authorize(string $action, string|null $resource = null, array<string, mixed> $context = [])
@@ -21,10 +20,10 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
  * @method static \SineMacula\Laravel\Authorization\AuthorizationManager for(object $principal)
  * @method static \SineMacula\Laravel\Authorization\AuthorizationManager withPolicies(array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy> $policies)
  *
+ * @see AuthorizationManager
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
- *
- * @see         AuthorizationManager
  */
 class Authorization extends Facade
 {
