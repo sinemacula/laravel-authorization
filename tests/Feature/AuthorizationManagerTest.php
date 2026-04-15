@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
@@ -41,9 +42,9 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversClass(AuthorizationManager::class)]
-#[CoversClass(HasRoles::class)]
-#[CoversClass(HasPermissions::class)]
-#[CoversClass(HasPolicies::class)]
+#[CoversTrait(HasRoles::class)]
+#[CoversTrait(HasPermissions::class)]
+#[CoversTrait(HasPolicies::class)]
 final class AuthorizationManagerTest extends TestCase
 {
     /**

@@ -27,7 +27,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
  *
  * @phpstan-require-extends \Illuminate\Database\Eloquent\Model
  */
-trait HasPermissions
+trait HasPermissions // @phpstan-ignore trait.unused
 {
     /**
      * Morph-to-many relation onto direct permissions.

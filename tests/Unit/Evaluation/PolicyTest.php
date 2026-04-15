@@ -125,4 +125,60 @@ final class PolicyTest extends TestCase
         /** @phpstan-ignore-next-line */
         Policy::fromArray(['name' => 'x', 'statements' => ['not-an-array']]);
     }
+
+    /**
+     * Non-integer version is rejected.
+     *
+     * @return void
+     */
+    public function testRejectsNonIntegerVersion(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        /** @phpstan-ignore-next-line */
+        Policy::fromArray([
+            'version'    => '1',
+            'name'       => 'x',
+            'statements' => [],
+        ]);
+    }
+
+    /**
+     * toArray emits version, name and statements in canonical order
+     * (kills the version-key literal mutants).
+     *
+     * @return void
+     */
+    public function testToArrayShape(): void
+    {
+        $policy = Policy::fromArray([
+            'name'       => 'sample',
+            'statements' => [['effect' => 'allow', 'actions' => ['x']]],
+        ]);
+
+        self::assertSame([
+            'version'    => 1,
+            'name'       => 'sample',
+            'statements' => [
+                [
+                    'effect'    => 'allow',
+                    'actions'   => ['x'],
+                    'resources' => ['*'],
+                ],
+            ],
+        ], $policy->toArray());
+    }
+
+    /**
+     * Empty name string is rejected.
+     *
+     * @return void
+     */
+    public function testRejectsNonStringName(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        /** @phpstan-ignore-next-line */
+        Policy::fromArray(['name' => 42, 'statements' => []]);
+    }
 }

@@ -103,7 +103,7 @@ final class PolicyEvaluatorTest extends TestCase
     public function testTraceCapturesSkippedStatements(): void
     {
         $policy = Policy::fromArray([
-            'name'       => 'p',
+            'name'       => 'named-policy',
             'statements' => [
                 ['effect' => 'allow', 'actions' => ['users:*']],
                 ['effect' => 'allow', 'actions' => ['posts:create']],
@@ -114,8 +114,94 @@ final class PolicyEvaluatorTest extends TestCase
 
         self::assertTrue($result->allowed);
         self::assertCount(2, $result->trace);
-        self::assertSame('skipped', $result->trace[0]['decision']);
-        self::assertSame('matched', $result->trace[1]['decision']);
+
+        self::assertSame([
+            'policy'          => 'named-policy',
+            'statement_index' => 0,
+            'decision'        => 'skipped',
+            'reason'          => 'action/resource did not match',
+        ], $result->trace[0]);
+
+        self::assertSame([
+            'policy'          => 'named-policy',
+            'statement_index' => 1,
+            'decision'        => 'matched',
+            'reason'          => 'explicit allow',
+        ], $result->trace[1]);
+    }
+
+    /**
+     * Trace entry for an explicit deny carries the deny reason verbatim.
+     *
+     * @return void
+     */
+    public function testTraceCapturesExplicitDenyEntry(): void
+    {
+        $policy = Policy::fromArray([
+            'name'       => 'deny-pol',
+            'statements' => [
+                ['effect' => 'deny', 'actions' => ['posts:delete']],
+            ],
+        ]);
+
+        $result = (new PolicyEvaluator())->evaluate([$policy], 'posts:delete');
+
+        self::assertSame([
+            'policy'          => 'deny-pol',
+            'statement_index' => 0,
+            'decision'        => 'matched',
+            'reason'          => 'explicit deny',
+        ], $result->trace[0]);
+    }
+
+    /**
+     * The first matched allow is preserved across subsequent matches
+     * (kills the AssignCoalesce mutation).
+     *
+     * @return void
+     */
+    public function testFirstAllowIsPreservedWhenMultipleMatch(): void
+    {
+        $policy = Policy::fromArray([
+            'name'       => 'multi-allow',
+            'statements' => [
+                ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['first']],
+                ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['second']],
+            ],
+        ]);
+
+        $result = (new PolicyEvaluator())->evaluate([$policy], 'posts:read', 'first');
+
+        self::assertNotNull($result->matchedStatement);
+        // Both statements would match action; only the first matches resource,
+        // so it must be the matched statement.
+        self::assertSame(['first'], $result->matchedStatement->resources);
+    }
+
+    /**
+     * The trace for a condition-skipped statement records the reason.
+     *
+     * @return void
+     */
+    public function testTraceConditionSkipReasonIsLiteral(): void
+    {
+        $policy = Policy::fromArray([
+            'name'       => 'cond-pol',
+            'statements' => [[
+                'effect'     => 'allow',
+                'actions'    => ['x'],
+                'conditions' => ['t' => ['eq' => 'a']],
+            ]],
+        ]);
+
+        $result = (new PolicyEvaluator())->evaluate([$policy], 'x', null, ['t' => 'b']);
+
+        self::assertSame([
+            'policy'          => 'cond-pol',
+            'statement_index' => 0,
+            'decision'        => 'skipped',
+            'reason'          => 'conditions not satisfied',
+        ], $result->trace[0]);
     }
 
     /**

@@ -1,0 +1,418 @@
+<?php
+
+declare(strict_types = 1);
+
+namespace Tests\Unit;
+
+use Illuminate\Contracts\Events\Dispatcher;
+use Mockery;
+use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\Contracts\Authorizable;
+use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
+use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
+use SineMacula\Laravel\Authorization\Evaluation\Policy;
+use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
+use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
+use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
+use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
+
+/**
+ * Unit tests for {@see \SineMacula\Laravel\Authorization\AuthorizationManager}
+ * using stub principals and a real evaluator — no Laravel boot required.
+ *
+ * @author      Ben Carey <bdmc@sinemacula.co.uk>
+ * @copyright   2026 Sine Macula Limited
+ *
+ * @internal
+ */
+#[CoversClass(AuthorizationManager::class)]
+final class AuthorizationManagerTest extends TestCase
+{
+    /**
+     * Tear down Mockery instances after every test.
+     *
+     * @return void
+     */
+    protected function tearDown(): void
+    {
+        Mockery::close();
+
+        parent::tearDown();
+    }
+
+    /**
+     * Anonymous resolver yields implicit deny on can().
+     *
+     * @return void
+     */
+    public function testAnonymousCanReturnsFalse(): void
+    {
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator(),
+            resolver: new NullPrincipalResolver(),
+        );
+
+        self::assertFalse($manager->can('posts:create'));
+    }
+
+    /**
+     * Anonymous resolver causes authorize() to throw AuthorizationException.
+     *
+     * @return void
+     */
+    public function testAnonymousAuthorizeThrows(): void
+    {
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator(),
+            resolver: new NullPrincipalResolver(),
+        );
+
+        $this->expectException(AuthorizationException::class);
+
+        $manager->authorize('posts:create');
+    }
+
+    /**
+     * for() returns a scoped manager that uses the supplied principal.
+     *
+     * @return void
+     */
+    public function testForOverridesResolver(): void
+    {
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator(),
+            resolver: new NullPrincipalResolver(),
+        );
+
+        $principal = $this->stubAuthorizable(['posts:create']);
+        $scoped    = $manager->for($principal);
+
+        self::assertNotSame($manager, $scoped);
+        self::assertTrue($scoped->can('posts:create'));
+        self::assertFalse($manager->can('posts:create'));
+    }
+
+    /**
+     * RBAC permission grants allow when no policies match.
+     *
+     * @return void
+     */
+    public function testRbacAllowedWhenPolicyDoesNotMatch(): void
+    {
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator(),
+            resolver: new NullPrincipalResolver(),
+        );
+
+        $principal = $this->stubAuthorizable(['posts:create'], [
+            Policy::fromArray([
+                'name'       => 'noise',
+                'statements' => [['effect' => 'allow', 'actions' => ['users:read']]],
+            ]),
+        ]);
+
+        $result = $manager->for($principal)->evaluate('posts:create');
+
+        self::assertTrue($result->allowed);
+        self::assertSame(EvaluationResult::REASON_RBAC_ALLOW, $result->reason);
+    }
+
+    /**
+     * Policy explicit allow takes precedence (and the RBAC fallback is skipped).
+     *
+     * @return void
+     */
+    public function testPolicyExplicitAllowReason(): void
+    {
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator(),
+            resolver: new NullPrincipalResolver(),
+        );
+
+        $principal = $this->stubAuthorizable([], [
+            Policy::fromArray([
+                'name'       => 'allow-create',
+                'statements' => [['effect' => 'allow', 'actions' => ['posts:create']]],
+            ]),
+        ]);
+
+        $result = $manager->for($principal)->evaluate('posts:create');
+
+        self::assertTrue($result->allowed);
+        self::assertSame(EvaluationResult::REASON_EXPLICIT_ALLOW, $result->reason);
+    }
+
+    /**
+     * Policy explicit deny overrides RBAC allow.
+     *
+     * @return void
+     */
+    public function testExplicitDenyOverridesRbac(): void
+    {
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator(),
+            resolver: new NullPrincipalResolver(),
+        );
+
+        $principal = $this->stubAuthorizable(['posts:delete'], [
+            Policy::fromArray([
+                'name'       => 'deny',
+                'statements' => [['effect' => 'deny', 'actions' => ['posts:delete']]],
+            ]),
+        ]);
+
+        $result = $manager->for($principal)->evaluate('posts:delete');
+
+        self::assertFalse($result->allowed);
+        self::assertSame(EvaluationResult::REASON_EXPLICIT_DENY, $result->reason);
+    }
+
+    /**
+     * withPolicies overrides the principal's policies and the policy store.
+     *
+     * @return void
+     */
+    /**
+     * withPolicies returns a fresh scope and does not mutate the
+     * originating manager (kills the "remove clone" mutant).
+     *
+     * @return void
+     */
+    public function testWithPoliciesReturnsCloneNotSelf(): void
+    {
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator(),
+            resolver: new NullPrincipalResolver(),
+        );
+
+        $principal = $this->stubAuthorizable(['rbac:do']);
+
+        $override = Policy::fromArray([
+            'name'       => 'override',
+            'statements' => [['effect' => 'deny', 'actions' => ['rbac:do']]],
+        ]);
+
+        $scoped = $manager->for($principal)->withPolicies([$override]);
+
+        self::assertNotSame($manager, $scoped);
+
+        // The original manager (no override, no for()) still goes through the
+        // anonymous resolver and returns false.
+        self::assertFalse($manager->can('rbac:do'));
+
+        // The scoped manager applies the override and denies.
+        self::assertFalse($scoped->can('rbac:do'));
+
+        // Without the override the same scoped principal would be allowed via
+        // RBAC — proving the override is what made the deny.
+        self::assertTrue($manager->for($principal)->can('rbac:do'));
+    }
+
+    /**
+     * for() also returns a clone without mutating the original.
+     *
+     * @return void
+     */
+    public function testForReturnsCloneNotSelf(): void
+    {
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator(),
+            resolver: new NullPrincipalResolver(),
+        );
+
+        $principal = $this->stubAuthorizable(['x']);
+        $scoped    = $manager->for($principal);
+
+        self::assertNotSame($manager, $scoped);
+        self::assertTrue($scoped->can('x'));
+        self::assertFalse($manager->can('x'));
+    }
+
+    public function testWithPoliciesOverridesEverything(): void
+    {
+        $store = Mockery::mock(PolicyStore::class);
+        $store->shouldNotReceive('policiesFor');
+
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator(),
+            resolver: new NullPrincipalResolver(),
+            store: $store,
+        );
+
+        $principal = $this->stubAuthorizable([], [
+            Policy::fromArray([
+                'name'       => 'principal',
+                'statements' => [['effect' => 'deny', 'actions' => ['x']]],
+            ]),
+        ]);
+
+        $override = Policy::fromArray([
+            'name'       => 'override',
+            'statements' => [['effect' => 'allow', 'actions' => ['x']]],
+        ]);
+
+        $result = $manager->for($principal)->withPolicies([$override])->evaluate('x');
+
+        self::assertTrue($result->allowed);
+    }
+
+    /**
+     * PolicyStore is consulted alongside the principal's own policies.
+     *
+     * @return void
+     */
+    public function testPolicyStoreContributesPolicies(): void
+    {
+        $principal = $this->stubAuthorizable();
+
+        $store = Mockery::mock(PolicyStore::class);
+        $store->shouldReceive('policiesFor')
+            ->once()
+            ->with($principal)
+            ->andReturn([
+                Policy::fromArray([
+                    'name'       => 'store',
+                    'statements' => [['effect' => 'allow', 'actions' => ['from:store']]],
+                ]),
+            ]);
+
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator(),
+            resolver: new NullPrincipalResolver(),
+            store: $store,
+        );
+
+        self::assertTrue($manager->for($principal)->can('from:store'));
+    }
+
+    /**
+     * DecisionEvaluated fires on every evaluation.
+     *
+     * @return void
+     */
+    public function testDecisionEventDispatched(): void
+    {
+        $events = Mockery::mock(Dispatcher::class);
+        $events->shouldReceive('dispatch')
+            ->once()
+            ->with(Mockery::type(DecisionEvaluated::class));
+
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator(),
+            resolver: new NullPrincipalResolver(),
+            events: $events,
+        );
+
+        $manager->evaluate('x');
+
+        // Mockery throws on unmet expectations during tearDown.
+        self::assertTrue(true);
+    }
+
+    /**
+     * authorize() dispatches both DecisionEvaluated and AuthorizationFailed before throwing.
+     *
+     * @return void
+     */
+    public function testAuthorizeFailsDispatchesBothEvents(): void
+    {
+        $events = Mockery::mock(Dispatcher::class);
+        $events->shouldReceive('dispatch')
+            ->once()
+            ->with(Mockery::type(DecisionEvaluated::class));
+        $events->shouldReceive('dispatch')
+            ->once()
+            ->with(Mockery::type(AuthorizationFailed::class));
+
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator(),
+            resolver: new NullPrincipalResolver(),
+            events: $events,
+        );
+
+        $this->expectException(AuthorizationException::class);
+
+        $manager->authorize('x');
+    }
+
+    /**
+     * authorize() succeeds silently when allowed.
+     *
+     * @return void
+     */
+    public function testAuthorizeReturnsVoidWhenAllowed(): void
+    {
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator(),
+            resolver: new NullPrincipalResolver(),
+        );
+
+        $principal = $this->stubAuthorizable(['ok']);
+
+        $manager->for($principal)->authorize('ok');
+
+        $this->expectNotToPerformAssertions();
+    }
+
+    /**
+     * Resolver-provided principal is consumed when no for() override is in play.
+     *
+     * @return void
+     */
+    public function testResolverSuppliesPrincipal(): void
+    {
+        $principal = $this->stubAuthorizable(['from:resolver']);
+
+        $resolver = Mockery::mock(PrincipalResolver::class);
+        $resolver->shouldReceive('resolve')->andReturn($principal);
+
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator(),
+            resolver: $resolver,
+        );
+
+        self::assertTrue($manager->can('from:resolver'));
+    }
+
+    /**
+     * Non-Authorizable principal is treated as having no RBAC permissions.
+     *
+     * @return void
+     */
+    public function testNonAuthorizablePrincipalHasNoRbac(): void
+    {
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator(),
+            resolver: new NullPrincipalResolver(),
+        );
+
+        $plain = (object) ['id' => 1];
+
+        self::assertFalse($manager->for($plain)->can('anything'));
+    }
+
+    /**
+     * Build a stubbed Authorizable principal returning the supplied
+     * permissions and policies.
+     *
+     * @param  array<int, string>                                                          $permissions
+     * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>             $policies
+     * @return \SineMacula\Laravel\Authorization\Contracts\Authorizable
+     */
+    private function stubAuthorizable(array $permissions = [], array $policies = []): Authorizable
+    {
+        $principal = Mockery::mock(Authorizable::class);
+
+        $principal->shouldReceive('hasPermission')
+            ->andReturnUsing(static fn (mixed $permission): bool => \in_array($permission, $permissions, true));
+
+        $principal->shouldReceive('getPolicies')
+            ->andReturn($policies);
+
+        return $principal;
+    }
+}

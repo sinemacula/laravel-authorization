@@ -4,7 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Integration;
 
-use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -23,7 +23,7 @@ use Tests\TestCase;
  *
  * @internal
  */
-#[CoversClass(HasRoles::class)]
+#[CoversTrait(HasRoles::class)]
 final class PolymorphicIdentityTest extends TestCase
 {
     /**

@@ -13,7 +13,7 @@ namespace SineMacula\Laravel\Authorization\Traits;
  *
  * @phpstan-require-extends \Illuminate\Database\Eloquent\Model
  */
-trait Authorizable
+trait Authorizable // @phpstan-ignore trait.unused
 {
     use HasPermissions;
     use HasPolicies;

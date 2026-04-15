@@ -24,7 +24,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
  *
  * @phpstan-require-extends \Illuminate\Database\Eloquent\Model
  */
-trait HasPolicies
+trait HasPolicies // @phpstan-ignore trait.unused
 {
     /**
      * Morph-to-many relation onto policies.
