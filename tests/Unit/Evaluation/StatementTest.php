@@ -4,7 +4,6 @@ declare(strict_types = 1);
 
 namespace Tests\Unit\Evaluation;
 
-use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -72,7 +71,7 @@ final class StatementTest extends TestCase
      */
     public function testRejectsMissingEffect(): void
     {
-        $this->expectException(InvalidArgumentException::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         Statement::fromArray(['actions' => ['x']]);
     }
@@ -84,7 +83,7 @@ final class StatementTest extends TestCase
      */
     public function testRejectsInvalidEffect(): void
     {
-        $this->expectException(InvalidArgumentException::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         Statement::fromArray(['effect' => 'audit', 'actions' => ['x']]);
     }
@@ -96,7 +95,7 @@ final class StatementTest extends TestCase
      */
     public function testRejectsMissingActions(): void
     {
-        $this->expectException(InvalidArgumentException::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         Statement::fromArray(['effect' => 'allow']);
     }
@@ -108,7 +107,7 @@ final class StatementTest extends TestCase
      */
     public function testRejectsEmptyActions(): void
     {
-        $this->expectException(InvalidArgumentException::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         Statement::fromArray(['effect' => 'allow', 'actions' => []]);
     }
@@ -120,9 +119,9 @@ final class StatementTest extends TestCase
      */
     public function testRejectsNonStringActions(): void
     {
-        $this->expectException(InvalidArgumentException::class);
+        $this->expectException(\InvalidArgumentException::class);
 
-        /** @phpstan-ignore-next-line */
+        // @phpstan-ignore-next-line
         Statement::fromArray(['effect' => 'allow', 'actions' => [123]]);
     }
 
@@ -133,9 +132,9 @@ final class StatementTest extends TestCase
      */
     public function testRejectsNonArrayResources(): void
     {
-        $this->expectException(InvalidArgumentException::class);
+        $this->expectException(\InvalidArgumentException::class);
 
-        /** @phpstan-ignore-next-line */
+        // @phpstan-ignore-next-line
         Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'resources' => 'nope']);
     }
 
@@ -162,9 +161,9 @@ final class StatementTest extends TestCase
      */
     public function testRejectsNonStringResources(): void
     {
-        $this->expectException(InvalidArgumentException::class);
+        $this->expectException(\InvalidArgumentException::class);
 
-        /** @phpstan-ignore-next-line */
+        // @phpstan-ignore-next-line
         Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'resources' => [42]]);
     }
 
@@ -175,9 +174,9 @@ final class StatementTest extends TestCase
      */
     public function testRejectsNonArrayConditions(): void
     {
-        $this->expectException(InvalidArgumentException::class);
+        $this->expectException(\InvalidArgumentException::class);
 
-        /** @phpstan-ignore-next-line */
+        // @phpstan-ignore-next-line
         Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => 'nope']);
     }
 
@@ -188,9 +187,9 @@ final class StatementTest extends TestCase
      */
     public function testRejectsNonStringConditionKeys(): void
     {
-        $this->expectException(InvalidArgumentException::class);
+        $this->expectException(\InvalidArgumentException::class);
 
-        /** @phpstan-ignore-next-line */
+        // @phpstan-ignore-next-line
         Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => [42 => 'v']]);
     }
 
@@ -299,44 +298,44 @@ final class StatementTest extends TestCase
     public static function operatorProvider(): array
     {
         return [
-            'eq-true'          => [['tenant' => ['eq' => 'org-1']],              ['tenant' => 'org-1'],          true],
-            'eq-false'         => [['tenant' => ['eq' => 'org-1']],              ['tenant' => 'org-2'],          false],
-            'neq-true'         => [['tenant' => ['neq' => 'org-1']],             ['tenant' => 'org-2'],          true],
-            'neq-false'        => [['tenant' => ['neq' => 'org-1']],             ['tenant' => 'org-1'],          false],
-            'in-true'          => [['role' => ['in' => ['admin', 'staff']]],     ['role' => 'admin'],            true],
-            'in-false'         => [['role' => ['in' => ['admin', 'staff']]],     ['role' => 'guest'],            false],
-            'in-non-array'     => [['role' => ['in' => 'admin']],                ['role' => 'admin'],            false],
-            'not_in-true'      => [['role' => ['not_in' => ['admin', 'staff']]], ['role' => 'guest'],            true],
-            'not_in-false'     => [['role' => ['not_in' => ['admin', 'staff']]], ['role' => 'admin'],            false],
-            'starts_with-true' => [['email' => ['starts_with' => 'admin@']],     ['email' => 'admin@example'],   true],
-            'ends_with-true'   => [['email' => ['ends_with' => 'sine.co']],      ['email' => 'a@sine.co'],       true],
-            'cidr-match'       => [['ip' => ['cidr' => '192.168.1.0/24']],       ['ip' => '192.168.1.25'],       true],
-            'cidr-no-match'    => [['ip' => ['cidr' => '192.168.1.0/24']],       ['ip' => '10.0.0.1'],           false],
-            'cidr-exact'       => [['ip' => ['cidr' => '192.168.1.1']],          ['ip' => '192.168.1.1'],        true],
-            'cidr-zero-bits'   => [['ip' => ['cidr' => '0.0.0.0/0']],            ['ip' => '1.2.3.4'],            true],
-            'cidr-mask-32-match' => [['ip' => ['cidr' => '192.168.1.1/32']],     ['ip' => '192.168.1.1'],        true],
-            'cidr-mask-32-miss' => [['ip' => ['cidr' => '192.168.1.1/32']],      ['ip' => '192.168.1.2'],        false],
-            'cidr-mask-31-match' => [['ip' => ['cidr' => '192.168.1.0/31']],     ['ip' => '192.168.1.1'],        true],
-            'cidr-mask-31-miss' => [['ip' => ['cidr' => '192.168.1.0/31']],      ['ip' => '192.168.1.2'],        false],
+            'eq-true'             => [['tenant' => ['eq' => 'org-1']], ['tenant' => 'org-1'], true],
+            'eq-false'            => [['tenant' => ['eq' => 'org-1']], ['tenant' => 'org-2'], false],
+            'neq-true'            => [['tenant' => ['neq' => 'org-1']], ['tenant' => 'org-2'], true],
+            'neq-false'           => [['tenant' => ['neq' => 'org-1']], ['tenant' => 'org-1'], false],
+            'in-true'             => [['role' => ['in' => ['admin', 'staff']]], ['role' => 'admin'], true],
+            'in-false'            => [['role' => ['in' => ['admin', 'staff']]], ['role' => 'guest'], false],
+            'in-non-array'        => [['role' => ['in' => 'admin']], ['role' => 'admin'], false],
+            'not_in-true'         => [['role' => ['not_in' => ['admin', 'staff']]], ['role' => 'guest'], true],
+            'not_in-false'        => [['role' => ['not_in' => ['admin', 'staff']]], ['role' => 'admin'], false],
+            'starts_with-true'    => [['email' => ['starts_with' => 'admin@']], ['email' => 'admin@example'], true],
+            'ends_with-true'      => [['email' => ['ends_with' => 'sine.co']], ['email' => 'a@sine.co'], true],
+            'cidr-match'          => [['ip' => ['cidr' => '192.168.1.0/24']], ['ip' => '192.168.1.25'], true],
+            'cidr-no-match'       => [['ip' => ['cidr' => '192.168.1.0/24']], ['ip' => '10.0.0.1'], false],
+            'cidr-exact'          => [['ip' => ['cidr' => '192.168.1.1']], ['ip' => '192.168.1.1'], true],
+            'cidr-zero-bits'      => [['ip' => ['cidr' => '0.0.0.0/0']], ['ip' => '1.2.3.4'], true],
+            'cidr-mask-32-match'  => [['ip' => ['cidr' => '192.168.1.1/32']], ['ip' => '192.168.1.1'], true],
+            'cidr-mask-32-miss'   => [['ip' => ['cidr' => '192.168.1.1/32']], ['ip' => '192.168.1.2'], false],
+            'cidr-mask-31-match'  => [['ip' => ['cidr' => '192.168.1.0/31']], ['ip' => '192.168.1.1'], true],
+            'cidr-mask-31-miss'   => [['ip' => ['cidr' => '192.168.1.0/31']], ['ip' => '192.168.1.2'], false],
             'between-equal-lower' => [['at' => ['between' => ['2026-04-15', '2026-04-20']]], ['at' => '2026-04-15'], true],
             'between-equal-upper' => [['at' => ['between' => ['2026-04-15', '2026-04-20']]], ['at' => '2026-04-20'], true],
-            'between-just-below' => [['at' => ['between' => ['2026-04-15', '2026-04-20']]], ['at' => '2026-04-14'], false],
-            'between-just-above' => [['at' => ['between' => ['2026-04-15', '2026-04-20']]], ['at' => '2026-04-21'], false],
-            'before-equal'      => [['at' => ['before' => '2026-04-15']],         ['at' => '2026-04-15'],         false],
-            'after-equal'       => [['at' => ['after' => '2026-04-15']],          ['at' => '2026-04-15'],         false],
-            'cidr-bad-ip'      => [['ip' => ['cidr' => '192.168.1.0/24']],       ['ip' => 'not-an-ip'],          false],
-            'cidr-bad-bits'    => [['ip' => ['cidr' => '192.168.1.0/abc']],      ['ip' => '192.168.1.25'],       false],
-            'cidr-bits-too-big' => [['ip' => ['cidr' => '192.168.1.0/64']],      ['ip' => '192.168.1.25'],       false],
-            'before-iso'       => [['at' => ['before' => '2026-04-15']],         ['at' => '2026-04-14'],         true],
-            'before-iso-false' => [['at' => ['before' => '2026-04-15']],         ['at' => '2026-04-16'],         false],
-            'after-iso'        => [['at' => ['after' => '2026-04-15']],          ['at' => '2026-04-16'],         true],
-            'between-iso'      => [['at' => ['between' => ['2026-04-10', '2026-04-20']]], ['at' => '2026-04-15'], true],
-            'between-outside'  => [['at' => ['between' => ['2026-04-10', '2026-04-12']]], ['at' => '2026-04-15'], false],
-            'between-bad-shape' => [['at' => ['between' => ['2026-04-10']]],     ['at' => '2026-04-15'],         false],
-            'between-bad-left' => [['at' => ['between' => ['bad', '2026-04-20']]], ['at' => '2026-04-15'],       false],
-            'time-invalid'     => [['at' => ['before' => 'not-a-date']],         ['at' => '2026-04-14'],         false],
-            'time-int'         => [['at' => ['before' => 2_000_000_000]],        ['at' => 1_000_000_000],        true],
-            'time-empty-string' => [['at' => ['before' => '2026-04-15']],        ['at' => ''],                   false],
+            'between-just-below'  => [['at' => ['between' => ['2026-04-15', '2026-04-20']]], ['at' => '2026-04-14'], false],
+            'between-just-above'  => [['at' => ['between' => ['2026-04-15', '2026-04-20']]], ['at' => '2026-04-21'], false],
+            'before-equal'        => [['at' => ['before' => '2026-04-15']], ['at' => '2026-04-15'], false],
+            'after-equal'         => [['at' => ['after' => '2026-04-15']], ['at' => '2026-04-15'], false],
+            'cidr-bad-ip'         => [['ip' => ['cidr' => '192.168.1.0/24']], ['ip' => 'not-an-ip'], false],
+            'cidr-bad-bits'       => [['ip' => ['cidr' => '192.168.1.0/abc']], ['ip' => '192.168.1.25'], false],
+            'cidr-bits-too-big'   => [['ip' => ['cidr' => '192.168.1.0/64']], ['ip' => '192.168.1.25'], false],
+            'before-iso'          => [['at' => ['before' => '2026-04-15']], ['at' => '2026-04-14'], true],
+            'before-iso-false'    => [['at' => ['before' => '2026-04-15']], ['at' => '2026-04-16'], false],
+            'after-iso'           => [['at' => ['after' => '2026-04-15']], ['at' => '2026-04-16'], true],
+            'between-iso'         => [['at' => ['between' => ['2026-04-10', '2026-04-20']]], ['at' => '2026-04-15'], true],
+            'between-outside'     => [['at' => ['between' => ['2026-04-10', '2026-04-12']]], ['at' => '2026-04-15'], false],
+            'between-bad-shape'   => [['at' => ['between' => ['2026-04-10']]], ['at' => '2026-04-15'], false],
+            'between-bad-left'    => [['at' => ['between' => ['bad', '2026-04-20']]], ['at' => '2026-04-15'], false],
+            'time-invalid'        => [['at' => ['before' => 'not-a-date']], ['at' => '2026-04-14'], false],
+            'time-int'            => [['at' => ['before' => 2000000000]], ['at' => 1000000000], true],
+            'time-empty-string'   => [['at' => ['before' => '2026-04-15']], ['at' => ''], false],
         ];
     }
 
@@ -345,7 +344,7 @@ final class StatementTest extends TestCase
      *
      * @param  array<string, mixed>  $conditions
      * @param  array<string, mixed>  $context
-     * @param  bool                  $expected
+     * @param  bool  $expected
      * @return void
      */
     #[DataProvider('operatorProvider')]

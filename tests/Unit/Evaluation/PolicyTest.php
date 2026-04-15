@@ -4,7 +4,6 @@ declare(strict_types = 1);
 
 namespace Tests\Unit\Evaluation;
 
-use InvalidArgumentException;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
@@ -68,7 +67,7 @@ final class PolicyTest extends TestCase
      */
     public function testRejectsMissingName(): void
     {
-        $this->expectException(InvalidArgumentException::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         Policy::fromArray(['statements' => []]);
     }
@@ -80,7 +79,7 @@ final class PolicyTest extends TestCase
      */
     public function testRejectsEmptyName(): void
     {
-        $this->expectException(InvalidArgumentException::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         Policy::fromArray(['name' => '', 'statements' => []]);
     }
@@ -92,7 +91,7 @@ final class PolicyTest extends TestCase
      */
     public function testRejectsMissingStatements(): void
     {
-        $this->expectException(InvalidArgumentException::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         Policy::fromArray(['name' => 'example']);
     }
@@ -104,7 +103,7 @@ final class PolicyTest extends TestCase
      */
     public function testRejectsInvalidVersion(): void
     {
-        $this->expectException(InvalidArgumentException::class);
+        $this->expectException(\InvalidArgumentException::class);
 
         Policy::fromArray([
             'version'    => 0,
@@ -120,9 +119,9 @@ final class PolicyTest extends TestCase
      */
     public function testRejectsStatementsNotArrays(): void
     {
-        $this->expectException(InvalidArgumentException::class);
+        $this->expectException(\InvalidArgumentException::class);
 
-        /** @phpstan-ignore-next-line */
+        // @phpstan-ignore-next-line
         Policy::fromArray(['name' => 'x', 'statements' => ['not-an-array']]);
     }
 
@@ -133,9 +132,9 @@ final class PolicyTest extends TestCase
      */
     public function testRejectsNonIntegerVersion(): void
     {
-        $this->expectException(InvalidArgumentException::class);
+        $this->expectException(\InvalidArgumentException::class);
 
-        /** @phpstan-ignore-next-line */
+        // @phpstan-ignore-next-line
         Policy::fromArray([
             'version'    => '1',
             'name'       => 'x',
@@ -176,9 +175,9 @@ final class PolicyTest extends TestCase
      */
     public function testRejectsNonStringName(): void
     {
-        $this->expectException(InvalidArgumentException::class);
+        $this->expectException(\InvalidArgumentException::class);
 
-        /** @phpstan-ignore-next-line */
+        // @phpstan-ignore-next-line
         Policy::fromArray(['name' => 42, 'statements' => []]);
     }
 }

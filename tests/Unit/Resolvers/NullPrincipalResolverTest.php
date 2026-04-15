@@ -26,6 +26,6 @@ final class NullPrincipalResolverTest extends TestCase
      */
     public function testResolveReturnsNull(): void
     {
-        self::assertNull((new NullPrincipalResolver())->resolve());
+        self::assertNull((new NullPrincipalResolver)->resolve());
     }
 }

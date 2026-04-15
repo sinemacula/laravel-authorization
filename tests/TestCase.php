@@ -59,37 +59,6 @@ abstract class TestCase extends OrchestraTestCase
     }
 
     /**
-     * Build the database connection config from environment variables.
-     *
-     * @return array<string, mixed>
-     */
-    private function databaseConnection(): array
-    {
-        /** @var string $driver */
-        $driver = env('DB_CONNECTION', 'sqlite');
-
-        if ($driver === 'sqlite') {
-            return [
-                'driver'   => 'sqlite',
-                'database' => ':memory:',
-                'prefix'   => '',
-            ];
-        }
-
-        return [
-            'driver'    => $driver,
-            'host'      => env('DB_HOST', '127.0.0.1'),
-            'port'      => env('DB_PORT', $driver === 'pgsql' ? '5432' : '3306'),
-            'database'  => env('DB_DATABASE', 'laravel_authorization_test'),
-            'username'  => env('DB_USERNAME', 'root'),
-            'password'  => env('DB_PASSWORD', ''),
-            'prefix'    => '',
-            'charset'   => $driver === 'pgsql' ? 'utf8' : 'utf8mb4',
-            'collation' => $driver === 'pgsql' ? null : 'utf8mb4_unicode_ci',
-        ];
-    }
-
-    /**
      * Run the package's shipped migrations and any fixture tables so
      * tests that persist roles, permissions, or policies have a
      * working schema.
@@ -129,5 +98,36 @@ abstract class TestCase extends OrchestraTestCase
                 Schema::dropIfExists('stub_second_authorizables');
             });
         }
+    }
+
+    /**
+     * Build the database connection config from environment variables.
+     *
+     * @return array<string, mixed>
+     */
+    private function databaseConnection(): array
+    {
+        /** @var string $driver */
+        $driver = env('DB_CONNECTION', 'sqlite');
+
+        if ($driver === 'sqlite') {
+            return [
+                'driver'   => 'sqlite',
+                'database' => ':memory:',
+                'prefix'   => '',
+            ];
+        }
+
+        return [
+            'driver'    => $driver,
+            'host'      => env('DB_HOST', '127.0.0.1'),
+            'port'      => env('DB_PORT', $driver === 'pgsql' ? '5432' : '3306'),
+            'database'  => env('DB_DATABASE', 'laravel_authorization_test'),
+            'username'  => env('DB_USERNAME', 'root'),
+            'password'  => env('DB_PASSWORD', ''),
+            'prefix'    => '',
+            'charset'   => $driver === 'pgsql' ? 'utf8' : 'utf8mb4',
+            'collation' => $driver === 'pgsql' ? null : 'utf8mb4_unicode_ci',
+        ];
     }
 }

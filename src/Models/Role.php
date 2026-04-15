@@ -12,12 +12,13 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
  * Eloquent model for role rows.
  *
  * Roles are named buckets of permissions shared across authorizable
- * identities. The `guard_name` column is retained for migration
- * compatibility with Spatie's `laravel-permission` package.
+ * identities. The `guard_name` column is nullable: a null value
+ * marks the role as guard-agnostic (applies to every guard), a
+ * concrete string scopes the role to a single guard.
  *
  * @property string $id
  * @property string $name
- * @property string $guard_name
+ * @property string|null $guard_name
  * @property string|null $description
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

@@ -40,7 +40,7 @@ final class EvaluatorThroughputTest extends TestCase
         }
 
         $policy    = Policy::fromArray(['name' => 'bulk', 'statements' => $statements]);
-        $evaluator = new PolicyEvaluator();
+        $evaluator = new PolicyEvaluator;
 
         $start = microtime(true);
 

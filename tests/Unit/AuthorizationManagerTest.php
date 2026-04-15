@@ -39,7 +39,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     protected function tearDown(): void
     {
-        Mockery::close();
+        \Mockery::close();
 
         parent::tearDown();
     }
@@ -52,8 +52,8 @@ final class AuthorizationManagerTest extends TestCase
     public function testAnonymousCanReturnsFalse(): void
     {
         $manager = new AuthorizationManager(
-            evaluator: new PolicyEvaluator(),
-            resolver: new NullPrincipalResolver(),
+            evaluator: new PolicyEvaluator,
+            resolver: new NullPrincipalResolver,
         );
 
         self::assertFalse($manager->can('posts:create'));
@@ -67,8 +67,8 @@ final class AuthorizationManagerTest extends TestCase
     public function testAnonymousAuthorizeThrows(): void
     {
         $manager = new AuthorizationManager(
-            evaluator: new PolicyEvaluator(),
-            resolver: new NullPrincipalResolver(),
+            evaluator: new PolicyEvaluator,
+            resolver: new NullPrincipalResolver,
         );
 
         $this->expectException(AuthorizationException::class);
@@ -84,8 +84,8 @@ final class AuthorizationManagerTest extends TestCase
     public function testForOverridesResolver(): void
     {
         $manager = new AuthorizationManager(
-            evaluator: new PolicyEvaluator(),
-            resolver: new NullPrincipalResolver(),
+            evaluator: new PolicyEvaluator,
+            resolver: new NullPrincipalResolver,
         );
 
         $principal = $this->stubAuthorizable(['posts:create']);
@@ -104,8 +104,8 @@ final class AuthorizationManagerTest extends TestCase
     public function testRbacAllowedWhenPolicyDoesNotMatch(): void
     {
         $manager = new AuthorizationManager(
-            evaluator: new PolicyEvaluator(),
-            resolver: new NullPrincipalResolver(),
+            evaluator: new PolicyEvaluator,
+            resolver: new NullPrincipalResolver,
         );
 
         $principal = $this->stubAuthorizable(['posts:create'], [
@@ -129,8 +129,8 @@ final class AuthorizationManagerTest extends TestCase
     public function testPolicyExplicitAllowReason(): void
     {
         $manager = new AuthorizationManager(
-            evaluator: new PolicyEvaluator(),
-            resolver: new NullPrincipalResolver(),
+            evaluator: new PolicyEvaluator,
+            resolver: new NullPrincipalResolver,
         );
 
         $principal = $this->stubAuthorizable([], [
@@ -154,8 +154,8 @@ final class AuthorizationManagerTest extends TestCase
     public function testExplicitDenyOverridesRbac(): void
     {
         $manager = new AuthorizationManager(
-            evaluator: new PolicyEvaluator(),
-            resolver: new NullPrincipalResolver(),
+            evaluator: new PolicyEvaluator,
+            resolver: new NullPrincipalResolver,
         );
 
         $principal = $this->stubAuthorizable(['posts:delete'], [
@@ -185,8 +185,8 @@ final class AuthorizationManagerTest extends TestCase
     public function testWithPoliciesReturnsCloneNotSelf(): void
     {
         $manager = new AuthorizationManager(
-            evaluator: new PolicyEvaluator(),
-            resolver: new NullPrincipalResolver(),
+            evaluator: new PolicyEvaluator,
+            resolver: new NullPrincipalResolver,
         );
 
         $principal = $this->stubAuthorizable(['rbac:do']);
@@ -220,8 +220,8 @@ final class AuthorizationManagerTest extends TestCase
     public function testForReturnsCloneNotSelf(): void
     {
         $manager = new AuthorizationManager(
-            evaluator: new PolicyEvaluator(),
-            resolver: new NullPrincipalResolver(),
+            evaluator: new PolicyEvaluator,
+            resolver: new NullPrincipalResolver,
         );
 
         $principal = $this->stubAuthorizable(['x']);
@@ -234,12 +234,12 @@ final class AuthorizationManagerTest extends TestCase
 
     public function testWithPoliciesOverridesEverything(): void
     {
-        $store = Mockery::mock(PolicyStore::class);
+        $store = \Mockery::mock(PolicyStore::class);
         $store->shouldNotReceive('policiesFor');
 
         $manager = new AuthorizationManager(
-            evaluator: new PolicyEvaluator(),
-            resolver: new NullPrincipalResolver(),
+            evaluator: new PolicyEvaluator,
+            resolver: new NullPrincipalResolver,
             store: $store,
         );
 
@@ -269,7 +269,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $principal = $this->stubAuthorizable();
 
-        $store = Mockery::mock(PolicyStore::class);
+        $store = \Mockery::mock(PolicyStore::class);
         $store->shouldReceive('policiesFor')
             ->once()
             ->with($principal)
@@ -281,8 +281,8 @@ final class AuthorizationManagerTest extends TestCase
             ]);
 
         $manager = new AuthorizationManager(
-            evaluator: new PolicyEvaluator(),
-            resolver: new NullPrincipalResolver(),
+            evaluator: new PolicyEvaluator,
+            resolver: new NullPrincipalResolver,
             store: $store,
         );
 
@@ -296,14 +296,14 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testDecisionEventDispatched(): void
     {
-        $events = Mockery::mock(Dispatcher::class);
+        $events = \Mockery::mock(Dispatcher::class);
         $events->shouldReceive('dispatch')
             ->once()
-            ->with(Mockery::type(DecisionEvaluated::class));
+            ->with(\Mockery::type(DecisionEvaluated::class));
 
         $manager = new AuthorizationManager(
-            evaluator: new PolicyEvaluator(),
-            resolver: new NullPrincipalResolver(),
+            evaluator: new PolicyEvaluator,
+            resolver: new NullPrincipalResolver,
             events: $events,
         );
 
@@ -320,17 +320,17 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testAuthorizeFailsDispatchesBothEvents(): void
     {
-        $events = Mockery::mock(Dispatcher::class);
+        $events = \Mockery::mock(Dispatcher::class);
         $events->shouldReceive('dispatch')
             ->once()
-            ->with(Mockery::type(DecisionEvaluated::class));
+            ->with(\Mockery::type(DecisionEvaluated::class));
         $events->shouldReceive('dispatch')
             ->once()
-            ->with(Mockery::type(AuthorizationFailed::class));
+            ->with(\Mockery::type(AuthorizationFailed::class));
 
         $manager = new AuthorizationManager(
-            evaluator: new PolicyEvaluator(),
-            resolver: new NullPrincipalResolver(),
+            evaluator: new PolicyEvaluator,
+            resolver: new NullPrincipalResolver,
             events: $events,
         );
 
@@ -347,8 +347,8 @@ final class AuthorizationManagerTest extends TestCase
     public function testAuthorizeReturnsVoidWhenAllowed(): void
     {
         $manager = new AuthorizationManager(
-            evaluator: new PolicyEvaluator(),
-            resolver: new NullPrincipalResolver(),
+            evaluator: new PolicyEvaluator,
+            resolver: new NullPrincipalResolver,
         );
 
         $principal = $this->stubAuthorizable(['ok']);
@@ -367,11 +367,11 @@ final class AuthorizationManagerTest extends TestCase
     {
         $principal = $this->stubAuthorizable(['from:resolver']);
 
-        $resolver = Mockery::mock(PrincipalResolver::class);
+        $resolver = \Mockery::mock(PrincipalResolver::class);
         $resolver->shouldReceive('resolve')->andReturn($principal);
 
         $manager = new AuthorizationManager(
-            evaluator: new PolicyEvaluator(),
+            evaluator: new PolicyEvaluator,
             resolver: $resolver,
         );
 
@@ -386,8 +386,8 @@ final class AuthorizationManagerTest extends TestCase
     public function testNonAuthorizablePrincipalHasNoRbac(): void
     {
         $manager = new AuthorizationManager(
-            evaluator: new PolicyEvaluator(),
-            resolver: new NullPrincipalResolver(),
+            evaluator: new PolicyEvaluator,
+            resolver: new NullPrincipalResolver,
         );
 
         $plain = (object) ['id' => 1];
@@ -399,13 +399,13 @@ final class AuthorizationManagerTest extends TestCase
      * Build a stubbed Authorizable principal returning the supplied
      * permissions and policies.
      *
-     * @param  array<int, string>                                                          $permissions
-     * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>             $policies
+     * @param  array<int, string>  $permissions
+     * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
      * @return \SineMacula\Laravel\Authorization\Contracts\Authorizable
      */
     private function stubAuthorizable(array $permissions = [], array $policies = []): Authorizable
     {
-        $principal = Mockery::mock(Authorizable::class);
+        $principal = \Mockery::mock(Authorizable::class);
 
         $principal->shouldReceive('hasPermission')
             ->andReturnUsing(static fn (mixed $permission): bool => \in_array($permission, $permissions, true));

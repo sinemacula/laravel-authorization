@@ -213,6 +213,12 @@ trait HasPermissions // @phpstan-ignore trait.unused
     /**
      * Resolve a permission identifier to a model instance.
      *
+     * Matches either an exact `guard_name` equal to the configured
+     * default guard or a null `guard_name` (the guard-agnostic
+     * sentinel). Guard-specific rows take precedence over
+     * guard-agnostic rows — the query orders non-null guards first
+     * and returns the first match.
+     *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return \SineMacula\Laravel\Authorization\Models\Permission
      *
@@ -232,7 +238,10 @@ trait HasPermissions // @phpstan-ignore trait.unused
         /** @var \SineMacula\Laravel\Authorization\Models\Permission|null $model */
         $model = $class::query()
             ->where('name', $permission)
-            ->where('guard_name', $guard)
+            ->where(static function ($query) use ($guard): void {
+                $query->where('guard_name', $guard)->orWhereNull('guard_name');
+            })
+            ->orderByRaw('guard_name IS NULL')
             ->first();
 
         if ($model === null) {

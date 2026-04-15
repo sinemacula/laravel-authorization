@@ -28,7 +28,7 @@ final class PolicyEvaluatorTest extends TestCase
      */
     public function testImplicitDenyWhenNoPolicies(): void
     {
-        $result = (new PolicyEvaluator())->evaluate([], 'posts:create');
+        $result = (new PolicyEvaluator)->evaluate([], 'posts:create');
 
         self::assertFalse($result->allowed);
         self::assertSame(EvaluationResult::REASON_IMPLICIT_DENY, $result->reason);
@@ -47,7 +47,7 @@ final class PolicyEvaluatorTest extends TestCase
             'statements' => [['effect' => 'allow', 'actions' => ['posts:create']]],
         ]);
 
-        $result = (new PolicyEvaluator())->evaluate([$policy], 'posts:create');
+        $result = (new PolicyEvaluator)->evaluate([$policy], 'posts:create');
 
         self::assertTrue($result->allowed);
         self::assertSame(EvaluationResult::REASON_EXPLICIT_ALLOW, $result->reason);
@@ -68,7 +68,7 @@ final class PolicyEvaluatorTest extends TestCase
             'statements' => [['effect' => 'deny', 'actions' => ['posts:create']]],
         ]);
 
-        $result = (new PolicyEvaluator())->evaluate([$policy], 'posts:create');
+        $result = (new PolicyEvaluator)->evaluate([$policy], 'posts:create');
 
         self::assertFalse($result->allowed);
         self::assertSame(EvaluationResult::REASON_EXPLICIT_DENY, $result->reason);
@@ -85,11 +85,11 @@ final class PolicyEvaluatorTest extends TestCase
             'name'       => 'p',
             'statements' => [
                 ['effect' => 'allow', 'actions' => ['posts:create']],
-                ['effect' => 'deny',  'actions' => ['posts:create']],
+                ['effect' => 'deny', 'actions' => ['posts:create']],
             ],
         ]);
 
-        $result = (new PolicyEvaluator())->evaluate([$policy], 'posts:create');
+        $result = (new PolicyEvaluator)->evaluate([$policy], 'posts:create');
 
         self::assertFalse($result->allowed);
         self::assertSame(EvaluationResult::REASON_EXPLICIT_DENY, $result->reason);
@@ -110,7 +110,7 @@ final class PolicyEvaluatorTest extends TestCase
             ],
         ]);
 
-        $result = (new PolicyEvaluator())->evaluate([$policy], 'posts:create');
+        $result = (new PolicyEvaluator)->evaluate([$policy], 'posts:create');
 
         self::assertTrue($result->allowed);
         self::assertCount(2, $result->trace);
@@ -144,7 +144,7 @@ final class PolicyEvaluatorTest extends TestCase
             ],
         ]);
 
-        $result = (new PolicyEvaluator())->evaluate([$policy], 'posts:delete');
+        $result = (new PolicyEvaluator)->evaluate([$policy], 'posts:delete');
 
         self::assertSame([
             'policy'          => 'deny-pol',
@@ -170,7 +170,7 @@ final class PolicyEvaluatorTest extends TestCase
             ],
         ]);
 
-        $result = (new PolicyEvaluator())->evaluate([$policy], 'posts:read', 'first');
+        $result = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', 'first');
 
         self::assertNotNull($result->matchedStatement);
         // Both statements would match action; only the first matches resource,
@@ -194,7 +194,7 @@ final class PolicyEvaluatorTest extends TestCase
             ]],
         ]);
 
-        $result = (new PolicyEvaluator())->evaluate([$policy], 'x', null, ['t' => 'b']);
+        $result = (new PolicyEvaluator)->evaluate([$policy], 'x', null, ['t' => 'b']);
 
         self::assertSame([
             'policy'          => 'cond-pol',
@@ -222,7 +222,7 @@ final class PolicyEvaluatorTest extends TestCase
             ],
         ]);
 
-        $result = (new PolicyEvaluator())->evaluate([$policy], 'posts:create', null, ['tenant' => 'org-2']);
+        $result = (new PolicyEvaluator)->evaluate([$policy], 'posts:create', null, ['tenant' => 'org-2']);
 
         self::assertFalse($result->allowed);
         self::assertSame(EvaluationResult::REASON_IMPLICIT_DENY, $result->reason);
@@ -240,12 +240,12 @@ final class PolicyEvaluatorTest extends TestCase
         $policy = Policy::fromArray([
             'name'       => 'p',
             'statements' => [
-                ['effect' => 'deny',  'actions' => ['posts:*']],
+                ['effect' => 'deny', 'actions' => ['posts:*']],
                 ['effect' => 'allow', 'actions' => ['posts:*']],
             ],
         ]);
 
-        $result = (new PolicyEvaluator())->evaluate([$policy], 'posts:create');
+        $result = (new PolicyEvaluator)->evaluate([$policy], 'posts:create');
 
         self::assertFalse($result->allowed);
         self::assertCount(1, $result->trace);

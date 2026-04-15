@@ -22,19 +22,13 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
  */
 final class PolicyEvaluatorBench
 {
-    /**
-     * Evaluator instance used across revolutions.
-     */
+    /** Evaluator instance used across revolutions. */
     private PolicyEvaluator $evaluator;
 
-    /**
-     * Policy with an explicit allow on `posts:create`.
-     */
+    /** Policy with an explicit allow on `posts:create`. */
     private Policy $allowPolicy;
 
-    /**
-     * Policy with both an allow and a deny on `posts:delete`.
-     */
+    /** Policy with both an allow and a deny on `posts:delete`. */
     private Policy $denyPolicy;
 
     /**
@@ -52,7 +46,7 @@ final class PolicyEvaluatorBench
      */
     public function setUp(): void
     {
-        $this->evaluator = new PolicyEvaluator();
+        $this->evaluator = new PolicyEvaluator;
 
         $this->allowPolicy = Policy::fromArray([
             'name'       => 'allow',
@@ -63,7 +57,7 @@ final class PolicyEvaluatorBench
             'name'       => 'deny',
             'statements' => [
                 ['effect' => 'allow', 'actions' => ['posts:delete']],
-                ['effect' => 'deny',  'actions' => ['posts:delete']],
+                ['effect' => 'deny', 'actions' => ['posts:delete']],
             ],
         ]);
     }
@@ -73,9 +67,9 @@ final class PolicyEvaluatorBench
      *
      * @return void
      */
-    #[Bench\Revs(1000)]
-    #[Bench\Iterations(3)]
     #[Bench\BeforeMethods('setUp')]
+    #[Bench\Iterations(3)]
+    #[Bench\Revs(1000)]
     public function benchImplicitDeny(): void
     {
         $this->evaluator->evaluate([], 'posts:create');
@@ -86,9 +80,9 @@ final class PolicyEvaluatorBench
      *
      * @return void
      */
-    #[Bench\Revs(1000)]
-    #[Bench\Iterations(3)]
     #[Bench\BeforeMethods('setUp')]
+    #[Bench\Iterations(3)]
+    #[Bench\Revs(1000)]
     public function benchExplicitAllow(): void
     {
         $this->evaluator->evaluate([$this->allowPolicy], 'posts:create');
@@ -99,9 +93,9 @@ final class PolicyEvaluatorBench
      *
      * @return void
      */
-    #[Bench\Revs(1000)]
-    #[Bench\Iterations(3)]
     #[Bench\BeforeMethods('setUp')]
+    #[Bench\Iterations(3)]
+    #[Bench\Revs(1000)]
     public function benchDenyOverridesAllow(): void
     {
         $this->evaluator->evaluate([$this->denyPolicy], 'posts:delete');

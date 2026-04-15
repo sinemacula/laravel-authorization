@@ -12,11 +12,14 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
  * Eloquent model for permission rows.
  *
  * Permissions are atomic action strings that can be granted directly
- * to an identity or inherited via a role.
+ * to an identity or inherited via a role. The `guard_name` column is
+ * nullable: a null value marks the permission as guard-agnostic
+ * (applies to every guard), a concrete string scopes it to a single
+ * guard.
  *
  * @property string $id
  * @property string $name
- * @property string $guard_name
+ * @property string|null $guard_name
  * @property string|null $description
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

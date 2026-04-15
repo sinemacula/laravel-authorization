@@ -47,7 +47,7 @@ final class ExceptionsTest extends TestCase
         self::assertSame('posts:create', $exception->getAction());
         self::assertSame('arn:posts:1', $exception->getResource());
         self::assertSame($result, $exception->getResult());
-        self::assertStringContainsString("on resource 'arn:posts:1'", $exception->getMessage());
+        self::assertStringContainsString('on resource \'arn:posts:1\'', $exception->getMessage());
     }
 
     /**

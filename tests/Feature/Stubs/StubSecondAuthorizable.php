@@ -22,6 +22,13 @@ class StubSecondAuthorizable extends Model implements AuthorizableContract
     use Authorizable;
 
     /**
+     * Disable auto-incrementing — stubs use explicit IDs.
+     *
+     * @var bool
+     */
+    public $incrementing = false;
+
+    /**
      * Primary key column.
      *
      * @var string
@@ -34,13 +41,6 @@ class StubSecondAuthorizable extends Model implements AuthorizableContract
      * @var string
      */
     protected $keyType = 'string';
-
-    /**
-     * Disable auto-incrementing — stubs use explicit IDs.
-     *
-     * @var bool
-     */
-    public $incrementing = false;
 
     /**
      * Mass-assignable attributes.

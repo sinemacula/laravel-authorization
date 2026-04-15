@@ -4,9 +4,10 @@
  * Create the `roles` table.
  *
  * Roles are named buckets of permissions shared across authorizable
- * identities. The `guard_name` column is retained for migration
- * compatibility with Spatie's `laravel-permission` package and
- * defaults to the value configured via `authorization.defaults.guard`.
+ * identities. The `guard_name` column is nullable: a null value marks
+ * the role as guard-agnostic (applies to every guard), a concrete
+ * string scopes the role to a single guard and mirrors Spatie's
+ * `laravel-permission` convention for migrating consumers.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -35,7 +36,7 @@ return new class extends Migration {
         Schema::create($table, static function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->string('name');
-            $table->string('guard_name');
+            $table->string('guard_name')->nullable();
             $table->string('description')->nullable();
             $table->timestamps();
 

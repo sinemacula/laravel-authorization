@@ -317,63 +317,31 @@ most likely first-use path.
   document the opt-in as the recommended wiring when the application
   uses Laravel Auth. Non-breaking.
 
-### 19. No cross-guard ("global") role / permission support
+### 19. No cross-guard ("global") role / permission support — **RESOLVED**
 
-- **Files:** `src/Traits/HasRoles.php:204–211`;
-  `src/Traits/HasPermissions.php:236–244`;
-  `database/migrations/2026_04_14_000001_create_roles_table.php:38–42`.
-- **Observation:** resolution of a role or permission by string name
-  performs a literal equality match on `guard_name`
-  (`->where('guard_name', $guard)`). There is no wildcard convention
-  (e.g. `'*'` or `null` meaning "any guard"), so an enterprise
-  deployment with multiple guards — e.g. `web` for customers, `api`
-  for partner integrations, `admin` for an internal console — cannot
-  declare a single `super-admin` or `auditor` role that applies across
-  every guard. The workaround today is to duplicate the row per guard
-  and assign all copies to the identity, which invites drift between
-  guard-scoped copies of the same logical role.
-- **Impact:** multi-guard enterprise scenarios are second-class. A
-  cross-guard role is a natural concept (a platform administrator acts
-  the same regardless of how they authenticated), but the current
-  schema and lookup logic force it to be modelled as N separate rows.
-- **Options:** (a) treat a sentinel `guard_name` value (e.g. `'*'` or
-  `null`) as "applies to every guard" and widen the `resolveRole` /
-  `resolvePermission` lookups to match either the exact guard or the
-  sentinel, (b) introduce a separate `guards` join table and allow a
-  role/permission to be attached to many guards, or (c) document the
-  "duplicate per guard" pattern as the supported idiom and provide a
-  helper to keep the copies in sync. Option (a) is the lowest-friction
-  and matches the spirit of Spatie's loose-typing conventions; option
-  (b) is the most explicit but is a schema change.
+- **Decision:** option (a) — `guard_name` is now nullable. A null
+  value marks the row as guard-agnostic; `resolveRole` /
+  `resolvePermission` widen the lookup to match either the
+  configured default guard or a null guard, with guard-specific
+  rows taking precedence when both exist.
+- **Implementation:** migrations drop the NOT NULL constraint on
+  `guard_name` in both `roles` and `permissions`;
+  `HasRoles::resolveRole()` and `HasPermissions::resolvePermission()`
+  union the exact-guard match with `orWhereNull('guard_name')` and
+  order non-null guards first.
+- **Coverage:** `tests/Feature/GuardAgnosticLookupTest.php` pins the
+  four scenarios (guard-agnostic resolution, guard-specific
+  precedence) for roles and permissions.
 
-### 20. Single-guard apps carry unused `guard_name` complexity
+### 20. Single-guard apps carry unused `guard_name` complexity — **RESOLVED**
 
-- **Files:** same as issue #19.
-- **Observation:** the overwhelming majority of Laravel apps use a
-  single guard (`web`). For those consumers, `guard_name` is always
-  `'web'` on every row, the unique constraint on `(name, guard_name)`
-  collapses to `(name)`, every `resolveRole` / `resolvePermission`
-  lookup runs an extra `where` clause that narrows nothing, and the
-  user must mentally account for a concept they have no use for. The
-  package inherits this from Spatie's idiom, but Spatie's guard model
-  exists because its permission engine is tightly bound to the
-  authentication layer — this package is explicitly decoupled from
-  auth via `PrincipalResolver`, so the same justification does not
-  fully apply here.
-- **Impact:** simple customer implementations pay an
-  enterprise-shaped tax in schema, config, and lookup cost. It is not
-  a large tax, but it is pure overhead for that cohort and
-  contradicts the "minimal configuration" drop-in narrative.
-- **Options:** (a) add a config flag
-  (`authorization.guards.enabled = false`) that, when disabled, makes
-  migrations omit `guard_name` and lookups drop the guard filter —
-  enterprise consumers opt in, simple consumers get a slimmer schema;
-  (b) keep the column but make it nullable and treat null as
-  "guard-agnostic" (ties into issue #19's sentinel approach); (c)
-  accept the overhead and document `guard_name` prominently in the
-  README so new users understand why it is there. Option (a) is the
-  cleanest for the simple case but introduces two schema variants —
-  option (b) is a single schema that serves both cohorts.
+- **Decision:** option (b) — kept a single schema shape. Single-guard
+  consumers set `guard_name` to the literal guard (usually `'web'`)
+  and see unchanged behaviour; consumers who want a fully
+  guard-agnostic role / permission set it to null. No config flag,
+  no schema variant.
+- **Implementation:** co-resolved with issue #19 in the same schema
+  change.
 
 ### 21. Role ↔ permission guard mismatch is not prevented
 
@@ -1021,9 +989,9 @@ enterprise systems ship both.)_
   (a junior admin promoting themselves, a peer demoting a senior
   admin, a tenant admin acting on a platform admin).
 - **Relationship to #28 (role hierarchy):** orthogonal. Hierarchy
-  governs permission flow (admin *inherits* editor's permissions).
-  Rank governs management authority (admin *can act on* editor,
-  editor *cannot act on* admin). Most enterprise systems ship
+  governs permission flow (admin _inherits_ editor's permissions).
+  Rank governs management authority (admin _can act on_ editor,
+  editor _cannot act on_ admin). Most enterprise systems ship
   both; they cover different risks.
 - **Impact:** without rank, a consumer cannot model common
   requirements such as "tenant admins cannot demote platform
@@ -1075,9 +1043,9 @@ enterprise systems ship both.)_
 
 ### 46. No CI check enforcing zero `sinemacula/laravel-*` runtime dependency
 
-- **Spec reference:** §12.5 — *"Zero runtime dependency on any
+- **Spec reference:** §12.5 — _"Zero runtime dependency on any
   `sinemacula/laravel-*` package (enforced by CI check on
-  `composer.json`)."*
+  `composer.json`)."_
 - **Files:** `.github/workflows/tests.yml`,
   `.github/workflows/quality-gates.yml` — no job, step, or script
   inspects `composer.json`'s `require` block for sibling package
@@ -1102,9 +1070,9 @@ enterprise systems ship both.)_
 
 ### 47. Open question §15.4 unresolved — gate conflict default
 
-- **Spec reference:** §15 open question 4 — *"Gate conflict
+- **Spec reference:** §15 open question 4 — _"Gate conflict
   default. `log` is the safe default, but `throw` would be the
-  opinionated enterprise default. Lock in v1.0.0."*
+  opinionated enterprise default. Lock in v1.0.0."_
 - **Files:** `config/authorization.php:88–90` — default is
   currently `log`; `src/AuthorizationServiceProvider.php:174–199`
   implements all three modes.
@@ -1128,12 +1096,12 @@ enterprise systems ship both.)_
 
 ### 48. Open question §15.5 unresolved — final Spatie alias set
 
-- **Spec reference:** §15 open question 5 — *"Spatie API aliases.
+- **Spec reference:** §15 open question 5 — _"Spatie API aliases.
   Which Spatie method names do we alias on
   `HasRoles`/`HasPermissions`? Minimum is `assignRole`,
   `removeRole`, `givePermissionTo`, `hasPermissionTo`,
   `syncRoles`, `syncPermissions`. Full list to be finalised when
-  the migration guide is drafted."*
+  the migration guide is drafted."_
 - **Files:** `src/Traits/HasRoles.php` (has `assignRole`,
   `revokeRole`, `removeRole` alias at line 169, `syncRoles`,
   `hasRole`, `getRoles`); `src/Traits/HasPermissions.php` (has
