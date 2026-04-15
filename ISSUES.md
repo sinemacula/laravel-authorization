@@ -132,23 +132,6 @@ most likely first-use path.
   carefully), or (c) ship a lightweight "StringPermissionEnum"
   convenience that consumers can register without defining their own.
 
-### 18. No shipped `AuthGuardPrincipalResolver` for standard Laravel Auth
-
-- **Files:** `src/Resolvers/` (only `NullPrincipalResolver.php`
-  present); `src/AuthorizationServiceProvider.php:64–70`
-  (resolver binding).
-- **Observation:** the default `PrincipalResolver` binding is
-  `NullPrincipalResolver`, which always returns `null` and therefore
-  always yields implicit deny. Any consumer using Laravel's auth guard
-  must write a custom resolver (e.g. `return auth()->user();`) and bind
-  it themselves — a four-line boilerplate that covers the majority case
-  for this package.
-- **Options:** ship an opt-in `AuthGuardPrincipalResolver` that wraps
-  `Auth::guard($config['defaults.guard'])->user()`. Keep
-  `NullPrincipalResolver` as the default (anonymous-safe by design) and
-  document the opt-in as the recommended wiring when the application
-  uses Laravel Auth. Non-breaking.
-
 ### 22. No row-level multi-tenant role / permission scoping
 
 - **Files:** `database/migrations/2026_04_14_000001_create_roles_table.php`
