@@ -15,7 +15,5 @@ namespace SineMacula\Laravel\Authorization\Traits;
  */
 trait Authorizable // @phpstan-ignore trait.unused
 {
-    use HasPermissions;
-    use HasPolicies;
-    use HasRoles;
+    use HasPermissions, HasPolicies, HasRoles;
 }

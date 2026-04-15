@@ -17,6 +17,7 @@ declare(strict_types = 1);
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use SineMacula\Laravel\Authorization\Database\MigrationCollisionGuard;
 
@@ -39,9 +40,20 @@ return new class extends Migration {
             $table->string('guard_name')->nullable();
             $table->string('description')->nullable();
             $table->timestamps();
-
-            $table->unique(['name', 'guard_name']);
         });
+
+        // Functional unique index on `(name, COALESCE(guard_name, ''))`.
+        // Ordinary UNIQUE(name, guard_name) would permit duplicate
+        // guard-agnostic rows because MySQL, PostgreSQL and SQLite all
+        // treat NULL as distinct inside unique indexes. COALESCE folds
+        // nulls to the empty string so the invariant
+        // "at most one row per (name, guard) pair, including the
+        // null-guard slot" is enforced at the data layer.
+        DB::statement(\sprintf(
+            "CREATE UNIQUE INDEX %s_name_guard_unique ON %s (name, (COALESCE(guard_name, '')))",
+            $table,
+            $table,
+        ));
     }
 
     /**

@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -20,7 +21,9 @@ use Tests\TestCase;
  * — the row applies to every guard. String lookups (`assignRole`,
  * `givePermission`, `hasRole`, `hasPermission`) resolve against the
  * configured default guard first and fall back to the guard-agnostic
- * row when no guard-specific match exists.
+ * row when no guard-specific match exists. The uniqueness invariant
+ * for the null-guard slot is enforced by a functional unique index
+ * on `(name, COALESCE(guard_name, ''))` at the data layer.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -144,5 +147,121 @@ final class GuardAgnosticLookupTest extends TestCase
         self::assertNotNull($assigned);
         self::assertSame($specific->getKey(), $assigned->getKey());
         self::assertNotSame($agnostic->getKey(), $assigned->getKey());
+    }
+
+    /**
+     * A second guard-agnostic role with the same name is rejected at
+     * save time.
+     *
+     * @return void
+     */
+    public function testDuplicateGuardAgnosticRoleIsRejected(): void
+    {
+        Role::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => self::ROLE_NAME,
+            'guard_name' => null,
+        ]);
+
+        $this->expectException(QueryException::class);
+
+        Role::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => self::ROLE_NAME,
+            'guard_name' => null,
+        ]);
+    }
+
+    /**
+     * A second guard-agnostic permission with the same name is
+     * rejected at save time.
+     *
+     * @return void
+     */
+    public function testDuplicateGuardAgnosticPermissionIsRejected(): void
+    {
+        Permission::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => self::PERMISSION_NAME,
+            'guard_name' => null,
+        ]);
+
+        $this->expectException(QueryException::class);
+
+        Permission::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => self::PERMISSION_NAME,
+            'guard_name' => null,
+        ]);
+    }
+
+    /**
+     * Guard-specific and guard-agnostic rows with the same name may
+     * co-exist — the unique-guard-agnostic invariant targets only
+     * the null-guard slot.
+     *
+     * @return void
+     */
+    public function testGuardSpecificAndGuardAgnosticMayCoexist(): void
+    {
+        Role::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => self::PRECEDENCE_ROLE,
+            'guard_name' => 'web',
+        ]);
+
+        $agnostic = Role::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => self::PRECEDENCE_ROLE,
+            'guard_name' => null,
+        ]);
+
+        self::assertSame(2, Role::query()->where('name', self::PRECEDENCE_ROLE)->count());
+        self::assertNotNull($agnostic->getKey());
+    }
+
+    /**
+     * Updating a guard-specific row to guard-agnostic fails when a
+     * guard-agnostic row with the same name already exists.
+     *
+     * @return void
+     */
+    public function testUpdatingToGuardAgnosticCollisionIsRejected(): void
+    {
+        Role::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => self::PRECEDENCE_ROLE,
+            'guard_name' => null,
+        ]);
+        $specific = Role::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => self::PRECEDENCE_ROLE,
+            'guard_name' => 'web',
+        ]);
+
+        $this->expectException(QueryException::class);
+
+        $specific->guard_name = null;
+        $specific->save();
+    }
+
+    /**
+     * Re-saving an existing guard-agnostic row (no data change) is
+     * allowed — the invariant ignores the row against itself.
+     *
+     * @return void
+     */
+    public function testResavingExistingGuardAgnosticRowIsAllowed(): void
+    {
+        $role = Role::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => self::ROLE_NAME,
+            'guard_name' => null,
+        ]);
+
+        $role->description = 'platform admin role';
+        $role->save();
+
+        self::assertSame('platform admin role', $role->fresh()?->description);
     }
 }

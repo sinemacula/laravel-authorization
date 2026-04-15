@@ -317,32 +317,6 @@ most likely first-use path.
   document the opt-in as the recommended wiring when the application
   uses Laravel Auth. Non-breaking.
 
-### 19. No cross-guard ("global") role / permission support — **RESOLVED**
-
-- **Decision:** option (a) — `guard_name` is now nullable. A null
-  value marks the row as guard-agnostic; `resolveRole` /
-  `resolvePermission` widen the lookup to match either the
-  configured default guard or a null guard, with guard-specific
-  rows taking precedence when both exist.
-- **Implementation:** migrations drop the NOT NULL constraint on
-  `guard_name` in both `roles` and `permissions`;
-  `HasRoles::resolveRole()` and `HasPermissions::resolvePermission()`
-  union the exact-guard match with `orWhereNull('guard_name')` and
-  order non-null guards first.
-- **Coverage:** `tests/Feature/GuardAgnosticLookupTest.php` pins the
-  four scenarios (guard-agnostic resolution, guard-specific
-  precedence) for roles and permissions.
-
-### 20. Single-guard apps carry unused `guard_name` complexity — **RESOLVED**
-
-- **Decision:** option (b) — kept a single schema shape. Single-guard
-  consumers set `guard_name` to the literal guard (usually `'web'`)
-  and see unchanged behaviour; consumers who want a fully
-  guard-agnostic role / permission set it to null. No config flag,
-  no schema variant.
-- **Implementation:** co-resolved with issue #19 in the same schema
-  change.
-
 ### 21. Role ↔ permission guard mismatch is not prevented
 
 - **Files:** `src/Models/Role.php:60–74` (`permissions()` relation, no
