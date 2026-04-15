@@ -4,10 +4,6 @@
         directories: [
             "src"
         ],
-        // Scoped gate: only the evaluation hot path and the manager are mutated here.
-        // Everything else (contracts, enums, exceptions, facades, service provider,
-        // models, traits of boilerplate shape) is covered by `infection.full.json5`
-        // on the scheduled job.
         excludes: [
             "AuthorizationServiceProvider.php",
             "Contracts",
@@ -30,22 +26,6 @@
     },
     timeout: 15,
     mutators: {
-        "@default": true,
-        // Visibility mutators on internal helpers produce equivalent mutants:
-        // a private/protected/public swap on a non-API method does not change
-        // observable behaviour through the public surface.
-        "PublicVisibility": false,
-        "ProtectedVisibility": false,
-        // array_values around array_map of strings is defensive — Infection
-        // sees it as redundant on already-list inputs but it documents intent.
-        "UnwrapArrayValues": false,
-        // array_unique on a name list is idempotent when the source already
-        // happens to be deduplicated by the test fixtures; keep the call but
-        // exclude the mutant since it does not reflect a behavioural
-        // regression for any realistic input.
-        "UnwrapArrayUnique": false,
-        // (string) cast on an Eloquent ULID key is documentation; the key
-        // already returns string in Laravel 12 / 13.
-        "CastString": false
+        "@default": true
     }
 }

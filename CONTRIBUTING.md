@@ -1,7 +1,6 @@
 # Contributing
 
-Contributions are welcome via GitHub pull requests. This guide covers the
-expectations for working on this package.
+Contributions are welcome via GitHub pull requests. This guide covers the expectations for working on this package.
 
 ## Requirements
 
@@ -32,8 +31,7 @@ Branch from `master` using the appropriate prefix:
 
 ### Commits
 
-This project uses [Conventional Commits](https://www.conventionalcommits.org/).
-Prefix your commit messages accordingly:
+This project uses [Conventional Commits](https://www.conventionalcommits.org/). Prefix your commit messages accordingly:
 
 ```text
 feat: add wildcard matching for policy resource patterns
@@ -88,18 +86,15 @@ vendor/bin/phpunit --filter testMethodName tests/Unit/SomeTest.php
 ## Pull Requests
 
 - Keep changes minimal and scoped to a single concern
-- Do not change static analysis or formatting configuration without prior
-  discussion
+- Do not change static analysis or formatting configuration without prior discussion
 - Include tests for new or changed behaviour
 - Ensure `composer check` and `composer test` pass
 
 ## Security
 
-If you discover a security vulnerability, please report it directly to
-Sine Macula rather than opening a public issue. See [SECURITY.md](SECURITY.md)
-for details.
+If you discover a security vulnerability, please report it directly to Sine Macula rather than opening a public issue.
+See [SECURITY.md](SECURITY.md) for details.
 
 ## License
 
-By contributing, you agree that your contributions will be licensed under
-the [Apache License 2.0](LICENSE).
+By contributing, you agree that your contributions will be licensed under the [Apache License 2.0](LICENSE).
