@@ -99,8 +99,25 @@ final class ConditionEvaluator
     /**
      * Log an unknown-operator warning and return false.
      *
-     * The call is wrapped in a try/catch so the evaluator remains
-     * usable in pure-PHP contexts such as benchmarks.
+     * The logger call is wrapped in a try/catch by design: the
+     * condition evaluator sits on the authorization hot path and
+     * must not abort a `can()` check because an observability
+     * back-end (a Laravel log facade root, a logging driver, a
+     * third-party collector) is unavailable. The intentional
+     * swallow covers three operating modes:
+     *
+     * - **Pure-PHP contexts** (benchmarks, standalone evaluator
+     *   use) where Laravel's `logger()` helper may not be bound.
+     * - **Container-less test runs** that construct the evaluator
+     *   directly without a facade root.
+     * - **Production outages** where the configured logging
+     *   driver fails — rare but real; no reason to cascade into
+     *   an authorization failure.
+     *
+     * Consumers who want unknown-operator events as hard signals
+     * should subscribe to the `DecisionEvaluated` event and
+     * inspect the trace — every skipped statement is recorded
+     * there with a `'conditions not satisfied'` reason.
      *
      * @param  string  $operator
      * @return bool
@@ -112,7 +129,7 @@ final class ConditionEvaluator
                 // @phpstan-ignore-next-line function.notFound
                 logger()->debug("Unknown authorization condition operator '{$operator}' — evaluated to false.");
             } catch (\Throwable) {
-                // Silently ignore logger failures.
+                // Intentional: see the method docblock above.
             }
         }
 

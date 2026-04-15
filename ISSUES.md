@@ -106,17 +106,6 @@ consumed into this file and removed from the repo.
 
 ## Observations (not spec gaps)
 
-### 13. `ConditionEvaluator::logUnknownOperator()` swallows logger errors silently
-
-- **File:** `src/Evaluation/ConditionEvaluator.php:108–120`.
-- **Observation:** the helper wraps the `logger()` call in a bare
-  `catch (\Throwable)` with no rethrow and no fallback emit. The §12.4
-  observability guarantee is therefore not enforced — in a container
-  context where the facade root is missing, the warning vanishes. This
-  is probably the right trade-off (the authorizer must not fail a
-  request because the logger is unavailable), but the behaviour is
-  undocumented.
-
 ### 14. Policy document versioning is present but unexercised
 
 - **File:** `src/Evaluation/Policy.php:20–34`, §15 open question 3.
