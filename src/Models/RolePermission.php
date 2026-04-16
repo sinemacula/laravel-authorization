@@ -149,9 +149,18 @@ class RolePermission extends Pivot
 
         $parent = $this->pivotParent;
 
+        // @codeCoverageIgnoreStart
+        // Defensive symmetry with resolveRoleParent(): pivotParent
+        // is only set by BelongsToMany traversal, and only Role's
+        // permissions() relation uses this pivot via `using()`.
+        // Reaching this branch requires a consumer-side
+        // `Permission::roles()` relation that opts into
+        // `->using(RolePermission::class)`, kept for forward
+        // symmetry when that override ships.
         if ($parent instanceof $permissionClass && $parent->id === $permissionId) {
             return $parent;
         }
+        // @codeCoverageIgnoreEnd
 
         if ($this->relationLoaded('permission')) {
             /** @var \SineMacula\Laravel\Authorization\Models\Permission|null $loaded */

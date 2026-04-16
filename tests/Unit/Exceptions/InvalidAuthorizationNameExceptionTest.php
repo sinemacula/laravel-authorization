@@ -67,7 +67,7 @@ final class InvalidAuthorizationNameExceptionTest extends TestCase
 
         self::assertSame('role', $exception->getKind());
         self::assertSame('has space', $exception->getName());
-        self::assertStringContainsString("Invalid role name 'has space'", $exception->getMessage());
+        self::assertStringContainsString('Invalid role name \'has space\'', $exception->getMessage());
         self::assertSame(422, $exception->getCode());
     }
 

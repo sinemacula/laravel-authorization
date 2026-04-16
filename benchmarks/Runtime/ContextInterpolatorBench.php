@@ -28,6 +28,9 @@ use SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator;
 #[Bench\OutputTimeUnit('microseconds')]
 final class ContextInterpolatorBench
 {
+    /** Resource string used by every subject. */
+    private const string RESOURCE = 'posts:42';
+
     /** Reusable interpolator across revolutions. */
     private ContextInterpolator $interpolator;
 
@@ -71,7 +74,7 @@ final class ContextInterpolatorBench
     #[Bench\Revs(5000)]
     public function benchNoTokens(): void
     {
-        $this->interpolator->interpolate('plain:resource:string', $this->principal, 'posts:42', $this->context);
+        $this->interpolator->interpolate('plain:resource:string', $this->principal, self::RESOURCE, $this->context);
     }
 
     /**
@@ -84,7 +87,7 @@ final class ContextInterpolatorBench
     #[Bench\Revs(2000)]
     public function benchTenTokens(): void
     {
-        $this->interpolator->interpolate($this->pattern10, $this->principal, 'posts:42', $this->context);
+        $this->interpolator->interpolate($this->pattern10, $this->principal, self::RESOURCE, $this->context);
     }
 
     /**
@@ -97,6 +100,6 @@ final class ContextInterpolatorBench
     #[Bench\Revs(1000)]
     public function benchTwentyTokens(): void
     {
-        $this->interpolator->interpolate($this->pattern20, $this->principal, 'posts:42', $this->context);
+        $this->interpolator->interpolate($this->pattern20, $this->principal, self::RESOURCE, $this->context);
     }
 }

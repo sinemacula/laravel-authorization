@@ -112,9 +112,11 @@ class Policy extends Model
 
         $encoded = \json_encode($document);
 
+        // @codeCoverageIgnoreStart — defensive: the preceding `EvaluationPolicy::fromArray` round-trip would itself have failed on a non-JSON-encodable payload (it calls `json_encode` during trace normalisation), so reaching this branch requires a resource type or a circular reference smuggled past the factory validator.
         if ($encoded === false) {
             throw new InvalidPolicyDocumentException(policyName: $this->resolveName(), reason: 'policy document is not JSON-encodable.');
         }
+        // @codeCoverageIgnoreEnd
 
         $this->attributes['document'] = $encoded;
     }

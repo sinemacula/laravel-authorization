@@ -36,6 +36,7 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversTrait(HasPolicies::class)]
+#[\PHPUnit\Framework\Attributes\CoversNothing]
 final class FailClosedPolicyHydrationTest extends TestCase
 {
     /**

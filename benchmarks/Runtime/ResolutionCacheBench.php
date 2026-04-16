@@ -124,26 +124,6 @@ final class ResolutionCacheBench
     }
 
     /**
-     * Build + prime a fresh cache for the forget benchmark.
-     *
-     * @return \SineMacula\Laravel\Authorization\Cache\ResolutionCache
-     */
-    private function newForgetTarget(): ResolutionCache
-    {
-        $arrayStore = new ArrayStore;
-        $repo       = new CacheRepository($arrayStore);
-        $cache      = new ResolutionCache(store: $repo, ttl: 0, prefix: 'bench-forget');
-
-        $context = new ResolutionCacheContext(roleIds: ['role-1']);
-
-        $cache->rememberRoles($this->principal, $this->roleResolver, $context);
-        $cache->rememberPermissions($this->principal, $this->permissionResolver, $context);
-        $cache->rememberPolicies($this->principal, $this->policyResolver, $context);
-
-        return $cache;
-    }
-
-    /**
      * Benchmark: memo-tier hit on `rememberRoles()` — the in-memory
      * lookup every second `can()` on the same principal pays.
      *
@@ -151,7 +131,7 @@ final class ResolutionCacheBench
      */
     #[Bench\BeforeMethods('setUp')]
     #[Bench\Iterations(3)]
-    #[Bench\Revs(10_000)]
+    #[Bench\Revs(10000)]
     public function benchRememberRolesMemoHit(): void
     {
         $this->memoOnly->rememberRoles($this->principal, $this->roleResolver);
@@ -164,7 +144,7 @@ final class ResolutionCacheBench
      */
     #[Bench\BeforeMethods('setUp')]
     #[Bench\Iterations(3)]
-    #[Bench\Revs(10_000)]
+    #[Bench\Revs(10000)]
     public function benchRememberPermissionsMemoHit(): void
     {
         $this->memoOnly->rememberPermissions($this->principal, $this->permissionResolver);
@@ -200,5 +180,25 @@ final class ResolutionCacheBench
     public function benchForgetTaggedPrincipal(): void
     {
         $this->forgetTarget->forget($this->principal);
+    }
+
+    /**
+     * Build + prime a fresh cache for the forget benchmark.
+     *
+     * @return \SineMacula\Laravel\Authorization\Cache\ResolutionCache
+     */
+    private function newForgetTarget(): ResolutionCache
+    {
+        $arrayStore = new ArrayStore;
+        $repo       = new CacheRepository($arrayStore);
+        $cache      = new ResolutionCache(store: $repo, ttl: 0, prefix: 'bench-forget');
+
+        $context = new ResolutionCacheContext(roleIds: ['role-1']);
+
+        $cache->rememberRoles($this->principal, $this->roleResolver, $context);
+        $cache->rememberPermissions($this->principal, $this->permissionResolver, $context);
+        $cache->rememberPolicies($this->principal, $this->policyResolver, $context);
+
+        return $cache;
     }
 }

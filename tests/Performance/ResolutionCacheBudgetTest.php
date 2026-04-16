@@ -34,6 +34,24 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
 final class ResolutionCacheBudgetTest extends TestCase
 {
     /**
+     * Permission name used across the memo-hit and round-trip
+     * subjects — deduplicated to a constant so the same literal
+     * does not appear inline in multiple places.
+     *
+     * @var string
+     */
+    private const string PERMISSION = 'posts:create';
+
+    /**
+     * Companion permission used alongside `PERMISSION` in the
+     * persistent-tier round-trip subject — deduplicated so the
+     * same literal does not appear inline.
+     *
+     * @var string
+     */
+    private const string PERMISSION_READ = 'posts:read';
+
+    /**
      * A primed memo-tier read must stay under ~1μs per call.
      * Observed ~2μs per call on the reference machine; budget is
      * 5× that for headroom against CI variance while still
@@ -46,14 +64,14 @@ final class ResolutionCacheBudgetTest extends TestCase
     {
         $cache     = new ResolutionCache(store: null, ttl: 0, prefix: 'budget');
         $principal = self::principal();
-        $resolver  = static fn (): array => ['posts:create', 'posts:read', 'posts:update'];
+        $resolver  = static fn (): array => [self::PERMISSION, self::PERMISSION_READ, 'posts:update'];
 
         // Prime the memo so the measured calls all hit the memo tier.
         $cache->rememberPermissions($principal, $resolver);
 
         $start = \microtime(true);
 
-        for ($i = 0; $i < 10_000; $i++) {
+        for ($i = 0; $i < 10000; $i++) {
             $cache->rememberPermissions($principal, $resolver);
         }
 
@@ -93,7 +111,7 @@ final class ResolutionCacheBudgetTest extends TestCase
 
         $writer->rememberPermissions(
             $principal,
-            static fn (): array => ['posts:create', 'posts:read'],
+            static fn (): array => [self::PERMISSION, self::PERMISSION_READ],
             $context,
         );
 
@@ -104,7 +122,7 @@ final class ResolutionCacheBudgetTest extends TestCase
         );
 
         self::assertSame(
-            ['posts:create', 'posts:read'],
+            [self::PERMISSION, self::PERMISSION_READ],
             $roundTrip,
             'Expected persistent-tier entry to round-trip via bounded-TTL write.',
         );

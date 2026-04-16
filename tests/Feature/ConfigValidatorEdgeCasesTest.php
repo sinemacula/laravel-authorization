@@ -4,8 +4,8 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
-use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Container\Container;
+use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
@@ -153,7 +153,7 @@ final class ConfigValidatorEdgeCasesTest extends TestCase
             ConfigValidator::validate((array) $config->get('authorization'), $this->app);
             self::fail('Expected InvalidAuthorizationConfigException.');
         } catch (InvalidAuthorizationConfigException $exception) {
-            self::assertStringContainsString('stdClass', $exception->getMessage());
+            self::assertStringContainsString(\stdClass::class, $exception->getMessage());
         }
     }
 }

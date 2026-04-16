@@ -47,7 +47,7 @@ final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
     {
         Facade::clearResolvedInstances();
         Facade::setFacadeApplication(null);
-        Mockery::close();
+        \Mockery::close();
 
         parent::tearDown();
     }
@@ -126,7 +126,7 @@ final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
      */
     public function testOfferPublishingSkipsWhenNotInConsole(): void
     {
-        $app = Mockery::mock(Application::class);
+        $app = \Mockery::mock(Application::class);
         $app->shouldReceive('runningInConsole')->once()->andReturnFalse();
 
         Facade::setFacadeApplication($app);
@@ -150,7 +150,7 @@ final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
         $container = new Container;
 
         /** @var \Illuminate\Contracts\Foundation\Application $app */
-        $app = Mockery::mock(Application::class);
+        $app = \Mockery::mock(Application::class);
         $app->shouldReceive('bound')->andReturnUsing(static fn (string $abstract): bool => $container->bound($abstract));
         $app->shouldReceive('runningInConsole')->andReturnFalse();
         $app->shouldReceive('make')->andReturnUsing(static fn (string $abstract): mixed => $container->make($abstract));

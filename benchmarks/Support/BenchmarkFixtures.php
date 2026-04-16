@@ -121,11 +121,11 @@ final class BenchmarkFixtures
         return [
             'tenant'  => 'tenant-99',
             'request' => [
-                'ip'        => '10.0.0.42',
-                'method'    => 'POST',
-                'path'      => '/admin/posts/99',
-                'country'   => 'US',
-                'referrer'  => 'https://example.test/dashboard',
+                'ip'         => '10.0.0.42',
+                'method'     => 'POST',
+                'path'       => '/admin/posts/99',
+                'country'    => 'US',
+                'referrer'   => 'https://example.test/dashboard',
                 'user_agent' => 'Mozilla/5.0',
             ],
             'environment' => 'production',

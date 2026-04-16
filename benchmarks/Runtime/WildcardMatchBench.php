@@ -36,6 +36,9 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
 #[Bench\OutputTimeUnit('microseconds')]
 final class WildcardMatchBench
 {
+    /** Action string the shallow / literal subjects match against. */
+    private const string ASKED_ACTION = 'posts:create';
+
     /** Statement carrying a single shallow prefix pattern. */
     private Statement $shallow;
 
@@ -64,7 +67,7 @@ final class WildcardMatchBench
 
         $this->literal = new Statement(
             effect: PolicyEffect::ALLOW,
-            actions: ['posts:create'],
+            actions: [self::ASKED_ACTION],
         );
 
         // 10-segment deep glob — matches a `a:b:c:...:j` action.
@@ -92,10 +95,10 @@ final class WildcardMatchBench
      */
     #[Bench\BeforeMethods('setUp')]
     #[Bench\Iterations(3)]
-    #[Bench\Revs(10_000)]
+    #[Bench\Revs(10000)]
     public function benchShallowPrefixMatch(): void
     {
-        $this->shallow->matches('posts:create');
+        $this->shallow->matches(self::ASKED_ACTION);
     }
 
     /**
@@ -105,10 +108,10 @@ final class WildcardMatchBench
      */
     #[Bench\BeforeMethods('setUp')]
     #[Bench\Iterations(3)]
-    #[Bench\Revs(10_000)]
+    #[Bench\Revs(10000)]
     public function benchLiteralMatch(): void
     {
-        $this->literal->matches('posts:create');
+        $this->literal->matches(self::ASKED_ACTION);
     }
 
     /**
@@ -118,7 +121,7 @@ final class WildcardMatchBench
      */
     #[Bench\BeforeMethods('setUp')]
     #[Bench\Iterations(3)]
-    #[Bench\Revs(10_000)]
+    #[Bench\Revs(10000)]
     public function benchDeepPatternMatch(): void
     {
         $this->deep->matches('a:b:c:d:e:f:g:h:i:j');
@@ -135,6 +138,6 @@ final class WildcardMatchBench
     #[Bench\Revs(1000)]
     public function benchHundredPatternMiss(): void
     {
-        $this->miss->matches('posts:create');
+        $this->miss->matches(self::ASKED_ACTION);
     }
 }
