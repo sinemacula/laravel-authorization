@@ -28,7 +28,6 @@ use Tests\TestCase;
  *
  * @internal
  */
-#[\PHPUnit\Framework\Attributes\CoversNothing]
 class TenantScopingTest extends TestCase
 {
     public function testNullResolverShowsAllRoles(): void

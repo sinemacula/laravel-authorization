@@ -32,7 +32,6 @@ use Tests\TestCase;
  */
 #[CoversTrait(HasRoles::class)]
 #[CoversTrait(HasPermissions::class)]
-#[\PHPUnit\Framework\Attributes\CoversNothing]
 final class GuardAgnosticLookupTest extends TestCase
 {
     /** Permission name used across the guard-agnostic permission scenarios. */

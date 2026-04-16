@@ -26,7 +26,6 @@ use Tests\TestCase;
 #[CoversTrait(HasRoles::class)]
 #[CoversTrait(HasPermissions::class)]
 #[CoversTrait(HasPolicies::class)]
-#[\PHPUnit\Framework\Attributes\CoversNothing]
 final class TraitsCoverageTest extends TestCase
 {
     /**

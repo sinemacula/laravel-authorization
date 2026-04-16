@@ -24,7 +24,6 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversTrait(HasRoles::class)]
-#[\PHPUnit\Framework\Attributes\CoversNothing]
 final class PolymorphicIdentityTest extends TestCase
 {
     /**
