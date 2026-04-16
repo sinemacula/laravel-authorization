@@ -44,6 +44,24 @@ final class MigrateSpatieCommandTest extends TestCase
     }
 
     /**
+     * Drop the Spatie-style fixture tables so they do not leak across
+     * tests on persistent-connection drivers (MySQL / Postgres). The
+     * shipped `TestCase::defineDatabaseMigrations()` already drops the
+     * package's own tables via `authorization.tables`; this hook
+     * cleans up the Spatie-style tables the migration command reads.
+     *
+     * @return void
+     */
+    protected function tearDown(): void
+    {
+        foreach (['model_has_permissions', 'model_has_roles', 'role_has_permissions', 'permissions', 'roles'] as $table) {
+            Schema::dropIfExists($table);
+        }
+
+        parent::tearDown();
+    }
+
+    /**
      * Full migration copies all five Spatie tables into the package tables.
      *
      * @return void

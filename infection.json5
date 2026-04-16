@@ -13,6 +13,8 @@
             "Exceptions",
             "Facades",
             "Models",
+            "Observers",
+            "Registrars",
             "Resolvers"
         ]
     },

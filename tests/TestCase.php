@@ -26,6 +26,39 @@ use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
  */
 abstract class TestCase extends OrchestraTestCase
 {
+    /** Process-level flag so the Testbench Blade view cache is cleared once per phpunit run. */
+    private static bool $viewCacheCleared = false;
+
+    /**
+     * Clear Testbench's shared compiled-view cache once per phpunit
+     * process. Blade compiles anonymous templates (including those
+     * passed to `Blade::render()`) into
+     * `vendor/orchestra/testbench-core/laravel/storage/framework/views/`
+     * keyed by template-string hash. The directory persists across
+     * runs, so a compiled template baked without a directive that
+     * later gets registered keeps producing uncompiled output until
+     * the cache is flushed. Clearing per-process keeps the fix cheap
+     * (one sweep per worker, not per test).
+     *
+     * @return void
+     */
+    protected function setUp(): void
+    {
+        if (!self::$viewCacheCleared) {
+            $views = __DIR__ . '/../vendor/orchestra/testbench-core/laravel/storage/framework/views';
+
+            if (\is_dir($views)) {
+                foreach (\glob($views . '/*.php') ?: [] as $file) {
+                    @\unlink($file);
+                }
+            }
+
+            self::$viewCacheCleared = true;
+        }
+
+        parent::setUp();
+    }
+
     /**
      * Register the package service provider.
      *
