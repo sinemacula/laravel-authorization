@@ -65,7 +65,7 @@ return new class extends Migration {
         // "at most one row per (name, guard) pair, including the
         // null-guard slot" is enforced at the data layer.
         DB::statement(\sprintf(
-            "CREATE UNIQUE INDEX %s_name_guard_unique ON %s (name, (COALESCE(guard_name, '')))",
+            'CREATE UNIQUE INDEX %s_name_guard_unique ON %s (name, (COALESCE(guard_name, \'\')))',
             $table,
             $table,
         ));

@@ -7,39 +7,39 @@ namespace Tests\Feature;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
-use SineMacula\Laravel\Authorization\Contracts\PolicyRepository;
+use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
-use SineMacula\Laravel\Authorization\DecisionJournal;
 use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
+use SineMacula\Laravel\Authorization\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Models\Policy as PolicyModel;
-use SineMacula\Laravel\Authorization\Repositories\DefaultPolicyRepository;
+use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Feature coverage for the `PolicyRepository` seam and the
- * `DecisionJournal` / `Authorization::lastDecision()` surface.
+ * Feature coverage for the `PolicyResolver` seam and the
+ * `LastDecisionStore` / `Authorization::lastDecision()` surface.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
  */
-#[CoversClass(DefaultPolicyRepository::class)]
-#[CoversClass(DecisionJournal::class)]
+#[CoversClass(DefaultPolicyResolver::class)]
+#[CoversClass(LastDecisionStore::class)]
 #[CoversClass(AuthorizationManager::class)]
-final class PolicyRepositoryAndJournalTest extends TestCase
+final class PolicyResolverAndLastDecisionStoreTest extends TestCase
 {
     /**
-     * `DefaultPolicyRepository` returns the principal's attached
+     * `DefaultPolicyResolver` returns the principal's attached
      * policies when no external store is configured.
      *
      * @return void
      */
-    public function testDefaultRepositoryReturnsPrincipalPolicies(): void
+    public function testDefaultResolverReturnsPrincipalPolicies(): void
     {
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->attachPolicy(PolicyModel::create([
@@ -50,21 +50,21 @@ final class PolicyRepositoryAndJournalTest extends TestCase
             ],
         ]));
 
-        $repository = new DefaultPolicyRepository;
+        $resolver = new DefaultPolicyResolver;
 
-        $policies = $repository->policiesFor($user->fresh());
+        $policies = $resolver->policiesFor($user->fresh());
 
         self::assertCount(1, $policies);
         self::assertSame('allow-x', $policies[0]->name);
     }
 
     /**
-     * `DefaultPolicyRepository` unions the store's policies with
+     * `DefaultPolicyResolver` unions the store's policies with
      * the principal's attached policies.
      *
      * @return void
      */
-    public function testDefaultRepositoryUnionsStoreWithPrincipalPolicies(): void
+    public function testDefaultResolverUnionsStoreWithPrincipalPolicies(): void
     {
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->attachPolicy(PolicyModel::create([
@@ -89,9 +89,9 @@ final class PolicyRepositoryAndJournalTest extends TestCase
             }
         };
 
-        $repository = new DefaultPolicyRepository(store: $store);
+        $resolver = new DefaultPolicyResolver(store: $store);
 
-        $policies = $repository->policiesFor($user->fresh());
+        $policies = $resolver->policiesFor($user->fresh());
         $names    = \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $policies);
 
         self::assertCount(2, $policies);
@@ -100,20 +100,20 @@ final class PolicyRepositoryAndJournalTest extends TestCase
     }
 
     /**
-     * Binding a custom `PolicyRepository` swaps the gathering
+     * Binding a custom `PolicyResolver` swaps the gathering
      * strategy — the manager never hits the Eloquent layer when
-     * the repository returns a fixed list.
+     * the resolver returns a fixed list.
      *
      * @return void
      */
-    public function testCustomRepositoryOverridesTheGatheringStrategy(): void
+    public function testCustomResolverOverridesTheGatheringStrategy(): void
     {
         $fixed = EvaluationPolicy::fromArray([
             'name'       => 'fixed',
             'statements' => [['effect' => 'allow', 'actions' => ['fixed:act']]],
         ]);
 
-        $this->app->instance(PolicyRepository::class, new class ($fixed) implements PolicyRepository {
+        $this->app->instance(PolicyResolver::class, new class ($fixed) implements PolicyResolver {
             public function __construct(private readonly EvaluationPolicy $policy) {}
 
             public function policiesFor(object $principal): array
@@ -165,7 +165,7 @@ final class PolicyRepositoryAndJournalTest extends TestCase
 
     /**
      * `Authorization::lastDecision()` survives `withPolicies()`
-     * scoping too — the journal is shared across every clone.
+     * scoping too — the store is shared across every clone.
      *
      * @return void
      */
@@ -188,13 +188,13 @@ final class PolicyRepositoryAndJournalTest extends TestCase
     }
 
     /**
-     * `forgetLastDecision()` clears the journal so long-running
+     * `forgetLastDecision()` clears the store so long-running
      * workers can reset between requests without a stale decision
      * leaking through.
      *
      * @return void
      */
-    public function testForgetLastDecisionClearsTheJournal(): void
+    public function testForgetLastDecisionClearsTheStore(): void
     {
         $user = $this->bindResolvableUser();
 

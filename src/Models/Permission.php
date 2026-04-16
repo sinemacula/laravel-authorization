@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -71,6 +72,16 @@ class Permission extends Model
      * @var bool
      */
     private bool $systemProtectionBypassed = false;
+
+    /**
+     * Pre-save attribute snapshot captured on `updating` and
+     * consumed by the `updated` listener so `PermissionUpdated`
+     * carries a complete before/after diff. Reset after each
+     * dispatch so a follow-up save observes a clean slate.
+     *
+     * @var array<string, mixed>
+     */
+    private array $beforeChangeSnapshot = [];
 
     /**
      * Create a new Eloquent model instance.
@@ -156,19 +167,7 @@ class Permission extends Model
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
         $class = config('authorization.models.permission', static::class);
 
-        /**
-         * @var \SineMacula\Laravel\Authorization\Models\Permission|null $model
-         *
-         * @phpstan-ignore staticMethod.dynamicCall
-         */
-        $model = $class::query()
-            ->where('name', $name)
-            ->where(static function ($query) use ($guard): void {
-                // @phpstan-ignore staticMethod.dynamicCall
-                $query->where('guard_name', $guard)->orWhereNull('guard_name');
-            })
-            ->orderByRaw('guard_name IS NULL')
-            ->first();
+        $model = self::queryForGuard($class, $name, $guard)->first();
 
         if ($model === null) {
             throw new UnknownPermissionException($name);
@@ -196,6 +195,14 @@ class Permission extends Model
             if ($permission->wasSystemPermissionRenamed()) {
                 $permission->assertSystemProtectionAllows('rename');
             }
+
+            $snapshot = [];
+
+            foreach (\array_keys($permission->getDirty()) as $key) {
+                $snapshot[$key] = $permission->getOriginal($key);
+            }
+
+            $permission->beforeChangeSnapshot = $snapshot;
         });
 
         static::created(static function (self $permission): void {
@@ -203,7 +210,12 @@ class Permission extends Model
         });
 
         static::updated(static function (self $permission): void {
-            Event::dispatch(new PermissionUpdated($permission, $permission->getChanges()));
+            Event::dispatch(new PermissionUpdated($permission, [
+                'before' => $permission->beforeChangeSnapshot,
+                'after'  => $permission->getChanges(),
+            ]));
+
+            $permission->beforeChangeSnapshot = [];
         });
 
         static::deleted(static function (self $permission): void {
@@ -230,6 +242,52 @@ class Permission extends Model
     protected function getAuthorizationNameKind(): string
     {
         return 'permission';
+    }
+
+    /**
+     * Build the guard-precedence query for the supplied permission
+     * name. Centralises the dynamic class-string handling so the
+     * caller stays readable and the two unavoidable PHPStan
+     * suppressions live in one place.
+     *
+     * The configured permission model is instantiated through `new
+     * $class` so PHPStan resolves the receiver as an Eloquent
+     * `Model` instance — `newQuery()`, `where()`, and the closure
+     * receiver type cleanly without ignores. The remaining two
+     * suppressions on `orderByRaw()` and `orWhereNull()` exist
+     * because Laravel declares those methods via `@method static`
+     * annotations on `Illuminate\Database\Eloquent\Builder`, which
+     * PHPStan flags as `staticMethod.dynamicCall` whenever they
+     * appear inside an instance-method chain. They are runtime-
+     * dynamic instance calls; the static-receiver shape is a
+     * docblock artefact of Laravel's annotation soup, not the
+     * actual call dispatch.
+     *
+     * @param  class-string<\SineMacula\Laravel\Authorization\Models\Permission>  $class
+     * @param  string  $name
+     * @param  string  $guard
+     * @return \Illuminate\Database\Eloquent\Builder<\SineMacula\Laravel\Authorization\Models\Permission>
+     */
+    private static function queryForGuard(string $class, string $name, string $guard): Builder
+    {
+        $instance = new $class;
+
+        // The chain ends in `orderByRaw()`, which Laravel declares
+        // as `@method static` on Illuminate\Database\Eloquent\Builder.
+        // PHPStan flags any dynamic call to such a method as
+        // `staticMethod.dynamicCall` even though runtime dispatch is
+        // genuinely dynamic instance dispatch on a Builder instance.
+        // The same applies to `orWhereNull()` inside the closure
+        // below. Both ignores are docblock-soup artefacts, not
+        // unsafe calls.
+        // @phpstan-ignore staticMethod.dynamicCall
+        return $instance->newQuery()
+            ->where('name', $name)
+            ->where(static function (Builder $query) use ($guard): void {
+                // @phpstan-ignore staticMethod.dynamicCall
+                $query->where('guard_name', $guard)->orWhereNull('guard_name');
+            })
+            ->orderByRaw('guard_name IS NULL');
     }
 
     /**

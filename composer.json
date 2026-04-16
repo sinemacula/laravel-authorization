@@ -55,7 +55,10 @@
         "psr-4": {
             "Benchmarks\\": "benchmarks/",
             "Tests\\": "tests/"
-        }
+        },
+        "files": [
+            "tests/Feature/Stubs/octane_request_terminated.php"
+        ]
     },
     "scripts": {
         "check": [

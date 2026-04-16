@@ -39,7 +39,7 @@ final class RoleGuardParityTest extends TestCase
      */
     public function testSameGuardAttachmentSucceeds(): void
     {
-        $role = $this->role(guard: 'web');
+        $role       = $this->role(guard: 'web');
         $permission = $this->permission(guard: 'web');
 
         $role->givePermission($permission);
@@ -55,7 +55,7 @@ final class RoleGuardParityTest extends TestCase
      */
     public function testCrossGuardAttachmentViaApiIsRejected(): void
     {
-        $role = $this->role(guard: 'web');
+        $role       = $this->role(guard: 'web');
         $permission = $this->permission(guard: 'api');
 
         $this->expectException(GuardMismatchException::class);
@@ -71,7 +71,7 @@ final class RoleGuardParityTest extends TestCase
      */
     public function testCrossGuardAttachmentViaRawRelationIsRejected(): void
     {
-        $role = $this->role(guard: 'web');
+        $role       = $this->role(guard: 'web');
         $permission = $this->permission(guard: 'api');
 
         $this->expectException(GuardMismatchException::class);
@@ -86,7 +86,7 @@ final class RoleGuardParityTest extends TestCase
      */
     public function testCrossGuardAttachmentViaSyncIsRejected(): void
     {
-        $role = $this->role(guard: 'web');
+        $role       = $this->role(guard: 'web');
         $permission = $this->permission(guard: 'api');
 
         $this->expectException(GuardMismatchException::class);
@@ -102,7 +102,7 @@ final class RoleGuardParityTest extends TestCase
      */
     public function testGuardAgnosticPermissionAttachesToGuardSpecificRole(): void
     {
-        $role = $this->role(guard: 'web');
+        $role       = $this->role(guard: 'web');
         $permission = $this->permission(guard: null);
 
         $role->givePermission($permission);
@@ -117,7 +117,7 @@ final class RoleGuardParityTest extends TestCase
      */
     public function testGuardSpecificPermissionAttachesToGuardAgnosticRole(): void
     {
-        $role = $this->role(guard: null);
+        $role       = $this->role(guard: null);
         $permission = $this->permission(guard: 'api');
 
         $role->givePermission($permission);
@@ -132,7 +132,7 @@ final class RoleGuardParityTest extends TestCase
      */
     public function testBothGuardAgnosticAttachesSucceeds(): void
     {
-        $role = $this->role(guard: null);
+        $role       = $this->role(guard: null);
         $permission = $this->permission(guard: null);
 
         $role->givePermission($permission);
@@ -149,7 +149,7 @@ final class RoleGuardParityTest extends TestCase
      */
     public function testExceptionCarriesBothNamesAndGuards(): void
     {
-        $role = $this->role(guard: 'web', name: 'editor');
+        $role       = $this->role(guard: 'web', name: 'editor');
         $permission = $this->permission(guard: 'api', name: 'api:call');
 
         try {

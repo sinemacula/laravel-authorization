@@ -6,10 +6,13 @@ namespace SineMacula\Laravel\Authorization\Traits;
 
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use SineMacula\Laravel\Authorization\Events\IdentityPermissionExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\IdentityPermissionGranted;
 use SineMacula\Laravel\Authorization\Events\IdentityPermissionRevoked;
+use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\AuthorizableGrantPivot;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -83,6 +86,8 @@ trait HasPermissions // @phpstan-ignore trait.unused
     {
         $model = $this->resolvePermission($permission);
 
+        $prior = $this->readPermissionPivot($model);
+
         $this->permissions()->syncWithoutDetaching([
             (string) $model->getKey() => ['expires_at' => $expiresAt],
         ]);
@@ -92,6 +97,15 @@ trait HasPermissions // @phpstan-ignore trait.unused
         }
 
         Event::dispatch(new IdentityPermissionGranted($this, $model));
+
+        if ($prior['exists'] && !self::permissionExpiriesEqual($prior['expires_at'], $expiresAt)) {
+            Event::dispatch(new IdentityPermissionExpiryChanged(
+                $this,
+                $model,
+                $prior['expires_at'],
+                $expiresAt,
+            ));
+        }
 
         return $this;
     }
@@ -122,6 +136,14 @@ trait HasPermissions // @phpstan-ignore trait.unused
     /**
      * Replace this identity's direct permissions with the supplied set.
      *
+     * Each net attachment fires `IdentityPermissionGranted` and
+     * each net detachment fires `IdentityPermissionRevoked`, so
+     * audit consumers receive the same per-row signal they would
+     * for `givePermission()` / `revokePermission()` calls and the
+     * cache invalidation listener wired to those events keeps
+     * the resolution cache coherent without a separate forget
+     * call in this method.
+     *
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Permission|string>  $permissions
      * @return static
      *
@@ -129,24 +151,27 @@ trait HasPermissions // @phpstan-ignore trait.unused
      */
     public function syncPermissions(array $permissions): static
     {
-        $ids = \array_values(\array_map(
-            fn (Permission|string $permission): string => (string) $this->resolvePermission($permission)->getKey(),
-            $permissions,
-        ));
+        $resolved = [];
 
-        $this->permissions()->sync($ids);
+        foreach ($permissions as $permission) {
+            $model                               = $this->resolvePermission($permission);
+            $resolved[(string) $model->getKey()] = $model;
+        }
+
+        $ids    = \array_keys($resolved);
+        $result = $this->permissions()->sync($ids);
 
         if (isset($this->relations['permissions'])) {
             unset($this->relations['permissions']);
         }
 
-        // sync() bypasses givePermission / revokePermission and so
-        // fires no IdentityPermissionGranted /
-        // IdentityPermissionRevoked events — invalidate the
-        // resolution cache directly so the next getPermissions()
-        // observes the fresh set.
-        if (app()->bound(ResolutionCache::class)) {
-            app(ResolutionCache::class)->forget($this);
+        /** @var array{attached?: array<int, mixed>, detached?: array<int, mixed>, updated?: array<int, mixed>} $result */
+        foreach ($result['attached'] ?? [] as $id) {
+            Event::dispatch(new IdentityPermissionGranted($this, $resolved[(string) $id] ?? $this->resolvePermissionById((string) $id)));
+        }
+
+        foreach ($result['detached'] ?? [] as $id) {
+            Event::dispatch(new IdentityPermissionRevoked($this, $this->resolvePermissionById((string) $id)));
         }
 
         return $this;
@@ -274,6 +299,109 @@ trait HasPermissions // @phpstan-ignore trait.unused
             : null;
 
         return $class::resolveByName($permission, $guard);
+    }
+
+    /**
+     * Read the existing pivot row for the supplied permission
+     * and return its existence and `expires_at` value. Returns
+     * `['exists' => false, 'expires_at' => null]` when no row
+     * exists. The query bypasses the relation's expiry filter so
+     * it observes both live and expired pivot rows — both are
+     * candidates for an expiry mutation by a re-call to
+     * `givePermission()`.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Permission  $permission
+     * @return array{exists: bool, expires_at: \DateTimeInterface|null}
+     */
+    private function readPermissionPivot(Permission $permission): array
+    {
+        /** @var string $table */
+        $table = config('authorization.tables.authorizable_permissions', 'authorizable_permissions');
+
+        $row = DB::table($table)
+            ->where('authorizable_type', $this->getMorphClass())
+            ->where('authorizable_id', (string) $this->getKey())
+            ->where('permission_id', (string) $permission->getKey())
+            ->first();
+
+        if ($row === null) {
+            return ['exists' => false, 'expires_at' => null];
+        }
+
+        return [
+            'exists'     => true,
+            'expires_at' => self::coercePermissionExpiry($row->expires_at ?? null),
+        ];
+    }
+
+    /**
+     * Coerce a raw pivot `expires_at` value into a
+     * DateTimeInterface or null.
+     *
+     * @param  mixed  $value
+     * @return \DateTimeInterface|null
+     */
+    private static function coercePermissionExpiry(mixed $value): ?\DateTimeInterface
+    {
+        if ($value instanceof \DateTimeInterface) {
+            return $value;
+        }
+
+        if (\is_string($value) && $value !== '') {
+            return Carbon::parse($value);
+        }
+
+        return null;
+    }
+
+    /**
+     * Compare two expiry values for equality. Two nulls are
+     * equal (forever vs. forever); a null and a concrete instant
+     * differ; two concrete instants are compared by UTC
+     * timestamp so DST and timezone normalisation do not produce
+     * spurious false positives.
+     *
+     * @param  \DateTimeInterface|null  $left
+     * @param  \DateTimeInterface|null  $right
+     * @return bool
+     */
+    private static function permissionExpiriesEqual(?\DateTimeInterface $left, ?\DateTimeInterface $right): bool
+    {
+        if ($left === null && $right === null) {
+            return true;
+        }
+
+        if ($left === null || $right === null) {
+            return false;
+        }
+
+        return $left->getTimestamp() === $right->getTimestamp();
+    }
+
+    /**
+     * Resolve a permission model by primary key, used by
+     * `syncPermissions()` when the sync delta surfaces an ID
+     * that was not part of the caller's input set (the
+     * detachment list).
+     *
+     * @param  string  $id
+     * @return \SineMacula\Laravel\Authorization\Models\Permission
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
+     */
+    private function resolvePermissionById(string $id): Permission
+    {
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
+        $class = config('authorization.models.permission', Permission::class);
+
+        /** @var \SineMacula\Laravel\Authorization\Models\Permission|null $model */
+        $model = $class::query()->whereKey($id)->first();
+
+        if ($model === null) {
+            throw new UnknownPermissionException($id);
+        }
+
+        return $model;
     }
 
     /**

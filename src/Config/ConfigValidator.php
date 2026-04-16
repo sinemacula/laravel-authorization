@@ -100,10 +100,7 @@ final class ConfigValidator
                 GateConflictMode::cases(),
             );
 
-            throw new InvalidAuthorizationConfigException(
-                'authorization.gate.on_conflict',
-                'expected one of [' . \implode(', ', $accepted) . '], got ' . self::describe($value) . '.',
-            );
+            throw new InvalidAuthorizationConfigException('authorization.gate.on_conflict', 'expected one of [' . \implode(', ', $accepted) . '], got ' . self::describe($value) . '.');
         }
     }
 
@@ -119,12 +116,7 @@ final class ConfigValidator
     private static function validatePrincipalResolver(mixed $value): void
     {
         if ($value === null) {
-            throw new InvalidAuthorizationConfigException(
-                'authorization.principal_resolver',
-                'a principal resolver class is required; set it to '
-                    . '\\SineMacula\\Laravel\\Authorization\\Resolvers\\NullPrincipalResolver'
-                    . ' to keep the package anonymous-safe.',
-            );
+            throw new InvalidAuthorizationConfigException('authorization.principal_resolver', 'a principal resolver class is required; set it to \SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver to keep the package anonymous-safe.');
         }
 
         self::assertImplementsContract(

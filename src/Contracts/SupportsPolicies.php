@@ -25,23 +25,23 @@ interface SupportsPolicies
     /**
      * Attach the given policy to this identity.
      *
-     * @param  \SineMacula\Laravel\Authorization\Models\Policy|\Illuminate\Database\Eloquent\Model  $policy
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return static
      */
-    public function attachPolicy(PolicyModel|Model $policy): static;
+    public function attachPolicy(Model|PolicyModel $policy): static;
 
     /**
      * Detach the given policy from this identity.
      *
-     * @param  \SineMacula\Laravel\Authorization\Models\Policy|\Illuminate\Database\Eloquent\Model  $policy
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return static
      */
-    public function detachPolicy(PolicyModel|Model $policy): static;
+    public function detachPolicy(Model|PolicyModel $policy): static;
 
     /**
      * Replace the identity's attached policies with the supplied set.
      *
-     * @param  array<int, \SineMacula\Laravel\Authorization\Models\Policy|\Illuminate\Database\Eloquent\Model>  $policies
+     * @param  array<int, \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Models\Policy>  $policies
      * @return static
      */
     public function syncPolicies(array $policies): static;

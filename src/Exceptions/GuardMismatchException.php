@@ -45,7 +45,7 @@ class GuardMismatchException extends \RuntimeException
         parent::__construct(
             "Guard mismatch: role '{$roleName}' (guard '{$roleGuard}') cannot carry"
                 . " permission '{$permissionName}' (guard '{$permissionGuard}')."
-                . " Scope one side to null for a guard-agnostic attachment, or match the guards.",
+                . ' Scope one side to null for a guard-agnostic attachment, or match the guards.',
             422,
         );
     }

@@ -364,8 +364,10 @@ final class BladeDirectivesTest extends TestCase
      * matching `@endunless<name>` alias — a migrated Spatie view
      * that uses `@endunlesshasrole`, `@endunlesshasanyrole`,
      * `@endunlesshasallroles`, `@endunlesspermission`,
-     * `@endunlessanypermission`, or `@endunlessallpermissions`
-     * compiles cleanly alongside `@endunlessrole` (see issue #86).
+     * `@endunlessanypermission`, `@endunlessallpermissions`,
+     * `@endunlesshaspermission`, `@endunlesshasanypermission`, or
+     * `@endunlesshasallpermissions` compiles cleanly alongside
+     * `@endunlessrole` (see issues #85, #86).
      *
      * @return void
      */
@@ -387,6 +389,9 @@ final class BladeDirectivesTest extends TestCase
             '@unlesspermission(\'posts:draft\') yes @endunlesspermission',
             '@unlessanypermission([\'posts:draft\']) yes @endunlessanypermission',
             '@unlessallpermissions([\'posts:draft\']) yes @endunlessallpermissions',
+            '@unlesshaspermission(\'posts:draft\') yes @endunlesshaspermission',
+            '@unlesshasanypermission([\'posts:draft\']) yes @endunlesshasanypermission',
+            '@unlesshasallpermissions([\'posts:draft\']) yes @endunlesshasallpermissions',
         ];
 
         foreach ($closings as $template) {
@@ -417,6 +422,52 @@ final class BladeDirectivesTest extends TestCase
 
         $user->assignRole('editor');
         self::assertSame('yes', $this->render('@hasallroles([\'admin\', \'editor\']) yes @endhasallroles'));
+    }
+
+    /**
+     * `@haspermission`, `@hasanypermission`, `@hasallpermissions`
+     * are the permission-side Spatie-compat aliases — they must
+     * behave identically to their canonical counterparts so a
+     * migrated view renders unchanged (see issue #85).
+     *
+     * @return void
+     */
+    public function testSpatiePermissionAliasesMatchCanonicalBehaviour(): void
+    {
+        Permission::create(['id' => (string) Str::uuid(), 'name' => self::PERMISSION, 'guard_name' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:delete', 'guard_name' => 'web']);
+
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user->givePermission(self::PERMISSION);
+
+        $this->actAs($user);
+
+        self::assertSame('yes', $this->render('@haspermission(\'' . self::PERMISSION . '\') yes @endhaspermission'));
+        self::assertSame('yes', $this->render('@hasanypermission([\'posts:delete\', \'' . self::PERMISSION . '\']) yes @endhasanypermission'));
+        self::assertSame('', $this->render('@hasallpermissions([\'' . self::PERMISSION . '\', \'posts:delete\']) yes @endhasallpermissions'));
+
+        $user->givePermission('posts:delete');
+        self::assertSame('yes', $this->render('@hasallpermissions([\'' . self::PERMISSION . '\', \'posts:delete\']) yes @endhasallpermissions'));
+    }
+
+    /**
+     * `@unlesshaspermission` / `@unlesshasanypermission` /
+     * `@unlesshasallpermissions` close with the Spatie-shaped
+     * `@endunless<name>` directives. Anonymous principal evaluates
+     * every predicate to false so the unless-bodies render.
+     *
+     * @return void
+     */
+    public function testSpatiePermissionUnlessAliasesCompileWithEndunless(): void
+    {
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:draft', 'guard_name' => 'web']);
+
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $this->actAs($user);
+
+        self::assertSame('yes', $this->render('@unlesshaspermission(\'posts:draft\') yes @endunlesshaspermission'));
+        self::assertSame('yes', $this->render('@unlesshasanypermission([\'posts:draft\']) yes @endunlesshasanypermission'));
+        self::assertSame('yes', $this->render('@unlesshasallpermissions([\'posts:draft\']) yes @endunlesshasallpermissions'));
     }
 
     /**

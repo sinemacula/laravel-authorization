@@ -17,15 +17,15 @@ consumed into this file and removed from the repo.
 - **Observed state:** `tests/Feature/` contains
   `AuthorizationManagerTest`, `PolicyModelTest`, `ServiceProviderTest`,
   `TraitsCoverageTest`, and stubs. The following are absent:
-    - **Gate auto-wiring tests** — no coverage for the
+  - **Gate auto-wiring tests** — no coverage for the
       `log | overwrite | throw` conflict modes configured in
       `AuthorizationServiceProvider::registerEnumGate()`, and no coverage
       proving the closure forwards `$user` via `Authorization::for($user)`
       (the seed bug called out in §6.3).
-    - **Migration publishing test** — no assertion that
+  - **Migration publishing test** — no assertion that
       `authorization-config` and `authorization-migrations` publish tags
       resolve to the expected targets.
-    - **Role CRUD coverage** — no Feature test exercising the Role
+  - **Role CRUD coverage** — no Feature test exercising the Role
       permission-management API (blocked by issue #2 above).
 
 ### 4. Integration suite thin
@@ -35,14 +35,14 @@ consumed into this file and removed from the repo.
   Gate parity, and the MySQL + PostgreSQL + SQLite DB matrix.
 - **Observed state:** `tests/Integration/` contains only
   `PolymorphicIdentityTest.php`. Missing:
-    - Spatie migration scenario (a consumer swapping from
+  - Spatie migration scenario (a consumer swapping from
       `spatie/laravel-permission` using the shipped aliases).
-    - Principal-resolver binding (a custom resolver bound into the
+  - Principal-resolver binding (a custom resolver bound into the
       container and used end-to-end through the facade).
-    - Gate parity (for every registered enum case,
+  - Gate parity (for every registered enum case,
       `Gate::forUser($u)->allows(...)` yields the same decision as
       `Authorization::for($u)->can(...)`).
-    - Cross-database tests — no MySQL/PostgreSQL harness exists; §10.1
+  - Cross-database tests — no MySQL/PostgreSQL harness exists; §10.1
       mandates the DB matrix in CI.
 
 ### 5. Performance suite missing RBAC N+1 and parse budgets
@@ -643,151 +643,6 @@ enterprise systems ship both.)_
   class `@api` in docblocks so static-analysis consumers can
   detect breakage. Do both.
 
-### 56. `sync*` methods dispatch no events — audit trail has a bulk-operation blind spot
-
-- **Files:** `src/Traits/HasRoles.php` (`syncRoles`);
-  `src/Traits/HasPermissions.php:108–…` (`syncPermissions`);
-  `src/Traits/HasPolicies.php:94–…` (`syncPolicies`);
-  `src/Models/Role.php:136–…` (`syncPermissions`).
-- **Observation:** every `sync*` method across the authorizable
-  traits and the Role API calls Eloquent's `sync()` and returns
-  — no `Event::dispatch(...)` calls at all. Single-item
-  counterparts (`assignRole` / `revokeRole`,
-  `givePermission` / `revokePermission`,
-  `attachPolicy` / `detachPolicy`,
-  `Role::givePermission` / `revokePermission`) all emit dedicated
-  events. A bulk `syncRoles([...])` that adds two roles and
-  removes one emits nothing.
-- **Impact:** the future `laravel-audit-log` sibling cannot
-  reconstruct state transitions from the event stream alone —
-  anything the caller flushes via `sync*` is invisible.
-  Contradicts the observability guarantee that every assignment
-  transition is emittable.
-- **Options:** (a) inside each `sync*`, diff the
-  before-vs-after pivot IDs using the return of Eloquent's
-  `sync()` (`['attached' => [...], 'detached' => [...],
-  'updated' => [...]]`), then dispatch the corresponding
-  single-item events for each attached / detached row — replays
-  cleanly through existing subscribers; (b) introduce bulk
-  variant events (`RolesSynced`, `PermissionsSynced`,
-  `PoliciesSynced`, `RolePermissionsSynced`) carrying the full
-  delta — expands the event surface but is more economical for
-  bulk-focused consumers. Option (a) leaves the event catalogue
-  as-is and closes the audit gap.
-
-### 64. `PolicyRepository` contract is misnamed — should mirror `PrincipalResolver`
-
-- **Files:** `src/Contracts/PolicyRepository.php`;
-  `src/Repositories/DefaultPolicyRepository.php`;
-  `src/AuthorizationServiceProvider.php:100–105`;
-  `src/AuthorizationManager.php:274–281`.
-- **Observation:** the contract exposes a single read method
-  `policiesFor(object $principal): array` — no create, update,
-  delete, or persistence-layer query builder. In DDD and Laravel
-  convention "Repository" implies a CRUD abstraction over a
-  persistence backend (e.g. `UserRepository` with `find`, `save`,
-  `delete`). This contract is a **resolution strategy** that
-  answers "what policies apply right now for this principal?"
-  and composes an optional external `PolicyStore` with the
-  principal's own attached policies.
-- **Asymmetry with `PrincipalResolver`:** the package already has
-  `PrincipalResolver::resolve(): ?object` answering "what
-  principal is in scope?". `PolicyRepository::policiesFor()`
-  answers "what policies are in scope?". Same shape, same job,
-  different suffix. A developer looking at the service-provider
-  bindings sees `PrincipalResolver` and `PolicyRepository` and has
-  to infer that they fill analogous roles — the names don't tell
-  that story.
-- **Impact:** cognitive tax on contract-surface discoverability.
-  Consumers implementing a tenant-scoped policy seam expect to
-  find a `PolicyResolver` alongside `PrincipalResolver`; today
-  they find `PolicyRepository` and an old spec reference.
-- **Options:** (a) rename the contract to `PolicyResolver` and
-  its default implementation to `DefaultPolicyResolver`; move
-  from `src/Repositories/` to `src/Resolvers/` to sit beside
-  `NullPrincipalResolver`. Matches the existing idiom exactly;
-  (b) keep `PolicyRepository` and document the non-standard
-  semantic in a design note; (c) rename to `PolicyAggregator`
-  / `PolicyGatherer` to describe the "union multiple sources"
-  behaviour more precisely than either "Repository" or
-  "Resolver". Option (a) is the symmetric answer and collapses
-  the two mental models consumers need to carry.
-
-### 65. `DecisionJournal` is a misnomer and its API leaks collection semantics onto single-slot storage
-
-- **Files:** `src/DecisionJournal.php`;
-  `src/AuthorizationManager.php:114,138,156–188` (call sites);
-  `src/Facades/Authorization.php:22–23` (facade methods).
-- **Observation:** "Journal" connotes a sequential, append-only
-  record (transaction journal, audit journal, changelog). The
-  class holds exactly **one** `EvaluationResult` at a time —
-  every `record()` overwrites the previous value with no history
-  retained. The method verbs compound the confusion:
-    - `record()` — append-flavoured verb, suggests adding
-    - `last()` — collection-flavoured, suggests "last of many"
-    - `forget()` — single-value mutation verb
-      Three different metaphors for a single-slot container. A
-      reader's mental model on first encounter with
-      `DecisionJournal::record(...)` is "this appends to a log" —
-      which the implementation does not do.
-- **Impact:** naming-driven incorrect mental models. A consumer
-  expecting to read a history of decisions from the "journal"
-  will discover the single-slot semantics only by reading the
-  code. Also blocks a future actual journal — if we later want
-  to record the last N decisions (for debugging, slow-query-style
-  traces, or admin introspection), the name is already taken by
-  the wrong thing.
-- **Options:** (a) rename the class to `LastDecisionStore` (or
-  `CurrentDecision` / `DecisionSlot`) and update the API to
-  match the slot semantics: `set()` / `get()` / `clear()`.
-  Facade becomes `Authorization::lastDecision()` (getter
-  unchanged) and `Authorization::clearLastDecision()` (matches
-  the getter's tense). Test `PolicyRepositoryAndJournalTest`
-  renames too; (b) keep `DecisionJournal` but clarify the
-  docblock that it is a single-slot holder and the verbs are
-  Laravel-idiomatic (`forget` matches Cache / Session). Less
-  churn, more reader-surprise; (c) upgrade the class to an
-  actual journal — record the last N decisions with a ring
-  buffer — and keep the name accurate. Useful for introspection
-  / debugging if #42's expectations are met. Option (a) is the
-  minimum-surprise fix.
-
-### 66. `DecisionJournal` cross-request leakage in Octane / RoadRunner has no shipped auto-reset hook
-
-- **Files:** `src/DecisionJournal.php:58–67` (docblock +
-  `forget()`); `src/AuthorizationManager.php:185–188`
-  (`forgetLastDecision()`); no shipped listener / middleware
-  that calls either.
-- **Observation:** the journal is bound as a container singleton
-  at `src/AuthorizationServiceProvider.php:115`. Under Octane /
-  RoadRunner / Swoole / FrankenPHP (all supported by modern
-  Laravel) the container — and therefore the singleton — is
-  **preserved across requests**. A decision recorded on request
-  A stays readable via `Authorization::lastDecision()` on
-  request B unless the consumer explicitly calls
-  `forgetLastDecision()` between requests. The class docblock
-  acknowledges this ("Long-running workers call this between
-  requests") but no shipped code does it.
-- **Impact:** a production Octane deployment using the journal
-  will see cross-request decision leakage. The "why was this
-  denied?" surface that the journal exists to provide will
-  silently return the **previous request's** answer unless the
-  consumer wires a reset hook. Not a correctness bug in the
-  engine — a correctness bug in the observability surface.
-- **Options:** (a) ship an Octane listener on
-  `Laravel\Octane\Events\RequestReceived` (or the analogous
-  RoadRunner / Swoole hooks) that calls
-  `Authorization::forgetLastDecision()`. Bind only when the
-  Octane package is installed (class_exists guard) to keep the
-  package's zero-runtime-deps contract; (b) register a
-  `TerminatingMiddleware` that calls the reset on HTTP response
-  termination — works for Octane and standard FPM alike; (c)
-  re-scope the journal to a per-request-scope binding rather
-  than a singleton, so Octane's `flush()` clears it naturally.
-  Option (c) is the cleanest architecturally but changes the
-  clone-inheritance semantics the journal currently relies on.
-  Option (b) is the most portable.
-
 ### 67. `EvaluatorThroughputTest` budget flakes under parallel contention
 
 - **Files:** `tests/Performance/EvaluatorThroughputTest.php`
@@ -862,11 +717,13 @@ enterprise systems ship both.)_
   `getPolicies` path where applicable).
 - **Observation:** every cache touchpoint from the model traits
   follows the pattern:
+
   ```php
   if (app()->bound(ResolutionCache::class)) {
       app(ResolutionCache::class)->forget($this);
   }
   ```
+
   The `app()` global helper is a service-locator call inside a
   trait that mixes into Eloquent models. It couples the model
   layer to the container, makes the trait impossible to test in
@@ -878,7 +735,7 @@ enterprise systems ship both.)_
   layer. Unit-testing `syncRoles` now requires either a full
   container boot or a mock via `App::instance()`. Also
   architecturally inconsistent with the event-based listener
-  (`InvalidateResolutionCache`) that *is* cleanly
+  (`InvalidateResolutionCache`) that _is_ cleanly
   dependency-injected — the same job is done twice, once via DI
   and once via service locator, only because the `sync*` methods
   bypass the single-event dispatch path.
@@ -899,48 +756,6 @@ enterprise systems ship both.)_
   every existing subscriber without new event classes.
   Option (b) is the least-new-surface fix and dovetails with
   #56's option (a).
-
-### 73. Row-lifecycle `*Updated` events carry only post-save state — the stated before/after diff is unreconstructable
-
-- **Files:** `src/Models/Role.php:77–79` (and identical shape in
-  `src/Models/Permission.php`, `src/Models/Policy.php`);
-  `src/Events/RoleUpdated.php:29–35` (and identical shape on
-  `PermissionUpdated` / `PolicyUpdated`).
-- **Observation:** the `*Updated` events are dispatched from
-  `static::updated(...)` with `$role->getChanges()` passed as
-  the `$changes` payload. `getChanges()` in Eloquent returns an
-  `array<string, new_value>` — only the post-save values of the
-  attributes that were modified. The class docblocks on
-  `RoleUpdated`, `PermissionUpdated`, and `PolicyUpdated` all
-  promise that "audit consumers can render a before/after diff
-  without a second round-trip". They cannot — the **before**
-  state is not in the payload, and by the time `updated` fires
-  the model's `getOriginal()` returns the new values (the save
-  has already refreshed them). A downstream audit subscriber
-  wanting the pre-save state has to re-query the audit history
-  or the journaled prior row from its own side.
-- **Impact:** the SOC 2 / ISO 27001 narrative in the commit
-  message ("reconstructing the 'who changed what' trail") fails
-  on the 'what' half for update transitions — consumers have
-  only the destination, not the delta. The event payload is
-  shaped as if it contains a diff but contains a half-diff. A
-  consumer reading the event class will expect the fuller
-  contract the docblock promises.
-- **Options:** (a) switch the hook from `static::updated` to
-  `static::saving` (or `updating`) and capture both
-  `$role->getDirty()` (for the incoming changes) and a loop over
-  `$role->getOriginal($attribute)` for the baseline at the
-  moment of the save; pass both as `before` / `after` arrays on
-  the event. The event dispatches on the successful save path
-  after the row persists; (b) change the event payload to a
-  single `{attribute => [before, after]}` map captured via the
-  `updating` hook and dispatched from the `updated` hook using
-  a pre-save snapshot the model holds during the transition;
-  (c) narrow the docblock claim to reflect the as-is payload —
-  "updated row + new values" instead of "before/after diff" —
-  and let consumers implement their own baseline capture via a
-  `saving` listener. Option (a) keeps the SOC 2 promise and is
-  the enterprise-grade answer.
 
 ### 77. Resolution cache returns stale role / permission / policy sets across temporal-grant expiry
 
@@ -977,50 +792,6 @@ enterprise systems ship both.)_
   Option (a) is the honest enterprise path; option (c) is the
   current behaviour.
 
-### 80. `assignRole(role, expiry)` silently shortens an existing forever grant — one verb covers two semantics
-
-- **Files:** `src/Traits/HasRoles.php:68–82` (`assignRole`);
-  `src/Traits/HasPermissions.php:68–82` (`givePermission`);
-  `src/Traits/HasPolicies.php:82–97` (`attachPolicy`).
-- **Observation:** all three grant methods use
-  `syncWithoutDetaching([$id => ['expires_at' => $expiresAt]])`,
-  which updates the existing pivot row when one is present.
-  Consequence: a consumer who holds a forever grant
-  (`expires_at = null`) and then calls
-  `$user->assignRole('admin', Carbon::parse('2026-06-01'))` —
-  perhaps to add a new temporal admin grant, unaware the user
-  already holds one — **silently shortens the forever grant
-  to expire on 2026-06-01**. No event, no exception, no return
-  value hint. The "assign" verb reads as additive but the
-  behaviour is mutative.
-- **Impact:** audit-visible privilege loss with no signal.
-  Enterprise security workflows specifically ask "was this
-  user's admin ever shortened?" and the answer from the events
-  alone is "no" — the `RoleAssigned` event fires with the new
-  expiry as if it were a fresh grant. Separately, the inverse
-  surprise (extending a temporal grant to forever by calling
-  `assignRole(role)` with no expiry on an existing expiring
-  grant) **does** happen: `$expiresAt = null` writes `null` to
-  the pivot, bumping the expiry to forever. Both directions
-  have silent mutation.
-- **Options:** (a) split the API into two verbs:
-  `assignRole(role)` stays forever-only and throws when the
-  row already exists; a new
-  `scheduleRole(role, expiresAt)` creates or updates temporal
-  grants explicitly. `extendRoleGrant` /
-  `shortenRoleGrant` helpers for lifetime changes. Three-way
-  surface, clear semantics; (b) keep the single-verb API but
-  emit a distinct event (`RoleExpiryChanged`) when the pivot's
-  existing `expires_at` differs from the supplied one, so
-  audit consumers can detect shortening / extension separately
-  from fresh grants; (c) keep the current behaviour and
-  document that `assignRole` is an upsert over the pivot —
-  honest but still the audit-blind footgun. Option (b) is the
-  low-friction enterprise answer: no API split, full
-  observability.
-
----
-
 ### 84. System-wide enum audit — cover, consolidate, and single-responsibility
 
 - **Scope:** package-wide audit of every place a constrained
@@ -1036,12 +807,12 @@ enterprise systems ship both.)_
        list of cases.
 - **Candidate surfaces to audit (non-exhaustive, surfaced
   during commit review):**
-    - `authorization.gate.on_conflict` config value —
+  - `authorization.gate.on_conflict` config value —
       string-typed `'log' | 'throw' | 'overwrite'`, matched on
       string literals in `src/AuthorizationServiceProvider.php`
       (already tracked as #58; folds into this audit as
       `GateConflictMode`).
-    - `EvaluationResult::REASON_*` class constants
+  - `EvaluationResult::REASON_*` class constants
       (`explicit_allow`, `explicit_deny`, `implicit_deny`,
       `rbac_allow`) — a closed set of decision-reason values
       passed as strings everywhere. Candidate enum
@@ -1049,22 +820,22 @@ enterprise systems ship both.)_
       `$result->reason === EvaluationResult::REASON_EXPLICIT_ALLOW`
       — typed enum would give exhaustive `match` and IDE
       completion.
-    - Evaluation trace `decision` field
+  - Evaluation trace `decision` field
       (`'matched' | 'skipped'`) — string literal matched on raw
       strings. Candidate enum `TraceDecision`.
-    - `SystemRoleProtectedException::$operation`
+  - `SystemRoleProtectedException::$operation`
       (`'delete' | 'rename'`) — raised and compared as string.
       Candidate enum `ProtectedOperation`.
-    - `ValidatesAuthorizationName::getAuthorizationNameKind()`
+  - `ValidatesAuthorizationName::getAuthorizationNameKind()`
       return value — strings like `'role'`, `'permission'`.
       Candidate enum `AuthorizationEntityKind` (or reuse the
       `PolicyEffect`-style pattern per-model).
-    - `authorization.permission_enums` entries — already enums
+  - `authorization.permission_enums` entries — already enums
       implementing `PermissionEnum`; confirm the audit does not
       accidentally collapse this correct-by-construction seam.
-    - `PolicyEffect` enum — already exists; audit for
+  - `PolicyEffect` enum — already exists; audit for
       single-responsibility (allow / deny only, no drift).
-    - `CacheKind` slots in `ResolutionCache`
+  - `CacheKind` slots in `ResolutionCache`
       (`'policies' | 'permissions' | 'roles'`) — strings in the
       `rememberStringList` helper. Candidate enum.
 - **Observation:** enums enforce exhaustiveness at the type
@@ -1108,49 +879,6 @@ enterprise systems ship both.)_
 - **Related issues:** #58 (`gate.on_conflict`), and any future
   flag that surfaces a stringly-typed closed set will cite
   this audit as its landing home.
-
-### 85. Spatie permission-side Blade aliases are still incomplete after the consolidation commit
-
-- **File:** `src/AuthorizationServiceProvider.php:320–328` —
-  the names arrays at the start of `registerBladeDirectives()`.
-- **Observation:** the consolidation commit (`f929474`)
-  defines two arrays:
-  ```php
-  $roleNames       = ['role', 'anyrole', 'allroles',
-                      'hasrole', 'hasanyrole', 'hasallroles'];
-  $permissionNames = ['permission', 'anypermission',
-                      'allpermissions'];
-  ```
-  Role names include the three canonical directives
-  (`role` / `anyrole` / `allroles`) **plus** the three
-  Spatie-compat opening-tag aliases (`hasrole` / `hasanyrole`
-  / `hasallroles`). Permission names include **only** the
-  three canonical directives — no `haspermission` /
-  `hasanypermission` / `hasallpermissions`. The commit message
-  claims to close #86 ("every canonical and compat Blade
-  directive name now has a matching `@endunless<name>`
-  alias"), which is accurate for the names the commit
-  registers, but the permission-side Spatie **opening-tag**
-  alias set was never registered in the first place. The
-  `@endunless*` coverage is therefore complete relative to
-  an incomplete parent set.
-- **Impact:** Spatie consumers migrating views verbatim hit a
-  Blade compile error on any `@haspermission` /
-  `@hasanypermission` / `@hasallpermissions` usage — the
-  exact failure mode #86 was logged to remove, surviving on
-  the permission axis only. The §12.5 "switch packages
-  without rewriting every controller" narrative is now
-  asymmetric across role vs permission views.
-- **Options:** (a) extend `$permissionNames` to include the
-  three Spatie aliases alongside the canonical set, and
-  register the three extra `Blade::if` calls pointing at the
-  same `$anyPerm` / `$allPerm` closures already defined;
-  `@endunless*` aliases fall out automatically from the
-  shared loop at line 338; (b) document the permission
-  Spatie-aliases as intentionally unsupported and rescope the
-  §12.5 claim on the view side to role checks only. Option
-  (a) closes the asymmetry with six lines of code and no new
-  concepts.
 
 ### 86. `BladeHelpers::currentPrincipal()` retains the `app()` service-locator path — middleware uses the facade
 
@@ -1201,6 +929,7 @@ enterprise systems ship both.)_
   when the variable is handed to the subclass. Each concrete
   leaf then re-asserts the type with a PHPStan `@var`
   docblock:
+
   ```php
   protected function matches(object $principal, string $needle): bool
   {
@@ -1208,6 +937,7 @@ enterprise systems ship both.)_
       return $principal->hasRole($needle);
   }
   ```
+
   Works, but the `@var` is load-bearing — remove it and
   PHPStan flags `hasRole` as "method not found on `object`".
   The safety of the `handle()`-level contract check is
@@ -1231,75 +961,6 @@ enterprise systems ship both.)_
   contravariant-parameter rules to allow narrowing, which
   they don't, so this option does not work in practice. Option
   (a) is the right answer for a PHPStan-level-8 codebase.
-
-### 88. Gate conflict handler uses `switch` on `GateConflictMode` — forfeits exhaustiveness
-
-- **File:** `src/AuthorizationServiceProvider.php:428–442`
-  (`registerEnumGate`).
-- **Observation:** commit `802ed05` introduced the
-  `GateConflictMode` enum specifically to replace the
-  stringly-typed `match` flagged in #58. The consumer site is
-  now a `switch` over enum cases
-  (`case GateConflictMode::THROW: ... case GateConflictMode::LOG: ...`).
-  PHP `switch` does not carry exhaustiveness-over-enum at the
-  type level — PHPStan will not flag a missing case if a
-  fourth case is ever added to the enum. `match` over an enum
-  **does** get exhaustiveness under PHPStan level 8: any
-  missing case becomes a static-analysis error. The commit
-  swapped out one half of the type-safety benefit (typo
-  rejection via `tryFrom`) and left the other half
-  (exhaustive branching) on the table.
-- **Impact:** if the enum ever grows (e.g. a `WARN_AND_OVERWRITE`
-  case is added), the `switch` here silently falls through with
-  no case match, producing undefined behaviour on that code
-  path. One of the two main reasons to introduce the enum was
-  exhaustiveness; the consumer site doesn't enforce it.
-- **Options:** (a) rewrite the `switch` as a
-  `match ($onConflict) { GateConflictMode::THROW => throw ...,
-  GateConflictMode::OVERWRITE => null, GateConflictMode::LOG => ... }`
-  pattern — the `match` expression-form enforces exhaustive
-  case coverage at PHPStan level 8; (b) keep `switch` but add
-  a post-switch `assert(false, 'unhandled GateConflictMode ...')`
-  or similar trip-wire — catches at runtime, not at analysis
-  time; (c) accept the loss and document. Option (a) is the
-  idiomatic PHP answer and restores the exhaustiveness half of
-  the enum's value proposition.
-
-### 89. `Permission::resolveByName` carries two unexplained `@phpstan-ignore staticMethod.dynamicCall` suppressions
-
-- **File:** `src/Models/Permission.php:106,111` (two
-  `@phpstan-ignore staticMethod.dynamicCall` annotations
-  inside `resolveByName`).
-- **Observation:** the method calls `$class::query()` where
-  `$class` is a class-string read from config. PHPStan
-  level 8 cannot statically resolve the class and flags both
-  the outer `::query()` call and the nested `->where(...)`
-  continuation. The code suppresses both instances with
-  `@phpstan-ignore` without an inline rationale. On a PHPStan
-  level-8 codebase, every ignore comment should carry a one-
-  line reason so reviewers can tell intentional suppression
-  from accidental.
-- **Impact:** `@phpstan-ignore` comments accrete over time
-  when their purpose is opaque. A future maintainer deleting
-  them (reasonably, assuming PHPStan was recently updated and
-  the check is no longer an issue) would silently lose static
-  coverage. Also makes grep / audit of remaining suppressions
-  harder when they all look identical.
-- **Options:** (a) annotate both suppressions inline with the
-  reason — e.g.
-  `// @phpstan-ignore staticMethod.dynamicCall — $class is a
-  config-sourced class-string<Permission> verified by
-  ConfigValidator at boot`; (b) replace the dynamic call with
-  `app($class)::query()` or an explicit type assertion via
-  `assert(is_a($class, self::class, true))` before the call,
-  which PHPStan can follow without the ignore; (c) push the
-  dynamic-class concern down into a `PermissionRepository`
-  contract (ties into #1's already-shipped
-  `PolicyRepository` pattern) — consumers bind a concrete
-  implementation and the static method sheds the dynamic
-  class-string entirely. Option (b) is the smallest change
-  that removes both ignores without the wider architectural
-  work.
 
 ### 90. `AuthorizableGrantPivot` is shared across three distinct pivot tables — can't express future per-table divergence
 
@@ -1341,6 +1002,130 @@ enterprise systems ship both.)_
   rather than the pivot — forces a design constraint but
   keeps the pivot surface tight. Option (a) is the honest
   iterative path and is already the committed state.
+
+### 91. System-policy protection does not cover `document` mutations — the authorization-carrying field is unguarded
+
+- **Files:** `src/Models/Policy.php:175–179`
+  (`updating` hook calls `wasSystemPolicyRenamed` only);
+  `src/Models/Policy.php:293–304`
+  (`wasSystemPolicyRenamed` body + docblock).
+- **Observation:** the `updating` hook on `Policy` blocks
+  only rename mutations on `is_system = true` rows. The
+  method's docblock states explicitly "description and
+  document bumps pass unconditionally." The `document`
+  column is the JSON payload that carries every statement,
+  effect, action, resource, and condition the evaluator walks
+  — it is the authorization-defining field on the Policy
+  table. A caller with raw Eloquent access can freely
+  overwrite a platform-shipped deny policy's `document` while
+  the row stays delete-protected and rename-protected. The
+  protection guards the wrapper and leaves the payload
+  uncovered. Issue #76 option (a) flagged this exact case:
+  "for `Policy`, document mutation as well — policy
+  `document` changes are the authorization-impacting edit,
+  analogous to role rename."
+- **Impact:** the most security-relevant field on the Policy
+  table is not covered by the system-protection invariant.
+  A compliance-audited deployment that ships a platform deny
+  policy still allows that policy's document body to be
+  rewritten in place — same security hole as deleting the
+  policy, only quieter because the row still exists.
+- **Options:** (a) extend `wasSystemPolicyRenamed` into
+  `wasSystemPolicyAuthorizationDirty` (or split into a
+  second hook `wasSystemPolicyDocumentDirty`) that also
+  returns true when `'document'` is dirty; the `updating`
+  hook calls both and raises `SystemPolicyProtectedException`
+  on either; (b) document the gap and treat document
+  mutation as an explicit exception-to-the-rule — honest but
+  leaves the security invariant half-enforced; (c) promote
+  Policy to a three-operation protection matrix
+  (`delete` / `rename` / `document-rewrite`) via an enum on
+  the exception, giving callers structured reasons. Option
+  (a) is the minimum change that closes #76's stated scope.
+
+### 92. `is_system` protection pattern is triplicated across Role, Permission, Policy
+
+- **Files:** `src/Models/Role.php:73–105,305–425`;
+  `src/Models/Permission.php:71–107,185–286`;
+  `src/Models/Policy.php:74–107,165–310` —
+  plus three near-identical exception classes
+  (`SystemRoleProtectedException`,
+  `SystemPermissionProtectedException`,
+  `SystemPolicyProtectedException`).
+- **Observation:** the commit extends #76 by duplicating the
+  full pattern across all three primitive models. Three
+  instances of `private bool $systemProtectionBypassed`;
+  three `forceSystem()` methods with identical bodies; three
+  `assertSystemProtectionAllows()` methods whose only
+  variation is the exception class thrown and the
+  `getOriginal('name', ...)` label; three `wasSystem*Renamed`
+  helpers that differ only in the entity name in the method
+  identifier. Issue #76 explicitly called this out —
+  "(b) lift the protection logic into a shared trait
+  (`ProtectsSystemFlaggedRows`) … avoids the three-way
+  duplication that would otherwise appear alongside the
+  `ValidatesAuthorizationName` trait." The commit picked
+  option (a) and shipped the foreseen duplication.
+- **Impact:** ~150 lines of duplicated infrastructure across
+  three models. Any future change to the protection
+  semantics — adding a second protected operation (see #91
+  on Policy's `document`), switching to an enum for
+  `$operation` (see #84's audit), logging protected-mutation
+  attempts, wiring a consumer-supplied audit listener —
+  lands three times and diverges silently if one site is
+  missed. Also complicates PHPStan coverage, test coverage,
+  and onboarding.
+- **Options:** (a) extract
+  `SineMacula\Laravel\Authorization\Traits\ProtectsSystemFlaggedRows`
+  with the `$systemProtectionBypassed` property,
+  `forceSystem()`, `assertSystemProtectionAllows()`, and the
+  `saved`-hook bypass reset. Each model composes the trait
+  and overrides a single
+  `protectedDirtyAttributes(): array<string>` hook that
+  returns the list of attributes whose dirty-state triggers
+  the check (`['name']` for Role / Permission, `['name',
+  'document']` for Policy — closes #91 in the same move).
+  The per-model exception class stays; the trait raises it
+  via an abstract `protectedOperationException(string $operation): Throwable`
+  hook. Three leaf classes become ~30 lines each; (b) accept
+  the duplication and defer the trait until the third
+  follow-on change makes it unavoidable — drift-by-design;
+  (c) collapse the three exception classes into a single
+  `SystemFlaggedRowProtectedException` carrying the entity
+  kind alongside the operation (ties into #84's enum
+  audit). Option (a) is the right enterprise answer and
+  composes cleanly with the Policy-document extension in
+  #91.
+
+### 93. `OrphanedRolePermissionException::$side` is stringly-typed — candidate enum per #84
+
+- **File:** `src/Exceptions/OrphanedRolePermissionException.php:29–56`
+  (constructor + `getSide()` accessor).
+- **Observation:** the legal values for `$side` are the
+  string literals `'role'` and `'permission'`. The
+  constructor takes `string`; `getSide()` returns `string`;
+  consumers comparing the exception payload do so with
+  `$e->getSide() === 'role'`. No compile-time enforcement
+  that only those two values are supplied; a typo at the
+  throw site (`side: 'Role'` capitalised) passes silently
+  and every caller's equality check against `'role'` fails.
+  Parallel case to
+  `SystemRoleProtectedException::$operation` flagged in
+  #84's candidate surfaces.
+- **Impact:** minor on day-one usage, but every
+  stringly-typed enum-candidate field adds to the surface
+  #84 has to sweep. Catching them at introduction is
+  cheaper than fixing during the audit pass.
+- **Options:** (a) introduce
+  `RolePermissionOrphanSide` enum (`Role = 'role'`,
+  `Permission = 'permission'`) and retype the constructor
+  and accessor. Matches the `GateConflictMode` shape
+  already in `src/Enums/`; (b) fold into #84's audit pass
+  and leave as-is for now — consistent with the "audit
+  sweep" framing of that issue. Option (a) closes the new
+  surface as it lands; option (b) is the consistent
+  iterative path. Either is fine provided the field is not
+  left stringly-typed through v1.0.0.
 
 ---
 

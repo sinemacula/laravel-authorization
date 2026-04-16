@@ -14,7 +14,7 @@ use Illuminate\Support\ServiceProvider;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
-use SineMacula\Laravel\Authorization\Contracts\PolicyRepository;
+use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
@@ -32,8 +32,8 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Listeners\InvalidateResolutionCache;
-use SineMacula\Laravel\Authorization\Repositories\CachingPolicyRepository;
-use SineMacula\Laravel\Authorization\Repositories\DefaultPolicyRepository;
+use SineMacula\Laravel\Authorization\Resolvers\CachingPolicyResolver;
+use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
 
@@ -62,8 +62,8 @@ class AuthorizationServiceProvider extends ServiceProvider
         $this->registerPrincipalResolver();
         $this->registerPolicyStore();
         $this->registerResolutionCache();
-        $this->registerPolicyRepository();
-        $this->registerDecisionJournal();
+        $this->registerPolicyResolver();
+        $this->registerLastDecisionStore();
         $this->registerPolicyEvaluator();
         $this->registerAuthorizationManager();
     }
@@ -79,6 +79,7 @@ class AuthorizationServiceProvider extends ServiceProvider
         $this->offerPublishing();
         $this->registerGates();
         $this->registerCacheInvalidationListeners();
+        $this->registerOctaneResetListener();
         $this->registerRouteMiddleware();
         $this->registerBladeDirectives();
     }
@@ -160,7 +161,7 @@ class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Bind the policy repository — the internal policy-gathering
+     * Bind the policy resolver — the internal policy-gathering
      * seam the manager consults on every evaluation. The default
      * implementation unions an optional `PolicyStore` with the
      * principal's own attached policies; the caching decorator
@@ -168,14 +169,14 @@ class AuthorizationServiceProvider extends ServiceProvider
      *
      * @return void
      */
-    protected function registerPolicyRepository(): void
+    protected function registerPolicyResolver(): void
     {
-        $this->app->singleton(PolicyRepository::class, static function (Application $app): PolicyRepository {
-            $default = new DefaultPolicyRepository(
+        $this->app->singleton(PolicyResolver::class, static function (Application $app): PolicyResolver {
+            $default = new DefaultPolicyResolver(
                 store: $app->bound(PolicyStore::class) ? $app->make(PolicyStore::class) : null,
             );
 
-            return new CachingPolicyRepository(
+            return new CachingPolicyResolver(
                 inner: $default,
                 cache: $app->make(ResolutionCache::class),
             );
@@ -216,14 +217,49 @@ class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Bind the decision journal that holds the most recent
+     * Bind the single-slot store that holds the most recent
      * evaluation result across every scoped clone of the manager.
      *
      * @return void
      */
-    protected function registerDecisionJournal(): void
+    protected function registerLastDecisionStore(): void
     {
-        $this->app->singleton(DecisionJournal::class);
+        $this->app->singleton(LastDecisionStore::class);
+    }
+
+    /**
+     * Wire an Octane request-boundary listener that clears the
+     * last-decision store between requests.
+     *
+     * The store is bound as a container singleton, so under Octane
+     * (or RoadRunner / Swoole / FrankenPHP) the slot survives
+     * across requests and would otherwise leak the previous
+     * request's decision into the next one's `lastDecision()`
+     * accessor. The listener is wired only when Octane's
+     * `RequestTerminated` event class is present in the host
+     * application — keeping the package free of a hard Octane
+     * dependency while auto-resetting when Octane is installed.
+     *
+     * @return void
+     */
+    protected function registerOctaneResetListener(): void
+    {
+        $event = 'Laravel\Octane\Events\RequestTerminated';
+
+        if (!\class_exists($event) || !$this->app->bound(Dispatcher::class)) {
+            return;
+        }
+
+        /** @var \Illuminate\Contracts\Events\Dispatcher $dispatcher */
+        $dispatcher = $this->app->make(Dispatcher::class);
+
+        $app = $this->app;
+
+        $dispatcher->listen($event, static function () use ($app): void {
+            if ($app->bound(LastDecisionStore::class)) {
+                $app->make(LastDecisionStore::class)->reset();
+            }
+        });
     }
 
     /**
@@ -245,9 +281,9 @@ class AuthorizationServiceProvider extends ServiceProvider
     {
         $this->app->singleton('authorization', static fn (Application $app): AuthorizationManager => new AuthorizationManager(
             evaluator: $app->make(PolicyEvaluator::class),
-            resolver: $app->make(PrincipalResolver::class),
-            repository: $app->make(PolicyRepository::class),
-            journal: $app->make(DecisionJournal::class),
+            principalResolver: $app->make(PrincipalResolver::class),
+            policyResolver: $app->make(PolicyResolver::class),
+            lastDecisionStore: $app->make(LastDecisionStore::class),
             events: $app->bound(Dispatcher::class) ? $app->make(Dispatcher::class) : null,
         ));
 
@@ -294,9 +330,10 @@ class AuthorizationServiceProvider extends ServiceProvider
      * `@role / @unlessrole / @elserole / @endrole` quartet; the
      * same pattern covers `@permission`, `@anyrole`, `@allroles`,
      * `@anypermission`, and `@allpermissions`. Spatie-style
-     * aliases (`@hasrole`, `@hasanyrole`, `@hasallroles`) are
-     * registered in parallel so consumers migrating from Spatie
-     * can move their views verbatim.
+     * aliases (`@hasrole`, `@hasanyrole`, `@hasallroles`,
+     * `@haspermission`, `@hasanypermission`, `@hasallpermissions`)
+     * are registered in parallel so consumers migrating from
+     * Spatie can move their views verbatim.
      *
      * Spatie closes its unless-variants with `@endunless<name>`,
      * whereas `Blade::if` closes its auto-generated variant with
@@ -319,7 +356,7 @@ class AuthorizationServiceProvider extends ServiceProvider
         }
 
         $roleNames       = ['role', 'anyrole', 'allroles', 'hasrole', 'hasanyrole', 'hasallroles'];
-        $permissionNames = ['permission', 'anypermission', 'allpermissions'];
+        $permissionNames = ['permission', 'anypermission', 'allpermissions', 'haspermission', 'hasanypermission', 'hasallpermissions'];
 
         $anyRole = static fn (array|string $roles): bool => BladeHelpers::hasRole($roles);
         $allRole = static fn (array|string $roles): bool => BladeHelpers::hasAllRoles($roles);
@@ -336,6 +373,9 @@ class AuthorizationServiceProvider extends ServiceProvider
         Blade::if('permission', $anyPerm);
         Blade::if('anypermission', $anyPerm);
         Blade::if('allpermissions', $allPerm);
+        Blade::if('haspermission', $anyPerm);
+        Blade::if('hasanypermission', $anyPerm);
+        Blade::if('hasallpermissions', $allPerm);
 
         foreach ([...$roleNames, ...$permissionNames] as $name) {
             Blade::directive('endunless' . $name, static fn (): string => '<?php endif; ?>');
@@ -420,22 +460,26 @@ class AuthorizationServiceProvider extends ServiceProvider
     {
         $permission = $case->toString();
 
-        // Single decision point for every conflict mode. Each arm
-        // either short-circuits (log / throw) or falls through to
-        // the define call below (overwrite, and the no-conflict
-        // happy path).
+        // Single decision point for every conflict mode. `match`
+        // over the enum is exhaustive at PHPStan level 8 — adding
+        // a future `GateConflictMode` case becomes a clear
+        // "unhandled match" error here rather than silent
+        // fall-through under `switch`. THROW short-circuits with
+        // an exception, OVERWRITE proceeds to redefine the gate,
+        // and LOG records the conflict and abandons the redefine.
         if (Gate::has($permission)) {
-            switch ($onConflict) {
-                case GateConflictMode::THROW:
-                    throw new GateConflictException($permission);
-
-                case GateConflictMode::OVERWRITE:
-                    break;
-
-                case GateConflictMode::LOG:
+            $shouldDefine = match ($onConflict) {
+                GateConflictMode::THROW     => throw new GateConflictException($permission),
+                GateConflictMode::OVERWRITE => true,
+                GateConflictMode::LOG       => (function () use ($permission): bool {
                     $this->logGateConflict($permission);
 
-                    return;
+                    return false;
+                })(),
+            };
+
+            if (!$shouldDefine) {
+                return;
             }
         }
 

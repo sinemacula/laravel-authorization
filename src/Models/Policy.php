@@ -76,6 +76,16 @@ class Policy extends Model
     private bool $systemProtectionBypassed = false;
 
     /**
+     * Pre-save attribute snapshot captured on `updating` and
+     * consumed by the `updated` listener so `PolicyUpdated`
+     * carries a complete before/after diff. Reset after each
+     * dispatch so a follow-up save observes a clean slate.
+     *
+     * @var array<string, mixed>
+     */
+    private array $beforeChangeSnapshot = [];
+
+    /**
      * Create a new Eloquent model instance.
      *
      * @param  array<string, mixed>  $attributes
@@ -176,6 +186,14 @@ class Policy extends Model
             if ($policy->wasSystemPolicyRenamed()) {
                 $policy->assertSystemProtectionAllows('rename');
             }
+
+            $snapshot = [];
+
+            foreach (\array_keys($policy->getDirty()) as $key) {
+                $snapshot[$key] = $policy->getOriginal($key);
+            }
+
+            $policy->beforeChangeSnapshot = $snapshot;
         });
 
         static::created(static function (self $policy): void {
@@ -183,7 +201,12 @@ class Policy extends Model
         });
 
         static::updated(static function (self $policy): void {
-            Event::dispatch(new PolicyUpdated($policy, $policy->getChanges()));
+            Event::dispatch(new PolicyUpdated($policy, [
+                'before' => $policy->beforeChangeSnapshot,
+                'after'  => $policy->getChanges(),
+            ]));
+
+            $policy->beforeChangeSnapshot = [];
         });
 
         static::deleted(static function (self $policy): void {

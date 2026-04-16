@@ -6,9 +6,11 @@ namespace SineMacula\Laravel\Authorization\Traits;
 
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Events\IdentityRoleAssigned;
+use SineMacula\Laravel\Authorization\Events\IdentityRoleExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\IdentityRoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\AuthorizableGrantPivot;
@@ -84,6 +86,8 @@ trait HasRoles // @phpstan-ignore trait.unused
     {
         $model = $this->resolveRole($role);
 
+        $prior = $this->readRolePivot($model);
+
         $this->roles()->syncWithoutDetaching([
             (string) $model->getKey() => ['expires_at' => $expiresAt],
         ]);
@@ -93,6 +97,15 @@ trait HasRoles // @phpstan-ignore trait.unused
         }
 
         Event::dispatch(new IdentityRoleAssigned($this, $model));
+
+        if ($prior['exists'] && !self::roleExpiriesEqual($prior['expires_at'], $expiresAt)) {
+            Event::dispatch(new IdentityRoleExpiryChanged(
+                $this,
+                $model,
+                $prior['expires_at'],
+                $expiresAt,
+            ));
+        }
 
         return $this;
     }
@@ -123,6 +136,14 @@ trait HasRoles // @phpstan-ignore trait.unused
     /**
      * Replace this identity's roles with the supplied set.
      *
+     * Each net attachment fires `IdentityRoleAssigned` and each
+     * net detachment fires `IdentityRoleRevoked`, so audit
+     * consumers receive the same per-row signal they would for
+     * `assignRole()` / `revokeRole()` calls and the cache
+     * invalidation listener wired to those events keeps the
+     * resolution cache coherent without a separate forget call
+     * in this method.
+     *
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Role|string>  $roles
      * @return static
      *
@@ -130,23 +151,27 @@ trait HasRoles // @phpstan-ignore trait.unused
      */
     public function syncRoles(array $roles): static
     {
-        $ids = \array_values(\array_map(
-            fn (Role|string $role): string => (string) $this->resolveRole($role)->getKey(),
-            $roles,
-        ));
+        $resolved = [];
 
-        $this->roles()->sync($ids);
+        foreach ($roles as $role) {
+            $model                               = $this->resolveRole($role);
+            $resolved[(string) $model->getKey()] = $model;
+        }
+
+        $ids    = \array_keys($resolved);
+        $result = $this->roles()->sync($ids);
 
         if (isset($this->relations['roles'])) {
             unset($this->relations['roles']);
         }
 
-        // sync() bypasses assignRole / revokeRole and so fires
-        // no IdentityRoleAssigned / IdentityRoleRevoked events —
-        // invalidate the resolution cache directly so the next
-        // getRoles() observes the fresh set.
-        if (app()->bound(ResolutionCache::class)) {
-            app(ResolutionCache::class)->forget($this);
+        /** @var array{attached?: array<int, mixed>, detached?: array<int, mixed>, updated?: array<int, mixed>} $result */
+        foreach ($result['attached'] ?? [] as $id) {
+            Event::dispatch(new IdentityRoleAssigned($this, $resolved[(string) $id] ?? $this->resolveRoleById((string) $id)));
+        }
+
+        foreach ($result['detached'] ?? [] as $id) {
+            Event::dispatch(new IdentityRoleRevoked($this, $this->resolveRoleById((string) $id)));
         }
 
         return $this;
@@ -270,6 +295,111 @@ trait HasRoles // @phpstan-ignore trait.unused
 
         if ($model === null) {
             throw new UnknownRoleException($role);
+        }
+
+        return $model;
+    }
+
+    /**
+     * Read the existing pivot row for the supplied role and
+     * return its existence and `expires_at` value. Returns
+     * `['exists' => false, 'expires_at' => null]` when no row
+     * exists. The query bypasses the relation's expiry filter so
+     * it observes both live and expired pivot rows — both are
+     * candidates for an expiry mutation by a re-call to
+     * `assignRole()`.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+     * @return array{exists: bool, expires_at: \DateTimeInterface|null}
+     */
+    private function readRolePivot(Role $role): array
+    {
+        /** @var string $table */
+        $table = config('authorization.tables.authorizable_roles', 'authorizable_roles');
+
+        $row = DB::table($table)
+            ->where('authorizable_type', $this->getMorphClass())
+            ->where('authorizable_id', (string) $this->getKey())
+            ->where('role_id', (string) $role->getKey())
+            ->first();
+
+        if ($row === null) {
+            return ['exists' => false, 'expires_at' => null];
+        }
+
+        $rawExpiresAt = $row->expires_at ?? null;
+
+        return [
+            'exists'     => true,
+            'expires_at' => self::coerceRoleExpiry($rawExpiresAt),
+        ];
+    }
+
+    /**
+     * Coerce a raw pivot `expires_at` value (string from the DB
+     * query, Carbon, DateTimeInterface, or null) into a
+     * DateTimeInterface or null.
+     *
+     * @param  mixed  $value
+     * @return \DateTimeInterface|null
+     */
+    private static function coerceRoleExpiry(mixed $value): ?\DateTimeInterface
+    {
+        if ($value instanceof \DateTimeInterface) {
+            return $value;
+        }
+
+        if (\is_string($value) && $value !== '') {
+            return Carbon::parse($value);
+        }
+
+        return null;
+    }
+
+    /**
+     * Compare two expiry values for equality. Two nulls are equal
+     * (forever vs. forever); a null and a concrete instant differ
+     * (forever vs. expiring); two concrete instants are compared
+     * by their UTC timestamp so DST and timezone normalisation
+     * do not produce spurious false positives.
+     *
+     * @param  \DateTimeInterface|null  $left
+     * @param  \DateTimeInterface|null  $right
+     * @return bool
+     */
+    private static function roleExpiriesEqual(?\DateTimeInterface $left, ?\DateTimeInterface $right): bool
+    {
+        if ($left === null && $right === null) {
+            return true;
+        }
+
+        if ($left === null || $right === null) {
+            return false;
+        }
+
+        return $left->getTimestamp() === $right->getTimestamp();
+    }
+
+    /**
+     * Resolve a role model by primary key, used by `syncRoles()`
+     * when the sync delta surfaces an ID that was not part of the
+     * caller's input set (the detachment list).
+     *
+     * @param  string  $id
+     * @return \SineMacula\Laravel\Authorization\Models\Role
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
+     */
+    private function resolveRoleById(string $id): Role
+    {
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
+        $class = config('authorization.models.role', Role::class);
+
+        /** @var \SineMacula\Laravel\Authorization\Models\Role|null $model */
+        $model = $class::query()->whereKey($id)->first();
+
+        if ($model === null) {
+            throw new UnknownRoleException($id);
         }
 
         return $model;

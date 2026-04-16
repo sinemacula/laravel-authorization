@@ -7,10 +7,11 @@ namespace SineMacula\Laravel\Authorization\Traits;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
-use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Events\IdentityPolicyAttached;
 use SineMacula\Laravel\Authorization\Events\IdentityPolicyDetached;
+use SineMacula\Laravel\Authorization\Events\IdentityPolicyExpiryChanged;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Models\AuthorizableGrantPivot;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -86,6 +87,8 @@ trait HasPolicies // @phpstan-ignore trait.unused
      */
     public function attachPolicy(Model|Policy $policy, ?\DateTimeInterface $expiresAt = null): static
     {
+        $prior = $this->readPolicyPivot($policy);
+
         $this->policies()->syncWithoutDetaching([
             (string) $policy->getKey() => ['expires_at' => $expiresAt],
         ]);
@@ -96,6 +99,15 @@ trait HasPolicies // @phpstan-ignore trait.unused
 
         if ($policy instanceof Policy) {
             Event::dispatch(new IdentityPolicyAttached($this, $policy));
+
+            if ($prior['exists'] && !self::policyExpiriesEqual($prior['expires_at'], $expiresAt)) {
+                Event::dispatch(new IdentityPolicyExpiryChanged(
+                    $this,
+                    $policy,
+                    $prior['expires_at'],
+                    $expiresAt,
+                ));
+            }
         }
 
         return $this;
@@ -131,28 +143,50 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * Accepts `Policy` instances or any Eloquent model — same
      * widened contract as `attachPolicy()`.
      *
+     * Each net attachment fires `IdentityPolicyAttached` and
+     * each net detachment fires `IdentityPolicyDetached` for
+     * Policy-shaped rows, mirroring the per-row signal of
+     * `attachPolicy()` / `detachPolicy()`. The cache invalidation
+     * listener wired to those events keeps the resolution cache
+     * coherent without a separate forget call in this method.
+     * Non-Policy models are still synced silently — the events
+     * carry a `Policy` instance by contract, so detached IDs
+     * that resolve to a non-Policy model (or nothing) are
+     * skipped without raising.
+     *
      * @param  array<int, \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Models\Policy>  $policies
      * @return static
      */
     public function syncPolicies(array $policies): static
     {
-        $ids = \array_values(\array_map(
-            static fn (Model|Policy $policy): string => (string) $policy->getKey(),
-            $policies,
-        ));
+        $resolved = [];
 
-        $this->policies()->sync($ids);
+        foreach ($policies as $policy) {
+            $resolved[(string) $policy->getKey()] = $policy;
+        }
+
+        $ids    = \array_keys($resolved);
+        $result = $this->policies()->sync($ids);
 
         if (isset($this->relations['policies'])) {
             unset($this->relations['policies']);
         }
 
-        // sync() bypasses attachPolicy / detachPolicy and so fires
-        // no IdentityPolicyAttached / IdentityPolicyDetached
-        // events — invalidate the resolution cache directly so the
-        // next evaluation observes the fresh policy set.
-        if (app()->bound(ResolutionCache::class)) {
-            app(ResolutionCache::class)->forget($this);
+        /** @var array{attached?: array<int, mixed>, detached?: array<int, mixed>, updated?: array<int, mixed>} $result */
+        foreach ($result['attached'] ?? [] as $id) {
+            $model = $resolved[(string) $id] ?? $this->lookupPolicyById((string) $id);
+
+            if ($model instanceof Policy) {
+                Event::dispatch(new IdentityPolicyAttached($this, $model));
+            }
+        }
+
+        foreach ($result['detached'] ?? [] as $id) {
+            $model = $this->lookupPolicyById((string) $id);
+
+            if ($model instanceof Policy) {
+                Event::dispatch(new IdentityPolicyDetached($this, $model));
+            }
         }
 
         return $this;
@@ -187,6 +221,103 @@ trait HasPolicies // @phpstan-ignore trait.unused
         }
 
         return \array_values($hydrated);
+    }
+
+    /**
+     * Read the existing pivot row for the supplied policy and
+     * return its existence and `expires_at` value. Returns
+     * `['exists' => false, 'expires_at' => null]` when no row
+     * exists. The query bypasses the relation's expiry filter so
+     * it observes both live and expired pivot rows — both are
+     * candidates for an expiry mutation by a re-call to
+     * `attachPolicy()`.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @return array{exists: bool, expires_at: \DateTimeInterface|null}
+     */
+    private function readPolicyPivot(Model|Policy $policy): array
+    {
+        /** @var string $table */
+        $table = config('authorization.tables.authorizable_policies', 'authorizable_policies');
+
+        $row = DB::table($table)
+            ->where('authorizable_type', $this->getMorphClass())
+            ->where('authorizable_id', (string) $this->getKey())
+            ->where('policy_id', (string) $policy->getKey())
+            ->first();
+
+        if ($row === null) {
+            return ['exists' => false, 'expires_at' => null];
+        }
+
+        return [
+            'exists'     => true,
+            'expires_at' => self::coercePolicyExpiry($row->expires_at ?? null),
+        ];
+    }
+
+    /**
+     * Coerce a raw pivot `expires_at` value into a
+     * DateTimeInterface or null.
+     *
+     * @param  mixed  $value
+     * @return \DateTimeInterface|null
+     */
+    private static function coercePolicyExpiry(mixed $value): ?\DateTimeInterface
+    {
+        if ($value instanceof \DateTimeInterface) {
+            return $value;
+        }
+
+        if (\is_string($value) && $value !== '') {
+            return Carbon::parse($value);
+        }
+
+        return null;
+    }
+
+    /**
+     * Compare two expiry values for equality. Two nulls are
+     * equal (forever vs. forever); a null and a concrete instant
+     * differ; two concrete instants are compared by UTC
+     * timestamp so DST and timezone normalisation do not produce
+     * spurious false positives.
+     *
+     * @param  \DateTimeInterface|null  $left
+     * @param  \DateTimeInterface|null  $right
+     * @return bool
+     */
+    private static function policyExpiriesEqual(?\DateTimeInterface $left, ?\DateTimeInterface $right): bool
+    {
+        if ($left === null && $right === null) {
+            return true;
+        }
+
+        if ($left === null || $right === null) {
+            return false;
+        }
+
+        return $left->getTimestamp() === $right->getTimestamp();
+    }
+
+    /**
+     * Look up a policy model by primary key, used by
+     * `syncPolicies()` when the sync delta surfaces an ID that
+     * was not part of the caller's input set (the detachment
+     * list). Returns null when the row no longer exists or
+     * resolves to a non-Policy model — both branches are
+     * handled by the caller as "skip the event.".
+     *
+     * @param  string  $id
+     * @return \SineMacula\Laravel\Authorization\Models\Policy|null
+     */
+    private function lookupPolicyById(string $id): ?Policy
+    {
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
+        $class = config('authorization.models.policy', Policy::class);
+
+        /** @var \SineMacula\Laravel\Authorization\Models\Policy|null $model */
+        return $class::query()->whereKey($id)->first();
     }
 
     /**

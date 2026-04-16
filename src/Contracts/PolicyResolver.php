@@ -9,23 +9,28 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy;
 /**
  * Internal policy-gathering contract.
  *
+ * Sits alongside `PrincipalResolver` and answers the symmetric
+ * question — `PrincipalResolver::resolve()` returns the principal in
+ * scope, `PolicyResolver::policiesFor()` returns the policies in
+ * scope for that principal.
+ *
  * `PolicyStore` models *external* sources (JWT-embedded policies,
- * config-shipped policies, remote APIs). `PolicyRepository` models
+ * config-shipped policies, remote APIs). `PolicyResolver` models
  * the *internal gathering strategy* the authorization manager uses
  * to answer "what policies apply to this principal right now?" —
  * typically the union of an optional `PolicyStore` and the
  * principal's own attached policies.
  *
- * Swapping the repository is the hook for alternate gathering
+ * Swapping the resolver is the hook for alternate gathering
  * strategies: an aggressive per-request cache, a tenant-scoped
  * pre-loader, a role-hierarchy expander, a test fake. The manager
  * never talks to the Eloquent layer directly — it only ever asks
- * the bound repository.
+ * the bound resolver.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-interface PolicyRepository
+interface PolicyResolver
 {
     /**
      * Return every policy the authorization manager should consider

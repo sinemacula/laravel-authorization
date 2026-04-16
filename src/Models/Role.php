@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Events\RolePermissionGranted;
 use SineMacula\Laravel\Authorization\Events\RolePermissionRevoked;
 use SineMacula\Laravel\Authorization\Events\RoleUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException;
+use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
 
 /**
@@ -72,6 +73,16 @@ class Role extends Model
      * @var bool
      */
     private bool $systemProtectionBypassed = false;
+
+    /**
+     * Pre-save attribute snapshot captured on `updating` and
+     * consumed by the `updated` listener so `RoleUpdated`
+     * carries a complete before/after diff. Reset after each
+     * dispatch so a follow-up save observes a clean slate.
+     *
+     * @var array<string, mixed>
+     */
+    private array $beforeChangeSnapshot = [];
 
     /**
      * Create a new Eloquent model instance.
@@ -183,6 +194,13 @@ class Role extends Model
     /**
      * Replace this role's permission set with the supplied list.
      *
+     * Each net attachment fires `RolePermissionGranted` and each
+     * net detachment fires `RolePermissionRevoked`, so audit
+     * consumers receive the same per-row signal they would for
+     * `givePermission()` / `revokePermission()` calls and the
+     * cache invalidation listener wired to those events keeps
+     * the resolution cache coherent.
+     *
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Permission|string>  $permissions
      * @return static
      *
@@ -190,15 +208,27 @@ class Role extends Model
      */
     public function syncPermissions(array $permissions): static
     {
-        $ids = \array_values(\array_map(
-            fn (Permission|string $permission): string => (string) $this->resolvePermission($permission)->getKey(),
-            $permissions,
-        ));
+        $resolved = [];
 
-        $this->permissions()->sync($ids);
+        foreach ($permissions as $permission) {
+            $model                               = $this->resolvePermission($permission);
+            $resolved[(string) $model->getKey()] = $model;
+        }
+
+        $ids    = \array_keys($resolved);
+        $result = $this->permissions()->sync($ids);
 
         if (isset($this->relations['permissions'])) {
             unset($this->relations['permissions']);
+        }
+
+        /** @var array{attached?: array<int, mixed>, detached?: array<int, mixed>, updated?: array<int, mixed>} $result */
+        foreach ($result['attached'] ?? [] as $id) {
+            Event::dispatch(new RolePermissionGranted($this, $resolved[(string) $id] ?? $this->resolvePermissionById((string) $id)));
+        }
+
+        foreach ($result['detached'] ?? [] as $id) {
+            Event::dispatch(new RolePermissionRevoked($this, $this->resolvePermissionById((string) $id)));
         }
 
         return $this;
@@ -312,6 +342,14 @@ class Role extends Model
             if ($role->wasSystemRoleRenamed()) {
                 $role->assertSystemProtectionAllows('rename');
             }
+
+            $snapshot = [];
+
+            foreach (\array_keys($role->getDirty()) as $key) {
+                $snapshot[$key] = $role->getOriginal($key);
+            }
+
+            $role->beforeChangeSnapshot = $snapshot;
         });
 
         static::created(static function (self $role): void {
@@ -319,7 +357,12 @@ class Role extends Model
         });
 
         static::updated(static function (self $role): void {
-            Event::dispatch(new RoleUpdated($role, $role->getChanges()));
+            Event::dispatch(new RoleUpdated($role, [
+                'before' => $role->beforeChangeSnapshot,
+                'after'  => $role->getChanges(),
+            ]));
+
+            $role->beforeChangeSnapshot = [];
         });
 
         static::deleted(static function (self $role): void {
@@ -374,6 +417,32 @@ class Role extends Model
     protected function getAuthorizationNameKind(): string
     {
         return 'role';
+    }
+
+    /**
+     * Resolve a permission model by primary key, used by
+     * `syncPermissions()` when the sync delta surfaces an ID
+     * that was not part of the caller's input set (the
+     * detachment list).
+     *
+     * @param  string  $id
+     * @return \SineMacula\Laravel\Authorization\Models\Permission
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
+     */
+    private function resolvePermissionById(string $id): Permission
+    {
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
+        $class = config('authorization.models.permission', Permission::class);
+
+        /** @var \SineMacula\Laravel\Authorization\Models\Permission|null $model */
+        $model = $class::query()->whereKey($id)->first();
+
+        if ($model === null) {
+            throw new UnknownPermissionException($id);
+        }
+
+        return $model;
     }
 
     /**

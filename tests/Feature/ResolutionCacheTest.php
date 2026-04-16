@@ -10,19 +10,19 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
-use SineMacula\Laravel\Authorization\Contracts\PolicyRepository;
+use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Listeners\InvalidateResolutionCache;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy as PolicyModel;
 use SineMacula\Laravel\Authorization\Models\Role;
-use SineMacula\Laravel\Authorization\Repositories\CachingPolicyRepository;
+use SineMacula\Laravel\Authorization\Resolvers\CachingPolicyResolver;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
  * Feature coverage for the resolution cache, its invalidation
- * listener, and the caching policy-repository decorator.
+ * listener, and the caching policy-resolver decorator.
  *
  * Covers the two tiers (in-memory memo + optional persistent
  * store), the principal-scoped invalidation path
@@ -36,7 +36,7 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversClass(ResolutionCache::class)]
-#[CoversClass(CachingPolicyRepository::class)]
+#[CoversClass(CachingPolicyResolver::class)]
 #[CoversClass(InvalidateResolutionCache::class)]
 #[CoversClass(AuthorizationServiceProvider::class)]
 final class ResolutionCacheTest extends TestCase
@@ -58,7 +58,7 @@ final class ResolutionCacheTest extends TestCase
         $config->set('authorization.cache.prefix', 'authorization-test');
 
         $this->app->forgetInstance(ResolutionCache::class);
-        $this->app->forgetInstance(PolicyRepository::class);
+        $this->app->forgetInstance(PolicyResolver::class);
 
         // Re-run the registration so the fresh config is consumed.
         (new AuthorizationServiceProvider($this->app))->register();
@@ -170,18 +170,18 @@ final class ResolutionCacheTest extends TestCase
 
     /**
      * `IdentityPolicyAttached` invalidates the principal's cached
-     * policy slot via the caching repository decorator.
+     * policy slot via the caching resolver decorator.
      *
      * @return void
      */
-    public function testIdentityPolicyAttachedInvalidatesCachingRepository(): void
+    public function testIdentityPolicyAttachedInvalidatesCachingResolver(): void
     {
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        /** @var \SineMacula\Laravel\Authorization\Contracts\PolicyRepository $repository */
-        $repository = $this->app->make(PolicyRepository::class);
+        /** @var \SineMacula\Laravel\Authorization\Contracts\PolicyResolver $resolver */
+        $resolver = $this->app->make(PolicyResolver::class);
 
-        self::assertSame([], $repository->policiesFor($user));
+        self::assertSame([], $resolver->policiesFor($user));
 
         $user->attachPolicy(PolicyModel::create([
             'id'       => (string) Str::uuid(),
@@ -191,7 +191,7 @@ final class ResolutionCacheTest extends TestCase
             ],
         ]));
 
-        $policies = $repository->policiesFor($user->fresh());
+        $policies = $resolver->policiesFor($user->fresh());
 
         self::assertCount(1, $policies);
         self::assertInstanceOf(EvaluationPolicy::class, $policies[0]);

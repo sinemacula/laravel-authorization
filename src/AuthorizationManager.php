@@ -6,7 +6,7 @@ namespace SineMacula\Laravel\Authorization;
 
 use Illuminate\Contracts\Events\Dispatcher;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
-use SineMacula\Laravel\Authorization\Contracts\PolicyRepository;
+use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
@@ -57,9 +57,9 @@ class AuthorizationManager
      * Create a new manager instance.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator  $evaluator
-     * @param  \SineMacula\Laravel\Authorization\Contracts\PrincipalResolver  $resolver
-     * @param  \SineMacula\Laravel\Authorization\Contracts\PolicyRepository  $repository
-     * @param  \SineMacula\Laravel\Authorization\DecisionJournal  $journal
+     * @param  \SineMacula\Laravel\Authorization\Contracts\PrincipalResolver  $principalResolver
+     * @param  \SineMacula\Laravel\Authorization\Contracts\PolicyResolver  $policyResolver
+     * @param  \SineMacula\Laravel\Authorization\LastDecisionStore  $lastDecisionStore
      * @param  \Illuminate\Contracts\Events\Dispatcher|null  $events
      */
     public function __construct(
@@ -68,13 +68,13 @@ class AuthorizationManager
         private readonly PolicyEvaluator $evaluator,
 
         /** Bridge to the host application's concept of the current principal. */
-        private readonly PrincipalResolver $resolver,
+        private readonly PrincipalResolver $principalResolver,
 
         /** Gathers the policy set applicable to a principal on each evaluation. */
-        private readonly PolicyRepository $repository,
+        private readonly PolicyResolver $policyResolver,
 
-        /** Shared journal holding the most recent evaluation result across every scoped clone. */
-        private readonly DecisionJournal $journal,
+        /** Shared single-slot store holding the most recent evaluation result across every scoped clone. */
+        private readonly LastDecisionStore $lastDecisionStore,
 
         /** Event dispatcher used to emit decision events, or null when unavailable. */
         private readonly ?Dispatcher $events = null,
@@ -111,7 +111,7 @@ class AuthorizationManager
         $principal = $this->currentPrincipal();
         $result    = $this->evaluateFor($principal, $action, $resource, $context);
 
-        $this->journal->record($result);
+        $this->lastDecisionStore->put($result);
         $this->dispatch(new DecisionEvaluated($principal, $action, $resource, $context, $result));
 
         if (!$result->allowed) {
@@ -135,7 +135,7 @@ class AuthorizationManager
         $principal = $this->currentPrincipal();
         $result    = $this->evaluateFor($principal, $action, $resource, $context);
 
-        $this->journal->record($result);
+        $this->lastDecisionStore->put($result);
         $this->dispatch(new DecisionEvaluated($principal, $action, $resource, $context, $result));
 
         return $result;
@@ -148,14 +148,14 @@ class AuthorizationManager
      * last check denied?" without re-running the evaluation.
      *
      * Returns null when the process has not yet produced a
-     * decision or when the journal was explicitly cleared between
+     * decision or when the store was explicitly cleared between
      * requests in a long-running worker.
      *
      * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult|null
      */
     public function lastDecision(): ?EvaluationResult
     {
-        return $this->journal->last();
+        return $this->lastDecisionStore->get();
     }
 
     /**
@@ -184,7 +184,7 @@ class AuthorizationManager
      */
     public function forgetLastDecision(): void
     {
-        $this->journal->forget();
+        $this->lastDecisionStore->forget();
     }
 
     /**
@@ -236,7 +236,7 @@ class AuthorizationManager
             return $this->principalOverride;
         }
 
-        return $this->resolver->resolve();
+        return $this->principalResolver->resolve();
     }
 
     /**
@@ -271,9 +271,9 @@ class AuthorizationManager
      *
      * When a per-call override is in effect, it is returned
      * verbatim. Otherwise the manager delegates to the bound
-     * `PolicyRepository` — consumers swap the repository to
-     * introduce caching, tenant scoping, or other gathering
-     * strategies without touching the manager.
+     * `PolicyResolver` — consumers swap the resolver to introduce
+     * caching, tenant scoping, or other gathering strategies
+     * without touching the manager.
      *
      * @param  object  $principal
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
@@ -284,7 +284,7 @@ class AuthorizationManager
             return $this->policyOverride;
         }
 
-        return $this->repository->policiesFor($principal);
+        return $this->policyResolver->policiesFor($principal);
     }
 
     /**

@@ -32,7 +32,7 @@ final class AuthGuardPrincipalResolverTest extends TestCase
      */
     protected function tearDown(): void
     {
-        Mockery::close();
+        \Mockery::close();
 
         parent::tearDown();
     }
@@ -45,11 +45,11 @@ final class AuthGuardPrincipalResolverTest extends TestCase
      */
     public function testReturnsAuthenticatableFromConfiguredGuard(): void
     {
-        $user  = Mockery::mock(Authenticatable::class);
-        $guard = Mockery::mock(Guard::class);
+        $user  = \Mockery::mock(Authenticatable::class);
+        $guard = \Mockery::mock(Guard::class);
         $guard->shouldReceive('user')->once()->andReturn($user);
 
-        $factory = Mockery::mock(AuthFactory::class);
+        $factory = \Mockery::mock(AuthFactory::class);
         $factory->shouldReceive('guard')->once()->with('web')->andReturn($guard);
 
         $resolver = new AuthGuardPrincipalResolver($factory);
@@ -66,10 +66,10 @@ final class AuthGuardPrincipalResolverTest extends TestCase
      */
     public function testReturnsNullWhenGuardIsAnonymous(): void
     {
-        $guard = Mockery::mock(Guard::class);
+        $guard = \Mockery::mock(Guard::class);
         $guard->shouldReceive('user')->once()->andReturnNull();
 
-        $factory = Mockery::mock(AuthFactory::class);
+        $factory = \Mockery::mock(AuthFactory::class);
         $factory->shouldReceive('guard')->once()->andReturn($guard);
 
         $resolver = new AuthGuardPrincipalResolver($factory);
@@ -85,11 +85,11 @@ final class AuthGuardPrincipalResolverTest extends TestCase
      */
     public function testExplicitGuardOverrideIsHonoured(): void
     {
-        $user  = Mockery::mock(Authenticatable::class);
-        $guard = Mockery::mock(Guard::class);
+        $user  = \Mockery::mock(Authenticatable::class);
+        $guard = \Mockery::mock(Guard::class);
         $guard->shouldReceive('user')->once()->andReturn($user);
 
-        $factory = Mockery::mock(AuthFactory::class);
+        $factory = \Mockery::mock(AuthFactory::class);
         $factory->shouldReceive('guard')->once()->with('api')->andReturn($guard);
 
         $resolver = new AuthGuardPrincipalResolver($factory, guard: 'api');

@@ -49,6 +49,9 @@ use Tests\TestCase;
 #[CoversClass(PolicyDeleted::class)]
 final class LifecycleEventsTest extends TestCase
 {
+    /** Canonical description used across the role before/after diff scenarios. */
+    private const string EDITOR_ROLE_DESCRIPTION = 'Editor role';
+
     /**
      * Creating a role dispatches `RoleCreated`.
      *
@@ -71,12 +74,43 @@ final class LifecycleEventsTest extends TestCase
     }
 
     /**
-     * Updating a role dispatches `RoleUpdated` carrying the dirty
-     * attribute set.
+     * Updating a role dispatches `RoleUpdated` carrying both the
+     * pre-save (`before`) and post-save (`after`) snapshots so an
+     * audit consumer can render the diff without a second
+     * round-trip (issue #73).
      *
      * @return void
      */
-    public function testRoleUpdatedEventCarriesChanges(): void
+    public function testRoleUpdatedEventCarriesBeforeAndAfterDiff(): void
+    {
+        $role = Role::create([
+            'id'          => (string) Str::uuid(),
+            'name'        => 'editor',
+            'guard_name'  => 'web',
+            'description' => self::EDITOR_ROLE_DESCRIPTION,
+        ]);
+
+        Event::fake([RoleUpdated::class]);
+
+        $role->description = 'Senior editor role';
+        $role->save();
+
+        Event::assertDispatched(
+            RoleUpdated::class,
+            static fn (RoleUpdated $event): bool => $event->role->is($role)
+                && ($event->changes['before']['description'] ?? null) === self::EDITOR_ROLE_DESCRIPTION
+                && ($event->changes['after']['description'] ?? null)  === 'Senior editor role',
+        );
+    }
+
+    /**
+     * The `before` map captures the pre-save value even when the
+     * pre-save value was null (the row had no description before
+     * the first set).
+     *
+     * @return void
+     */
+    public function testRoleUpdatedEventCarriesNullBeforeForFirstSet(): void
     {
         $role = Role::create([
             'id'         => (string) Str::uuid(),
@@ -86,14 +120,15 @@ final class LifecycleEventsTest extends TestCase
 
         Event::fake([RoleUpdated::class]);
 
-        $role->description = 'Editor role';
+        $role->description = self::EDITOR_ROLE_DESCRIPTION;
         $role->save();
 
         Event::assertDispatched(
             RoleUpdated::class,
             static fn (RoleUpdated $event): bool => $event->role->is($role)
-                && \array_key_exists('description', $event->changes)
-                && $event->changes['description'] === 'Editor role',
+                && \array_key_exists('description', $event->changes['before'])
+                && $event->changes['before']['description']          === null
+                && ($event->changes['after']['description'] ?? null) === self::EDITOR_ROLE_DESCRIPTION,
         );
     }
 
@@ -143,11 +178,39 @@ final class LifecycleEventsTest extends TestCase
 
     /**
      * Updating a permission dispatches `PermissionUpdated` with
-     * the change set.
+     * the before/after diff (issue #73).
      *
      * @return void
      */
-    public function testPermissionUpdatedEventCarriesChanges(): void
+    public function testPermissionUpdatedEventCarriesBeforeAndAfterDiff(): void
+    {
+        $permission = Permission::create([
+            'id'          => (string) Str::uuid(),
+            'name'        => 'posts:create',
+            'guard_name'  => 'web',
+            'description' => 'Create posts',
+        ]);
+
+        Event::fake([PermissionUpdated::class]);
+
+        $permission->description = 'Create blog posts';
+        $permission->save();
+
+        Event::assertDispatched(
+            PermissionUpdated::class,
+            static fn (PermissionUpdated $event): bool => $event->permission->is($permission)
+                && ($event->changes['before']['description'] ?? null) === 'Create posts'
+                && ($event->changes['after']['description'] ?? null)  === 'Create blog posts',
+        );
+    }
+
+    /**
+     * The `before` map captures null when the prior value was
+     * null (first-time set on a previously empty column).
+     *
+     * @return void
+     */
+    public function testPermissionUpdatedEventCarriesNullBeforeForFirstSet(): void
     {
         $permission = Permission::create([
             'id'         => (string) Str::uuid(),
@@ -163,7 +226,9 @@ final class LifecycleEventsTest extends TestCase
         Event::assertDispatched(
             PermissionUpdated::class,
             static fn (PermissionUpdated $event): bool => $event->permission->is($permission)
-                && ($event->changes['description'] ?? null) === 'Create posts',
+                && \array_key_exists('description', $event->changes['before'])
+                && $event->changes['before']['description']          === null
+                && ($event->changes['after']['description'] ?? null) === 'Create posts',
         );
     }
 
@@ -214,12 +279,42 @@ final class LifecycleEventsTest extends TestCase
     }
 
     /**
-     * Updating a policy dispatches `PolicyUpdated` with the change
-     * set.
+     * Updating a policy dispatches `PolicyUpdated` with the
+     * before/after diff (issue #73).
      *
      * @return void
      */
-    public function testPolicyUpdatedEventCarriesChanges(): void
+    public function testPolicyUpdatedEventCarriesBeforeAndAfterDiff(): void
+    {
+        $policy = Policy::create([
+            'id'          => (string) Str::uuid(),
+            'name'        => 'initial',
+            'description' => 'Initial policy',
+            'document'    => [
+                'statements' => [['effect' => 'allow', 'actions' => ['x']]],
+            ],
+        ]);
+
+        Event::fake([PolicyUpdated::class]);
+
+        $policy->description = 'Updated policy';
+        $policy->save();
+
+        Event::assertDispatched(
+            PolicyUpdated::class,
+            static fn (PolicyUpdated $event): bool => $event->policy->is($policy)
+                && ($event->changes['before']['description'] ?? null) === 'Initial policy'
+                && ($event->changes['after']['description'] ?? null)  === 'Updated policy',
+        );
+    }
+
+    /**
+     * The `before` map captures null when the prior value was
+     * null (first-time set on a previously empty column).
+     *
+     * @return void
+     */
+    public function testPolicyUpdatedEventCarriesNullBeforeForFirstSet(): void
     {
         $policy = Policy::create([
             'id'       => (string) Str::uuid(),
@@ -237,7 +332,9 @@ final class LifecycleEventsTest extends TestCase
         Event::assertDispatched(
             PolicyUpdated::class,
             static fn (PolicyUpdated $event): bool => $event->policy->is($policy)
-                && ($event->changes['description'] ?? null) === 'Initial policy',
+                && \array_key_exists('description', $event->changes['before'])
+                && $event->changes['before']['description']          === null
+                && ($event->changes['after']['description'] ?? null) === 'Initial policy',
         );
     }
 

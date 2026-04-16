@@ -48,7 +48,7 @@ final class RolePermissionApiTest extends TestCase
     {
         Event::fake([RolePermissionGranted::class]);
 
-        $role = $this->makeRole();
+        $role       = $this->makeRole();
         $permission = $this->makePermission();
 
         $role->givePermission(self::PERMISSION_NAME);
@@ -69,7 +69,7 @@ final class RolePermissionApiTest extends TestCase
      */
     public function testGivePermissionAcceptsModelInstance(): void
     {
-        $role = $this->makeRole();
+        $role       = $this->makeRole();
         $permission = $this->makePermission();
 
         $role->givePermission($permission);
@@ -104,7 +104,7 @@ final class RolePermissionApiTest extends TestCase
     {
         Event::fake([RolePermissionRevoked::class]);
 
-        $role = $this->makeRole();
+        $role       = $this->makeRole();
         $permission = $this->makePermission();
 
         $role->givePermission(self::PERMISSION_NAME);
