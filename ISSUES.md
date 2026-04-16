@@ -71,67 +71,71 @@ consumed into this file and removed from the repo.
   artefact") currently only exercises the evaluator, so the Manager,
   RBAC lookup, and policy-parse hot paths have no tracked budget.
 
-### 22. No row-level multi-tenant role / permission scoping
+### 100. `ancestors()` passes a UUID to `proposedParentName` — exception shows ID instead of name
 
-- **Files:** `database/migrations/2026_04_14_000001_create_roles_table.php`
-  (no tenant column); `database/migrations/2026_04_14_000002_create_permissions_table.php`
-  (no tenant column); `src/Models/Role.php`, `src/Models/Permission.php`
-  (no global scope); `SPECS.md` §4.3 item 4.
-- **Observation:** the package has no notion of row-level tenant
-  ownership on `roles` or `permissions`. All role and permission rows
-  live in a single shared namespace, disambiguated only by
-  `(name, guard_name)`. SPECS.md §4.3 explicitly defers tenant
-  handling to the policy `context` array
-  (`conditions: { tenant_id: {eq: 'org-1'} }`), and states the
-  package "does not ship tenant middleware or tenant-aware tables."
-- **Pushback on the spec stance:** SPECS.md §4.3 conflates two
-  different tenancy problems:
-    1. **Data-plane tenancy** — "user X can only read tenant Y's
-       resources." Policy context conditions solve this well.
-    2. **Control-plane tenancy** — "Client A defines a role called
-       'Content Manager' that Client B does not know exists, with
-       their own custom permissions, managed through Client A's
-       admin UI." Policy conditions cannot model this — the role
-       name itself is tenant-owned.
-       Enterprise SaaS RBAC almost always needs **both**. The current
-       design supports (1) and leaves (2) to the consumer, which means
-       every SaaS consumer has to build their own tenant scoping on top
-       of shared tables, or fork the package.
-- **Impact:** SaaS consumers that want self-serve RBAC per tenant
-  (Client A's admins managing their own role catalogue) have no
-  path today without polluting the shared `roles` / `permissions`
-  tables with `tenant_id` prefixes in the `name` column — a pattern
-  that defeats the unique constraint and makes listing a tenant's
-  roles a string-prefix query. For a package aspiring to be
-  enterprise-ready, this is the largest single gap surfaced so far.
-- **Options:** (a) add a nullable polymorphic owner
-  (`tenant_type` / `tenant_id`) to `roles` and `permissions`, with
-  `null` meaning "global / platform role" — scope lookups by the
-  current tenant context supplied via a new `TenantResolver`
-  contract (mirrors the `PrincipalResolver` pattern and keeps the
-  package auth-agnostic); (b) keep the core tables single-tenant
-  and ship a sibling `laravel-authorization-tenancy` package that
-  layers tenant-scoped models on top; (c) document policy
-  `context` conditions as the supported tenancy idiom and accept
-  that control-plane tenancy is out of scope.
-- **Follow-on work required for option (a):** schema change
-  (nullable polymorphic owner on `roles` and `permissions`),
-  lookup scoping (global scope keyed off the `TenantResolver`),
-  attachment validation (prevent cross-tenant role ↔ permission
-  and identity ↔ role attachment, analogous to issue #21 for
-  guards), API ergonomics ("fetch this tenant's roles",
-  "clone the platform role catalogue to tenant X"), and
-  `PrincipalResolver` interaction (principal's effective tenant
-  becomes an evaluation input). Each is tractable but the surface
-  is wide — SPECS.md and the PRD should be amended to call out
-  every touch point before implementation begins.
+- **File:** `src/Models/Role.php:213`.
+- **Observation:** the cycle-detection throw inside `ancestors()`
+  constructs `RoleHierarchyCycleException(roleName: $this->name,
+  proposedParentName: $current->parent_id)`. The parameter
+  `proposedParentName` receives a UUID string (`parent_id`), not
+  the parent role's name. The saving hook at line 593–594
+  correctly resolves the parent first
+  (`$proposedParent?->name ?? $role->parent_id`); the
+  `ancestors()` path skips the resolution. The exception message
+  will read "Role 'admin' cannot set parent to
+  '550e8400-e29b-…'" instead of "…to 'editor'".
+- **Impact:** confusing error output. An enterprise consumer
+  catching the exception in a controller gets an opaque UUID
+  instead of the human-readable role name the saving-hook path
+  would have given them.
+- **Options:** (a) resolve the parent via `static::query()->find($current->parent_id)?->name`
+  before throwing, matching the saving-hook pattern; (b) change
+  the exception to accept both name and ID so the consumer
+  can render whichever they prefer.
 
----
+### 101. `descendants()` has no cycle guard — infinite loop if a cycle exists in the DB
 
-## Enterprise readiness gaps
+- **File:** `src/Models/Role.php:237–253`.
+- **Observation:** the breadth-first descendant walk uses
+  `while ($queue !== [])` with no `$visited` set. If a cycle
+  exists in the database — race condition between two concurrent
+  `parent_id` saves, direct SQL bypassing the model's saving
+  hook, FK enforcement off in SQLite/test — the BFS loops
+  forever. The symmetry is broken:
+  `ancestors()` at line 205–230 carries a `$visited` map and
+  throws on re-encounter; `descendants()` does not.
+- **Impact:** a corrupted hierarchy (however it got there) turns
+  every `$role->descendants()` call — including the saving
+  hook's own cycle check at line 588 — into a runaway loop that
+  exhausts memory or hits max-execution-time. The saving hook
+  itself becomes the vector: if someone inserts a cycle via raw
+  SQL, the next legitimate `parent_id` update triggers
+  `$role->descendants()` inside the hook and hangs.
+- **Options:** (a) add a `$visited` set keyed by primary key
+  inside the BFS, breaking the loop and throwing
+  `RoleHierarchyCycleException` on re-encounter — mirrors the
+  ancestors pattern; (b) cap the walk at a configurable
+  `authorization.hierarchy.max_depth` (default 50) and throw
+  on breach. Option (a) is the clean fix; option (b) adds a
+  safety net for pathological trees regardless of cycles.
 
-Surfaced during deep code review against an enterprise RBAC checklist.
-These are not spec deviations — they are features or surfaces a serious
-enterprise consumer expects on day 1–30 that this package does not
-ship. All items are in-scope for v1.0.0.
+### 102. `isAncestorOf()` has no cycle guard — same infinite-loop risk as `descendants()`
+
+- **File:** `src/Models/Role.php:261–281`.
+- **Observation:** the parent-chain walk in `isAncestorOf()`
+  uses `while ($current->parent_id !== null)` with no `$visited`
+  set — the same missing guard as `descendants()`. A cycle in
+  the DB turns this helper into a runaway loop. Unlike
+  `ancestors()`, which has the guard, `isAncestorOf()` was
+  implemented independently and missed it.
+- **Impact:** same as #101 — a corrupted hierarchy hangs the
+  caller. Consumer code like `$role->isAncestorOf($other)` in
+  a Blade view or API controller produces a timeout instead of
+  a catchable exception.
+- **Options:** (a) add a `$visited` set and throw
+  `RoleHierarchyCycleException` on re-encounter, consistent
+  with `ancestors()`; (b) rewrite `isAncestorOf()` to delegate
+  to `ancestors()` (which already has the guard) and check
+  membership — eliminates the independent walk entirely. Option
+  (b) is the single-owner answer.
 

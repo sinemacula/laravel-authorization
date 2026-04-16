@@ -4,11 +4,13 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Events\RoleCreated;
@@ -20,6 +22,7 @@ use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use SineMacula\Laravel\Authorization\Traits\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
@@ -44,6 +47,8 @@ use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
  * @property bool $is_system
  * @property string|null $parent_id
  * @property int|null $rank
+ * @property string|null $tenant_type
+ * @property string|null $tenant_id
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -64,6 +69,8 @@ class Role extends Model
         'is_system',
         'parent_id',
         'rank',
+        'tenant_type',
+        'tenant_id',
     ];
 
     /**
@@ -162,6 +169,81 @@ class Role extends Model
             foreignPivotKey: 'role_id',
             relatedPivotKey: 'permission_id',
         )->using(RolePermission::class);
+    }
+
+    // ------------------------------------------------------------------
+    // Tenant ownership
+    // ------------------------------------------------------------------
+
+    /**
+     * The tenant that owns this role.
+     *
+     * A null morph pair marks the role as global (platform-level).
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\MorphTo<\Illuminate\Database\Eloquent\Model, $this>
+     */
+    public function tenant(): MorphTo
+    {
+        return $this->morphTo('tenant');
+    }
+
+    /**
+     * Determine whether this role is global (not owned by any tenant).
+     *
+     * @return bool
+     */
+    public function isGlobal(): bool
+    {
+        return $this->tenant_type === null;
+    }
+
+    /**
+     * Determine whether this role is owned by a tenant.
+     *
+     * @return bool
+     */
+    public function isTenantOwned(): bool
+    {
+        return $this->tenant_type !== null;
+    }
+
+    /**
+     * Scope the query to rows owned by the given tenant.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<static>  $query
+     * @param  object  $tenant
+     * @return \Illuminate\Database\Eloquent\Builder<static>
+     */
+    public function scopeForTenant(Builder $query, object $tenant): Builder
+    {
+        $morphType = $tenant instanceof Model
+            ? $tenant->getMorphClass()
+            : $tenant::class;
+
+        $morphId = method_exists($tenant, 'getKey')
+            ? (string) $tenant->getKey()
+            : spl_object_hash($tenant);
+
+        return $query->where($this->getTable() . '.tenant_type', $morphType)
+            ->where($this->getTable() . '.tenant_id', $morphId);
+    }
+
+    /**
+     * Scope the query to global rows only (tenant columns are null).
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<static>  $query
+     * @return \Illuminate\Database\Eloquent\Builder<static>
+     */
+    public function scopeGlobalOnly(Builder $query): Builder
+    {
+        // `whereNull` is declared as `@method static` on the Eloquent
+        // Builder docblock; PHPStan flags the dynamic instance call
+        // as `staticMethod.dynamicCall` even though runtime dispatch
+        // is genuinely dynamic. The same pattern is used in
+        // `GuardScopedLookup` — a docblock-soup artefact, not an
+        // unsafe call.
+        // @phpstan-ignore staticMethod.dynamicCall
+        return $query->whereNull($this->getTable() . '.tenant_type');
     }
 
     // ------------------------------------------------------------------
@@ -572,6 +654,8 @@ class Role extends Model
      */
     protected static function booted(): void
     {
+        static::addGlobalScope(new TenantScope);
+
         static::saving(static function (self $role): void {
             if ($role->parent_id === null) {
                 return;

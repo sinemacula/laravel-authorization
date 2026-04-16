@@ -25,6 +25,7 @@ use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
 use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Events\IdentityPermissionGranted;
@@ -44,6 +45,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Resolvers\CachingPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
+use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
 
 /**
@@ -69,6 +71,7 @@ class AuthorizationServiceProvider extends ServiceProvider
         $this->mergeConfigFrom(__DIR__ . '/../config/authorization.php', 'authorization');
 
         $this->registerPrincipalResolver();
+        $this->registerTenantResolver();
         $this->registerPolicyStore();
         $this->registerResolutionCache();
         $this->registerPolicyResolver();
@@ -144,6 +147,19 @@ class AuthorizationServiceProvider extends ServiceProvider
         $class = $this->app['config']->get('authorization.principal_resolver', NullPrincipalResolver::class);
 
         $this->app->singleton(PrincipalResolver::class, $class);
+    }
+
+    /**
+     * Bind the tenant resolver.
+     *
+     * @return void
+     */
+    protected function registerTenantResolver(): void
+    {
+        /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\TenantResolver> $class */
+        $class = $this->app['config']->get('authorization.tenant_resolver', NullTenantResolver::class);
+
+        $this->app->singleton(TenantResolver::class, $class);
     }
 
     /**

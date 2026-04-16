@@ -9,6 +9,7 @@ use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
 use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
 use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 
@@ -47,6 +48,7 @@ final class ConfigValidator
         self::validatePermissionProviders($config['permission_providers'] ?? []);
         self::validateGateOnConflict($config['gate']['on_conflict'] ?? null);
         self::validatePrincipalResolver($config['principal_resolver'] ?? null);
+        self::validateTenantResolver($config['tenant_resolver'] ?? null);
         self::validatePolicyStore($config['policy_store'] ?? null);
         self::validateCacheStore($config['cache']['store'] ?? null, $container);
     }
@@ -155,6 +157,28 @@ final class ConfigValidator
             $value,
             PrincipalResolver::class,
             'authorization.principal_resolver',
+        );
+    }
+
+    /**
+     * Validate that `tenant_resolver`, when set, resolves to a class
+     * implementing `TenantResolver`.
+     *
+     * @param  mixed  $value
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    private static function validateTenantResolver(mixed $value): void
+    {
+        if ($value === null) {
+            return;
+        }
+
+        self::assertImplementsContract(
+            $value,
+            TenantResolver::class,
+            'authorization.tenant_resolver',
         );
     }
 

@@ -187,6 +187,21 @@ return [
 
     /*
     |---------------------------------------------------------------------------
+    | Tenant resolver
+    |---------------------------------------------------------------------------
+    |
+    | Bridges the engine to whatever concept of "current tenant" the
+    | application uses. The shipped default returns null, disabling tenant
+    | scoping entirely — all roles and permissions are visible regardless
+    | of ownership. Applications wire their own resolver through this key
+    | or by binding the contract directly.
+    |
+    */
+
+    'tenant_resolver' => \SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver::class,
+
+    /*
+    |---------------------------------------------------------------------------
     | Resolution cache
     |---------------------------------------------------------------------------
     |

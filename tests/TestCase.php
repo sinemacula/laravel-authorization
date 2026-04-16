@@ -81,6 +81,12 @@ abstract class TestCase extends OrchestraTestCase
             $table->timestamps();
         });
 
+        Schema::create('stub_tenants', static function (Blueprint $table): void {
+            $table->string('id')->primary();
+            $table->string('name')->nullable();
+            $table->timestamps();
+        });
+
         if (env('DB_CONNECTION', 'sqlite') !== 'sqlite') {
             $this->beforeApplicationDestroyed(function (): void {
                 /** @var \Illuminate\Config\Repository $config */
@@ -96,6 +102,7 @@ abstract class TestCase extends OrchestraTestCase
 
                 Schema::dropIfExists('stub_identities');
                 Schema::dropIfExists('stub_second_identities');
+                Schema::dropIfExists('stub_tenants');
             });
         }
     }
