@@ -106,4 +106,119 @@ final class BenchmarkFixtures
     {
         return 'benchmark-role';
     }
+
+    /**
+     * A realistic interpolation context — matches the shape callers
+     * pass through `can()`: a principal stand-in under `user`,
+     * request metadata, and a tenant scalar. Paired with the
+     * `interpolationPattern()` fixture so the 10-token parse path
+     * hits plain keys, dot-notation keys, and resource namespaces.
+     *
+     * @return array<string, mixed>
+     */
+    public static function interpolationContext(): array
+    {
+        return [
+            'tenant'  => 'tenant-99',
+            'request' => [
+                'ip'        => '10.0.0.42',
+                'method'    => 'POST',
+                'path'      => '/admin/posts/99',
+                'country'   => 'US',
+                'referrer'  => 'https://example.test/dashboard',
+                'user_agent' => 'Mozilla/5.0',
+            ],
+            'environment' => 'production',
+        ];
+    }
+
+    /**
+     * A 10-token interpolation pattern blending principal,
+     * resource, and dot-notation context lookups. Used by the
+     * `ContextInterpolator` benchmark.
+     *
+     * @return string
+     */
+    public static function interpolationPattern(): string
+    {
+        return '${principal.id}:${principal.type}:${resource.type}:${resource.id}'
+            . ':${context.tenant}:${context.request.ip}:${context.request.method}'
+            . ':${context.request.path}:${context.request.country}:${context.environment}';
+    }
+
+    /**
+     * A 20-token interpolation pattern — doubles the 10-token
+     * fixture so the performance-budget test has a higher-weight
+     * measurement to run against without drifting from the bench
+     * fixture shape.
+     *
+     * @return string
+     */
+    public static function interpolationPatternWide(): string
+    {
+        return self::interpolationPattern() . ':' . self::interpolationPattern();
+    }
+
+    /**
+     * Full 18-operator condition map covering every branch in
+     * `Statement::evaluateOperator()` — string ops, numeric ops,
+     * temporal ops, set ops, boolean, CIDR, and null checks. Used
+     * by the condition-evaluation bench and its matching budget
+     * test so both surfaces measure the same operator chain.
+     *
+     * @return array<string, mixed>
+     */
+    public static function conditionChain(): array
+    {
+        return [
+            'tenant'       => ['eq' => 'tenant-99'],
+            'role'         => ['neq' => 'guest'],
+            'country'      => ['in' => ['US', 'GB', 'CA']],
+            'blocklist'    => ['not_in' => ['blocked', 'banned']],
+            'ip'           => ['cidr' => '10.0.0.0/8'],
+            'path'         => ['starts_with' => '/admin'],
+            'file'         => ['ends_with' => '.json'],
+            'scheduled_at' => ['before' => '2099-01-01T00:00:00Z'],
+            'created_at'   => ['after' => '2000-01-01T00:00:00Z'],
+            'window'       => ['between' => ['2000-01-01T00:00:00Z', '2099-01-01T00:00:00Z']],
+            'agent'        => ['string_like' => 'Mozilla/*'],
+            'deleted_at'   => ['null' => true],
+            'email'        => ['not_null' => true],
+            'age'          => ['gt' => 17],
+            'quota'        => ['gte' => 0],
+            'strikes'      => ['lt' => 3],
+            'priority'     => ['lte' => 10],
+            'verified'     => ['bool' => true],
+        ];
+    }
+
+    /**
+     * Context matching the 18-operator `conditionChain()` fixture —
+     * every key resolves to a value that makes its operator pass.
+     *
+     * @return array<string, mixed>
+     */
+    public static function conditionContext(): array
+    {
+        return [
+            'tenant'       => 'tenant-99',
+            'role'         => 'member',
+            'country'      => 'US',
+            'blocklist'    => 'allowed',
+            'ip'           => '10.0.0.42',
+            'path'         => '/admin/posts',
+            'file'         => 'report.json',
+            'scheduled_at' => '2026-06-01T00:00:00Z',
+            'created_at'   => '2026-01-01T00:00:00Z',
+            'window'       => '2026-06-01T00:00:00Z',
+            'agent'        => 'Mozilla/5.0',
+            'deleted_at'   => null,
+            'email'        => 'alice@example.test',
+            'age'          => 42,
+            'quota'        => 10,
+            'strikes'      => 0,
+            'priority'     => 5,
+            'verified'     => true,
+        ];
+    }
 }
