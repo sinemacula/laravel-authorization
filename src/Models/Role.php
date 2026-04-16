@@ -4,19 +4,23 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Models;
 
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Events\RoleCreated;
 use SineMacula\Laravel\Authorization\Events\RoleDeleted;
 use SineMacula\Laravel\Authorization\Events\RolePermissionGranted;
 use SineMacula\Laravel\Authorization\Events\RolePermissionRevoked;
 use SineMacula\Laravel\Authorization\Events\RoleUpdated;
+use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
+use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use SineMacula\Laravel\Authorization\Traits\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
 
@@ -38,6 +42,7 @@ use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
  * @property string|null $guard_name
  * @property string|null $description
  * @property bool $is_system
+ * @property string|null $parent_id
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -56,6 +61,7 @@ class Role extends Model
         'guard_name',
         'description',
         'is_system',
+        'parent_id',
     ];
 
     /**
@@ -119,7 +125,7 @@ class Role extends Model
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
         $class = config('authorization.models.role', static::class);
 
-        $model = self::queryForGuard($class, $name, $guard)->first();
+        $model = GuardScopedLookup::queryForGuard($class, $name, $guard)->first();
 
         if ($model === null) {
             throw new UnknownRoleException($name);
@@ -154,6 +160,137 @@ class Role extends Model
             relatedPivotKey: 'permission_id',
         )->using(RolePermission::class);
     }
+
+    // ------------------------------------------------------------------
+    // Hierarchy relations and helpers
+    // ------------------------------------------------------------------
+
+    /**
+     * The parent role in the hierarchy.
+     *
+     * A null `parent_id` marks this role as a root (no parent).
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsTo<self, $this>
+     */
+    public function parent(): BelongsTo
+    {
+        return $this->belongsTo(static::class, 'parent_id');
+    }
+
+    /**
+     * The direct children of this role in the hierarchy.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\HasMany<self, $this>
+     */
+    public function children(): HasMany
+    {
+        return $this->hasMany(static::class, 'parent_id');
+    }
+
+    /**
+     * Return all ancestor roles ordered from root to immediate parent.
+     *
+     * Walks up the parent chain eagerly loading each level. Includes
+     * cycle detection — if a visited role is encountered a second
+     * time, the chain is broken and a
+     * `RoleHierarchyCycleException` is thrown.
+     *
+     * @return \Illuminate\Support\Collection<int, self>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
+     */
+    public function ancestors(): Collection
+    {
+        $ancestors = new Collection;
+        $visited   = [];
+        $current   = $this;
+
+        while ($current->parent_id !== null) {
+            if (isset($visited[$current->parent_id])) {
+                throw new RoleHierarchyCycleException(roleName: $this->name, proposedParentName: $current->parent_id);
+            }
+
+            $visited[$current->parent_id] = true;
+
+            /** @var self|null $parent */
+            $parent = $current->parent;
+
+            if ($parent === null) {
+                break;
+            }
+
+            $ancestors->prepend($parent);
+            $current = $parent;
+        }
+
+        return $ancestors->values();
+    }
+
+    /**
+     * Return all descendant roles (breadth-first).
+     *
+     * @return \Illuminate\Support\Collection<int, self>
+     */
+    public function descendants(): Collection
+    {
+        $descendants = new Collection;
+        $queue       = $this->children()->get()->all();
+
+        while ($queue !== []) {
+            /** @var self $node */
+            $node = \array_shift($queue);
+            $descendants->push($node);
+
+            foreach ($node->children()->get() as $child) {
+                $queue[] = $child;
+            }
+        }
+
+        return $descendants->values();
+    }
+
+    /**
+     * Determine whether this role is an ancestor of the given role.
+     *
+     * @param  self  $role
+     * @return bool
+     */
+    public function isAncestorOf(self $role): bool
+    {
+        $current = $role;
+
+        while ($current->parent_id !== null) {
+            if ($current->parent_id === $this->getKey()) {
+                return true;
+            }
+
+            /** @var self|null $parent */
+            $parent = $current->parent;
+
+            if ($parent === null) {
+                break;
+            }
+
+            $current = $parent;
+        }
+
+        return false;
+    }
+
+    /**
+     * Determine whether this role is a descendant of the given role.
+     *
+     * @param  self  $role
+     * @return bool
+     */
+    public function isDescendantOf(self $role): bool
+    {
+        return $role->isAncestorOf($this);
+    }
+
+    // ------------------------------------------------------------------
+    // Permission management
+    // ------------------------------------------------------------------
 
     /**
      * Attach the given permission to this role.
@@ -272,7 +409,13 @@ class Role extends Model
     }
 
     /**
-     * Return the names of every permission attached to this role.
+     * Return the names of every permission this role holds.
+     *
+     * When `authorization.hierarchy.enabled` is true (the default),
+     * this includes the deduplicated union of the role's own direct
+     * permissions and all permissions inherited from ancestor roles.
+     * When hierarchy is disabled, only directly attached permissions
+     * are returned.
      *
      * @return array<int, string>
      */
@@ -282,6 +425,20 @@ class Role extends Model
         $permissions = $this->permissions;
 
         $names = $permissions->map(static fn (Permission $permission): string => $permission->name)->all();
+
+        /** @var bool $hierarchyEnabled */
+        $hierarchyEnabled = config('authorization.hierarchy.enabled', true);
+
+        if ($hierarchyEnabled && $this->parent_id !== null) {
+            foreach ($this->ancestors() as $ancestor) {
+                /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission> $ancestorPermissions */
+                $ancestorPermissions = $ancestor->permissions;
+
+                foreach ($ancestorPermissions as $ancestorPermission) {
+                    $names[] = $ancestorPermission->name;
+                }
+            }
+        }
 
         return \array_values(\array_unique($names));
     }
@@ -336,7 +493,8 @@ class Role extends Model
     /**
      * Register the row-lifecycle listeners that translate
      * Eloquent's native `created` / `updated` / `deleted` events
-     * into the package's typed CRUD events. System-protection
+     * into the package's typed CRUD events, plus the hierarchy
+     * cycle-detection guard on `saving`. System-protection
      * hooks (`deleting`, `updating` guard, `saved` bypass reset)
      * are registered by `HasSystemProtection::bootHasSystemProtection()`.
      *
@@ -344,6 +502,33 @@ class Role extends Model
      */
     protected static function booted(): void
     {
+        static::saving(static function (self $role): void {
+            if ($role->parent_id === null) {
+                return;
+            }
+
+            // Self-referential check.
+            if ($role->exists && $role->parent_id === $role->getKey()) {
+                throw new RoleHierarchyCycleException(roleName: $role->name, proposedParentName: $role->name);
+            }
+
+            // If the role already exists, verify the proposed parent
+            // is not already a descendant (which would form a cycle).
+            if ($role->exists && $role->isDirty('parent_id')) {
+                $descendants = $role->descendants();
+
+                foreach ($descendants as $descendant) {
+                    if ($descendant->getKey() === $role->parent_id) {
+                        /** @var self|null $proposedParent */
+                        $proposedParent = static::query()->find($role->parent_id);
+                        $proposedName   = $proposedParent?->name ?? $role->parent_id;
+
+                        throw new RoleHierarchyCycleException(roleName: $role->name, proposedParentName: $proposedName);
+                    }
+                }
+            }
+        });
+
         static::updating(static function (self $role): void {
             $snapshot = [];
 
@@ -440,52 +625,6 @@ class Role extends Model
         $roleName = $this->getOriginal('name', $this->getAttribute('name'));
 
         return new SystemRoleProtectedException(roleName: (string) $roleName, operation: $operation);
-    }
-
-    /**
-     * Build the guard-precedence query for the supplied role
-     * name. Centralises the dynamic class-string handling so the
-     * caller stays readable and the two unavoidable PHPStan
-     * suppressions live in one place.
-     *
-     * The configured role model is instantiated through `new
-     * $class` so PHPStan resolves the receiver as an Eloquent
-     * `Model` instance — `newQuery()`, `where()`, and the closure
-     * receiver type cleanly without ignores. The remaining two
-     * suppressions on `orderByRaw()` and `orWhereNull()` exist
-     * because Laravel declares those methods via `@method static`
-     * annotations on `Illuminate\Database\Eloquent\Builder`, which
-     * PHPStan flags as `staticMethod.dynamicCall` whenever they
-     * appear inside an instance-method chain. They are runtime-
-     * dynamic instance calls; the static-receiver shape is a
-     * docblock artefact of Laravel's annotation soup, not the
-     * actual call dispatch.
-     *
-     * @param  class-string<\SineMacula\Laravel\Authorization\Models\Role>  $class
-     * @param  string  $name
-     * @param  string  $guard
-     * @return \Illuminate\Database\Eloquent\Builder<\SineMacula\Laravel\Authorization\Models\Role>
-     */
-    private static function queryForGuard(string $class, string $name, string $guard): Builder
-    {
-        $instance = new $class;
-
-        // The chain ends in `orderByRaw()`, which Laravel declares
-        // as `@method static` on Illuminate\Database\Eloquent\Builder.
-        // PHPStan flags any dynamic call to such a method as
-        // `staticMethod.dynamicCall` even though runtime dispatch is
-        // genuinely dynamic instance dispatch on a Builder instance.
-        // The same applies to `orWhereNull()` inside the closure
-        // below. Both ignores are docblock-soup artefacts, not
-        // unsafe calls.
-        // @phpstan-ignore staticMethod.dynamicCall
-        return $instance->newQuery()
-            ->where('name', $name)
-            ->where(static function (Builder $query) use ($guard): void {
-                // @phpstan-ignore staticMethod.dynamicCall
-                $query->where('guard_name', $guard)->orWhereNull('guard_name');
-            })
-            ->orderByRaw('guard_name IS NULL');
     }
 
     /**

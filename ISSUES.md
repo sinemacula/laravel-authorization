@@ -135,77 +135,6 @@ These are not spec deviations — they are features or surfaces a serious
 enterprise consumer expects on day 1–30 that this package does not
 ship. All items are in-scope for v1.0.0.
 
-### 28. No role hierarchy / inheritance
-
-_(Not to be confused with role rank — see #45. Hierarchy governs
-**permission flow** ("admin inherits editor's permissions"); rank
-governs **management authority** ("admin can act on editor, editor
-cannot act on admin"). They are independent features and most
-enterprise systems ship both.)_
-
-- **Files:** `database/migrations/2026_04_14_000001_create_roles_table.php`
-  (no `parent_id` column); `src/Models/Role.php` (no parent/children
-  relations); `src/Traits/HasPermissions.php:143–164`
-  (`getPermissions()` walks only the identity's own roles, never
-  into role ancestors).
-- **Observation:** roles are flat. There is no parent-child
-  relationship, so `admin ⊃ editor ⊃ viewer` cannot be expressed
-  structurally. Consumers wanting inheritance today must duplicate
-  permissions across roles manually and keep them in sync.
-- **Impact:** one of the most common enterprise RBAC asks. Without
-  it, role catalogues bloat quickly and drift (someone adds
-  `posts:archive` to `editor` but forgets to add it to `admin`).
-- **Options:** (a) add nullable `parent_id` on `roles` with
-  self-referential FK; `Role::ancestors()` resolves the chain;
-  `getPermissions()` walks up ancestors unioning permissions at
-  each level — requires cycle-detection guard on write; (b) adopt
-  a closure-table pattern (separate `role_hierarchy` table with
-  `ancestor_id`, `descendant_id`, `depth`) for O(1) ancestry
-  lookup at the cost of write-time maintenance; (c) document the
-  flat-role model as intentional and steer inheritance needs into
-  policies. Option (a) is the lowest-friction and the standard
-  idiom; option (b) matters only at very large role catalogues.
-
-### 31. No permission categorisation / grouping
-
-- **Files:** `database/migrations/2026_04_14_000002_create_permissions_table.php`;
-  `src/Models/Permission.php`.
-- **Observation:** permissions carry `name`, `guard_name`,
-  `description` — no `category`, `group`, `module`, or tag
-  metadata. A permissions-management UI rendering 500+ permissions
-  has nothing to group by.
-- **Impact:** admin UIs for RBAC configuration get unusable above
-  ~100 permissions without grouping. Consumers end up deriving a
-  category from the `name` prefix (`posts:*` → "Posts") at view
-  time, which is both fragile and not persistable.
-- **Options:** (a) add a nullable `category` string column on
-  `permissions`; (b) introduce a `permission_categories` table
-  with a FK for normalised grouping; (c) ship a tags package via
-  `spatie/laravel-tags` or similar polymorphic tag support;
-  (d) defer to consumer — document the `name` prefix convention.
-  Option (a) is cheap and covers 90% of cases.
-
-### 32. No soft deletes on roles, permissions, or policies
-
-- **Files:** `src/Models/Role.php`, `src/Models/Permission.php`,
-  `src/Models/Policy.php` — none use `SoftDeletes`.
-- **Observation:** deletion is permanent. Historical questions
-  ("what roles did user X hold on 2026-01-01?") become unanswerable
-  once a role row is deleted, even if the assignment pivot rows
-  were audit-logged.
-- **Impact:** compliance-heavy deployments (SOC 2, ISO 27001) need
-  to reconstruct historical authorization state during incident
-  response. Without soft deletes this is impossible from the
-  package's own tables.
-- **Options:** (a) add `SoftDeletes` to all three models and a
-  `deleted_at` column to each; cascade rules need updating so a
-  soft-deleted role's pivot rows are not also cascaded hard;
-  (b) defer to the future `laravel-audit-log` package, which can
-  snapshot row state on delete; (c) combine — keep hard delete as
-  default, offer soft-delete as an opt-in trait mixin. Depends on
-  how much of the historical-reconstruction responsibility is
-  pushed to the audit package.
-
 ### 37. No context variable interpolation in policy statements
 
 - **Files:** `src/Evaluation/Statement.php:272–280` (`matchesResource()`)
@@ -322,4 +251,8 @@ enterprise systems ship both.)_
   consumers who set every role's rank to null get current
   behaviour; enterprise consumers who set ranks get the guardrail
   automatically.
+
+---
+
+## Code-quality flags (surfaced during pedantic commit review)
 

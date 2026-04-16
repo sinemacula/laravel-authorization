@@ -4,7 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Models;
 
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -14,6 +13,7 @@ use SineMacula\Laravel\Authorization\Events\PermissionDeleted;
 use SineMacula\Laravel\Authorization\Events\PermissionUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPermissionProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
+use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use SineMacula\Laravel\Authorization\Traits\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
 
@@ -34,6 +34,7 @@ use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
  * @property string $name
  * @property string|null $guard_name
  * @property string|null $description
+ * @property string|null $category
  * @property bool $is_system
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -52,6 +53,7 @@ class Permission extends Model
         'name',
         'guard_name',
         'description',
+        'category',
         'is_system',
     ];
 
@@ -138,7 +140,7 @@ class Permission extends Model
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
         $class = config('authorization.models.permission', static::class);
 
-        $model = self::queryForGuard($class, $name, $guard)->first();
+        $model = GuardScopedLookup::queryForGuard($class, $name, $guard)->first();
 
         if ($model === null) {
             throw new UnknownPermissionException($name);
@@ -226,51 +228,5 @@ class Permission extends Model
         $permissionName = $this->getOriginal('name', $this->getAttribute('name'));
 
         return new SystemPermissionProtectedException(permissionName: $permissionName, operation: $operation);
-    }
-
-    /**
-     * Build the guard-precedence query for the supplied permission
-     * name. Centralises the dynamic class-string handling so the
-     * caller stays readable and the two unavoidable PHPStan
-     * suppressions live in one place.
-     *
-     * The configured permission model is instantiated through `new
-     * $class` so PHPStan resolves the receiver as an Eloquent
-     * `Model` instance — `newQuery()`, `where()`, and the closure
-     * receiver type cleanly without ignores. The remaining two
-     * suppressions on `orderByRaw()` and `orWhereNull()` exist
-     * because Laravel declares those methods via `@method static`
-     * annotations on `Illuminate\Database\Eloquent\Builder`, which
-     * PHPStan flags as `staticMethod.dynamicCall` whenever they
-     * appear inside an instance-method chain. They are runtime-
-     * dynamic instance calls; the static-receiver shape is a
-     * docblock artefact of Laravel's annotation soup, not the
-     * actual call dispatch.
-     *
-     * @param  class-string<\SineMacula\Laravel\Authorization\Models\Permission>  $class
-     * @param  string  $name
-     * @param  string  $guard
-     * @return \Illuminate\Database\Eloquent\Builder<\SineMacula\Laravel\Authorization\Models\Permission>
-     */
-    private static function queryForGuard(string $class, string $name, string $guard): Builder
-    {
-        $instance = new $class;
-
-        // The chain ends in `orderByRaw()`, which Laravel declares
-        // as `@method static` on Illuminate\Database\Eloquent\Builder.
-        // PHPStan flags any dynamic call to such a method as
-        // `staticMethod.dynamicCall` even though runtime dispatch is
-        // genuinely dynamic instance dispatch on a Builder instance.
-        // The same applies to `orWhereNull()` inside the closure
-        // below. Both ignores are docblock-soup artefacts, not
-        // unsafe calls.
-        // @phpstan-ignore staticMethod.dynamicCall
-        return $instance->newQuery()
-            ->where('name', $name)
-            ->where(static function (Builder $query) use ($guard): void {
-                // @phpstan-ignore staticMethod.dynamicCall
-                $query->where('guard_name', $guard)->orWhereNull('guard_name');
-            })
-            ->orderByRaw('guard_name IS NULL');
     }
 }

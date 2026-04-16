@@ -205,4 +205,22 @@ return [
         'ttl'    => (int) env('AUTHORIZATION_CACHE_TTL_SECONDS', 0),
         'prefix' => env('AUTHORIZATION_CACHE_PREFIX', 'authorization'),
     ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Role hierarchy
+    |---------------------------------------------------------------------------
+    |
+    | Controls whether the role parent-child hierarchy affects permission
+    | resolution. When enabled (the default), a role's `getPermissions()`
+    | returns the deduplicated union of its own direct permissions and all
+    | permissions inherited from ancestor roles. When disabled, only directly
+    | attached permissions are returned — `parent_id` can still be set for
+    | organisational grouping but has no effect on authorization decisions.
+    |
+    */
+
+    'hierarchy' => [
+        'enabled' => (bool) env('AUTHORIZATION_HIERARCHY_ENABLED', true),
+    ],
 ];

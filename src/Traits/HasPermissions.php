@@ -371,11 +371,8 @@ trait HasPermissions // @phpstan-ignore trait.unused
             $roles = $this->roles;
 
             foreach ($roles as $role) {
-                /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission> $rolePermissions */
-                $rolePermissions = $role->permissions;
-
-                foreach ($rolePermissions as $rolePermission) {
-                    $names[] = $rolePermission->name;
+                foreach ($role->getPermissions() as $rolePerm) {
+                    $names[] = $rolePerm;
                 }
             }
         }
