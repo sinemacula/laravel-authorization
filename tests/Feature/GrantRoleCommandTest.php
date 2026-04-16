@@ -7,7 +7,6 @@ namespace Tests\Feature;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Artisan;
 use PHPUnit\Framework\Attributes\CoversClass;
-use SineMacula\Laravel\Authorization\Console\Concerns\ResolvesIdentity;
 use SineMacula\Laravel\Authorization\Console\GrantRoleCommand;
 use SineMacula\Laravel\Authorization\Models\Role;
 use Tests\Feature\Stubs\StubIdentity;
@@ -22,7 +21,6 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversClass(GrantRoleCommand::class)]
-#[CoversClass(ResolvesIdentity::class)]
 final class GrantRoleCommandTest extends TestCase
 {
     /**

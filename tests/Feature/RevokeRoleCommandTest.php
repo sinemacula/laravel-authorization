@@ -6,7 +6,6 @@ namespace Tests\Feature;
 
 use Illuminate\Support\Facades\Artisan;
 use PHPUnit\Framework\Attributes\CoversClass;
-use SineMacula\Laravel\Authorization\Console\Concerns\ResolvesIdentity;
 use SineMacula\Laravel\Authorization\Console\RevokeRoleCommand;
 use SineMacula\Laravel\Authorization\Models\Role;
 use Tests\Feature\Stubs\StubIdentity;
@@ -21,7 +20,6 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversClass(RevokeRoleCommand::class)]
-#[CoversClass(ResolvesIdentity::class)]
 final class RevokeRoleCommandTest extends TestCase
 {
     /**

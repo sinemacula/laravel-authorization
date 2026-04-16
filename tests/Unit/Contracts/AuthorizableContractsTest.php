@@ -4,7 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Unit\Contracts;
 
-use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
@@ -27,10 +27,7 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
  *
  * @internal
  */
-#[CoversClass(AuthorizableIdentity::class)]
-#[CoversClass(SupportsRoles::class)]
-#[CoversClass(SupportsPermissions::class)]
-#[CoversClass(SupportsPolicies::class)]
+#[CoversNothing]
 final class AuthorizableContractsTest extends TestCase
 {
     /**

@@ -6,7 +6,6 @@ namespace Tests\Feature;
 
 use Illuminate\Support\Facades\Artisan;
 use PHPUnit\Framework\Attributes\CoversClass;
-use SineMacula\Laravel\Authorization\Console\Concerns\ResolvesIdentity;
 use SineMacula\Laravel\Authorization\Console\WhyCanCommand;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -23,7 +22,6 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversClass(WhyCanCommand::class)]
-#[CoversClass(ResolvesIdentity::class)]
 final class WhyCanCommandTest extends TestCase
 {
     /**
