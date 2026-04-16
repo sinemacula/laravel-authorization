@@ -669,6 +669,9 @@ final class UncoveredBranchesTest extends TestCase
         $fakeLog = new class extends \Psr\Log\AbstractLogger {
             public int $channelCalls = 0;
             public int $warningCalls = 0;
+            public ?string $lastMessage = null;
+            /** @var array<string, mixed>|null */
+            public ?array $lastContext = null;
 
             public function channel(string $name): self
             {
@@ -676,10 +679,14 @@ final class UncoveredBranchesTest extends TestCase
 
                 throw new \RuntimeException('channel ' . $name . ' is unavailable');
             }
+
             public function warning(string|\Stringable $message, array $context = []): void
             {
                 $this->warningCalls++;
+                $this->lastMessage = (string) $message;
+                $this->lastContext = $context;
             }
+
             public function log($level, string|\Stringable $message, array $context = []): void {}
         };
         $this->app->instance('log', $fakeLog);
@@ -693,13 +700,15 @@ final class UncoveredBranchesTest extends TestCase
         ]);
         $user->attachPolicy($policy);
 
+        $policyId = (string) $policy->getKey();
+
         // Overwrite the stored document with a JSON-encoded array
         // that lacks the required statements key — the Eloquent
         // array cast yields a decoded value and `EvaluationPolicy::fromArray`
         // then fails the schema validator, triggering the logger
         // fallback path inside `logMalformedPolicy`.
         \Illuminate\Support\Facades\DB::table((string) config('authorization.tables.policies', 'policies'))
-            ->where('id', $policy->getKey())
+            ->where('id', $policyId)
             ->update(['document' => \json_encode(['version' => 'not-an-int'])]);
 
         $results = $user->fresh()?->getPolicies() ?? [];
@@ -709,6 +718,22 @@ final class UncoveredBranchesTest extends TestCase
         // and the default logger's `warning()` was used.
         self::assertGreaterThanOrEqual(1, $fakeLog->channelCalls, 'channel() should be attempted');
         self::assertGreaterThanOrEqual(1, $fakeLog->warningCalls, 'warning() should land on the default logger');
+
+        // Pin the exact warning content so the concat and context
+        // array inside `logMalformedPolicy` stay honest against
+        // ConcatOperandRemoval / ArrayItemRemoval / CastString
+        // mutations.
+        self::assertNotNull($fakeLog->lastMessage);
+        self::assertStringStartsWith("Authorization: skipping malformed policy '{$policyId}' — ", $fakeLog->lastMessage);
+
+        self::assertIsArray($fakeLog->lastContext);
+        self::assertArrayHasKey('policy_id', $fakeLog->lastContext);
+        self::assertArrayHasKey('policy_name', $fakeLog->lastContext);
+        self::assertArrayHasKey('reason', $fakeLog->lastContext);
+        self::assertSame($policyId, $fakeLog->lastContext['policy_id']);
+        self::assertSame('malformed-fallback', $fakeLog->lastContext['policy_name']);
+        self::assertIsString($fakeLog->lastContext['reason']);
+        self::assertNotSame('', $fakeLog->lastContext['reason']);
     }
 
     /**
@@ -766,6 +791,9 @@ final class UncoveredBranchesTest extends TestCase
         $fakeLog = new class extends \Psr\Log\AbstractLogger {
             public int $channelCalls = 0;
             public int $warningCalls = 0;
+            public ?string $lastMessage = null;
+            /** @var array<string, mixed>|null */
+            public ?array $lastContext = null;
 
             public function channel(string $name): self
             {
@@ -776,6 +804,8 @@ final class UncoveredBranchesTest extends TestCase
             public function warning(string|\Stringable $message, array $context = []): void
             {
                 $this->warningCalls++;
+                $this->lastMessage = (string) $message;
+                $this->lastContext = $context;
             }
             public function log($level, string|\Stringable $message, array $context = []): void {}
         };
@@ -800,6 +830,18 @@ final class UncoveredBranchesTest extends TestCase
         self::assertSame([], $result);
         self::assertGreaterThanOrEqual(1, $fakeLog->channelCalls, 'channel() should be attempted');
         self::assertGreaterThanOrEqual(1, $fakeLog->warningCalls, 'warning() should land on the default logger');
+
+        // Pin the logged content — `cache_key` and `reason` must
+        // land in the context with the exact key the cache emitted.
+        self::assertNotNull($fakeLog->lastMessage);
+        self::assertStringStartsWith("Authorization: discarding corrupt resolution-cache entry '{$key}' — ", $fakeLog->lastMessage);
+
+        self::assertIsArray($fakeLog->lastContext);
+        self::assertArrayHasKey('cache_key', $fakeLog->lastContext);
+        self::assertArrayHasKey('reason', $fakeLog->lastContext);
+        self::assertSame($key, $fakeLog->lastContext['cache_key']);
+        self::assertIsString($fakeLog->lastContext['reason']);
+        self::assertNotSame('', $fakeLog->lastContext['reason']);
     }
 
     /**

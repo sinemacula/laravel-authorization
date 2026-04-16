@@ -710,6 +710,256 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
+     * `Statement::fromArray` distinguishes between missing and
+     * wrong-type effect values — pins the `!isset($x) || !is_string`
+     * branch against `&&` mutants.
+     *
+     * @return void
+     */
+    public function testStatementResolveEffectRejectsMissingAndNonString(): void
+    {
+        // Missing.
+        $this->expectExceptionObjectShape(
+            static fn () => \SineMacula\Laravel\Authorization\Evaluation\Statement::fromArray([
+                'actions' => ['x'],
+            ]),
+            \InvalidArgumentException::class,
+            'Policy statement requires a string effect.',
+        );
+
+        // Present but non-string.
+        $this->expectExceptionObjectShape(
+            static fn () => \SineMacula\Laravel\Authorization\Evaluation\Statement::fromArray([
+                'effect'  => 42,
+                'actions' => ['x'],
+            ]),
+            \InvalidArgumentException::class,
+            'Policy statement requires a string effect.',
+        );
+    }
+
+    /**
+     * `Statement::fromArray` rejects missing, non-array, and empty
+     * actions — pins each of the three `||` sub-expressions.
+     *
+     * @return void
+     */
+    public function testStatementResolveActionsRejectsAllThreeBranches(): void
+    {
+        // Missing.
+        $this->expectExceptionObjectShape(
+            static fn () => \SineMacula\Laravel\Authorization\Evaluation\Statement::fromArray([
+                'effect' => 'allow',
+            ]),
+            \InvalidArgumentException::class,
+            'Policy statement requires at least one action.',
+        );
+
+        // Not array.
+        $this->expectExceptionObjectShape(
+            static fn () => \SineMacula\Laravel\Authorization\Evaluation\Statement::fromArray([
+                'effect'  => 'allow',
+                'actions' => 'x',
+            ]),
+            \InvalidArgumentException::class,
+            'Policy statement requires at least one action.',
+        );
+
+        // Empty array.
+        $this->expectExceptionObjectShape(
+            static fn () => \SineMacula\Laravel\Authorization\Evaluation\Statement::fromArray([
+                'effect'  => 'allow',
+                'actions' => [],
+            ]),
+            \InvalidArgumentException::class,
+            'Policy statement requires at least one action.',
+        );
+    }
+
+    /**
+     * An invalid effect string yields the correctly quoted
+     * message. Pins the trailing `:'{$data['effect']}'` concat.
+     *
+     * @return void
+     */
+    public function testStatementUnknownEffectQuotesOffendingValue(): void
+    {
+        try {
+            \SineMacula\Laravel\Authorization\Evaluation\Statement::fromArray([
+                'effect'  => 'maybe',
+                'actions' => ['x'],
+            ]);
+            self::fail('Expected InvalidArgumentException.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertSame("Invalid policy effect: 'maybe'", $exception->getMessage());
+        }
+    }
+
+    /**
+     * Default `resources` value is `['*']`. Pins the
+     * `public array $resources = ['*'];` default against
+     * ArrayItemRemoval.
+     *
+     * @return void
+     */
+    public function testStatementDefaultResourcesWildcard(): void
+    {
+        $statement = \SineMacula\Laravel\Authorization\Evaluation\Statement::fromArray([
+            'effect'  => 'allow',
+            'actions' => ['x'],
+        ]);
+
+        self::assertSame(['*'], $statement->resources);
+    }
+
+    /**
+     * `compareNumeric` returns false for non-numeric actual /
+     * operand inputs, and performs strict comparison for numeric.
+     *
+     * @return void
+     */
+    public function testCompareNumericAcrossOperatorMatrix(): void
+    {
+        self::assertFalse(\SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::compareNumeric('abc', 5, '>'));
+        self::assertFalse(\SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::compareNumeric(5, 'abc', '>'));
+
+        self::assertTrue(\SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::compareNumeric(10, 5, '>'));
+        self::assertFalse(\SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::compareNumeric(5, 5, '>'));
+        self::assertTrue(\SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::compareNumeric(5, 5, '>='));
+        self::assertTrue(\SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::compareNumeric(5, 10, '<'));
+        self::assertTrue(\SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::compareNumeric(5, 5, '<='));
+        self::assertFalse(\SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::compareNumeric(5, 5, 'unknown'));
+    }
+
+    /**
+     * `matchesBool` coerces both sides before equality — pins
+     * the symmetric coercion against mutants that skip one side.
+     *
+     * @return void
+     */
+    public function testMatchesBoolCoercesBothSidesSymmetrically(): void
+    {
+        $cls = \SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::class;
+
+        self::assertTrue($cls::matchesBool(true, 'true'));
+        self::assertTrue($cls::matchesBool('1', 1));
+        self::assertTrue($cls::matchesBool(false, 'no'));
+        self::assertTrue($cls::matchesBool('anything-else', 0));
+        self::assertFalse($cls::matchesBool(true, false));
+        self::assertFalse($cls::matchesBool(false, true));
+    }
+
+    /**
+     * `matchesCidr` handles exact-match, /0 mask, /32 mask, and
+     * bad-input cases. Pins the `0 ? 0 : (-1 << (32 - $bits))`
+     * ternary.
+     *
+     * @return void
+     */
+    public function testMatchesCidrMatrix(): void
+    {
+        $cls = \SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::class;
+
+        // Exact match with no slash.
+        self::assertTrue($cls::matchesCidr('10.0.0.1', '10.0.0.1'));
+        self::assertFalse($cls::matchesCidr('10.0.0.1', '10.0.0.2'));
+
+        // /0 matches everything.
+        self::assertTrue($cls::matchesCidr('8.8.8.8', '0.0.0.0/0'));
+        self::assertTrue($cls::matchesCidr('255.255.255.255', '0.0.0.0/0'));
+
+        // /32 matches only exact.
+        self::assertTrue($cls::matchesCidr('1.2.3.4', '1.2.3.4/32'));
+        self::assertFalse($cls::matchesCidr('1.2.3.5', '1.2.3.4/32'));
+
+        // Bad IP.
+        self::assertFalse($cls::matchesCidr('not-an-ip', '10.0.0.0/8'));
+
+        // Bad bits.
+        self::assertFalse($cls::matchesCidr('10.0.0.1', '10.0.0.0/abc'));
+
+        // Bits too big.
+        self::assertFalse($cls::matchesCidr('10.0.0.1', '10.0.0.0/64'));
+    }
+
+    /**
+     * `compareTimes` uses the `<` / `>` comparator; anything else
+     * returns false. Pins the default-arm `false` against
+     * FalseValue / MatchArmRemoval mutants.
+     *
+     * @return void
+     */
+    public function testCompareTimesDefaultArmReturnsFalse(): void
+    {
+        $cls = \SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::class;
+
+        self::assertTrue($cls::compareTimes('2026-01-01', '2026-06-01', '<'));
+        self::assertTrue($cls::compareTimes('2026-06-01', '2026-01-01', '>'));
+        self::assertFalse($cls::compareTimes('2026-01-01', '2026-06-01', '>'));
+        self::assertFalse($cls::compareTimes('2026-06-01', '2026-01-01', '<'));
+
+        // Default arm.
+        self::assertFalse($cls::compareTimes('2026-01-01', '2026-06-01', '=='));
+        self::assertFalse($cls::compareTimes('2026-01-01', '2026-06-01', 'unknown'));
+
+        // Null timestamps fail closed.
+        self::assertFalse($cls::compareTimes('not-a-time', '2026-06-01', '<'));
+        self::assertFalse($cls::compareTimes('2026-01-01', 'not-a-time', '<'));
+    }
+
+    /**
+     * `matchesBetween` requires both bounds; returns false on
+     * missing operand keys, malformed operand, or out-of-range
+     * values. Pins the `>=` and `<=` inclusive bounds.
+     *
+     * @return void
+     */
+    public function testMatchesBetweenRequiresBothBoundsAndInclusive(): void
+    {
+        $cls = \SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::class;
+
+        self::assertTrue($cls::matchesBetween('2026-06-15', ['2026-06-01', '2026-06-30']));
+
+        // Inclusive lower bound.
+        self::assertTrue($cls::matchesBetween('2026-06-01', ['2026-06-01', '2026-06-30']));
+        // Inclusive upper bound.
+        self::assertTrue($cls::matchesBetween('2026-06-30', ['2026-06-01', '2026-06-30']));
+
+        // Just outside.
+        self::assertFalse($cls::matchesBetween('2026-05-31', ['2026-06-01', '2026-06-30']));
+        self::assertFalse($cls::matchesBetween('2026-07-01', ['2026-06-01', '2026-06-30']));
+
+        // Missing operand keys.
+        self::assertFalse($cls::matchesBetween('2026-06-15', ['2026-06-01']));
+        self::assertFalse($cls::matchesBetween('2026-06-15', 'not-array'));
+
+        // Unparseable operand.
+        self::assertFalse($cls::matchesBetween('2026-06-15', ['bad', '2026-06-30']));
+        self::assertFalse($cls::matchesBetween('not-a-time', ['2026-06-01', '2026-06-30']));
+    }
+
+    /**
+     * Run a callable and assert it throws the expected exception
+     * class with the expected message. Shared helper for the
+     * `resolveEffect` / `resolveActions` branches.
+     *
+     * @param  callable(): mixed  $callable
+     * @param  class-string<\Throwable>  $class
+     * @param  string  $message
+     * @return void
+     */
+    private function expectExceptionObjectShape(callable $callable, string $class, string $message): void
+    {
+        try {
+            $callable();
+            self::fail("Expected exception {$class}.");
+        } catch (\Throwable $exception) {
+            self::assertInstanceOf($class, $exception);
+            self::assertStringContainsString($message, $exception->getMessage());
+        }
+    }
+
+    /**
      * `attachPolicy()` with a different expiry fires
      * `IdentityPolicyExpiryChanged`.
      *
