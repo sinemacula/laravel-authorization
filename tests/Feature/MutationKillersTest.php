@@ -42,6 +42,7 @@ use Tests\TestCase;
 #[CoversClass(ResolutionCache::class)]
 #[CoversClass(\SineMacula\Laravel\Authorization\Evaluation\Statement::class)]
 #[CoversClass(\SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::class)]
+#[CoversClass(\SineMacula\Laravel\Authorization\AuthorizationManager::class)]
 final class MutationKillersTest extends TestCase
 {
     /**
@@ -1029,6 +1030,77 @@ final class MutationKillersTest extends TestCase
             self::assertInstanceOf($class, $exception);
             self::assertStringContainsString($message, $exception->getMessage());
         }
+    }
+
+    /**
+     * `authorize()` populates the `LastDecisionStore` on both the
+     * success and deny paths — pins the MethodCallRemoval mutant
+     * on `$this->lastDecisionStore->put($result)` inside the
+     * `authorize` branch (not evaluate).
+     *
+     * @return void
+     */
+    public function testAuthorizeWritesLastDecisionOnBothOutcomes(): void
+    {
+        $this->app->make(\SineMacula\Laravel\Authorization\LastDecisionStore::class)->forget();
+
+        // Deny path — authorize() throws, lastDecision captures the result.
+        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'la', 'guard_name' => 'web']);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+
+        try {
+            \SineMacula\Laravel\Authorization\Facades\Authorization::for($user)->authorize('forbidden:action');
+            self::fail('Expected AuthorizationException.');
+        } catch (\SineMacula\Laravel\Authorization\Exceptions\AuthorizationException) {
+            $last = \SineMacula\Laravel\Authorization\Facades\Authorization::lastDecision();
+            self::assertNotNull($last);
+            self::assertFalse($last->allowed);
+        }
+
+        // Allow path — authorize() returns, lastDecision captures allow.
+        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'allow:me', 'guard_name' => 'web']);
+        $role->givePermission($permission);
+        $user->assignRole($role);
+
+        \SineMacula\Laravel\Authorization\Facades\Authorization::for($user->fresh())->authorize('allow:me');
+
+        $last = \SineMacula\Laravel\Authorization\Facades\Authorization::lastDecision();
+        self::assertNotNull($last);
+        self::assertTrue($last->allowed);
+    }
+
+    /**
+     * `withPolicies()` returns a cloned manager — pins the
+     * CloneRemoval mutant on `$scoped = clone $this;`. The two
+     * managers must be distinct instances.
+     *
+     * @return void
+     */
+    public function testWithPoliciesReturnsDistinctClone(): void
+    {
+        $manager = \SineMacula\Laravel\Authorization\Facades\Authorization::getFacadeRoot();
+        self::assertInstanceOf(\SineMacula\Laravel\Authorization\AuthorizationManager::class, $manager);
+
+        $policy = new \SineMacula\Laravel\Authorization\Evaluation\Policy(
+            name: 'clone-probe',
+            statements: [
+                new \SineMacula\Laravel\Authorization\Evaluation\Statement(
+                    effect: \SineMacula\Laravel\Authorization\Enums\PolicyEffect::ALLOW,
+                    actions: ['probe:clone'],
+                ),
+            ],
+        );
+
+        $scoped = $manager->withPolicies([$policy]);
+
+        // Clones are distinct objects — pins CloneRemoval.
+        self::assertNotSame($manager, $scoped);
+
+        // The scoped clone evaluates through the supplied policies
+        // and yields allow; the base does not.
+        $scopedPrincipal = StubIdentity::create(['id' => (string) Str::uuid()]);
+        self::assertTrue($scoped->for($scopedPrincipal)->can('probe:clone'));
+        self::assertFalse($manager->for($scopedPrincipal)->can('probe:clone'));
     }
 
     /**
