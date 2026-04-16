@@ -9,68 +9,6 @@ consumed into this file and removed from the repo.
 
 ## P0 — Test coverage gaps
 
-### 3. Feature suite missing spec-mandated scenarios
-
-- **Spec reference:** §9.1 — Feature suite must cover service provider
-  boot, facade wiring, Gate auto-wiring, config merge, migrations
-  publishing, and role/permission/policy CRUD.
-- **Observed state:** `tests/Feature/` contains
-  `AuthorizationManagerTest`, `PolicyModelTest`, `ServiceProviderTest`,
-  `TraitsCoverageTest`, and stubs. The following are absent:
-  - **Gate auto-wiring tests** — no coverage for the
-      `log | overwrite | throw` conflict modes configured in
-      `AuthorizationServiceProvider::registerEnumGate()`, and no coverage
-      proving the closure forwards `$user` via `Authorization::for($user)`
-      (the seed bug called out in §6.3).
-  - **Migration publishing test** — no assertion that
-      `authorization-config` and `authorization-migrations` publish tags
-      resolve to the expected targets.
-  - **Role CRUD coverage** — no Feature test exercising the Role
-      permission-management API (blocked by issue #2 above).
-
-### 4. Integration suite thin
-
-- **Spec reference:** §9.1 — Integration suite must cover polymorphic
-  identities, the Spatie migration scenario, principal-resolver binding,
-  Gate parity, and the MySQL + PostgreSQL + SQLite DB matrix.
-- **Observed state:** `tests/Integration/` contains only
-  `PolymorphicIdentityTest.php`. Missing:
-  - Spatie migration scenario (a consumer swapping from
-      `spatie/laravel-permission` using the shipped aliases).
-  - Principal-resolver binding (a custom resolver bound into the
-      container and used end-to-end through the facade).
-  - Gate parity (for every registered enum case,
-      `Gate::forUser($u)->allows(...)` yields the same decision as
-      `Authorization::for($u)->can(...)`).
-  - Cross-database tests — no MySQL/PostgreSQL harness exists; §10.1
-      mandates the DB matrix in CI.
-
-### 5. Performance suite missing RBAC N+1 and parse budgets
-
-- **Spec reference:** §9.1 — Performance suite must cover evaluator
-  throughput, RBAC lookup N+1 safety, and policy JSON parse cost.
-- **Observed state:** `tests/Performance/EvaluatorThroughputTest.php` is
-  the only performance test. There is no N+1 budget for `can()` repeated
-  within a request (§12.2 calls this out explicitly), and no parse-cost
-  budget for `Policy::fromArray()`.
-
----
-
-## P0 — Benchmarks and docs
-
-### 6. Three of the four required benches are missing
-
-- **Spec reference:** §9.5 — benchmarks required in v1.0.0 are
-  `Runtime/PolicyEvaluatorBench`, `Runtime/AuthorizationManagerBench`,
-  `Runtime/RoleLookupBench`, and `Runtime/PolicyParseBench`.
-- **Observed state:** only `benchmarks/Runtime/PolicyEvaluatorBench.php`
-  exists. `benchmarks/Support/` is empty (no harnesses or in-memory
-  fixtures, despite §2 listing `benchmarks/Support/` as the fixtures
-  location).
-- **Impact:** the Phase-4 exit criterion ("`composer bench:ci` publishes
-  artefact") currently only exercises the evaluator, so the Manager,
-  RBAC lookup, and policy-parse hot paths have no tracked budget.
-
 ### 100. `ancestors()` passes a UUID to `proposedParentName` — exception shows ID instead of name
 
 - **File:** `src/Models/Role.php:213`.
@@ -138,4 +76,113 @@ consumed into this file and removed from the repo.
   to `ancestors()` (which already has the guard) and check
   membership — eliminates the independent walk entirely. Option
   (b) is the single-owner answer.
+
+### 103. `TenantScope::apply()` resolves the tenant on every Eloquent query — no memoization
+
+- **File:** `src/Scopes/TenantScope.php:36–42`.
+- **Observation:** the global scope calls
+  `app(TenantResolver::class)->resolve()` inside `apply()`,
+  which fires for **every** query Eloquent issues against the
+  Role and Permission models. A request that loads a user's
+  effective permissions can easily issue dozens of
+  Role/Permission queries (the relation walks, the
+  `effectivePermissions()` enum sweep, the cache-miss paths).
+  Each one re-invokes the resolver. There is no per-request
+  memoisation or container-singleton guarantee — the binding is
+  bound as a regular singleton, but the `resolve()` call inside
+  it could re-derive the tenant from request middleware,
+  session, or a database lookup on every invocation depending
+  on the consumer's implementation.
+- **Impact:** consumers wiring a resolver that does any
+  non-trivial work (database lookup, JWT decode, cache miss
+  on first call) pay that cost N times per request. The
+  `effectivePermissions()` enum walk in `2c9b5a2` is
+  particularly exposed — it issues one Permission query per
+  enum case.
+- **Options:** (a) cache the resolved tenant on the scope
+  instance for the request lifetime — flush via the same
+  Octane `RequestTerminated` hook that resets the
+  `LastDecisionStore`; (b) document an explicit
+  expectation that consumer `TenantResolver` implementations
+  must memoise internally, and provide a base
+  `MemoisingTenantResolver` decorator they can compose;
+  (c) accept the cost and document that hot paths bypass the
+  scope via `withoutGlobalScope(TenantScope::class)`. Option
+  (a) is the right enterprise default.
+
+### 104. Non-Model tenants are silently broken — `spl_object_hash` fallback produces unstable IDs
+
+- **Files:** `src/Scopes/TenantScope.php:48–50`;
+  `src/Models/Role.php:223–225` (`scopeForTenant`);
+  `src/Models/Permission.php` (parallel `scopeForTenant`).
+- **Observation:** when the resolved tenant does not implement
+  `getKey()`, both the global scope and the local
+  `scopeForTenant` derive the morph_id via
+  `spl_object_hash($tenant)`. That hash is PHP-internal,
+  request-scoped, and reused after garbage collection. A
+  consumer using a custom non-Eloquent `Tenant` class would
+  have written rows with `tenant_id = '<their-canonical-id>'`
+  (whatever value they passed to `Role::create`), but the
+  scope queries with `WHERE tenant_id = '0000000000abc1234'`
+  (the spl_object_hash). The two values never match, so
+  every tenant-owned row is invisible to the consumer — but
+  global rows still return, so the failure looks like
+  "consumer's tenant has no roles" rather than "consumer's
+  resolver is incompatible." Untested code path: every test
+  fixture (`StubTenant`) extends `Model`, so the
+  spl_object_hash branch is never exercised.
+- **Impact:** silent data invisibility for a real consumer
+  cohort. The contract docblock on `TenantResolver` says
+  resolve returns `?object` — broad enough that consumers
+  reasonably assume any object works. The implicit
+  `getKey()` requirement is a hidden contract.
+- **Options:** (a) require tenants to implement a contract
+  (`AuthorizableTenant` with
+  `getAuthorizationKey(): string`) and refuse to scope on
+  anything else — throws a typed exception so the consumer
+  knows what to fix; (b) keep the `spl_object_hash` branch
+  but log a warning the first time it fires, so consumers
+  see the silent failure surface in their logs; (c) document
+  the `getKey()` requirement in the `TenantResolver` contract
+  docblock and remove the `spl_object_hash` fallback —
+  callers without `getKey()` get a clear runtime error
+  instead of silent invisibility. Option (a) or (c) — both
+  fail loudly. Option (b) is the half-measure.
+
+### 105. No invariant enforces both-or-neither on `tenant_type` / `tenant_id` columns
+
+- **Files:** `database/migrations/2026_04_14_000012_add_tenant_columns_to_roles_table.php`;
+  `database/migrations/2026_04_14_000013_add_tenant_columns_to_permissions_table.php`;
+  `src/Models/Role.php:185–207` (`tenant`, `isGlobal`,
+  `isTenantOwned`).
+- **Observation:** the migrations declare both
+  `tenant_type` and `tenant_id` as nullable strings with no
+  composite CHECK constraint. Nothing at the DB or model
+  layer enforces the both-or-neither invariant — a row can
+  be inserted with `tenant_type = 'App\Models\Tenant'` and
+  `tenant_id = NULL`, or the inverse. The
+  `TenantScope::apply` filter checks
+  `tenant_type IS NULL` only, so a row with
+  `tenant_type = X, tenant_id = NULL` would not match the
+  global filter and would not match any tenant-id filter
+  either — silently invisible. Likewise `isGlobal()` and
+  `isTenantOwned()` only consult `tenant_type`, so an
+  inconsistent row reads as "tenant-owned" but has no usable
+  tenant ID.
+- **Impact:** orphaned tenant rows are persistable. A bug in
+  consumer code that writes one column without the other
+  produces silently-invisible authorization data. The
+  inverse case (tenant_id without tenant_type) is the
+  worst — the row is unreachable through any scope.
+- **Options:** (a) add a CHECK constraint at the DB layer
+  in both migrations: `(tenant_type IS NULL AND tenant_id
+  IS NULL) OR (tenant_type IS NOT NULL AND tenant_id IS NOT
+  NULL)` — works on PostgreSQL and MySQL 8.0.16+ and
+  SQLite. The package's CI matrix (per #4) covers all
+  three; (b) enforce in the model `saving` hook with a
+  typed exception (`InconsistentTenantOwnershipException`);
+  (c) both — DB layer for data integrity, model layer for
+  early surface. Option (c) is belt-and-braces and matches
+  the COALESCE-index precedent on `(name, guard_name)`
+  uniqueness.
 
