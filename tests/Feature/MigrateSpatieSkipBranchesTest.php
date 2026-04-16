@@ -110,19 +110,30 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
      */
     public function testSkipsUnmappedRolePermissionRows(): void
     {
-        DB::table('roles')->insert(['id' => 1, 'name' => 'admin', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()]);
-        DB::table('permissions')->insert(['id' => 1, 'name' => 'x:do', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('roles')->insert([
+            ['id' => 1, 'name' => 'admin', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 2, 'name' => 'editor', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+        DB::table('permissions')->insert([
+            ['id' => 1, 'name' => 'a:do', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 2, 'name' => 'b:do', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+        ]);
 
+        // Unmappable rows interleaved before *and* after mappable
+        // rows — a `break` mutation would stop processing after
+        // the first unmappable row and miss the later mappable
+        // one, distinguishing it from the real `continue`.
         DB::table('role_has_permissions')->insert([
-            ['permission_id' => 1, 'role_id' => 1],
-            ['permission_id' => 999, 'role_id' => 1],
-            ['permission_id' => 1, 'role_id' => 999],
+            ['permission_id' => 999, 'role_id' => 1],    // unmappable permission
+            ['permission_id' => 1, 'role_id' => 1],      // mappable
+            ['permission_id' => 1, 'role_id' => 999],    // unmappable role
+            ['permission_id' => 2, 'role_id' => 2],      // mappable
         ]);
 
         $exitCode = Artisan::call('authorization:migrate-spatie');
 
         self::assertSame(0, $exitCode);
-        self::assertSame(1, DB::table('auth_role_permissions')->count());
+        self::assertSame(2, DB::table('auth_role_permissions')->count());
     }
 
     /**
@@ -133,16 +144,22 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
      */
     public function testSkipsUnmappedModelRoleRows(): void
     {
-        DB::table('roles')->insert(['id' => 1, 'name' => 'admin', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('roles')->insert([
+            ['id' => 1, 'name' => 'admin', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 2, 'name' => 'editor', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+        ]);
 
+        // Unmappable row before a mappable one so a `break`
+        // mutation would skip the mappable row.
         DB::table('model_has_roles')->insert([
-            ['role_id' => 1, 'model_type' => 'App\\User', 'model_id' => 7],
-            ['role_id' => 999, 'model_type' => 'App\\User', 'model_id' => 8],
+            ['role_id' => 999, 'model_type' => 'App\\User', 'model_id' => 7],
+            ['role_id' => 1, 'model_type' => 'App\\User', 'model_id' => 8],
+            ['role_id' => 2, 'model_type' => 'App\\User', 'model_id' => 9],
         ]);
 
         Artisan::call('authorization:migrate-spatie');
 
-        self::assertSame(1, DB::table('auth_authorizable_roles')->count());
+        self::assertSame(2, DB::table('auth_authorizable_roles')->count());
     }
 
     /**
@@ -153,16 +170,22 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
      */
     public function testSkipsUnmappedModelPermissionRows(): void
     {
-        DB::table('permissions')->insert(['id' => 1, 'name' => 'x:do', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('permissions')->insert([
+            ['id' => 1, 'name' => 'a:do', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 2, 'name' => 'b:do', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+        ]);
 
+        // Unmappable row before a mappable one so a `break`
+        // mutation would skip the mappable row.
         DB::table('model_has_permissions')->insert([
-            ['permission_id' => 1, 'model_type' => 'App\\User', 'model_id' => 7],
-            ['permission_id' => 999, 'model_type' => 'App\\User', 'model_id' => 8],
+            ['permission_id' => 999, 'model_type' => 'App\\User', 'model_id' => 7],
+            ['permission_id' => 1, 'model_type' => 'App\\User', 'model_id' => 8],
+            ['permission_id' => 2, 'model_type' => 'App\\User', 'model_id' => 9],
         ]);
 
         Artisan::call('authorization:migrate-spatie');
 
-        self::assertSame(1, DB::table('auth_authorizable_permissions')->count());
+        self::assertSame(2, DB::table('auth_authorizable_permissions')->count());
     }
 
     /**

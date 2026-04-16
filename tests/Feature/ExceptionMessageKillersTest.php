@@ -171,6 +171,76 @@ final class ExceptionMessageKillersTest extends TestCase
     }
 
     /**
+     * `AuthorizationMiddlewareMisconfiguredException` shortens the
+     * FQCN to the trailing class name and embeds it at the exact
+     * position in the message. Pins the `strrpos + 1` arithmetic
+     * against Increment / Decrement / UnwrapSubstr mutations.
+     *
+     * @return void
+     */
+    public function testMisconfiguredMiddlewareExceptionShortensContractFqcn(): void
+    {
+        $exception = new \SineMacula\Laravel\Authorization\Exceptions\AuthorizationMiddlewareMisconfiguredException(
+            contract: 'SineMacula\\Laravel\\Authorization\\Contracts\\SupportsRoles',
+            middleware: 'auth.role',
+        );
+
+        self::assertSame(
+            'Middleware auth.role requires the authenticated identity to implement SupportsRoles; '
+            . 'apply the appropriate trait on the user model or remove the middleware from this route.',
+            $exception->getMessage(),
+        );
+    }
+
+    /**
+     * A contract with no namespace separator falls back to the
+     * raw string — pins the `strrpos !== false` ternary false
+     * branch.
+     *
+     * @return void
+     */
+    public function testMisconfiguredMiddlewareExceptionHandlesUnqualifiedContract(): void
+    {
+        $exception = new \SineMacula\Laravel\Authorization\Exceptions\AuthorizationMiddlewareMisconfiguredException(
+            contract: 'Bareword',
+            middleware: 'auth.permission',
+        );
+
+        self::assertStringContainsString('implement Bareword;', $exception->getMessage());
+    }
+
+    /**
+     * `GuardMismatchException` assembles its message via three
+     * concat segments and carries HTTP status 422. Pins the
+     * concat content and the status code against
+     * Increment / Decrement / ConcatOperandRemoval mutants.
+     *
+     * @return void
+     */
+    public function testGuardMismatchExceptionMessageAndCode(): void
+    {
+        $exception = new \SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException(
+            roleName: 'editor',
+            permissionName: 'posts:create',
+            roleGuard: 'web',
+            permissionGuard: 'api',
+        );
+
+        self::assertSame(
+            "Guard mismatch: role 'editor' (guard 'web') cannot carry"
+            . " permission 'posts:create' (guard 'api')."
+            . ' Scope one side to null for a guard-agnostic attachment, or match the guards.',
+            $exception->getMessage(),
+        );
+
+        self::assertSame(422, $exception->getCode());
+        self::assertSame('editor', $exception->getRoleName());
+        self::assertSame('posts:create', $exception->getPermissionName());
+        self::assertSame('web', $exception->getRoleGuard());
+        self::assertSame('api', $exception->getPermissionGuard());
+    }
+
+    /**
      * `principal_resolver` non-string message names the offending
      * type.
      *
