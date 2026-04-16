@@ -45,7 +45,12 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * at expiry without requiring a sweeper run. The pivot's
      * `expires_at` column is surfaced via `withPivot()`.
      *
-     * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Permission, $this, \SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePermissionPivot, 'pivot'>
+     * @phpcs:disable Generic.Files.LineLength.TooLong
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Permission, $this,
+     *     \SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePermissionPivot, 'pivot'>
+     *
+     * @phpcs:enable Generic.Files.LineLength.TooLong
      */
     public function permissions(): MorphToMany
     {
