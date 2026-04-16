@@ -166,6 +166,111 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     }
 
     /**
+     * The summary table output reflects zero counts when every
+     * Spatie table is empty — pins the counter initialisation
+     * against IncrementInteger / DecrementInteger mutations on
+     * the `=> 0` seeds.
+     *
+     * @return void
+     */
+    public function testSummaryReportsZeroCountsWhenSpatieSourceIsEmpty(): void
+    {
+        $exitCode = Artisan::call('authorization:migrate-spatie');
+        $output   = Artisan::output();
+
+        self::assertSame(0, $exitCode);
+
+        // The migration summary table is rendered with each row
+        // `[table, count]`. An initial value other than 0 would
+        // surface as a non-zero count for the otherwise-empty
+        // source schema.
+        self::assertStringContainsString('Migration summary', $output);
+        self::assertMatchesRegularExpression('/roles\s+\|\s+0\s+/', $output);
+        self::assertMatchesRegularExpression('/permissions\s+\|\s+0\s+/', $output);
+        self::assertMatchesRegularExpression('/role_permissions\s+\|\s+0\s+/', $output);
+        self::assertMatchesRegularExpression('/authorizable_roles\s+\|\s+0\s+/', $output);
+        self::assertMatchesRegularExpression('/authorizable_permissions\s+\|\s+0\s+/', $output);
+    }
+
+    /**
+     * The summary table output with seeded rows reports exact
+     * counts — pins the counter increment (`$counts['roles']++`)
+     * against Increment / Decrement / UnwrapPostInc mutations.
+     *
+     * @return void
+     */
+    public function testSummaryReportsExactCountsForEachTable(): void
+    {
+        DB::table('roles')->insert([
+            ['id' => 1, 'name' => 'admin', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 2, 'name' => 'editor', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 3, 'name' => 'viewer', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+        DB::table('permissions')->insert([
+            ['id' => 1, 'name' => 'a:do', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 2, 'name' => 'b:do', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+        DB::table('role_has_permissions')->insert([
+            ['permission_id' => 1, 'role_id' => 1],
+        ]);
+        DB::table('model_has_roles')->insert([
+            ['role_id' => 1, 'model_type' => 'App\\User', 'model_id' => 7],
+            ['role_id' => 2, 'model_type' => 'App\\User', 'model_id' => 8],
+        ]);
+        DB::table('model_has_permissions')->insert([
+            ['permission_id' => 1, 'model_type' => 'App\\User', 'model_id' => 9],
+        ]);
+
+        Artisan::call('authorization:migrate-spatie');
+        $output = Artisan::output();
+
+        self::assertMatchesRegularExpression('/roles\s+\|\s+3\s+/', $output);
+        self::assertMatchesRegularExpression('/permissions\s+\|\s+2\s+/', $output);
+        self::assertMatchesRegularExpression('/role_permissions\s+\|\s+1\s+/', $output);
+        self::assertMatchesRegularExpression('/authorizable_roles\s+\|\s+2\s+/', $output);
+        self::assertMatchesRegularExpression('/authorizable_permissions\s+\|\s+1\s+/', $output);
+    }
+
+    /**
+     * Dry run renders the "No data was written" warning message —
+     * pins the dry-run banner against ConcatOperandRemoval and
+     * string-message mutations.
+     *
+     * @return void
+     */
+    public function testDryRunRendersWarningAndDoesNotWrite(): void
+    {
+        DB::table('roles')->insert([
+            ['id' => 1, 'name' => 'admin', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
+        Artisan::call('authorization:migrate-spatie', ['--dry-run' => true]);
+        $output = Artisan::output();
+
+        self::assertStringContainsString('Dry run — no data will be written.', $output);
+        self::assertStringContainsString('Re-run without --dry-run to apply.', $output);
+        self::assertSame(0, DB::table('auth_roles')->count(), 'Dry run must not persist any row.');
+    }
+
+    /**
+     * The command coerces the `--dry-run` option to bool so an
+     * integer-shaped "0" still writes. Pins the (bool) cast
+     * against CastBool mutation.
+     *
+     * @return void
+     */
+    public function testDryRunFalseWithFalsyOptionPerformsRealMigration(): void
+    {
+        DB::table('roles')->insert([
+            ['id' => 1, 'name' => 'admin', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
+        Artisan::call('authorization:migrate-spatie');
+
+        self::assertSame(1, DB::table('auth_roles')->count(), 'Default (no --dry-run) should write to the target.');
+    }
+
+    /**
      * Configure the package to use prefixed target table names so they
      * do not collide with Spatie's source tables.
      *

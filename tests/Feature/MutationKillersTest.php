@@ -514,6 +514,202 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
+     * The cache key is built as `<prefix>:<kind>:<morph>:<id>` —
+     * targeted assertions pin the exact shape so concat-removal
+     * and concat-reorder mutations around `keyFor()` break.
+     *
+     * @return void
+     */
+    public function testCacheKeyShapeIsPrefixKindMorphId(): void
+    {
+        $driver = new class implements \Illuminate\Contracts\Cache\Store {
+            /** @var array<string, mixed> */
+            public array $storage = [];
+
+            public function get($key): mixed
+            {
+                return $this->storage[$key] ?? null;
+            }
+
+            public function many(array $keys): array
+            {
+                return [];
+            }
+
+            public function put($key, $value, $seconds): bool
+            {
+                $this->storage[$key] = $value;
+
+                return true;
+            }
+
+            public function putMany(array $values, mixed $seconds): bool
+            {
+                return true;
+            }
+
+            public function increment($key, $value = 1): bool|int
+            {
+                return false;
+            }
+
+            public function decrement($key, $value = 1): bool|int
+            {
+                return false;
+            }
+
+            public function forever($key, $value): bool
+            {
+                $this->storage[$key] = $value;
+
+                return true;
+            }
+
+            public function touch($key, $ttl): bool
+            {
+                return true;
+            }
+
+            public function forget($key): bool
+            {
+                unset($this->storage[$key]);
+
+                return true;
+            }
+
+            public function flush(): bool
+            {
+                $this->storage = [];
+
+                return true;
+            }
+
+            public function getPrefix(): string
+            {
+                return '';
+            }
+        };
+
+        $store = new \Illuminate\Cache\Repository($driver);
+        $cache = new ResolutionCache(store: $store, ttl: 0, prefix: 'km-test');
+
+        // A principal exposing getMorphClass + getKey should key
+        // as `<prefix>:<kind>:<morph>:<id>`.
+        $principal = new class {
+            public function getMorphClass(): string
+            {
+                return 'widget';
+            }
+
+            public function getKey(): string
+            {
+                return 'abc';
+            }
+        };
+
+        $cache->rememberPermissions($principal, static fn (): array => ['x:do']);
+        self::assertArrayHasKey('km-test:permissions:widget:abc', $driver->storage);
+
+        $cache->rememberRoles($principal, static fn (): array => ['r']);
+        self::assertArrayHasKey('km-test:roles:widget:abc', $driver->storage);
+
+        $cache->rememberPolicies($principal, static fn (): array => []);
+        self::assertArrayHasKey('km-test:policies:widget:abc', $driver->storage);
+    }
+
+    /**
+     * When a principal lacks `getMorphClass`, the key falls back
+     * to `<FQCN>:<id>` — pins the type coalesce against Coalesce
+     * mutants.
+     *
+     * @return void
+     */
+    public function testCacheKeyShapeFallsBackToClassNameWhenMorphMissing(): void
+    {
+        $driver = new class implements \Illuminate\Contracts\Cache\Store {
+            public array $storage = [];
+
+            public function get($key): mixed
+            {
+                return $this->storage[$key] ?? null;
+            }
+
+            public function many(array $keys): array
+            {
+                return [];
+            }
+
+            public function put($key, $value, $seconds): bool
+            {
+                $this->storage[$key] = $value;
+
+                return true;
+            }
+
+            public function putMany(array $values, mixed $seconds): bool
+            {
+                return true;
+            }
+
+            public function increment($key, $value = 1): bool|int
+            {
+                return false;
+            }
+
+            public function decrement($key, $value = 1): bool|int
+            {
+                return false;
+            }
+
+            public function forever($key, $value): bool
+            {
+                $this->storage[$key] = $value;
+
+                return true;
+            }
+
+            public function touch($key, $ttl): bool
+            {
+                return true;
+            }
+
+            public function forget($key): bool
+            {
+                unset($this->storage[$key]);
+
+                return true;
+            }
+
+            public function flush(): bool
+            {
+                $this->storage = [];
+
+                return true;
+            }
+
+            public function getPrefix(): string
+            {
+                return '';
+            }
+        };
+
+        $store = new \Illuminate\Cache\Repository($driver);
+        $cache = new ResolutionCache(store: $store, ttl: 0, prefix: 'km');
+
+        $principal = new class {
+            public function getKey(): string
+            {
+                return '77';
+            }
+        };
+
+        $cache->rememberPermissions($principal, static fn (): array => []);
+
+        $class = $principal::class;
+        self::assertArrayHasKey("km:permissions:{$class}:77", $driver->storage);
+    }
+
+    /**
      * `attachPolicy()` with a different expiry fires
      * `IdentityPolicyExpiryChanged`.
      *
