@@ -72,7 +72,11 @@ final class ResolutionCache
         /** Optional persistent cache store; null disables cross-request caching. */
         private readonly ?CacheRepository $store = null,
 
-        /** Entry lifetime in seconds; 0 stores forever. */
+        /**
+         * Entry lifetime in seconds; 0 stores forever.
+         *
+         * @infection-ignore-all DecrementInteger — the `resolveTtl()` guard treats any `$ttl <= 0` as "forever", so `0 → -1` is an equivalent mutation.
+         */
         private readonly int $ttl = 0,
 
         /** Namespace prefix for every key written by this cache. */

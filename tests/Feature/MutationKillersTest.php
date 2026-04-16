@@ -359,6 +359,13 @@ final class MutationKillersTest extends TestCase
             return $ref->invoke($cache, $maxTtl);
         };
 
+        // Default constructor ttl is 0 (forever). `new ResolutionCache()`
+        // without explicit ttl resolves to the forever branch. Pins
+        // the default parameter value against IncrementInteger mutation.
+        $defaultCache = new ResolutionCache(store: null);
+        $defaultRef   = new \ReflectionMethod($defaultCache, 'resolveTtl');
+        self::assertSame([true, 0], $defaultRef->invoke($defaultCache, null));
+
         // Forever (ttl=0) + no maxTtl: forever short-circuit.
         self::assertSame([true, 0], $invoke(0, null));
 
@@ -511,6 +518,69 @@ final class MutationKillersTest extends TestCase
             \SineMacula\Laravel\Authorization\Events\IdentityPermissionExpiryChanged::class,
             1,
         );
+    }
+
+    /**
+     * `authorizationResolveGrantPivotColumns` reads the per-pivot
+     * column map from `authorization.pivots.<pivot>.<column>`. A
+     * custom override at each config path is applied — pins every
+     * concat operand in the prefix assembly (line 224) and each
+     * `$prefix . 'column'` call.
+     *
+     * @return void
+     */
+    public function testAuthorizationResolveGrantPivotColumnsHonoursPerPivotOverrides(): void
+    {
+        /** @var \Illuminate\Contracts\Config\Repository $config */
+        $config = $this->app->make(\Illuminate\Contracts\Config\Repository::class);
+
+        $config->set('authorization.pivots.authorizable_roles.authorizable_type_column', 'custom_type');
+        $config->set('authorization.pivots.authorizable_roles.authorizable_id_column', 'custom_id');
+        $config->set('authorization.pivots.authorizable_roles.role_column', 'custom_role_fk');
+        $config->set('authorization.pivots.authorizable_roles.expires_at_column', 'custom_expires_at');
+
+        $probe = new class {
+            use ResolvesPivotExpiry;
+
+            public function columns(): array
+            {
+                return self::authorizationResolveGrantPivotColumns('authorizable_roles', 'role_column', 'role_id');
+            }
+        };
+
+        $columns = $probe->columns();
+
+        self::assertSame('custom_type', $columns['authorizable_type']);
+        self::assertSame('custom_id', $columns['authorizable_id']);
+        self::assertSame('custom_role_fk', $columns['target']);
+        self::assertSame('custom_expires_at', $columns['expires_at']);
+    }
+
+    /**
+     * Without an override, `authorizationResolveGrantPivotColumns`
+     * returns the package defaults for each column. Pins the
+     * default values passed as second argument to each `config()`
+     * call.
+     *
+     * @return void
+     */
+    public function testAuthorizationResolveGrantPivotColumnsDefaultsToPackageColumns(): void
+    {
+        $probe = new class {
+            use ResolvesPivotExpiry;
+
+            public function columns(string $pivot, string $targetKey, string $defaultTarget): array
+            {
+                return self::authorizationResolveGrantPivotColumns($pivot, $targetKey, $defaultTarget);
+            }
+        };
+
+        $columns = $probe->columns('some_new_pivot', 'custom_key', 'custom_default');
+
+        self::assertSame('authorizable_type', $columns['authorizable_type']);
+        self::assertSame('authorizable_id', $columns['authorizable_id']);
+        self::assertSame('custom_default', $columns['target']);
+        self::assertSame('expires_at', $columns['expires_at']);
     }
 
     /**
