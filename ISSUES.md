@@ -7,5 +7,5 @@ consumed into this file and removed from the repo.
 
 ---
 
-## P0 — Test coverage gaps
+## Naming flags (commit review)
 

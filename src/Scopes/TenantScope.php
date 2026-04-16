@@ -7,7 +7,7 @@ namespace SineMacula\Laravel\Authorization\Scopes;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Scope;
-use SineMacula\Laravel\Authorization\Contracts\TenantIdentifier;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 
@@ -106,15 +106,11 @@ class TenantScope implements Scope
      */
     public static function extractTenantPair(object $tenant): array
     {
-        if ($tenant instanceof Model) {
+        if ($tenant instanceof Model || $tenant instanceof AuthorizableTenant) {
             /** @var int|string|null $key */
             $key = $tenant->getKey();
 
             return [$tenant->getMorphClass(), (string) $key];
-        }
-
-        if ($tenant instanceof TenantIdentifier) {
-            return [$tenant->getTenantType(), $tenant->getTenantIdentifier()];
         }
 
         throw new InvalidTenantException($tenant);

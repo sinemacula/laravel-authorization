@@ -12,8 +12,8 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
  *
  *   - `Illuminate\Database\Eloquent\Model` — reads `getMorphClass()`
  *     and `getKey()`.
- *   - `SineMacula\Laravel\Authorization\Contracts\TenantIdentifier`
- *     — reads `getTenantType()` and `getTenantIdentifier()`.
+ *   - `SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant`
+ *     — reads `getMorphClass()` and `getKey()` via the contract.
  *
  * Anything else — a plain `object` with no stable identity — is
  * refused with this exception instead of falling back to
@@ -36,7 +36,7 @@ class InvalidTenantException extends \LogicException
     {
         parent::__construct(\sprintf(
             'Tenant must be an Eloquent Model or implement %s. Got %s.',
-            \SineMacula\Laravel\Authorization\Contracts\TenantIdentifier::class,
+            \SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant::class,
             $tenant::class,
         ));
     }

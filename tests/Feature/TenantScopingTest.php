@@ -4,7 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
-use SineMacula\Laravel\Authorization\Contracts\TenantIdentifier;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
@@ -435,7 +435,7 @@ class TenantScopingTest extends TestCase
 
     /**
      * A resolver that returns an object which is neither an
-     * Eloquent `Model` nor a `TenantIdentifier` implementer is
+     * Eloquent `Model` nor an `AuthorizableTenant` implementer is
      * refused at the scope boundary with `InvalidTenantException`
      * (issue #104) — no silent `spl_object_hash` fallback.
      *
@@ -454,20 +454,20 @@ class TenantScopingTest extends TestCase
     }
 
     /**
-     * A custom tenant implementing `TenantIdentifier` is accepted
+     * A custom tenant implementing `AuthorizableTenant` is accepted
      * by the scope and matches rows written with the contract's
-     * `getTenantType()` / `getTenantIdentifier()` values (issue
-     * #104).
+     * `getMorphClass()` / `getKey()` values (issue #104).
      *
      * @return void
      */
-    public function testTenantIdentifierImplementerIsAcceptedByScope(): void
+    public function testAuthorizableTenantImplementerIsAcceptedByScope(): void
     {
-        $customTenant = new class implements TenantIdentifier {
+        $customTenant = new class implements AuthorizableTenant
+        {
             /**
              * @return string
              */
-            public function getTenantIdentifier(): string
+            public function getKey(): string
             {
                 return 'custom-tenant-42';
             }
@@ -475,7 +475,7 @@ class TenantScopingTest extends TestCase
             /**
              * @return string
              */
-            public function getTenantType(): string
+            public function getMorphClass(): string
             {
                 return 'App\Tenancy\CustomTenant';
             }
@@ -484,8 +484,8 @@ class TenantScopingTest extends TestCase
         Role::create([
             'name'        => 'custom-role',
             'guard_name'  => 'web',
-            'tenant_type' => $customTenant->getTenantType(),
-            'tenant_id'   => $customTenant->getTenantIdentifier(),
+            'tenant_type' => $customTenant->getMorphClass(),
+            'tenant_id'   => (string) $customTenant->getKey(),
         ]);
         Role::create(['name' => 'global-role', 'guard_name' => 'web']);
 

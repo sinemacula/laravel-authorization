@@ -140,8 +140,8 @@ class Permission extends Model
      * Delegates morph-pair extraction to
      * `TenantScope::extractTenantPair()` so the global scope and
      * this local scope share a single owner for the acceptance
-     * rules — refuses any tenant that is neither a Model nor a
-     * `TenantIdentifier` implementer with a typed exception.
+     * rules — refuses any tenant that is neither a Model nor an
+     * `AuthorizableTenant` implementer with a typed exception.
      *
      * @param  \Illuminate\Database\Eloquent\Builder<static>  $query
      * @param  object  $tenant
