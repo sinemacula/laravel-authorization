@@ -46,7 +46,10 @@ final class GrantRoleCommandTest extends TestCase
         $freshUser = $user->fresh();
         self::assertTrue($freshUser->hasRole('editor'));
 
-        Relation::morphMap([]);
+        // Reset the shared morph map — `morphMap([])` merges rather
+        // than replaces, so without the `false` second arg the
+        // `stub_identity` alias leaks into later tests in the run.
+        Relation::morphMap([], false);
     }
 
     /**
