@@ -216,7 +216,7 @@ class AuthorizationManager
         /** @var array<int, mixed> $enums */
         $enums = \function_exists('config')
             ? (array) config('authorization.permission_enums', [])
-            : [];
+            : []; // @codeCoverageIgnore — defensive fallback when the Laravel `config` helper is unavailable (non-Laravel embedding).
 
         $permissions = [];
 
