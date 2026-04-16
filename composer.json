@@ -68,10 +68,10 @@
             "qlty fmt"
         ],
         "test": [
-            "@php vendor/bin/paratest"
+            "@php vendor/bin/paratest --exclude-testsuite=Performance"
         ],
         "test:coverage": [
-            "@php vendor/bin/paratest --coverage-clover=clover.xml"
+            "@php vendor/bin/paratest --exclude-testsuite=Performance --coverage-clover=clover.xml"
         ],
         "test:unit": [
             "@php vendor/bin/paratest --testsuite Unit"

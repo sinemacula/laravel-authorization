@@ -111,13 +111,16 @@ return [
     |---------------------------------------------------------------------------
     |
     | Decides what happens when auto-wiring a permission that already has a
-    | Gate of the same name. `log` (default) preserves the existing Gate and
-    | emits a warning. `throw` fails boot. `overwrite` silently replaces it.
+    | Gate of the same name. The opinionated enterprise default is `throw` —
+    | a duplicate Gate registration is almost always a bug, and failing boot
+    | is catchable and loud. `log` preserves the existing Gate and emits a
+    | warning (opt-in for consumers with deliberate collision patterns);
+    | `overwrite` silently replaces it.
     |
     */
 
     'gate' => [
-        'on_conflict' => env('AUTHORIZATION_GATE_ON_CONFLICT', 'log'),
+        'on_conflict' => env('AUTHORIZATION_GATE_ON_CONFLICT', 'throw'),
     ],
 
     /*

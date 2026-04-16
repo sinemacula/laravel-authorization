@@ -398,72 +398,6 @@ enterprise systems ship both.)_
   behaviour; enterprise consumers who set ranks get the guardrail
   automatically.
 
-### 47. Open question §15.4 unresolved — gate conflict default
-
-- **Spec reference:** §15 open question 4 — _"Gate conflict
-  default. `log` is the safe default, but `throw` would be the
-  opinionated enterprise default. Lock in v1.0.0."_
-- **Files:** `config/authorization.php:88–90` — default is
-  currently `log`; `src/AuthorizationServiceProvider.php:174–199`
-  implements all three modes.
-- **Observation:** the implementation supports all three modes
-  (`log`, `throw`, `overwrite`), but the spec explicitly flags the
-  default as an unresolved decision to lock before v1.0.0. The
-  current `log` default silently preserves a user-defined Gate
-  that collides with an auto-wired permission — which could
-  silently weaken authorization if a consumer accidentally
-  redefines a Gate name.
-- **Impact:** defers a decision the spec itself calls out as
-  pre-v1.0.0 mandatory. The enterprise-correct answer is almost
-  certainly `throw` — a boot-time crash is strictly safer than a
-  silently weakened Gate.
-- **Options:** (a) change the default to `throw`, making
-  collisions fail-loud; keep `log` and `overwrite` as opt-ins for
-  consumers that have deliberate collision patterns; (b) keep
-  `log` as default and document the rationale in
-  `docs/design/`. Option (a) matches "opinionated enterprise
-  default" in the spec text.
-
-### 48. Open question §15.5 unresolved — final Spatie alias set
-
-- **Spec reference:** §15 open question 5 — _"Spatie API aliases.
-  Which Spatie method names do we alias on
-  `HasRoles`/`HasPermissions`? Minimum is `assignRole`,
-  `removeRole`, `givePermissionTo`, `hasPermissionTo`,
-  `syncRoles`, `syncPermissions`. Full list to be finalised when
-  the migration guide is drafted."_
-- **Files:** `src/Traits/HasRoles.php` (has `assignRole`,
-  `revokeRole`, `removeRole` alias at line 169, `syncRoles`,
-  `hasRole`, `getRoles`); `src/Traits/HasPermissions.php` (has
-  canonical methods plus `givePermissionTo`, `revokePermissionTo`,
-  `hasPermissionTo`, `getPermissionNames` aliases).
-- **Observation:** the minimum set is shipped, but the spec
-  explicitly defers the full set until the Spatie migration guide
-  is written — which has not yet happened (no migration guide
-  lives in `docs/`). The full Spatie surface includes methods not
-  yet aliased: `hasAnyRole`, `hasAllRoles`, `hasAnyPermission`,
-  `hasAllPermissions`, `hasDirectPermission`,
-  `getDirectPermissions`, `getAllPermissions`, `getRoleNames`,
-  `permissionsViaRoles`. A Spatie consumer copy-pasting controller
-  code will hit missing methods at runtime.
-- **Impact:** the §12.5 compatibility claim ("Supports Spatie's
-  `laravel-permission` migration idiom … so a Spatie consumer can
-  switch packages without rewriting every controller") is only
-  partially true under the current alias set. This is an
-  unresolved spec commitment.
-- **Options:** (a) ship the full Spatie read-side surface
-  (`hasAnyRole`, `hasAllRoles`, `hasAnyPermission`,
-  `hasAllPermissions`, `hasDirectPermission`,
-  `getDirectPermissions`, `getAllPermissions`, `getRoleNames`,
-  `permissionsViaRoles`) as thin wrappers over the existing
-  canonical methods — mostly one-liners; (b) draft the Spatie
-  migration guide first, enumerate every controller-layer idiom
-  it recommends, and alias exactly that set; (c) narrow the
-  §12.5 claim to "assignment-side idioms" and document the
-  read-side methods consumers must rewrite. Option (a) delivers
-  the spec commitment in full; option (b) is cleaner but
-  sequence-dependent on the migration guide.
-
 ### 49. No `AuthorizableResource` contract for model-to-resource-string conversion
 
 - **Files:** no contract exists; `src/AuthorizationManager.php` and
@@ -618,180 +552,6 @@ enterprise systems ship both.)_
   Laravel package-registration conventions better; option (b) is
   consistent with existing config idiom. Either works.
 
-### 54. Events lack a SemVer stability guarantee
-
-- **Files:** `src/Events/*.php` (eight event classes — public
-  properties treated as payload contract).
-- **Observation:** §12.6 locks SemVer on "public contracts in
-  `Contracts/` and public trait method signatures" but does not
-  name events. The §12.4 observability guarantee presupposes
-  consumers subscribe to these events, which means the payloads
-  are de facto public contract — but there is no documented
-  commitment about when their shape can change. Adding a
-  property, renaming one, changing a type, or changing the set of
-  dispatched events could silently break every audit-log
-  subscriber without a major-version bump.
-- **Impact:** the `laravel-audit-log` sibling (and any consumer
-  wiring its own event listeners) cannot pin a version confidently.
-  Spec §12.4 is aspirational without a versioning commitment.
-- **Options:** (a) amend §12.6 and the README to explicitly
-  extend the SemVer commitment to dispatched events — payload
-  property shape, property types, and the set of events emitted
-  in each transition. Adding a new event or a new property on an
-  existing event remains non-breaking; renaming, retyping, or
-  removing is major-bumped; (b) additionally mark each event
-  class `@api` in docblocks so static-analysis consumers can
-  detect breakage. Do both.
-
-### 67. `EvaluatorThroughputTest` budget flakes under parallel contention
-
-- **Files:** `tests/Performance/EvaluatorThroughputTest.php`
-  (0.5s wall-clock budget on a 100-statement evaluation).
-- **Observation:** serial runs clear the budget with wide margin
-  (~0.14s on the reference machine). Under ParaTest's default
-  16-way parallel execution the same test regularly exceeds the
-  budget — observed readings of 0.52s and 1.73s on consecutive
-  `composer test` invocations while other processes saturate the
-  CPU. The evaluator itself is unchanged; the variance is CPU
-  contention between parallel processes competing for a single
-  thread budget.
-- **Impact:** `composer test` is unreliable for the performance
-  tier — a green-on-serial / red-on-parallel outcome trains
-  developers to ignore the tier's signals. CI reproducibility is
-  at risk whenever the runner is shared or noisy.
-- **Options:** (a) exclude the Performance suite from parallel
-  execution in `phpunit.xml.dist` / `paratest` config, running
-  it serially in CI (`composer test:performance` already runs
-  serially via phpunit; the problem is
-  `composer test` which uses ParaTest and pulls Performance in);
-  (b) convert the wall-clock budget into a query-count /
-  operation-count budget that is insensitive to CPU contention —
-  asserts the evaluator performs at most N ops for N statements,
-  not that the wall-clock is under X seconds; (c) widen the
-  budget to absorb parallel contention (masks real regressions,
-  weakens the signal). Option (b) is the most rigorous;
-  option (a) is the fastest fix. Both acceptable.
-
-### 68. Role-pivot mutations leave persistent cache entries stale until TTL
-
-- **Files:** `src/Cache/ResolutionCache.php` (`flush()` documents
-  the behaviour explicitly);
-  `src/Listeners/InvalidateResolutionCache.php` (`handleRoleMutation`
-  calls `flush()` on `RolePermissionGranted` / `Revoked`).
-- **Observation:** when a role gains or loses a permission, every
-  identity carrying the role has a stale cached
-  `getPermissions()` list. The in-memory tier is cleared via
-  `flush()`, but the persistent tier is **not** — flushing the
-  configured cache store would wipe unrelated entries. With no
-  reverse index from role to the identities carrying it, the
-  listener cannot target only the affected principals, so the
-  stale entries sit in the store until the configured TTL expires
-  or until a principal-scoped event (assign / revoke / attach)
-  fires for each affected identity.
-- **Impact:** a production deployment with cross-request caching
-  enabled and role-pivot mutations flowing through the admin UI
-  will serve stale permission lists to affected users until TTL.
-  For a token-lifetime TTL (e.g. 30 minutes) this is tolerable;
-  for forever-caching (`ttl = 0`) the stale window is unbounded
-  unless the consumer manually bumps each identity.
-- **Options:** (a) use cache tags — Redis and Memcached support
-  them, Laravel's `Cache::tags(['authorization', "role:{$id}"])`
-  gives us a reverse index. Invalidate by role tag on pivot
-  mutation. Only works for tag-capable stores; fall back to the
-  current flush-in-memory-only behaviour otherwise; (b) walk
-  the `authorizable_roles` pivot in the listener and forget each
-  principal individually. Expensive for roles held by many
-  identities; acceptable when pivot mutations are rare admin
-  operations; (c) record a "generation number" for each role and
-  bump it on pivot mutation; compose the cache key from
-  `(principal, role-generation)` so stale entries are naturally
-  superseded. Elegant but adds a second storage layer for the
-  generation map. Option (a) plus option (b) fallback is the
-  honest enterprise path.
-
-### 69. Model traits reach `app()` service locator for cache access
-
-- **Files:** `src/Traits/HasRoles.php:124–126,166–169`;
-  `src/Traits/HasPermissions.php:126–127,168–172`;
-  `src/Traits/HasPolicies.php:112–114` (and analogous
-  `getPolicies` path where applicable).
-- **Observation:** every cache touchpoint from the model traits
-  follows the pattern:
-
-  ```php
-  if (app()->bound(ResolutionCache::class)) {
-      app(ResolutionCache::class)->forget($this);
-  }
-  ```
-
-  The `app()` global helper is a service-locator call inside a
-  trait that mixes into Eloquent models. It couples the model
-  layer to the container, makes the trait impossible to test in
-  isolation without booting a Laravel app, and hides the cache as
-  a concrete dependency of every `sync*` / `get*` method. The
-  guard (`bound(...)`) papers over the coupling — the cache isn't
-  declared as a dependency, it's opportunistically looked up.
-- **Impact:** classic Service Locator anti-pattern at the trait
-  layer. Unit-testing `syncRoles` now requires either a full
-  container boot or a mock via `App::instance()`. Also
-  architecturally inconsistent with the event-based listener
-  (`InvalidateResolutionCache`) that _is_ cleanly
-  dependency-injected — the same job is done twice, once via DI
-  and once via service locator, only because the `sync*` methods
-  bypass the single-event dispatch path.
-- **Impact on #56 (sync-event gap):** this commit resolved the
-  cache-invalidation side of the bypass by reaching for `app()`
-  directly, but the audit-observability side remains open —
-  consumers subscribing to `RoleAssigned` / `PermissionGranted`
-  / `PolicyAttached` still get nothing from bulk `sync*` calls.
-  Both gaps should be closed together.
-- **Options:** (a) dispatch bulk-diff events from each `sync*`
-  method (`RolesSynced`, `PermissionsSynced`, `PoliciesSynced`)
-  carrying `attached` / `detached` ID arrays from Eloquent's
-  `sync()` return; extend `InvalidateResolutionCache` to handle
-  those events. Fixes #56 and removes the service-locator call
-  in one move; (b) dispatch the existing single-item events
-  (`RoleAssigned` / `RoleRevoked` etc.) from `sync*` for each
-  attached / detached pivot row. Heavier but replays through
-  every existing subscriber without new event classes.
-  Option (b) is the least-new-surface fix and dovetails with
-  #56's option (a).
-
-### 77. Resolution cache returns stale role / permission / policy sets across temporal-grant expiry
-
-- **Files:** `src/Cache/ResolutionCache.php` (memoises
-  per-principal lookups); `src/Traits/HasRoles.php`,
-  `src/Traits/HasPermissions.php`, `src/Traits/HasPolicies.php`
-  (relations filter `expires_at` at read time).
-- **Observation:** temporal grants (#30, now shipped) rely on a
-  DB-level filter — `expires_at IS NULL OR expires_at > now()`
-  evaluated on every relation read. The resolution cache sits
-  above that filter and memoises the result per principal, so a
-  list populated at 12:00 still reports an entry that expired at
-  12:30 until an invalidation event fires on that principal
-  (assign / revoke / attach / detach on the identity, or a role
-  pivot change). The cache is correct on every write path, but
-  wall-clock advance alone does not invalidate it.
-- **Impact:** deployments that combine the persistent cache tier
-  with temporal grants can report stale membership for up to the
-  cache TTL past the expiry. For short-lived break-glass grants
-  (e.g. "admin for one hour") a 30-minute TTL means up to 30
-  minutes of drift between "actually expired" and "observably
-  expired."
-- **Options:** (a) compute an entry TTL bounded by the nearest
-  `expires_at` across the stored rows — requires one extra read
-  per populate path and a min() over the pivot. Cleanest, works
-  across both tiers. (b) Ship a scheduled
-  `authorization:prune-expired-grants` command that bumps the
-  cache per affected principal when a row crosses its expiry —
-  requires a generation / sweeper pattern. (c) Document the
-  caveat (already done in `ResolutionCache`'s docblock), advise
-  consumers using temporal grants to either disable the
-  persistent tier or pair it with a short TTL, and close the
-  gap in a follow-on release once option (a) is scoped.
-  Option (a) is the honest enterprise path; option (c) is the
-  current behaviour.
-
 ### 84. System-wide enum audit — cover, consolidate, and single-responsibility
 
 - **Scope:** package-wide audit of every place a constrained
@@ -879,42 +639,6 @@ enterprise systems ship both.)_
 - **Related issues:** #58 (`gate.on_conflict`), and any future
   flag that surfaces a stringly-typed closed set will cite
   this audit as its landing home.
-
-### 86. `BladeHelpers::currentPrincipal()` retains the `app()` service-locator path — middleware uses the facade
-
-- **File:** `src/Support/BladeHelpers.php:38–45`.
-- **Observation:** the consolidation commit updated
-  `BladeHelpers` to route through
-  `AuthorizationManager::currentPrincipal()` (correct), but the
-  helper still resolves the manager via
-  `app()->bound(AuthorizationManager::class)` with a
-  `\function_exists('app')` guard in front. The middleware, by
-  contrast, uses `Authorization::currentPrincipal()` — the
-  facade that this commit explicitly exposed for exactly this
-  purpose. Two sibling surfaces, two different entry points to
-  the same method; only one of them honours the commit's
-  "single accessor" promise.
-- **Impact:** partial consolidation. The consolidation's value
-  proposition — "every surface funnels through one accessor" —
-  is weakened when one of the three surfaces (Blade)
-  hand-rolls its own lookup. A future change to the facade
-  (caching, logging, instrumentation) reaches the middleware
-  but not the Blade layer. Also the `function_exists('app')`
-  guard is defensive to the point of unreachable code: the
-  package cannot load without Laravel, so the helper cannot
-  exist.
-- **Options:** (a) replace the body with a single
-  `Authorization::currentPrincipal()` call, matching the
-  middleware's path. Facades throw a clear
-  `RuntimeException` when the root is unresolved — the
-  Blade helper should let that surface naturally rather than
-  silently returning null; (b) wrap in a `try / catch` for
-  the facade-not-bootstrapped case but drop the
-  `function_exists` guard — one layer of defence, not two;
-  (c) keep the direct `app()` path and update the middleware
-  to match — consistency via the ugly path. Option (a) is
-  the enterprise answer; option (b) preserves test-harness
-  friendliness at the cost of one line.
 
 ### 87. `AbstractAuthorizationMiddleware::matches()` type-erases the contract — concrete subclasses need a `@var` re-assertion
 
@@ -1126,6 +850,119 @@ enterprise systems ship both.)_
   surface as it lands; option (b) is the consistent
   iterative path. Either is fine provided the field is not
   left stringly-typed through v1.0.0.
+
+### 94. Expiry-mutation helpers triplicated across `HasRoles` / `HasPermissions` / `HasPolicies`
+
+- **Files:** `src/Traits/HasRoles.php:303–378`
+  (`readRolePivot`, `coerceRoleExpiry`, `roleExpiriesEqual`);
+  `src/Traits/HasPermissions.php` (`readPermissionPivot`,
+  `coercePermissionExpiry`, `permissionExpiriesEqual`);
+  `src/Traits/HasPolicies.php` (`readPolicyPivot`,
+  `coercePolicyExpiry`, `policyExpiriesEqual`).
+- **Observation:** the expiry-change detection machinery lands
+  in three places with identical shape. Each trait carries a
+  `read*Pivot($model)` that issues a raw `DB::table(...)` query
+  against the `authorizable_*` table, a `coerce*Expiry($raw)`
+  that normalises string / Carbon / DateTimeInterface into a
+  `?DateTimeInterface`, and a `*ExpiriesEqual($left, $right)`
+  that normalises to UTC timestamps. The only variation across
+  the three is the pivot table name, the related-model FK
+  column (`role_id` / `permission_id` / `policy_id`), and the
+  entity name in the method identifier. Same failure mode the
+  engineer called out on #92 for system protection — each new
+  requirement (logging, rate-limiting, granted-by tracking,
+  context variable capture) has to land three times.
+- **Impact:** ~200 lines of near-duplicated helper machinery
+  across the three traits, with drift risk every time the
+  pivot schema evolves. Also surfaces as a coverage-by-copy
+  problem: `ExpiryChangedEventsTest` has to exercise each
+  entity path independently to catch a bug that exists in
+  one helper but not the others.
+- **Options:** (a) extract a
+  `SineMacula\Laravel\Authorization\Traits\TracksGrantExpiry`
+  trait composed by all three `Has*` traits, parameterising
+  the entity-specific bits via a single
+  `grantPivotMetadata(): array{table: string, key: string}`
+  hook that each `Has*` trait implements in one line; (b)
+  promote the shared helpers onto the `AuthorizableGrantPivot`
+  class (already shared across the three relations per #90)
+  as static methods, so the traits delegate to one pivot-owner
+  surface; (c) accept the duplication and tighten the tests
+  to run parity across the three entities. Option (a) is the
+  symmetric answer to #92's same-shaped trait extraction.
+
+### 95. Pivot-row reads use `DB::table()` with hardcoded column names, bypassing the `authorization.pivots.*` config
+
+- **Files:** `src/Traits/HasRoles.php:315–335` (`readRolePivot`
+  body); same pattern in `readPermissionPivot` /
+  `readPolicyPivot` on the sibling traits.
+- **Observation:** the pivot-row reads for expiry detection
+  use `DB::table($table)` with hardcoded column literals —
+  `'authorizable_type'`, `'authorizable_id'`, `'role_id'`,
+  `'expires_at'`. The previous commit (`2347df5`) introduced
+  the `authorization.pivots.role_permissions.role_column`
+  config block specifically because #62 flagged the
+  fragile-coupling cost of hardcoded pivot columns. The new
+  expiry-detection reads reintroduce the same coupling on a
+  different pivot, without consulting the config seam.
+- **Impact:** consistency regression. A consumer who swaps a
+  pivot column name (via future `authorization.pivots.authorizable_roles.*`
+  config following the #62 pattern) will find the
+  `authorizable_*` relation's `->using(...)` pivot hook and
+  `RolePermission` pivot honour the override, but
+  `assignRole()`'s expiry-change detection silently reads the
+  wrong column and emits false `IdentityRoleExpiryChanged`
+  events (or misses real ones). The invariant that one config
+  change rewires every site is broken again.
+- **Options:** (a) extend the `authorization.pivots` config
+  block with
+  `authorizable_roles` / `authorizable_permissions` /
+  `authorizable_policies` sub-blocks and read every column
+  name through config in the new `read*Pivot` helpers;
+  (b) issue the pivot read through the Eloquent relation
+  itself (`$this->roles()->newPivotStatement()->where(...)`)
+  so Laravel's relation layer supplies the column names;
+  (c) remove the raw `DB::table()` path entirely and
+  capture the prior expiry via the model's already-loaded
+  pivot relation when one exists, falling back to a
+  relation-scoped query only when not. Option (c) is the
+  architecturally cleanest and incidentally speeds up the
+  happy path.
+
+### 96. `Role::resolveByName()` missing — asymmetric consolidation with `Permission::resolveByName()`
+
+- **Files:** `src/Models/Role.php` (no `resolveByName`
+  static method); `src/Models/Permission.php:160`
+  (has `resolveByName`); `src/Traits/HasRoles.php:274–301`
+  (inline resolution query duplicating what
+  `Permission::resolveByName` centralised).
+- **Observation:** the earlier commit (`802ed05`) extracted
+  `Permission::resolveByName()` as the single owner of the
+  guard-precedence query, closing #55's drift risk. The
+  matching extraction on Role was never shipped.
+  `HasRoles::resolveRole()` still carries the full
+  `->where('name', ...)->where(guard OR null)->orderByRaw(...)`
+  query inline. If the guard-precedence rule evolves
+  (wildcard `'*'` sentinel from the older guard-model
+  conversation, case-insensitivity, a `deprecated_at` filter,
+  anything) the Role side won't inherit the change. Exactly
+  the drift risk #55 was logged against, now asymmetric
+  across the two primitives.
+- **Impact:** partial consolidation. The invariant that the
+  role-side and identity-side lookups match is currently
+  held together by two separate copies of the query, in
+  different files, with no single owner. Future guard-model
+  changes have to be applied in both. Also breaks the
+  symmetry a reader expects between Role and Permission —
+  the two primitives should have matching resolver shapes.
+- **Options:** (a) ship a `Role::resolveByName(string $name, ?string $guard): self`
+  mirroring the Permission static; `HasRoles::resolveRole()`
+  delegates to it, matching the pattern the Permission side
+  uses; (b) push both resolvers down into a shared
+  `src/Support/GuardScopedLookup.php` helper that both
+  models call; (c) accept the asymmetry and document — poor
+  answer given the drift cost. Option (a) is the symmetric
+  close to the partial consolidation.
 
 ---
 

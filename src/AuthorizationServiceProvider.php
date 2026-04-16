@@ -428,10 +428,10 @@ class AuthorizationServiceProvider extends ServiceProvider
         $enums = $this->app['config']->get('authorization.permission_enums', []);
 
         /** @var mixed $rawMode */
-        $rawMode    = $this->app['config']->get('authorization.gate.on_conflict', GateConflictMode::LOG->value);
+        $rawMode    = $this->app['config']->get('authorization.gate.on_conflict', GateConflictMode::THROW->value);
         $onConflict = $rawMode instanceof GateConflictMode
             ? $rawMode
-            : (\is_string($rawMode) ? GateConflictMode::tryFrom($rawMode) : null) ?? GateConflictMode::LOG;
+            : (\is_string($rawMode) ? GateConflictMode::tryFrom($rawMode) : null) ?? GateConflictMode::THROW;
 
         foreach ($enums as $enumClass) {
             if (!\is_string($enumClass) || !\is_subclass_of($enumClass, PermissionEnum::class)) {

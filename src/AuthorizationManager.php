@@ -82,6 +82,33 @@ class AuthorizationManager
     ) {}
 
     /**
+     * Return the container-bound authorization manager, or null when
+     * the package is not booted / the binding is not registered.
+     *
+     * Single, centralised service-locator call — consumers that cannot
+     * take the manager via constructor injection (notably static
+     * Blade-directive helpers) funnel through this accessor instead
+     * of reaching for `app()` directly.
+     *
+     * @return self|null
+     */
+    public static function instance(): ?self
+    {
+        if (!\function_exists('app')) {
+            return null;
+        }
+
+        $container = app();
+
+        if (!$container->bound(self::class)) {
+            return null;
+        }
+
+        /** @var self */
+        return $container->make(self::class);
+    }
+
+    /**
      * Determine whether the current principal is allowed to perform
      * the supplied action.
      *

@@ -111,7 +111,11 @@ final class ResolutionCacheTest extends TestCase
         $store = Cache::store('array');
         $keys  = \array_filter(
             \array_keys((array) $this->extractPrivate($store->getStore(), 'storage') ?? []),
-            static fn (mixed $key): bool => \is_string($key) && \str_starts_with($key, 'authorization-test:permissions:'),
+            // Laravel's tagged array entries are stored under a
+            // `<hash>:<original-key>` shape; the suffix match keeps
+            // the assertion faithful to the prefix-scoped entry
+            // without coupling to the opaque tag hash.
+            static fn (mixed $key): bool => \is_string($key) && \str_contains($key, 'authorization-test:permissions:'),
         );
 
         self::assertNotEmpty($keys, 'Persistent cache entry should exist under the configured prefix.');
@@ -231,6 +235,113 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
+     * On a tag-capable store, a `RolePermissionGranted` event
+     * invalidates the persistent cache entry for every principal
+     * tagged with the mutated role — the reverse-index gap called
+     * out in ISSUES.md #68. The test assigns the role to the
+     * principal (so the entry carries the role tag), primes
+     * `getPermissions()` into the persistent tier, then grants a
+     * new permission to the role and asserts the next read sees
+     * the mutation without any manual `forget()` call.
+     *
+     * @return void
+     */
+    public function testRolePermissionGrantedInvalidatesTaggedPersistentEntry(): void
+    {
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard_name' => 'web']);
+
+        $seed = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:read', 'guard_name' => 'web']);
+        $role->givePermission($seed);
+
+        $user->assignRole('editor');
+
+        // Prime the persistent cache via the canonical accessor —
+        // the trait wires role IDs through so the entry carries
+        // the role tag.
+        self::assertSame(['posts:read'], $user->fresh()?->getPermissions());
+
+        // Attaching a new permission to the role fires
+        // `RolePermissionGranted`. On a tag-capable store the
+        // listener must flush the principal's entry via the role
+        // tag — not just the in-memory memo.
+        $second = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard_name' => 'web']);
+        $role->givePermission($second);
+
+        $permissions = $user->fresh()?->getPermissions() ?? [];
+        \sort($permissions);
+
+        self::assertSame(['posts:create', 'posts:read'], $permissions);
+    }
+
+    /**
+     * On a non-tag store, `RolePermissionGranted` cannot reach a
+     * reverse index into the persistent tier, so the listener
+     * falls back to `flush()` on the in-memory memo and leaves
+     * the persistent tier to expire on TTL (the documented
+     * stale-until-TTL behaviour for File / Database drivers).
+     * This is regression coverage for the non-tag branch of the
+     * invalidation path — `supportsTags()` reports false, and
+     * the memo flush is the only observable side effect.
+     *
+     * @return void
+     */
+    public function testRolePermissionGrantedFallsBackToMemoFlushOnNonTagStore(): void
+    {
+        $driver = self::makeNonTaggableDriver();
+
+        $this->app->instance(
+            ResolutionCache::class,
+            new ResolutionCache(
+                store: new \Illuminate\Cache\Repository($driver),
+                ttl: 0,
+                prefix: 'authorization-test',
+            ),
+        );
+
+        $cache = $this->app->make(ResolutionCache::class);
+        self::assertInstanceOf(ResolutionCache::class, $cache);
+        self::assertFalse($cache->supportsTags());
+
+        $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
+
+        // Seed the in-memory memo with a stale entry — the
+        // resolver runs once and the result is memoised for the
+        // lifetime of the process. The persistent tier also
+        // receives the same value so we can confirm afterwards
+        // that the listener does *not* touch it.
+        $cache->rememberPermissions($principal, static fn (): array => ['stale:entry']);
+
+        $keysBefore = \array_keys((array) $this->extractPrivate($driver, 'storage') ?? []);
+        self::assertNotEmpty($keysBefore, 'Persistent write should populate the non-tag store.');
+
+        $role       = Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard_name' => 'web']);
+        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard_name' => 'web']);
+        $role->givePermission($permission);
+
+        // Persistent entries are intentionally untouched — the
+        // non-tag branch leaves them to expire on TTL.
+        self::assertSame(
+            $keysBefore,
+            \array_keys((array) $this->extractPrivate($driver, 'storage') ?? []),
+            'Non-tag store must keep persistent entries after a role-pivot mutation.',
+        );
+
+        // But the memo *was* flushed — drop the persistent entry
+        // for the original principal (so the store read on the
+        // next lookup misses) and observe that the resolver runs
+        // again instead of returning the memoised `stale:entry`.
+        foreach ($keysBefore as $key) {
+            $driver->forget((string) $key);
+        }
+
+        self::assertSame(
+            ['live:entry'],
+            $cache->rememberPermissions($principal, static fn (): array => ['live:entry']),
+        );
+    }
+
+    /**
      * `syncRoles()` bypasses the canonical event path but still
      * invalidates the cache — the trait calls `forget()` directly
      * after `sync()`.
@@ -319,16 +430,25 @@ final class ResolutionCacheTest extends TestCase
     {
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        $cache = $this->app->make(ResolutionCache::class);
+        // Target the non-taggable store path with an anonymous
+        // driver that hides `tags()` — this keeps the test's
+        // payload shape in sync with the cache's untagged write
+        // so the fail-closed recovery can be observed without
+        // tangling with Laravel's tag-namespace hashing. The
+        // tag-capable store exercises its own recovery via
+        // `forgetFromStore()` which the tag-capable scenarios
+        // cover indirectly.
+        $driver = self::makeNonTaggableDriver();
+        $store  = new \Illuminate\Cache\Repository($driver);
+
+        $cache = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
 
         // Prime the persistent tier with the correct shape so the
         // cache key is discoverable, then corrupt it.
         $cache->rememberPolicies($principal, static fn (): array => []);
 
-        /** @var \Illuminate\Contracts\Cache\Repository $store */
-        $store = Cache::store('array');
-        $keys  = \array_filter(
-            \array_keys((array) $this->extractPrivate($store->getStore(), 'storage') ?? []),
+        $keys = \array_filter(
+            \array_keys((array) $this->extractPrivate($driver, 'storage') ?? []),
             static fn (mixed $key): bool => \is_string($key) && \str_starts_with($key, 'authorization-test:policies:'),
         );
 
@@ -337,7 +457,7 @@ final class ResolutionCacheTest extends TestCase
 
         // Seed a malformed payload — a list of non-array entries
         // will fail the `Policy::fromArray` contract.
-        $store->put($policyKey, ['not-a-policy-document', 42], 60);
+        $driver->put($policyKey, ['not-a-policy-document', 42], 60);
 
         // Fresh cache instance forces the persistent tier to be
         // consulted (bypasses the in-memory memo primed above).
@@ -357,7 +477,7 @@ final class ResolutionCacheTest extends TestCase
         // Store should have been rewritten with the recomputed
         // (valid) payload, not the corrupt one.
         /** @var mixed $stored */
-        $stored = $store->get($policyKey);
+        $stored = $driver->get($policyKey);
         self::assertIsArray($stored);
         self::assertCount(1, $stored);
         self::assertIsArray($stored[0]);
@@ -388,5 +508,102 @@ final class ResolutionCacheTest extends TestCase
         $ref->setAccessible(true);
 
         return $ref->getValue($object);
+    }
+
+    /**
+     * Build a bare non-taggable `Store` — an in-memory analogue of
+     * the shipped File / Database drivers that the Laravel
+     * `Repository` wraps unchanged (no `tags()` method on the
+     * driver means `ResolutionCache::isTaggable()` returns false).
+     *
+     * @return \Illuminate\Contracts\Cache\Store
+     */
+    private static function makeNonTaggableDriver(): \Illuminate\Contracts\Cache\Store
+    {
+        return new class implements \Illuminate\Contracts\Cache\Store {
+            /** @var array<string, mixed> */
+            public array $storage = [];
+
+            public function get($key): mixed
+            {
+                return $this->storage[$key] ?? null;
+            }
+
+            /**
+             * @param  array<int, string>  $keys
+             * @return array<string, mixed>
+             */
+            public function many(array $keys): array
+            {
+                $result = [];
+
+                foreach ($keys as $key) {
+                    $result[$key] = $this->storage[$key] ?? null;
+                }
+
+                return $result;
+            }
+
+            public function put($key, $value, $seconds): bool
+            {
+                $this->storage[$key] = $value;
+
+                return true;
+            }
+
+            /**
+             * @param  array<string, mixed>  $values
+             * @param  mixed  $seconds
+             */
+            public function putMany(array $values, mixed $seconds): bool
+            {
+                foreach ($values as $key => $value) {
+                    $this->storage[$key] = $value;
+                }
+
+                return true;
+            }
+
+            public function increment($key, $value = 1): bool|int
+            {
+                return false;
+            }
+
+            public function decrement($key, $value = 1): bool|int
+            {
+                return false;
+            }
+
+            public function forever($key, $value): bool
+            {
+                $this->storage[$key] = $value;
+
+                return true;
+            }
+
+            public function touch($key, $ttl): bool
+            {
+                return isset($this->storage[$key]);
+            }
+
+            public function forget($key): bool
+            {
+                unset($this->storage[$key]);
+
+                return true;
+            }
+
+            public function flush(): bool
+            {
+                $this->storage = [];
+
+                return true;
+            }
+
+            public function getPrefix(): string
+            {
+                return '';
+            }
+        };
     }
 }

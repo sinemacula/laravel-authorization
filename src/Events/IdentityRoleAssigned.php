@@ -9,6 +9,11 @@ use SineMacula\Laravel\Authorization\Models\Role;
 /**
  * Dispatched when a role is assigned to an authorizable identity.
  *
+ * Part of the SemVer-stable event API; breaking changes require a
+ * major version bump.
+ *
+ * @api
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */

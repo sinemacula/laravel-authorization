@@ -16,6 +16,11 @@ use SineMacula\Laravel\Authorization\Models\Permission;
  * map holds the post-save values (sourced via `getChanges()`).
  * Both maps share the same key set.
  *
+ * Part of the SemVer-stable event API; breaking changes require a
+ * major version bump.
+ *
+ * @api
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */

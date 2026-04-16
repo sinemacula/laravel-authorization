@@ -19,6 +19,11 @@ use SineMacula\Laravel\Authorization\Models\Role;
  * `expires_at` differs from the supplied value, so audit consumers
  * can render the expiry mutation as its own row.
  *
+ * Part of the SemVer-stable event API; breaking changes require a
+ * major version bump.
+ *
+ * @api
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */

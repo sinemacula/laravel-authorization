@@ -18,6 +18,11 @@ use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
  * hard-denial signal that fires only when `authorize()` is about
  * to throw.
  *
+ * Part of the SemVer-stable event API; breaking changes require a
+ * major version bump.
+ *
+ * @api
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */

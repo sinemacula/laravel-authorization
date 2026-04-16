@@ -37,11 +37,7 @@ final class BladeHelpers
      */
     public static function currentPrincipal(): ?object
     {
-        if (!\function_exists('app') || !app()->bound(AuthorizationManager::class)) {
-            return null;
-        }
-
-        return app(AuthorizationManager::class)->currentPrincipal();
+        return AuthorizationManager::instance()?->currentPrincipal();
     }
 
     /**

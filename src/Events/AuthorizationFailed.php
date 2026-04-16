@@ -19,6 +19,11 @@ use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
  * required. The split is intentional: hard-denial is rare and
  * security-relevant; soft-denial is routine and filterable.
  *
+ * Part of the SemVer-stable event API; breaking changes require a
+ * major version bump.
+ *
+ * @api
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */

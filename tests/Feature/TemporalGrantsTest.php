@@ -7,7 +7,9 @@ namespace Tests\Feature;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
+use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -33,6 +35,8 @@ use Tests\TestCase;
  *
  * @internal
  */
+#[CoversClass(AuthorizationServiceProvider::class)]
+#[CoversClass(ResolutionCache::class)]
 #[CoversTrait(HasRoles::class)]
 #[CoversTrait(HasPermissions::class)]
 #[CoversTrait(HasPolicies::class)]
@@ -243,6 +247,65 @@ final class TemporalGrantsTest extends TestCase
             ['staff'],
             $this->sortedRoleNames($user->fresh()),
         );
+    }
+
+    /**
+     * A cached `getRoles()` snapshot bounded by a temporal grant's
+     * `expires_at` invalidates itself once the clock passes the
+     * expiry — no manual `forget()` call required. Regression
+     * coverage for ISSUES.md #77: the cache writes the entry
+     * with `min(configured-ttl, seconds-until-nearest-expiry) -
+     * 1s` so wall-clock advance alone is enough to drop the
+     * stored row.
+     *
+     * @return void
+     */
+    public function testCachedRolesExpireWithTemporalGrantWithoutManualForget(): void
+    {
+        // Wire a persistent array-backed cache so the entry
+        // survives a memo reset and the TTL bound is the only
+        // thing governing visibility.
+        /** @var \Illuminate\Contracts\Config\Repository $config */
+        $config = $this->app->make('config');
+        $config->set('authorization.cache.store', 'array');
+        $config->set('authorization.cache.ttl', 3600);
+        $config->set('authorization.cache.prefix', 'authorization-temporal');
+
+        $this->app->forgetInstance(ResolutionCache::class);
+        (new AuthorizationServiceProvider($this->app))->register();
+
+        Role::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => 'oncall',
+            'guard_name' => 'web',
+        ]);
+
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+
+        Carbon::setTestNow('2026-07-01 12:00:00');
+        $user->assignRole('oncall', expiresAt: Carbon::parse('2026-07-01 12:05:00'));
+
+        // Prime the persistent entry at t=12:00, bounded to
+        // ~299s (5 minutes minus the shave).
+        self::assertSame(['oncall'], $user->fresh()?->getRoles());
+
+        // Walk past the expiry — the TTL bound means the stored
+        // entry has elapsed even though no mutation event fired.
+        Carbon::setTestNow('2026-07-01 12:10:00');
+
+        // A fresh principal instance drops the in-memory memo so
+        // the persistent tier is the sole source — its entry is
+        // now expired and the resolver observes the DB-filtered
+        // empty set.
+        $fresh = $user->fresh();
+        self::assertNotNull($fresh);
+
+        // Wipe the singleton's in-memory memo that was primed at
+        // t=12:00 — the persistent tier is the one under test.
+        $this->app->forgetInstance(ResolutionCache::class);
+        (new AuthorizationServiceProvider($this->app))->register();
+
+        self::assertSame([], $fresh->getRoles());
     }
 
     /**

@@ -34,6 +34,8 @@ use SineMacula\Laravel\Authorization\Models\Role;
  */
 trait HasPermissions // @phpstan-ignore trait.unused
 {
+    use ResolvesPivotExpiry;
+
     /**
      * Morph-to-many relation onto direct permissions.
      *
@@ -208,16 +210,40 @@ trait HasPermissions // @phpstan-ignore trait.unused
     /**
      * Return the union of direct and role-inherited permission names.
      *
+     * The persistent-tier TTL is bounded by the nearest upcoming
+     * `expires_at` across both the identity's direct permission
+     * pivot and its role pivot, so temporal grants on either
+     * side invalidate the entry at the moment they lapse (#77).
+     * The role IDs are tagged into the entry so a
+     * `RolePermissionGranted` / `RolePermissionRevoked` event
+     * flushes every principal carrying the mutated role on
+     * tag-capable stores (#68).
+     *
      * @return array<int, string>
      */
     public function getPermissions(): array
     {
-        $cache = app()->bound(ResolutionCache::class)
-            ? app(ResolutionCache::class)
-            : null;
+        $cache = ResolutionCache::instance();
 
         if ($cache instanceof ResolutionCache) {
-            return $cache->rememberPermissions($this, fn (): array => $this->computePermissions());
+            /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission> $direct */
+            $direct = $this->permissions;
+
+            $roles   = \method_exists($this, 'roles') ? $this->roles : null;
+            $roleIds = $roles !== null ? self::authorizationCollectModelIds($roles) : [];
+
+            $nearest = self::authorizationNearestPivotExpirySeconds($direct);
+
+            if ($roles !== null) {
+                $nearest = self::authorizationMinNullable($nearest, self::authorizationNearestPivotExpirySeconds($roles));
+            }
+
+            return $cache->rememberPermissions(
+                $this,
+                fn (): array => $this->computePermissions(),
+                $nearest,
+                $roleIds,
+            );
         }
 
         return $this->computePermissions();

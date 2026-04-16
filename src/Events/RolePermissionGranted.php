@@ -15,6 +15,11 @@ use SineMacula\Laravel\Authorization\Models\Role;
  * consumers use the event class to distinguish role-catalogue
  * mutations from identity-level grants.
  *
+ * Part of the SemVer-stable event API; breaking changes require a
+ * major version bump.
+ *
+ * @api
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */

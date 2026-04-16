@@ -32,6 +32,8 @@ use SineMacula\Laravel\Authorization\Models\Role;
  */
 trait HasRoles // @phpstan-ignore trait.unused
 {
+    use ResolvesPivotExpiry;
+
     /**
      * Morph-to-many relation onto roles.
      *
@@ -206,18 +208,32 @@ trait HasRoles // @phpstan-ignore trait.unused
      * result is memoised per-request and optionally persisted
      * cross-request. Cache entries are invalidated by the
      * `InvalidateResolutionCache` listener on
-     * `IdentityRoleAssigned` / `IdentityRoleRevoked`.
+     * `IdentityRoleAssigned` / `IdentityRoleRevoked` (and — on a
+     * tag-capable persistent store — on
+     * `RolePermissionGranted` / `RolePermissionRevoked` via role
+     * tags). The persistent-tier TTL is additionally bounded by
+     * the nearest upcoming `expires_at` across the relation's
+     * pivot rows so temporal grants invalidate themselves at the
+     * exact moment they lapse (#77).
      *
      * @return array<int, string>
      */
     public function getRoles(): array
     {
-        $cache = app()->bound(ResolutionCache::class)
-            ? app(ResolutionCache::class)
-            : null;
+        $cache = ResolutionCache::instance();
 
         if ($cache instanceof ResolutionCache) {
-            return $cache->rememberRoles($this, fn (): array => $this->computeRoles());
+            /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
+            $roles   = $this->roles;
+            $roleIds = self::authorizationCollectModelIds($roles);
+            $maxTtl  = self::authorizationNearestPivotExpirySeconds($roles);
+
+            return $cache->rememberRoles(
+                $this,
+                fn (): array => $this->computeRoles(),
+                $maxTtl,
+                $roleIds,
+            );
         }
 
         return $this->computeRoles();

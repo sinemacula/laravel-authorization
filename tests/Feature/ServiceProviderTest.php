@@ -55,7 +55,7 @@ final class ServiceProviderTest extends TestCase
         $config = $this->app->make(ConfigRepository::class);
 
         self::assertSame('web', $config->get('authorization.defaults.guard'));
-        self::assertSame('log', $config->get('authorization.gate.on_conflict'));
+        self::assertSame('throw', $config->get('authorization.gate.on_conflict'));
         self::assertSame(NullPrincipalResolver::class, $config->get('authorization.principal_resolver'));
     }
 
