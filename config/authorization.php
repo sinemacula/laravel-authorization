@@ -65,6 +65,24 @@ return [
             'role_column'       => env('AUTHORIZATION_PIVOT_ROLE_PERMISSIONS_ROLE_COLUMN', 'role_id'),
             'permission_column' => env('AUTHORIZATION_PIVOT_ROLE_PERMISSIONS_PERMISSION_COLUMN', 'permission_id'),
         ],
+        'authorizable_roles' => [
+            'authorizable_type_column' => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_ROLES_TYPE_COLUMN', 'authorizable_type'),
+            'authorizable_id_column'   => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_ROLES_ID_COLUMN', 'authorizable_id'),
+            'role_column'              => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_ROLES_ROLE_COLUMN', 'role_id'),
+            'expires_at_column'        => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_ROLES_EXPIRES_AT_COLUMN', 'expires_at'),
+        ],
+        'authorizable_permissions' => [
+            'authorizable_type_column' => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_PERMISSIONS_TYPE_COLUMN', 'authorizable_type'),
+            'authorizable_id_column'   => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_PERMISSIONS_ID_COLUMN', 'authorizable_id'),
+            'permission_column'        => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_PERMISSIONS_PERMISSION_COLUMN', 'permission_id'),
+            'expires_at_column'        => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_PERMISSIONS_EXPIRES_AT_COLUMN', 'expires_at'),
+        ],
+        'authorizable_policies' => [
+            'authorizable_type_column' => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_POLICIES_TYPE_COLUMN', 'authorizable_type'),
+            'authorizable_id_column'   => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_POLICIES_ID_COLUMN', 'authorizable_id'),
+            'policy_column'            => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_POLICIES_POLICY_COLUMN', 'policy_id'),
+            'expires_at_column'        => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_POLICIES_EXPIRES_AT_COLUMN', 'expires_at'),
+        ],
     ],
 
     /*

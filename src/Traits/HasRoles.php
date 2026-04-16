@@ -6,14 +6,13 @@ namespace SineMacula\Laravel\Authorization\Traits;
 
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Events\IdentityRoleAssigned;
 use SineMacula\Laravel\Authorization\Events\IdentityRoleExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\IdentityRoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
-use SineMacula\Laravel\Authorization\Models\AuthorizableGrantPivot;
+use SineMacula\Laravel\Authorization\Models\AuthorizableRolePivot;
 use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
@@ -61,7 +60,7 @@ trait HasRoles // @phpstan-ignore trait.unused
             foreignPivotKey: 'authorizable_id',
             relatedPivotKey: 'role_id',
         )
-            ->using(AuthorizableGrantPivot::class)
+            ->using(AuthorizableRolePivot::class)
             ->withPivot('expires_at')
             ->where(static function ($query) use ($pivot): void {
                 $query->whereNull($pivot . '.expires_at')
@@ -88,7 +87,10 @@ trait HasRoles // @phpstan-ignore trait.unused
     {
         $model = $this->resolveRole($role);
 
-        $prior = $this->readRolePivot($model);
+        /** @var string $table */
+        $table   = config('authorization.tables.authorizable_roles', 'authorizable_roles');
+        $columns = self::authorizationResolveGrantPivotColumns('authorizable_roles', 'role_column', 'role_id');
+        $prior   = $this->authorizationReadGrantPivot($table, $columns, (string) $model->getKey());
 
         $this->roles()->syncWithoutDetaching([
             (string) $model->getKey() => ['expires_at' => $expiresAt],
@@ -100,7 +102,7 @@ trait HasRoles // @phpstan-ignore trait.unused
 
         Event::dispatch(new IdentityRoleAssigned($this, $model));
 
-        if ($prior['exists'] && !self::roleExpiriesEqual($prior['expires_at'], $expiresAt)) {
+        if ($prior['exists'] && !self::authorizationGrantExpiriesEqual($prior['expires_at'], $expiresAt)) {
             Event::dispatch(new IdentityRoleExpiryChanged(
                 $this,
                 $model,
@@ -267,20 +269,12 @@ trait HasRoles // @phpstan-ignore trait.unused
     /**
      * Resolve a role identifier to a model instance.
      *
-     * Matches either an exact `guard_name` equal to the identity's
-     * authorization guard or a null `guard_name` (the guard-agnostic
-     * sentinel). Guard-specific rows take precedence over
-     * guard-agnostic rows — the query orders non-null guards first
-     * and returns the first match.
-     *
-     * The guard is resolved in priority order:
-     *
-     * 1. `$this->getAuthorizationGuard()` when the identity model
-     *    declares it (the opt-in hook for multi-guard deployments —
-     *    a user authenticated under `api` returns `'api'` so its
-     *    assignments resolve against `api`-guard rows instead of
-     *    the package default).
-     * 2. `authorization.defaults.guard` otherwise.
+     * Honours `$this->getAuthorizationGuard()` when the identity
+     * model declares it — a user authenticated under a non-default
+     * guard routes its lookups against its own guard's rows instead
+     * of the package default. Delegates the actual query to
+     * `Role::resolveByName()` so both identity-side and any other
+     * caller share one implementation (see #96).
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @return \SineMacula\Laravel\Authorization\Models\Role
@@ -295,105 +289,12 @@ trait HasRoles // @phpstan-ignore trait.unused
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
         $class = config('authorization.models.role', Role::class);
-        /** @var string $guard */
+
         $guard = \method_exists($this, 'getAuthorizationGuard')
             ? $this->getAuthorizationGuard()
-            : config('authorization.defaults.guard', 'web');
+            : null;
 
-        /** @var \SineMacula\Laravel\Authorization\Models\Role|null $model */
-        $model = $class::query()
-            ->where('name', $role)
-            ->where(static function ($query) use ($guard): void {
-                $query->where('guard_name', $guard)->orWhereNull('guard_name');
-            })
-            ->orderByRaw('guard_name IS NULL')
-            ->first();
-
-        if ($model === null) {
-            throw new UnknownRoleException($role);
-        }
-
-        return $model;
-    }
-
-    /**
-     * Read the existing pivot row for the supplied role and
-     * return its existence and `expires_at` value. Returns
-     * `['exists' => false, 'expires_at' => null]` when no row
-     * exists. The query bypasses the relation's expiry filter so
-     * it observes both live and expired pivot rows — both are
-     * candidates for an expiry mutation by a re-call to
-     * `assignRole()`.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
-     * @return array{exists: bool, expires_at: \DateTimeInterface|null}
-     */
-    private function readRolePivot(Role $role): array
-    {
-        /** @var string $table */
-        $table = config('authorization.tables.authorizable_roles', 'authorizable_roles');
-
-        $row = DB::table($table)
-            ->where('authorizable_type', $this->getMorphClass())
-            ->where('authorizable_id', (string) $this->getKey())
-            ->where('role_id', (string) $role->getKey())
-            ->first();
-
-        if ($row === null) {
-            return ['exists' => false, 'expires_at' => null];
-        }
-
-        $rawExpiresAt = $row->expires_at ?? null;
-
-        return [
-            'exists'     => true,
-            'expires_at' => self::coerceRoleExpiry($rawExpiresAt),
-        ];
-    }
-
-    /**
-     * Coerce a raw pivot `expires_at` value (string from the DB
-     * query, Carbon, DateTimeInterface, or null) into a
-     * DateTimeInterface or null.
-     *
-     * @param  mixed  $value
-     * @return \DateTimeInterface|null
-     */
-    private static function coerceRoleExpiry(mixed $value): ?\DateTimeInterface
-    {
-        if ($value instanceof \DateTimeInterface) {
-            return $value;
-        }
-
-        if (\is_string($value) && $value !== '') {
-            return Carbon::parse($value);
-        }
-
-        return null;
-    }
-
-    /**
-     * Compare two expiry values for equality. Two nulls are equal
-     * (forever vs. forever); a null and a concrete instant differ
-     * (forever vs. expiring); two concrete instants are compared
-     * by their UTC timestamp so DST and timezone normalisation
-     * do not produce spurious false positives.
-     *
-     * @param  \DateTimeInterface|null  $left
-     * @param  \DateTimeInterface|null  $right
-     * @return bool
-     */
-    private static function roleExpiriesEqual(?\DateTimeInterface $left, ?\DateTimeInterface $right): bool
-    {
-        if ($left === null && $right === null) {
-            return true;
-        }
-
-        if ($left === null || $right === null) {
-            return false;
-        }
-
-        return $left->getTimestamp() === $right->getTimestamp();
+        return $class::resolveByName($role, $guard);
     }
 
     /**

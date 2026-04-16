@@ -7,13 +7,12 @@ namespace SineMacula\Laravel\Authorization\Traits;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Events\IdentityPolicyAttached;
 use SineMacula\Laravel\Authorization\Events\IdentityPolicyDetached;
 use SineMacula\Laravel\Authorization\Events\IdentityPolicyExpiryChanged;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyDocumentException;
-use SineMacula\Laravel\Authorization\Models\AuthorizableGrantPivot;
+use SineMacula\Laravel\Authorization\Models\AuthorizablePolicyPivot;
 use SineMacula\Laravel\Authorization\Models\Policy;
 
 /**
@@ -30,6 +29,8 @@ use SineMacula\Laravel\Authorization\Models\Policy;
  */
 trait HasPolicies // @phpstan-ignore trait.unused
 {
+    use ResolvesPivotExpiry;
+
     /**
      * Morph-to-many relation onto policies.
      *
@@ -56,7 +57,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
             foreignPivotKey: 'authorizable_id',
             relatedPivotKey: 'policy_id',
         )
-            ->using(AuthorizableGrantPivot::class)
+            ->using(AuthorizablePolicyPivot::class)
             ->withPivot('expires_at')
             ->where(static function ($query) use ($pivot): void {
                 $query->whereNull($pivot . '.expires_at')
@@ -87,7 +88,10 @@ trait HasPolicies // @phpstan-ignore trait.unused
      */
     public function attachPolicy(Model|Policy $policy, ?\DateTimeInterface $expiresAt = null): static
     {
-        $prior = $this->readPolicyPivot($policy);
+        /** @var string $table */
+        $table   = config('authorization.tables.authorizable_policies', 'authorizable_policies');
+        $columns = self::authorizationResolveGrantPivotColumns('authorizable_policies', 'policy_column', 'policy_id');
+        $prior   = $this->authorizationReadGrantPivot($table, $columns, (string) $policy->getKey());
 
         $this->policies()->syncWithoutDetaching([
             (string) $policy->getKey() => ['expires_at' => $expiresAt],
@@ -100,7 +104,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
         if ($policy instanceof Policy) {
             Event::dispatch(new IdentityPolicyAttached($this, $policy));
 
-            if ($prior['exists'] && !self::policyExpiriesEqual($prior['expires_at'], $expiresAt)) {
+            if ($prior['exists'] && !self::authorizationGrantExpiriesEqual($prior['expires_at'], $expiresAt)) {
                 Event::dispatch(new IdentityPolicyExpiryChanged(
                     $this,
                     $policy,
@@ -221,83 +225,6 @@ trait HasPolicies // @phpstan-ignore trait.unused
         }
 
         return \array_values($hydrated);
-    }
-
-    /**
-     * Read the existing pivot row for the supplied policy and
-     * return its existence and `expires_at` value. Returns
-     * `['exists' => false, 'expires_at' => null]` when no row
-     * exists. The query bypasses the relation's expiry filter so
-     * it observes both live and expired pivot rows — both are
-     * candidates for an expiry mutation by a re-call to
-     * `attachPolicy()`.
-     *
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Models\Policy  $policy
-     * @return array{exists: bool, expires_at: \DateTimeInterface|null}
-     */
-    private function readPolicyPivot(Model|Policy $policy): array
-    {
-        /** @var string $table */
-        $table = config('authorization.tables.authorizable_policies', 'authorizable_policies');
-
-        $row = DB::table($table)
-            ->where('authorizable_type', $this->getMorphClass())
-            ->where('authorizable_id', (string) $this->getKey())
-            ->where('policy_id', (string) $policy->getKey())
-            ->first();
-
-        if ($row === null) {
-            return ['exists' => false, 'expires_at' => null];
-        }
-
-        return [
-            'exists'     => true,
-            'expires_at' => self::coercePolicyExpiry($row->expires_at ?? null),
-        ];
-    }
-
-    /**
-     * Coerce a raw pivot `expires_at` value into a
-     * DateTimeInterface or null.
-     *
-     * @param  mixed  $value
-     * @return \DateTimeInterface|null
-     */
-    private static function coercePolicyExpiry(mixed $value): ?\DateTimeInterface
-    {
-        if ($value instanceof \DateTimeInterface) {
-            return $value;
-        }
-
-        if (\is_string($value) && $value !== '') {
-            return Carbon::parse($value);
-        }
-
-        return null;
-    }
-
-    /**
-     * Compare two expiry values for equality. Two nulls are
-     * equal (forever vs. forever); a null and a concrete instant
-     * differ; two concrete instants are compared by UTC
-     * timestamp so DST and timezone normalisation do not produce
-     * spurious false positives.
-     *
-     * @param  \DateTimeInterface|null  $left
-     * @param  \DateTimeInterface|null  $right
-     * @return bool
-     */
-    private static function policyExpiriesEqual(?\DateTimeInterface $left, ?\DateTimeInterface $right): bool
-    {
-        if ($left === null && $right === null) {
-            return true;
-        }
-
-        if ($left === null || $right === null) {
-            return false;
-        }
-
-        return $left->getTimestamp() === $right->getTimestamp();
     }
 
     /**

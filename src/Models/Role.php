@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Models;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -15,6 +16,8 @@ use SineMacula\Laravel\Authorization\Events\RolePermissionRevoked;
 use SineMacula\Laravel\Authorization\Events\RoleUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
+use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
+use SineMacula\Laravel\Authorization\Traits\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
 
 /**
@@ -41,7 +44,7 @@ use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
  */
 class Role extends Model
 {
-    use HasUuids, ValidatesAuthorizationName;
+    use HasSystemProtection, HasUuids, ValidatesAuthorizationName;
 
     /**
      * The attributes that are mass assignable.
@@ -63,16 +66,6 @@ class Role extends Model
     protected $casts = [
         'is_system' => 'boolean',
     ];
-
-    /**
-     * Per-instance escape-hatch flag. When true, the next delete
-     * or rename bypasses the system-role protection and resets to
-     * false on completion. Invoked via `forceSystem()` — never
-     * persisted, never inherited across instances.
-     *
-     * @var bool
-     */
-    private bool $systemProtectionBypassed = false;
 
     /**
      * Pre-save attribute snapshot captured on `updating` and
@@ -99,23 +92,40 @@ class Role extends Model
     }
 
     /**
-     * Unlock the next protected mutation (delete or rename) on
-     * this instance. Returns `$this` for chaining:
+     * Resolve a role by name under the supplied guard, favouring
+     * guard-specific rows over guard-agnostic rows.
      *
-     *     $role->forceSystem()->delete();
+     * Centralises the guard-precedence query shared by
+     * `HasRoles::resolveRole()` and any direct static caller — a
+     * single owner for the guard-agnostic disjunction so evolution
+     * of the matching rules happens in one place (see issue #55
+     * and #96). Consumers calling `$class::resolveByName(...)`
+     * where `$class` is read from `authorization.models.role` get
+     * correct late-static-binding against their swapped model.
      *
-     * The bypass is **per-instance, single-use, and in-memory** —
-     * it never persists to the database, never leaks across
-     * instances (a `$role->fresh()` drops it), and resets to
-     * false the moment the guard clause consults it.
+     * @param  string  $name
+     * @param  string|null  $guard
+     * @return self
      *
-     * @return static
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
      */
-    public function forceSystem(): static
+    public static function resolveByName(string $name, ?string $guard = null): self
     {
-        $this->systemProtectionBypassed = true;
+        if ($guard === null) {
+            /** @var string $guard */
+            $guard = config('authorization.defaults.guard', 'web');
+        }
 
-        return $this;
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
+        $class = config('authorization.models.role', static::class);
+
+        $model = self::queryForGuard($class, $name, $guard)->first();
+
+        if ($model === null) {
+            throw new UnknownRoleException($name);
+        }
+
+        return $model;
     }
 
     /**
@@ -326,23 +336,15 @@ class Role extends Model
     /**
      * Register the row-lifecycle listeners that translate
      * Eloquent's native `created` / `updated` / `deleted` events
-     * into the package's typed CRUD events, and enforce the
-     * system-role protection invariant on `deleting` / `updating`
-     * before the row reaches the database.
+     * into the package's typed CRUD events. System-protection
+     * hooks (`deleting`, `updating` guard, `saved` bypass reset)
+     * are registered by `HasSystemProtection::bootHasSystemProtection()`.
      *
      * @return void
      */
     protected static function booted(): void
     {
-        static::deleting(static function (self $role): void {
-            $role->assertSystemProtectionAllows('delete');
-        });
-
         static::updating(static function (self $role): void {
-            if ($role->wasSystemRoleRenamed()) {
-                $role->assertSystemProtectionAllows('rename');
-            }
-
             $snapshot = [];
 
             foreach (\array_keys($role->getDirty()) as $key) {
@@ -367,16 +369,6 @@ class Role extends Model
 
         static::deleted(static function (self $role): void {
             Event::dispatch(new RoleDeleted($role));
-        });
-
-        // Clear the bypass flag after every completed save so it
-        // cannot hop across an intervening non-protected mutation
-        // (e.g. a description update) and silently unlock the next
-        // rename or delete. `saved` fires after `updating` has had
-        // a chance to consume the flag for a legitimate rename, so
-        // this reset is strictly idempotent on that path.
-        static::saved(static function (self $role): void {
-            $role->systemProtectionBypassed = false;
         });
     }
 
@@ -420,6 +412,83 @@ class Role extends Model
     }
 
     /**
+     * Return the attribute names whose dirty state triggers the
+     * system-protection guard on `updating`. For roles, only
+     * `name` changes are protected.
+     *
+     * @return list<string>
+     */
+    protected function systemProtectedFields(): array
+    {
+        return ['name'];
+    }
+
+    /**
+     * Construct the per-model exception raised when a protected
+     * mutation on a system role is refused.
+     *
+     * @param  string  $operation
+     * @return \Throwable
+     */
+    protected function systemProtectionException(string $operation): \Throwable
+    {
+        // Use the ORIGINAL name — on a rename, `getAttribute('name')`
+        // already reflects the mutated value. Audit consumers want
+        // "which role was targeted" (the canonical persisted name),
+        // not "what the attempted rename would produce."
+        /** @var string $roleName */
+        $roleName = $this->getOriginal('name', $this->getAttribute('name'));
+
+        return new SystemRoleProtectedException(roleName: (string) $roleName, operation: $operation);
+    }
+
+    /**
+     * Build the guard-precedence query for the supplied role
+     * name. Centralises the dynamic class-string handling so the
+     * caller stays readable and the two unavoidable PHPStan
+     * suppressions live in one place.
+     *
+     * The configured role model is instantiated through `new
+     * $class` so PHPStan resolves the receiver as an Eloquent
+     * `Model` instance — `newQuery()`, `where()`, and the closure
+     * receiver type cleanly without ignores. The remaining two
+     * suppressions on `orderByRaw()` and `orWhereNull()` exist
+     * because Laravel declares those methods via `@method static`
+     * annotations on `Illuminate\Database\Eloquent\Builder`, which
+     * PHPStan flags as `staticMethod.dynamicCall` whenever they
+     * appear inside an instance-method chain. They are runtime-
+     * dynamic instance calls; the static-receiver shape is a
+     * docblock artefact of Laravel's annotation soup, not the
+     * actual call dispatch.
+     *
+     * @param  class-string<\SineMacula\Laravel\Authorization\Models\Role>  $class
+     * @param  string  $name
+     * @param  string  $guard
+     * @return \Illuminate\Database\Eloquent\Builder<\SineMacula\Laravel\Authorization\Models\Role>
+     */
+    private static function queryForGuard(string $class, string $name, string $guard): Builder
+    {
+        $instance = new $class;
+
+        // The chain ends in `orderByRaw()`, which Laravel declares
+        // as `@method static` on Illuminate\Database\Eloquent\Builder.
+        // PHPStan flags any dynamic call to such a method as
+        // `staticMethod.dynamicCall` even though runtime dispatch is
+        // genuinely dynamic instance dispatch on a Builder instance.
+        // The same applies to `orWhereNull()` inside the closure
+        // below. Both ignores are docblock-soup artefacts, not
+        // unsafe calls.
+        // @phpstan-ignore staticMethod.dynamicCall
+        return $instance->newQuery()
+            ->where('name', $name)
+            ->where(static function (Builder $query) use ($guard): void {
+                // @phpstan-ignore staticMethod.dynamicCall
+                $query->where('guard_name', $guard)->orWhereNull('guard_name');
+            })
+            ->orderByRaw('guard_name IS NULL');
+    }
+
+    /**
      * Resolve a permission model by primary key, used by
      * `syncPermissions()` when the sync delta surfaces an ID
      * that was not part of the caller's input set (the
@@ -443,57 +512,5 @@ class Role extends Model
         }
 
         return $model;
-    }
-
-    /**
-     * Decide whether the supplied mutation is allowed against the
-     * current instance. Consumes the bypass flag so a second
-     * protected operation on the same instance re-arms the
-     * protection.
-     *
-     * @param  string  $operation
-     * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException
-     */
-    private function assertSystemProtectionAllows(string $operation): void
-    {
-        if ((bool) $this->getAttribute('is_system') === false) {
-            return;
-        }
-
-        if ($this->systemProtectionBypassed) {
-            $this->systemProtectionBypassed = false;
-
-            return;
-        }
-
-        // Use the ORIGINAL name — on a rename, `getAttribute('name')`
-        // already reflects the mutated value. Audit consumers want
-        // "which role was targeted" (the canonical persisted name),
-        // not "what the attempted rename would produce."
-        /** @var string $roleName */
-        $roleName = $this->getOriginal('name', $this->getAttribute('name'));
-
-        throw new SystemRoleProtectedException(roleName: (string) $roleName, operation: $operation);
-    }
-
-    /**
-     * Test whether the pending update renames a system role.
-     * Only rename operations go through the protection check;
-     * description and guard_name bumps pass unconditionally.
-     *
-     * @return bool
-     */
-    private function wasSystemRoleRenamed(): bool
-    {
-        if (!(bool) $this->getAttribute('is_system')) {
-            return false;
-        }
-
-        /** @var array<string, mixed> $dirty */
-        $dirty = $this->getDirty();
-
-        return \array_key_exists('name', $dirty);
     }
 }

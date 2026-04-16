@@ -640,329 +640,89 @@ enterprise systems ship both.)_
   flag that surfaces a stringly-typed closed set will cite
   this audit as its landing home.
 
-### 87. `AbstractAuthorizationMiddleware::matches()` type-erases the contract — concrete subclasses need a `@var` re-assertion
+### 97. `instance()` accessor duplicated across `ResolutionCache` and `AuthorizationManager`
 
-- **File:** `src/Http/Middleware/AbstractAuthorizationMiddleware.php:90`
-  (abstract signature); `src/Http/Middleware/RequireRole.php:38–42`
-  and `RequirePermission.php` (concrete `matches` methods).
-- **Observation:** the abstract method signature is
-  `matches(object $principal, string $needle): bool`. After
-  `handle()`'s `instanceof $contract` guard, `$principal` is
-  known to implement the contract returned by
-  `requiredContract()`, but the type information is erased
-  when the variable is handed to the subclass. Each concrete
-  leaf then re-asserts the type with a PHPStan `@var`
-  docblock:
-
+- **Files:** `src/Cache/ResolutionCache.php:92–106`;
+  `src/AuthorizationManager.php:95–109`.
+- **Observation:** the commit introduces the same 15-line
+  static accessor on two unrelated classes, byte-for-byte
+  identical:
   ```php
-  protected function matches(object $principal, string $needle): bool
+  public static function instance(): ?self
   {
-      /** @var \SineMacula\Laravel\Authorization\Contracts\SupportsRoles $principal */
-      return $principal->hasRole($needle);
+      if (!\function_exists('app')) {
+          return null;
+      }
+      $container = app();
+      if (!$container->bound(self::class)) {
+          return null;
+      }
+      /** @var self */
+      return $container->make(self::class);
   }
   ```
+  Two sanctioned service-locator sites is an improvement over
+  the scattered `app()->bound(...) ? app(...) : null` idiom
+  that preceded it, but the shape that repeats across two
+  classes is itself duplicated logic. Also the
+  `function_exists('app')` guard is defensive to the point of
+  unreachable code (the Laravel global helper is always
+  loaded when the package loads) — and is now the
+  duplicated guard on both classes.
+- **Impact:** drift risk if one site ever diverges (e.g. one
+  class adds logging / metrics on the accessor and the other
+  forgets). Also the pattern is likely to be needed on future
+  container-bound classes (`LastDecisionStore`,
+  `PolicyResolver`, etc.) and each new class will copy the
+  15 lines.
+- **Options:** (a) extract a `BindsInstanceFromContainer`
+  trait with the static method and a single abstract hook
+  (`containerKey(): string` defaulting to `self::class`);
+  each class `use`s it, one source of truth; (b) extract a
+  free-standing helper `ContainerInstance::ofOrNull(string
+  $class): ?object` and have both classes' static methods
+  delegate to it in one line; (c) accept the duplication and
+  document — two-site drift is still cheaper than three.
+  Option (a) composes cleanly with #92's proposed
+  `ProtectsSystemFlaggedRows` trait pattern — one trait file
+  per cross-cutting concern.
 
-  Works, but the `@var` is load-bearing — remove it and
-  PHPStan flags `hasRole` as "method not found on `object`".
-  The safety of the `handle()`-level contract check is
-  invisible to static analysis at the subclass call site.
-- **Impact:** weak type propagation across the template-method
-  boundary. Any future maintainer could delete the `@var`
-  thinking it's a stale docblock and silently disable PHPStan
-  coverage at the hot path. Also encourages copy-pasting the
-  `@var` annotation for every new middleware that extends the
-  abstract.
-- **Options:** (a) add a PHPStan `@template T` annotation
-  on the abstract class and parameterise `matches(T $principal)`
-  — generics stay a PHPStan concern, runtime unchanged;
-  concrete subclasses declare `@extends AbstractAuthorizationMiddleware<SupportsRoles>`
-  and type propagation works without per-method `@var`; (b)
-  accept the pattern and document in the abstract docblock
-  that subclasses must re-assert the contract type on
-  `$principal` — minimal churn, explicit; (c) narrow
-  `matches` to accept the specific contract via late static
-  binding on each subclass — requires PHP's
-  contravariant-parameter rules to allow narrowing, which
-  they don't, so this option does not work in practice. Option
-  (a) is the right answer for a PHPStan-level-8 codebase.
+### 98. Cache-remember methods grew to four positional parameters with unrelated concerns
 
-### 90. `AuthorizableGrantPivot` is shared across three distinct pivot tables — can't express future per-table divergence
-
-- **Files:** `src/Models/AuthorizableGrantPivot.php` (shared
-  pivot class); `src/Traits/HasRoles.php`,
-  `src/Traits/HasPermissions.php`, `src/Traits/HasPolicies.php`
-  (three `->using(AuthorizableGrantPivot::class)` call sites).
-- **Observation:** the three authorizable-grant pivots
-  (`authorizable_roles`, `authorizable_permissions`,
-  `authorizable_policies`) currently share an identical
-  shape: morph keys + `expires_at`. One pivot class casts
-  `expires_at` for all three — efficient today. But the
-  in-flight work for #22 (polymorphic tenant scoping) and
-  #30's sibling `granted_by` column noted as a future
-  extension both land per-row metadata that may not apply
-  uniformly across the three tables. A future
-  `authorizable_policies.approved_by` column — for a policy
-  attachment approval workflow — would not apply to roles or
-  permissions, but the shared pivot class would either cast it
-  for all three or have to split back out.
-- **Impact:** design-time tension for future per-table
-  features. Today the pivot is simple and correct. When the
-  first per-table divergence lands, the refactor path is
-  either "split `AuthorizableGrantPivot` into three subclasses"
-  (back to where we were) or "let the shared class grow a
-  field set that is partially ignored on two of the three
-  tables" (muddy).
-- **Options:** (a) keep the shared pivot as-is; treat the
-  first per-table divergence as the trigger to split
-  (`AuthorizableRolePivot`, `AuthorizablePermissionPivot`,
-  `AuthorizablePolicyPivot` each extending
-  `AuthorizableGrantPivot` for shared `expires_at` casting).
-  YAGNI answer — no churn today; (b) split now along the three
-  tables even though they currently share shape — each
-  `Has*` trait already points at a distinct pivot slot, so
-  the split is mechanical and future-proofs per-table fields;
-  (c) accept the shared pivot and document that per-table
-  metadata must go on `authorizable` or on the related model
-  rather than the pivot — forces a design constraint but
-  keeps the pivot surface tight. Option (a) is the honest
-  iterative path and is already the committed state.
-
-### 91. System-policy protection does not cover `document` mutations — the authorization-carrying field is unguarded
-
-- **Files:** `src/Models/Policy.php:175–179`
-  (`updating` hook calls `wasSystemPolicyRenamed` only);
-  `src/Models/Policy.php:293–304`
-  (`wasSystemPolicyRenamed` body + docblock).
-- **Observation:** the `updating` hook on `Policy` blocks
-  only rename mutations on `is_system = true` rows. The
-  method's docblock states explicitly "description and
-  document bumps pass unconditionally." The `document`
-  column is the JSON payload that carries every statement,
-  effect, action, resource, and condition the evaluator walks
-  — it is the authorization-defining field on the Policy
-  table. A caller with raw Eloquent access can freely
-  overwrite a platform-shipped deny policy's `document` while
-  the row stays delete-protected and rename-protected. The
-  protection guards the wrapper and leaves the payload
-  uncovered. Issue #76 option (a) flagged this exact case:
-  "for `Policy`, document mutation as well — policy
-  `document` changes are the authorization-impacting edit,
-  analogous to role rename."
-- **Impact:** the most security-relevant field on the Policy
-  table is not covered by the system-protection invariant.
-  A compliance-audited deployment that ships a platform deny
-  policy still allows that policy's document body to be
-  rewritten in place — same security hole as deleting the
-  policy, only quieter because the row still exists.
-- **Options:** (a) extend `wasSystemPolicyRenamed` into
-  `wasSystemPolicyAuthorizationDirty` (or split into a
-  second hook `wasSystemPolicyDocumentDirty`) that also
-  returns true when `'document'` is dirty; the `updating`
-  hook calls both and raises `SystemPolicyProtectedException`
-  on either; (b) document the gap and treat document
-  mutation as an explicit exception-to-the-rule — honest but
-  leaves the security invariant half-enforced; (c) promote
-  Policy to a three-operation protection matrix
-  (`delete` / `rename` / `document-rewrite`) via an enum on
-  the exception, giving callers structured reasons. Option
-  (a) is the minimum change that closes #76's stated scope.
-
-### 92. `is_system` protection pattern is triplicated across Role, Permission, Policy
-
-- **Files:** `src/Models/Role.php:73–105,305–425`;
-  `src/Models/Permission.php:71–107,185–286`;
-  `src/Models/Policy.php:74–107,165–310` —
-  plus three near-identical exception classes
-  (`SystemRoleProtectedException`,
-  `SystemPermissionProtectedException`,
-  `SystemPolicyProtectedException`).
-- **Observation:** the commit extends #76 by duplicating the
-  full pattern across all three primitive models. Three
-  instances of `private bool $systemProtectionBypassed`;
-  three `forceSystem()` methods with identical bodies; three
-  `assertSystemProtectionAllows()` methods whose only
-  variation is the exception class thrown and the
-  `getOriginal('name', ...)` label; three `wasSystem*Renamed`
-  helpers that differ only in the entity name in the method
-  identifier. Issue #76 explicitly called this out —
-  "(b) lift the protection logic into a shared trait
-  (`ProtectsSystemFlaggedRows`) … avoids the three-way
-  duplication that would otherwise appear alongside the
-  `ValidatesAuthorizationName` trait." The commit picked
-  option (a) and shipped the foreseen duplication.
-- **Impact:** ~150 lines of duplicated infrastructure across
-  three models. Any future change to the protection
-  semantics — adding a second protected operation (see #91
-  on Policy's `document`), switching to an enum for
-  `$operation` (see #84's audit), logging protected-mutation
-  attempts, wiring a consumer-supplied audit listener —
-  lands three times and diverges silently if one site is
-  missed. Also complicates PHPStan coverage, test coverage,
-  and onboarding.
-- **Options:** (a) extract
-  `SineMacula\Laravel\Authorization\Traits\ProtectsSystemFlaggedRows`
-  with the `$systemProtectionBypassed` property,
-  `forceSystem()`, `assertSystemProtectionAllows()`, and the
-  `saved`-hook bypass reset. Each model composes the trait
-  and overrides a single
-  `protectedDirtyAttributes(): array<string>` hook that
-  returns the list of attributes whose dirty-state triggers
-  the check (`['name']` for Role / Permission, `['name',
-  'document']` for Policy — closes #91 in the same move).
-  The per-model exception class stays; the trait raises it
-  via an abstract `protectedOperationException(string $operation): Throwable`
-  hook. Three leaf classes become ~30 lines each; (b) accept
-  the duplication and defer the trait until the third
-  follow-on change makes it unavoidable — drift-by-design;
-  (c) collapse the three exception classes into a single
-  `SystemFlaggedRowProtectedException` carrying the entity
-  kind alongside the operation (ties into #84's enum
-  audit). Option (a) is the right enterprise answer and
-  composes cleanly with the Policy-document extension in
-  #91.
-
-### 93. `OrphanedRolePermissionException::$side` is stringly-typed — candidate enum per #84
-
-- **File:** `src/Exceptions/OrphanedRolePermissionException.php:29–56`
-  (constructor + `getSide()` accessor).
-- **Observation:** the legal values for `$side` are the
-  string literals `'role'` and `'permission'`. The
-  constructor takes `string`; `getSide()` returns `string`;
-  consumers comparing the exception payload do so with
-  `$e->getSide() === 'role'`. No compile-time enforcement
-  that only those two values are supplied; a typo at the
-  throw site (`side: 'Role'` capitalised) passes silently
-  and every caller's equality check against `'role'` fails.
-  Parallel case to
-  `SystemRoleProtectedException::$operation` flagged in
-  #84's candidate surfaces.
-- **Impact:** minor on day-one usage, but every
-  stringly-typed enum-candidate field adds to the surface
-  #84 has to sweep. Catching them at introduction is
-  cheaper than fixing during the audit pass.
-- **Options:** (a) introduce
-  `RolePermissionOrphanSide` enum (`Role = 'role'`,
-  `Permission = 'permission'`) and retype the constructor
-  and accessor. Matches the `GateConflictMode` shape
-  already in `src/Enums/`; (b) fold into #84's audit pass
-  and leave as-is for now — consistent with the "audit
-  sweep" framing of that issue. Option (a) closes the new
-  surface as it lands; option (b) is the consistent
-  iterative path. Either is fine provided the field is not
-  left stringly-typed through v1.0.0.
-
-### 94. Expiry-mutation helpers triplicated across `HasRoles` / `HasPermissions` / `HasPolicies`
-
-- **Files:** `src/Traits/HasRoles.php:303–378`
-  (`readRolePivot`, `coerceRoleExpiry`, `roleExpiriesEqual`);
-  `src/Traits/HasPermissions.php` (`readPermissionPivot`,
-  `coercePermissionExpiry`, `permissionExpiriesEqual`);
-  `src/Traits/HasPolicies.php` (`readPolicyPivot`,
-  `coercePolicyExpiry`, `policyExpiriesEqual`).
-- **Observation:** the expiry-change detection machinery lands
-  in three places with identical shape. Each trait carries a
-  `read*Pivot($model)` that issues a raw `DB::table(...)` query
-  against the `authorizable_*` table, a `coerce*Expiry($raw)`
-  that normalises string / Carbon / DateTimeInterface into a
-  `?DateTimeInterface`, and a `*ExpiriesEqual($left, $right)`
-  that normalises to UTC timestamps. The only variation across
-  the three is the pivot table name, the related-model FK
-  column (`role_id` / `permission_id` / `policy_id`), and the
-  entity name in the method identifier. Same failure mode the
-  engineer called out on #92 for system protection — each new
-  requirement (logging, rate-limiting, granted-by tracking,
-  context variable capture) has to land three times.
-- **Impact:** ~200 lines of near-duplicated helper machinery
-  across the three traits, with drift risk every time the
-  pivot schema evolves. Also surfaces as a coverage-by-copy
-  problem: `ExpiryChangedEventsTest` has to exercise each
-  entity path independently to catch a bug that exists in
-  one helper but not the others.
-- **Options:** (a) extract a
-  `SineMacula\Laravel\Authorization\Traits\TracksGrantExpiry`
-  trait composed by all three `Has*` traits, parameterising
-  the entity-specific bits via a single
-  `grantPivotMetadata(): array{table: string, key: string}`
-  hook that each `Has*` trait implements in one line; (b)
-  promote the shared helpers onto the `AuthorizableGrantPivot`
-  class (already shared across the three relations per #90)
-  as static methods, so the traits delegate to one pivot-owner
-  surface; (c) accept the duplication and tighten the tests
-  to run parity across the three entities. Option (a) is the
-  symmetric answer to #92's same-shaped trait extraction.
-
-### 95. Pivot-row reads use `DB::table()` with hardcoded column names, bypassing the `authorization.pivots.*` config
-
-- **Files:** `src/Traits/HasRoles.php:315–335` (`readRolePivot`
-  body); same pattern in `readPermissionPivot` /
-  `readPolicyPivot` on the sibling traits.
-- **Observation:** the pivot-row reads for expiry detection
-  use `DB::table($table)` with hardcoded column literals —
-  `'authorizable_type'`, `'authorizable_id'`, `'role_id'`,
-  `'expires_at'`. The previous commit (`2347df5`) introduced
-  the `authorization.pivots.role_permissions.role_column`
-  config block specifically because #62 flagged the
-  fragile-coupling cost of hardcoded pivot columns. The new
-  expiry-detection reads reintroduce the same coupling on a
-  different pivot, without consulting the config seam.
-- **Impact:** consistency regression. A consumer who swaps a
-  pivot column name (via future `authorization.pivots.authorizable_roles.*`
-  config following the #62 pattern) will find the
-  `authorizable_*` relation's `->using(...)` pivot hook and
-  `RolePermission` pivot honour the override, but
-  `assignRole()`'s expiry-change detection silently reads the
-  wrong column and emits false `IdentityRoleExpiryChanged`
-  events (or misses real ones). The invariant that one config
-  change rewires every site is broken again.
-- **Options:** (a) extend the `authorization.pivots` config
-  block with
-  `authorizable_roles` / `authorizable_permissions` /
-  `authorizable_policies` sub-blocks and read every column
-  name through config in the new `read*Pivot` helpers;
-  (b) issue the pivot read through the Eloquent relation
-  itself (`$this->roles()->newPivotStatement()->where(...)`)
-  so Laravel's relation layer supplies the column names;
-  (c) remove the raw `DB::table()` path entirely and
-  capture the prior expiry via the model's already-loaded
-  pivot relation when one exists, falling back to a
-  relation-scoped query only when not. Option (c) is the
-  architecturally cleanest and incidentally speeds up the
-  happy path.
-
-### 96. `Role::resolveByName()` missing — asymmetric consolidation with `Permission::resolveByName()`
-
-- **Files:** `src/Models/Role.php` (no `resolveByName`
-  static method); `src/Models/Permission.php:160`
-  (has `resolveByName`); `src/Traits/HasRoles.php:274–301`
-  (inline resolution query duplicating what
-  `Permission::resolveByName` centralised).
-- **Observation:** the earlier commit (`802ed05`) extracted
-  `Permission::resolveByName()` as the single owner of the
-  guard-precedence query, closing #55's drift risk. The
-  matching extraction on Role was never shipped.
-  `HasRoles::resolveRole()` still carries the full
-  `->where('name', ...)->where(guard OR null)->orderByRaw(...)`
-  query inline. If the guard-precedence rule evolves
-  (wildcard `'*'` sentinel from the older guard-model
-  conversation, case-insensitivity, a `deprecated_at` filter,
-  anything) the Role side won't inherit the change. Exactly
-  the drift risk #55 was logged against, now asymmetric
-  across the two primitives.
-- **Impact:** partial consolidation. The invariant that the
-  role-side and identity-side lookups match is currently
-  held together by two separate copies of the query, in
-  different files, with no single owner. Future guard-model
-  changes have to be applied in both. Also breaks the
-  symmetry a reader expects between Role and Permission —
-  the two primitives should have matching resolver shapes.
-- **Options:** (a) ship a `Role::resolveByName(string $name, ?string $guard): self`
-  mirroring the Permission static; `HasRoles::resolveRole()`
-  delegates to it, matching the pattern the Permission side
-  uses; (b) push both resolvers down into a shared
-  `src/Support/GuardScopedLookup.php` helper that both
-  models call; (c) accept the asymmetry and document — poor
-  answer given the drift cost. Option (a) is the symmetric
-  close to the partial consolidation.
+- **File:** `src/Cache/ResolutionCache.php:118–197`
+  (`rememberPolicies`, `rememberPermissions`,
+  `rememberRoles` signatures).
+- **Observation:** the remember-methods now take
+  `(object $principal, Closure $resolver, ?int $maxTtl = null,
+  array $roleIds = [])` — four positional parameters mixing
+  the core cache-slot identity (`$principal`, `$resolver`)
+  with two TTL/tag-metadata fields (`$maxTtl`, `$roleIds`).
+  Every call site in the traits now passes the TTL hint and
+  the role-tag list positionally; a consumer reading
+  `$cache->rememberRoles($user, fn() => ..., 3600, ['admin',
+  'editor'])` has to infer what the trailing array is without
+  looking up the signature. PHP 8 named arguments help but
+  the positional shape is the canonical one consumers copy
+  from.
+- **Impact:** parameter-order footgun as the signature grows.
+  If a fifth knob lands (e.g. a `CacheDriver` override, a
+  per-call tag-prefix, a cache-hit-only flag) the positional
+  shape keeps getting wider. Also splits a conceptually
+  single invariant ("cache context for this remember") across
+  three separate parameters.
+- **Options:** (a) introduce a
+  `ResolutionCacheContext` value object that bundles
+  `?int $maxTtl` and `array $roleIds` (plus future knobs) as
+  named properties; the remember-methods narrow to
+  `(object $principal, Closure $resolver, ?ResolutionCacheContext $context = null)`
+  and call sites construct context via `new ResolutionCacheContext(maxTtl: ..., roleIds: ...)`;
+  (b) keep the positional shape and lean on consumers to use
+  PHP 8 named arguments in their own code; (c) split the
+  remember-methods into a low-level positional path and a
+  higher-level fluent `->with()->remember()` DSL — more
+  surface, clearer call sites. Option (a) is the simplest
+  that caps the API width and gives every future knob a
+  named home.
 
 ---
 

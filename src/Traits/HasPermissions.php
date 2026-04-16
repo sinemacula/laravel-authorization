@@ -6,16 +6,14 @@ namespace SineMacula\Laravel\Authorization\Traits;
 
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Events\IdentityPermissionExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\IdentityPermissionGranted;
 use SineMacula\Laravel\Authorization\Events\IdentityPermissionRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
-use SineMacula\Laravel\Authorization\Models\AuthorizableGrantPivot;
+use SineMacula\Laravel\Authorization\Models\AuthorizablePermissionPivot;
 use SineMacula\Laravel\Authorization\Models\Permission;
-use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
  * Direct permission trait for authorizable models.
@@ -61,7 +59,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
             foreignPivotKey: 'authorizable_id',
             relatedPivotKey: 'permission_id',
         )
-            ->using(AuthorizableGrantPivot::class)
+            ->using(AuthorizablePermissionPivot::class)
             ->withPivot('expires_at')
             ->where(static function ($query) use ($pivot): void {
                 $query->whereNull($pivot . '.expires_at')
@@ -88,7 +86,10 @@ trait HasPermissions // @phpstan-ignore trait.unused
     {
         $model = $this->resolvePermission($permission);
 
-        $prior = $this->readPermissionPivot($model);
+        /** @var string $table */
+        $table   = config('authorization.tables.authorizable_permissions', 'authorizable_permissions');
+        $columns = self::authorizationResolveGrantPivotColumns('authorizable_permissions', 'permission_column', 'permission_id');
+        $prior   = $this->authorizationReadGrantPivot($table, $columns, (string) $model->getKey());
 
         $this->permissions()->syncWithoutDetaching([
             (string) $model->getKey() => ['expires_at' => $expiresAt],
@@ -100,7 +101,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
 
         Event::dispatch(new IdentityPermissionGranted($this, $model));
 
-        if ($prior['exists'] && !self::permissionExpiriesEqual($prior['expires_at'], $expiresAt)) {
+        if ($prior['exists'] && !self::authorizationGrantExpiriesEqual($prior['expires_at'], $expiresAt)) {
             Event::dispatch(new IdentityPermissionExpiryChanged(
                 $this,
                 $model,
@@ -325,83 +326,6 @@ trait HasPermissions // @phpstan-ignore trait.unused
             : null;
 
         return $class::resolveByName($permission, $guard);
-    }
-
-    /**
-     * Read the existing pivot row for the supplied permission
-     * and return its existence and `expires_at` value. Returns
-     * `['exists' => false, 'expires_at' => null]` when no row
-     * exists. The query bypasses the relation's expiry filter so
-     * it observes both live and expired pivot rows — both are
-     * candidates for an expiry mutation by a re-call to
-     * `givePermission()`.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Models\Permission  $permission
-     * @return array{exists: bool, expires_at: \DateTimeInterface|null}
-     */
-    private function readPermissionPivot(Permission $permission): array
-    {
-        /** @var string $table */
-        $table = config('authorization.tables.authorizable_permissions', 'authorizable_permissions');
-
-        $row = DB::table($table)
-            ->where('authorizable_type', $this->getMorphClass())
-            ->where('authorizable_id', (string) $this->getKey())
-            ->where('permission_id', (string) $permission->getKey())
-            ->first();
-
-        if ($row === null) {
-            return ['exists' => false, 'expires_at' => null];
-        }
-
-        return [
-            'exists'     => true,
-            'expires_at' => self::coercePermissionExpiry($row->expires_at ?? null),
-        ];
-    }
-
-    /**
-     * Coerce a raw pivot `expires_at` value into a
-     * DateTimeInterface or null.
-     *
-     * @param  mixed  $value
-     * @return \DateTimeInterface|null
-     */
-    private static function coercePermissionExpiry(mixed $value): ?\DateTimeInterface
-    {
-        if ($value instanceof \DateTimeInterface) {
-            return $value;
-        }
-
-        if (\is_string($value) && $value !== '') {
-            return Carbon::parse($value);
-        }
-
-        return null;
-    }
-
-    /**
-     * Compare two expiry values for equality. Two nulls are
-     * equal (forever vs. forever); a null and a concrete instant
-     * differ; two concrete instants are compared by UTC
-     * timestamp so DST and timezone normalisation do not produce
-     * spurious false positives.
-     *
-     * @param  \DateTimeInterface|null  $left
-     * @param  \DateTimeInterface|null  $right
-     * @return bool
-     */
-    private static function permissionExpiriesEqual(?\DateTimeInterface $left, ?\DateTimeInterface $right): bool
-    {
-        if ($left === null && $right === null) {
-            return true;
-        }
-
-        if ($left === null || $right === null) {
-            return false;
-        }
-
-        return $left->getTimestamp() === $right->getTimestamp();
     }
 
     /**

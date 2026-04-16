@@ -30,6 +30,16 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
  * directives — consumers wiring a custom `PrincipalResolver` see
  * it honoured at every surface.
  *
+ * Generic parameter `TContract` names the capability contract a
+ * concrete subclass binds itself to (`SupportsRoles` for
+ * `RequireRole`, `SupportsPermissions` for `RequirePermission`).
+ * The bound propagates to `matches()` so subclass implementations
+ * declare `TContract $principal` and PHPStan carries the narrowed
+ * type across the template-method boundary without an inline
+ * `@var` re-assertion (see issue #87).
+ *
+ * @template TContract of object
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -75,7 +85,7 @@ abstract class AbstractAuthorizationMiddleware
      * capability contract this middleware probes
      * (`SupportsRoles` / `SupportsPermissions`).
      *
-     * @return class-string
+     * @return class-string<TContract>
      */
     abstract protected function requiredContract(): string;
 
@@ -83,7 +93,14 @@ abstract class AbstractAuthorizationMiddleware
      * Test whether the supplied principal satisfies a single
      * needle (role name, permission string, …).
      *
-     * @param  object  $principal
+     * The parameter is typed to the class-bound generic
+     * `TContract`, so each subclass declares its concrete
+     * contract — the principal arrives already narrowed by the
+     * `instanceof $contract` check in `handle()` and PHPStan
+     * carries the narrowed type into the method body without
+     * an inline `@var` re-assertion.
+     *
+     * @param  TContract  $principal
      * @param  string  $needle
      * @return bool
      */

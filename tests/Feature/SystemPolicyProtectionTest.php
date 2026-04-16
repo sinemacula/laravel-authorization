@@ -6,18 +6,20 @@ namespace Tests\Feature;
 
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPolicyProtectedException;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Traits\HasSystemProtection;
 use Tests\TestCase;
 
 /**
  * Feature coverage for the system-policy protection flag.
  *
- * `is_system = true` blocks the next delete or rename on the
- * instance unless `forceSystem()` is called first; the bypass is
- * per-instance, in-memory, and single-use — it does not persist
- * across `$policy->fresh()` hydrations and re-arms on the next
- * protected mutation.
+ * `is_system = true` blocks the next delete, rename, or document
+ * rewrite on the instance unless `forceSystem()` is called first;
+ * the bypass is per-instance, in-memory, and single-use — it does
+ * not persist across `$policy->fresh()` hydrations and re-arms on
+ * the next protected mutation. The document guard closes #91.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -26,6 +28,7 @@ use Tests\TestCase;
  */
 #[CoversClass(Policy::class)]
 #[CoversClass(SystemPolicyProtectedException::class)]
+#[CoversTrait(HasSystemProtection::class)]
 final class SystemPolicyProtectionTest extends TestCase
 {
     /**
@@ -102,8 +105,9 @@ final class SystemPolicyProtectionTest extends TestCase
     }
 
     /**
-     * Non-rename updates — description, document swap — pass
-     * without needing the escape hatch.
+     * Non-protected updates — description changes — pass without
+     * needing the escape hatch. (`name` and `document` are
+     * protected; `description` is not.).
      *
      * @return void
      */
@@ -190,6 +194,68 @@ final class SystemPolicyProtectionTest extends TestCase
         $policy->delete();
 
         self::assertNull(Policy::query()->find($policy->getKey()));
+    }
+
+    /**
+     * Rewriting the document on a system policy without the
+     * escape hatch is refused — the document carries the
+     * authorization payload and is the security-relevant field
+     * on the Policy table (#91).
+     *
+     * @return void
+     */
+    public function testDocumentRewriteOnSystemPolicyIsRefused(): void
+    {
+        $policy = $this->makeSystemPolicy('break-glass');
+
+        try {
+            $policy->document = [
+                'statements' => [
+                    [
+                        'effect'    => 'deny',
+                        'actions'   => ['*:*'],
+                        'resources' => ['*'],
+                    ],
+                ],
+            ];
+            $policy->save();
+            self::fail('Expected SystemPolicyProtectedException was not thrown.');
+        } catch (SystemPolicyProtectedException $exception) {
+            self::assertSame('break-glass', $exception->getPolicyName());
+            self::assertSame('document-rewrite', $exception->getOperation());
+        }
+    }
+
+    /**
+     * `forceSystem()` unlocks the next document rewrite on a
+     * system policy.
+     *
+     * @return void
+     */
+    public function testForceSystemAllowsDocumentRewrite(): void
+    {
+        $policy = $this->makeSystemPolicy('break-glass');
+
+        $newDocument = [
+            'statements' => [
+                [
+                    'effect'    => 'deny',
+                    'actions'   => ['*:*'],
+                    'resources' => ['*'],
+                ],
+            ],
+        ];
+
+        $policy->forceSystem();
+        $policy->document = $newDocument;
+        $policy->save();
+
+        /** @var \SineMacula\Laravel\Authorization\Models\Policy $fresh */
+        $fresh    = $policy->fresh();
+        $document = $fresh->document;
+
+        self::assertIsArray($document);
+        self::assertSame('deny', $document['statements'][0]['effect']);
     }
 
     /**

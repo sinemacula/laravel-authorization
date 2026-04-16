@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Models;
 
 use Illuminate\Database\Eloquent\Relations\Pivot;
+use SineMacula\Laravel\Authorization\Enums\OrphanSide;
 use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\OrphanedRolePermissionException;
 
@@ -126,7 +127,7 @@ class RolePermission extends Pivot
         $role = $roleClass::query()->find($roleId);
 
         if ($role === null) {
-            throw new OrphanedRolePermissionException(side: 'role', parentId: $roleId);
+            throw new OrphanedRolePermissionException(side: OrphanSide::ROLE, parentId: $roleId);
         }
 
         return $role;
@@ -165,7 +166,7 @@ class RolePermission extends Pivot
         $permission = $permissionClass::query()->find($permissionId);
 
         if ($permission === null) {
-            throw new OrphanedRolePermissionException(side: 'permission', parentId: $permissionId);
+            throw new OrphanedRolePermissionException(side: OrphanSide::PERMISSION, parentId: $permissionId);
         }
 
         return $permission;

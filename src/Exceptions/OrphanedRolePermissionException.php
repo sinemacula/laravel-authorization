@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Exceptions;
 
+use SineMacula\Laravel\Authorization\Enums\OrphanSide;
+
 /**
  * Thrown when a `RolePermission` pivot save references a role or
  * permission row that cannot be resolved.
@@ -26,31 +28,31 @@ class OrphanedRolePermissionException extends \RuntimeException
     /**
      * Create a new exception instance.
      *
-     * @param  string  $side
+     * @param  \SineMacula\Laravel\Authorization\Enums\OrphanSide  $side
      * @param  string  $parentId
      */
     public function __construct(
 
-        /** Which side is missing: "role" or "permission". */
-        private readonly string $side,
+        /** Which side is missing: role or permission. */
+        private readonly OrphanSide $side,
 
         /** The ID that failed to resolve. */
         private readonly string $parentId,
 
     ) {
         parent::__construct(
-            "Orphaned role_permissions pivot: {$side} '{$parentId}' does not exist."
+            "Orphaned role_permissions pivot: {$side->value} '{$parentId}' does not exist."
                 . ' Refusing to persist a pivot row with a missing parent.',
             422,
         );
     }
 
     /**
-     * Return which side was missing ("role" or "permission").
+     * Return which side was missing.
      *
-     * @return string
+     * @return \SineMacula\Laravel\Authorization\Enums\OrphanSide
      */
-    public function getSide(): string
+    public function getSide(): OrphanSide
     {
         return $this->side;
     }

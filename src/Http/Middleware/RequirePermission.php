@@ -22,13 +22,15 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
  * to OR semantics. For AND across several permissions, chain the
  * middleware — `->middleware(['permission:posts:edit', 'permission:posts:publish'])`.
  *
+ * @extends AbstractAuthorizationMiddleware<SupportsPermissions>
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
 class RequirePermission extends AbstractAuthorizationMiddleware
 {
     /**
-     * @return class-string<\SineMacula\Laravel\Authorization\Contracts\SupportsPermissions>
+     * @return class-string<SupportsPermissions>
      */
     protected function requiredContract(): string
     {
@@ -36,13 +38,12 @@ class RequirePermission extends AbstractAuthorizationMiddleware
     }
 
     /**
-     * @param  object  $principal
+     * @param  SupportsPermissions  $principal
      * @param  string  $needle
      * @return bool
      */
     protected function matches(object $principal, string $needle): bool
     {
-        /** @var \SineMacula\Laravel\Authorization\Contracts\SupportsPermissions $principal */
         return $principal->hasPermission($needle);
     }
 

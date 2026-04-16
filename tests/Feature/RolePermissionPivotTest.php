@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Enums\OrphanSide;
 use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\OrphanedRolePermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -36,6 +37,7 @@ use Tests\TestCase;
  */
 #[CoversClass(RolePermission::class)]
 #[CoversClass(OrphanedRolePermissionException::class)]
+#[CoversClass(OrphanSide::class)]
 final class RolePermissionPivotTest extends TestCase
 {
     /**
@@ -206,7 +208,7 @@ final class RolePermissionPivotTest extends TestCase
             $pivot->save();
             self::fail('Expected OrphanedRolePermissionException was not thrown.');
         } catch (OrphanedRolePermissionException $exception) {
-            self::assertSame('role', $exception->getSide());
+            self::assertSame(OrphanSide::ROLE, $exception->getSide());
             self::assertSame($pivot->getAttribute('role_id'), $exception->getParentId());
         }
     }
@@ -230,7 +232,7 @@ final class RolePermissionPivotTest extends TestCase
             $pivot->save();
             self::fail('Expected OrphanedRolePermissionException was not thrown.');
         } catch (OrphanedRolePermissionException $exception) {
-            self::assertSame('permission', $exception->getSide());
+            self::assertSame(OrphanSide::PERMISSION, $exception->getSide());
             self::assertSame($pivot->getAttribute('permission_id'), $exception->getParentId());
         }
     }

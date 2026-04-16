@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Traits;
 
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Shared helpers used by the authorizable-identity traits to feed
@@ -157,5 +158,132 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
         }
 
         return \min($left, $right);
+    }
+
+    /**
+     * Read the existing pivot row for the authorizable-to-grant
+     * triplet `(type, id, $targetId)` against the supplied pivot
+     * table and return its existence and `expires_at` value.
+     * Returns `['exists' => false, 'expires_at' => null]` when no
+     * row exists. The query bypasses any relation-level expiry
+     * filter so it observes both live and expired pivot rows —
+     * both are candidates for an expiry mutation by a re-call to
+     * the surface-specific grant method.
+     *
+     * Column names are supplied by the caller from the per-table
+     * `authorization.pivots.*` config block so a consumer who
+     * swaps a pivot column name (type / id / FK / expires_at) at
+     * the config seam sees the override honoured here as well —
+     * closing the coupling regression flagged in #95.
+     *
+     * Shared by the three authorizable-identity traits so the
+     * expiry-change detection machinery lives in one place (see
+     * #94).
+     *
+     * @param  string  $table
+     * @param  array{authorizable_type: string, authorizable_id: string, target: string, expires_at: string}  $columns
+     * @param  string  $targetId
+     * @return array{exists: bool, expires_at: \DateTimeInterface|null}
+     */
+    private function authorizationReadGrantPivot(string $table, array $columns, string $targetId): array
+    {
+        $row = DB::table($table)
+            ->where($columns['authorizable_type'], $this->getMorphClass())
+            ->where($columns['authorizable_id'], (string) $this->getKey())
+            ->where($columns['target'], $targetId)
+            ->first();
+
+        if ($row === null) {
+            return ['exists' => false, 'expires_at' => null];
+        }
+
+        $expiresAtColumn = $columns['expires_at'];
+
+        return [
+            'exists'     => true,
+            'expires_at' => self::authorizationCoerceGrantExpiry($row->{$expiresAtColumn} ?? null),
+        ];
+    }
+
+    /**
+     * Resolve the full column map for a pivot's `authorization.pivots.*`
+     * config sub-block. Returns the `authorizable_type`,
+     * `authorizable_id`, `target` (the FK column pointing at the
+     * related model), and `expires_at` column names. Consumers who
+     * leave the config untouched get the package defaults —
+     * `authorizable_type`, `authorizable_id`, `{entity}_id`, and
+     * `expires_at` respectively.
+     *
+     * @param  string  $pivot
+     * @param  string  $targetKey
+     * @param  string  $defaultTarget
+     * @return array{authorizable_type: string, authorizable_id: string, target: string, expires_at: string}
+     */
+    private static function authorizationResolveGrantPivotColumns(string $pivot, string $targetKey, string $defaultTarget): array
+    {
+        $prefix = 'authorization.pivots.' . $pivot . '.';
+
+        /** @var string $type */
+        $type = config($prefix . 'authorizable_type_column', 'authorizable_type');
+        /** @var string $id */
+        $id = config($prefix . 'authorizable_id_column', 'authorizable_id');
+        /** @var string $target */
+        $target = config($prefix . $targetKey, $defaultTarget);
+        /** @var string $expiresAt */
+        $expiresAt = config($prefix . 'expires_at_column', 'expires_at');
+
+        return [
+            'authorizable_type' => $type,
+            'authorizable_id'   => $id,
+            'target'            => $target,
+            'expires_at'        => $expiresAt,
+        ];
+    }
+
+    /**
+     * Coerce a raw pivot `expires_at` value (string from a DB
+     * query, Carbon, `DateTimeInterface`, or null) into a
+     * `DateTimeInterface` or null. Shared by the three
+     * authorizable-identity traits (see #94).
+     *
+     * @param  mixed  $value
+     * @return \DateTimeInterface|null
+     */
+    private static function authorizationCoerceGrantExpiry(mixed $value): ?\DateTimeInterface
+    {
+        if ($value instanceof \DateTimeInterface) {
+            return $value;
+        }
+
+        if (\is_string($value) && $value !== '') {
+            return Carbon::parse($value);
+        }
+
+        return null;
+    }
+
+    /**
+     * Compare two expiry values for equality. Two nulls are equal
+     * (forever vs. forever); a null and a concrete instant differ
+     * (forever vs. expiring); two concrete instants are compared
+     * by their UTC timestamp so DST and timezone normalisation do
+     * not produce spurious false positives. Shared by the three
+     * authorizable-identity traits (see #94).
+     *
+     * @param  \DateTimeInterface|null  $left
+     * @param  \DateTimeInterface|null  $right
+     * @return bool
+     */
+    private static function authorizationGrantExpiriesEqual(?\DateTimeInterface $left, ?\DateTimeInterface $right): bool
+    {
+        if ($left === null && $right === null) {
+            return true;
+        }
+
+        if ($left === null || $right === null) {
+            return false;
+        }
+
+        return $left->getTimestamp() === $right->getTimestamp();
     }
 }
