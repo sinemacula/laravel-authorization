@@ -97,6 +97,51 @@ final class ConditionEvaluator
     }
 
     /**
+     * Compare two values numerically using the supplied comparator.
+     *
+     * Both sides must be numeric (pass `is_numeric`); if either side
+     * is non-numeric the condition fails gracefully (returns false).
+     *
+     * @param  mixed  $actual
+     * @param  mixed  $operand
+     * @param  string  $comparator
+     * @return bool
+     */
+    public static function compareNumeric(mixed $actual, mixed $operand, string $comparator): bool
+    {
+        if (!\is_numeric($actual) || !\is_numeric($operand)) {
+            return false;
+        }
+
+        $left  = (float) $actual;
+        $right = (float) $operand;
+
+        return match ($comparator) {
+            '>'     => $left > $right,
+            '>='    => $left >= $right,
+            '<'     => $left < $right,
+            '<='    => $left <= $right,
+            default => false,
+        };
+    }
+
+    /**
+     * Evaluate the `bool` operator by coercing both sides to boolean.
+     *
+     * Truthy coercion: `true`, `'true'`, `'1'`, `1` resolve to true.
+     * Everything else resolves to false. Both sides are coerced before
+     * comparison so the operator is symmetric.
+     *
+     * @param  mixed  $actual
+     * @param  mixed  $operand
+     * @return bool
+     */
+    public static function matchesBool(mixed $actual, mixed $operand): bool
+    {
+        return self::coerceBool($actual) === self::coerceBool($operand);
+    }
+
+    /**
      * Log an unknown-operator warning and return false.
      *
      * The logger call is wrapped in a try/catch by design: the
@@ -188,5 +233,19 @@ final class ConditionEvaluator
         } catch (\Throwable) {
             return false;
         }
+    }
+
+    /**
+     * Coerce a mixed value to a boolean.
+     *
+     * Truthy: `true`, `'true'`, `'1'`, `1`.
+     * Everything else: false.
+     *
+     * @param  mixed  $value
+     * @return bool
+     */
+    private static function coerceBool(mixed $value): bool
+    {
+        return $value === true || $value === 'true' || $value === '1' || $value === 1;
     }
 }

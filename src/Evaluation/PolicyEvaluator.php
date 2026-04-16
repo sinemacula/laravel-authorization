@@ -21,6 +21,9 @@ use SineMacula\Laravel\Authorization\Enums\TraceDecision;
  */
 final class PolicyEvaluator
 {
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null Shared interpolator instance, created lazily. */
+    private ?ContextInterpolator $interpolator = null;
+
     /**
      * Evaluate the supplied policies against the action, resource and
      * context.
@@ -29,17 +32,20 @@ final class PolicyEvaluator
      * @param  string  $action
      * @param  string|null  $resource
      * @param  array<string, mixed>  $context
+     * @param  object|null  $principal
      * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult
      */
-    public function evaluate(array $policies, string $action, ?string $resource = null, array $context = []): EvaluationResult
+    public function evaluate(array $policies, string $action, ?string $resource = null, array $context = [], ?object $principal = null): EvaluationResult
     {
-        /** @var list<array{policy: string, statement_index: int, decision: TraceDecision, reason: string}> $trace */
+        $interpolator = $this->interpolator();
+
+        /** @var list<array{policy: string, statement_index: int, decision: \SineMacula\Laravel\Authorization\Enums\TraceDecision, reason: string}> $trace */
         $trace          = [];
         $allowStatement = null;
 
         foreach ($policies as $policy) {
             foreach ($policy->statements as $index => $statement) {
-                if (!$statement->matches($action, $resource)) {
+                if (!$statement->matches($action, $resource, $interpolator, $principal, $context)) {
                     $trace[] = [
                         'policy'          => $policy->name,
                         'statement_index' => $index,
@@ -50,7 +56,7 @@ final class PolicyEvaluator
                     continue;
                 }
 
-                if (!$statement->evaluateConditions($context)) {
+                if (!$statement->evaluateConditions($context, $interpolator, $principal, $resource)) {
                     $trace[] = [
                         'policy'          => $policy->name,
                         'statement_index' => $index,
@@ -88,5 +94,15 @@ final class PolicyEvaluator
         }
 
         return EvaluationResult::implicitlyDenied($trace);
+    }
+
+    /**
+     * Return the shared context interpolator instance.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator
+     */
+    private function interpolator(): ContextInterpolator
+    {
+        return $this->interpolator ??= new ContextInterpolator;
     }
 }

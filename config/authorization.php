@@ -223,4 +223,24 @@ return [
     'hierarchy' => [
         'enabled' => (bool) env('AUTHORIZATION_HIERARCHY_ENABLED', true),
     ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Role rank / seniority
+    |---------------------------------------------------------------------------
+    |
+    | Controls whether rank-based seniority checks are active. When enabled
+    | (the default), `canActOn()` on an authorizable identity compares the
+    | actor's highest-ranked role (lowest numeric `rank` value) against the
+    | target's. When disabled, `canActOn()` always returns true — consumers
+    | who do not need rank-based authority can skip the feature entirely.
+    |
+    | Roles with a null `rank` are unranked and exempt from rank checks
+    | regardless of this toggle.
+    |
+    */
+
+    'rank' => [
+        'enabled' => (bool) env('AUTHORIZATION_RANK_ENABLED', true),
+    ],
 ];

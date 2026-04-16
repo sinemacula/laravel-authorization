@@ -9,6 +9,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
+use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 use SineMacula\Laravel\Authorization\Events\IdentityRoleAssigned;
 use SineMacula\Laravel\Authorization\Events\IdentityRoleExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\IdentityRoleRevoked;
@@ -242,6 +243,62 @@ trait HasRoles // @phpstan-ignore trait.unused
     }
 
     // ------------------------------------------------------------------
+    // Rank helpers
+    // ------------------------------------------------------------------
+
+    /**
+     * Determine whether this identity can act on the given target
+     * based on role rank seniority.
+     *
+     * Both `$this` and `$target` must implement `SupportsRoles`;
+     * returns false otherwise. When `authorization.rank.enabled` is
+     * false the check is bypassed and the method returns true
+     * unconditionally (rank feature disabled).
+     *
+     * Semantics:
+     * - Actor has no ranked roles -> false (cannot assert rank
+     *   authority).
+     * - Target has no ranked roles -> true (unranked targets are
+     *   freely actable-on).
+     * - Otherwise: actor's best rank must be strictly less than
+     *   target's best rank (strict-senior — equal rank = cannot act).
+     *
+     * @param  object  $target
+     * @return bool
+     */
+    public function canActOn(object $target): bool
+    {
+        /** @var bool $enabled */
+        $enabled = config('authorization.rank.enabled', true);
+
+        if (!$enabled) {
+            return true;
+        }
+
+        if (!($this instanceof SupportsRoles) || !($target instanceof SupportsRoles)) {
+            return false;
+        }
+
+        $actorRank = $this->highestRank();
+
+        if ($actorRank === null) {
+            return false;
+        }
+
+        if (!\method_exists($target, 'roles')) {
+            return false;
+        }
+
+        $targetRank = $this->computeHighestRank($target->roles()->get());
+
+        if ($targetRank === null) {
+            return true;
+        }
+
+        return $actorRank < $targetRank;
+    }
+
+    // ------------------------------------------------------------------
     // Spatie-compatible aliases
     // ------------------------------------------------------------------
 
@@ -335,5 +392,46 @@ trait HasRoles // @phpstan-ignore trait.unused
         $names = $roles->map(static fn (Role $role): string => $role->name)->all();
 
         return \array_values($names);
+    }
+
+    /**
+     * Return the lowest `rank` value across this identity's roles,
+     * or null if none of the assigned roles are ranked.
+     *
+     * Lower rank = more senior (0 is the most senior).
+     *
+     * @return int|null
+     */
+    private function highestRank(): ?int
+    {
+        /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
+        $roles = $this->roles;
+
+        return $this->computeHighestRank($roles);
+    }
+
+    /**
+     * Scan a collection of roles and return the lowest `rank`
+     * value (most senior), or null when no role in the set is
+     * ranked.
+     *
+     * @param  iterable<int, \SineMacula\Laravel\Authorization\Models\Role>  $roles
+     * @return int|null
+     */
+    private function computeHighestRank(iterable $roles): ?int
+    {
+        $best = null;
+
+        foreach ($roles as $role) {
+            if ($role->rank === null) {
+                continue;
+            }
+
+            if ($best === null || $role->rank < $best) {
+                $best = $role->rank;
+            }
+        }
+
+        return $best;
     }
 }

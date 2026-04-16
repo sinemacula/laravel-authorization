@@ -90,29 +90,53 @@ final readonly class Statement
      * Determine whether the statement applies to the supplied action
      * and optional resource.
      *
+     * When an interpolator is provided, resource patterns are
+     * interpolated before fnmatch comparison, allowing `${...}`
+     * tokens in persisted policy documents to resolve at evaluation
+     * time.
+     *
      * @param  string  $action
      * @param  string|null  $resource
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null  $interpolator
+     * @param  object|null  $principal
+     * @param  array<string, mixed>  $context
      * @return bool
      */
-    public function matches(string $action, ?string $resource = null): bool
-    {
+    public function matches(
+        string $action,
+        ?string $resource = null,
+        ?ContextInterpolator $interpolator = null,
+        ?object $principal = null,
+        array $context = [],
+    ): bool {
         if (!$this->matchesAction($action)) {
             return false;
         }
 
-        return $resource === null || $this->matchesResource($resource);
+        return $resource === null || $this->matchesResource($resource, $interpolator, $principal, $context);
     }
 
     /**
      * Evaluate every condition against the supplied context.
      *
+     * When an interpolator is provided, string operands within the
+     * condition map are interpolated before operator evaluation,
+     * allowing `${...}` tokens in persisted policy documents.
+     *
      * @param  array<string, mixed>  $context
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null  $interpolator
+     * @param  object|null  $principal
+     * @param  string|null  $resource
      * @return bool
      */
-    public function evaluateConditions(array $context): bool
-    {
+    public function evaluateConditions(
+        array $context,
+        ?ContextInterpolator $interpolator = null,
+        ?object $principal = null,
+        ?string $resource = null,
+    ): bool {
         foreach ($this->conditions as $key => $expected) {
-            if (!$this->evaluateConditionEntry($key, $expected, $context)) {
+            if (!$this->evaluateConditionEntry($key, $expected, $context, $interpolator, $principal, $resource)) {
                 return false;
             }
         }
@@ -126,15 +150,28 @@ final readonly class Statement
      * @param  int|string  $key
      * @param  mixed  $expected
      * @param  array<string, mixed>  $context
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null  $interpolator
+     * @param  object|null  $principal
+     * @param  string|null  $resource
      * @return bool
      */
-    private function evaluateConditionEntry(int|string $key, mixed $expected, array $context): bool
-    {
+    private function evaluateConditionEntry(
+        int|string $key,
+        mixed $expected,
+        array $context,
+        ?ContextInterpolator $interpolator = null,
+        ?object $principal = null,
+        ?string $resource = null,
+    ): bool {
         if (!\is_string($key) || !\array_key_exists($key, $context)) {
             return false;
         }
 
-        return $this->evaluateCondition($expected, $context[$key]);
+        $interpolated = $interpolator !== null
+            ? self::interpolateOperands($expected, $interpolator, $principal, $resource, $context)
+            : $expected;
+
+        return $this->evaluateCondition($interpolated, $context[$key]);
     }
 
     /**
@@ -271,18 +308,72 @@ final readonly class Statement
     /**
      * Determine whether the resource matches any configured pattern.
      *
+     * When an interpolator is supplied, each resource pattern is
+     * interpolated before the fnmatch comparison.
+     *
      * @param  string  $resource
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null  $interpolator
+     * @param  object|null  $principal
+     * @param  array<string, mixed>  $context
      * @return bool
      */
-    private function matchesResource(string $resource): bool
-    {
+    private function matchesResource(
+        string $resource,
+        ?ContextInterpolator $interpolator = null,
+        ?object $principal = null,
+        array $context = [],
+    ): bool {
         foreach ($this->resources as $pattern) {
-            if (\fnmatch($pattern, $resource, \FNM_NOESCAPE)) {
+            $resolved = $interpolator !== null
+                ? $interpolator->interpolate($pattern, $principal, $resource, $context)
+                : $pattern;
+
+            if (\fnmatch($resolved, $resource, \FNM_NOESCAPE)) {
                 return true;
             }
         }
 
         return false;
+    }
+
+    /**
+     * Recursively interpolate string operands within a condition payload.
+     *
+     * If the payload is a plain string, it is interpolated directly.
+     * If it is an array (operator map), every string value within the
+     * array is interpolated. Non-string values pass through unchanged.
+     *
+     * @param  mixed  $expected
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator  $interpolator
+     * @param  object|null  $principal
+     * @param  string|null  $resource
+     * @param  array<string, mixed>  $context
+     * @return mixed
+     */
+    private static function interpolateOperands(
+        mixed $expected,
+        ContextInterpolator $interpolator,
+        ?object $principal,
+        ?string $resource,
+        array $context,
+    ): mixed {
+        if (\is_string($expected)) {
+            return $interpolator->interpolate($expected, $principal, $resource, $context);
+        }
+
+        if (\is_array($expected)) {
+            $result = [];
+
+            foreach ($expected as $key => $value) {
+                $result[$key] = \is_string($value)
+                    ? $interpolator->interpolate($value, $principal, $resource, $context)
+                    : $value;
+            }
+
+            return $result;
+        }
+
+        return $expected;
     }
 
     /**
@@ -328,6 +419,14 @@ final readonly class Statement
             'before'      => ConditionEvaluator::compareTimes($actual, $operand, '<'),
             'after'       => ConditionEvaluator::compareTimes($actual, $operand, '>'),
             'between'     => ConditionEvaluator::matchesBetween($actual, $operand),
+            'string_like' => \is_string($actual) && \is_string($operand) && \fnmatch($operand, $actual, \FNM_NOESCAPE),
+            'null'        => $actual === null,
+            'not_null'    => $actual !== null,
+            'gt'          => ConditionEvaluator::compareNumeric($actual, $operand, '>'),
+            'gte'         => ConditionEvaluator::compareNumeric($actual, $operand, '>='),
+            'lt'          => ConditionEvaluator::compareNumeric($actual, $operand, '<'),
+            'lte'         => ConditionEvaluator::compareNumeric($actual, $operand, '<='),
+            'bool'        => ConditionEvaluator::matchesBool($actual, $operand),
             default       => ConditionEvaluator::logUnknownOperator($operator),
         };
     }

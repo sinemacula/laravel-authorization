@@ -43,6 +43,7 @@ use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
  * @property string|null $description
  * @property bool $is_system
  * @property string|null $parent_id
+ * @property int|null $rank
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -62,6 +63,7 @@ class Role extends Model
         'description',
         'is_system',
         'parent_id',
+        'rank',
     ];
 
     /**
@@ -71,6 +73,7 @@ class Role extends Model
      */
     protected $casts = [
         'is_system' => 'boolean',
+        'rank'      => 'integer',
     ];
 
     /**
@@ -286,6 +289,73 @@ class Role extends Model
     public function isDescendantOf(self $role): bool
     {
         return $role->isAncestorOf($this);
+    }
+
+    // ------------------------------------------------------------------
+    // Rank helpers
+    // ------------------------------------------------------------------
+
+    /**
+     * Determine whether this role carries a rank value.
+     *
+     * Unranked roles (`rank === null`) are not subject to
+     * rank-based seniority checks.
+     *
+     * @return bool
+     */
+    public function isRanked(): bool
+    {
+        return $this->rank !== null;
+    }
+
+    /**
+     * Determine whether this role outranks the given role.
+     *
+     * A lower numeric rank is more senior (0 = most senior). Both
+     * roles must be ranked; if either is unranked the comparison is
+     * undefined and the method returns false.
+     *
+     * @param  self  $other
+     * @return bool
+     */
+    public function outranks(self $other): bool
+    {
+        if (!$this->isRanked() || !$other->isRanked()) {
+            return false;
+        }
+
+        /** @var int $thisRank */
+        $thisRank = $this->rank;
+
+        /** @var int $otherRank */
+        $otherRank = $other->rank;
+
+        return $thisRank < $otherRank;
+    }
+
+    /**
+     * Determine whether this role outranks or equals the given role.
+     *
+     * Same semantics as `outranks()` but uses `<=` (equal rank
+     * satisfies the check). Both roles must be ranked; if either is
+     * unranked the method returns false.
+     *
+     * @param  self  $other
+     * @return bool
+     */
+    public function outranksOrEquals(self $other): bool
+    {
+        if (!$this->isRanked() || !$other->isRanked()) {
+            return false;
+        }
+
+        /** @var int $thisRank */
+        $thisRank = $this->rank;
+
+        /** @var int $otherRank */
+        $otherRank = $other->rank;
+
+        return $thisRank <= $otherRank;
     }
 
     // ------------------------------------------------------------------

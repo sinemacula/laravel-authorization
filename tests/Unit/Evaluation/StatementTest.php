@@ -9,6 +9,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator;
+use SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 
 /**
@@ -21,6 +22,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
  */
 #[CoversClass(Statement::class)]
 #[CoversClass(ConditionEvaluator::class)]
+#[CoversClass(ContextInterpolator::class)]
 final class StatementTest extends TestCase
 {
     /**
@@ -336,6 +338,46 @@ final class StatementTest extends TestCase
             'time-invalid'        => [['at' => ['before' => 'not-a-date']], ['at' => '2026-04-14'], false],
             'time-int'            => [['at' => ['before' => 2000000000]], ['at' => 1000000000], true],
             'time-empty-string'   => [['at' => ['before' => '2026-04-15']], ['at' => ''], false],
+
+            // #38 — string_like operator
+            'string_like-match'      => [['name' => ['string_like' => 'admin*']], ['name' => 'admin-user'], true],
+            'string_like-miss'       => [['name' => ['string_like' => 'admin*']], ['name' => 'guest-user'], false],
+            'string_like-question'   => [['name' => ['string_like' => 'user?']], ['name' => 'user1'], true],
+            'string_like-non-string' => [['name' => ['string_like' => 'admin*']], ['name' => 123], false],
+
+            // #38 — null / not_null operators
+            'null-true'              => [['field' => ['null' => true]], ['field' => null], true],
+            'null-false'             => [['field' => ['null' => true]], ['field' => 'value'], false],
+            'null-zero-is-not-null'  => [['field' => ['null' => true]], ['field' => 0], false],
+            'null-empty-is-not-null' => [['field' => ['null' => true]], ['field' => ''], false],
+            'not_null-true'          => [['field' => ['not_null' => true]], ['field' => 'value'], true],
+            'not_null-false'         => [['field' => ['not_null' => true]], ['field' => null], false],
+
+            // #38 — numeric comparison operators
+            'gt-true'                => [['age' => ['gt' => 18]], ['age' => 21], true],
+            'gt-false-equal'         => [['age' => ['gt' => 18]], ['age' => 18], false],
+            'gt-false-less'          => [['age' => ['gt' => 18]], ['age' => 16], false],
+            'gte-true-equal'         => [['age' => ['gte' => 18]], ['age' => 18], true],
+            'gte-true-greater'       => [['age' => ['gte' => 18]], ['age' => 19], true],
+            'gte-false'              => [['age' => ['gte' => 18]], ['age' => 17], false],
+            'lt-true'                => [['age' => ['lt' => 18]], ['age' => 16], true],
+            'lt-false-equal'         => [['age' => ['lt' => 18]], ['age' => 18], false],
+            'lt-false-greater'       => [['age' => ['lt' => 18]], ['age' => 21], false],
+            'lte-true-equal'         => [['age' => ['lte' => 18]], ['age' => 18], true],
+            'lte-true-less'          => [['age' => ['lte' => 18]], ['age' => 17], true],
+            'lte-false'              => [['age' => ['lte' => 18]], ['age' => 19], false],
+            'gt-string-numeric'      => [['age' => ['gt' => '18']], ['age' => '21'], true],
+            'gt-non-numeric-actual'  => [['age' => ['gt' => 18]], ['age' => 'abc'], false],
+            'gt-non-numeric-operand' => [['age' => ['gt' => 'abc']], ['age' => 21], false],
+            'gt-float'               => [['val' => ['gt' => 1.5]], ['val' => 2.5], true],
+
+            // #38 — bool operator
+            'bool-true-string'       => [['flag' => ['bool' => 'true']], ['flag' => true], true],
+            'bool-true-int'          => [['flag' => ['bool' => 1]], ['flag' => 'true'], true],
+            'bool-true-string-one'   => [['flag' => ['bool' => '1']], ['flag' => true], true],
+            'bool-false-mismatch'    => [['flag' => ['bool' => 'true']], ['flag' => false], false],
+            'bool-false-both'        => [['flag' => ['bool' => false]], ['flag' => 0], true],
+            'bool-false-zero-string' => [['flag' => ['bool' => '0']], ['flag' => false], true],
         ];
     }
 
@@ -373,5 +415,152 @@ final class StatementTest extends TestCase
         ]);
 
         self::assertFalse($statement->matches('posts:create', 'arn:users:1'));
+    }
+
+    // ------------------------------------------------------------------
+    // #37 — Context variable interpolation wired into Statement
+    // ------------------------------------------------------------------
+
+    /**
+     * Interpolated resource pattern matches when the principal id is
+     * substituted into the resource glob.
+     *
+     * @return void
+     */
+    public function testInterpolatedResourcePatternMatchesPrincipal(): void
+    {
+        $statement = Statement::fromArray([
+            'effect'    => 'allow',
+            'actions'   => ['posts:read'],
+            'resources' => ['posts:${principal.id}:*'],
+        ]);
+
+        $principal = new class {
+            /**
+             * @param  string  $key
+             * @return int|null
+             */
+            public function getAttribute(string $key): ?int
+            {
+                return $key === 'id' ? 42 : null;
+            }
+        };
+
+        $interpolator = new ContextInterpolator;
+
+        self::assertTrue($statement->matches('posts:read', 'posts:42:draft', $interpolator, $principal));
+        self::assertFalse($statement->matches('posts:read', 'posts:99:draft', $interpolator, $principal));
+    }
+
+    /**
+     * Interpolated resource pattern using context resolves correctly.
+     *
+     * @return void
+     */
+    public function testInterpolatedResourcePatternFromContext(): void
+    {
+        $statement = Statement::fromArray([
+            'effect'    => 'allow',
+            'actions'   => ['posts:*'],
+            'resources' => ['tenant:${context.tenant_id}:*'],
+        ]);
+
+        $interpolator = new ContextInterpolator;
+
+        self::assertTrue($statement->matches(
+            'posts:read',
+            'tenant:org-5:posts',
+            $interpolator,
+            null,
+            ['tenant_id' => 'org-5'],
+        ));
+
+        self::assertFalse($statement->matches(
+            'posts:read',
+            'tenant:org-9:posts',
+            $interpolator,
+            null,
+            ['tenant_id' => 'org-5'],
+        ));
+    }
+
+    /**
+     * Interpolated condition operand resolves principal id before
+     * operator evaluation.
+     *
+     * @return void
+     */
+    public function testInterpolatedConditionOperandResolvesPrincipal(): void
+    {
+        $statement = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['posts:update'],
+            'conditions' => ['owner_id' => ['eq' => '${principal.id}']],
+        ]);
+
+        $principal = new class {
+            /**
+             * @param  string  $key
+             * @return string|null
+             */
+            public function getAttribute(string $key): ?string
+            {
+                return $key === 'id' ? '42' : null;
+            }
+        };
+
+        $interpolator = new ContextInterpolator;
+
+        self::assertTrue($statement->evaluateConditions(
+            ['owner_id' => '42'],
+            $interpolator,
+            $principal,
+        ));
+
+        self::assertFalse($statement->evaluateConditions(
+            ['owner_id' => '99'],
+            $interpolator,
+            $principal,
+        ));
+    }
+
+    /**
+     * Without an interpolator, `${...}` tokens are treated as literals
+     * (backwards compatibility).
+     *
+     * @return void
+     */
+    public function testWithoutInterpolatorTokensAreLiteral(): void
+    {
+        $statement = Statement::fromArray([
+            'effect'    => 'allow',
+            'actions'   => ['posts:read'],
+            'resources' => ['posts:${principal.id}'],
+        ]);
+
+        // The literal string `posts:${principal.id}` won't match `posts:42`
+        self::assertFalse($statement->matches('posts:read', 'posts:42'));
+
+        // But it will match its own literal form
+        self::assertTrue($statement->matches('posts:read', 'posts:${principal.id}'));
+    }
+
+    /**
+     * Interpolation with resource.type in a resource pattern.
+     *
+     * @return void
+     */
+    public function testInterpolatedResourceType(): void
+    {
+        $statement = Statement::fromArray([
+            'effect'    => 'allow',
+            'actions'   => ['read'],
+            'resources' => ['${resource.type}:*'],
+        ]);
+
+        $interpolator = new ContextInterpolator;
+
+        self::assertTrue($statement->matches('read', 'posts:42', $interpolator));
+        self::assertTrue($statement->matches('read', 'posts:99', $interpolator));
     }
 }

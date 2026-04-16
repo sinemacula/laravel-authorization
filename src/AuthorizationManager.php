@@ -305,7 +305,7 @@ class AuthorizationManager
         }
 
         $policies = $this->gatherPolicies($principal);
-        $result   = $this->evaluator->evaluate($policies, $action, $resource, $context);
+        $result   = $this->evaluator->evaluate($policies, $action, $resource, $context, $principal);
         $decisive = $result->reason === DecisionReason::EXPLICIT_DENY
             || $result->reason      === DecisionReason::EXPLICIT_ALLOW;
 
