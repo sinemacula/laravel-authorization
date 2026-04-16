@@ -40,6 +40,8 @@ use Tests\TestCase;
 #[CoversTrait(HasPolicies::class)]
 #[CoversTrait(ResolvesPivotExpiry::class)]
 #[CoversClass(ResolutionCache::class)]
+#[CoversClass(\SineMacula\Laravel\Authorization\Evaluation\Statement::class)]
+#[CoversClass(\SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::class)]
 final class MutationKillersTest extends TestCase
 {
     /**

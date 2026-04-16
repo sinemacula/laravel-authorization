@@ -23,6 +23,8 @@ use Tests\TestCase;
  */
 #[CoversClass(ConfigValidator::class)]
 #[CoversClass(InvalidAuthorizationConfigException::class)]
+#[CoversClass(\SineMacula\Laravel\Authorization\Exceptions\AuthorizationMiddlewareMisconfiguredException::class)]
+#[CoversClass(\SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException::class)]
 final class ExceptionMessageKillersTest extends TestCase
 {
     /**
