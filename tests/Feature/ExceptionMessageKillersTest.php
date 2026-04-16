@@ -23,7 +23,7 @@ use Tests\TestCase;
  */
 #[CoversClass(ConfigValidator::class)]
 #[CoversClass(InvalidAuthorizationConfigException::class)]
-#[CoversClass(\SineMacula\Laravel\Authorization\Exceptions\AuthorizationMiddlewareMisconfiguredException::class)]
+#[CoversClass(\SineMacula\Laravel\Authorization\Http\Middleware\AuthorizationMiddlewareMisconfiguredException::class)]
 #[CoversClass(\SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException::class)]
 final class ExceptionMessageKillersTest extends TestCase
 {
@@ -51,7 +51,7 @@ final class ExceptionMessageKillersTest extends TestCase
     /**
      * A non-existent `permission_enums` entry yields a message
      * that quotes the class name in single quotes and says
-     * "does not exist."
+     * "does not exist.".
      *
      * @return void
      */
@@ -59,13 +59,13 @@ final class ExceptionMessageKillersTest extends TestCase
     {
         /** @var ConfigRepository $config */
         $config = $this->app->make(ConfigRepository::class);
-        $config->set('authorization.permission_enums', ['App\\NoSuch\\ClassX']);
+        $config->set('authorization.permission_enums', ['App\NoSuch\ClassX']);
 
         try {
             ConfigValidator::validate((array) $config->get('authorization'), $this->app);
             self::fail('Expected InvalidAuthorizationConfigException.');
         } catch (InvalidAuthorizationConfigException $exception) {
-            self::assertStringContainsString("class 'App\\NoSuch\\ClassX' does not exist.", $exception->getMessage());
+            self::assertStringContainsString('class \'App\NoSuch\ClassX\' does not exist.', $exception->getMessage());
         }
     }
 
@@ -85,7 +85,7 @@ final class ExceptionMessageKillersTest extends TestCase
             ConfigValidator::validate((array) $config->get('authorization'), $this->app);
             self::fail('Expected InvalidAuthorizationConfigException.');
         } catch (InvalidAuthorizationConfigException $exception) {
-            self::assertStringContainsString("class 'stdClass' does not implement", $exception->getMessage());
+            self::assertStringContainsString('class \'stdClass\' does not implement', $exception->getMessage());
             self::assertStringContainsString(\SineMacula\Laravel\Authorization\Contracts\PermissionEnum::class, $exception->getMessage());
             self::assertStringEndsWith('.', $exception->getMessage());
         }
@@ -142,13 +142,13 @@ final class ExceptionMessageKillersTest extends TestCase
     {
         /** @var ConfigRepository $config */
         $config = $this->app->make(ConfigRepository::class);
-        $config->set('authorization.permission_providers', ['App\\NoSuch\\ProviderX']);
+        $config->set('authorization.permission_providers', ['App\NoSuch\ProviderX']);
 
         try {
             ConfigValidator::validate((array) $config->get('authorization'), $this->app);
             self::fail('Expected InvalidAuthorizationConfigException.');
         } catch (InvalidAuthorizationConfigException $exception) {
-            self::assertStringContainsString("class 'App\\NoSuch\\ProviderX' does not exist.", $exception->getMessage());
+            self::assertStringContainsString('class \'App\NoSuch\ProviderX\' does not exist.', $exception->getMessage());
         }
     }
 
@@ -182,8 +182,8 @@ final class ExceptionMessageKillersTest extends TestCase
      */
     public function testMisconfiguredMiddlewareExceptionShortensContractFqcn(): void
     {
-        $exception = new \SineMacula\Laravel\Authorization\Exceptions\AuthorizationMiddlewareMisconfiguredException(
-            contract: 'SineMacula\\Laravel\\Authorization\\Contracts\\SupportsRoles',
+        $exception = new \SineMacula\Laravel\Authorization\Http\Middleware\AuthorizationMiddlewareMisconfiguredException(
+            contract: 'SineMacula\Laravel\Authorization\Contracts\SupportsRoles',
             middleware: 'auth.role',
         );
 
@@ -203,7 +203,7 @@ final class ExceptionMessageKillersTest extends TestCase
      */
     public function testMisconfiguredMiddlewareExceptionHandlesUnqualifiedContract(): void
     {
-        $exception = new \SineMacula\Laravel\Authorization\Exceptions\AuthorizationMiddlewareMisconfiguredException(
+        $exception = new \SineMacula\Laravel\Authorization\Http\Middleware\AuthorizationMiddlewareMisconfiguredException(
             contract: 'Bareword',
             middleware: 'auth.permission',
         );
@@ -229,8 +229,8 @@ final class ExceptionMessageKillersTest extends TestCase
         );
 
         self::assertSame(
-            "Guard mismatch: role 'editor' (guard 'web') cannot carry"
-            . " permission 'posts:create' (guard 'api')."
+            'Guard mismatch: role \'editor\' (guard \'web\') cannot carry'
+            . ' permission \'posts:create\' (guard \'api\').'
             . ' Scope one side to null for a guard-agnostic attachment, or match the guards.',
             $exception->getMessage(),
         );

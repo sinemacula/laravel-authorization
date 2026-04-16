@@ -4,18 +4,16 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Models;
 
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
+use Illuminate\Database\Eloquent\Attributes\ScopedBy;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
-use Illuminate\Support\Facades\Event;
-use SineMacula\Laravel\Authorization\Events\PermissionCreated;
-use SineMacula\Laravel\Authorization\Events\PermissionDeleted;
-use SineMacula\Laravel\Authorization\Events\PermissionUpdated;
-use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPermissionProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
+use SineMacula\Laravel\Authorization\Observers\PermissionObserver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use SineMacula\Laravel\Authorization\Traits\HasSystemProtection;
@@ -46,6 +44,8 @@ use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
+#[ObservedBy(PermissionObserver::class)]
+#[ScopedBy(TenantScope::class)]
 class Permission extends Model
 {
     use HasSystemProtection, HasUuids, ValidatesAuthorizationName;
@@ -73,16 +73,6 @@ class Permission extends Model
     protected $casts = [
         'is_system' => 'boolean',
     ];
-
-    /**
-     * Pre-save attribute snapshot captured on `updating` and
-     * consumed by the `updated` listener so `PermissionUpdated`
-     * carries a complete before/after diff. Reset after each
-     * dispatch so a follow-up save observes a clean slate.
-     *
-     * @var array<string, mixed>
-     */
-    private array $beforeChangeSnapshot = [];
 
     /**
      * Create a new Eloquent model instance.
@@ -229,65 +219,13 @@ class Permission extends Model
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
         $class = config('authorization.models.permission', static::class);
 
-        $model = GuardScopedLookup::queryForGuard($class, $name, $guard)->first();
+        $model = GuardScopedLookup::findForGuard($class, $name, $guard);
 
-        if ($model === null) {
+        if (!$model instanceof self) {
             throw new UnknownPermissionException($name);
         }
 
         return $model;
-    }
-
-    /**
-     * Register the row-lifecycle listeners that translate
-     * Eloquent's native `created` / `updated` / `deleted` events
-     * into the package's typed CRUD events. System-protection
-     * hooks (`deleting`, `updating` guard, `saved` bypass reset)
-     * are registered by `HasSystemProtection::bootHasSystemProtection()`.
-     *
-     * @return void
-     */
-    protected static function booted(): void
-    {
-        static::addGlobalScope(new TenantScope);
-
-        static::saving(static function (self $permission): void {
-            // Enforce the both-or-neither tenant ownership invariant
-            // so a half-set row cannot be persisted — it would be
-            // invisible to the `TenantScope` global filter and to
-            // `scopeForTenant` / `scopeGlobalOnly`, silently
-            // orphaning the data.
-            if (($permission->tenant_type === null) !== ($permission->tenant_id === null)) {
-                throw new InvalidTenantColumnsException(modelKind: 'permission', missingColumn: $permission->tenant_type === null ? 'tenant_type' : 'tenant_id');
-            }
-        });
-
-        static::updating(static function (self $permission): void {
-            $snapshot = [];
-
-            foreach (\array_keys($permission->getDirty()) as $key) {
-                $snapshot[$key] = $permission->getOriginal($key);
-            }
-
-            $permission->beforeChangeSnapshot = $snapshot;
-        });
-
-        static::created(static function (self $permission): void {
-            Event::dispatch(new PermissionCreated($permission));
-        });
-
-        static::updated(static function (self $permission): void {
-            Event::dispatch(new PermissionUpdated($permission, [
-                'before' => $permission->beforeChangeSnapshot,
-                'after'  => $permission->getChanges(),
-            ]));
-
-            $permission->beforeChangeSnapshot = [];
-        });
-
-        static::deleted(static function (self $permission): void {
-            Event::dispatch(new PermissionDeleted($permission));
-        });
     }
 
     /**

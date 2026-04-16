@@ -6,7 +6,7 @@ namespace Tests\Unit\Enums;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
-use SineMacula\Laravel\Authorization\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 
 /**
  * Unit tests for the decision-reason enum.

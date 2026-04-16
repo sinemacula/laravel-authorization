@@ -35,14 +35,14 @@ use Tests\TestCase;
  *
  * @internal
  */
-#[CoversTrait(HasRoles::class)]
-#[CoversTrait(HasPermissions::class)]
-#[CoversTrait(HasPolicies::class)]
-#[CoversTrait(ResolvesPivotExpiry::class)]
 #[CoversClass(ResolutionCache::class)]
 #[CoversClass(\SineMacula\Laravel\Authorization\Evaluation\Statement::class)]
 #[CoversClass(\SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::class)]
 #[CoversClass(\SineMacula\Laravel\Authorization\AuthorizationManager::class)]
+#[CoversTrait(HasRoles::class)]
+#[CoversTrait(HasPermissions::class)]
+#[CoversTrait(HasPolicies::class)]
+#[CoversTrait(ResolvesPivotExpiry::class)]
 final class MutationKillersTest extends TestCase
 {
     /**
@@ -57,7 +57,9 @@ final class MutationKillersTest extends TestCase
         $probe = new class {
             use ResolvesPivotExpiry;
 
-            /** @param  iterable<int, Model>  $models */
+            /**
+             * @param  iterable<int, Model>  $models
+             */
             public function collect(iterable $models): array
             {
                 return self::authorizationCollectModelIds($models);
@@ -118,7 +120,9 @@ final class MutationKillersTest extends TestCase
         $probe = new class {
             use ResolvesPivotExpiry;
 
-            /** @param  iterable<int, Model>  $models */
+            /**
+             * @param  iterable<int, Model>  $models
+             */
             public function collect(iterable $models): array
             {
                 return self::authorizationCollectModelIds($models);
@@ -154,7 +158,9 @@ final class MutationKillersTest extends TestCase
         $probe = new class {
             use ResolvesPivotExpiry;
 
-            /** @param  iterable<int, Model>  $related */
+            /**
+             * @param  iterable<int, Model>  $related
+             */
             public function nearest(iterable $related): ?int
             {
                 return self::authorizationNearestPivotExpirySeconds($related);
@@ -164,9 +170,9 @@ final class MutationKillersTest extends TestCase
         $now = \Illuminate\Support\Carbon::now();
 
         $mk = static function (int $seconds) use ($now): Model {
-            $model                   = new class extends Model {};
-            $pivot                   = new \stdClass;
-            $pivot->expires_at       = (clone $now)->addSeconds($seconds)->toDateTimeString();
+            $model             = new class extends Model {};
+            $pivot             = new \stdClass;
+            $pivot->expires_at = (clone $now)->addSeconds($seconds)->toDateTimeString();
             $model->setRelation('pivot', $pivot);
 
             return $model;
@@ -195,7 +201,9 @@ final class MutationKillersTest extends TestCase
         $probe = new class {
             use ResolvesPivotExpiry;
 
-            /** @param  iterable<int, Model>  $related */
+            /**
+             * @param  iterable<int, Model>  $related
+             */
             public function nearest(iterable $related): ?int
             {
                 return self::authorizationNearestPivotExpirySeconds($related);
@@ -295,9 +303,9 @@ final class MutationKillersTest extends TestCase
         };
 
         $mk = static function (string $expiresAt): Model {
-            $model                   = new class extends Model {};
-            $pivot                   = new \stdClass;
-            $pivot->expires_at       = $expiresAt;
+            $model             = new class extends Model {};
+            $pivot             = new \stdClass;
+            $pivot->expires_at = $expiresAt;
             $model->setRelation('pivot', $pivot);
 
             return $model;
@@ -459,7 +467,7 @@ final class MutationKillersTest extends TestCase
     public function testAssignRoleIsIdempotentWhenExpiryUnchanged(): void
     {
         \Illuminate\Support\Facades\Event::fake(
-            [\SineMacula\Laravel\Authorization\Events\IdentityRoleExpiryChanged::class],
+            [\SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleExpiryChanged::class],
         );
 
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'idem', 'guard_name' => 'web']);
@@ -470,7 +478,7 @@ final class MutationKillersTest extends TestCase
         $user->assignRole($role, $expires);
 
         \Illuminate\Support\Facades\Event::assertNotDispatched(
-            \SineMacula\Laravel\Authorization\Events\IdentityRoleExpiryChanged::class,
+            \SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleExpiryChanged::class,
         );
     }
 
@@ -484,7 +492,7 @@ final class MutationKillersTest extends TestCase
     public function testAssignRoleFiresExpiryChangedWhenWindowMoves(): void
     {
         \Illuminate\Support\Facades\Event::fake(
-            [\SineMacula\Laravel\Authorization\Events\IdentityRoleExpiryChanged::class],
+            [\SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleExpiryChanged::class],
         );
 
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'moving', 'guard_name' => 'web']);
@@ -494,7 +502,7 @@ final class MutationKillersTest extends TestCase
         $user->assignRole($role, new \DateTimeImmutable('+2 hours'));
 
         \Illuminate\Support\Facades\Event::assertDispatchedTimes(
-            \SineMacula\Laravel\Authorization\Events\IdentityRoleExpiryChanged::class,
+            \SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleExpiryChanged::class,
             1,
         );
     }
@@ -508,7 +516,7 @@ final class MutationKillersTest extends TestCase
     public function testGivePermissionFiresExpiryChangedWhenWindowMoves(): void
     {
         \Illuminate\Support\Facades\Event::fake(
-            [\SineMacula\Laravel\Authorization\Events\IdentityPermissionExpiryChanged::class],
+            [\SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionExpiryChanged::class],
         );
 
         $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'p:m', 'guard_name' => 'web']);
@@ -518,7 +526,7 @@ final class MutationKillersTest extends TestCase
         $user->givePermission($permission, new \DateTimeImmutable('+2 hours'));
 
         \Illuminate\Support\Facades\Event::assertDispatchedTimes(
-            \SineMacula\Laravel\Authorization\Events\IdentityPermissionExpiryChanged::class,
+            \SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionExpiryChanged::class,
             1,
         );
     }
@@ -864,7 +872,7 @@ final class MutationKillersTest extends TestCase
             ]);
             self::fail('Expected InvalidArgumentException.');
         } catch (\InvalidArgumentException $exception) {
-            self::assertSame("Invalid policy effect: 'maybe'", $exception->getMessage());
+            self::assertSame('Invalid policy effect: \'maybe\'', $exception->getMessage());
         }
     }
 
@@ -1012,27 +1020,6 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * Run a callable and assert it throws the expected exception
-     * class with the expected message. Shared helper for the
-     * `resolveEffect` / `resolveActions` branches.
-     *
-     * @param  callable(): mixed  $callable
-     * @param  class-string<\Throwable>  $class
-     * @param  string  $message
-     * @return void
-     */
-    private function expectExceptionObjectShape(callable $callable, string $class, string $message): void
-    {
-        try {
-            $callable();
-            self::fail("Expected exception {$class}.");
-        } catch (\Throwable $exception) {
-            self::assertInstanceOf($class, $exception);
-            self::assertStringContainsString($message, $exception->getMessage());
-        }
-    }
-
-    /**
      * `authorize()` populates the `LastDecisionStore` on both the
      * success and deny paths — pins the MethodCallRemoval mutant
      * on `$this->lastDecisionStore->put($result)` inside the
@@ -1042,7 +1029,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testAuthorizeWritesLastDecisionOnBothOutcomes(): void
     {
-        $this->app->make(\SineMacula\Laravel\Authorization\LastDecisionStore::class)->forget();
+        $this->app->make(\SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore::class)->forget();
 
         // Deny path — authorize() throws, lastDecision captures the result.
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'la', 'guard_name' => 'web']);
@@ -1085,7 +1072,7 @@ final class MutationKillersTest extends TestCase
             name: 'clone-probe',
             statements: [
                 new \SineMacula\Laravel\Authorization\Evaluation\Statement(
-                    effect: \SineMacula\Laravel\Authorization\Enums\PolicyEffect::ALLOW,
+                    effect: \SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect::ALLOW,
                     actions: ['probe:clone'],
                 ),
             ],
@@ -1112,7 +1099,7 @@ final class MutationKillersTest extends TestCase
     public function testAttachPolicyFiresExpiryChangedWhenWindowMoves(): void
     {
         \Illuminate\Support\Facades\Event::fake(
-            [\SineMacula\Laravel\Authorization\Events\IdentityPolicyExpiryChanged::class],
+            [\SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyExpiryChanged::class],
         );
 
         $policy = \SineMacula\Laravel\Authorization\Models\Policy::create([
@@ -1126,8 +1113,29 @@ final class MutationKillersTest extends TestCase
         $user->attachPolicy($policy, new \DateTimeImmutable('+2 hours'));
 
         \Illuminate\Support\Facades\Event::assertDispatchedTimes(
-            \SineMacula\Laravel\Authorization\Events\IdentityPolicyExpiryChanged::class,
+            \SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyExpiryChanged::class,
             1,
         );
+    }
+
+    /**
+     * Run a callable and assert it throws the expected exception
+     * class with the expected message. Shared helper for the
+     * `resolveEffect` / `resolveActions` branches.
+     *
+     * @param  callable(): mixed  $callable
+     * @param  class-string<\Throwable>  $class
+     * @param  string  $message
+     * @return void
+     */
+    private function expectExceptionObjectShape(callable $callable, string $class, string $message): void
+    {
+        try {
+            $callable();
+            self::fail("Expected exception {$class}.");
+        } catch (\Throwable $exception) {
+            self::assertInstanceOf($class, $exception);
+            self::assertStringContainsString($message, $exception->getMessage());
+        }
     }
 }

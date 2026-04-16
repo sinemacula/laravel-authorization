@@ -19,6 +19,8 @@ use Illuminate\Support\Facades\DB;
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
+ *
+ * @phpstan-require-extends \Illuminate\Database\Eloquent\Model
  */
 trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
 {
@@ -94,6 +96,16 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      */
     private static function authorizationSecondsUntilPivotExpiry(\Illuminate\Database\Eloquent\Model $model, int $nowTimestamp): ?int
     {
+        // Pivots on relation-bound models arrive as either a concrete
+        // `Pivot` instance or, in mutation-kill fixtures, a plain
+        // `stdClass` with a scalar `expires_at`. The tests in
+        // `MutationKillersTest` intentionally pass non-Model pivots
+        // to exercise the scalar-expires_at path, so the access is
+        // kept as direct property read with a null-coalesce rather
+        // than `getAttribute()` (which requires an Eloquent model).
+        // PHPStan cannot see the dynamically-assigned `pivot`
+        // relation attribute on `Model` and flags it as missing.
+        /** @phpstan-ignore-next-line property.notFound */
         $pivot = $model->pivot ?? null;
 
         if ($pivot === null) {
@@ -124,19 +136,11 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      */
     private static function authorizationCoerceExpiresAt(mixed $raw): ?Carbon
     {
-        if ($raw === null) {
-            return null;
-        }
-
-        if ($raw instanceof \DateTimeInterface) {
-            return Carbon::instance(Carbon::parse($raw));
-        }
-
-        if (\is_string($raw) && $raw !== '') {
-            return Carbon::parse($raw);
-        }
-
-        return null;
+        return match (true) {
+            $raw instanceof \DateTimeInterface => Carbon::instance(Carbon::parse($raw)),
+            \is_string($raw) && $raw !== ''    => Carbon::parse($raw),
+            default                            => null,
+        };
     }
 
     /**
@@ -180,16 +184,17 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      * expiry-change detection machinery lives in one place (see
      * #94).
      *
+     * @param  \Illuminate\Database\Eloquent\Model  $identity
      * @param  string  $table
      * @param  array{authorizable_type: string, authorizable_id: string, target: string, expires_at: string}  $columns
      * @param  string  $targetId
      * @return array{exists: bool, expires_at: \DateTimeInterface|null}
      */
-    private function authorizationReadGrantPivot(string $table, array $columns, string $targetId): array
+    private static function authorizationReadGrantPivot(\Illuminate\Database\Eloquent\Model $identity, string $table, array $columns, string $targetId): array
     {
         $row = DB::table($table)
-            ->where($columns['authorizable_type'], $this->getMorphClass())
-            ->where($columns['authorizable_id'], (string) $this->getKey())
+            ->where($columns['authorizable_type'], $identity->getMorphClass())
+            ->where($columns['authorizable_id'], (string) $identity->getKey())
             ->where($columns['target'], $targetId)
             ->first();
 
@@ -285,5 +290,30 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
         }
 
         return $left->getTimestamp() === $right->getTimestamp();
+    }
+
+    /**
+     * Resolve the optional `getAuthorizationGuard()` hook on the
+     * identity model. The hook is duck-typed — consumers opt in by
+     * declaring the method on their model, so the lookup is routed
+     * through reflection to keep PHPStan from narrowing the call on
+     * the specific using class (every concrete analysed class either
+     * always or never has the method, which would make a direct
+     * `method_exists` guard read as a constant condition).
+     *
+     * @param  object  $identity
+     * @return string|null
+     */
+    private static function authorizationResolveGuard(object $identity): ?string
+    {
+        $reflection = new \ReflectionObject($identity);
+
+        if (!$reflection->hasMethod('getAuthorizationGuard')) {
+            return null;
+        }
+
+        $value = $reflection->getMethod('getAuthorizationGuard')->invoke($identity);
+
+        return \is_string($value) ? $value : null;
     }
 }

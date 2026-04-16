@@ -7,6 +7,9 @@ namespace Tests\Feature;
 use Illuminate\Support\ServiceProvider;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
+use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
+use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
+use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use Tests\TestCase;
 
 /**
@@ -28,6 +31,9 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversClass(AuthorizationServiceProvider::class)]
+#[CoversClass(GateRegistrar::class)]
+#[CoversClass(BladeDirectiveRegistrar::class)]
+#[CoversClass(EventListenerRegistrar::class)]
 final class PublishingTagsTest extends TestCase
 {
     /**

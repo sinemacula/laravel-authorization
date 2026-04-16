@@ -9,6 +9,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPolicyProtectedException;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
 use SineMacula\Laravel\Authorization\Traits\HasSystemProtection;
 use Tests\TestCase;
 
@@ -27,6 +28,7 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversClass(Policy::class)]
+#[CoversClass(PolicyObserver::class)]
 #[CoversClass(SystemPolicyProtectedException::class)]
 #[CoversTrait(HasSystemProtection::class)]
 final class SystemPolicyProtectionTest extends TestCase

@@ -4,15 +4,13 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Models;
 
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Event;
+use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
-use SineMacula\Laravel\Authorization\Events\PolicyCreated;
-use SineMacula\Laravel\Authorization\Events\PolicyDeleted;
-use SineMacula\Laravel\Authorization\Events\PolicyUpdated;
-use SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPolicyProtectedException;
+use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
 use SineMacula\Laravel\Authorization\Traits\HasSystemProtection;
 
 /**
@@ -37,6 +35,7 @@ use SineMacula\Laravel\Authorization\Traits\HasSystemProtection;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
+#[ObservedBy(PolicyObserver::class)]
 class Policy extends Model
 {
     use HasSystemProtection, HasUuids;
@@ -67,16 +66,6 @@ class Policy extends Model
     ];
 
     /**
-     * Pre-save attribute snapshot captured on `updating` and
-     * consumed by the `updated` listener so `PolicyUpdated`
-     * carries a complete before/after diff. Reset after each
-     * dispatch so a follow-up save observes a clean slate.
-     *
-     * @var array<string, mixed>
-     */
-    private array $beforeChangeSnapshot = [];
-
-    /**
      * Create a new Eloquent model instance.
      *
      * @param  array<string, mixed>  $attributes
@@ -97,7 +86,7 @@ class Policy extends Model
      * @param  mixed  $value
      * @return void
      *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyDocumentException
+     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
      */
     public function setDocumentAttribute(mixed $value): void
     {
@@ -127,7 +116,7 @@ class Policy extends Model
      *
      * @return \SineMacula\Laravel\Authorization\Evaluation\Policy
      *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyDocumentException
+     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
      */
     public function toEvaluationPolicy(): EvaluationPolicy
     {
@@ -139,45 +128,6 @@ class Policy extends Model
         } catch (\Throwable $exception) {
             throw new InvalidPolicyDocumentException(policyName: $this->name, reason: $exception->getMessage(), previous: $exception);
         }
-    }
-
-    /**
-     * Register the row-lifecycle listeners that translate
-     * Eloquent's native `created` / `updated` / `deleted` events
-     * into the package's typed CRUD events. System-protection
-     * hooks (`deleting`, `updating` guard, `saved` bypass reset)
-     * are registered by `HasSystemProtection::bootHasSystemProtection()`.
-     *
-     * @return void
-     */
-    protected static function booted(): void
-    {
-        static::updating(static function (self $policy): void {
-            $snapshot = [];
-
-            foreach (\array_keys($policy->getDirty()) as $key) {
-                $snapshot[$key] = $policy->getOriginal($key);
-            }
-
-            $policy->beforeChangeSnapshot = $snapshot;
-        });
-
-        static::created(static function (self $policy): void {
-            Event::dispatch(new PolicyCreated($policy));
-        });
-
-        static::updated(static function (self $policy): void {
-            Event::dispatch(new PolicyUpdated($policy, [
-                'before' => $policy->beforeChangeSnapshot,
-                'after'  => $policy->getChanges(),
-            ]));
-
-            $policy->beforeChangeSnapshot = [];
-        });
-
-        static::deleted(static function (self $policy): void {
-            Event::dispatch(new PolicyDeleted($policy));
-        });
     }
 
     /**

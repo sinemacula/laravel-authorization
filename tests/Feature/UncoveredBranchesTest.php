@@ -32,12 +32,12 @@ use Tests\TestCase;
  *
  * @internal
  */
+#[CoversClass(ResolutionCache::class)]
+#[CoversClass(BladeHelpers::class)]
 #[CoversTrait(HasRoles::class)]
 #[CoversTrait(HasPermissions::class)]
 #[CoversTrait(HasPolicies::class)]
 #[CoversTrait(ResolvesPivotExpiry::class)]
-#[CoversClass(ResolutionCache::class)]
-#[CoversClass(BladeHelpers::class)]
 final class UncoveredBranchesTest extends TestCase
 {
     /**
@@ -250,14 +250,16 @@ final class UncoveredBranchesTest extends TestCase
                 return false;
             }
 
-            /** @return array<int, string> */
+            /**
+             * @return array<int, string>
+             */
             public function getRoles(): array
             {
                 return [];
             }
         };
 
-        self::assertFalse($user->fresh()?->canActOn($target));
+        static::assertFalse($user->fresh()?->canActOn($target));
     }
 
     /**
@@ -285,7 +287,7 @@ final class UncoveredBranchesTest extends TestCase
         // Silence static analyser by touching $roleId after the
         // throw — the assertion itself doesn't run but keeps IDEs
         // from flagging the unused local.
-        self::assertNotSame('', $roleId);
+        static::assertNotSame('', $roleId);
     }
 
     /**
@@ -338,14 +340,14 @@ final class UncoveredBranchesTest extends TestCase
         // in `rememberStringList` drops the non-string items and
         // returns only the strings.
         $key = \array_key_first($driver->storage);
-        self::assertIsString($key);
+        static::assertIsString($key);
         $driver->storage[$key] = ['valid:perm', 42, null, 'another:perm'];
 
         $fresh = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
 
         $result = $fresh->rememberPermissions($principal, static fn (): array => \PHPUnit\Framework\Assert::fail('Resolver should not be called on a store hit.'));
 
-        self::assertSame(['valid:perm', 'another:perm'], $result);
+        static::assertSame(['valid:perm', 'another:perm'], $result);
     }
 
     /**
@@ -375,7 +377,7 @@ final class UncoveredBranchesTest extends TestCase
         // is raised and no tag-flush occurs.
         $cache->forgetRoleTags($role);
 
-        self::assertTrue(true);
+        static::assertTrue(true);
     }
 
     /**
@@ -396,7 +398,7 @@ final class UncoveredBranchesTest extends TestCase
         // lacks `tags()` — the method exits at the early guard.
         $cache->forgetRoleTags($role);
 
-        self::assertTrue(true);
+        static::assertTrue(true);
     }
 
     /**
@@ -416,11 +418,11 @@ final class UncoveredBranchesTest extends TestCase
         $cache->rememberPermissions($principal, static fn (): array => ['a:do']);
         $cache->rememberRoles($principal, static fn (): array => ['admin']);
 
-        self::assertNotEmpty($driver->storage, 'Persistent store should contain entries before forget().');
+        static::assertNotEmpty($driver->storage, 'Persistent store should contain entries before forget().');
 
         $cache->forget($principal);
 
-        self::assertEmpty($driver->storage, 'Non-tag forget() should remove every per-principal slot.');
+        static::assertEmpty($driver->storage, 'Non-tag forget() should remove every per-principal slot.');
     }
 
     /**
@@ -441,7 +443,7 @@ final class UncoveredBranchesTest extends TestCase
         // the resolver again.
         $result = $cache->rememberPermissions($principal, static fn (): array => \PHPUnit\Framework\Assert::fail('memoised'));
 
-        self::assertSame(['z:do'], $result);
+        static::assertSame(['z:do'], $result);
     }
 
     /**
@@ -468,7 +470,7 @@ final class UncoveredBranchesTest extends TestCase
             new \SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext(maxTtl: null, roleIds: ['', 'real-role-id']),
         );
 
-        self::assertSame(['t:do'], $cache->rememberPermissions($principal, static fn (): array => []));
+        static::assertSame(['t:do'], $cache->rememberPermissions($principal, static fn (): array => []));
     }
 
     /**
@@ -494,7 +496,7 @@ final class UncoveredBranchesTest extends TestCase
             new \SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext(maxTtl: 1),
         );
 
-        self::assertSame([], $driver->storage, 'Persistent tier must skip zero/negative TTL writes.');
+        static::assertSame([], $driver->storage, 'Persistent tier must skip zero/negative TTL writes.');
     }
 
     /**
@@ -515,7 +517,7 @@ final class UncoveredBranchesTest extends TestCase
             },
         );
 
-        self::assertFalse(BladeHelpers::hasAllRoles(['admin']));
+        static::assertFalse(BladeHelpers::hasAllRoles(['admin']));
     }
 
     // Spatie-migration-specific coverage lives in MigrateSpatieSkipTest; that
@@ -538,7 +540,7 @@ final class UncoveredBranchesTest extends TestCase
 
         $names = $user->fresh()?->getRoles() ?? [];
 
-        self::assertSame(['temp'], $names);
+        static::assertSame(['temp'], $names);
     }
 
     /**
@@ -564,17 +566,17 @@ final class UncoveredBranchesTest extends TestCase
             }
         };
 
-        self::assertNull($probe->coerce(''));
-        self::assertNull($probe->coerce(null));
-        self::assertNull($probe->coerce(42));
+        static::assertNull($probe->coerce(''));
+        static::assertNull($probe->coerce(null));
+        static::assertNull($probe->coerce(42));
 
         // Non-empty string — exercises the `Carbon::parse($raw)` branch.
         $carbon = $probe->coerce('2026-01-01 00:00:00');
-        self::assertInstanceOf(\Illuminate\Support\Carbon::class, $carbon);
+        static::assertInstanceOf(\Illuminate\Support\Carbon::class, $carbon);
 
         // DateTimeInterface — exercises the other branch.
         $carbon = $probe->coerce(new \DateTimeImmutable('2026-01-01 00:00:00'));
-        self::assertInstanceOf(\Illuminate\Support\Carbon::class, $carbon);
+        static::assertInstanceOf(\Illuminate\Support\Carbon::class, $carbon);
     }
 
     /**
@@ -594,11 +596,11 @@ final class UncoveredBranchesTest extends TestCase
             }
         };
 
-        self::assertSame(3, $probe->min(5, 3));
-        self::assertSame(3, $probe->min(3, 5));
-        self::assertSame(5, $probe->min(null, 5));
-        self::assertSame(5, $probe->min(5, null));
-        self::assertNull($probe->min(null, null));
+        static::assertSame(3, $probe->min(5, 3));
+        static::assertSame(3, $probe->min(3, 5));
+        static::assertSame(5, $probe->min(null, 5));
+        static::assertSame(5, $probe->min(5, null));
+        static::assertNull($probe->min(null, null));
     }
 
     /**
@@ -620,14 +622,14 @@ final class UncoveredBranchesTest extends TestCase
         };
 
         $dt = new \DateTimeImmutable('+1 hour');
-        self::assertSame($dt, $probe->coerce($dt));
+        static::assertSame($dt, $probe->coerce($dt));
 
         $carbon = $probe->coerce('2026-01-01 00:00:00');
-        self::assertInstanceOf(\DateTimeInterface::class, $carbon);
+        static::assertInstanceOf(\DateTimeInterface::class, $carbon);
 
-        self::assertNull($probe->coerce(null));
-        self::assertNull($probe->coerce(''));
-        self::assertNull($probe->coerce(42));
+        static::assertNull($probe->coerce(null));
+        static::assertNull($probe->coerce(''));
+        static::assertNull($probe->coerce(42));
     }
 
     /**
@@ -650,7 +652,7 @@ final class UncoveredBranchesTest extends TestCase
 
         $model = new class extends \Illuminate\Database\Eloquent\Model {};
 
-        self::assertNull($probe->seconds($model));
+        static::assertNull($probe->seconds($model));
     }
 
     /**
@@ -667,9 +669,10 @@ final class UncoveredBranchesTest extends TestCase
         // default-channel fallback branch. Implements LoggerInterface
         // so the `logger()` helper's return type is satisfied.
         $fakeLog = new class extends \Psr\Log\AbstractLogger {
-            public int $channelCalls = 0;
-            public int $warningCalls = 0;
+            public int $channelCalls    = 0;
+            public int $warningCalls    = 0;
             public ?string $lastMessage = null;
+
             /** @var array<string, mixed>|null */
             public ?array $lastContext = null;
 
@@ -712,28 +715,28 @@ final class UncoveredBranchesTest extends TestCase
             ->update(['document' => \json_encode(['version' => 'not-an-int'])]);
 
         $results = $user->fresh()?->getPolicies() ?? [];
-        self::assertSame([], $results);
+        static::assertSame([], $results);
 
         // Confirm the fallback branch ran — `channel()` raised
         // and the default logger's `warning()` was used.
-        self::assertGreaterThanOrEqual(1, $fakeLog->channelCalls, 'channel() should be attempted');
-        self::assertGreaterThanOrEqual(1, $fakeLog->warningCalls, 'warning() should land on the default logger');
+        static::assertGreaterThanOrEqual(1, $fakeLog->channelCalls, 'channel() should be attempted');
+        static::assertGreaterThanOrEqual(1, $fakeLog->warningCalls, 'warning() should land on the default logger');
 
         // Pin the exact warning content so the concat and context
         // array inside `logMalformedPolicy` stay honest against
         // ConcatOperandRemoval / ArrayItemRemoval / CastString
         // mutations.
-        self::assertNotNull($fakeLog->lastMessage);
-        self::assertStringStartsWith("Authorization: skipping malformed policy '{$policyId}' — ", $fakeLog->lastMessage);
+        static::assertNotNull($fakeLog->lastMessage);
+        static::assertStringStartsWith("Authorization: skipping malformed policy '{$policyId}' — ", $fakeLog->lastMessage);
 
-        self::assertIsArray($fakeLog->lastContext);
-        self::assertArrayHasKey('policy_id', $fakeLog->lastContext);
-        self::assertArrayHasKey('policy_name', $fakeLog->lastContext);
-        self::assertArrayHasKey('reason', $fakeLog->lastContext);
-        self::assertSame($policyId, $fakeLog->lastContext['policy_id']);
-        self::assertSame('malformed-fallback', $fakeLog->lastContext['policy_name']);
-        self::assertIsString($fakeLog->lastContext['reason']);
-        self::assertNotSame('', $fakeLog->lastContext['reason']);
+        static::assertIsArray($fakeLog->lastContext);
+        static::assertArrayHasKey('policy_id', $fakeLog->lastContext);
+        static::assertArrayHasKey('policy_name', $fakeLog->lastContext);
+        static::assertArrayHasKey('reason', $fakeLog->lastContext);
+        static::assertSame($policyId, $fakeLog->lastContext['policy_id']);
+        static::assertSame('malformed-fallback', $fakeLog->lastContext['policy_name']);
+        static::assertIsString($fakeLog->lastContext['reason']);
+        static::assertNotSame('', $fakeLog->lastContext['reason']);
     }
 
     /**
@@ -752,10 +755,12 @@ final class UncoveredBranchesTest extends TestCase
             {
                 return $this;
             }
+
             public function warning(string|\Stringable $message, array $context = []): void
             {
                 throw new \RuntimeException('logger unavailable');
             }
+
             public function log($level, string|\Stringable $message, array $context = []): void {}
         });
 
@@ -775,7 +780,7 @@ final class UncoveredBranchesTest extends TestCase
             ->update(['document' => \json_encode(['version' => 'not-an-int'])]);
 
         $results = $user->fresh()?->getPolicies() ?? [];
-        self::assertSame([], $results);
+        static::assertSame([], $results);
     }
 
     /**
@@ -789,9 +794,10 @@ final class UncoveredBranchesTest extends TestCase
     public function testLogCorruptCacheEntryHandlesChannelMisconfiguration(): void
     {
         $fakeLog = new class extends \Psr\Log\AbstractLogger {
-            public int $channelCalls = 0;
-            public int $warningCalls = 0;
+            public int $channelCalls    = 0;
+            public int $warningCalls    = 0;
             public ?string $lastMessage = null;
+
             /** @var array<string, mixed>|null */
             public ?array $lastContext = null;
 
@@ -801,12 +807,14 @@ final class UncoveredBranchesTest extends TestCase
 
                 throw new \RuntimeException('channel ' . $name . ' is unavailable');
             }
+
             public function warning(string|\Stringable $message, array $context = []): void
             {
                 $this->warningCalls++;
                 $this->lastMessage = (string) $message;
                 $this->lastContext = $context;
             }
+
             public function log($level, string|\Stringable $message, array $context = []): void {}
         };
         $this->app->instance('log', $fakeLog);
@@ -827,21 +835,21 @@ final class UncoveredBranchesTest extends TestCase
         $fresh  = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
         $result = $fresh->rememberPolicies($principal, static fn (): array => []);
 
-        self::assertSame([], $result);
-        self::assertGreaterThanOrEqual(1, $fakeLog->channelCalls, 'channel() should be attempted');
-        self::assertGreaterThanOrEqual(1, $fakeLog->warningCalls, 'warning() should land on the default logger');
+        static::assertSame([], $result);
+        static::assertGreaterThanOrEqual(1, $fakeLog->channelCalls, 'channel() should be attempted');
+        static::assertGreaterThanOrEqual(1, $fakeLog->warningCalls, 'warning() should land on the default logger');
 
         // Pin the logged content — `cache_key` and `reason` must
         // land in the context with the exact key the cache emitted.
-        self::assertNotNull($fakeLog->lastMessage);
-        self::assertStringStartsWith("Authorization: discarding corrupt resolution-cache entry '{$key}' — ", $fakeLog->lastMessage);
+        static::assertNotNull($fakeLog->lastMessage);
+        static::assertStringStartsWith("Authorization: discarding corrupt resolution-cache entry '{$key}' — ", $fakeLog->lastMessage);
 
-        self::assertIsArray($fakeLog->lastContext);
-        self::assertArrayHasKey('cache_key', $fakeLog->lastContext);
-        self::assertArrayHasKey('reason', $fakeLog->lastContext);
-        self::assertSame($key, $fakeLog->lastContext['cache_key']);
-        self::assertIsString($fakeLog->lastContext['reason']);
-        self::assertNotSame('', $fakeLog->lastContext['reason']);
+        static::assertIsArray($fakeLog->lastContext);
+        static::assertArrayHasKey('cache_key', $fakeLog->lastContext);
+        static::assertArrayHasKey('reason', $fakeLog->lastContext);
+        static::assertSame($key, $fakeLog->lastContext['cache_key']);
+        static::assertIsString($fakeLog->lastContext['reason']);
+        static::assertNotSame('', $fakeLog->lastContext['reason']);
     }
 
     /**
@@ -864,7 +872,7 @@ final class UncoveredBranchesTest extends TestCase
         $first  = $cache->rememberPolicies($principal, static fn (): array => [$policy]);
         $second = $cache->rememberPolicies($principal, static fn (): array => \PHPUnit\Framework\Assert::fail('memoised'));
 
-        self::assertSame($first, $second);
+        static::assertSame($first, $second);
     }
 
     /**
@@ -897,8 +905,8 @@ final class UncoveredBranchesTest extends TestCase
             static fn (): array => \PHPUnit\Framework\Assert::fail('Should hit the persistent store.'),
         );
 
-        self::assertCount(1, $result);
-        self::assertSame('hydrated', $result[0]->name);
+        static::assertCount(1, $result);
+        static::assertSame('hydrated', $result[0]->name);
     }
 
     /**
@@ -912,8 +920,7 @@ final class UncoveredBranchesTest extends TestCase
     {
         $driver = new class implements \Illuminate\Contracts\Cache\Store {
             /** @var array<string, mixed> */
-            public array $storage = [];
-
+            public array $storage   = [];
             public int $getCalls    = 0;
             public int $forgetCalls = 0;
 
@@ -991,9 +998,9 @@ final class UncoveredBranchesTest extends TestCase
 
         $result = $cache->rememberPermissions($principal, static fn (): array => ['fresh:perm']);
 
-        self::assertSame(['fresh:perm'], $result);
-        self::assertGreaterThanOrEqual(1, $driver->getCalls, 'driver get() should be attempted');
-        self::assertGreaterThanOrEqual(1, $driver->forgetCalls, 'forget() should be called on corruption');
+        static::assertSame(['fresh:perm'], $result);
+        static::assertGreaterThanOrEqual(1, $driver->getCalls, 'driver get() should be attempted');
+        static::assertGreaterThanOrEqual(1, $driver->forgetCalls, 'forget() should be called on corruption');
     }
 
     /**
@@ -1009,10 +1016,12 @@ final class UncoveredBranchesTest extends TestCase
             {
                 return $this;
             }
+
             public function warning(string|\Stringable $message, array $context = []): void
             {
                 throw new \RuntimeException('logger unavailable');
             }
+
             public function log($level, string|\Stringable $message, array $context = []): void {}
         });
 
@@ -1031,7 +1040,7 @@ final class UncoveredBranchesTest extends TestCase
         // The fail-closed contract ensures hydration still returns.
         $result = $fresh->rememberPolicies($principal, static fn (): array => []);
 
-        self::assertSame([], $result);
+        static::assertSame([], $result);
     }
 
     /**

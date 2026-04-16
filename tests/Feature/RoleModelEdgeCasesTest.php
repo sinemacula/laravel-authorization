@@ -7,9 +7,19 @@ namespace Tests\Feature;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Observers\RoleObserver;
+use SineMacula\Laravel\Authorization\Traits\HasRoleHierarchy;
+use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
+use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use Tests\TestCase;
 
 /**
@@ -33,6 +43,15 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversClass(Role::class)]
+#[CoversClass(RoleObserver::class)]
+#[CoversTrait(HasRoleHierarchy::class)]
+#[CoversTrait(ManagesPermissions::class)]
+#[CoversClass(TenantScope::class)]
+#[CoversClass(NullTenantResolver::class)]
+#[CoversClass(ResolutionCacheContext::class)]
+#[CoversClass(InvalidTenantException::class)]
+#[CoversClass(InvalidTenantColumnsException::class)]
+#[CoversClass(GuardScopedLookup::class)]
 final class RoleModelEdgeCasesTest extends TestCase
 {
     /**

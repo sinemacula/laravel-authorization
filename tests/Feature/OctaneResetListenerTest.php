@@ -8,8 +8,11 @@ use Illuminate\Contracts\Events\Dispatcher;
 use Laravel\Octane\Events\RequestTerminated;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
+use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
+use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
+use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
-use SineMacula\Laravel\Authorization\LastDecisionStore;
+use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use Tests\TestCase;
 
 /**
@@ -23,6 +26,9 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversClass(AuthorizationServiceProvider::class)]
+#[CoversClass(GateRegistrar::class)]
+#[CoversClass(BladeDirectiveRegistrar::class)]
+#[CoversClass(EventListenerRegistrar::class)]
 #[CoversClass(LastDecisionStore::class)]
 final class OctaneResetListenerTest extends TestCase
 {
@@ -53,7 +59,7 @@ final class OctaneResetListenerTest extends TestCase
             'The package should register a listener for the Octane RequestTerminated event when the class is present.',
         );
 
-        /** @var \SineMacula\Laravel\Authorization\LastDecisionStore $store */
+        /** @var \SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore $store */
         $store = $this->app->make(LastDecisionStore::class);
         $store->put(EvaluationResult::rbacAllowed());
 

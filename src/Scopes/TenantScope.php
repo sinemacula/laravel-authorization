@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Scopes;
 
+use Illuminate\Container\Container;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Scope;
@@ -57,8 +58,8 @@ class TenantScope implements Scope
     /**
      * Apply the tenant scope to the given Eloquent builder.
      *
+     * @param  \Illuminate\Database\Eloquent\Builder<\Illuminate\Database\Eloquent\Model>  $builder
      * @param  \Illuminate\Database\Eloquent\Model  $model
-     * @param  \Illuminate\Database\Eloquent\Builder<*>  $builder
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
@@ -138,7 +139,7 @@ class TenantScope implements Scope
      */
     private function resolveTenant(): ?object
     {
-        $container   = \Illuminate\Container\Container::getInstance();
+        $container   = Container::getInstance();
         $containerId = \spl_object_id($container);
 
         if ($this->resolvedTenantMemo !== null && $this->resolvedTenantMemo['container_id'] === $containerId) {

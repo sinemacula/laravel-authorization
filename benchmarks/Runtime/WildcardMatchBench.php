@@ -5,7 +5,7 @@ declare(strict_types = 1);
 namespace Benchmarks\Runtime;
 
 use PhpBench\Attributes as Bench;
-use SineMacula\Laravel\Authorization\Enums\PolicyEffect;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 
 /**

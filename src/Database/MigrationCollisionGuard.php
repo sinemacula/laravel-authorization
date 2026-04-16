@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Database;
 
 use Illuminate\Support\Facades\Schema;
-use SineMacula\Laravel\Authorization\Exceptions\MigrationCollisionException;
 
 /**
  * Idempotency guard for shipped migrations.
@@ -26,7 +25,7 @@ final class MigrationCollisionGuard
      * @param  string  $table
      * @return void
      *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\MigrationCollisionException
+     * @throws \SineMacula\Laravel\Authorization\Database\MigrationCollisionException
      */
     public static function ensureNotExists(string $table): void
     {

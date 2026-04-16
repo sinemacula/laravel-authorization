@@ -40,6 +40,9 @@ final class CachingPolicyResolver implements PolicyResolver
 
     /**
      * @inheritDoc
+     *
+     * @param  object  $principal
+     * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
      */
     public function policiesFor(object $principal): array
     {

@@ -8,20 +8,29 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
-use SineMacula\Laravel\Authorization\Events\IdentityPermissionGranted;
-use SineMacula\Laravel\Authorization\Events\IdentityPermissionRevoked;
-use SineMacula\Laravel\Authorization\Events\IdentityPolicyAttached;
-use SineMacula\Laravel\Authorization\Events\IdentityPolicyDetached;
-use SineMacula\Laravel\Authorization\Events\IdentityRoleAssigned;
-use SineMacula\Laravel\Authorization\Events\IdentityRoleRevoked;
-use SineMacula\Laravel\Authorization\Events\RolePermissionGranted;
-use SineMacula\Laravel\Authorization\Events\RolePermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionGranted;
+use SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyAttached;
+use SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyDetached;
+use SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleRevoked;
+use SineMacula\Laravel\Authorization\Events\Role\RolePermissionGranted;
+use SineMacula\Laravel\Authorization\Events\Role\RolePermissionRevoked;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Observers\RoleObserver;
+use SineMacula\Laravel\Authorization\Traits\HasRoleHierarchy;
+use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
 use SineMacula\Laravel\Authorization\Traits\HasPermissions;
 use SineMacula\Laravel\Authorization\Traits\HasPolicies;
 use SineMacula\Laravel\Authorization\Traits\HasRoles;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
+use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -42,6 +51,9 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversClass(Role::class)]
+#[CoversClass(RoleObserver::class)]
+#[CoversTrait(HasRoleHierarchy::class)]
+#[CoversTrait(ManagesPermissions::class)]
 #[CoversClass(IdentityRoleAssigned::class)]
 #[CoversClass(IdentityRoleRevoked::class)]
 #[CoversClass(IdentityPermissionGranted::class)]
@@ -53,6 +65,12 @@ use Tests\TestCase;
 #[CoversTrait(HasRoles::class)]
 #[CoversTrait(HasPermissions::class)]
 #[CoversTrait(HasPolicies::class)]
+#[CoversClass(TenantScope::class)]
+#[CoversClass(NullTenantResolver::class)]
+#[CoversClass(ResolutionCacheContext::class)]
+#[CoversClass(InvalidTenantException::class)]
+#[CoversClass(InvalidTenantColumnsException::class)]
+#[CoversClass(GuardScopedLookup::class)]
 final class SyncEventsTest extends TestCase
 {
     /**

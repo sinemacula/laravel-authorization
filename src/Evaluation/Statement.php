@@ -4,7 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
-use SineMacula\Laravel\Authorization\Enums\PolicyEffect;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 
 /**
  * Immutable policy statement.
@@ -27,7 +27,7 @@ final readonly class Statement
     /**
      * Create a new statement instance.
      *
-     * @param  \SineMacula\Laravel\Authorization\Enums\PolicyEffect  $effect
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect  $effect
      * @param  array<int, string>  $actions
      * @param  array<int, string>  $resources
      * @param  array<string, mixed>  $conditions
@@ -178,7 +178,7 @@ final readonly class Statement
      * Extract the effect from the array representation.
      *
      * @param  array<string, mixed>  $data
-     * @return \SineMacula\Laravel\Authorization\Enums\PolicyEffect
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect
      *
      * @throws \InvalidArgumentException
      */

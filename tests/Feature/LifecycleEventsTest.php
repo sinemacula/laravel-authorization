@@ -7,18 +7,30 @@ namespace Tests\Feature;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
-use SineMacula\Laravel\Authorization\Events\PermissionCreated;
-use SineMacula\Laravel\Authorization\Events\PermissionDeleted;
-use SineMacula\Laravel\Authorization\Events\PermissionUpdated;
-use SineMacula\Laravel\Authorization\Events\PolicyCreated;
-use SineMacula\Laravel\Authorization\Events\PolicyDeleted;
-use SineMacula\Laravel\Authorization\Events\PolicyUpdated;
-use SineMacula\Laravel\Authorization\Events\RoleCreated;
-use SineMacula\Laravel\Authorization\Events\RoleDeleted;
-use SineMacula\Laravel\Authorization\Events\RoleUpdated;
+use PHPUnit\Framework\Attributes\CoversTrait;
+use SineMacula\Laravel\Authorization\Events\Permission\PermissionCreated;
+use SineMacula\Laravel\Authorization\Events\Permission\PermissionDeleted;
+use SineMacula\Laravel\Authorization\Events\Permission\PermissionUpdated;
+use SineMacula\Laravel\Authorization\Events\Policy\PolicyCreated;
+use SineMacula\Laravel\Authorization\Events\Policy\PolicyDeleted;
+use SineMacula\Laravel\Authorization\Events\Policy\PolicyUpdated;
+use SineMacula\Laravel\Authorization\Events\Role\RoleCreated;
+use SineMacula\Laravel\Authorization\Events\Role\RoleDeleted;
+use SineMacula\Laravel\Authorization\Events\Role\RoleUpdated;
 use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Observers\PermissionObserver;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Observers\RoleObserver;
+use SineMacula\Laravel\Authorization\Traits\HasRoleHierarchy;
+use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
+use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use Tests\TestCase;
 
 /**
@@ -36,8 +48,13 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversClass(Role::class)]
+#[CoversClass(RoleObserver::class)]
+#[CoversTrait(HasRoleHierarchy::class)]
+#[CoversTrait(ManagesPermissions::class)]
 #[CoversClass(Permission::class)]
+#[CoversClass(PermissionObserver::class)]
 #[CoversClass(Policy::class)]
+#[CoversClass(PolicyObserver::class)]
 #[CoversClass(RoleCreated::class)]
 #[CoversClass(RoleUpdated::class)]
 #[CoversClass(RoleDeleted::class)]
@@ -47,6 +64,12 @@ use Tests\TestCase;
 #[CoversClass(PolicyCreated::class)]
 #[CoversClass(PolicyUpdated::class)]
 #[CoversClass(PolicyDeleted::class)]
+#[CoversClass(TenantScope::class)]
+#[CoversClass(NullTenantResolver::class)]
+#[CoversClass(ResolutionCacheContext::class)]
+#[CoversClass(InvalidTenantException::class)]
+#[CoversClass(InvalidTenantColumnsException::class)]
+#[CoversClass(GuardScopedLookup::class)]
 final class LifecycleEventsTest extends TestCase
 {
     /** Canonical description used across the role before/after diff scenarios. */

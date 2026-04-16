@@ -4,10 +4,8 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
-use Illuminate\Foundation\Testing\TestCase as FoundationTestCase;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
-use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Testing\AuthorizationAssertions;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;

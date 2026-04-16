@@ -7,6 +7,13 @@ namespace Tests\Feature;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Observers\PermissionObserver;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
+use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use Tests\TestCase;
 
 /**
@@ -21,6 +28,13 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversClass(Permission::class)]
+#[CoversClass(PermissionObserver::class)]
+#[CoversClass(TenantScope::class)]
+#[CoversClass(NullTenantResolver::class)]
+#[CoversClass(ResolutionCacheContext::class)]
+#[CoversClass(InvalidTenantException::class)]
+#[CoversClass(InvalidTenantColumnsException::class)]
+#[CoversClass(GuardScopedLookup::class)]
 final class PermissionCategoryTest extends TestCase
 {
     /**

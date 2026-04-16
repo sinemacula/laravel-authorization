@@ -105,23 +105,22 @@ final class ContextInterpolator
             return $this->resolvePrincipalType($principal);
         }
 
+        /** @var mixed $value */
+        $value = null;
+
         // Eloquent models: use getAttribute for transparent accessor support
         if (\method_exists($principal, 'getAttribute')) {
             /** @var mixed $value */
             $value = $principal->getAttribute($key);
-
-            return \is_scalar($value) ? $value : null;
-        }
-
-        // Plain objects: property access
-        if (\property_exists($principal, $key)) {
+        } elseif (\property_exists($principal, $key)) {
+            // Plain objects: property access
+            /** @var array<string, mixed> $vars */
+            $vars = \get_object_vars($principal);
             /** @var mixed $value */
-            $value = $principal->{$key};
-
-            return \is_scalar($value) ? $value : null;
+            $value = $vars[$key] ?? null;
         }
 
-        return null;
+        return \is_scalar($value) ? $value : null;
     }
 
     /**

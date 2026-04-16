@@ -6,7 +6,6 @@ namespace SineMacula\Laravel\Authorization\Http\Middleware;
 
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\Request;
-use SineMacula\Laravel\Authorization\Exceptions\AuthorizationMiddlewareMisconfiguredException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
@@ -55,7 +54,7 @@ abstract class AbstractAuthorizationMiddleware
      *
      * @throws \Illuminate\Auth\AuthenticationException
      * @throws \Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationMiddlewareMisconfiguredException
+     * @throws \SineMacula\Laravel\Authorization\Http\Middleware\AuthorizationMiddlewareMisconfiguredException
      */
     public function handle(Request $request, \Closure $next, string ...$needles): mixed
     {

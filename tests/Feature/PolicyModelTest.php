@@ -5,9 +5,10 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use PHPUnit\Framework\Attributes\CoversClass;
-use SineMacula\Laravel\Authorization\Enums\PolicyEffect;
-use SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyDocumentException;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
+use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
 use Tests\TestCase;
 
 /**
@@ -19,6 +20,7 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversClass(Policy::class)]
+#[CoversClass(PolicyObserver::class)]
 final class PolicyModelTest extends TestCase
 {
     /**

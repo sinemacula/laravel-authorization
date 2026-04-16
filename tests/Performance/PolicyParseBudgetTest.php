@@ -28,6 +28,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy;
  * @internal
  */
 #[CoversClass(Policy::class)]
+#[CoversClass(PolicyObserver::class)]
 final class PolicyParseBudgetTest extends TestCase
 {
     /**

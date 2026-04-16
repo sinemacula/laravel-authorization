@@ -7,6 +7,9 @@ namespace Tests\Feature;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
+use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
+use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
+use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
@@ -76,6 +79,9 @@ final class StubBadPermissionProvider implements PermissionProvider
  * @internal
  */
 #[CoversClass(AuthorizationServiceProvider::class)]
+#[CoversClass(GateRegistrar::class)]
+#[CoversClass(BladeDirectiveRegistrar::class)]
+#[CoversClass(EventListenerRegistrar::class)]
 final class ServiceProviderExtraBranchesTest extends TestCase
 {
     /**
@@ -162,10 +168,7 @@ final class ServiceProviderExtraBranchesTest extends TestCase
         $config->set('authorization.permission_enums', [123, \stdClass::class, PermissionEnum::class]);
         $config->set('authorization.gate.on_conflict', 'overwrite');
 
-        $provider = new AuthorizationServiceProvider($this->app);
-
-        $reflection = new \ReflectionMethod($provider, 'registerGates');
-        $reflection->invoke($provider);
+        (new \SineMacula\Laravel\Authorization\Registrars\GateRegistrar($this->app))->register();
 
         // The valid PermissionEnum entries were wired; the garbage
         // entries were silently skipped without raising.

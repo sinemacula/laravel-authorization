@@ -4,8 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
-use SineMacula\Laravel\Authorization\Enums\PolicyEffect;
-use SineMacula\Laravel\Authorization\Enums\TraceDecision;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision;
 
 /**
  * AWS IAM-style policy evaluator.
@@ -39,7 +39,7 @@ final class PolicyEvaluator
     {
         $interpolator = $this->interpolator();
 
-        /** @var list<array{policy: string, statement_index: int, decision: \SineMacula\Laravel\Authorization\Enums\TraceDecision, reason: string}> $trace */
+        /** @var list<array{policy: string, statement_index: int, decision: \SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision, reason: string}> $trace */
         $trace          = [];
         $allowStatement = null;
 

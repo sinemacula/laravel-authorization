@@ -13,9 +13,12 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
+use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
+use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
+use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
-use SineMacula\Laravel\Authorization\Exceptions\AuthorizationMiddlewareMisconfiguredException;
 use SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware;
+use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizationMiddlewareMisconfiguredException;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -46,6 +49,9 @@ use Tests\TestCase;
 #[CoversClass(AbstractAuthorizationMiddleware::class)]
 #[CoversClass(AuthorizationMiddlewareMisconfiguredException::class)]
 #[CoversClass(AuthorizationServiceProvider::class)]
+#[CoversClass(GateRegistrar::class)]
+#[CoversClass(BladeDirectiveRegistrar::class)]
+#[CoversClass(EventListenerRegistrar::class)]
 final class RouteMiddlewareTest extends TestCase
 {
     /**

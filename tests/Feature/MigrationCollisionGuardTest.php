@@ -7,8 +7,8 @@ namespace Tests\Feature;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Database\MigrationCollisionException;
 use SineMacula\Laravel\Authorization\Database\MigrationCollisionGuard;
-use SineMacula\Laravel\Authorization\Exceptions\MigrationCollisionException;
 use Tests\TestCase;
 
 /**

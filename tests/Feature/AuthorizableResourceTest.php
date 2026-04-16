@@ -10,6 +10,9 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
+use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
+use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
+use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableResource;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -27,6 +30,9 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversClass(AuthorizationServiceProvider::class)]
+#[CoversClass(GateRegistrar::class)]
+#[CoversClass(BladeDirectiveRegistrar::class)]
+#[CoversClass(EventListenerRegistrar::class)]
 #[CoversClass(AuthorizationManager::class)]
 final class AuthorizableResourceTest extends TestCase
 {

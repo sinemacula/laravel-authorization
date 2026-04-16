@@ -6,7 +6,7 @@ namespace Tests\Performance;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
-use SineMacula\Laravel\Authorization\Enums\PolicyEffect;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 
 /**

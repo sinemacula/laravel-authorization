@@ -9,12 +9,12 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
-use SineMacula\Laravel\Authorization\Events\IdentityPermissionExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\IdentityPermissionGranted;
-use SineMacula\Laravel\Authorization\Events\IdentityPermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionGranted;
+use SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
-use SineMacula\Laravel\Authorization\Models\AuthorizablePermissionPivot;
 use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePermissionPivot;
 
 /**
  * Direct permission trait for authorizable models.
@@ -30,6 +30,8 @@ use SineMacula\Laravel\Authorization\Models\Permission;
  * @copyright   2026 Sine Macula Limited
  *
  * @phpstan-require-extends \Illuminate\Database\Eloquent\Model
+ *
+ * @phpstan-require-implements \SineMacula\Laravel\Authorization\Contracts\SupportsRoles
  */
 trait HasPermissions // @phpstan-ignore trait.unused
 {
@@ -43,7 +45,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * at expiry without requiring a sweeper run. The pivot's
      * `expires_at` column is surfaced via `withPivot()`.
      *
-     * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Permission, static>
+     * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Permission, $this, \SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePermissionPivot, 'pivot'>
      */
     public function permissions(): MorphToMany
     {
@@ -53,6 +55,12 @@ trait HasPermissions // @phpstan-ignore trait.unused
         /** @var string $pivot */
         $pivot = config('authorization.tables.authorizable_permissions', 'authorizable_permissions');
 
+        // The `where(...)` and inner `whereNull()/orWhere()` calls are
+        // resolved by PHPStan to static methods on Eloquent's Builder
+        // via Laravel's annotation soup — the underlying dispatch is
+        // instance-level. Same pattern, same justification, as
+        // `GuardScopedLookup`.
+        // @phpstan-ignore staticMethod.dynamicCall
         return $this->morphToMany(
             related: $model,
             name: 'authorizable',
@@ -62,7 +70,8 @@ trait HasPermissions // @phpstan-ignore trait.unused
         )
             ->using(AuthorizablePermissionPivot::class)
             ->withPivot('expires_at')
-            ->where(static function ($query) use ($pivot): void {
+            ->where(static function (\Illuminate\Database\Eloquent\Builder $query) use ($pivot): void {
+                // @phpstan-ignore staticMethod.dynamicCall
                 $query->whereNull($pivot . '.expires_at')
                     ->orWhere($pivot . '.expires_at', '>', Carbon::now());
             });
@@ -90,7 +99,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
         /** @var string $table */
         $table   = config('authorization.tables.authorizable_permissions', 'authorizable_permissions');
         $columns = self::authorizationResolveGrantPivotColumns('authorizable_permissions', 'permission_column', 'permission_id');
-        $prior   = $this->authorizationReadGrantPivot($table, $columns, (string) $model->getKey());
+        $prior   = self::authorizationReadGrantPivot($this, $table, $columns, (string) $model->getKey());
 
         $this->permissions()->syncWithoutDetaching([
             (string) $model->getKey() => ['expires_at' => $expiresAt],
@@ -169,12 +178,11 @@ trait HasPermissions // @phpstan-ignore trait.unused
             unset($this->relations['permissions']);
         }
 
-        /** @var array{attached?: array<int, mixed>, detached?: array<int, mixed>, updated?: array<int, mixed>} $result */
-        foreach ($result['attached'] ?? [] as $id) {
+        foreach ($result['attached'] as $id) {
             Event::dispatch(new IdentityPermissionGranted($this, $resolved[(string) $id] ?? $this->resolvePermissionById((string) $id)));
         }
 
-        foreach ($result['detached'] ?? [] as $id) {
+        foreach ($result['detached'] as $id) {
             Event::dispatch(new IdentityPermissionRevoked($this, $this->resolvePermissionById((string) $id)));
         }
 
@@ -231,14 +239,12 @@ trait HasPermissions // @phpstan-ignore trait.unused
             /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission> $direct */
             $direct = $this->permissions;
 
-            $roles   = \method_exists($this, 'roles') ? $this->roles : null;
-            $roleIds = $roles !== null ? self::authorizationCollectModelIds($roles) : [];
+            /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
+            $roles   = $this->roles;
+            $roleIds = self::authorizationCollectModelIds($roles);
 
             $nearest = self::authorizationNearestPivotExpirySeconds($direct);
-
-            if ($roles !== null) {
-                $nearest = self::authorizationMinNullable($nearest, self::authorizationNearestPivotExpirySeconds($roles));
-            }
+            $nearest = self::authorizationMinNullable($nearest, self::authorizationNearestPivotExpirySeconds($roles));
 
             return $cache->rememberPermissions(
                 $this,
@@ -321,11 +327,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
         $class = config('authorization.models.permission', Permission::class);
 
-        $guard = \method_exists($this, 'getAuthorizationGuard')
-            ? $this->getAuthorizationGuard()
-            : null;
-
-        return $class::resolveByName($permission, $guard);
+        return $class::resolveByName($permission, self::authorizationResolveGuard($this));
     }
 
     /**
@@ -366,14 +368,12 @@ trait HasPermissions // @phpstan-ignore trait.unused
         $direct = $this->permissions;
         $names  = $direct->map(static fn (Permission $p): string => $p->name)->all();
 
-        if (method_exists($this, 'roles')) {
-            /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
-            $roles = $this->roles;
+        /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
+        $roles = $this->roles;
 
-            foreach ($roles as $role) {
-                foreach ($role->getPermissions() as $rolePerm) {
-                    $names[] = $rolePerm;
-                }
+        foreach ($roles as $role) {
+            foreach ($role->getPermissions() as $rolePerm) {
+                $names[] = $rolePerm;
             }
         }
 

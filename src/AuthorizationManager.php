@@ -9,8 +9,9 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
-use SineMacula\Laravel\Authorization\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
+use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
@@ -64,7 +65,7 @@ class AuthorizationManager
      * @param  \SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator  $evaluator
      * @param  \SineMacula\Laravel\Authorization\Contracts\PrincipalResolver  $principalResolver
      * @param  \SineMacula\Laravel\Authorization\Contracts\PolicyResolver  $policyResolver
-     * @param  \SineMacula\Laravel\Authorization\LastDecisionStore  $lastDecisionStore
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore  $lastDecisionStore
      * @param  \Illuminate\Contracts\Events\Dispatcher|null  $events
      */
     public function __construct(

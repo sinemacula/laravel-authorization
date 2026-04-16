@@ -4,8 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
-use SineMacula\Laravel\Authorization\Enums\DecisionReason;
-use SineMacula\Laravel\Authorization\Enums\TraceDecision;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision;
 
 /**
  * Immutable evaluation result.
@@ -54,7 +54,7 @@ final readonly class EvaluationResult
      * Create a new evaluation result.
      *
      * @param  bool  $allowed
-     * @param  \SineMacula\Laravel\Authorization\Enums\DecisionReason  $reason
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason  $reason
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement|null  $matchedStatement
      * @param  list<EvaluationTraceEntry>  $trace
      */

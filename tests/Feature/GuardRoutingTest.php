@@ -13,9 +13,18 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Observers\RoleObserver;
+use SineMacula\Laravel\Authorization\Traits\HasRoleHierarchy;
+use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
 use SineMacula\Laravel\Authorization\Traits\HasAuthorization;
 use SineMacula\Laravel\Authorization\Traits\HasPermissions;
 use SineMacula\Laravel\Authorization\Traits\HasRoles;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
+use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use Tests\TestCase;
 
 /**
@@ -34,8 +43,17 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversClass(Role::class)]
+#[CoversClass(RoleObserver::class)]
+#[CoversTrait(HasRoleHierarchy::class)]
+#[CoversTrait(ManagesPermissions::class)]
 #[CoversTrait(HasRoles::class)]
 #[CoversTrait(HasPermissions::class)]
+#[CoversClass(TenantScope::class)]
+#[CoversClass(NullTenantResolver::class)]
+#[CoversClass(ResolutionCacheContext::class)]
+#[CoversClass(InvalidTenantException::class)]
+#[CoversClass(InvalidTenantColumnsException::class)]
+#[CoversClass(GuardScopedLookup::class)]
 final class GuardRoutingTest extends TestCase
 {
     /**

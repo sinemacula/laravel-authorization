@@ -6,8 +6,8 @@ namespace Tests\Unit\Evaluation;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
-use SineMacula\Laravel\Authorization\Enums\DecisionReason;
-use SineMacula\Laravel\Authorization\Enums\TraceDecision;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 

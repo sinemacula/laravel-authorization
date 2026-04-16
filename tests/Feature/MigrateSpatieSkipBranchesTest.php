@@ -90,7 +90,7 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
         $output   = Artisan::output();
 
         self::assertSame(1, $exitCode);
-        self::assertStringContainsString("Target table 'auth_authorizable_roles' does not exist", $output);
+        self::assertStringContainsString('Target table \'auth_authorizable_roles\' does not exist', $output);
 
         // Restore the target table so teardown's migrator can roll back.
         Schema::create('auth_authorizable_roles', static function (Blueprint $table): void {
@@ -152,9 +152,9 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
         // Unmappable row before a mappable one so a `break`
         // mutation would skip the mappable row.
         DB::table('model_has_roles')->insert([
-            ['role_id' => 999, 'model_type' => 'App\\User', 'model_id' => 7],
-            ['role_id' => 1, 'model_type' => 'App\\User', 'model_id' => 8],
-            ['role_id' => 2, 'model_type' => 'App\\User', 'model_id' => 9],
+            ['role_id' => 999, 'model_type' => 'App\User', 'model_id' => 7],
+            ['role_id' => 1, 'model_type' => 'App\User', 'model_id' => 8],
+            ['role_id' => 2, 'model_type' => 'App\User', 'model_id' => 9],
         ]);
 
         Artisan::call('authorization:migrate-spatie');
@@ -178,9 +178,9 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
         // Unmappable row before a mappable one so a `break`
         // mutation would skip the mappable row.
         DB::table('model_has_permissions')->insert([
-            ['permission_id' => 999, 'model_type' => 'App\\User', 'model_id' => 7],
-            ['permission_id' => 1, 'model_type' => 'App\\User', 'model_id' => 8],
-            ['permission_id' => 2, 'model_type' => 'App\\User', 'model_id' => 9],
+            ['permission_id' => 999, 'model_type' => 'App\User', 'model_id' => 7],
+            ['permission_id' => 1, 'model_type' => 'App\User', 'model_id' => 8],
+            ['permission_id' => 2, 'model_type' => 'App\User', 'model_id' => 9],
         ]);
 
         Artisan::call('authorization:migrate-spatie');
@@ -237,11 +237,11 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
             ['permission_id' => 1, 'role_id' => 1],
         ]);
         DB::table('model_has_roles')->insert([
-            ['role_id' => 1, 'model_type' => 'App\\User', 'model_id' => 7],
-            ['role_id' => 2, 'model_type' => 'App\\User', 'model_id' => 8],
+            ['role_id' => 1, 'model_type' => 'App\User', 'model_id' => 7],
+            ['role_id' => 2, 'model_type' => 'App\User', 'model_id' => 8],
         ]);
         DB::table('model_has_permissions')->insert([
-            ['permission_id' => 1, 'model_type' => 'App\\User', 'model_id' => 9],
+            ['permission_id' => 1, 'model_type' => 'App\User', 'model_id' => 9],
         ]);
 
         Artisan::call('authorization:migrate-spatie');

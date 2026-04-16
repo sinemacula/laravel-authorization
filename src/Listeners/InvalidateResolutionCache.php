@@ -5,14 +5,14 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Listeners;
 
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
-use SineMacula\Laravel\Authorization\Events\IdentityPermissionGranted;
-use SineMacula\Laravel\Authorization\Events\IdentityPermissionRevoked;
-use SineMacula\Laravel\Authorization\Events\IdentityPolicyAttached;
-use SineMacula\Laravel\Authorization\Events\IdentityPolicyDetached;
-use SineMacula\Laravel\Authorization\Events\IdentityRoleAssigned;
-use SineMacula\Laravel\Authorization\Events\IdentityRoleRevoked;
-use SineMacula\Laravel\Authorization\Events\RolePermissionGranted;
-use SineMacula\Laravel\Authorization\Events\RolePermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionGranted;
+use SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyAttached;
+use SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyDetached;
+use SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleRevoked;
+use SineMacula\Laravel\Authorization\Events\Role\RolePermissionGranted;
+use SineMacula\Laravel\Authorization\Events\Role\RolePermissionRevoked;
 
 /**
  * Event listener that keeps the resolution cache coherent.
@@ -58,7 +58,7 @@ final class InvalidateResolutionCache
      * Drop the cached entries belonging to the authorizable on
      * the event.
      *
-     * @param  \SineMacula\Laravel\Authorization\Events\IdentityPermissionGranted|\SineMacula\Laravel\Authorization\Events\IdentityPermissionRevoked|\SineMacula\Laravel\Authorization\Events\IdentityPolicyAttached|\SineMacula\Laravel\Authorization\Events\IdentityPolicyDetached|\SineMacula\Laravel\Authorization\Events\IdentityRoleAssigned|\SineMacula\Laravel\Authorization\Events\IdentityRoleRevoked  $event
+     * @param  \SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionGranted|\SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionRevoked|\SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyAttached|\SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyDetached|\SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleAssigned|\SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleRevoked  $event
      * @return void
      */
     public function handlePrincipalMutation(
@@ -77,7 +77,7 @@ final class InvalidateResolutionCache
      * flushed so the same request observes the mutation even
      * before any tag flush propagates.
      *
-     * @param  \SineMacula\Laravel\Authorization\Events\RolePermissionGranted|\SineMacula\Laravel\Authorization\Events\RolePermissionRevoked  $event
+     * @param  \SineMacula\Laravel\Authorization\Events\Role\RolePermissionGranted|\SineMacula\Laravel\Authorization\Events\Role\RolePermissionRevoked  $event
      * @return void
      */
     public function handleRoleMutation(

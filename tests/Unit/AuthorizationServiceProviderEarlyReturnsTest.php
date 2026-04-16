@@ -11,6 +11,9 @@ use Mockery;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
+use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
+use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
+use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 
 /**
  * Unit coverage for the service provider's defensive early-return
@@ -35,6 +38,9 @@ use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
  * @internal
  */
 #[CoversClass(AuthorizationServiceProvider::class)]
+#[CoversClass(GateRegistrar::class)]
+#[CoversClass(BladeDirectiveRegistrar::class)]
+#[CoversClass(EventListenerRegistrar::class)]
 final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
 {
     /**
@@ -60,10 +66,9 @@ final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
      */
     public function testCacheInvalidationListenersSkipWhenDispatcherUnbound(): void
     {
-        $app      = $this->bareApplication();
-        $provider = new AuthorizationServiceProvider($app);
+        $app = $this->bareApplication();
 
-        $this->invokeProtected($provider, 'registerCacheInvalidationListeners');
+        $this->invokePrivateOn(new EventListenerRegistrar($app), 'registerCacheInvalidationListeners');
 
         self::assertFalse($app->bound(\Illuminate\Contracts\Events\Dispatcher::class));
     }
@@ -77,11 +82,10 @@ final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
      */
     public function testOctaneResetListenerSkipsWhenDispatcherUnbound(): void
     {
-        $app      = $this->bareApplication();
-        $provider = new AuthorizationServiceProvider($app);
+        $app = $this->bareApplication();
 
         // No exception and no listener wiring attempt.
-        $this->invokeProtected($provider, 'registerOctaneResetListener');
+        $this->invokePrivateOn(new EventListenerRegistrar($app), 'registerOctaneResetListener');
 
         self::assertFalse($app->bound(\Illuminate\Contracts\Events\Dispatcher::class));
     }
@@ -110,10 +114,9 @@ final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
      */
     public function testBladeDirectivesSkipWhenCompilerUnbound(): void
     {
-        $app      = $this->bareApplication();
-        $provider = new AuthorizationServiceProvider($app);
+        $app = $this->bareApplication();
 
-        $this->invokeProtected($provider, 'registerBladeDirectives');
+        (new BladeDirectiveRegistrar($app))->register();
 
         self::assertFalse($app->bound('blade.compiler'));
     }
@@ -171,5 +174,18 @@ final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
     {
         $reflection = new \ReflectionMethod($provider, $method);
         $reflection->invoke($provider);
+    }
+
+    /**
+     * Invoke a private method on an arbitrary target via reflection.
+     *
+     * @param  object  $target
+     * @param  string  $method
+     * @return void
+     */
+    private function invokePrivateOn(object $target, string $method): void
+    {
+        $reflection = new \ReflectionMethod($target, $method);
+        $reflection->invoke($target);
     }
 }

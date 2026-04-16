@@ -6,8 +6,9 @@ namespace Tests\Feature;
 
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
-use SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyDocumentException;
+use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
 use Tests\TestCase;
 
 /**
@@ -27,6 +28,7 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversClass(Policy::class)]
+#[CoversClass(PolicyObserver::class)]
 #[CoversClass(InvalidPolicyDocumentException::class)]
 final class PolicyModelEdgeCasesTest extends TestCase
 {

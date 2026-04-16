@@ -47,6 +47,8 @@ final class AuthGuardPrincipalResolver implements PrincipalResolver
 
     /**
      * @inheritDoc
+     *
+     * @return object|null
      */
     public function resolve(): ?object
     {

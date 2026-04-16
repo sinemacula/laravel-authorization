@@ -6,7 +6,7 @@ namespace Benchmarks\Runtime;
 
 use Benchmarks\Support\BenchmarkFixtures;
 use PhpBench\Attributes as Bench;
-use SineMacula\Laravel\Authorization\Enums\PolicyEffect;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 
 /**

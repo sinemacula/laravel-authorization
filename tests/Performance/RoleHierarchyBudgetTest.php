@@ -6,7 +6,11 @@ namespace Tests\Performance;
 
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Observers\RoleObserver;
+use SineMacula\Laravel\Authorization\Traits\HasRoleHierarchy;
+use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
 use Tests\TestCase;
 
 /**
@@ -25,6 +29,9 @@ use Tests\TestCase;
  * @internal
  */
 #[CoversClass(Role::class)]
+#[CoversClass(RoleObserver::class)]
+#[CoversTrait(HasRoleHierarchy::class)]
+#[CoversTrait(ManagesPermissions::class)]
 final class RoleHierarchyBudgetTest extends TestCase
 {
     /**

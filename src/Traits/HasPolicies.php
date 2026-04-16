@@ -8,11 +8,11 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
-use SineMacula\Laravel\Authorization\Events\IdentityPolicyAttached;
-use SineMacula\Laravel\Authorization\Events\IdentityPolicyDetached;
-use SineMacula\Laravel\Authorization\Events\IdentityPolicyExpiryChanged;
-use SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyDocumentException;
-use SineMacula\Laravel\Authorization\Models\AuthorizablePolicyPivot;
+use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
+use SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyAttached;
+use SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyDetached;
+use SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyExpiryChanged;
+use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePolicyPivot;
 use SineMacula\Laravel\Authorization\Models\Policy;
 
 /**
@@ -26,6 +26,8 @@ use SineMacula\Laravel\Authorization\Models\Policy;
  * @copyright   2026 Sine Macula Limited
  *
  * @phpstan-require-extends \Illuminate\Database\Eloquent\Model
+ *
+ * @phpstan-require-implements \SineMacula\Laravel\Authorization\Contracts\SupportsPolicies
  */
 trait HasPolicies // @phpstan-ignore trait.unused
 {
@@ -40,7 +42,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * The pivot's `expires_at` column is surfaced via
      * `withPivot()`.
      *
-     * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy, static>
+     * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy, $this, \SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePolicyPivot, 'pivot'>
      */
     public function policies(): MorphToMany
     {
@@ -50,6 +52,12 @@ trait HasPolicies // @phpstan-ignore trait.unused
         /** @var string $pivot */
         $pivot = config('authorization.tables.authorizable_policies', 'authorizable_policies');
 
+        // The `where(...)` and inner `whereNull()/orWhere()` calls are
+        // resolved by PHPStan to static methods on Eloquent's Builder
+        // via Laravel's annotation soup — the underlying dispatch is
+        // instance-level. Same pattern, same justification, as
+        // `GuardScopedLookup`.
+        // @phpstan-ignore staticMethod.dynamicCall
         return $this->morphToMany(
             related: $model,
             name: 'authorizable',
@@ -59,7 +67,8 @@ trait HasPolicies // @phpstan-ignore trait.unused
         )
             ->using(AuthorizablePolicyPivot::class)
             ->withPivot('expires_at')
-            ->where(static function ($query) use ($pivot): void {
+            ->where(static function (\Illuminate\Database\Eloquent\Builder $query) use ($pivot): void {
+                // @phpstan-ignore staticMethod.dynamicCall
                 $query->whereNull($pivot . '.expires_at')
                     ->orWhere($pivot . '.expires_at', '>', Carbon::now());
             });
@@ -91,7 +100,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
         /** @var string $table */
         $table   = config('authorization.tables.authorizable_policies', 'authorizable_policies');
         $columns = self::authorizationResolveGrantPivotColumns('authorizable_policies', 'policy_column', 'policy_id');
-        $prior   = $this->authorizationReadGrantPivot($table, $columns, (string) $policy->getKey());
+        $prior   = self::authorizationReadGrantPivot($this, $table, $columns, (string) $policy->getKey());
 
         $this->policies()->syncWithoutDetaching([
             (string) $policy->getKey() => ['expires_at' => $expiresAt],
@@ -176,8 +185,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
             unset($this->relations['policies']);
         }
 
-        /** @var array{attached?: array<int, mixed>, detached?: array<int, mixed>, updated?: array<int, mixed>} $result */
-        foreach ($result['attached'] ?? [] as $id) {
+        foreach ($result['attached'] as $id) {
             $model = $resolved[(string) $id] ?? $this->lookupPolicyById((string) $id);
 
             if ($model instanceof Policy) {
@@ -185,7 +193,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
             }
         }
 
-        foreach ($result['detached'] ?? [] as $id) {
+        foreach ($result['detached'] as $id) {
             $model = $this->lookupPolicyById((string) $id);
 
             if ($model instanceof Policy) {
@@ -224,7 +232,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
             }
         }
 
-        return \array_values($hydrated);
+        return $hydrated;
     }
 
     /**
@@ -243,8 +251,9 @@ trait HasPolicies // @phpstan-ignore trait.unused
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
         $class = config('authorization.models.policy', Policy::class);
 
-        /** @var \SineMacula\Laravel\Authorization\Models\Policy|null $model */
-        return $class::query()->whereKey($id)->first();
+        $model = $class::query()->whereKey($id)->first();
+
+        return $model instanceof Policy ? $model : null;
     }
 
     /**
@@ -253,7 +262,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * evaluation set.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
-     * @param  \SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyDocumentException  $exception
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException  $exception
      * @return void
      */
     private static function logMalformedPolicy(Policy $policy, InvalidPolicyDocumentException $exception): void
@@ -280,7 +289,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
                 "Authorization: skipping malformed policy '{$policy->getKey()}' — " . $exception->getMessage(),
                 [
                     'policy_id'   => (string) $policy->getKey(),
-                    'policy_name' => (string) ($policy->name ?? ''),
+                    'policy_name' => $policy->name ?? '',
                     'reason'      => $exception->getMessage(),
                 ],
             );

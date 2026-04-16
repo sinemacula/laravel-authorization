@@ -10,11 +10,11 @@ use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
-use SineMacula\Laravel\Authorization\Events\IdentityRoleAssigned;
-use SineMacula\Laravel\Authorization\Events\IdentityRoleExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\IdentityRoleRevoked;
+use SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
-use SineMacula\Laravel\Authorization\Models\AuthorizableRolePivot;
+use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizableRolePivot;
 use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
@@ -30,6 +30,8 @@ use SineMacula\Laravel\Authorization\Models\Role;
  * @copyright   2026 Sine Macula Limited
  *
  * @phpstan-require-extends \Illuminate\Database\Eloquent\Model
+ *
+ * @phpstan-require-implements \SineMacula\Laravel\Authorization\Contracts\SupportsRoles
  */
 trait HasRoles // @phpstan-ignore trait.unused
 {
@@ -45,7 +47,7 @@ trait HasRoles // @phpstan-ignore trait.unused
      * `withPivot()` so consumers can inspect remaining lifetime
      * on the cast `pivot` attribute.
      *
-     * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, static>
+     * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, $this, \SineMacula\Laravel\Authorization\Models\Pivots\AuthorizableRolePivot, 'pivot'>
      */
     public function roles(): MorphToMany
     {
@@ -55,6 +57,12 @@ trait HasRoles // @phpstan-ignore trait.unused
         /** @var string $pivot */
         $pivot = config('authorization.tables.authorizable_roles', 'authorizable_roles');
 
+        // The `where(...)` and inner `whereNull()/orWhere()` calls are
+        // resolved by PHPStan to static methods on Eloquent's Builder
+        // via Laravel's annotation soup — the underlying dispatch is
+        // instance-level. Same pattern, same justification, as
+        // `GuardScopedLookup`.
+        // @phpstan-ignore staticMethod.dynamicCall
         return $this->morphToMany(
             related: $model,
             name: 'authorizable',
@@ -64,7 +72,8 @@ trait HasRoles // @phpstan-ignore trait.unused
         )
             ->using(AuthorizableRolePivot::class)
             ->withPivot('expires_at')
-            ->where(static function ($query) use ($pivot): void {
+            ->where(static function (\Illuminate\Database\Eloquent\Builder $query) use ($pivot): void {
+                // @phpstan-ignore staticMethod.dynamicCall
                 $query->whereNull($pivot . '.expires_at')
                     ->orWhere($pivot . '.expires_at', '>', Carbon::now());
             });
@@ -92,7 +101,7 @@ trait HasRoles // @phpstan-ignore trait.unused
         /** @var string $table */
         $table   = config('authorization.tables.authorizable_roles', 'authorizable_roles');
         $columns = self::authorizationResolveGrantPivotColumns('authorizable_roles', 'role_column', 'role_id');
-        $prior   = $this->authorizationReadGrantPivot($table, $columns, (string) $model->getKey());
+        $prior   = self::authorizationReadGrantPivot($this, $table, $columns, (string) $model->getKey());
 
         $this->roles()->syncWithoutDetaching([
             (string) $model->getKey() => ['expires_at' => $expiresAt],
@@ -171,12 +180,11 @@ trait HasRoles // @phpstan-ignore trait.unused
             unset($this->relations['roles']);
         }
 
-        /** @var array{attached?: array<int, mixed>, detached?: array<int, mixed>, updated?: array<int, mixed>} $result */
-        foreach ($result['attached'] ?? [] as $id) {
+        foreach ($result['attached'] as $id) {
             Event::dispatch(new IdentityRoleAssigned($this, $resolved[(string) $id] ?? $this->resolveRoleById((string) $id)));
         }
 
-        foreach ($result['detached'] ?? [] as $id) {
+        foreach ($result['detached'] as $id) {
             Event::dispatch(new IdentityRoleRevoked($this, $this->resolveRoleById((string) $id)));
         }
 
@@ -275,27 +283,15 @@ trait HasRoles // @phpstan-ignore trait.unused
             return true;
         }
 
-        if (!($this instanceof SupportsRoles) || !($target instanceof SupportsRoles)) {
-            return false;
-        }
+        $actorRank = $this instanceof SupportsRoles ? $this->highestRank() : null;
 
-        $actorRank = $this->highestRank();
-
-        if ($actorRank === null) {
-            return false;
-        }
-
-        if (!\method_exists($target, 'roles')) {
+        if ($actorRank === null || !($target instanceof SupportsRoles) || !\method_exists($target, 'roles')) {
             return false;
         }
 
         $targetRank = $this->computeHighestRank($target->roles()->get());
 
-        if ($targetRank === null) {
-            return true;
-        }
-
-        return $actorRank < $targetRank;
+        return $targetRank === null || $actorRank < $targetRank;
     }
 
     // ------------------------------------------------------------------
@@ -347,11 +343,7 @@ trait HasRoles // @phpstan-ignore trait.unused
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
         $class = config('authorization.models.role', Role::class);
 
-        $guard = \method_exists($this, 'getAuthorizationGuard')
-            ? $this->getAuthorizationGuard()
-            : null;
-
-        return $class::resolveByName($role, $guard);
+        return $class::resolveByName($role, self::authorizationResolveGuard($this));
     }
 
     /**

@@ -4,12 +4,17 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Observers\PermissionObserver;
+use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenant;
@@ -28,6 +33,15 @@ use Tests\TestCase;
  *
  * @internal
  */
+#[CoversClass(TenantScope::class)]
+#[CoversClass(Role::class)]
+#[CoversClass(Permission::class)]
+#[CoversClass(RoleObserver::class)]
+#[CoversClass(PermissionObserver::class)]
+#[CoversClass(InvalidTenantException::class)]
+#[CoversClass(InvalidTenantColumnsException::class)]
+#[CoversClass(ConfigValidator::class)]
+#[CoversClass(InvalidAuthorizationConfigException::class)]
 class TenantScopingTest extends TestCase
 {
     public function testNullResolverShowsAllRoles(): void

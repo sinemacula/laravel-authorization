@@ -6,13 +6,13 @@ namespace Tests\Unit\Exceptions;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
-use SineMacula\Laravel\Authorization\Enums\PolicyEffect;
+use SineMacula\Laravel\Authorization\Database\MigrationCollisionException;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
+use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\GateConflictException;
-use SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyDocumentException;
-use SineMacula\Laravel\Authorization\Exceptions\MigrationCollisionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 

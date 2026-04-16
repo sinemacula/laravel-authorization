@@ -14,8 +14,8 @@ use SineMacula\Laravel\Authorization\Enums\OrphanSide;
 use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\OrphanedRolePermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
 use SineMacula\Laravel\Authorization\Models\Role;
-use SineMacula\Laravel\Authorization\Models\RolePermission;
 use Tests\TestCase;
 
 /**
@@ -357,7 +357,7 @@ final class RolePermissionPivotTest extends TestCase
      * Instantiate a fresh pivot with the given attributes set.
      *
      * @param  array<string, mixed>  $attributes
-     * @return \SineMacula\Laravel\Authorization\Models\RolePermission
+     * @return \SineMacula\Laravel\Authorization\Models\Pivots\RolePermission
      */
     private function newPivot(array $attributes): RolePermission
     {

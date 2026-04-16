@@ -27,7 +27,7 @@ trait ResolvesIdentity
      * model does not implement `AuthorizableIdentity`.
      *
      * @param  string  $identity
-     * @return \Illuminate\Database\Eloquent\Model&\SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity|null
+     * @return (\Illuminate\Database\Eloquent\Model&\SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity)|null
      */
     protected function resolveIdentity(string $identity): (AuthorizableIdentity&Model)|null
     {
@@ -75,7 +75,7 @@ trait ResolvesIdentity
             return null;
         }
 
-        /** @var \Illuminate\Database\Eloquent\Model&\SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity */
+        /** @var (\Illuminate\Database\Eloquent\Model&\SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity) */
         return $model;
     }
 }
