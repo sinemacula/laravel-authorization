@@ -31,7 +31,7 @@ trait HasContainerInstance
     public static function instance(): ?static
     {
         if (!\function_exists('app')) {
-            return null; // @codeCoverageIgnore — defensive fallback when the Laravel `app` helper is unavailable (non-Laravel embedding).
+            return null; // @codeCoverageIgnore
         }
 
         $container = app();

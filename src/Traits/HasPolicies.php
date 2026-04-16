@@ -258,9 +258,12 @@ trait HasPolicies // @phpstan-ignore trait.unused
      */
     private static function logMalformedPolicy(Policy $policy, InvalidPolicyDocumentException $exception): void
     {
+        // @codeCoverageIgnoreStart
+        // Defensive: the Laravel `logger()` helper is always present under a booted framework, so this fallback is reachable only from non-Laravel embeddings.
         if (!\function_exists('logger')) {
             return;
         }
+        // @codeCoverageIgnoreEnd
 
         try {
             /** @var \Illuminate\Log\LogManager $logger */

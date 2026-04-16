@@ -68,7 +68,7 @@ final class AuthGuardPrincipalResolver implements PrincipalResolver
     private static function defaultGuard(): string
     {
         if (!\function_exists('config')) {
-            return 'web'; // @codeCoverageIgnore — defensive fallback when the Laravel `config` helper is unavailable (non-Laravel embedding).
+            return 'web'; // @codeCoverageIgnore
         }
 
         /** @var string|null $guard */

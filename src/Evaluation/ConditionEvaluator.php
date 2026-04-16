@@ -230,7 +230,8 @@ final class ConditionEvaluator
     {
         try {
             return \strtotime($value);
-            // @codeCoverageIgnoreStart — defensive: `strtotime()` returns false on PHP 8+ rather than raising, retained for forward-compatibility with ext-date engine changes.
+            // @codeCoverageIgnoreStart
+            // Defensive: `strtotime()` returns false on PHP 8+ rather than raising, retained for forward-compatibility with ext-date engine changes.
         } catch (\Throwable) {
             return false;
         }

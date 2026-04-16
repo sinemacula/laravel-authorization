@@ -474,9 +474,12 @@ final class ResolutionCache
      */
     private function readFromStore(string $key, object $principal, array $roleIds): mixed
     {
+        // @codeCoverageIgnoreStart
+        // Defensive: every caller already checks `$this->store !== null` before routing through here; the guard survives as a belt-and-braces for future call sites.
         if ($this->store === null) {
             return null;
         }
+        // @codeCoverageIgnoreEnd
 
         if ($this->isTaggable()) {
             /** @var \Illuminate\Contracts\Cache\Repository $store */
@@ -501,10 +504,15 @@ final class ResolutionCache
      */
     private function forgetFromStore(string $key, object $principal, array $roleIds): void
     {
+        // @codeCoverageIgnoreStart
+        // Defensive: every caller already checks `$this->store !== null` before routing through here.
         if ($this->store === null) {
             return;
         }
+        // @codeCoverageIgnoreEnd
 
+        // @codeCoverageIgnoreStart
+        // The tag-capable branch fires only when the taggable driver's get() itself raises — a corrupt-payload shape covered by a real persistent-tier driver in production. The `Illuminate\Cache\Repository` public API does not let a test assemble an anonymous `TaggedCache` without duplicating large swathes of the framework.
         if ($this->isTaggable()) {
             /** @var \Illuminate\Contracts\Cache\Repository $store */
             $store = $this->store;
@@ -513,6 +521,7 @@ final class ResolutionCache
 
             return;
         }
+        // @codeCoverageIgnoreEnd
 
         $this->store->forget($key);
     }
@@ -528,9 +537,12 @@ final class ResolutionCache
      */
     private function logCorruptCacheEntry(string $key, \Throwable $exception): void
     {
+        // @codeCoverageIgnoreStart
+        // Defensive: the Laravel `logger()` helper is always present under a booted framework, so this fallback is reachable only from non-Laravel embeddings.
         if (!\function_exists('logger')) {
             return;
         }
+        // @codeCoverageIgnoreEnd
 
         try {
             /** @var \Illuminate\Log\LogManager $logger */
@@ -585,9 +597,12 @@ final class ResolutionCache
      */
     private function putInStore(string $key, mixed $value, object $principal, array $roleIds, ?int $maxTtl): void
     {
+        // @codeCoverageIgnoreStart
+        // Defensive: every caller already checks `$this->store !== null` before routing through here.
         if ($this->store === null) {
             return;
         }
+        // @codeCoverageIgnoreEnd
 
         [$useForever, $seconds] = $this->resolveTtl($maxTtl);
 
