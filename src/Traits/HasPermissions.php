@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
 use SineMacula\Laravel\Authorization\Events\IdentityPermissionExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\IdentityPermissionGranted;
 use SineMacula\Laravel\Authorization\Events\IdentityPermissionRevoked;
@@ -242,8 +243,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
             return $cache->rememberPermissions(
                 $this,
                 fn (): array => $this->computePermissions(),
-                $nearest,
-                $roleIds,
+                new ResolutionCacheContext(maxTtl: $nearest, roleIds: $roleIds),
             );
         }
 

@@ -6,7 +6,9 @@ namespace Tests\Unit\Evaluation;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Enums\PolicyEffect;
+use SineMacula\Laravel\Authorization\Enums\TraceDecision;
 use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 
@@ -29,10 +31,10 @@ final class EvaluationResultTest extends TestCase
     public function testAllowedFactory(): void
     {
         $statement = new Statement(PolicyEffect::ALLOW, ['x']);
-        $result    = EvaluationResult::allowed($statement, [['policy' => 'p', 'statement_index' => 0, 'decision' => 'matched', 'reason' => 'explicit allow']]);
+        $result    = EvaluationResult::allowed($statement, [['policy' => 'p', 'statement_index' => 0, 'decision' => TraceDecision::MATCHED, 'reason' => 'explicit allow']]);
 
         self::assertTrue($result->allowed);
-        self::assertSame(EvaluationResult::REASON_EXPLICIT_ALLOW, $result->reason);
+        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $result->reason);
         self::assertSame($statement, $result->matchedStatement);
         self::assertCount(1, $result->trace);
     }
@@ -48,7 +50,7 @@ final class EvaluationResultTest extends TestCase
         $result    = EvaluationResult::explicitlyDenied($statement);
 
         self::assertFalse($result->allowed);
-        self::assertSame(EvaluationResult::REASON_EXPLICIT_DENY, $result->reason);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $result->reason);
         self::assertSame($statement, $result->matchedStatement);
     }
 
@@ -62,7 +64,7 @@ final class EvaluationResultTest extends TestCase
         $result = EvaluationResult::implicitlyDenied();
 
         self::assertFalse($result->allowed);
-        self::assertSame(EvaluationResult::REASON_IMPLICIT_DENY, $result->reason);
+        self::assertSame(DecisionReason::IMPLICIT_DENY, $result->reason);
         self::assertNull($result->matchedStatement);
     }
 
@@ -76,7 +78,7 @@ final class EvaluationResultTest extends TestCase
         $result = EvaluationResult::rbacAllowed();
 
         self::assertTrue($result->allowed);
-        self::assertSame(EvaluationResult::REASON_RBAC_ALLOW, $result->reason);
+        self::assertSame(DecisionReason::RBAC_ALLOW, $result->reason);
         self::assertNull($result->matchedStatement);
     }
 
@@ -88,8 +90,8 @@ final class EvaluationResultTest extends TestCase
     public function testExplainIncludesTraceEntries(): void
     {
         $trace = [
-            ['policy' => 'p', 'statement_index' => 0, 'decision' => 'matched', 'reason' => 'explicit allow'],
-            ['policy' => 'p', 'statement_index' => 1, 'decision' => 'skipped', 'reason' => 'conditions not satisfied'],
+            ['policy' => 'p', 'statement_index' => 0, 'decision' => TraceDecision::MATCHED, 'reason' => 'explicit allow'],
+            ['policy' => 'p', 'statement_index' => 1, 'decision' => TraceDecision::SKIPPED, 'reason' => 'conditions not satisfied'],
         ];
 
         $result = EvaluationResult::allowed(new Statement(PolicyEffect::ALLOW, ['x']), $trace);

@@ -7,7 +7,7 @@ namespace Tests\Feature;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversTrait;
-use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
+use SineMacula\Laravel\Authorization\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Traits\HasPolicies;
@@ -120,6 +120,6 @@ final class FailClosedPolicyHydrationTest extends TestCase
         $result = Authorization::for($user->fresh())->evaluate('posts:create');
 
         self::assertTrue($result->allowed);
-        self::assertSame(EvaluationResult::REASON_EXPLICIT_ALLOW, $result->reason);
+        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $result->reason);
     }
 }

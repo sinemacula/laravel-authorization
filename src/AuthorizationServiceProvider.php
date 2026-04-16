@@ -13,7 +13,15 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\ServiceProvider;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
+use SineMacula\Laravel\Authorization\Console\GrantRoleCommand;
+use SineMacula\Laravel\Authorization\Console\ListPermissionsCommand;
+use SineMacula\Laravel\Authorization\Console\ListRolesCommand;
+use SineMacula\Laravel\Authorization\Console\MigrateSpatieCommand;
+use SineMacula\Laravel\Authorization\Console\RevokeRoleCommand;
+use SineMacula\Laravel\Authorization\Console\WhyCanCommand;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableResource;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
+use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
@@ -32,6 +40,7 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Listeners\InvalidateResolutionCache;
+use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Resolvers\CachingPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
@@ -77,7 +86,9 @@ class AuthorizationServiceProvider extends ServiceProvider
     {
         $this->validateConfig();
         $this->offerPublishing();
+        $this->registerCommands();
         $this->registerGates();
+        $this->registerPermissionProviders();
         $this->registerCacheInvalidationListeners();
         $this->registerOctaneResetListener();
         $this->registerRouteMiddleware();
@@ -100,6 +111,26 @@ class AuthorizationServiceProvider extends ServiceProvider
         $config = (array) $this->app['config']->get('authorization', []);
 
         ConfigValidator::validate($config, $this->app);
+    }
+
+    /**
+     * Register the package's Artisan commands when the application
+     * is running in the console.
+     *
+     * @return void
+     */
+    protected function registerCommands(): void
+    {
+        if ($this->app->runningInConsole()) {
+            $this->commands([
+                ListRolesCommand::class,
+                ListPermissionsCommand::class,
+                GrantRoleCommand::class,
+                RevokeRoleCommand::class,
+                WhyCanCommand::class,
+                MigrateSpatieCommand::class,
+            ]);
+        }
     }
 
     /**
@@ -448,6 +479,51 @@ class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
+     * Walk every configured permission provider and create
+     * `Permission` rows for each string the provider declares.
+     *
+     * Providers are instantiated through the container so they can
+     * inject dependencies. Each permission string is persisted via
+     * `firstOrCreate` keyed on `(name, guard_name)` so the method
+     * is idempotent across boots.
+     *
+     * @return void
+     */
+    protected function registerPermissionProviders(): void
+    {
+        /** @var array<int, mixed> $providers */
+        $providers = $this->app['config']->get('authorization.permission_providers', []);
+
+        if ($providers === []) {
+            return;
+        }
+
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $permissionModel */
+        $permissionModel = $this->app['config']->get('authorization.models.permission', Permission::class);
+
+        foreach ($providers as $providerClass) {
+            if (!\is_string($providerClass) || !\is_subclass_of($providerClass, PermissionProvider::class)) {
+                continue;
+            }
+
+            /** @var \SineMacula\Laravel\Authorization\Contracts\PermissionProvider $provider */
+            $provider = $this->app->make($providerClass);
+
+            $guard = $provider->guard();
+
+            foreach ($provider->permissions() as $permission) {
+                if (!\is_string($permission) || $permission === '') {
+                    continue;
+                }
+
+                $permissionModel::firstOrCreate(
+                    ['name' => $permission, 'guard_name' => $guard],
+                );
+            }
+        }
+    }
+
+    /**
      * Register a single Gate for the supplied enum case.
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\PermissionEnum  $case
@@ -577,6 +653,10 @@ class AuthorizationServiceProvider extends ServiceProvider
     {
         if (\is_string($value)) {
             return $value;
+        }
+
+        if ($value instanceof AuthorizableResource) {
+            return $value->toResourceIdentifier();
         }
 
         if ($value instanceof Model) {

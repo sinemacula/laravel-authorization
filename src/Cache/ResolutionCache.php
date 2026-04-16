@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Cache;
 
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
+use SineMacula\Laravel\Authorization\Traits\HasContainerInstance;
 
 /**
  * Two-tier cache for principal resolution lookups.
@@ -51,6 +52,8 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy;
  */
 final class ResolutionCache
 {
+    use HasContainerInstance;
+
     /** @var array<string, mixed> In-memory per-principal memo, keyed by full cache key. */
     private array $memo = [];
 
@@ -78,45 +81,17 @@ final class ResolutionCache
     ) {}
 
     /**
-     * Return the container-bound resolution cache, or null when the
-     * package is not booted / the binding is not registered.
-     *
-     * Single, centralised service-locator call — every consumer that
-     * cannot take the cache via constructor injection (notably the
-     * model traits, which mix into Eloquent models and cannot
-     * expand the constructor surface) funnels through this accessor
-     * instead of reaching for `app()` directly.
-     *
-     * @return self|null
-     */
-    public static function instance(): ?self
-    {
-        if (!\function_exists('app')) {
-            return null;
-        }
-
-        $container = app();
-
-        if (!$container->bound(self::class)) {
-            return null;
-        }
-
-        /** @var self */
-        return $container->make(self::class);
-    }
-
-    /**
      * Return the cached list of policies for the principal, or
      * invoke the resolver and cache its output.
      *
      * @param  object  $principal
      * @param  \Closure(): array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $resolver
-     * @param  int|null  $maxTtl
-     * @param  array<int, string>  $roleIds
+     * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext|null  $context
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
      */
-    public function rememberPolicies(object $principal, \Closure $resolver, ?int $maxTtl = null, array $roleIds = []): array
+    public function rememberPolicies(object $principal, \Closure $resolver, ?ResolutionCacheContext $context = null): array
     {
+        $ctx = $context ?? new ResolutionCacheContext;
         $key = $this->key('policies', $principal);
 
         if (\array_key_exists($key, $this->memo)) {
@@ -127,7 +102,7 @@ final class ResolutionCache
         if ($this->store !== null) {
             try {
                 /** @var mixed $raw */
-                $raw = $this->readFromStore($key, $principal, $roleIds);
+                $raw = $this->readFromStore($key, $principal, $ctx->roleIds);
 
                 if (\is_array($raw)) {
                     $policies = [];
@@ -149,7 +124,7 @@ final class ResolutionCache
                 // through to the fresh-read path below. Matches the
                 // fail-closed + self-healing pattern used in
                 // `HasPolicies::logMalformedPolicy()`.
-                $this->forgetFromStore($key, $principal, $roleIds);
+                $this->forgetFromStore($key, $principal, $ctx->roleIds);
                 $this->logCorruptCacheEntry($key, $exception);
             }
         }
@@ -160,7 +135,7 @@ final class ResolutionCache
 
         if ($this->store !== null) {
             $documents = \array_map(static fn (Policy $policy): array => $policy->toArray(), $policies);
-            $this->putInStore($key, $documents, $principal, $roleIds, $maxTtl);
+            $this->putInStore($key, $documents, $principal, $ctx->roleIds, $ctx->maxTtl);
         }
 
         return $policies;
@@ -172,13 +147,14 @@ final class ResolutionCache
      *
      * @param  object  $principal
      * @param  \Closure(): array<int, string>  $resolver
-     * @param  int|null  $maxTtl
-     * @param  array<int, string>  $roleIds
+     * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext|null  $context
      * @return array<int, string>
      */
-    public function rememberPermissions(object $principal, \Closure $resolver, ?int $maxTtl = null, array $roleIds = []): array
+    public function rememberPermissions(object $principal, \Closure $resolver, ?ResolutionCacheContext $context = null): array
     {
-        return $this->rememberStringList('permissions', $principal, $resolver, $maxTtl, $roleIds);
+        $ctx = $context ?? new ResolutionCacheContext;
+
+        return $this->rememberStringList('permissions', $principal, $resolver, $ctx->maxTtl, $ctx->roleIds);
     }
 
     /**
@@ -187,13 +163,14 @@ final class ResolutionCache
      *
      * @param  object  $principal
      * @param  \Closure(): array<int, string>  $resolver
-     * @param  int|null  $maxTtl
-     * @param  array<int, string>  $roleIds
+     * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext|null  $context
      * @return array<int, string>
      */
-    public function rememberRoles(object $principal, \Closure $resolver, ?int $maxTtl = null, array $roleIds = []): array
+    public function rememberRoles(object $principal, \Closure $resolver, ?ResolutionCacheContext $context = null): array
     {
-        return $this->rememberStringList('roles', $principal, $resolver, $maxTtl, $roleIds);
+        $ctx = $context ?? new ResolutionCacheContext;
+
+        return $this->rememberStringList('roles', $principal, $resolver, $ctx->maxTtl, $ctx->roleIds);
     }
 
     /**

@@ -10,6 +10,7 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
@@ -130,7 +131,7 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
         $result = Authorization::for($user)->evaluate('fixed:act');
 
         self::assertTrue($result->allowed);
-        self::assertSame(EvaluationResult::REASON_EXPLICIT_ALLOW, $result->reason);
+        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $result->reason);
     }
 
     /**
@@ -160,7 +161,7 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
 
         self::assertNotNull($last);
         self::assertFalse($last->allowed);
-        self::assertSame(EvaluationResult::REASON_EXPLICIT_DENY, $last->reason);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $last->reason);
     }
 
     /**
@@ -184,7 +185,7 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
 
         self::assertNotNull($last);
         self::assertTrue($last->allowed);
-        self::assertSame(EvaluationResult::REASON_EXPLICIT_ALLOW, $last->reason);
+        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $last->reason);
     }
 
     /**

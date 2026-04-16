@@ -6,14 +6,17 @@ namespace SineMacula\Laravel\Authorization;
 
 use Illuminate\Contracts\Events\Dispatcher;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Traits\HasContainerInstance;
 
 /**
  * Authorization manager — the facade-facing entry point.
@@ -30,6 +33,8 @@ use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
  */
 class AuthorizationManager
 {
+    use HasContainerInstance;
+
     /**
      * Explicit principal supplied via `for()`. Ignored unless the
      * override flag is true.
@@ -80,33 +85,6 @@ class AuthorizationManager
         private readonly ?Dispatcher $events = null,
 
     ) {}
-
-    /**
-     * Return the container-bound authorization manager, or null when
-     * the package is not booted / the binding is not registered.
-     *
-     * Single, centralised service-locator call — consumers that cannot
-     * take the manager via constructor injection (notably static
-     * Blade-directive helpers) funnel through this accessor instead
-     * of reaching for `app()` directly.
-     *
-     * @return self|null
-     */
-    public static function instance(): ?self
-    {
-        if (!\function_exists('app')) {
-            return null;
-        }
-
-        $container = app();
-
-        if (!$container->bound(self::class)) {
-            return null;
-        }
-
-        /** @var self */
-        return $container->make(self::class);
-    }
 
     /**
      * Determine whether the current principal is allowed to perform
@@ -215,6 +193,51 @@ class AuthorizationManager
     }
 
     /**
+     * Return a map of every registered permission to its effective
+     * decision for the current principal.
+     *
+     * Walks every case of every configured `PermissionEnum` and
+     * evaluates each through the full 4-step evaluator (explicit
+     * deny, explicit allow, RBAC, implicit deny). The result is an
+     * associative array keyed by permission string with boolean
+     * values indicating whether the principal is allowed.
+     *
+     * **Performance note:** this method performs N evaluations where
+     * N is the total number of registered enum cases. Callers should
+     * cache the result when rendering permission-picker UIs or
+     * capability checklists rather than calling this on every
+     * request.
+     *
+     * @param  array<string, mixed>  $context
+     * @return array<string, bool>
+     */
+    public function effectivePermissions(array $context = []): array
+    {
+        /** @var array<int, mixed> $enums */
+        $enums = \function_exists('config')
+            ? (array) config('authorization.permission_enums', [])
+            : [];
+
+        $permissions = [];
+
+        foreach ($enums as $enumClass) {
+            if (!\is_string($enumClass) || !\is_subclass_of($enumClass, PermissionEnum::class)) {
+                continue;
+            }
+
+            /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\PermissionEnum> $className */
+            $className = $enumClass;
+
+            foreach ($className::cases() as $case) {
+                $action               = $case->toString();
+                $permissions[$action] = $this->can($action, null, $context);
+            }
+        }
+
+        return $permissions;
+    }
+
+    /**
      * Return a scoped manager bound to the supplied principal.
      *
      * @param  object  $principal
@@ -283,8 +306,8 @@ class AuthorizationManager
 
         $policies = $this->gatherPolicies($principal);
         $result   = $this->evaluator->evaluate($policies, $action, $resource, $context);
-        $decisive = $result->reason === EvaluationResult::REASON_EXPLICIT_DENY
-            || $result->reason      === EvaluationResult::REASON_EXPLICIT_ALLOW;
+        $decisive = $result->reason === DecisionReason::EXPLICIT_DENY
+            || $result->reason      === DecisionReason::EXPLICIT_ALLOW;
 
         if (!$decisive && $principal instanceof AuthorizableIdentity && $principal->hasPermission($action)) {
             return EvaluationResult::rbacAllowed($result->trace);

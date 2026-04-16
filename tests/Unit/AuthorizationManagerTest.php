@@ -12,7 +12,7 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
-use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
+use SineMacula\Laravel\Authorization\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
@@ -128,7 +128,7 @@ final class AuthorizationManagerTest extends TestCase
         $result = $manager->for($principal)->evaluate('posts:create');
 
         self::assertTrue($result->allowed);
-        self::assertSame(EvaluationResult::REASON_RBAC_ALLOW, $result->reason);
+        self::assertSame(DecisionReason::RBAC_ALLOW, $result->reason);
     }
 
     /**
@@ -155,7 +155,7 @@ final class AuthorizationManagerTest extends TestCase
         $result = $manager->for($principal)->evaluate('posts:create');
 
         self::assertTrue($result->allowed);
-        self::assertSame(EvaluationResult::REASON_EXPLICIT_ALLOW, $result->reason);
+        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $result->reason);
     }
 
     /**
@@ -182,7 +182,7 @@ final class AuthorizationManagerTest extends TestCase
         $result = $manager->for($principal)->evaluate('posts:delete');
 
         self::assertFalse($result->allowed);
-        self::assertSame(EvaluationResult::REASON_EXPLICIT_DENY, $result->reason);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $result->reason);
     }
 
     /**

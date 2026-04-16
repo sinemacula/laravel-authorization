@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
 use SineMacula\Laravel\Authorization\Enums\PolicyEffect;
+use SineMacula\Laravel\Authorization\Enums\TraceDecision;
 
 /**
  * AWS IAM-style policy evaluator.
@@ -32,7 +33,7 @@ final class PolicyEvaluator
      */
     public function evaluate(array $policies, string $action, ?string $resource = null, array $context = []): EvaluationResult
     {
-        /** @var list<array{policy: string, statement_index: int, decision: 'matched'|'skipped', reason: string}> $trace */
+        /** @var list<array{policy: string, statement_index: int, decision: TraceDecision, reason: string}> $trace */
         $trace          = [];
         $allowStatement = null;
 
@@ -42,7 +43,7 @@ final class PolicyEvaluator
                     $trace[] = [
                         'policy'          => $policy->name,
                         'statement_index' => $index,
-                        'decision'        => 'skipped',
+                        'decision'        => TraceDecision::SKIPPED,
                         'reason'          => 'action/resource did not match',
                     ];
 
@@ -53,7 +54,7 @@ final class PolicyEvaluator
                     $trace[] = [
                         'policy'          => $policy->name,
                         'statement_index' => $index,
-                        'decision'        => 'skipped',
+                        'decision'        => TraceDecision::SKIPPED,
                         'reason'          => 'conditions not satisfied',
                     ];
 
@@ -64,7 +65,7 @@ final class PolicyEvaluator
                     $trace[] = [
                         'policy'          => $policy->name,
                         'statement_index' => $index,
-                        'decision'        => 'matched',
+                        'decision'        => TraceDecision::MATCHED,
                         'reason'          => 'explicit deny',
                     ];
 
@@ -74,7 +75,7 @@ final class PolicyEvaluator
                 $trace[] = [
                     'policy'          => $policy->name,
                     'statement_index' => $index,
-                    'decision'        => 'matched',
+                    'decision'        => TraceDecision::MATCHED,
                     'reason'          => 'explicit allow',
                 ];
 

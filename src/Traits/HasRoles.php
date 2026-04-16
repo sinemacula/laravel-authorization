@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
 use SineMacula\Laravel\Authorization\Events\IdentityRoleAssigned;
 use SineMacula\Laravel\Authorization\Events\IdentityRoleExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\IdentityRoleRevoked;
@@ -233,8 +234,7 @@ trait HasRoles // @phpstan-ignore trait.unused
             return $cache->rememberRoles(
                 $this,
                 fn (): array => $this->computeRoles(),
-                $maxTtl,
-                $roleIds,
+                new ResolutionCacheContext(maxTtl: $maxTtl, roleIds: $roleIds),
             );
         }
 

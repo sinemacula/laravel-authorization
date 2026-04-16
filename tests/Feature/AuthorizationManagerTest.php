@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
-use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
+use SineMacula\Laravel\Authorization\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
@@ -74,7 +74,7 @@ final class AuthorizationManagerTest extends TestCase
 
         $result = Authorization::for($user)->evaluate('posts:create');
         self::assertTrue($result->allowed);
-        self::assertSame(EvaluationResult::REASON_RBAC_ALLOW, $result->reason);
+        self::assertSame(DecisionReason::RBAC_ALLOW, $result->reason);
     }
 
     /**
@@ -121,7 +121,7 @@ final class AuthorizationManagerTest extends TestCase
 
         $result = Authorization::for($user)->evaluate('posts:delete');
         self::assertFalse($result->allowed);
-        self::assertSame(EvaluationResult::REASON_EXPLICIT_DENY, $result->reason);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $result->reason);
     }
 
     /**
@@ -321,7 +321,7 @@ final class AuthorizationManagerTest extends TestCase
         $result = Authorization::for($user)->withPolicies([$override])->evaluate('ad:hoc');
 
         self::assertTrue($result->allowed);
-        self::assertSame(EvaluationResult::REASON_EXPLICIT_ALLOW, $result->reason);
+        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $result->reason);
     }
 
     /**

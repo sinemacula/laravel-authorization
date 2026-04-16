@@ -4,6 +4,9 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
+use SineMacula\Laravel\Authorization\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Enums\TraceDecision;
+
 /**
  * Immutable evaluation result.
  *
@@ -15,27 +18,43 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
- * @phpstan-type EvaluationTraceEntry array{policy: string, statement_index: int, decision: 'matched'|'skipped', reason: string}
+ * @phpstan-type EvaluationTraceEntry array{policy: string, statement_index: int, decision: TraceDecision, reason: string}
  */
 final readonly class EvaluationResult
 {
-    /** Reason code indicating an explicit allow from a policy statement. */
+    /**
+     * Reason code indicating an explicit allow from a policy statement.
+     *
+     * @deprecated use DecisionReason::EXPLICIT_ALLOW instead
+     */
     public const string REASON_EXPLICIT_ALLOW = 'explicit_allow';
 
-    /** Reason code indicating an explicit deny from a policy statement. */
+    /**
+     * Reason code indicating an explicit deny from a policy statement.
+     *
+     * @deprecated use DecisionReason::EXPLICIT_DENY instead
+     */
     public const string REASON_EXPLICIT_DENY = 'explicit_deny';
 
-    /** Reason code indicating the evaluator reached implicit deny. */
+    /**
+     * Reason code indicating the evaluator reached implicit deny.
+     *
+     * @deprecated use DecisionReason::IMPLICIT_DENY instead
+     */
     public const string REASON_IMPLICIT_DENY = 'implicit_deny';
 
-    /** Reason code indicating RBAC (roles/permissions) granted the allow. */
+    /**
+     * Reason code indicating RBAC (roles/permissions) granted the allow.
+     *
+     * @deprecated use DecisionReason::RBAC_ALLOW instead
+     */
     public const string REASON_RBAC_ALLOW = 'rbac_allow';
 
     /**
      * Create a new evaluation result.
      *
      * @param  bool  $allowed
-     * @param  string  $reason
+     * @param  \SineMacula\Laravel\Authorization\Enums\DecisionReason  $reason
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement|null  $matchedStatement
      * @param  list<EvaluationTraceEntry>  $trace
      */
@@ -45,7 +64,7 @@ final readonly class EvaluationResult
         public bool $allowed,
 
         /** Reason code describing how the decision was reached. */
-        public string $reason,
+        public DecisionReason $reason,
 
         /** Statement that produced the decision, or null for implicit/RBAC outcomes. */
         public ?Statement $matchedStatement = null,
@@ -66,7 +85,7 @@ final readonly class EvaluationResult
     {
         return new self(
             allowed: true,
-            reason: self::REASON_EXPLICIT_ALLOW,
+            reason: DecisionReason::EXPLICIT_ALLOW,
             matchedStatement: $statement,
             trace: $trace,
         );
@@ -83,7 +102,7 @@ final readonly class EvaluationResult
     {
         return new self(
             allowed: false,
-            reason: self::REASON_EXPLICIT_DENY,
+            reason: DecisionReason::EXPLICIT_DENY,
             matchedStatement: $statement,
             trace: $trace,
         );
@@ -99,7 +118,7 @@ final readonly class EvaluationResult
     {
         return new self(
             allowed: false,
-            reason: self::REASON_IMPLICIT_DENY,
+            reason: DecisionReason::IMPLICIT_DENY,
             trace: $trace,
         );
     }
@@ -114,7 +133,7 @@ final readonly class EvaluationResult
     {
         return new self(
             allowed: true,
-            reason: self::REASON_RBAC_ALLOW,
+            reason: DecisionReason::RBAC_ALLOW,
             trace: $trace,
         );
     }
@@ -127,14 +146,7 @@ final readonly class EvaluationResult
     public function explain(): string
     {
         $verdict = $this->allowed ? 'ALLOW' : 'DENY';
-        $reason  = match ($this->reason) {
-            self::REASON_EXPLICIT_ALLOW => 'explicit allow from a policy statement',
-            self::REASON_EXPLICIT_DENY  => 'explicit deny from a policy statement',
-            self::REASON_RBAC_ALLOW     => 'RBAC grant (direct permission or role-inherited)',
-            default                     => 'implicit deny (no statement matched)',
-        };
-
-        $summary = \sprintf('%s — %s.', $verdict, $reason);
+        $summary = \sprintf('%s — %s.', $verdict, $this->reason->label());
 
         if ($this->trace === []) {
             return $summary;
@@ -145,7 +157,7 @@ final readonly class EvaluationResult
         foreach ($this->trace as $entry) {
             $lines[] = \sprintf(
                 '  [%s] %s#%d — %s',
-                $entry['decision'],
+                $entry['decision']->value,
                 $entry['policy'],
                 $entry['statement_index'],
                 $entry['reason'],
