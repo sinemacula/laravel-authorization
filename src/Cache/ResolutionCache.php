@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Cache;
 
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
-use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
 
 /**
@@ -95,13 +94,32 @@ final class ResolutionCache
         }
 
         if ($this->store !== null) {
-            /** @var array<int, array<string, mixed>>|null $raw */
-            $raw = $this->store->get($key);
+            try {
+                /** @var mixed $raw */
+                $raw = $this->store->get($key);
 
-            if (\is_array($raw)) {
-                $policies = \array_map(static fn (array $document): Policy => Policy::fromArray($document), $raw);
+                if (\is_array($raw)) {
+                    $policies = [];
 
-                return $this->memo[$key] = $policies;
+                    foreach ($raw as $document) {
+                        if (!\is_array($document)) {
+                            throw new \UnexpectedValueException('Cached policy entry is not an array document.');
+                        }
+
+                        // @var array<string, mixed> $document
+                        $policies[] = Policy::fromArray($document);
+                    }
+
+                    return $this->memo[$key] = $policies;
+                }
+            } catch (\Throwable $exception) {
+                // Corrupt persistent-cache entry — forget the key,
+                // log through the `authorization` channel, and fall
+                // through to the fresh-read path below. Matches the
+                // fail-closed + self-healing pattern used in
+                // `HasPolicies::logMalformedPolicy()`.
+                $this->store->forget($key);
+                $this->logCorruptCacheEntry($key, $exception);
             }
         }
 
@@ -201,11 +219,18 @@ final class ResolutionCache
         }
 
         if ($this->store !== null) {
-            /** @var array<int, string>|null $raw */
-            $raw = $this->store->get($key);
+            try {
+                /** @var mixed $raw */
+                $raw = $this->store->get($key);
 
-            if (\is_array($raw)) {
-                return $this->memo[$key] = \array_values(\array_filter($raw, 'is_string'));
+                if (\is_array($raw)) {
+                    return $this->memo[$key] = \array_values(\array_filter($raw, 'is_string'));
+                }
+            } catch (\Throwable $exception) {
+                // Corrupt persistent-cache entry — forget the key,
+                // log, and fall through to the fresh-read path.
+                $this->store->forget($key);
+                $this->logCorruptCacheEntry($key, $exception);
             }
         }
 
@@ -229,14 +254,101 @@ final class ResolutionCache
      */
     private function key(string $kind, object $principal): string
     {
-        $type = $principal instanceof Model
-            ? $principal->getMorphClass()
-            : $principal::class;
-        $id = $principal instanceof Model
-            ? (string) $principal->getKey()
-            : \spl_object_hash($principal);
+        return "{$this->prefix}:{$kind}:" . $this->keyFor($principal);
+    }
 
-        return "{$this->prefix}:{$kind}:{$type}:{$id}";
+    /**
+     * Derive the principal portion of the cache key.
+     *
+     * Eloquent models already expose the canonical pairing
+     * (`getMorphClass()` + `getKey()`) and that remains the first
+     * choice. Non-Eloquent principals — a service-account value
+     * object, a tenant-scoped identity shell, any class implementing
+     * `AuthorizableIdentity` without extending `Model` — are
+     * duck-typed: if they expose compatible `getMorphClass()` /
+     * `getKey()` accessors the persistent tier keys on those and
+     * survives across requests. Principals that expose neither fall
+     * back to the concrete class name plus `spl_object_hash()`,
+     * which is only stable within a single request. The in-memory
+     * memo still benefits; the persistent tier is effectively
+     * per-request for those principals (see ISSUES.md #70 option
+     * (a) — the duck-typed path lets well-behaved custom
+     * principals opt in to cross-request caching without a new
+     * contract).
+     *
+     * @param  object  $principal
+     * @return string
+     */
+    private function keyFor(object $principal): string
+    {
+        $type = $principal::class;
+        $id   = null;
+
+        if (\method_exists($principal, 'getMorphClass')) {
+            /** @var mixed $morph */
+            $morph = $principal->getMorphClass();
+
+            if (\is_string($morph) && $morph !== '') {
+                $type = $morph;
+            }
+        }
+
+        if (\method_exists($principal, 'getKey')) {
+            /** @var mixed $raw */
+            $raw = $principal->getKey();
+
+            if (\is_string($raw) || \is_int($raw)) {
+                $candidate = (string) $raw;
+
+                if ($candidate !== '') {
+                    $id = $candidate;
+                }
+            }
+        }
+
+        if ($id === null) {
+            $id = 'obj:' . \spl_object_hash($principal);
+        }
+
+        return "{$type}:{$id}";
+    }
+
+    /**
+     * Report a corrupt persistent-cache entry without raising — the
+     * caller has already forgotten the key and will recompute via
+     * the resolver, so the cache self-heals on the same request.
+     *
+     * @param  string  $key
+     * @param  \Throwable  $exception
+     * @return void
+     */
+    private function logCorruptCacheEntry(string $key, \Throwable $exception): void
+    {
+        if (!\function_exists('logger')) {
+            return;
+        }
+
+        try {
+            /** @var \Illuminate\Log\LogManager $logger */
+            $logger  = logger();
+            $channel = null;
+
+            try {
+                $channel = $logger->channel('authorization');
+            } catch (\Throwable) {
+                $channel = $logger;
+            }
+
+            $channel->warning(
+                "Authorization: discarding corrupt resolution-cache entry '{$key}' — " . $exception->getMessage(),
+                [
+                    'cache_key' => $key,
+                    'reason'    => $exception->getMessage(),
+                ],
+            );
+        } catch (\Throwable) {
+            // Logging failures are not allowed to abort the check.
+        }
     }
 
     /**

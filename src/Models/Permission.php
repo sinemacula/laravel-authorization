@@ -11,6 +11,7 @@ use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Events\PermissionCreated;
 use SineMacula\Laravel\Authorization\Events\PermissionDeleted;
 use SineMacula\Laravel\Authorization\Events\PermissionUpdated;
+use SineMacula\Laravel\Authorization\Exceptions\SystemPermissionProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
 
@@ -21,12 +22,17 @@ use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
  * to an identity or inherited via a role. The `guard_name` column is
  * nullable: a null value marks the permission as guard-agnostic
  * (applies to every guard), a concrete string scopes it to a single
- * guard.
+ * guard. The `is_system` flag marks platform-shipped permissions as
+ * delete-protected: deletion or a rename of an `is_system = true`
+ * row raises `SystemPermissionProtectedException` unless
+ * `forceSystem()` is invoked to unlock the next operation on the
+ * instance.
  *
  * @property string $id
  * @property string $name
  * @property string|null $guard_name
  * @property string|null $description
+ * @property bool $is_system
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -44,7 +50,27 @@ class Permission extends Model
         'name',
         'guard_name',
         'description',
+        'is_system',
     ];
+
+    /**
+     * The attribute casts.
+     *
+     * @var array<string, string>
+     */
+    protected $casts = [
+        'is_system' => 'boolean',
+    ];
+
+    /**
+     * Per-instance escape-hatch flag. When true, the next delete
+     * or rename bypasses the system-permission protection and
+     * resets to false on completion. Invoked via `forceSystem()` —
+     * never persisted, never inherited across instances.
+     *
+     * @var bool
+     */
+    private bool $systemProtectionBypassed = false;
 
     /**
      * Create a new Eloquent model instance.
@@ -58,6 +84,26 @@ class Permission extends Model
         /** @var string $table */
         $table       = config('authorization.tables.permissions', 'permissions');
         $this->table = $table;
+    }
+
+    /**
+     * Unlock the next protected mutation (delete or rename) on
+     * this instance. Returns `$this` for chaining:
+     *
+     *     $permission->forceSystem()->delete();
+     *
+     * The bypass is **per-instance, single-use, and in-memory** —
+     * it never persists to the database, never leaks across
+     * instances (a `$permission->fresh()` drops it), and resets to
+     * false the moment the guard clause consults it.
+     *
+     * @return static
+     */
+    public function forceSystem(): static
+    {
+        $this->systemProtectionBypassed = true;
+
+        return $this;
     }
 
     /**
@@ -134,12 +180,24 @@ class Permission extends Model
     /**
      * Register the row-lifecycle listeners that translate
      * Eloquent's native `created` / `updated` / `deleted` events
-     * into the package's typed CRUD events.
+     * into the package's typed CRUD events, and enforce the
+     * system-permission protection invariant on `deleting` /
+     * `updating` before the row reaches the database.
      *
      * @return void
      */
     protected static function booted(): void
     {
+        static::deleting(static function (self $permission): void {
+            $permission->assertSystemProtectionAllows('delete');
+        });
+
+        static::updating(static function (self $permission): void {
+            if ($permission->wasSystemPermissionRenamed()) {
+                $permission->assertSystemProtectionAllows('rename');
+            }
+        });
+
         static::created(static function (self $permission): void {
             Event::dispatch(new PermissionCreated($permission));
         });
@@ -150,6 +208,16 @@ class Permission extends Model
 
         static::deleted(static function (self $permission): void {
             Event::dispatch(new PermissionDeleted($permission));
+        });
+
+        // Clear the bypass flag after every completed save so it
+        // cannot hop across an intervening non-protected mutation
+        // (e.g. a description update) and silently unlock the next
+        // rename or delete. `saved` fires after `updating` has had
+        // a chance to consume the flag for a legitimate rename, so
+        // this reset is strictly idempotent on that path.
+        static::saved(static function (self $permission): void {
+            $permission->systemProtectionBypassed = false;
         });
     }
 
@@ -162,5 +230,57 @@ class Permission extends Model
     protected function getAuthorizationNameKind(): string
     {
         return 'permission';
+    }
+
+    /**
+     * Decide whether the supplied mutation is allowed against the
+     * current instance. Consumes the bypass flag so a second
+     * protected operation on the same instance re-arms the
+     * protection.
+     *
+     * @param  string  $operation
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\SystemPermissionProtectedException
+     */
+    private function assertSystemProtectionAllows(string $operation): void
+    {
+        if ((bool) $this->getAttribute('is_system') === false) {
+            return;
+        }
+
+        if ($this->systemProtectionBypassed) {
+            $this->systemProtectionBypassed = false;
+
+            return;
+        }
+
+        // Use the ORIGINAL name — on a rename, `getAttribute('name')`
+        // already reflects the mutated value. Audit consumers want
+        // "which permission was targeted" (the canonical persisted
+        // name), not "what the attempted rename would produce."
+        /** @var string $permissionName */
+        $permissionName = $this->getOriginal('name', $this->getAttribute('name'));
+
+        throw new SystemPermissionProtectedException(permissionName: $permissionName, operation: $operation);
+    }
+
+    /**
+     * Test whether the pending update renames a system permission.
+     * Only rename operations go through the protection check;
+     * description and guard_name bumps pass unconditionally.
+     *
+     * @return bool
+     */
+    private function wasSystemPermissionRenamed(): bool
+    {
+        if (!(bool) $this->getAttribute('is_system')) {
+            return false;
+        }
+
+        /** @var array<string, mixed> $dirty */
+        $dirty = $this->getDirty();
+
+        return \array_key_exists('name', $dirty);
     }
 }

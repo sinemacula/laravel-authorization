@@ -170,6 +170,58 @@ final class SystemRoleProtectionTest extends TestCase
     }
 
     /**
+     * `forceSystem()` is consumed by an intervening non-protected
+     * save (e.g. a description update), so a subsequent rename
+     * without re-arming the bypass is refused. Regression guard
+     * for the flag-hop bug (#75).
+     *
+     * @return void
+     */
+    public function testBypassDoesNotHopAcrossUnrelatedSave(): void
+    {
+        $role = Role::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => 'super-admin',
+            'guard_name' => 'web',
+            'is_system'  => true,
+        ]);
+
+        // Arm the bypass, then perform an unrelated save that
+        // would not consume the flag under the old behaviour.
+        $role->forceSystem();
+        $role->description = 'Updated description.';
+        $role->save();
+
+        // The bypass must be gone: a rename without a fresh
+        // `forceSystem()` call must be refused.
+        $this->expectException(SystemRoleProtectedException::class);
+
+        $role->name = 'renamed-without-bypass';
+        $role->save();
+    }
+
+    /**
+     * `forceSystem()` followed immediately by `delete()` still
+     * succeeds — the `saved` reset must not interfere with the
+     * delete path, which has no `saved` event.
+     *
+     * @return void
+     */
+    public function testForceSystemImmediatelyFollowedByDeleteStillWorks(): void
+    {
+        $role = Role::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => 'decommissioned',
+            'guard_name' => 'web',
+            'is_system'  => true,
+        ]);
+
+        $role->forceSystem()->delete();
+
+        self::assertNull(Role::query()->find($role->getKey()));
+    }
+
+    /**
      * Non-system roles behave as before — no protection, no
      * bypass required.
      *

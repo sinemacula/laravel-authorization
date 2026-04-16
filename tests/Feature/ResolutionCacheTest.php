@@ -256,6 +256,115 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
+     * A non-Eloquent principal — a plain object implementing
+     * `AuthorizableIdentity` without extending `Model` — still gets
+     * cross-request persistent-cache benefit when it exposes the
+     * `getMorphClass()` / `getKey()` duck-typed pair. Regression
+     * coverage for ISSUES.md #70.
+     *
+     * @return void
+     */
+    public function testNonModelPrincipalIsRoutedThroughPersistentCache(): void
+    {
+        $principalId = 'svc:' . Str::uuid()->toString();
+
+        $principal = new class ($principalId) {
+            public function __construct(private readonly string $id) {}
+
+            public function getMorphClass(): string
+            {
+                return 'service-account';
+            }
+
+            public function getKey(): string
+            {
+                return $this->id;
+            }
+        };
+
+        $cache = $this->app->make(ResolutionCache::class);
+        $cache->rememberPermissions($principal, static fn (): array => ['svc:read', 'svc:write']);
+
+        /** @var \Illuminate\Contracts\Cache\Repository $store */
+        $store = Cache::store('array');
+        $keys  = \array_filter(
+            \array_keys((array) $this->extractPrivate($store->getStore(), 'storage') ?? []),
+            static fn (mixed $key): bool => \is_string($key) && \str_contains($key, 'service-account:' . $principalId),
+        );
+
+        self::assertNotEmpty($keys, 'Persistent cache entry should key on the duck-typed morph class and key.');
+
+        // A fresh cache instance reusing the same store must hit the
+        // persistent tier — proves cross-request caching actually
+        // works for non-Model principals.
+        $fresh  = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
+        $result = $fresh->rememberPermissions(
+            $principal,
+            static fn (): array => \PHPUnit\Framework\Assert::fail('Resolver should not be called on a store hit.'),
+        );
+
+        self::assertSame(['svc:read', 'svc:write'], $result);
+    }
+
+    /**
+     * A corrupt persistent-cache payload (wrong shape, partial
+     * data) must not propagate as an exception — the entry is
+     * forgotten, the resolver runs fresh, and the store is
+     * rewritten with the new value. Regression coverage for
+     * ISSUES.md #71.
+     *
+     * @return void
+     */
+    public function testCorruptPersistentCacheEntryIsDiscardedAndRecomputed(): void
+    {
+        $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
+
+        $cache = $this->app->make(ResolutionCache::class);
+
+        // Prime the persistent tier with the correct shape so the
+        // cache key is discoverable, then corrupt it.
+        $cache->rememberPolicies($principal, static fn (): array => []);
+
+        /** @var \Illuminate\Contracts\Cache\Repository $store */
+        $store = Cache::store('array');
+        $keys  = \array_filter(
+            \array_keys((array) $this->extractPrivate($store->getStore(), 'storage') ?? []),
+            static fn (mixed $key): bool => \is_string($key) && \str_starts_with($key, 'authorization-test:policies:'),
+        );
+
+        self::assertNotEmpty($keys);
+        $policyKey = (string) \array_values($keys)[0];
+
+        // Seed a malformed payload — a list of non-array entries
+        // will fail the `Policy::fromArray` contract.
+        $store->put($policyKey, ['not-a-policy-document', 42], 60);
+
+        // Fresh cache instance forces the persistent tier to be
+        // consulted (bypasses the in-memory memo primed above).
+        $fresh = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
+
+        $expected = [
+            new EvaluationPolicy(
+                name: 'fresh',
+                statements: [],
+            ),
+        ];
+
+        $result = $fresh->rememberPolicies($principal, static fn (): array => $expected);
+
+        self::assertSame($expected, $result);
+
+        // Store should have been rewritten with the recomputed
+        // (valid) payload, not the corrupt one.
+        /** @var mixed $stored */
+        $stored = $store->get($policyKey);
+        self::assertIsArray($stored);
+        self::assertCount(1, $stored);
+        self::assertIsArray($stored[0]);
+        self::assertSame('fresh', $stored[0]['name'] ?? null);
+    }
+
+    /**
      * Read a private property value via reflection — tests that
      * need to inspect the array cache's internal storage.
      *

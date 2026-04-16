@@ -47,6 +47,28 @@ return [
 
     /*
     |---------------------------------------------------------------------------
+    | Pivot columns
+    |---------------------------------------------------------------------------
+    |
+    | Column names used on the shipped pivot tables. Consumers who swap the
+    | pivot table schema (renamed FKs, legacy column names, bespoke naming
+    | conventions) can override each side here. The `RolePermission` pivot
+    | reads these when Laravel has not already supplied the relation's pivot
+    | keys (e.g. direct instantiation paths); otherwise the pivot prefers the
+    | relation-supplied keys so a consumer who overrides a relation definition
+    | still gets the invariant enforced.
+    |
+    */
+
+    'pivots' => [
+        'role_permissions' => [
+            'role_column'       => env('AUTHORIZATION_PIVOT_ROLE_PERMISSIONS_ROLE_COLUMN', 'role_id'),
+            'permission_column' => env('AUTHORIZATION_PIVOT_ROLE_PERMISSIONS_PERMISSION_COLUMN', 'permission_id'),
+        ],
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
     | Defaults
     |---------------------------------------------------------------------------
     |

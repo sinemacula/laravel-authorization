@@ -675,118 +675,6 @@ enterprise systems ship both.)_
   bulk-focused consumers. Option (a) leaves the event catalogue
   as-is and closes the audit gap.
 
-### 60. `RolePermission` pivot re-queries both parents on every save — 2 extra DB round-trips per attach
-
-- **Files:** `src/Models/RolePermission.php:54–94`
-  (`ensureGuardParity`); called from the `saving` hook at line 38.
-- **Observation:** on every pivot save the hook issues two fresh
-  `find()` queries — one for the role, one for the permission —
-  to read their `guard_name` columns. A typed
-  `$role->givePermission($permission)` call already holds both
-  Eloquent instances with `guard_name` loaded in memory, but the
-  pivot discards that context and goes back to the database
-  anyway. `$role->syncPermissions([... 50 permissions ...])` at
-  typical scale therefore produces **~100 extra point-lookups**
-  in addition to the sync itself.
-- **Impact:** real performance cliff on bulk role
-  configuration. Enterprise consumers seeding or re-syncing large
-  role catalogues (platform-admin tooling, multi-tenant role
-  templates) will feel it immediately. Also multiplies the
-  cost of every Artisan seeder / test fixture creation path.
-- **Options:** (a) short-circuit the check when the pivot is
-  saved through a `BelongsToMany` relation path — Laravel passes
-  the parent model to the pivot via `setPivotKeys()` /
-  `$pivot->pivotParent`, so the role-side `guard_name` is
-  reachable without a query; fetch only the permission side (one
-  query) and only when its `guard_name` isn't already loaded in
-  the current request via `Permission::find()` cache; (b) move
-  the invariant to a DB-level trigger or a composite FK that
-  includes `guard_name` on the pivot (heaviest, mirrors the
-  option (c) of the now-resolved #21 discussion); (c) require
-  the caller to have both models in hand and hydrate the pivot's
-  `guard_name` attributes explicitly before save — the pivot
-  validates against its own attributes only, zero extra queries.
-  Option (a) is the minimum-change performance fix; (c) is the
-  cleanest but is invasive.
-
-### 61. `RolePermission` pivot silently passes when either parent row is missing
-
-- **File:** `src/Models/RolePermission.php:75–77`.
-- **Observation:** `ensureGuardParity()` bails out (`return;`)
-  when either `$role` or `$permission` is null — i.e. when the
-  `find()` call didn't resolve the FK'd row. The FK constraint
-  on the pivot table catches the missing-parent case at DB layer,
-  so the save ultimately fails, but the validator itself
-  classifies a missing-parent row as "no guard mismatch" rather
-  than "unknown parent." The two failure modes should not surface
-  the same way to the caller.
-- **Impact:** if a consumer ever disables FK enforcement
-  (SQLite default, some CI matrices, testcontainers with
-  `foreign_key_checks = OFF`), a pivot row pointing at a
-  non-existent role or permission saves silently. Also masks the
-  root cause in error output — the raw DB error will reference
-  the FK column names, not the guard semantics, so the caller
-  debugging a seeder sees a foreign-key error when the real issue
-  might be a stale cache of IDs.
-- **Options:** (a) raise a typed
-  `UnknownRoleException` / `UnknownPermissionException` when the
-  corresponding `find()` returns null, reusing the existing
-  exception hierarchy; (b) accept the silent-pass behaviour and
-  document in the class docblock that the pivot assumes FK
-  integrity is enforced at the DB layer.
-
-### 62. `RolePermission` hardcodes column names `role_id` and `permission_id`
-
-- **File:** `src/Models/RolePermission.php:57,59`.
-- **Observation:** the pivot reads its FK attributes via
-  `$this->getAttribute('role_id')` and
-  `$this->getAttribute('permission_id')` — literal strings.
-  `Role::permissions()` at `src/Models/Role.php:75–82` passes
-  `foreignPivotKey: 'role_id'` and
-  `relatedPivotKey: 'permission_id'` explicitly. If a consumer
-  (or a future refactor) overrides those pivot key names, the
-  pivot's guard-parity check silently breaks — the `getAttribute`
-  calls return null, the early-return at line 61 fires, and the
-  invariant is no longer enforced.
-- **Impact:** fragile coupling between the pivot model and the
-  relation definition. Any future move toward configurable pivot
-  column names — the rest of the package reads table names from
-  `authorization.tables.*` but hardcodes pivot column names —
-  silently disables this invariant without any test catching it.
-- **Options:** (a) read the column names from the relation
-  itself via `$this->pivotParent?->getRelation('permissions')`
-  or have `Role::permissions()` register the names on the pivot
-  model; (b) promote the two column names to
-  `config('authorization.pivots.role_permissions.role_column', 'role_id')`
-  (etc.) and read through config, mirroring the existing
-  `authorization.tables.*` pattern; (c) accept the coupling and
-  add a comment on the relation and the pivot documenting that
-  the column names are load-bearing.
-
-### 63. No direct unit test on the `RolePermission` pivot — coverage goes entirely through Role API
-
-- **Files:** `tests/Feature/RoleGuardParityTest.php` (end-to-end
-  scenarios); no corresponding unit test under `tests/Unit/Models/`.
-- **Observation:** every test scenario exercises the pivot
-  through `Role::givePermission()`, `permissions()->attach()`,
-  or `permissions()->sync()`. The pivot's `ensureGuardParity()`
-  logic is never unit-tested with the pivot attributes set
-  directly — if the relation wiring changes and stops routing
-  through the pivot, the feature tests still pass against the
-  (silently disabled) invariant.
-- **Impact:** coverage is tight at the integration layer but
-  loose at the model layer. A future refactor to Role's
-  `permissions()` relation could drop the `->using(...)` call
-  and every guard-parity feature test would still pass because
-  it bypasses the pivot entirely. The unit test on the pivot is
-  the safety net.
-- **Options:** (a) add `tests/Unit/Models/RolePermissionTest.php`
-  that instantiates `RolePermission` with explicit `role_id` /
-  `permission_id` attributes and calls `save()` directly,
-  pinning each branch of `ensureGuardParity()` (same guards,
-  null-on-role, null-on-permission, both-null, mismatched
-  guards, missing parent row). Fast, no feature-test overhead.
-
 ### 64. `PolicyRepository` contract is misnamed — should mirror `PrincipalResolver`
 
 - **Files:** `src/Contracts/PolicyRepository.php`;
@@ -1012,108 +900,6 @@ enterprise systems ship both.)_
   Option (b) is the least-new-surface fix and dovetails with
   #56's option (a).
 
-### 70. Non-Model principals silently lose the persistent-cache tier
-
-- **File:** `src/Cache/ResolutionCache.php:220–230` (`key()`).
-- **Observation:** when the principal is not an Eloquent `Model`,
-  the cache key falls back to `spl_object_hash($principal)`.
-  That hash is stable only within a single request and — because
-  PHP can recycle hashes when the originating object is garbage
-  collected — not even reliably unique within a single request.
-  The persistent-cache tier is therefore useless for non-Model
-  principals: every request produces a new hash, every `get()`
-  misses, every `put()` writes a fresh entry that no subsequent
-  request will read. Worst case, a recycled hash collides with a
-  different principal in the in-memory tier and serves the wrong
-  cached payload.
-- **Impact:** the cache narrative in the README / config block
-  implies cross-request benefit for all principals. Consumers
-  using custom principal shapes (value objects representing a
-  service account, a non-Eloquent identity class) get only the
-  in-memory tier and a silently-filling persistent cache that
-  never hits. Silent under-performance with no log to flag it.
-- **Options:** (a) skip the persistent tier entirely for
-  non-Model principals — early-return from both `get()` and
-  `put()` paths when the principal has no stable identifier —
-  and document the limitation in the class / config block;
-  (b) introduce a `CacheKey` contract
-  (`cacheKeyForAuthorization(): string`) that any principal can
-  implement to provide a stable, request-independent key
-  (UUID-like); Model implements it via `getMorphClass()` +
-  `getKey()`, custom principals implement it themselves; (c)
-  require every principal to be an Eloquent Model — blunt, also
-  contradicts the spec's "plain `object` to the engine"
-  compatibility contract (§4.3 item 2). Option (b) matches the
-  package's "contract for every decoupling" idiom.
-
-### 71. Corrupt persistent-cache entry throws instead of falling through to the resolver
-
-- **File:** `src/Cache/ResolutionCache.php:86–94`
-  (`rememberPolicies` store path); also `Policy::fromArray`
-  invariants.
-- **Observation:** `rememberPolicies()` trusts the persistent
-  cache to return a valid serialised policy list. When the store
-  returns `array`, the code maps every element through
-  `Policy::fromArray($document)` without a try/catch. A single
-  corrupt document in the stored payload — version bump during
-  deploy, a manual cache edit, a partial write, a corrupt
-  serialiser — raises
-  `InvalidPolicyDocumentException` from inside the map, which
-  propagates all the way up through the manager and becomes a
-  500-class error for every subsequent `can()` call against that
-  principal until the cache entry is flushed. Compare to
-  `rememberStringList` at `:198` which is defensively
-  `array_filter($raw, 'is_string')` — silently drops garbage.
-  The two tiers use opposite failure policies.
-- **Impact:** violates the package-wide "fail closed"
-  invariant pinned in the design notes and the body of #12.
-  A corrupt cache state shouldn't become a live-site outage —
-  it should deny and log, letting the request proceed with the
-  resolver's freshly-gathered output. Also inconsistent with the
-  sibling `rememberStringList`, which fails soft.
-- **Options:** (a) wrap the `array_map(... Policy::fromArray ...)`
-  call in a try/catch on `InvalidPolicyDocumentException`; on
-  catch, `$this->store?->forget($key)`, log the corruption
-  through the `authorization` channel (already used for Gate
-  conflicts), and fall through to `$resolver()` so the caller
-  gets a fresh, valid policy list. Matches fail-closed +
-  self-healing intent; (b) tighten `rememberStringList` to
-  fail-fast so the two paths are symmetric and corrupt caches
-  always surface loudly. Option (a) is the honest
-  production-grade answer; option (b) is the symmetric-but-louder
-  alternative and works less well in long-running workers that
-  cannot tolerate a 500 on transient cache corruption.
-
-### 72. `permission_enums` validator accepts any `PermissionEnum` implementer, not specifically an enum
-
-- **File:** `src/Config/ConfigValidator.php:63–94`.
-- **Observation:** the validator checks that every entry in
-  `permission_enums` exists (via `class_exists || interface_exists
-  || enum_exists`) and implements `PermissionEnum` (via
-  `is_subclass_of`). It does **not** check that the entry is
-  specifically an enum. A consumer who registers a plain class
-  that implements `PermissionEnum` (no `cases()` method,
-  not a `UnitEnum`) sails past validation. At the use site —
-  `AuthorizationServiceProvider::registerGates()` — the code calls
-  `$className::cases()` which throws a `TypeError` on a non-enum,
-  with no reference back to the `permission_enums` config key the
-  validator was supposed to guard.
-- **Impact:** the validator's purpose is "boot-time clarity over
-  deep stack trace"; this gap leaves one class of misconfiguration
-  (right contract, wrong shape) producing exactly the deep stack
-  trace it was supposed to prevent. The config-docblock already
-  says "Backed or unit enums implementing `PermissionEnum`" — the
-  validator should enforce the enum half of that sentence.
-- **Options:** (a) tighten the enum check: after the existence
-  check, require `enum_exists($class)` (not just
-  `class_exists`) before the contract assertion. A class
-  implementing `PermissionEnum` that is not an enum fails
-  validation with a specific message; (b) assert that the class
-  is a subclass of `\UnitEnum` (the PHP core interface every enum
-  implements) alongside the `PermissionEnum` check. Option (b)
-  is the more precise invariant — it catches both backed and
-  unit enums with no enum-family guessing.
-
 ### 73. Row-lifecycle `*Updated` events carry only post-save state — the stated before/after diff is unreconstructable
 
 - **Files:** `src/Models/Role.php:77–79` (and identical shape in
@@ -1155,93 +941,6 @@ enterprise systems ship both.)_
   and let consumers implement their own baseline capture via a
   `saving` listener. Option (a) keeps the SOC 2 promise and is
   the enterprise-grade answer.
-
-### 75. `forceSystem()` bypass flag persists across intervening non-protected saves
-
-- **File:** `src/Models/Role.php:67–75` (flag declaration),
-  `:100–123` (`booted()` hooks), `:156–179`
-  (`assertSystemProtectionAllows`), `:126–143` (`forceSystem`).
-- **Observation:** the bypass flag is consumed **only** when
-  `assertSystemProtectionAllows()` runs — which fires from
-  `deleting` or from `updating` **when `wasSystemRoleRenamed()`
-  returns true**. An intervening non-protected save (description
-  change, `guard_name` bump, `is_system` toggle itself) does
-  not trip the guard, so the flag stays armed across it. The
-  following sequence leaves the bypass live for an unrelated
-  later rename:
-  ```php
-  $role->forceSystem();                    // flag = true
-  $role->description = 'tidy copy';
-  $role->save();                           // updating fires,
-                                           // name not dirty, guard
-                                           // skipped, flag UNCONSUMED
-  // ... minutes of unrelated code ...
-  $role->name = 'different-name';
-  $role->save();                           // flag consumed here —
-                                           // rename succeeds silently
-  ```
-  The class docblock calls the bypass "single-use" — a label
-  that most readers parse as "arm once, expires after the next
-  save." The actual semantics are "arm once, expires the next
-  time the guard runs." The gap between those two readings is a
-  footgun, and the existing test suite does not cover the
-  intervening-non-protected-save scenario.
-- **Impact:** consumers who arm the bypass and then forget to
-  complete the protected operation leave a latent escape hatch
-  on the instance. A later rename that the consumer expected to
-  be blocked silently succeeds. Pair that with long-lived
-  Eloquent instances in jobs / schedulers and the footgun
-  compounds.
-- **Options:** (a) consume the flag at the start of every
-  `deleting` / `updating` hook regardless of whether the
-  mutation is protected — the flag truly becomes "next save,
-  win or lose"; (b) tighten the docblock to state
-  "expires on the next protected mutation" and add a test
-  pinning the current behaviour so nobody accidentally
-  tightens it; (c) eliminate the instance flag entirely and
-  introduce a static `Role::withoutSystemProtection(closure)`
-  boundary that disables the guard for a closure's duration,
-  matching Eloquent's `withoutEvents` idiom. Option (c) is the
-  most Laravel-native and makes the bypass scope explicit.
-
-### 76. System-role protection has no equivalent for Permission or Policy
-
-- **Files:** `src/Models/Permission.php`,
-  `src/Models/Policy.php` — neither carries an `is_system`
-  column, a protection hook, nor a matching exception; only
-  `Role` is protected.
-- **Observation:** enterprise IAM deployments routinely ship
-  system-owned permissions (`*:*` super-admin, `iam:manage`
-  platform-admin surface) and system-owned policies
-  (platform-defined deny policies, compliance-mandated policies).
-  A caller with raw Eloquent access can delete either today
-  without the same speed bump that now guards roles. The
-  rationale that applies to `super-admin` / `auditor` roles —
-  "cascades into broken authorization across the application"
-  — applies identically to system-owned permissions and
-  policies, arguably more so for policies since a deleted
-  platform deny policy removes a security control.
-- **Impact:** protection is half-implemented at the authorization
-  primitives layer. The commit message describes the invariant
-  as "platform-shipped roles are delete-protected"; the
-  enterprise-ready framing requires "platform-shipped
-  authorization primitives are delete-protected" covering all
-  three tables.
-- **Options:** (a) extend the same pattern to `Permission` and
-  `Policy`: `is_system` column, `deleting` guard, `updating`
-  guard that blocks `name` rename (and, for `Policy`, document
-  mutation as well — policy `document` changes are the
-  authorization-impacting edit, analogous to role rename), and
-  sibling exception classes
-  `SystemPermissionProtectedException` /
-  `SystemPolicyProtectedException`; (b) lift the protection
-  logic into a shared trait
-  (`ProtectsSystemFlaggedRows`) that all three models compose,
-  with per-model overrides for which mutations are "protected"
-  (role = rename/delete; permission = rename/delete; policy =
-  document-change/delete). Option (b) avoids the three-way
-  duplication that would otherwise appear alongside the
-  `ValidatesAuthorizationName` trait.
 
 ### 77. Resolution cache returns stale role / permission / policy sets across temporal-grant expiry
 
@@ -1532,6 +1231,116 @@ enterprise systems ship both.)_
   contravariant-parameter rules to allow narrowing, which
   they don't, so this option does not work in practice. Option
   (a) is the right answer for a PHPStan-level-8 codebase.
+
+### 88. Gate conflict handler uses `switch` on `GateConflictMode` — forfeits exhaustiveness
+
+- **File:** `src/AuthorizationServiceProvider.php:428–442`
+  (`registerEnumGate`).
+- **Observation:** commit `802ed05` introduced the
+  `GateConflictMode` enum specifically to replace the
+  stringly-typed `match` flagged in #58. The consumer site is
+  now a `switch` over enum cases
+  (`case GateConflictMode::THROW: ... case GateConflictMode::LOG: ...`).
+  PHP `switch` does not carry exhaustiveness-over-enum at the
+  type level — PHPStan will not flag a missing case if a
+  fourth case is ever added to the enum. `match` over an enum
+  **does** get exhaustiveness under PHPStan level 8: any
+  missing case becomes a static-analysis error. The commit
+  swapped out one half of the type-safety benefit (typo
+  rejection via `tryFrom`) and left the other half
+  (exhaustive branching) on the table.
+- **Impact:** if the enum ever grows (e.g. a `WARN_AND_OVERWRITE`
+  case is added), the `switch` here silently falls through with
+  no case match, producing undefined behaviour on that code
+  path. One of the two main reasons to introduce the enum was
+  exhaustiveness; the consumer site doesn't enforce it.
+- **Options:** (a) rewrite the `switch` as a
+  `match ($onConflict) { GateConflictMode::THROW => throw ...,
+  GateConflictMode::OVERWRITE => null, GateConflictMode::LOG => ... }`
+  pattern — the `match` expression-form enforces exhaustive
+  case coverage at PHPStan level 8; (b) keep `switch` but add
+  a post-switch `assert(false, 'unhandled GateConflictMode ...')`
+  or similar trip-wire — catches at runtime, not at analysis
+  time; (c) accept the loss and document. Option (a) is the
+  idiomatic PHP answer and restores the exhaustiveness half of
+  the enum's value proposition.
+
+### 89. `Permission::resolveByName` carries two unexplained `@phpstan-ignore staticMethod.dynamicCall` suppressions
+
+- **File:** `src/Models/Permission.php:106,111` (two
+  `@phpstan-ignore staticMethod.dynamicCall` annotations
+  inside `resolveByName`).
+- **Observation:** the method calls `$class::query()` where
+  `$class` is a class-string read from config. PHPStan
+  level 8 cannot statically resolve the class and flags both
+  the outer `::query()` call and the nested `->where(...)`
+  continuation. The code suppresses both instances with
+  `@phpstan-ignore` without an inline rationale. On a PHPStan
+  level-8 codebase, every ignore comment should carry a one-
+  line reason so reviewers can tell intentional suppression
+  from accidental.
+- **Impact:** `@phpstan-ignore` comments accrete over time
+  when their purpose is opaque. A future maintainer deleting
+  them (reasonably, assuming PHPStan was recently updated and
+  the check is no longer an issue) would silently lose static
+  coverage. Also makes grep / audit of remaining suppressions
+  harder when they all look identical.
+- **Options:** (a) annotate both suppressions inline with the
+  reason — e.g.
+  `// @phpstan-ignore staticMethod.dynamicCall — $class is a
+  config-sourced class-string<Permission> verified by
+  ConfigValidator at boot`; (b) replace the dynamic call with
+  `app($class)::query()` or an explicit type assertion via
+  `assert(is_a($class, self::class, true))` before the call,
+  which PHPStan can follow without the ignore; (c) push the
+  dynamic-class concern down into a `PermissionRepository`
+  contract (ties into #1's already-shipped
+  `PolicyRepository` pattern) — consumers bind a concrete
+  implementation and the static method sheds the dynamic
+  class-string entirely. Option (b) is the smallest change
+  that removes both ignores without the wider architectural
+  work.
+
+### 90. `AuthorizableGrantPivot` is shared across three distinct pivot tables — can't express future per-table divergence
+
+- **Files:** `src/Models/AuthorizableGrantPivot.php` (shared
+  pivot class); `src/Traits/HasRoles.php`,
+  `src/Traits/HasPermissions.php`, `src/Traits/HasPolicies.php`
+  (three `->using(AuthorizableGrantPivot::class)` call sites).
+- **Observation:** the three authorizable-grant pivots
+  (`authorizable_roles`, `authorizable_permissions`,
+  `authorizable_policies`) currently share an identical
+  shape: morph keys + `expires_at`. One pivot class casts
+  `expires_at` for all three — efficient today. But the
+  in-flight work for #22 (polymorphic tenant scoping) and
+  #30's sibling `granted_by` column noted as a future
+  extension both land per-row metadata that may not apply
+  uniformly across the three tables. A future
+  `authorizable_policies.approved_by` column — for a policy
+  attachment approval workflow — would not apply to roles or
+  permissions, but the shared pivot class would either cast it
+  for all three or have to split back out.
+- **Impact:** design-time tension for future per-table
+  features. Today the pivot is simple and correct. When the
+  first per-table divergence lands, the refactor path is
+  either "split `AuthorizableGrantPivot` into three subclasses"
+  (back to where we were) or "let the shared class grow a
+  field set that is partially ignored on two of the three
+  tables" (muddy).
+- **Options:** (a) keep the shared pivot as-is; treat the
+  first per-table divergence as the trigger to split
+  (`AuthorizableRolePivot`, `AuthorizablePermissionPivot`,
+  `AuthorizablePolicyPivot` each extending
+  `AuthorizableGrantPivot` for shared `expires_at` casting).
+  YAGNI answer — no churn today; (b) split now along the three
+  tables even though they currently share shape — each
+  `Has*` trait already points at a distinct pivot slot, so
+  the split is mechanical and future-proofs per-table fields;
+  (c) accept the shared pivot and document that per-table
+  metadata must go on `authorizable` or on the related model
+  rather than the pivot — forces a design constraint but
+  keeps the pivot surface tight. Option (a) is the honest
+  iterative path and is already the committed state.
 
 ---
 

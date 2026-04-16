@@ -325,6 +325,16 @@ class Role extends Model
         static::deleted(static function (self $role): void {
             Event::dispatch(new RoleDeleted($role));
         });
+
+        // Clear the bypass flag after every completed save so it
+        // cannot hop across an intervening non-protected mutation
+        // (e.g. a description update) and silently unlock the next
+        // rename or delete. `saved` fires after `updating` has had
+        // a chance to consume the flag for a legitimate rename, so
+        // this reset is strictly idempotent on that path.
+        static::saved(static function (self $role): void {
+            $role->systemProtectionBypassed = false;
+        });
     }
 
     /**
