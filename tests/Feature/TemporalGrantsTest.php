@@ -15,7 +15,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Traits\HasPermissions;
 use SineMacula\Laravel\Authorization\Traits\HasPolicies;
 use SineMacula\Laravel\Authorization\Traits\HasRoles;
-use Tests\Feature\Stubs\StubAuthorizable;
+use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
@@ -65,7 +65,7 @@ final class TemporalGrantsTest extends TestCase
             'guard_name' => 'web',
         ]);
 
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         Carbon::setTestNow('2026-01-01 12:00:00');
         $user->assignRole('oncall', expiresAt: Carbon::parse('2026-01-01 13:00:00'));
@@ -90,7 +90,7 @@ final class TemporalGrantsTest extends TestCase
             'guard_name' => 'web',
         ]);
 
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         Carbon::setTestNow('2026-02-01 10:00:00');
         $user->givePermission('emergency:publish', expiresAt: Carbon::parse('2026-02-01 10:30:00'));
@@ -118,7 +118,7 @@ final class TemporalGrantsTest extends TestCase
             ],
         ]);
 
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         Carbon::setTestNow('2026-03-01 09:00:00');
         $user->attachPolicy($policy, expiresAt: Carbon::parse('2026-03-01 09:15:00'));
@@ -143,7 +143,7 @@ final class TemporalGrantsTest extends TestCase
             'guard_name' => 'web',
         ]);
 
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole('staff');
 
         $row = DB::table('authorizable_roles')
@@ -171,7 +171,7 @@ final class TemporalGrantsTest extends TestCase
             'guard_name' => 'web',
         ]);
 
-        $user    = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user    = StubIdentity::create(['id' => (string) Str::uuid()]);
         $expires = Carbon::parse('2026-06-01 09:00:00');
 
         Carbon::setTestNow('2026-06-01 08:00:00');
@@ -199,7 +199,7 @@ final class TemporalGrantsTest extends TestCase
             'guard_name' => 'web',
         ]);
 
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         Carbon::setTestNow('2026-04-01 12:00:00');
         $user->assignRole('shadowed', expiresAt: Carbon::parse('2026-04-01 11:00:00'));
@@ -227,7 +227,7 @@ final class TemporalGrantsTest extends TestCase
             'guard_name' => 'web',
         ]);
 
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         Carbon::setTestNow('2026-05-01 08:00:00');
         $user->assignRole('staff');
@@ -273,10 +273,10 @@ final class TemporalGrantsTest extends TestCase
     /**
      * Sort an identity's role names for stable comparison.
      *
-     * @param  \Tests\Feature\Stubs\StubAuthorizable|null  $user
+     * @param  \Tests\Feature\Stubs\StubIdentity|null  $user
      * @return array<int, string>
      */
-    private function sortedRoleNames(?StubAuthorizable $user): array
+    private function sortedRoleNames(?StubIdentity $user): array
     {
         $names = $user?->getRoles() ?? [];
         \sort($names);

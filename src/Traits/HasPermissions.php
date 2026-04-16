@@ -8,8 +8,8 @@ use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
-use SineMacula\Laravel\Authorization\Events\PermissionGranted;
-use SineMacula\Laravel\Authorization\Events\PermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\IdentityPermissionGranted;
+use SineMacula\Laravel\Authorization\Events\IdentityPermissionRevoked;
 use SineMacula\Laravel\Authorization\Models\AuthorizableGrantPivot;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -91,7 +91,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
             unset($this->relations['permissions']);
         }
 
-        Event::dispatch(new PermissionGranted($this, $model));
+        Event::dispatch(new IdentityPermissionGranted($this, $model));
 
         return $this;
     }
@@ -114,7 +114,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
             unset($this->relations['permissions']);
         }
 
-        Event::dispatch(new PermissionRevoked($this, $model));
+        Event::dispatch(new IdentityPermissionRevoked($this, $model));
 
         return $this;
     }
@@ -141,9 +141,10 @@ trait HasPermissions // @phpstan-ignore trait.unused
         }
 
         // sync() bypasses givePermission / revokePermission and so
-        // fires no PermissionGranted / PermissionRevoked events —
-        // invalidate the resolution cache directly so the next
-        // getPermissions() observes the fresh set.
+        // fires no IdentityPermissionGranted /
+        // IdentityPermissionRevoked events — invalidate the
+        // resolution cache directly so the next getPermissions()
+        // observes the fresh set.
         if (app()->bound(ResolutionCache::class)) {
             app(ResolutionCache::class)->forget($this);
         }

@@ -19,14 +19,14 @@ use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
-use SineMacula\Laravel\Authorization\Events\PermissionGranted;
-use SineMacula\Laravel\Authorization\Events\PermissionRevoked;
-use SineMacula\Laravel\Authorization\Events\PolicyAttached;
-use SineMacula\Laravel\Authorization\Events\PolicyDetached;
-use SineMacula\Laravel\Authorization\Events\RoleAssigned;
+use SineMacula\Laravel\Authorization\Events\IdentityPermissionGranted;
+use SineMacula\Laravel\Authorization\Events\IdentityPermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\IdentityPolicyAttached;
+use SineMacula\Laravel\Authorization\Events\IdentityPolicyDetached;
+use SineMacula\Laravel\Authorization\Events\IdentityRoleAssigned;
+use SineMacula\Laravel\Authorization\Events\IdentityRoleRevoked;
 use SineMacula\Laravel\Authorization\Events\RolePermissionGranted;
 use SineMacula\Laravel\Authorization\Events\RolePermissionRevoked;
-use SineMacula\Laravel\Authorization\Events\RoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\GateConflictException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
@@ -198,12 +198,12 @@ class AuthorizationServiceProvider extends ServiceProvider
         $dispatcher = $this->app->make(Dispatcher::class);
 
         $principalEvents = [
-            RoleAssigned::class,
-            RoleRevoked::class,
-            PermissionGranted::class,
-            PermissionRevoked::class,
-            PolicyAttached::class,
-            PolicyDetached::class,
+            IdentityRoleAssigned::class,
+            IdentityRoleRevoked::class,
+            IdentityPermissionGranted::class,
+            IdentityPermissionRevoked::class,
+            IdentityPolicyAttached::class,
+            IdentityPolicyDetached::class,
         ];
 
         foreach ($principalEvents as $event) {

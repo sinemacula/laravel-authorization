@@ -10,9 +10,9 @@ use SineMacula\Laravel\Authorization\Models\Role;
 /**
  * Dispatched when a permission is detached from a role.
  *
- * Distinct from `PermissionRevoked`, which fires when a direct
- * permission grant is removed from an authorizable identity. Audit
- * consumers use the event class to distinguish role-catalogue
+ * Distinct from `IdentityPermissionRevoked`, which fires when a
+ * direct permission grant is removed from an authorizable identity.
+ * Audit consumers use the event class to distinguish role-catalogue
  * mutations from identity-level revocations.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

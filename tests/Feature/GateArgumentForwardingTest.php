@@ -14,7 +14,7 @@ use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use Tests\Feature\Stubs\PermissionEnum;
-use Tests\Feature\Stubs\StubAuthorizable;
+use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
@@ -53,7 +53,7 @@ final class GateArgumentForwardingTest extends TestCase
         // Register a morph alias so `$stub->getMorphClass()` returns a
         // clean string; the default FQN contains backslashes that
         // trigger PHP's fnmatch escape handling in the evaluator.
-        Relation::morphMap(['stub' => StubAuthorizable::class]);
+        Relation::morphMap(['stub' => StubIdentity::class]);
 
         (new AuthorizationServiceProvider($this->app))->boot();
     }
@@ -72,30 +72,6 @@ final class GateArgumentForwardingTest extends TestCase
     }
 
     /**
-     * Swap the principal resolver for one that returns the supplied
-     * authorizable and refresh the manager so the next facade call
-     * picks it up.
-     *
-     * @param  \Tests\Feature\Stubs\StubAuthorizable  $user
-     * @return void
-     */
-    private function actAs(StubAuthorizable $user): void
-    {
-        $resolver = new class ($user) implements PrincipalResolver {
-            public function __construct(private readonly object $user) {}
-
-            public function resolve(): ?object
-            {
-                return $this->user;
-            }
-        };
-
-        $this->app->instance(PrincipalResolver::class, $resolver);
-        $this->app->forgetInstance('authorization');
-        $this->app->forgetInstance(AuthorizationManager::class);
-    }
-
-    /**
      * A string resource argument is forwarded to the evaluator's
      * resource slot.
      *
@@ -103,7 +79,7 @@ final class GateArgumentForwardingTest extends TestCase
      */
     public function testGateForwardsStringResource(): void
     {
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $user->attachPolicy(Policy::create([
@@ -129,8 +105,8 @@ final class GateArgumentForwardingTest extends TestCase
      */
     public function testGateForwardsEloquentModelAsMorphClassKey(): void
     {
-        $user   = StubAuthorizable::create(['id' => (string) Str::uuid()]);
-        $target = StubAuthorizable::create(['id' => 'target-1']);
+        $user   = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $target = StubIdentity::create(['id' => 'target-1']);
         $this->actAs($user);
 
         $resourceIdentifier = $target->getMorphClass() . ':target-1';
@@ -155,7 +131,7 @@ final class GateArgumentForwardingTest extends TestCase
      */
     public function testGateForwardsStringableObject(): void
     {
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $user->attachPolicy(Policy::create([
@@ -186,7 +162,7 @@ final class GateArgumentForwardingTest extends TestCase
      */
     public function testGateForwardsAssociativeArrayAsContext(): void
     {
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $user->attachPolicy(Policy::create([
@@ -214,7 +190,7 @@ final class GateArgumentForwardingTest extends TestCase
      */
     public function testGateForwardsResourceAndContextCombination(): void
     {
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $user->attachPolicy(Policy::create([
@@ -243,7 +219,7 @@ final class GateArgumentForwardingTest extends TestCase
      */
     public function testGateWithoutExtraArgumentsMatchesPolicyOnAction(): void
     {
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $user->attachPolicy(Policy::create([
@@ -267,7 +243,7 @@ final class GateArgumentForwardingTest extends TestCase
      */
     public function testGateIgnoresUnmappableTrailingArguments(): void
     {
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $user->attachPolicy(Policy::create([
@@ -282,5 +258,29 @@ final class GateArgumentForwardingTest extends TestCase
 
         // The trailing integer is not a context array and is discarded.
         self::assertTrue(Gate::allows('posts:create', ['arn:post:42', 99]));
+    }
+
+    /**
+     * Swap the principal resolver for one that returns the supplied
+     * authorizable and refresh the manager so the next facade call
+     * picks it up.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @return void
+     */
+    private function actAs(StubIdentity $user): void
+    {
+        $resolver = new class ($user) implements PrincipalResolver {
+            public function __construct(private readonly object $user) {}
+
+            public function resolve(): ?object
+            {
+                return $this->user;
+            }
+        };
+
+        $this->app->instance(PrincipalResolver::class, $resolver);
+        $this->app->forgetInstance('authorization');
+        $this->app->forgetInstance(AuthorizationManager::class);
     }
 }

@@ -16,7 +16,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Policy as PolicyModel;
 use SineMacula\Laravel\Authorization\Repositories\DefaultPolicyRepository;
-use Tests\Feature\Stubs\StubAuthorizable;
+use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
@@ -41,7 +41,7 @@ final class PolicyRepositoryAndJournalTest extends TestCase
      */
     public function testDefaultRepositoryReturnsPrincipalPolicies(): void
     {
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->attachPolicy(PolicyModel::create([
             'id'       => (string) Str::uuid(),
             'name'     => 'allow-x',
@@ -66,7 +66,7 @@ final class PolicyRepositoryAndJournalTest extends TestCase
      */
     public function testDefaultRepositoryUnionsStoreWithPrincipalPolicies(): void
     {
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->attachPolicy(PolicyModel::create([
             'id'       => (string) Str::uuid(),
             'name'     => 'principal-side',
@@ -125,7 +125,7 @@ final class PolicyRepositoryAndJournalTest extends TestCase
         $this->app->forgetInstance('authorization');
         $this->app->forgetInstance(AuthorizationManager::class);
 
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         $result = Authorization::for($user)->evaluate('fixed:act');
 
@@ -235,14 +235,14 @@ final class PolicyRepositoryAndJournalTest extends TestCase
 
     /**
      * Bind a principal resolver that returns a freshly-created
-     * StubAuthorizable so the facade picks it up via the configured
+     * StubIdentity so the facade picks it up via the configured
      * resolver.
      *
-     * @return \Tests\Feature\Stubs\StubAuthorizable
+     * @return \Tests\Feature\Stubs\StubIdentity
      */
-    private function bindResolvableUser(): StubAuthorizable
+    private function bindResolvableUser(): StubIdentity
     {
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         $resolver = new class ($user) implements PrincipalResolver {
             public function __construct(private readonly object $user) {}

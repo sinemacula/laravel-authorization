@@ -11,7 +11,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Traits\HasPermissions;
 use SineMacula\Laravel\Authorization\Traits\HasPolicies;
 use SineMacula\Laravel\Authorization\Traits\HasRoles;
-use Tests\Feature\Stubs\StubAuthorizable;
+use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
@@ -39,7 +39,7 @@ final class TraitsCoverageTest extends TestCase
         Permission::create(['id' => '01J0000000000000000PERMA2', 'name' => 'b:do', 'guard_name' => 'web']);
         Permission::create(['id' => '01J0000000000000000PERMA3', 'name' => 'c:do', 'guard_name' => 'web']);
 
-        $user = StubAuthorizable::create(['id' => '01J0000000000000000USRSP1']);
+        $user = StubIdentity::create(['id' => '01J0000000000000000USRSP1']);
 
         $user->syncPermissions(['a:do', 'b:do']);
         self::assertSame(['a:do', 'b:do'], self::sorted($user->fresh()?->getPermissions() ?? []));
@@ -66,7 +66,7 @@ final class TraitsCoverageTest extends TestCase
             'document' => ['statements' => [['effect' => 'allow', 'actions' => ['y']]]],
         ]);
 
-        $user = StubAuthorizable::create(['id' => '01J000000000000000USRSP2']);
+        $user = StubIdentity::create(['id' => '01J000000000000000USRSP2']);
 
         $user->syncPolicies([$first, $second]);
         self::assertCount(2, $user->fresh()?->policies()->get() ?? []);
@@ -86,7 +86,7 @@ final class TraitsCoverageTest extends TestCase
         $role       = Role::create(['id' => '01J0000000000000000ROLEMA1', 'name' => 'mod', 'guard_name' => 'web']);
         $permission = Permission::create(['id' => '01J0000000000000000PERMMA1', 'name' => 'mod:do', 'guard_name' => 'web']);
 
-        $user = StubAuthorizable::create(['id' => '01J0000000000000000USRMA1']);
+        $user = StubIdentity::create(['id' => '01J0000000000000000USRMA1']);
 
         $user->assignRole($role);
         $user->givePermission($permission);

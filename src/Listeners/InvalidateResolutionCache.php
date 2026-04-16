@@ -5,23 +5,24 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Listeners;
 
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
-use SineMacula\Laravel\Authorization\Events\PermissionGranted;
-use SineMacula\Laravel\Authorization\Events\PermissionRevoked;
-use SineMacula\Laravel\Authorization\Events\PolicyAttached;
-use SineMacula\Laravel\Authorization\Events\PolicyDetached;
-use SineMacula\Laravel\Authorization\Events\RoleAssigned;
+use SineMacula\Laravel\Authorization\Events\IdentityPermissionGranted;
+use SineMacula\Laravel\Authorization\Events\IdentityPermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\IdentityPolicyAttached;
+use SineMacula\Laravel\Authorization\Events\IdentityPolicyDetached;
+use SineMacula\Laravel\Authorization\Events\IdentityRoleAssigned;
+use SineMacula\Laravel\Authorization\Events\IdentityRoleRevoked;
 use SineMacula\Laravel\Authorization\Events\RolePermissionGranted;
 use SineMacula\Laravel\Authorization\Events\RolePermissionRevoked;
-use SineMacula\Laravel\Authorization\Events\RoleRevoked;
 
 /**
  * Event listener that keeps the resolution cache coherent.
  *
  * Two invalidation strategies:
  *
- * - **Principal-scoped events** (`RoleAssigned`, `RoleRevoked`,
- *   `PermissionGranted`, `PermissionRevoked`, `PolicyAttached`,
- *   `PolicyDetached`) carry the authorizable that changed. The
+ * - **Principal-scoped events** (`IdentityRoleAssigned`,
+ *   `IdentityRoleRevoked`, `IdentityPermissionGranted`,
+ *   `IdentityPermissionRevoked`, `IdentityPolicyAttached`,
+ *   `IdentityPolicyDetached`) carry the authorizable that changed. The
  *   listener calls `ResolutionCache::forget($authorizable)` so
  *   only that principal's cached lookups are dropped.
  * - **Role-pivot events** (`RolePermissionGranted`,
@@ -54,11 +55,11 @@ final class InvalidateResolutionCache
      * Drop the cached entries belonging to the authorizable on
      * the event.
      *
-     * @param  \SineMacula\Laravel\Authorization\Events\RoleAssigned|\SineMacula\Laravel\Authorization\Events\RoleRevoked|\SineMacula\Laravel\Authorization\Events\PermissionGranted|\SineMacula\Laravel\Authorization\Events\PermissionRevoked|\SineMacula\Laravel\Authorization\Events\PolicyAttached|\SineMacula\Laravel\Authorization\Events\PolicyDetached  $event
+     * @param  \SineMacula\Laravel\Authorization\Events\IdentityPermissionGranted|\SineMacula\Laravel\Authorization\Events\IdentityPermissionRevoked|\SineMacula\Laravel\Authorization\Events\IdentityPolicyAttached|\SineMacula\Laravel\Authorization\Events\IdentityPolicyDetached|\SineMacula\Laravel\Authorization\Events\IdentityRoleAssigned|\SineMacula\Laravel\Authorization\Events\IdentityRoleRevoked  $event
      * @return void
      */
     public function handlePrincipalMutation(
-        RoleAssigned|RoleRevoked|PermissionGranted|PermissionRevoked|PolicyAttached|PolicyDetached $event,
+        IdentityPermissionGranted|IdentityPermissionRevoked|IdentityPolicyAttached|IdentityPolicyDetached|IdentityRoleAssigned|IdentityRoleRevoked $event,
     ): void {
         $this->cache->forget($event->authorizable);
     }

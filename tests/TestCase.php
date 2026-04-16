@@ -69,13 +69,13 @@ abstract class TestCase extends OrchestraTestCase
     {
         $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
 
-        Schema::create('stub_authorizables', static function (Blueprint $table): void {
+        Schema::create('stub_identities', static function (Blueprint $table): void {
             $table->string('id')->primary();
             $table->string('name')->nullable();
             $table->timestamps();
         });
 
-        Schema::create('stub_second_authorizables', static function (Blueprint $table): void {
+        Schema::create('stub_second_identities', static function (Blueprint $table): void {
             $table->string('id')->primary();
             $table->string('name')->nullable();
             $table->timestamps();
@@ -94,8 +94,8 @@ abstract class TestCase extends OrchestraTestCase
                     }
                 }
 
-                Schema::dropIfExists('stub_authorizables');
-                Schema::dropIfExists('stub_second_authorizables');
+                Schema::dropIfExists('stub_identities');
+                Schema::dropIfExists('stub_second_identities');
             });
         }
     }

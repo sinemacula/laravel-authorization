@@ -12,7 +12,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class PolicyAttached
+final readonly class IdentityPolicyAttached
 {
     /**
      * Create a new event instance.

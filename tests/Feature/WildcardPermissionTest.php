@@ -15,7 +15,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Traits\HasPermissions;
 use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
-use Tests\Feature\Stubs\StubAuthorizable;
+use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
@@ -40,11 +40,11 @@ use Tests\TestCase;
  *
  * @internal
  */
-#[CoversTrait(HasPermissions::class)]
-#[CoversTrait(ValidatesAuthorizationName::class)]
 #[CoversClass(Role::class)]
 #[CoversClass(Permission::class)]
 #[CoversClass(Statement::class)]
+#[CoversTrait(HasPermissions::class)]
+#[CoversTrait(ValidatesAuthorizationName::class)]
 final class WildcardPermissionTest extends TestCase
 {
     /** Canonical asked action used across scenarios. */
@@ -156,7 +156,7 @@ final class WildcardPermissionTest extends TestCase
         ]);
         $role->givePermission('posts:*');
 
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole('editor');
 
         self::assertTrue($user->fresh()?->hasPermission(self::ASKED_ACTION));
@@ -178,11 +178,11 @@ final class WildcardPermissionTest extends TestCase
         $statement = Statement::fromArray([
             'effect'    => 'allow',
             'actions'   => [self::ASKED_ACTION],
-            'resources' => ['App\\Models\\Post:42'],
+            'resources' => ['App\Models\Post:42'],
         ]);
 
-        self::assertTrue($statement->matches(self::ASKED_ACTION, 'App\\Models\\Post:42'));
-        self::assertFalse($statement->matches(self::ASKED_ACTION, 'App\\Models\\Post:99'));
+        self::assertTrue($statement->matches(self::ASKED_ACTION, 'App\Models\Post:42'));
+        self::assertFalse($statement->matches(self::ASKED_ACTION, 'App\Models\Post:99'));
     }
 
     /**
@@ -195,10 +195,26 @@ final class WildcardPermissionTest extends TestCase
     {
         $statement = Statement::fromArray([
             'effect'  => 'allow',
-            'actions' => ['App\\Jobs\\Ping'],
+            'actions' => ['App\Jobs\Ping'],
         ]);
 
-        self::assertTrue($statement->matches('App\\Jobs\\Ping'));
+        self::assertTrue($statement->matches('App\Jobs\Ping'));
+    }
+
+    /**
+     * Invalid name samples for the data provider.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function invalidPermissionNames(): iterable
+    {
+        yield 'whitespace' => ['has space'];
+        yield 'empty' => [''];
+        yield 'question-mark' => ['posts:?'];
+        yield 'square-brackets' => ['posts:[abc]'];
+        yield 'curly-brackets' => ['posts:{a,b}'];
+        yield 'backslash' => ['App\Models\Post'];
+        yield 'forward-slash' => ['posts/create'];
     }
 
     /**
@@ -240,6 +256,21 @@ final class WildcardPermissionTest extends TestCase
     }
 
     /**
+     * Valid name samples for the data provider.
+     *
+     * @return iterable<string, array{0: string}>
+     */
+    public static function validPermissionNames(): iterable
+    {
+        yield 'colon-separated' => ['posts:create'];
+        yield 'wildcard' => ['posts:*'];
+        yield 'super-admin' => ['*:*'];
+        yield 'hyphenated' => ['platform-admin'];
+        yield 'underscored' => ['a_b_c'];
+        yield 'numeric' => ['v2:post:42'];
+    }
+
+    /**
      * The allowed character class covers the common permission
      * shapes — action strings, hyphenated names, underscores, and
      * wildcards.
@@ -262,44 +293,13 @@ final class WildcardPermissionTest extends TestCase
     }
 
     /**
-     * Invalid name samples for the data provider.
-     *
-     * @return iterable<string, array{0: string}>
-     */
-    public static function invalidPermissionNames(): iterable
-    {
-        yield 'whitespace'        => ['has space'];
-        yield 'empty'             => [''];
-        yield 'question-mark'     => ['posts:?'];
-        yield 'square-brackets'   => ['posts:[abc]'];
-        yield 'curly-brackets'    => ['posts:{a,b}'];
-        yield 'backslash'         => ['App\\Models\\Post'];
-        yield 'forward-slash'     => ['posts/create'];
-    }
-
-    /**
-     * Valid name samples for the data provider.
-     *
-     * @return iterable<string, array{0: string}>
-     */
-    public static function validPermissionNames(): iterable
-    {
-        yield 'colon-separated' => ['posts:create'];
-        yield 'wildcard'        => ['posts:*'];
-        yield 'super-admin'     => ['*:*'];
-        yield 'hyphenated'      => ['platform-admin'];
-        yield 'underscored'     => ['a_b_c'];
-        yield 'numeric'         => ['v2:post:42'];
-    }
-
-    /**
      * Attach a single permission (created if missing) to a fresh
      * authorizable and return the identity.
      *
      * @param  string  $name
-     * @return \Tests\Feature\Stubs\StubAuthorizable
+     * @return \Tests\Feature\Stubs\StubIdentity
      */
-    private function userHolding(string $name): StubAuthorizable
+    private function userHolding(string $name): StubIdentity
     {
         Permission::create([
             'id'         => (string) Str::uuid(),
@@ -307,7 +307,7 @@ final class WildcardPermissionTest extends TestCase
             'guard_name' => 'web',
         ]);
 
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->givePermission($name);
 
         return $user;

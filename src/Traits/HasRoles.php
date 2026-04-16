@@ -8,8 +8,8 @@ use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
-use SineMacula\Laravel\Authorization\Events\RoleAssigned;
-use SineMacula\Laravel\Authorization\Events\RoleRevoked;
+use SineMacula\Laravel\Authorization\Events\IdentityRoleAssigned;
+use SineMacula\Laravel\Authorization\Events\IdentityRoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\AuthorizableGrantPivot;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -92,7 +92,7 @@ trait HasRoles // @phpstan-ignore trait.unused
             unset($this->relations['roles']);
         }
 
-        Event::dispatch(new RoleAssigned($this, $model));
+        Event::dispatch(new IdentityRoleAssigned($this, $model));
 
         return $this;
     }
@@ -115,7 +115,7 @@ trait HasRoles // @phpstan-ignore trait.unused
             unset($this->relations['roles']);
         }
 
-        Event::dispatch(new RoleRevoked($this, $model));
+        Event::dispatch(new IdentityRoleRevoked($this, $model));
 
         return $this;
     }
@@ -142,9 +142,9 @@ trait HasRoles // @phpstan-ignore trait.unused
         }
 
         // sync() bypasses assignRole / revokeRole and so fires
-        // no RoleAssigned / RoleRevoked events — invalidate the
-        // resolution cache directly so the next getRoles()
-        // observes the fresh set.
+        // no IdentityRoleAssigned / IdentityRoleRevoked events —
+        // invalidate the resolution cache directly so the next
+        // getRoles() observes the fresh set.
         if (app()->bound(ResolutionCache::class)) {
             app(ResolutionCache::class)->forget($this);
         }
@@ -181,7 +181,7 @@ trait HasRoles // @phpstan-ignore trait.unused
      * result is memoised per-request and optionally persisted
      * cross-request. Cache entries are invalidated by the
      * `InvalidateResolutionCache` listener on
-     * `RoleAssigned` / `RoleRevoked`.
+     * `IdentityRoleAssigned` / `IdentityRoleRevoked`.
      *
      * @return array<int, string>
      */

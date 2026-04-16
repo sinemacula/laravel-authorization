@@ -10,7 +10,6 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
-use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -34,25 +33,21 @@ use Tests\TestCase;
  *
  * @internal
  */
+#[CoversClass(Role::class)]
 #[CoversTrait(HasRoles::class)]
 #[CoversTrait(HasPermissions::class)]
-#[CoversClass(Role::class)]
 final class GuardRoutingTest extends TestCase
 {
     /**
-     * Define a separate table for the api-guard stub so the two
-     * identity shapes coexist alongside the default-guard stub.
+     * Clean up the api-guard stub table after each test.
      *
      * @return void
      */
-    protected function defineDatabaseMigrations(): void
+    protected function tearDown(): void
     {
-        parent::defineDatabaseMigrations();
+        Schema::dropIfExists('api_guarded_users');
 
-        Schema::create('api_guarded_users', static function ($table): void {
-            $table->string('id')->primary();
-            $table->timestamps();
-        });
+        parent::tearDown();
     }
 
     /**
@@ -202,15 +197,19 @@ final class GuardRoutingTest extends TestCase
     }
 
     /**
-     * Clean up the api-guard stub table after each test.
+     * Define a separate table for the api-guard stub so the two
+     * identity shapes coexist alongside the default-guard stub.
      *
      * @return void
      */
-    protected function tearDown(): void
+    protected function defineDatabaseMigrations(): void
     {
-        Schema::dropIfExists('api_guarded_users');
+        parent::defineDatabaseMigrations();
 
-        parent::tearDown();
+        Schema::create('api_guarded_users', static function ($table): void {
+            $table->string('id')->primary();
+            $table->timestamps();
+        });
     }
 }
 
@@ -223,16 +222,11 @@ final class GuardRoutingTest extends TestCase
 class ApiGuardedUser extends Model implements AuthorizableIdentity
 {
     use HasAuthorization;
-
-    public $incrementing = false;
-
+    public $incrementing  = false;
     protected $primaryKey = 'id';
-
-    protected $keyType = 'string';
-
-    protected $fillable = ['id'];
-
-    protected $table = 'api_guarded_users';
+    protected $keyType    = 'string';
+    protected $fillable   = ['id'];
+    protected $table      = 'api_guarded_users';
 
     public function getAuthorizationGuard(): string
     {
@@ -249,14 +243,9 @@ class ApiGuardedUser extends Model implements AuthorizableIdentity
 class DefaultGuardUser extends Model implements AuthorizableIdentity
 {
     use HasAuthorization;
-
-    public $incrementing = false;
-
+    public $incrementing  = false;
     protected $primaryKey = 'id';
-
-    protected $keyType = 'string';
-
-    protected $fillable = ['id'];
-
-    protected $table = 'stub_authorizables';
+    protected $keyType    = 'string';
+    protected $fillable   = ['id'];
+    protected $table      = 'stub_identities';
 }

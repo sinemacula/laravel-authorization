@@ -12,12 +12,12 @@ use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
-use SineMacula\Laravel\Authorization\Events\PermissionGranted;
-use SineMacula\Laravel\Authorization\Events\PermissionRevoked;
-use SineMacula\Laravel\Authorization\Events\PolicyAttached;
-use SineMacula\Laravel\Authorization\Events\PolicyDetached;
-use SineMacula\Laravel\Authorization\Events\RoleAssigned;
-use SineMacula\Laravel\Authorization\Events\RoleRevoked;
+use SineMacula\Laravel\Authorization\Events\IdentityPermissionGranted;
+use SineMacula\Laravel\Authorization\Events\IdentityPermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\IdentityPolicyAttached;
+use SineMacula\Laravel\Authorization\Events\IdentityPolicyDetached;
+use SineMacula\Laravel\Authorization\Events\IdentityRoleAssigned;
+use SineMacula\Laravel\Authorization\Events\IdentityRoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
@@ -28,7 +28,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Traits\HasPermissions;
 use SineMacula\Laravel\Authorization\Traits\HasPolicies;
 use SineMacula\Laravel\Authorization\Traits\HasRoles;
-use Tests\Feature\Stubs\StubAuthorizable;
+use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
@@ -69,7 +69,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         Permission::create(['id' => '01J0000000000000000000POS1', 'name' => 'posts:create', 'guard_name' => 'web']);
 
-        $user = StubAuthorizable::create(['id' => '01J0000000000000000000USR1']);
+        $user = StubIdentity::create(['id' => '01J0000000000000000000USR1']);
         $user->givePermission('posts:create');
 
         $result = Authorization::for($user)->evaluate('posts:create');
@@ -88,7 +88,7 @@ final class AuthorizationManagerTest extends TestCase
         $permission = Permission::create(['id' => '01J0000000000000000000POS2', 'name' => 'posts:update', 'guard_name' => 'web']);
         $role->permissions()->attach($permission->getKey());
 
-        $user = StubAuthorizable::create(['id' => '01J0000000000000000000USR2']);
+        $user = StubIdentity::create(['id' => '01J0000000000000000000USR2']);
         $user->assignRole('editor');
 
         self::assertTrue($user->hasPermission('posts:update'));
@@ -115,7 +115,7 @@ final class AuthorizationManagerTest extends TestCase
             ],
         ]);
 
-        $user = StubAuthorizable::create(['id' => '01J0000000000000000000USR3']);
+        $user = StubIdentity::create(['id' => '01J0000000000000000000USR3']);
         $user->assignRole('admin');
         $user->attachPolicy($policy);
 
@@ -144,7 +144,7 @@ final class AuthorizationManagerTest extends TestCase
             ],
         ]);
 
-        $user = StubAuthorizable::create(['id' => '01J0000000000000000000USR4']);
+        $user = StubIdentity::create(['id' => '01J0000000000000000000USR4']);
         $user->assignRole('admin');
         $user->attachPolicy($policy);
 
@@ -165,17 +165,17 @@ final class AuthorizationManagerTest extends TestCase
         Event::fake();
 
         Role::create(['id' => '01J0000000000000000000ROL4', 'name' => 'writer', 'guard_name' => 'web']);
-        $user = StubAuthorizable::create(['id' => '01J0000000000000000000USR5']);
+        $user = StubIdentity::create(['id' => '01J0000000000000000000USR5']);
 
         $user->assignRole('writer');
         $user->assignRole('writer');
 
         self::assertCount(1, $user->roles()->get());
-        Event::assertDispatched(RoleAssigned::class);
+        Event::assertDispatched(IdentityRoleAssigned::class);
 
         $user->revokeRole('writer');
         self::assertCount(0, $user->fresh()?->roles()->get() ?? []);
-        Event::assertDispatched(RoleRevoked::class);
+        Event::assertDispatched(IdentityRoleRevoked::class);
     }
 
     /**
@@ -187,7 +187,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $this->expectException(UnknownRoleException::class);
 
-        StubAuthorizable::create(['id' => '01J0000000000000000000USR6'])->assignRole('nope');
+        StubIdentity::create(['id' => '01J0000000000000000000USR6'])->assignRole('nope');
     }
 
     /**
@@ -199,7 +199,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $this->expectException(UnknownPermissionException::class);
 
-        StubAuthorizable::create(['id' => '01J0000000000000000000USR7'])->givePermission('nope');
+        StubIdentity::create(['id' => '01J0000000000000000000USR7'])->givePermission('nope');
     }
 
     /**
@@ -213,7 +213,7 @@ final class AuthorizationManagerTest extends TestCase
         Role::create(['id' => '01J0000000000000000000ROL6', 'name' => 'b', 'guard_name' => 'web']);
         Role::create(['id' => '01J0000000000000000000ROL7', 'name' => 'c', 'guard_name' => 'web']);
 
-        $user = StubAuthorizable::create(['id' => '01J0000000000000000000USR8']);
+        $user = StubIdentity::create(['id' => '01J0000000000000000000USR8']);
         $user->syncRoles(['a', 'b']);
         self::assertSame(['a', 'b'], self::sortedValues($user->fresh()?->getRoles() ?? []));
 
@@ -236,12 +236,12 @@ final class AuthorizationManagerTest extends TestCase
             'document' => ['statements' => [['effect' => 'allow', 'actions' => ['x']]]],
         ]);
 
-        $user = StubAuthorizable::create(['id' => '01J0000000000000000000USR9']);
+        $user = StubIdentity::create(['id' => '01J0000000000000000000USR9']);
         $user->attachPolicy($policy);
         $user->detachPolicy($policy);
 
-        Event::assertDispatched(PolicyAttached::class);
-        Event::assertDispatched(PolicyDetached::class);
+        Event::assertDispatched(IdentityPolicyAttached::class);
+        Event::assertDispatched(IdentityPolicyDetached::class);
     }
 
     /**
@@ -254,13 +254,13 @@ final class AuthorizationManagerTest extends TestCase
         Event::fake();
 
         Permission::create(['id' => '01J0000000000000000000POS5', 'name' => 'ev:do', 'guard_name' => 'web']);
-        $user = StubAuthorizable::create(['id' => '01J00000000000000000USR10']);
+        $user = StubIdentity::create(['id' => '01J00000000000000000USR10']);
 
         $user->givePermission('ev:do');
         $user->revokePermission('ev:do');
 
-        Event::assertDispatched(PermissionGranted::class);
-        Event::assertDispatched(PermissionRevoked::class);
+        Event::assertDispatched(IdentityPermissionGranted::class);
+        Event::assertDispatched(IdentityPermissionRevoked::class);
     }
 
     /**
@@ -278,7 +278,7 @@ final class AuthorizationManagerTest extends TestCase
 
         Permission::create(['id' => '01J00000000000000000POS11', 'name' => 'posts:create', 'guard_name' => 'web']);
 
-        $user = StubAuthorizable::create(['id' => '01J00000000000000000USR11']);
+        $user = StubIdentity::create(['id' => '01J00000000000000000USR11']);
         $user->givePermission('posts:create');
 
         self::assertTrue(Authorization::for($user)->can('posts:create'));
@@ -311,7 +311,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testWithPoliciesOverridesPrincipalPolicies(): void
     {
-        $user = StubAuthorizable::create(['id' => '01J00000000000000000USR12']);
+        $user = StubIdentity::create(['id' => '01J00000000000000000USR12']);
 
         $override = EvaluationPolicy::fromArray([
             'name'       => 'ad-hoc',
@@ -334,7 +334,7 @@ final class AuthorizationManagerTest extends TestCase
         Permission::create(['id' => '01J00000000000000000POS12', 'name' => 'spatie:do', 'guard_name' => 'web']);
         Role::create(['id' => '01J0000000000000000000ROL8', 'name' => 'spatie-role', 'guard_name' => 'web']);
 
-        $user = StubAuthorizable::create(['id' => '01J00000000000000000USR13']);
+        $user = StubIdentity::create(['id' => '01J00000000000000000USR13']);
 
         // Aliases mirror canonical helpers.
         $user->givePermissionTo('spatie:do');
@@ -363,7 +363,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         self::assertNull(Authorization::currentPrincipal());
 
-        $user = StubAuthorizable::create(['id' => '01J0000000000000000000USR8']);
+        $user = StubIdentity::create(['id' => '01J0000000000000000000USR8']);
 
         self::assertSame($user, Authorization::for($user)->currentPrincipal());
     }

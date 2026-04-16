@@ -398,33 +398,6 @@ enterprise systems ship both.)_
   behaviour; enterprise consumers who set ranks get the guardrail
   automatically.
 
-### 46. No CI check enforcing zero `sinemacula/laravel-*` runtime dependency
-
-- **Spec reference:** §12.5 — _"Zero runtime dependency on any
-  `sinemacula/laravel-*` package (enforced by CI check on
-  `composer.json`)."_
-- **Files:** `.github/workflows/tests.yml`,
-  `.github/workflows/quality-gates.yml` — no job, step, or script
-  inspects `composer.json`'s `require` block for sibling package
-  entries.
-- **Observation:** the package's standalone-first guarantee rests
-  on this isolation, but nothing in CI fails the build if someone
-  accidentally adds `sinemacula/laravel-authentication` (or any
-  sibling) to runtime dependencies. Dev dependencies are fine;
-  runtime dependencies are not.
-- **Impact:** a silent future regression. One careless
-  `composer require` and the "drop-in, standalone" narrative is
-  broken without anyone noticing until a downstream consumer
-  tries to install the package in isolation.
-- **Options:** (a) add a small CI step that runs
-  `jq '.require | keys[]' composer.json` (or equivalent
-  `composer show --direct --format=json`), filters for entries
-  matching `sinemacula/laravel-*`, and fails the build if any
-  match; (b) write a dedicated PHP test under
-  `tests/Unit/PackageIsolationTest.php` that reads `composer.json`
-  and asserts the same invariant — runs on every test execution,
-  not just CI. Option (b) catches it locally too.
-
 ### 47. Open question §15.4 unresolved — gate conflict default
 
 - **Spec reference:** §15 open question 4 — _"Gate conflict
@@ -701,64 +674,6 @@ enterprise systems ship both.)_
   delta — expands the event surface but is more economical for
   bulk-focused consumers. Option (a) leaves the event catalogue
   as-is and closes the audit gap.
-
-### 57. Asymmetric event-class naming between identity-level and role-level mutations
-
-- **Files:** `src/Events/PermissionGranted.php`,
-  `src/Events/PermissionRevoked.php`, `src/Events/RoleAssigned.php`,
-  `src/Events/RoleRevoked.php`, `src/Events/PolicyAttached.php`,
-  `src/Events/PolicyDetached.php` (identity-level, unprefixed);
-  `src/Events/RolePermissionGranted.php`,
-  `src/Events/RolePermissionRevoked.php` (role-level,
-  `Role`-prefixed).
-- **Observation:** every identity-level event is unprefixed
-  (`PermissionGranted`, `RoleAssigned`, `PolicyAttached`); the
-  role-level events introduced in commit `e3699c0` carry an
-  explicit `Role` prefix. An audit consumer subscribing to
-  `PermissionGranted` expecting "all permission grants" silently
-  misses role-to-permission mutations. The naming convention
-  carries hidden context — "unprefixed = identity-scoped" — that
-  the event class names do not communicate.
-- **Impact:** SemVer-stable event contracts (tracked in #54) need
-  names that discoverable-without-docs. The current asymmetry is
-  a subscription footgun for enterprise audit.
-- **Options:** (a) rename every identity-level event with an
-  `Identity` prefix for symmetry:
-  `IdentityPermissionGranted` / `IdentityPermissionRevoked`,
-  `IdentityRoleAssigned` / `IdentityRoleRevoked`,
-  `IdentityPolicyAttached` / `IdentityPolicyDetached`. Role-level
-  events keep their current names. Both contexts become explicit
-  with no default; (b) accept the asymmetry and document the
-  "unprefixed = identity-scoped" convention in a design note.
-  Option (a) is the enterprise-grade default and matches the
-  `AuthorizableIdentity` contract's naming shift.
-
-### 59. Test fixture class names retain pre-rename terminology
-
-- **Files:** `tests/Feature/Stubs/StubAuthorizable.php`;
-  `tests/Feature/Stubs/StubSecondAuthorizable.php`; the stubs'
-  backing table `stub_authorizables` in `tests/TestCase.php`.
-- **Observation:** issue #25 renamed the contract to
-  `AuthorizableIdentity` and the trait to `HasAuthorization`.
-  Both fixtures were updated internally (their `implements` and
-  `use` clauses cite the new names) but the class names
-  themselves — `StubAuthorizable`, `StubSecondAuthorizable` —
-  and the backing table `stub_authorizables` retain the
-  pre-rename term. A grep for `AuthorizableIdentity` test
-  coverage silently skips the fixture layer.
-- **Impact:** minor readability and discoverability friction in
-  the test suite. Not a correctness bug, but three different
-  spellings of the same concept (`AuthorizableIdentity`,
-  `HasAuthorization`, `StubAuthorizable`) coexist in a small
-  surface area.
-- **Options:** (a) rename to `StubIdentity` /
-  `StubSecondIdentity` with backing table `stub_identities`
-  (concise, symmetric with `AuthorizableIdentity`); (b) rename
-  to `StubAuthorizableIdentity` / `StubSecondAuthorizableIdentity`
-  (verbose but mirrors the contract exactly); (c) keep the
-  current names and add a one-line class comment citing the
-  rationale. Option (a) is the minimal-friction path and matches
-  the shortened `*Identity` shape the contract uses.
 
 ### 60. `RolePermission` pivot re-queries both parents on every save — 2 extra DB round-trips per attach
 

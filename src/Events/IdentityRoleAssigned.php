@@ -7,12 +7,12 @@ namespace SineMacula\Laravel\Authorization\Events;
 use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
- * Dispatched when a role is revoked from an authorizable identity.
+ * Dispatched when a role is assigned to an authorizable identity.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class RoleRevoked
+final readonly class IdentityRoleAssigned
 {
     /**
      * Create a new event instance.
@@ -22,10 +22,10 @@ final readonly class RoleRevoked
      */
     public function __construct(
 
-        /** Authorizable identity that the role was revoked from. */
+        /** Authorizable identity that received the role assignment. */
         public object $authorizable,
 
-        /** Role that was revoked from the identity. */
+        /** Role that was assigned to the identity. */
         public Role $role,
 
     ) {}

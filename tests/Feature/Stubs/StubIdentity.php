@@ -17,7 +17,7 @@ use SineMacula\Laravel\Authorization\Traits\HasAuthorization;
  *
  * @internal
  */
-class StubAuthorizable extends Model implements AuthorizableIdentity
+class StubIdentity extends Model implements AuthorizableIdentity
 {
     use HasAuthorization;
 
@@ -54,5 +54,5 @@ class StubAuthorizable extends Model implements AuthorizableIdentity
      *
      * @var string
      */
-    protected $table = 'stub_authorizables';
+    protected $table = 'stub_identities';
 }

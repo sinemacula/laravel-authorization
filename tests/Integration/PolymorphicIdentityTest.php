@@ -9,8 +9,8 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Traits\HasRoles;
-use Tests\Feature\Stubs\StubAuthorizable;
-use Tests\Feature\Stubs\StubSecondAuthorizable;
+use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\TestCase;
 
 /**
@@ -38,8 +38,8 @@ final class PolymorphicIdentityTest extends TestCase
         $permission = Permission::create(['id' => '01J0000000000000000PERM01', 'name' => 'thing:do', 'guard_name' => 'web']);
         $role->permissions()->attach($permission->getKey());
 
-        $first  = StubAuthorizable::create(['id' => '01J0000000000000000USR101']);
-        $second = StubSecondAuthorizable::create(['id' => '01J0000000000000000USR102']);
+        $first  = StubIdentity::create(['id' => '01J0000000000000000USR101']);
+        $second = StubSecondIdentity::create(['id' => '01J0000000000000000USR102']);
 
         $first->assignRole('shared');
         $second->assignRole('shared');
@@ -49,7 +49,7 @@ final class PolymorphicIdentityTest extends TestCase
 
         // Polymorphic types on the pivot remain distinct.
         self::assertSame(
-            [StubAuthorizable::class, StubSecondAuthorizable::class],
+            [StubIdentity::class, StubSecondIdentity::class],
             self::sortedTypes(),
         );
     }

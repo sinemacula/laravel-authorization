@@ -4,7 +4,6 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
-use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
@@ -18,7 +17,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy as PolicyModel;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Repositories\CachingPolicyRepository;
-use Tests\Feature\Stubs\StubAuthorizable;
+use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
@@ -27,9 +26,9 @@ use Tests\TestCase;
  *
  * Covers the two tiers (in-memory memo + optional persistent
  * store), the principal-scoped invalidation path
- * (`RoleAssigned` / `PermissionGranted` / `PolicyAttached` and
- * their inverses), and the broad in-memory flush triggered by
- * role-pivot mutations.
+ * (`IdentityRoleAssigned` / `IdentityPermissionGranted` /
+ * `IdentityPolicyAttached` and their inverses), and the broad
+ * in-memory flush triggered by role-pivot mutations.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -73,8 +72,8 @@ final class ResolutionCacheTest extends TestCase
      */
     public function testInMemoryMemoReturnsCachedValueWithoutInvokingResolver(): void
     {
-        $cache = $this->app->make(ResolutionCache::class);
-        $principal = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $cache     = $this->app->make(ResolutionCache::class);
+        $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         $calls = 0;
 
@@ -103,14 +102,14 @@ final class ResolutionCacheTest extends TestCase
      */
     public function testPersistentStoreIsReadOnColdMiss(): void
     {
-        $cache = $this->app->make(ResolutionCache::class);
-        $principal = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $cache     = $this->app->make(ResolutionCache::class);
+        $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         $cache->rememberPermissions($principal, static fn (): array => ['posts:create', 'posts:delete']);
 
         /** @var \Illuminate\Contracts\Cache\Repository $store */
         $store = Cache::store('array');
-        $keys = \array_filter(
+        $keys  = \array_filter(
             \array_keys((array) $this->extractPrivate($store->getStore(), 'storage') ?? []),
             static fn (mixed $key): bool => \is_string($key) && \str_starts_with($key, 'authorization-test:permissions:'),
         );
@@ -118,8 +117,8 @@ final class ResolutionCacheTest extends TestCase
         self::assertNotEmpty($keys, 'Persistent cache entry should exist under the configured prefix.');
 
         // New cache instance with the same store — simulates a fresh request.
-        $fresh   = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
-        $result  = $fresh->rememberPermissions($principal, static fn (): array => \PHPUnit\Framework\Assert::fail('Resolver should not be called on a store hit.'));
+        $fresh  = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
+        $result = $fresh->rememberPermissions($principal, static fn (): array => \PHPUnit\Framework\Assert::fail('Resolver should not be called on a store hit.'));
 
         self::assertSame(['posts:create', 'posts:delete'], $result);
     }
@@ -132,8 +131,8 @@ final class ResolutionCacheTest extends TestCase
      */
     public function testForgetClearsEverySlotForPrincipal(): void
     {
-        $cache = $this->app->make(ResolutionCache::class);
-        $principal = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $cache     = $this->app->make(ResolutionCache::class);
+        $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         $cache->rememberPermissions($principal, static fn (): array => ['a']);
         $cache->rememberRoles($principal, static fn (): array => ['admin']);
@@ -151,14 +150,14 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `RoleAssigned` invalidates the principal's cached role /
-     * permission slots.
+     * `IdentityRoleAssigned` invalidates the principal's cached
+     * role / permission slots.
      *
      * @return void
      */
-    public function testRoleAssignedInvalidatesCache(): void
+    public function testIdentityRoleAssignedInvalidatesCache(): void
     {
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard_name' => 'web']);
 
         // Prime the cache with the current (empty) state.
@@ -170,14 +169,14 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `PolicyAttached` invalidates the principal's cached policy
-     * slot via the caching repository decorator.
+     * `IdentityPolicyAttached` invalidates the principal's cached
+     * policy slot via the caching repository decorator.
      *
      * @return void
      */
-    public function testPolicyAttachedInvalidatesCachingRepository(): void
+    public function testIdentityPolicyAttachedInvalidatesCachingRepository(): void
     {
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         /** @var \SineMacula\Laravel\Authorization\Contracts\PolicyRepository $repository */
         $repository = $this->app->make(PolicyRepository::class);
@@ -218,13 +217,13 @@ final class ResolutionCacheTest extends TestCase
 
         $cache = $this->app->make(ResolutionCache::class);
 
-        $principal = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         $cache->rememberPermissions($principal, static fn (): array => ['stale:entry']);
 
         self::assertSame(['stale:entry'], $cache->rememberPermissions($principal, static fn (): array => ['live:entry']));
 
-        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard_name' => 'web']);
+        $role       = Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard_name' => 'web']);
         $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard_name' => 'web']);
         $role->givePermission($permission);
 
@@ -244,7 +243,7 @@ final class ResolutionCacheTest extends TestCase
         Role::create(['id' => (string) Str::uuid(), 'name' => 'b', 'guard_name' => 'web']);
         Role::create(['id' => (string) Str::uuid(), 'name' => 'c', 'guard_name' => 'web']);
 
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->syncRoles(['a', 'b']);
 
         $first = $user->fresh()?->getRoles() ?? [];

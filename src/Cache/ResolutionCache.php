@@ -4,7 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Cache;
 
-use Closure;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
@@ -84,7 +83,7 @@ final class ResolutionCache
      * @param  \Closure(): array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $resolver
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
      */
-    public function rememberPolicies(object $principal, Closure $resolver): array
+    public function rememberPolicies(object $principal, \Closure $resolver): array
     {
         $key = $this->key('policies', $principal);
 
@@ -126,7 +125,7 @@ final class ResolutionCache
      * @param  \Closure(): array<int, string>  $resolver
      * @return array<int, string>
      */
-    public function rememberPermissions(object $principal, Closure $resolver): array
+    public function rememberPermissions(object $principal, \Closure $resolver): array
     {
         return $this->rememberStringList('permissions', $principal, $resolver);
     }
@@ -139,7 +138,7 @@ final class ResolutionCache
      * @param  \Closure(): array<int, string>  $resolver
      * @return array<int, string>
      */
-    public function rememberRoles(object $principal, Closure $resolver): array
+    public function rememberRoles(object $principal, \Closure $resolver): array
     {
         return $this->rememberStringList('roles', $principal, $resolver);
     }
@@ -147,8 +146,9 @@ final class ResolutionCache
     /**
      * Drop every cached entry for the supplied principal — memo
      * and persistent store alike. Listeners call this on
-     * principal-scoped mutations (`RoleAssigned`,
-     * `PermissionGranted`, `PolicyAttached`, and their inverses).
+     * principal-scoped mutations (`IdentityRoleAssigned`,
+     * `IdentityPermissionGranted`, `IdentityPolicyAttached`, and
+     * their inverses).
      *
      * @param  object  $principal
      * @return void
@@ -191,15 +191,13 @@ final class ResolutionCache
      * @param  \Closure(): array<int, string>  $resolver
      * @return array<int, string>
      */
-    private function rememberStringList(string $kind, object $principal, Closure $resolver): array
+    private function rememberStringList(string $kind, object $principal, \Closure $resolver): array
     {
         $key = $this->key($kind, $principal);
 
         if (\array_key_exists($key, $this->memo)) {
             /** @var array<int, string> $cached */
-            $cached = $this->memo[$key];
-
-            return $cached;
+            return $this->memo[$key];
         }
 
         if ($this->store !== null) {

@@ -22,7 +22,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Tests\Feature\Stubs\CustomRoleMiddlewareDouble;
-use Tests\Feature\Stubs\StubAuthorizable;
+use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
@@ -105,7 +105,7 @@ final class RouteMiddlewareTest extends TestCase
             'guard_name' => 'web',
         ]);
 
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $middleware = new RequireRole;
@@ -127,7 +127,7 @@ final class RouteMiddlewareTest extends TestCase
             'guard_name' => 'web',
         ]);
 
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole('admin');
 
         $this->actAs($user);
@@ -161,7 +161,7 @@ final class RouteMiddlewareTest extends TestCase
             'guard_name' => 'web',
         ]);
 
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole('editor');
 
         $this->actAs($user);
@@ -196,7 +196,7 @@ final class RouteMiddlewareTest extends TestCase
             'guard_name' => 'web',
         ]);
 
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole('oncall');
 
         $this->actAs($user);
@@ -225,7 +225,7 @@ final class RouteMiddlewareTest extends TestCase
             'guard_name' => 'web',
         ]);
 
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole('captain');
 
         $this->actAs($user);
@@ -286,7 +286,7 @@ final class RouteMiddlewareTest extends TestCase
             'guard_name' => 'web',
         ]);
 
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
 
         $middleware = new RequirePermission;
@@ -308,7 +308,7 @@ final class RouteMiddlewareTest extends TestCase
             'guard_name' => 'web',
         ]);
 
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->givePermission(self::PERMISSION);
 
         $this->actAs($user);
@@ -343,7 +343,7 @@ final class RouteMiddlewareTest extends TestCase
         ]);
         $role->permissions()->attach($permission->getKey());
 
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole('publisher');
 
         $this->actAs($user);
@@ -377,7 +377,7 @@ final class RouteMiddlewareTest extends TestCase
             'guard_name' => 'web',
         ]);
 
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->givePermission('posts:delete');
 
         $this->actAs($user);
@@ -447,10 +447,10 @@ final class RouteMiddlewareTest extends TestCase
             'guard_name' => 'web',
         ]);
 
-        $resolverUser = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $resolverUser = StubIdentity::create(['id' => (string) Str::uuid()]);
         $resolverUser->assignRole('admin');
 
-        $requestUser = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $requestUser = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         $this->actAs($resolverUser);
 

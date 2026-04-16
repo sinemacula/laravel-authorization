@@ -11,7 +11,7 @@ use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Traits\HasPolicies;
-use Tests\Feature\Stubs\StubAuthorizable;
+use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
@@ -46,7 +46,7 @@ final class FailClosedPolicyHydrationTest extends TestCase
      */
     public function testMalformedPolicyRowIsSkipped(): void
     {
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         // Persist a valid policy via the happy path.
         $good = Policy::create([
@@ -93,7 +93,7 @@ final class FailClosedPolicyHydrationTest extends TestCase
      */
     public function testAuthorizationStillEvaluatesAroundMalformedRow(): void
     {
-        $user = StubAuthorizable::create(['id' => (string) Str::uuid()]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         $user->attachPolicy(Policy::create([
             'id'       => (string) Str::uuid(),

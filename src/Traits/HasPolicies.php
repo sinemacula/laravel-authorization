@@ -9,8 +9,8 @@ use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
-use SineMacula\Laravel\Authorization\Events\PolicyAttached;
-use SineMacula\Laravel\Authorization\Events\PolicyDetached;
+use SineMacula\Laravel\Authorization\Events\IdentityPolicyAttached;
+use SineMacula\Laravel\Authorization\Events\IdentityPolicyDetached;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Models\AuthorizableGrantPivot;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -70,7 +70,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * who swap the policy model via `authorization.models.policy`
      * may pass their own subclass (or a duck-typed model persisted
      * in the same pivot) without jumping through inheritance
-     * hoops. The shipped `PolicyAttached` event expects a `Policy`
+     * hoops. The shipped `IdentityPolicyAttached` event expects a `Policy`
      * instance, so non-Policy models are attached silently; use
      * a Policy-shaped class when event wiring matters.
      *
@@ -95,7 +95,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
         }
 
         if ($policy instanceof Policy) {
-            Event::dispatch(new PolicyAttached($this, $policy));
+            Event::dispatch(new IdentityPolicyAttached($this, $policy));
         }
 
         return $this;
@@ -119,7 +119,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
         }
 
         if ($policy instanceof Policy) {
-            Event::dispatch(new PolicyDetached($this, $policy));
+            Event::dispatch(new IdentityPolicyDetached($this, $policy));
         }
 
         return $this;
@@ -148,9 +148,9 @@ trait HasPolicies // @phpstan-ignore trait.unused
         }
 
         // sync() bypasses attachPolicy / detachPolicy and so fires
-        // no PolicyAttached / PolicyDetached events — invalidate
-        // the resolution cache directly so the next evaluation
-        // observes the fresh policy set.
+        // no IdentityPolicyAttached / IdentityPolicyDetached
+        // events — invalidate the resolution cache directly so the
+        // next evaluation observes the fresh policy set.
         if (app()->bound(ResolutionCache::class)) {
             app(ResolutionCache::class)->forget($this);
         }

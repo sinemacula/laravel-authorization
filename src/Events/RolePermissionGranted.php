@@ -10,10 +10,10 @@ use SineMacula\Laravel\Authorization\Models\Role;
 /**
  * Dispatched when a permission is attached to a role.
  *
- * Distinct from `PermissionGranted`, which fires when a permission is
- * attached directly to an authorizable identity. Audit consumers use
- * the event class to distinguish role-catalogue mutations from
- * identity-level grants.
+ * Distinct from `IdentityPermissionGranted`, which fires when a
+ * permission is attached directly to an authorizable identity. Audit
+ * consumers use the event class to distinguish role-catalogue
+ * mutations from identity-level grants.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
