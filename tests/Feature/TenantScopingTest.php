@@ -4,9 +4,13 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use SineMacula\Laravel\Authorization\Contracts\TenantIdentifier;
 use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
@@ -24,7 +28,6 @@ use Tests\TestCase;
  *
  * @internal
  */
-#[\PHPUnit\Framework\Attributes\CoversNothing]
 class TenantScopingTest extends TestCase
 {
     public function testNullResolverShowsAllRoles(): void
@@ -377,6 +380,184 @@ class TenantScopingTest extends TestCase
     }
 
     /**
+     * The `TenantResolver` is consulted at most once per scope
+     * instance per container lifetime — a spy resolver wrapping a
+     * concrete tenant records one `resolve()` invocation regardless
+     * of how many Eloquent queries the scope filters (issue #103).
+     *
+     * @return void
+     */
+    public function testTenantResolverIsMemoisedAcrossQueries(): void
+    {
+        $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
+
+        Role::create(['name' => 'role-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey()]);
+        Role::create(['name' => 'global-role', 'guard_name' => 'web']);
+        Permission::create(['name' => 'perm-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey()]);
+
+        $spy = new class ($tenantA) implements TenantResolver {
+            public int $calls = 0;
+
+            public function __construct(private readonly ?object $tenant) {}
+
+            public function resolve(): ?object
+            {
+                $this->calls++;
+
+                return $this->tenant;
+            }
+        };
+
+        /** @var \Illuminate\Foundation\Application $app */
+        $app = $this->app;
+        $app->instance(TenantResolver::class, $spy);
+
+        // Flush any memo the scope captured before the spy was
+        // bound — previous tests may have resolved the null
+        // tenant against the NullTenantResolver default.
+        $this->flushTenantScopeMemos();
+
+        // Issue multiple queries against both scoped models — each
+        // one invokes `TenantScope::apply`. Without memoisation the
+        // spy would record one call per query.
+        Role::all();
+        Role::all();
+        Role::query()->where('name', 'role-a')->get();
+        Permission::all();
+        Permission::query()->where('name', 'perm-a')->get();
+
+        // One call per scope instance (Role + Permission each hold
+        // their own global scope registration). That is O(models),
+        // not O(queries) — the regression guard.
+        static::assertLessThanOrEqual(2, $spy->calls);
+        static::assertGreaterThan(0, $spy->calls);
+    }
+
+    /**
+     * A resolver that returns an object which is neither an
+     * Eloquent `Model` nor a `TenantIdentifier` implementer is
+     * refused at the scope boundary with `InvalidTenantException`
+     * (issue #104) — no silent `spl_object_hash` fallback.
+     *
+     * @return void
+     */
+    public function testNonModelNonIdentifierTenantIsRefused(): void
+    {
+        $opaque = new \stdClass;
+
+        $this->bindTenantResolver($opaque);
+
+        $this->expectException(InvalidTenantException::class);
+        $this->expectExceptionMessageMatches('/stdClass/');
+
+        Role::all();
+    }
+
+    /**
+     * A custom tenant implementing `TenantIdentifier` is accepted
+     * by the scope and matches rows written with the contract's
+     * `getTenantType()` / `getTenantIdentifier()` values (issue
+     * #104).
+     *
+     * @return void
+     */
+    public function testTenantIdentifierImplementerIsAcceptedByScope(): void
+    {
+        $customTenant = new class implements TenantIdentifier {
+            /**
+             * @return string
+             */
+            public function getTenantIdentifier(): string
+            {
+                return 'custom-tenant-42';
+            }
+
+            /**
+             * @return string
+             */
+            public function getTenantType(): string
+            {
+                return 'App\Tenancy\CustomTenant';
+            }
+        };
+
+        Role::create([
+            'name'        => 'custom-role',
+            'guard_name'  => 'web',
+            'tenant_type' => $customTenant->getTenantType(),
+            'tenant_id'   => $customTenant->getTenantIdentifier(),
+        ]);
+        Role::create(['name' => 'global-role', 'guard_name' => 'web']);
+
+        $this->bindTenantResolver($customTenant);
+        $this->flushTenantScopeMemos();
+
+        $roles = Role::all();
+
+        static::assertCount(2, $roles);
+        static::assertTrue($roles->pluck('name')->contains('custom-role'));
+        static::assertTrue($roles->pluck('name')->contains('global-role'));
+    }
+
+    /**
+     * Persisting a Role with only `tenant_type` (tenant_id null)
+     * raises `InvalidTenantColumnsException` before the row hits
+     * the database (issue #105).
+     *
+     * @return void
+     */
+    public function testRoleWithHalfSetTenantColumnsRaisesException(): void
+    {
+        $this->expectException(InvalidTenantColumnsException::class);
+        $this->expectExceptionMessageMatches('/tenant_id/');
+
+        Role::create([
+            'name'        => 'broken-role',
+            'guard_name'  => 'web',
+            'tenant_type' => 'App\Tenant',
+            'tenant_id'   => null,
+        ]);
+    }
+
+    /**
+     * The inverse case — `tenant_id` set with `tenant_type` null —
+     * is refused with the same exception (issue #105).
+     *
+     * @return void
+     */
+    public function testRoleWithTenantIdButNoTenantTypeRaisesException(): void
+    {
+        $this->expectException(InvalidTenantColumnsException::class);
+        $this->expectExceptionMessageMatches('/tenant_type/');
+
+        Role::create([
+            'name'        => 'broken-role',
+            'guard_name'  => 'web',
+            'tenant_type' => null,
+            'tenant_id'   => 'tenant-x',
+        ]);
+    }
+
+    /**
+     * Permissions carry the same tenant-column invariant (issue
+     * #105).
+     *
+     * @return void
+     */
+    public function testPermissionWithHalfSetTenantColumnsRaisesException(): void
+    {
+        $this->expectException(InvalidTenantColumnsException::class);
+        $this->expectExceptionMessageMatches('/tenant_id/');
+
+        Permission::create([
+            'name'        => 'broken-perm',
+            'guard_name'  => 'web',
+            'tenant_type' => 'App\Tenant',
+            'tenant_id'   => null,
+        ]);
+    }
+
+    /**
      * Bind a custom tenant resolver that returns the given tenant.
      *
      * @param  object|null  $tenant
@@ -394,5 +575,24 @@ class TenantScopingTest extends TestCase
                 }
             };
         });
+
+        $this->flushTenantScopeMemos();
+    }
+
+    /**
+     * Flush the per-instance tenant memo on the global scopes
+     * registered on `Role` and `Permission` so a re-bound resolver
+     * is observed on the next query.
+     *
+     * @return void
+     */
+    private function flushTenantScopeMemos(): void
+    {
+        foreach ([Role::class, Permission::class] as $class) {
+            /** @var \SineMacula\Laravel\Authorization\Scopes\TenantScope|null $scope */
+            $scope = $class::getGlobalScope(TenantScope::class);
+
+            $scope?->flushResolvedTenant();
+        }
     }
 }

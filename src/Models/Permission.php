@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Events\PermissionCreated;
 use SineMacula\Laravel\Authorization\Events\PermissionDeleted;
 use SineMacula\Laravel\Authorization\Events\PermissionUpdated;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPermissionProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
@@ -136,19 +137,21 @@ class Permission extends Model
     /**
      * Scope the query to rows owned by the given tenant.
      *
+     * Delegates morph-pair extraction to
+     * `TenantScope::extractTenantPair()` so the global scope and
+     * this local scope share a single owner for the acceptance
+     * rules — refuses any tenant that is neither a Model nor a
+     * `TenantIdentifier` implementer with a typed exception.
+     *
      * @param  \Illuminate\Database\Eloquent\Builder<static>  $query
      * @param  object  $tenant
      * @return \Illuminate\Database\Eloquent\Builder<static>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
      */
     public function scopeForTenant(Builder $query, object $tenant): Builder
     {
-        $morphType = $tenant instanceof Model
-            ? $tenant->getMorphClass()
-            : $tenant::class;
-
-        $morphId = method_exists($tenant, 'getKey')
-            ? (string) $tenant->getKey()
-            : spl_object_hash($tenant);
+        [$morphType, $morphId] = TenantScope::extractTenantPair($tenant);
 
         return $query->where($this->getTable() . '.tenant_type', $morphType)
             ->where($this->getTable() . '.tenant_id', $morphId);
@@ -247,6 +250,17 @@ class Permission extends Model
     protected static function booted(): void
     {
         static::addGlobalScope(new TenantScope);
+
+        static::saving(static function (self $permission): void {
+            // Enforce the both-or-neither tenant ownership invariant
+            // so a half-set row cannot be persisted — it would be
+            // invisible to the `TenantScope` global filter and to
+            // `scopeForTenant` / `scopeGlobalOnly`, silently
+            // orphaning the data.
+            if (($permission->tenant_type === null) !== ($permission->tenant_id === null)) {
+                throw new InvalidTenantColumnsException(modelKind: 'permission', missingColumn: $permission->tenant_type === null ? 'tenant_type' : 'tenant_id');
+            }
+        });
 
         static::updating(static function (self $permission): void {
             $snapshot = [];

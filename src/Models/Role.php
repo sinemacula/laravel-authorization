@@ -18,6 +18,7 @@ use SineMacula\Laravel\Authorization\Events\RoleDeleted;
 use SineMacula\Laravel\Authorization\Events\RolePermissionGranted;
 use SineMacula\Laravel\Authorization\Events\RolePermissionRevoked;
 use SineMacula\Laravel\Authorization\Events\RoleUpdated;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
@@ -210,19 +211,21 @@ class Role extends Model
     /**
      * Scope the query to rows owned by the given tenant.
      *
+     * Delegates morph-pair extraction to
+     * `TenantScope::extractTenantPair()` so the global scope and
+     * this local scope share a single owner for the acceptance
+     * rules — refuses any tenant that is neither a Model nor a
+     * `TenantIdentifier` implementer with a typed exception.
+     *
      * @param  \Illuminate\Database\Eloquent\Builder<static>  $query
      * @param  object  $tenant
      * @return \Illuminate\Database\Eloquent\Builder<static>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
      */
     public function scopeForTenant(Builder $query, object $tenant): Builder
     {
-        $morphType = $tenant instanceof Model
-            ? $tenant->getMorphClass()
-            : $tenant::class;
-
-        $morphId = method_exists($tenant, 'getKey')
-            ? (string) $tenant->getKey()
-            : spl_object_hash($tenant);
+        [$morphType, $morphId] = TenantScope::extractTenantPair($tenant);
 
         return $query->where($this->getTable() . '.tenant_type', $morphType)
             ->where($this->getTable() . '.tenant_id', $morphId);
@@ -278,7 +281,9 @@ class Role extends Model
      * Walks up the parent chain eagerly loading each level. Includes
      * cycle detection — if a visited role is encountered a second
      * time, the chain is broken and a
-     * `RoleHierarchyCycleException` is thrown.
+     * `RoleHierarchyCycleException` is thrown carrying the
+     * offending role's name and the name of the parent that would
+     * close the cycle.
      *
      * @return \Illuminate\Support\Collection<int, self>
      *
@@ -292,7 +297,13 @@ class Role extends Model
 
         while ($current->parent_id !== null) {
             if (isset($visited[$current->parent_id])) {
-                throw new RoleHierarchyCycleException(roleName: $this->name, proposedParentName: $current->parent_id);
+                /** @var static|null $proposedParent */
+                $proposedParent = static::query()->find($current->parent_id);
+                /** @var string $parentId */
+                $parentId     = $current->parent_id;
+                $proposedName = $proposedParent === null ? $parentId : $proposedParent->name;
+
+                throw new RoleHierarchyCycleException(roleName: $this->name, proposedParentName: $proposedName);
             }
 
             $visited[$current->parent_id] = true;
@@ -314,16 +325,39 @@ class Role extends Model
     /**
      * Return all descendant roles (breadth-first).
      *
+     * Carries a visited set keyed by primary key so a corrupted
+     * hierarchy (cycle written via raw SQL, a race between two
+     * concurrent `parent_id` saves, FK enforcement disabled) does
+     * not turn the walk into a runaway loop. A re-encountered node
+     * raises `RoleHierarchyCycleException` — matching the
+     * ancestors-walk behaviour so callers have one exception to
+     * catch regardless of direction.
+     *
      * @return \Illuminate\Support\Collection<int, self>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
      */
     public function descendants(): Collection
     {
         $descendants = new Collection;
         $queue       = $this->children()->get()->all();
 
+        /** @var string $selfKey */
+        $selfKey = $this->getKey();
+        $visited = [$selfKey => true];
+
         while ($queue !== []) {
             /** @var self $node */
             $node = \array_shift($queue);
+
+            /** @var string $nodeId */
+            $nodeId = $node->getKey();
+
+            if (isset($visited[$nodeId])) {
+                throw new RoleHierarchyCycleException(roleName: $this->name, proposedParentName: $node->name);
+            }
+
+            $visited[$nodeId] = true;
             $descendants->push($node);
 
             foreach ($node->children()->get() as $child) {
@@ -337,26 +371,28 @@ class Role extends Model
     /**
      * Determine whether this role is an ancestor of the given role.
      *
+     * Delegates to the other role's `ancestors()` walk so cycle
+     * detection has a single owner — any corrupted chain raises
+     * `RoleHierarchyCycleException` from `ancestors()` rather than
+     * looping forever.
+     *
      * @param  self  $role
      * @return bool
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
      */
     public function isAncestorOf(self $role): bool
     {
-        $current = $role;
+        /** @var string $selfKey */
+        $selfKey = $this->getKey();
 
-        while ($current->parent_id !== null) {
-            if ($current->parent_id === $this->getKey()) {
+        foreach ($role->ancestors() as $ancestor) {
+            /** @var string $ancestorKey */
+            $ancestorKey = $ancestor->getKey();
+
+            if ($ancestorKey === $selfKey) {
                 return true;
             }
-
-            /** @var self|null $parent */
-            $parent = $current->parent;
-
-            if ($parent === null) {
-                break;
-            }
-
-            $current = $parent;
         }
 
         return false;
@@ -657,6 +693,16 @@ class Role extends Model
         static::addGlobalScope(new TenantScope);
 
         static::saving(static function (self $role): void {
+            // Enforce the both-or-neither tenant ownership invariant
+            // before any hierarchy check — a row with only one of
+            // `tenant_type` / `tenant_id` set would be invisible to
+            // the `TenantScope` global filter and to
+            // `scopeForTenant` / `scopeGlobalOnly`, silently
+            // orphaning the data. Fail loudly on save.
+            if (($role->tenant_type === null) !== ($role->tenant_id === null)) {
+                throw new InvalidTenantColumnsException(modelKind: 'role', missingColumn: $role->tenant_type === null ? 'tenant_type' : 'tenant_id');
+            }
+
             if ($role->parent_id === null) {
                 return;
             }

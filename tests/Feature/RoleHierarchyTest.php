@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
@@ -262,6 +263,85 @@ final class RoleHierarchyTest extends TestCase
         self::assertTrue($leaf->isDescendantOf($root));
         self::assertTrue($child->isDescendantOf($root));
         self::assertFalse($root->isDescendantOf($leaf));
+    }
+
+    /**
+     * Cycle detection in `ancestors()` carries the proposed parent's
+     * name — not its UUID — so caught-exception output is readable
+     * (issue #100).
+     *
+     * @return void
+     */
+    public function testAncestorsCycleExceptionCarriesRoleNames(): void
+    {
+        $root  = $this->makeRole('admin');
+        $child = $this->makeRole('editor', parentId: $root->getKey());
+
+        $rootId  = (string) $root->getKey();
+        $childId = (string) $child->getKey();
+
+        // Bypass the saving hook to inject a cycle: point root's
+        // parent at the child so `ancestors()` on child loops.
+        $updated = DB::table('roles')->where('id', $rootId)->update(['parent_id' => $childId]);
+        self::assertSame(1, $updated, 'Cycle-injection update should hit one row.');
+
+        try {
+            $child->fresh()->ancestors();
+            self::fail('RoleHierarchyCycleException was not thrown.');
+        } catch (RoleHierarchyCycleException $exception) {
+            self::assertSame('editor', $exception->getRoleName());
+            // The proposed-parent is whatever the walk re-encounters
+            // as it closes the loop — it is the role's *name*, not
+            // its UUID (the #100 regression guard).
+            self::assertSame('admin', $exception->getProposedParentName());
+            self::assertStringNotContainsString($rootId, $exception->getMessage());
+            self::assertStringNotContainsString($childId, $exception->getMessage());
+            self::assertStringContainsString('admin', $exception->getMessage());
+            self::assertStringContainsString('editor', $exception->getMessage());
+        }
+    }
+
+    /**
+     * `descendants()` terminates safely (no infinite loop) when a
+     * cycle has been injected directly into the database, bypassing
+     * the Eloquent saving-hook guard (issue #101).
+     *
+     * @return void
+     */
+    public function testDescendantsTerminatesOnDatabaseLevelCycle(): void
+    {
+        $root  = $this->makeRole('admin');
+        $child = $this->makeRole('editor', parentId: $root->getKey());
+
+        // Inject a cycle bypassing the saving hook: point root's
+        // parent at its own child.
+        DB::table('roles')->where('id', (string) $root->getKey())
+            ->update(['parent_id' => (string) $child->getKey()]);
+
+        $this->expectException(RoleHierarchyCycleException::class);
+
+        $root->fresh()->descendants();
+    }
+
+    /**
+     * `isAncestorOf()` terminates safely on a database-level cycle
+     * (issue #102) — guarded by the `ancestors()` walk's cycle set.
+     *
+     * @return void
+     */
+    public function testIsAncestorOfTerminatesOnDatabaseLevelCycle(): void
+    {
+        $root  = $this->makeRole('admin');
+        $child = $this->makeRole('editor', parentId: $root->getKey());
+
+        // Inject a cycle: point root's parent at its own child so
+        // that walking the child's ancestor chain loops.
+        DB::table('roles')->where('id', (string) $root->getKey())
+            ->update(['parent_id' => (string) $child->getKey()]);
+
+        $this->expectException(RoleHierarchyCycleException::class);
+
+        $root->fresh()->isAncestorOf($child->fresh());
     }
 
     /**
