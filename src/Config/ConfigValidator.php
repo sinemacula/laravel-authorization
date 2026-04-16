@@ -108,7 +108,9 @@ final class ConfigValidator
             }
 
             if (!\is_subclass_of($class, PermissionProvider::class)) {
-                throw new InvalidAuthorizationConfigException("authorization.permission_providers.{$index}", "class '{$class}' does not implement " . PermissionProvider::class . '.');
+                $reason = "class '{$class}' does not implement " . PermissionProvider::class . '.';
+
+                throw new InvalidAuthorizationConfigException("authorization.permission_providers.{$index}", $reason);
             }
         }
     }
@@ -134,7 +136,9 @@ final class ConfigValidator
                 GateConflictMode::cases(),
             );
 
-            throw new InvalidAuthorizationConfigException('authorization.gate.on_conflict', 'expected one of [' . \implode(', ', $accepted) . '], got ' . self::describe($value) . '.');
+            $reason = 'expected one of [' . \implode(', ', $accepted) . '], got ' . self::describe($value) . '.';
+
+            throw new InvalidAuthorizationConfigException('authorization.gate.on_conflict', $reason);
         }
     }
 
@@ -150,7 +154,11 @@ final class ConfigValidator
     private static function validatePrincipalResolver(mixed $value): void
     {
         if ($value === null) {
-            throw new InvalidAuthorizationConfigException('authorization.principal_resolver', 'a principal resolver class is required; set it to \SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver to keep the package anonymous-safe.');
+            $reason = 'a principal resolver class is required; set it to'
+                . ' \SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver'
+                . ' to keep the package anonymous-safe.';
+
+            throw new InvalidAuthorizationConfigException('authorization.principal_resolver', $reason);
         }
 
         self::assertImplementsContract(

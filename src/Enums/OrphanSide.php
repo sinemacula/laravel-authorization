@@ -19,9 +19,13 @@ namespace SineMacula\Laravel\Authorization\Enums;
  */
 enum OrphanSide: string
 {
-    /** The role-side parent is missing. */
+    /**
+     * The role-side parent is missing.
+     */
     case ROLE = 'role';
 
-    /** The permission-side parent is missing. */
+    /**
+     * The permission-side parent is missing.
+     */
     case PERMISSION = 'permission';
 }

@@ -18,9 +18,13 @@ namespace SineMacula\Laravel\Authorization\Evaluation\Enums;
  */
 enum TraceDecision: string
 {
-    /** The statement matched the action/resource and conditions. */
+    /**
+     * The statement matched the action/resource and conditions.
+     */
     case MATCHED = 'matched';
 
-    /** The statement did not match (action/resource miss or condition failure). */
+    /**
+     * The statement did not match (action/resource miss or condition failure).
+     */
     case SKIPPED = 'skipped';
 }

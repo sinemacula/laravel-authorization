@@ -18,16 +18,24 @@ namespace SineMacula\Laravel\Authorization\Evaluation\Enums;
  */
 enum DecisionReason: string
 {
-    /** An explicit allow from a matching policy statement. */
+    /**
+     * An explicit allow from a matching policy statement.
+     */
     case EXPLICIT_ALLOW = 'explicit_allow';
 
-    /** An explicit deny from a matching policy statement. */
+    /**
+     * An explicit deny from a matching policy statement.
+     */
     case EXPLICIT_DENY = 'explicit_deny';
 
-    /** No statement matched; the evaluator fell through to implicit deny. */
+    /**
+     * No statement matched; the evaluator fell through to implicit deny.
+     */
     case IMPLICIT_DENY = 'implicit_deny';
 
-    /** RBAC (roles/permissions) granted the allow after policy evaluation was indeterminate. */
+    /**
+     * RBAC (roles/permissions) granted the allow after policy evaluation was indeterminate.
+     */
     case RBAC_ALLOW = 'rbac_allow';
 
     /**
