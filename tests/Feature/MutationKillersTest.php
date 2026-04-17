@@ -58,7 +58,7 @@ final class MutationKillersTest extends TestCase
             use ResolvesPivotExpiry;
 
             /**
-             * @param  iterable<int, Model>  $models
+             * @param  iterable<int, \Illuminate\Database\Eloquent\Model>  $models
              */
             public function collect(iterable $models): array
             {
@@ -121,7 +121,7 @@ final class MutationKillersTest extends TestCase
             use ResolvesPivotExpiry;
 
             /**
-             * @param  iterable<int, Model>  $models
+             * @param  iterable<int, \Illuminate\Database\Eloquent\Model>  $models
              */
             public function collect(iterable $models): array
             {
@@ -159,7 +159,7 @@ final class MutationKillersTest extends TestCase
             use ResolvesPivotExpiry;
 
             /**
-             * @param  iterable<int, Model>  $related
+             * @param  iterable<int, \Illuminate\Database\Eloquent\Model>  $related
              */
             public function nearest(iterable $related): ?int
             {
@@ -202,7 +202,7 @@ final class MutationKillersTest extends TestCase
             use ResolvesPivotExpiry;
 
             /**
-             * @param  iterable<int, Model>  $related
+             * @param  iterable<int, \Illuminate\Database\Eloquent\Model>  $related
              */
             public function nearest(iterable $related): ?int
             {

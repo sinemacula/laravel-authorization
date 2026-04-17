@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
-use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision;
 
 /**
  * Immutable evaluation result.
@@ -18,7 +17,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
- * @phpstan-type EvaluationTraceEntry array{policy: string, statement_index: int, decision: TraceDecision, reason: string}
+ * @phpstan-type EvaluationTraceEntry array{policy: string, statement_index: int, decision: \SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision, reason: string}
  */
 final readonly class EvaluationResult
 {

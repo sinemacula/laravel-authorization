@@ -17,7 +17,7 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
  * across several roles, chain the middleware —
  * `->middleware(['role:admin', 'role:oncall'])`.
  *
- * @extends AbstractAuthorizationMiddleware<SupportsRoles>
+ * @extends \SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware<\SineMacula\Laravel\Authorization\Contracts\SupportsRoles>
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -25,7 +25,7 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 class RequireRole extends AbstractAuthorizationMiddleware
 {
     /**
-     * @return class-string<SupportsRoles>
+     * @return class-string<\SineMacula\Laravel\Authorization\Contracts\SupportsRoles>
      */
     protected function requiredContract(): string
     {
@@ -33,7 +33,7 @@ class RequireRole extends AbstractAuthorizationMiddleware
     }
 
     /**
-     * @param  SupportsRoles  $principal
+     * @param  \SineMacula\Laravel\Authorization\Contracts\SupportsRoles  $principal
      * @param  string  $needle
      * @return bool
      */

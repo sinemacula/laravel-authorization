@@ -536,7 +536,7 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     {
         parent::defineEnvironment($app);
 
-        /** @var ConfigRepository $config */
+        /** @var \Illuminate\Config\Repository $config */
         $config = app(ConfigRepository::class);
 
         $config->set('authorization.tables.roles', 'auth_roles');

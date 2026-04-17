@@ -22,7 +22,7 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
  * to OR semantics. For AND across several permissions, chain the
  * middleware — `->middleware(['permission:posts:edit', 'permission:posts:publish'])`.
  *
- * @extends AbstractAuthorizationMiddleware<SupportsPermissions>
+ * @extends \SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware<\SineMacula\Laravel\Authorization\Contracts\SupportsPermissions>
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -30,7 +30,7 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
 class RequirePermission extends AbstractAuthorizationMiddleware
 {
     /**
-     * @return class-string<SupportsPermissions>
+     * @return class-string<\SineMacula\Laravel\Authorization\Contracts\SupportsPermissions>
      */
     protected function requiredContract(): string
     {
@@ -38,7 +38,7 @@ class RequirePermission extends AbstractAuthorizationMiddleware
     }
 
     /**
-     * @param  SupportsPermissions  $principal
+     * @param  \SineMacula\Laravel\Authorization\Contracts\SupportsPermissions  $principal
      * @param  string  $needle
      * @return bool
      */

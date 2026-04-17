@@ -64,9 +64,9 @@ final class RoleRankTest extends TestCase
         $actor->assignRole($seniorRole);
         $target->assignRole($juniorRole);
 
-        /** @var StubIdentity $freshActor */
+        /** @var \Tests\Feature\Stubs\StubIdentity $freshActor */
         $freshActor = $actor->fresh();
-        /** @var StubIdentity $freshTarget */
+        /** @var \Tests\Feature\Stubs\StubIdentity $freshTarget */
         $freshTarget = $target->fresh();
 
         self::assertTrue($freshActor->canActOn($freshTarget));
@@ -88,9 +88,9 @@ final class RoleRankTest extends TestCase
         $actor->assignRole($juniorRole);
         $target->assignRole($seniorRole);
 
-        /** @var StubIdentity $freshActor */
+        /** @var \Tests\Feature\Stubs\StubIdentity $freshActor */
         $freshActor = $actor->fresh();
-        /** @var StubIdentity $freshTarget */
+        /** @var \Tests\Feature\Stubs\StubIdentity $freshTarget */
         $freshTarget = $target->fresh();
 
         self::assertFalse($freshActor->canActOn($freshTarget));
@@ -112,9 +112,9 @@ final class RoleRankTest extends TestCase
         $alice->assignRole($roleA);
         $bob->assignRole($roleB);
 
-        /** @var StubIdentity $freshAlice */
+        /** @var \Tests\Feature\Stubs\StubIdentity $freshAlice */
         $freshAlice = $alice->fresh();
-        /** @var StubIdentity $freshBob */
+        /** @var \Tests\Feature\Stubs\StubIdentity $freshBob */
         $freshBob = $bob->fresh();
 
         self::assertFalse($freshAlice->canActOn($freshBob));
@@ -137,9 +137,9 @@ final class RoleRankTest extends TestCase
         $actor->assignRole($unrankedRole);
         $target->assignRole($rankedRole);
 
-        /** @var StubIdentity $freshActor */
+        /** @var \Tests\Feature\Stubs\StubIdentity $freshActor */
         $freshActor = $actor->fresh();
-        /** @var StubIdentity $freshTarget */
+        /** @var \Tests\Feature\Stubs\StubIdentity $freshTarget */
         $freshTarget = $target->fresh();
 
         self::assertFalse($freshActor->canActOn($freshTarget));
@@ -161,9 +161,9 @@ final class RoleRankTest extends TestCase
         $actor->assignRole($rankedRole);
         $target->assignRole($unrankedRole);
 
-        /** @var StubIdentity $freshActor */
+        /** @var \Tests\Feature\Stubs\StubIdentity $freshActor */
         $freshActor = $actor->fresh();
-        /** @var StubIdentity $freshTarget */
+        /** @var \Tests\Feature\Stubs\StubIdentity $freshTarget */
         $freshTarget = $target->fresh();
 
         self::assertTrue($freshActor->canActOn($freshTarget));
@@ -185,9 +185,9 @@ final class RoleRankTest extends TestCase
         $actor->assignRole($roleA);
         $target->assignRole($roleB);
 
-        /** @var StubIdentity $freshActor */
+        /** @var \Tests\Feature\Stubs\StubIdentity $freshActor */
         $freshActor = $actor->fresh();
-        /** @var StubIdentity $freshTarget */
+        /** @var \Tests\Feature\Stubs\StubIdentity $freshTarget */
         $freshTarget = $target->fresh();
 
         self::assertFalse($freshActor->canActOn($freshTarget));
@@ -242,9 +242,9 @@ final class RoleRankTest extends TestCase
         $target->assignRole($seniorRole);
 
         // Junior acting on senior — normally blocked, but rank is disabled.
-        /** @var StubIdentity $freshActor */
+        /** @var \Tests\Feature\Stubs\StubIdentity $freshActor */
         $freshActor = $actor->fresh();
-        /** @var StubIdentity $freshTarget */
+        /** @var \Tests\Feature\Stubs\StubIdentity $freshTarget */
         $freshTarget = $target->fresh();
 
         self::assertTrue($freshActor->canActOn($freshTarget));
@@ -272,9 +272,9 @@ final class RoleRankTest extends TestCase
         $target->assignRole($midRole);
 
         // Actor's best (1) < target's best (5) — can act.
-        /** @var StubIdentity $freshActor */
+        /** @var \Tests\Feature\Stubs\StubIdentity $freshActor */
         $freshActor = $actor->fresh();
-        /** @var StubIdentity $freshTarget */
+        /** @var \Tests\Feature\Stubs\StubIdentity $freshTarget */
         $freshTarget = $target->fresh();
 
         self::assertTrue($freshActor->canActOn($freshTarget));
@@ -309,7 +309,7 @@ final class RoleRankTest extends TestCase
 
         $plainObject = new \stdClass;
 
-        /** @var StubIdentity $freshActor */
+        /** @var \Tests\Feature\Stubs\StubIdentity $freshActor */
         $freshActor = $actor->fresh();
 
         self::assertFalse($freshActor->canActOn($plainObject));
