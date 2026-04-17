@@ -15,7 +15,8 @@
             "Models",
             "Observers",
             "Registrars",
-            "Resolvers"
+            "Resolvers",
+            "Traits"
         ]
     },
     logs: {
