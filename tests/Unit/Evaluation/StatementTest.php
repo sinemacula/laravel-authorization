@@ -21,6 +21,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
  * @internal
  *
  * @SuppressWarnings("php:S1192")
+ * @SuppressWarnings("php:S1448")
  */
 #[CoversClass(Statement::class)]
 #[CoversClass(ConditionEvaluator::class)]

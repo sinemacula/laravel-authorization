@@ -272,8 +272,8 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testGateParity(): void
     {
-        /** @var \Illuminate\Contracts\Config\Repository $config */
-        $config = $this->app->make('config');
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make('config'); // @phpstan-ignore method.nonObject
         $config->set('authorization.permission_enums', [\Tests\Feature\Stubs\PermissionEnum::class]);
 
         (new \SineMacula\Laravel\Authorization\AuthorizationServiceProvider($this->app))->boot();
@@ -380,6 +380,6 @@ final class AuthorizationManagerTest extends TestCase
     {
         \sort($values);
 
-        return \array_values($values);
+        return \array_values($values); // @phpstan-ignore arrayValues.list
     }
 }

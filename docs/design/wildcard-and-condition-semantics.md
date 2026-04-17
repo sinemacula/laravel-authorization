@@ -57,18 +57,18 @@ Policy statement conditions are expressed as a map of context keys to operator p
 action/resource patterns match, the evaluator calls `evaluateConditions($context)` before committing the effect. Every
 condition entry must pass for the statement to apply.
 
-| Operator      | Operand type         | Semantics                                           |
-|---------------|----------------------|-----------------------------------------------------|
-| `eq`          | scalar               | Strict equality (`===`)                             |
-| `neq`         | scalar               | Strict inequality (`!==`)                           |
-| `in`          | `array`              | Context value is in the operand array (strict)      |
-| `not_in`      | `array`              | Context value is not in the operand array (strict)  |
-| `cidr`        | `string` (CIDR)      | IPv4 address falls within the CIDR range            |
-| `starts_with` | `string`             | Context value starts with the operand               |
-| `ends_with`   | `string`             | Context value ends with the operand                 |
-| `before`      | time-like            | Context timestamp is before the operand             |
-| `after`       | time-like            | Context timestamp is after the operand              |
-| `between`     | `[time-like, time-like]` | Context timestamp falls within the inclusive range |
+| Operator      | Operand type             | Semantics                                         |
+|---------------|--------------------------|---------------------------------------------------|
+| `eq`          | scalar                   | Strict equality (`===`)                           |
+| `neq`         | scalar                   | Strict inequality (`!==`)                         |
+| `in`          | `array`                  | Context value is in the operand array (strict)    |
+| `not_in`      | `array`                  | Context value is not in the operand array (strict)|
+| `cidr`        | `string` (CIDR)          | IPv4 address falls within the CIDR range          |
+| `starts_with` | `string`                 | Context value starts with the operand             |
+| `ends_with`   | `string`                 | Context value ends with the operand               |
+| `before`      | time-like                | Context timestamp is before the operand           |
+| `after`       | time-like                | Context timestamp is after the operand            |
+| `between`     | `[time-like, time-like]` | Context timestamp falls within the inclusive range|
 
 Time-like values are coerced via `strtotime()` (strings) or used directly (integer UNIX timestamps). Non-parseable
 values cause the condition to fail silently.

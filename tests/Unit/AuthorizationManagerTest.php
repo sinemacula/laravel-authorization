@@ -32,6 +32,7 @@ use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
  * @internal
  *
  * @SuppressWarnings("php:S1192")
+ * @SuppressWarnings("php:S1448")
  */
 #[CoversClass(AuthorizationManager::class)]
 final class AuthorizationManagerTest extends TestCase

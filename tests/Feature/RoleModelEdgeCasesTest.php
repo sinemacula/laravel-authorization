@@ -156,6 +156,8 @@ final class RoleModelEdgeCasesTest extends TestCase
      * a key that does not exist.
      *
      * @return void
+     *
+     * @SuppressWarnings("php:S3011")
      */
     public function testResolvePermissionByIdThrowsOnMissingRow(): void
     {

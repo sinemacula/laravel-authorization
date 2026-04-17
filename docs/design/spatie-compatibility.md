@@ -53,9 +53,8 @@ Source: `AuthorizationServiceProvider::registerBladeDirectives()`.
 The package registers both the canonical short-form directives (`@role`, `@permission`, `@anyrole`, `@allroles`,
 `@anypermission`, `@allpermissions`) and the Spatie-shaped `@has…` aliases in parallel. Both families support
 `@unless<name>` / `@else<name>` / `@end<name>` automatically via `Blade::if`, and every directive ships a matching
-`@endunless<name>` alias so Spatie's `@endunlessrole` / `@endunlesspermission` spellings compile cleanly too (issue
-
-# 86)
+`@endunless<name>` alias so Spatie's `@endunlessrole` / `@endunlesspermission` spellings compile cleanly too
+(issue \#86).
 
 Full directive list:
 

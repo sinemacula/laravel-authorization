@@ -17,6 +17,7 @@ use SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator;
  * @internal
  *
  * @SuppressWarnings("php:S1192")
+ * @SuppressWarnings("php:S1448")
  */
 #[CoversClass(ContextInterpolator::class)]
 final class ContextInterpolatorTest extends TestCase

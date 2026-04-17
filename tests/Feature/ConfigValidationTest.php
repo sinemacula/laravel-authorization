@@ -30,6 +30,8 @@ use Tests\TestCase;
  * @internal
  *
  * @SuppressWarnings("php:S1192")
+ * @SuppressWarnings("php:S1448")
+ * @SuppressWarnings("php:S4144")
  */
 #[CoversClass(ConfigValidator::class)]
 #[CoversClass(InvalidAuthorizationConfigException::class)]

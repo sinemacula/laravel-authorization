@@ -39,6 +39,7 @@ use Tests\TestCase;
  * @internal
  *
  * @SuppressWarnings("php:S1192")
+ * @SuppressWarnings("php:S1448")
  */
 #[CoversClass(ResolutionCache::class)]
 #[CoversClass(CachingPolicyResolver::class)]
@@ -648,7 +649,8 @@ final class ResolutionCacheTest extends TestCase
         // Corrupt the stored value to a non-array.
         $driver->put('csl:permissions:sl:1', 'not-an-array', 60);
 
-        $fresh = new ResolutionCache(store: $store, ttl: 0, prefix: 'csl');
+        $cache = new ResolutionCache(store: $store, ttl: 0, prefix: 'csl');
+        self::assertInstanceOf(ResolutionCache::class, $cache);
 
         // The throwable from is_array(string) being true but
         // array_filter('is_string') being applied... Actually, a
@@ -991,7 +993,7 @@ final class ResolutionCacheTest extends TestCase
         $driver->put('logk:permissions:lg:1', new \stdClass, 60);
 
         // Capture log output.
-        $logSpy = \Illuminate\Support\Facades\Log::spy();
+        \Illuminate\Support\Facades\Log::spy();
 
         $fresh = new ResolutionCache(store: $store, ttl: 0, prefix: 'logk');
         $fresh->rememberPermissions($principal, static fn (): array => ['b']);
@@ -1153,6 +1155,8 @@ final class ResolutionCacheTest extends TestCase
      * @param  object  $object
      * @param  string  $property
      * @return mixed
+     *
+     * @SuppressWarnings("php:S3011")
      */
     private function extractPrivate(object $object, string $property): mixed
     {

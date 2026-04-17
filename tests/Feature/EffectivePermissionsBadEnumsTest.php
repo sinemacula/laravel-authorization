@@ -37,8 +37,8 @@ final class EffectivePermissionsBadEnumsTest extends TestCase
      */
     public function testNonStringAndNonEnumEntriesAreSkipped(): void
     {
-        /** @var \Illuminate\Contracts\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class);
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.permission_enums', [
             123,                             // non-string
             \stdClass::class,                // string but not a PermissionEnum subclass

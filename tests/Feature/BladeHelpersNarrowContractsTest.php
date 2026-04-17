@@ -20,28 +20,47 @@ use Tests\TestCase;
  *
  * @SuppressWarnings("php:S1192")
  */
-final class RolesOnlyPrincipal implements SupportsRoles
+final class RolesOnlyPrincipal implements SupportsRoles // phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 {
+    /**
+     * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
+     * @return static
+     */
     public function assignRole(RoleModel|string $role): static
     {
         return $this;
     }
 
+    /**
+     * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
+     * @return static
+     */
     public function revokeRole(RoleModel|string $role): static
     {
         return $this;
     }
 
+    /**
+     * @param  array<int, \SineMacula\Laravel\Authorization\Models\Role|string>  $roles
+     * @return static
+     */
     public function syncRoles(array $roles): static
     {
         return $this;
     }
 
+    /**
+     * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
+     * @return bool
+     */
     public function hasRole(RoleModel|string $role): bool
     {
         return $role === 'editor';
     }
 
+    /**
+     * @return array<int, string>
+     */
     public function getRoles(): array
     {
         return ['editor'];
@@ -62,7 +81,7 @@ final class RolesOnlyPrincipal implements SupportsRoles
  * @internal
  */
 #[CoversClass(BladeHelpers::class)]
-final class BladeHelpersNarrowContractsTest extends TestCase
+final class BladeHelpersNarrowContractsTest extends TestCase // phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 {
     /**
      * Swap in a resolver that returns a `RolesOnlyPrincipal` before
@@ -77,17 +96,23 @@ final class BladeHelpersNarrowContractsTest extends TestCase
         $principal = new RolesOnlyPrincipal;
 
         $resolver = new class ($principal) implements PrincipalResolver {
+            /**
+             * @param  \Tests\Feature\RolesOnlyPrincipal  $principal
+             */
             public function __construct(private readonly RolesOnlyPrincipal $principal) {}
 
-            public function resolve(): ?object
+            /**
+             * @return object|null
+             */
+            public function resolve(): ?object // @phpstan-ignore return.unusedType
             {
                 return $this->principal;
             }
         };
 
-        $this->app->instance(PrincipalResolver::class, $resolver);
-        $this->app->forgetInstance('authorization');
-        $this->app->forgetInstance(\SineMacula\Laravel\Authorization\AuthorizationManager::class);
+        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject
+        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
+        $this->app->forgetInstance(\SineMacula\Laravel\Authorization\AuthorizationManager::class); // @phpstan-ignore method.nonObject
     }
 
     /**

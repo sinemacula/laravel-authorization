@@ -126,7 +126,7 @@ final class BladeHelpersBudgetTest extends TestCase
         $resolver = new class ($principal) implements PrincipalResolver {
             public function __construct(private readonly object $principal) {}
 
-            public function resolve(): ?object
+            public function resolve(): ?object // @phpstan-ignore return.unusedType
             {
                 return $this->principal;
             }

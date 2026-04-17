@@ -29,6 +29,7 @@ use Tests\TestCase;
  * @internal
  *
  * @SuppressWarnings("php:S1192")
+ * @SuppressWarnings("php:S1448")
  */
 #[CoversClass(MigrateSpatieCommand::class)]
 final class MigrateSpatieSkipBranchesTest extends TestCase

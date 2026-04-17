@@ -191,7 +191,7 @@ final class RoleHierarchyTest extends TestCase
     public function testIdentityWithChildRoleInheritsAncestorPermission(): void
     {
         $parent = $this->makeRole('admin');
-        $child  = $this->makeRole('editor', parentId: $parent->getKey());
+        $this->makeRole('editor', parentId: $parent->getKey());
 
         $this->makePermission('posts:delete');
         $parent->givePermission('posts:delete');

@@ -154,11 +154,11 @@ final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
     {
         $container = new Container;
 
-        /** @var \Illuminate\Contracts\Foundation\Application $app */
+        /** @var \Illuminate\Contracts\Foundation\Application&\Mockery\MockInterface $app */
         $app = \Mockery::mock(Application::class);
-        $app->shouldReceive('bound')->andReturnUsing(static fn (string $abstract): bool => $container->bound($abstract));
-        $app->shouldReceive('runningInConsole')->andReturnFalse();
-        $app->shouldReceive('make')->andReturnUsing(static fn (string $abstract): mixed => $container->make($abstract));
+        $app->shouldReceive('bound')->andReturnUsing(static fn (string $abstract): bool => $container->bound($abstract)); // @phpstan-ignore method.notFound
+        $app->shouldReceive('runningInConsole')->andReturnFalse(); // @phpstan-ignore method.notFound
+        $app->shouldReceive('make')->andReturnUsing(static fn (string $abstract): mixed => $container->make($abstract)); // @phpstan-ignore method.notFound
 
         return $app;
     }

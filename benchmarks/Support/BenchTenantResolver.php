@@ -27,7 +27,7 @@ final class BenchTenantResolver implements TenantResolver
      *
      * @return object|null
      */
-    public function resolve(): ?object
+    public function resolve(): ?object // @phpstan-ignore return.unusedType
     {
         return new BenchTenant;
     }

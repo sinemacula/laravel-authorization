@@ -99,7 +99,7 @@ final class TraitsCoverageTest extends TestCase
         $user->revokePermission($permission);
         $user->revokeRole($role);
 
-        self::assertFalse($user->fresh()?->hasRole($role));
+        self::assertFalse($user->fresh()?->hasRole($role)); // @phpstan-ignore nullsafe.neverNull
         self::assertFalse($user->fresh()?->hasPermission($permission));
     }
 
@@ -113,6 +113,6 @@ final class TraitsCoverageTest extends TestCase
     {
         \sort($values);
 
-        return \array_values($values);
+        return \array_values($values); // @phpstan-ignore arrayValues.list
     }
 }

@@ -7,6 +7,7 @@ namespace Tests\Performance;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
+use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
 
 /**
  * Performance budget for `Policy::fromArray()`.

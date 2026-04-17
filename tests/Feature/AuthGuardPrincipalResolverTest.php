@@ -111,7 +111,7 @@ final class AuthGuardPrincipalResolverTest extends TestCase
         // service container so
         // `authorization.principal_resolver => AuthGuardPrincipalResolver::class`
         // is a valid one-line wiring for consumers.
-        $resolver = $this->app->make(AuthGuardPrincipalResolver::class);
+        $resolver = $this->app->make(AuthGuardPrincipalResolver::class); // @phpstan-ignore method.nonObject
 
         self::assertInstanceOf(AuthGuardPrincipalResolver::class, $resolver);
     }

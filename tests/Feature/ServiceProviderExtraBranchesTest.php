@@ -91,6 +91,9 @@ final class StubBadPermissionProvider implements PermissionProvider
 // phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 final class ServiceProviderExtraBranchesTest extends TestCase
 {
+    private const string VALID_PERM   = 'valid:perm';
+    private const string POSTS_CREATE = 'posts:create';
+
     /**
      * Setting a concrete `policy_store` class triggers the optional
      * singleton bind so the manager's policy resolver can pick it up.
@@ -130,13 +133,13 @@ final class ServiceProviderExtraBranchesTest extends TestCase
         // Pre-bind an existing gate so overwrite mode is the path we
         // observe behaviourally. If the provider coerced the enum to
         // the default (THROW), this call would raise.
-        \Illuminate\Support\Facades\Gate::define('posts:create', static fn (): bool => true);
+        \Illuminate\Support\Facades\Gate::define(self::POSTS_CREATE, static fn (): bool => true);
 
         (new AuthorizationServiceProvider($this->app))->boot();
 
         // The overwrite path ran — the Gate now resolves via the
         // authorization manager rather than the preseeded closure.
-        self::assertFalse(\Illuminate\Support\Facades\Gate::allows('posts:create'));
+        self::assertFalse(\Illuminate\Support\Facades\Gate::allows(self::POSTS_CREATE));
     }
 
     /**
@@ -154,7 +157,7 @@ final class ServiceProviderExtraBranchesTest extends TestCase
 
         (new AuthorizationServiceProvider($this->app))->boot();
 
-        self::assertNotNull(Permission::where('name', 'valid:perm')->first());
+        self::assertNotNull(Permission::where('name', self::VALID_PERM)->first());
         self::assertNull(Permission::where('name', '')->first());
     }
 
@@ -179,7 +182,7 @@ final class ServiceProviderExtraBranchesTest extends TestCase
 
         // The valid PermissionEnum entries were wired; the garbage
         // entries were silently skipped without raising.
-        self::assertTrue(\Illuminate\Support\Facades\Gate::has('posts:create'));
+        self::assertTrue(\Illuminate\Support\Facades\Gate::has(self::POSTS_CREATE));
     }
 
     /**
@@ -205,6 +208,6 @@ final class ServiceProviderExtraBranchesTest extends TestCase
         $reflection = new \ReflectionMethod($provider, 'registerPermissionProviders');
         $reflection->invoke($provider);
 
-        self::assertNotNull(Permission::where('name', 'valid:perm')->first());
+        self::assertNotNull(Permission::where('name', self::VALID_PERM)->first());
     }
 }

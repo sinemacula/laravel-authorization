@@ -54,7 +54,7 @@ class StubSecondIdentity extends Model implements AuthorizableIdentity
     /**
      * Backing table.
      *
-     * @var string
+     * @var string|null
      */
     protected $table = 'stub_second_identities';
 }

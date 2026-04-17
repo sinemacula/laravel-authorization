@@ -36,6 +36,7 @@ use Tests\TestCase;
  * @internal
  *
  * @SuppressWarnings("php:S1192")
+ * @SuppressWarnings("php:S1448")
  */
 #[CoversClass(ResolutionCache::class)]
 #[CoversClass(\SineMacula\Laravel\Authorization\Evaluation\Statement::class)]

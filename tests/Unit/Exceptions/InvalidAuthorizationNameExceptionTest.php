@@ -58,6 +58,8 @@ final class StubAuthorizationEntity // @phpstan-ignore class.missingExtends
 // phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 final class InvalidAuthorizationNameExceptionTest extends TestCase
 {
+    private const string HAS_SPACE = 'has space';
+
     /**
      * The constructor formats a stable message that identifies both
      * the entity kind and the offending name, and exposes both
@@ -67,11 +69,11 @@ final class InvalidAuthorizationNameExceptionTest extends TestCase
      */
     public function testConstructsMessageAndExposesAccessors(): void
     {
-        $exception = new InvalidAuthorizationNameException('role', 'has space');
+        $exception = new InvalidAuthorizationNameException('role', self::HAS_SPACE);
 
         self::assertSame('role', $exception->getKind());
-        self::assertSame('has space', $exception->getName());
-        self::assertStringContainsString('Invalid role name \'has space\'', $exception->getMessage());
+        self::assertSame(self::HAS_SPACE, $exception->getName());
+        self::assertStringContainsString('Invalid role name \'' . self::HAS_SPACE . '\'', $exception->getMessage());
         self::assertSame(422, $exception->getCode());
     }
 
@@ -100,11 +102,11 @@ final class InvalidAuthorizationNameExceptionTest extends TestCase
         $entity = new StubAuthorizationEntity;
 
         try {
-            $entity->setNameAttribute('has space');
+            $entity->setNameAttribute(self::HAS_SPACE);
             self::fail('Expected InvalidAuthorizationNameException.');
         } catch (InvalidAuthorizationNameException $exception) {
             self::assertSame('authorization entity', $exception->getKind());
-            self::assertSame('has space', $exception->getName());
+            self::assertSame(self::HAS_SPACE, $exception->getName());
         }
     }
 
