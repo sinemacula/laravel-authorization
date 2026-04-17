@@ -37,11 +37,7 @@ final readonly class Updated
         /** Updated role row in its post-save state. */
         public Role $role,
 
-        /**
-         * Before/after attribute diff captured across the update.
-         *
-         * @var array{before: array<string, mixed>, after: array<string, mixed>}
-         */
+        /** Before/after attribute diff captured across the update. */
         public array $changes,
 
     ) {}

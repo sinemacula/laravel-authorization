@@ -41,7 +41,7 @@ final class ExceptionsTest extends TestCase
      */
     public function testAuthorizationException(): void
     {
-        $statement = new Statement(PolicyEffect::Deny, ['x']);
+        $statement = new Statement(PolicyEffect::DENY, ['x']);
         $result    = EvaluationResult::explicitlyDenied($statement);
         $exception = new AuthorizationException('posts:create', 'arn:posts:1', $result);
 

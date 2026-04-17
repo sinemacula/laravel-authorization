@@ -284,7 +284,7 @@ final class ConfigValidationTest extends TestCase
     {
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.gate.on_conflict', \SineMacula\Laravel\Authorization\Enums\GateConflictMode::Throw);
+        $config->set('authorization.gate.on_conflict', \SineMacula\Laravel\Authorization\Enums\GateConflictMode::THROW);
 
         ConfigValidator::validate((array) $config->get('authorization'), $this->app);
 

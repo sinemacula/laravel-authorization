@@ -76,7 +76,7 @@ final class AuthorizationManagerTest extends TestCase
 
         $result = Authorization::for($user)->evaluate('posts:create');
         self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::RbacAllow, $result->reason);
+        self::assertSame(DecisionReason::RBAC_ALLOW, $result->reason);
     }
 
     /**
@@ -123,7 +123,7 @@ final class AuthorizationManagerTest extends TestCase
 
         $result = Authorization::for($user)->evaluate('posts:delete');
         self::assertFalse($result->allowed);
-        self::assertSame(DecisionReason::ExplicitDeny, $result->reason);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $result->reason);
     }
 
     /**
@@ -323,7 +323,7 @@ final class AuthorizationManagerTest extends TestCase
         $result = Authorization::for($user)->withPolicies([$override])->evaluate('ad:hoc');
 
         self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::ExplicitAllow, $result->reason);
+        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $result->reason);
     }
 
     /**

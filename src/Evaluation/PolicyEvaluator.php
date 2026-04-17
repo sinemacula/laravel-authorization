@@ -54,8 +54,8 @@ final class PolicyEvaluator
             foreach ($policy->statements as $index => $statement) {
                 $reason        = $this->classifyStatement($statement, $action, $resource, $context, $principal, $interpolator);
                 $traceDecision = $reason === 'action/resource did not match' || $reason === 'conditions not satisfied'
-                    ? TraceDecision::Skipped
-                    : TraceDecision::Matched;
+                    ? TraceDecision::SKIPPED
+                    : TraceDecision::MATCHED;
 
                 $trace[] = [
                     'policy'          => $policy->name,
@@ -107,7 +107,7 @@ final class PolicyEvaluator
             return 'conditions not satisfied';
         }
 
-        return $statement->effect === PolicyEffect::Deny ? 'explicit deny' : 'explicit allow';
+        return $statement->effect === PolicyEffect::DENY ? 'explicit deny' : 'explicit allow';
     }
 
     /**

@@ -21,10 +21,10 @@ enum TraceDecision: string
     /**
      * The statement matched the action/resource and conditions.
      */
-    case Matched = 'matched';
+    case MATCHED = 'matched';
 
     /**
      * The statement did not match (action/resource miss or condition failure).
      */
-    case Skipped = 'skipped';
+    case SKIPPED = 'skipped';
 }

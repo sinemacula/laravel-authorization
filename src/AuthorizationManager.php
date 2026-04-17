@@ -36,20 +36,10 @@ class AuthorizationManager
 {
     use HasContainerInstance;
 
-    /**
-     * @var object|null
-     *
-     * Explicit principal supplied via `for()`. Ignored unless the
-     * override flag is true.
-     */
+    /** @var object|null Explicit principal supplied via `for()`; ignored unless the override flag is true. */
     private ?object $principalOverride = null;
 
-    /**
-     * @var bool
-     *
-     * Whether `for()` has produced the current scope. When false, the
-     * manager defers principal resolution to the bound resolver.
-     */
+    /** @var bool Whether `for()` has produced the current scope; false defers to the bound resolver. */
     private bool $principalOverridden = false;
 
     /** @var array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>|null  Per-call policy override supplied via `withPolicies()`. */
@@ -268,12 +258,11 @@ class AuthorizationManager
     /**
      * Resolve the principal in scope for this invocation.
      *
-     * Honours a `for()` override when one is active; otherwise
-     * defers to the bound `PrincipalResolver`. The method is
-     * public so every surface that needs "the current principal"
-     * — middleware, Blade helpers, custom Gates — can delegate
-     * here instead of re-implementing the override + resolver
-     * trio (see issue #85).
+     * Honours a `for()` override when active; otherwise defers to the
+     * bound `PrincipalResolver`. Public so every surface that needs the
+     * current principal — middleware, Blade helpers, custom Gates — can
+     * delegate here instead of re-implementing the override + resolver
+     * trio.
      *
      * @return object|null
      */
@@ -307,8 +296,8 @@ class AuthorizationManager
 
         $policies = $this->gatherPolicies($principal);
         $result   = $this->evaluator->evaluate($policies, $action, $resource, $context, $principal);
-        $decisive = $result->reason === DecisionReason::ExplicitDeny
-            || $result->reason      === DecisionReason::ExplicitAllow;
+        $decisive = $result->reason === DecisionReason::EXPLICIT_DENY
+            || $result->reason      === DecisionReason::EXPLICIT_ALLOW;
 
         if (!$decisive && $principal instanceof AuthorizableIdentity && $principal->hasPermission($action)) {
             return EvaluationResult::rbacAllowed($result->trace);

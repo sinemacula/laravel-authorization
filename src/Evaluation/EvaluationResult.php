@@ -60,7 +60,7 @@ final readonly class EvaluationResult
     {
         return new self(
             allowed: true,
-            reason: DecisionReason::ExplicitAllow,
+            reason: DecisionReason::EXPLICIT_ALLOW,
             matchedStatement: $statement,
             trace: $trace,
         );
@@ -77,7 +77,7 @@ final readonly class EvaluationResult
     {
         return new self(
             allowed: false,
-            reason: DecisionReason::ExplicitDeny,
+            reason: DecisionReason::EXPLICIT_DENY,
             matchedStatement: $statement,
             trace: $trace,
         );
@@ -93,7 +93,7 @@ final readonly class EvaluationResult
     {
         return new self(
             allowed: false,
-            reason: DecisionReason::ImplicitDeny,
+            reason: DecisionReason::IMPLICIT_DENY,
             trace: $trace,
         );
     }
@@ -108,7 +108,7 @@ final readonly class EvaluationResult
     {
         return new self(
             allowed: true,
-            reason: DecisionReason::RbacAllow,
+            reason: DecisionReason::RBAC_ALLOW,
             trace: $trace,
         );
     }

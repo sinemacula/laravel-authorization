@@ -38,8 +38,8 @@ final class TraceDecisionTest extends TestCase
      */
     public function testBackingValues(): void
     {
-        self::assertSame('matched', TraceDecision::Matched->value);
-        self::assertSame('skipped', TraceDecision::Skipped->value);
+        self::assertSame('matched', TraceDecision::MATCHED->value);
+        self::assertSame('skipped', TraceDecision::SKIPPED->value);
     }
 
     /**
@@ -49,8 +49,8 @@ final class TraceDecisionTest extends TestCase
      */
     public function testTryFromResolvesCorrectly(): void
     {
-        self::assertSame(TraceDecision::Matched, TraceDecision::tryFrom('matched'));
-        self::assertSame(TraceDecision::Skipped, TraceDecision::tryFrom('skipped'));
+        self::assertSame(TraceDecision::MATCHED, TraceDecision::tryFrom('matched'));
+        self::assertSame(TraceDecision::SKIPPED, TraceDecision::tryFrom('skipped'));
         self::assertNull(TraceDecision::tryFrom('unknown'));
     }
 }

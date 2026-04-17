@@ -33,13 +33,7 @@ use Illuminate\Support\Arr;
  */
 final class ContextInterpolator
 {
-    /**
-     * @var string
-     *
-     * Regex pattern matching `${namespace.key}` tokens.
-     *
-     * Negative lookbehind rejects the `\${` escape sequence.
-     */
+    /** @var string Regex pattern matching `${namespace.key}` tokens; lookbehind rejects the `\${` escape. */
     private const string TOKEN_PATTERN = '/(?<!\\\)\$\{([a-zA-Z_][a-zA-Z0-9_.]*)\}/';
 
     /**

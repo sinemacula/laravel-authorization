@@ -10,7 +10,6 @@ use SineMacula\Laravel\Authorization\Events\Permission\Deleted as PermissionDele
 use SineMacula\Laravel\Authorization\Events\Permission\Updated as PermissionUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Models\Permission;
-use WeakMap;
 
 /**
  * Row-lifecycle observer for the `Permission` model.
@@ -31,21 +30,7 @@ use WeakMap;
  */
 final class PermissionObserver
 {
-    /**
-     * @var \WeakMap<\SineMacula\Laravel\Authorization\Models\Permission, array<string, mixed>>|null
-     *
-     * Pre-save attribute snapshots bridging `updating` and `updated`
-     * so the `PermissionUpdated` event carries a complete
-     * before/after diff. Keyed by the permission instance; `WeakMap`
-     * means a permission that goes out of scope before its
-     * `updated` fire releases its snapshot with no manual cleanup.
-     *
-     * Held statically so the snapshot survives Laravel's per-event
-     * observer resolution — the framework calls
-     * `app()->make(self::class)->method($model)` for each hook,
-     * which produces a fresh instance each time unless the observer
-     * is bound as a singleton.
-     */
+    /** @var \WeakMap<\SineMacula\Laravel\Authorization\Models\Permission, array<string, mixed>>|null Pre-update snapshots bridging `updating` and `updated`; static so it survives per-event observer resolution. */
     private static ?\WeakMap $snapshots = null;
 
     /**

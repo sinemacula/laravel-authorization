@@ -23,11 +23,7 @@ class WhyCanCommand extends Command
 {
     use ResolvesIdentity;
 
-    /**
-     * The console command signature.
-     *
-     * @var string
-     */
+    /** @var string The console command signature. */
     protected $signature = <<<'EOD'
         authorization:why-can
                                     {identity : Identity in morphType:key format (e.g. user:123)}
@@ -35,11 +31,7 @@ class WhyCanCommand extends Command
                                     {resource? : Optional resource identifier}
         EOD;
 
-    /**
-     * The console command description.
-     *
-     * @var string
-     */
+    /** @var string The console command description. */
     protected $description = 'Explain why an identity can or cannot perform an action';
 
     /**

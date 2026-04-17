@@ -210,7 +210,7 @@ final class RolePermissionPivotTest extends TestCase
             $pivot->save();
             self::fail('Expected OrphanedRolePermissionException was not thrown.');
         } catch (OrphanedRolePermissionException $exception) {
-            self::assertSame(OrphanSide::Role, $exception->getSide());
+            self::assertSame(OrphanSide::ROLE, $exception->getSide());
             self::assertSame($pivot->getAttribute('role_id'), $exception->getParentId());
         }
     }
@@ -234,7 +234,7 @@ final class RolePermissionPivotTest extends TestCase
             $pivot->save();
             self::fail('Expected OrphanedRolePermissionException was not thrown.');
         } catch (OrphanedRolePermissionException $exception) {
-            self::assertSame(OrphanSide::Permission, $exception->getSide());
+            self::assertSame(OrphanSide::PERMISSION, $exception->getSide());
             self::assertSame($pivot->getAttribute('permission_id'), $exception->getParentId());
         }
     }

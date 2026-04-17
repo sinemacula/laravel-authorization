@@ -13,8 +13,7 @@ namespace SineMacula\Laravel\Authorization\Models\Pivots;
  * pivot across three tables) so future per-table fields — most
  * notably a policy-attachment approval workflow's `approved_by`
  * column — can land here without leaking across the sibling
- * `authorizable_roles` and `authorizable_permissions` tables (see
- * issue #90).
+ * `authorizable_roles` and `authorizable_permissions` tables.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

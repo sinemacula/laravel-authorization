@@ -12,7 +12,7 @@ namespace SineMacula\Laravel\Authorization\Models\Pivots;
  * surface area. Kept as a distinct class (rather than sharing one
  * pivot across three tables) so future per-table fields can land
  * here without leaking across the sibling `authorizable_roles`
- * and `authorizable_policies` tables (see issue #90).
+ * and `authorizable_policies` tables.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

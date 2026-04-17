@@ -68,15 +68,9 @@ abstract class AbstractAuthorizationMiddleware
     abstract protected function requiredContract(): string;
 
     /**
-     * Test whether the supplied principal satisfies a single
-     * needle (role name, permission string, …).
-     *
-     * The parameter is typed to the class-bound generic
-     * `TContract`, so each subclass declares its concrete
-     * contract — the principal arrives already narrowed by the
-     * `instanceof $contract` check in `handle()` and PHPStan
-     * carries the narrowed type into the method body without
-     * an inline `@var` re-assertion.
+     * Test whether the supplied principal satisfies a single needle
+     * (role name, permission string, …). The principal arrives narrowed
+     * to the class-bound `TContract` by `handle()`'s instanceof guard.
      *
      * @param  TContract  $principal
      * @param  string  $needle

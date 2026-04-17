@@ -1246,7 +1246,7 @@ final class MutationKillersTest extends TestCase
             name: 'clone-probe',
             statements: [
                 new \SineMacula\Laravel\Authorization\Evaluation\Statement(
-                    effect: \SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect::Allow,
+                    effect: \SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect::ALLOW,
                     actions: ['probe:clone'],
                 ),
             ],

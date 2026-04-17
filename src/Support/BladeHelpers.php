@@ -29,9 +29,9 @@ final class BladeHelpers
      * manager cannot be constructed (tests that run without the
      * service provider booted) or the resolver reports anonymous.
      *
-     * Delegates to `AuthorizationManager::currentPrincipal()` so
-     * the Blade surface resolves the same principal as the
-     * facade, Gate, and middleware paths — see issue #85.
+     * Delegates to `AuthorizationManager::currentPrincipal()` so the
+     * Blade surface resolves the same principal as the facade, Gate,
+     * and middleware paths.
      *
      * @return object|null
      */

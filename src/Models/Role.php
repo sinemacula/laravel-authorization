@@ -45,11 +45,7 @@ class Role extends Model
 {
     use HasRoleHierarchy, HasSystemProtection, HasUuids, ManagesPermissions, ValidatesAuthorizationName;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var list<string>
-     */
+    /** @var list<string> Attributes that are mass assignable. */
     protected $fillable = [
         'name',
         'guard_name',
@@ -61,11 +57,7 @@ class Role extends Model
         'tenant_id',
     ];
 
-    /**
-     * The attribute casts.
-     *
-     * @var array<string, string>
-     */
+    /** @var array<string, string> Attribute cast map. */
     protected $casts = [
         'is_system' => 'boolean',
         'rank'      => 'integer',
@@ -92,8 +84,8 @@ class Role extends Model
      * Centralises the guard-precedence query shared by
      * `HasRoles::resolveRole()` and any direct static caller — a
      * single owner for the guard-agnostic disjunction so evolution
-     * of the matching rules happens in one place (see issue #55 and
-     * #96). Consumers calling `$class::resolveByName(...)` where
+     * of the matching rules happens in one place. Consumers calling
+     * `$class::resolveByName(...)` where
      * `$class` is read from `authorization.models.role` get correct
      * late-static-binding against their swapped model.
      *

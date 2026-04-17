@@ -34,7 +34,7 @@ final class PolicyEvaluatorTest extends TestCase
         $result = (new PolicyEvaluator)->evaluate([], 'posts:create');
 
         self::assertFalse($result->allowed);
-        self::assertSame(DecisionReason::ImplicitDeny, $result->reason);
+        self::assertSame(DecisionReason::IMPLICIT_DENY, $result->reason);
         self::assertSame([], $result->trace);
     }
 
@@ -53,10 +53,10 @@ final class PolicyEvaluatorTest extends TestCase
         $result = (new PolicyEvaluator)->evaluate([$policy], 'posts:create');
 
         self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::ExplicitAllow, $result->reason);
+        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $result->reason);
         self::assertNotNull($result->matchedStatement);
         self::assertCount(1, $result->trace);
-        self::assertSame(TraceDecision::Matched, $result->trace[0]['decision']);
+        self::assertSame(TraceDecision::MATCHED, $result->trace[0]['decision']);
     }
 
     /**
@@ -74,7 +74,7 @@ final class PolicyEvaluatorTest extends TestCase
         $result = (new PolicyEvaluator)->evaluate([$policy], 'posts:create');
 
         self::assertFalse($result->allowed);
-        self::assertSame(DecisionReason::ExplicitDeny, $result->reason);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $result->reason);
     }
 
     /**
@@ -95,7 +95,7 @@ final class PolicyEvaluatorTest extends TestCase
         $result = (new PolicyEvaluator)->evaluate([$policy], 'posts:create');
 
         self::assertFalse($result->allowed);
-        self::assertSame(DecisionReason::ExplicitDeny, $result->reason);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $result->reason);
     }
 
     /**
@@ -121,14 +121,14 @@ final class PolicyEvaluatorTest extends TestCase
         self::assertSame([
             'policy'          => 'named-policy',
             'statement_index' => 0,
-            'decision'        => TraceDecision::Skipped,
+            'decision'        => TraceDecision::SKIPPED,
             'reason'          => 'action/resource did not match',
         ], $result->trace[0]);
 
         self::assertSame([
             'policy'          => 'named-policy',
             'statement_index' => 1,
-            'decision'        => TraceDecision::Matched,
+            'decision'        => TraceDecision::MATCHED,
             'reason'          => 'explicit allow',
         ], $result->trace[1]);
     }
@@ -152,7 +152,7 @@ final class PolicyEvaluatorTest extends TestCase
         self::assertSame([
             'policy'          => 'deny-pol',
             'statement_index' => 0,
-            'decision'        => TraceDecision::Matched,
+            'decision'        => TraceDecision::MATCHED,
             'reason'          => 'explicit deny',
         ], $result->trace[0]);
     }
@@ -202,7 +202,7 @@ final class PolicyEvaluatorTest extends TestCase
         self::assertSame([
             'policy'          => 'cond-pol',
             'statement_index' => 0,
-            'decision'        => TraceDecision::Skipped,
+            'decision'        => TraceDecision::SKIPPED,
             'reason'          => 'conditions not satisfied',
         ], $result->trace[0]);
     }
@@ -228,8 +228,8 @@ final class PolicyEvaluatorTest extends TestCase
         $result = (new PolicyEvaluator)->evaluate([$policy], 'posts:create', null, ['tenant' => 'org-2']);
 
         self::assertFalse($result->allowed);
-        self::assertSame(DecisionReason::ImplicitDeny, $result->reason);
-        self::assertSame(TraceDecision::Skipped, $result->trace[0]['decision']);
+        self::assertSame(DecisionReason::IMPLICIT_DENY, $result->reason);
+        self::assertSame(TraceDecision::SKIPPED, $result->trace[0]['decision']);
         self::assertStringContainsString('conditions', $result->trace[0]['reason']);
     }
 

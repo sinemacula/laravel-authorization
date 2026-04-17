@@ -11,7 +11,6 @@ use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Role;
-use WeakMap;
 
 /**
  * Row-lifecycle observer for the `Role` model.
@@ -33,22 +32,7 @@ use WeakMap;
  */
 final class RoleObserver
 {
-    /**
-     * @var \WeakMap<\SineMacula\Laravel\Authorization\Models\Role, array<string, mixed>>|null
-     *
-     * Pre-save attribute snapshots bridging `updating` and `updated`
-     * so the `RoleUpdated` event carries a complete before/after
-     * diff. Keyed by the role instance; `WeakMap` means a role that
-     * goes out of scope before its `updated` fire releases its
-     * snapshot with no manual cleanup.
-     *
-     * Held statically so the snapshot survives Laravel's per-event
-     * observer resolution — the framework calls
-     * `app()->make(self::class)->method($model)` for each hook,
-     * which produces a fresh instance each time unless the observer
-     * is bound as a singleton. Static state is simpler than wiring
-     * a singleton binding.
-     */
+    /** @var \WeakMap<\SineMacula\Laravel\Authorization\Models\Role, array<string, mixed>>|null Pre-update snapshots bridging `updating` and `updated`; static so it survives per-event observer resolution. */
     private static ?\WeakMap $snapshots = null;
 
     /**

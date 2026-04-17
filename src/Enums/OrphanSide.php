@@ -9,7 +9,7 @@ namespace SineMacula\Laravel\Authorization\Enums;
  *
  * Carried on `OrphanedRolePermissionException` so callers inspect
  * the missing parent with a type-checked value instead of comparing
- * against a string literal (see issues #84 and #93). Backed by
+ * against a string literal. Backed by
  * strings so the exception message retains the human-readable
  * sentinel (`'role'` / `'permission'`) without extra mapping at the
  * throw site.
@@ -22,10 +22,10 @@ enum OrphanSide: string
     /**
      * The role-side parent is missing.
      */
-    case Role = 'role';
+    case ROLE = 'role';
 
     /**
      * The permission-side parent is missing.
      */
-    case Permission = 'permission';
+    case PERMISSION = 'permission';
 }

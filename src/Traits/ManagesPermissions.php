@@ -271,7 +271,7 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
      * back to the package default when the role itself is
      * guard-agnostic (null `guard_name`). Delegates the query to
      * `Permission::resolveByName()` so both sides share one
-     * implementation (see #55).
+     * implementation.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return \SineMacula\Laravel\Authorization\Models\Permission

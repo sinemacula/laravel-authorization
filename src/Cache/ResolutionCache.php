@@ -39,15 +39,7 @@ final class ResolutionCache
         /** Optional persistent cache store; null disables cross-request. */
         private readonly ?CacheRepository $store = null,
 
-        /**
-         * Entry lifetime in seconds; 0 stores forever.
-         *
-         * @formatter:off
-         *
-         * @infection-ignore-all DecrementInteger — the `resolveTtl()` guard treats any `$ttl <= 0` as "forever", so `0 → -1` is an equivalent mutation.
-         *
-         * @formatter:on
-         */
+        /** Entry lifetime in seconds; 0 stores forever. @infection-ignore-all DecrementInteger */
         private readonly int $ttl = 0,
 
         /** Namespace prefix for every key written by this cache. */
@@ -350,21 +342,10 @@ final class ResolutionCache
     /**
      * Derive the principal portion of the cache key.
      *
-     * Eloquent models already expose the canonical pairing
-     * (`getMorphClass()` + `getKey()`) and that remains the first
-     * choice. Non-Eloquent principals — a service-account value
-     * object, a tenant-scoped identity shell, any class implementing
-     * `AuthorizableIdentity` without extending `Model` — are
-     * duck-typed: if they expose compatible `getMorphClass()` /
-     * `getKey()` accessors the persistent tier keys on those and
-     * survives across requests. Principals that expose neither fall
-     * back to the concrete class name plus `spl_object_hash()`,
-     * which is only stable within a single request. The in-memory
-     * memo still benefits; the persistent tier is effectively
-     * per-request for those principals (see ISSUES.md #70 option
-     * (a) — the duck-typed path lets well-behaved custom
-     * principals opt in to cross-request caching without a new
-     * contract).
+     * Eloquent models use their canonical `getMorphClass()` + `getKey()`
+     * pairing. Non-Eloquent principals are duck-typed on those same
+     * accessors; principals exposing neither fall back to a per-request
+     * `spl_object_hash()`, in which case only the in-memory memo applies.
      *
      * @param  object  $principal
      * @return string

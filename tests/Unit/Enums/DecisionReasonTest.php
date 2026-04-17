@@ -62,10 +62,10 @@ final class DecisionReasonTest extends TestCase
      */
     public function testTryFromResolvesKnownValues(): void
     {
-        self::assertSame(DecisionReason::ExplicitAllow, DecisionReason::tryFrom('explicit_allow'));
-        self::assertSame(DecisionReason::ExplicitDeny, DecisionReason::tryFrom('explicit_deny'));
-        self::assertSame(DecisionReason::ImplicitDeny, DecisionReason::tryFrom('implicit_deny'));
-        self::assertSame(DecisionReason::RbacAllow, DecisionReason::tryFrom('rbac_allow'));
+        self::assertSame(DecisionReason::EXPLICIT_ALLOW, DecisionReason::tryFrom('explicit_allow'));
+        self::assertSame(DecisionReason::EXPLICIT_DENY, DecisionReason::tryFrom('explicit_deny'));
+        self::assertSame(DecisionReason::IMPLICIT_DENY, DecisionReason::tryFrom('implicit_deny'));
+        self::assertSame(DecisionReason::RBAC_ALLOW, DecisionReason::tryFrom('rbac_allow'));
     }
 
     /**

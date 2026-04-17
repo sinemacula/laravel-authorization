@@ -227,7 +227,7 @@ trait HasRoles // @phpstan-ignore trait.unused
      * tags). The persistent-tier TTL is additionally bounded by
      * the nearest upcoming `expires_at` across the relation's
      * pivot rows so temporal grants invalidate themselves at the
-     * exact moment they lapse (#77).
+     * exact moment they lapse.
      *
      * @return array<int, string>
      */
@@ -328,7 +328,7 @@ trait HasRoles // @phpstan-ignore trait.unused
      * guard routes its lookups against its own guard's rows instead
      * of the package default. Delegates the actual query to
      * `Role::resolveByName()` so both identity-side and any other
-     * caller share one implementation (see #96).
+     * caller share one implementation.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @return \SineMacula\Laravel\Authorization\Models\Role

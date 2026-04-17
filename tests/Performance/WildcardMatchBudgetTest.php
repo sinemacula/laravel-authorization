@@ -40,7 +40,7 @@ final class WildcardMatchBudgetTest extends TestCase
     public function testCanMatchHundredShallowWildcardsQuickly(): void
     {
         $statement = new Statement(
-            effect: PolicyEffect::Allow,
+            effect: PolicyEffect::ALLOW,
             actions: ['posts:*'],
         );
 
@@ -71,7 +71,7 @@ final class WildcardMatchBudgetTest extends TestCase
     public function testCanMatchHundredDeepWildcardsQuickly(): void
     {
         $statement = new Statement(
-            effect: PolicyEffect::Allow,
+            effect: PolicyEffect::ALLOW,
             actions: ['a:b:c:d:e:f:g:h:i:*'],
         );
 

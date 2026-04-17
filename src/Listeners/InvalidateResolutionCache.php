@@ -12,25 +12,10 @@ use SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked as RolePermis
 /**
  * Event listener that keeps the resolution cache coherent.
  *
- * Two invalidation strategies:
- *
- * - Principal-scoped events (`IdentityRoleAssigned`,
- *   `IdentityRoleRevoked`, `IdentityPermissionGranted`,
- *   `IdentityPermissionRevoked`, `IdentityPolicyAttached`,
- *   `IdentityPolicyDetached`) carry the authorizable that changed. The
- *   listener calls `ResolutionCache::forget($authorizable)` so
- *   only that principal's cached lookups are dropped.
- * - Role-pivot events (`RolePermissionGranted`,
- *   `RolePermissionRevoked`) have no reverse index in a plain
- *   cache store, so the listener branches on store capability:
- *   tag-capable stores (Redis, Memcached, the Laravel array
- *   store) flush every entry tagged with the affected role via
- *   `forgetRoleTags()`; non-tag stores (File, Database) fall
- *   back to `flush()`, which clears only the in-memory tier and
- *   leaves persistent entries to expire on TTL or on the next
- *   principal-scoped event. This closes ISSUES.md #68 for the
- *   common production stores and preserves the prior behaviour
- *   everywhere else.
+ * Principal-scoped identity events drop only that authorizable's cached
+ * lookups via `ResolutionCache::forget()`. Role-pivot events flush every
+ * entry tagged with the affected role on tag-capable stores (Redis,
+ * Memcached, array) and fall back to an in-memory flush elsewhere.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -53,7 +38,7 @@ final class InvalidateResolutionCache
      * Drop the cached entries belonging to the authorizable on
      * the event.
      *
-     * @param  IdentityEvent  $event
+     * @param  \SineMacula\Laravel\Authorization\Events\Identity\IdentityEvent  $event
      * @return void
      */
     public function handlePrincipalMutation(IdentityEvent $event): void

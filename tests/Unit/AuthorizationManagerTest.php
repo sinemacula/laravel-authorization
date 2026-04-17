@@ -131,7 +131,7 @@ final class AuthorizationManagerTest extends TestCase
         $result = $manager->for($principal)->evaluate('posts:create');
 
         self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::RbacAllow, $result->reason);
+        self::assertSame(DecisionReason::RBAC_ALLOW, $result->reason);
     }
 
     /**
@@ -158,7 +158,7 @@ final class AuthorizationManagerTest extends TestCase
         $result = $manager->for($principal)->evaluate('posts:create');
 
         self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::ExplicitAllow, $result->reason);
+        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $result->reason);
     }
 
     /**
@@ -185,7 +185,7 @@ final class AuthorizationManagerTest extends TestCase
         $result = $manager->for($principal)->evaluate('posts:delete');
 
         self::assertFalse($result->allowed);
-        self::assertSame(DecisionReason::ExplicitDeny, $result->reason);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $result->reason);
     }
 
     /**
@@ -452,7 +452,7 @@ final class AuthorizationManagerTest extends TestCase
         $manager->evaluate('some:action');
 
         self::assertNotNull($manager->lastDecision());
-        self::assertSame(DecisionReason::ImplicitDeny, $manager->lastDecision()->reason);
+        self::assertSame(DecisionReason::IMPLICIT_DENY, $manager->lastDecision()->reason);
     }
 
     /**
