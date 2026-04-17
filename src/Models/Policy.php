@@ -40,7 +40,7 @@ class Policy extends Model
 {
     use HasSystemProtection, HasUuids;
 
-    /** Placeholder name used when exception context has no policy name available. */
+    /** @var string Placeholder used when exception context lacks a policy name. */
     private const string UNNAMED_PLACEHOLDER = '[unnamed]';
 
     /**
@@ -172,6 +172,8 @@ class Policy extends Model
      *
      * @param  mixed  $value
      * @return array<string, mixed>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
      */
     private function normaliseDocument(mixed $value): array
     {

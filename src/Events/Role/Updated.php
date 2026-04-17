@@ -2,12 +2,12 @@
 
 declare(strict_types = 1);
 
-namespace SineMacula\Laravel\Authorization\Events\Permission;
+namespace SineMacula\Laravel\Authorization\Events\Role;
 
-use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
- * Dispatched after a permission row is updated.
+ * Dispatched after a role row is updated.
  *
  * Carries the full before/after diff so audit consumers can render
  * the change set without a second round-trip. The `before` map
@@ -24,18 +24,18 @@ use SineMacula\Laravel\Authorization\Models\Permission;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class PermissionUpdated
+final readonly class Updated
 {
     /**
      * Create a new event instance.
      *
-     * @param  \SineMacula\Laravel\Authorization\Models\Permission  $permission
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @param  array{before: array<string, mixed>, after: array<string, mixed>}  $changes
      */
     public function __construct(
 
-        /** Updated permission row in its post-save state. */
-        public Permission $permission,
+        /** Updated role row in its post-save state. */
+        public Role $role,
 
         /**
          * Before/after attribute diff captured across the update.

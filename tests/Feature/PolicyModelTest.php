@@ -52,7 +52,7 @@ final class PolicyModelTest extends TestCase
         $evaluation = $fresh->toEvaluationPolicy();
         self::assertSame('full-round-trip', $evaluation->name);
         self::assertCount(1, $evaluation->statements);
-        self::assertSame(PolicyEffect::ALLOW, $evaluation->statements[0]->effect);
+        self::assertSame(PolicyEffect::Allow, $evaluation->statements[0]->effect);
     }
 
     /**

@@ -46,10 +46,9 @@ final class AuthGuardPrincipalResolver implements PrincipalResolver
     ) {}
 
     /**
-     * @inheritDoc
-     *
      * @return object|null
      */
+    #[\Override]
     public function resolve(): ?object
     {
         $guard = $this->guard ?? self::defaultGuard();

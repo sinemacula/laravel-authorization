@@ -2,13 +2,16 @@
 
 declare(strict_types = 1);
 
-namespace SineMacula\Laravel\Authorization\Events\Identity;
+namespace SineMacula\Laravel\Authorization\Events\Permission;
 
 use SineMacula\Laravel\Authorization\Models\Permission;
 
 /**
- * Dispatched when a direct permission is revoked from an authorizable
- * identity.
+ * Dispatched after a new permission row is persisted.
+ *
+ * Part of the permission-catalogue lifecycle trio
+ * (`PermissionCreated`, `PermissionUpdated`, `PermissionDeleted`)
+ * consumed by audit-log sinks.
  *
  * Part of the SemVer-stable event API; breaking changes require a
  * major version bump.
@@ -18,20 +21,16 @@ use SineMacula\Laravel\Authorization\Models\Permission;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class IdentityPermissionRevoked
+final readonly class Created
 {
     /**
      * Create a new event instance.
      *
-     * @param  object  $authorizable
      * @param  \SineMacula\Laravel\Authorization\Models\Permission  $permission
      */
     public function __construct(
 
-        /** Authorizable identity that the direct permission was revoked from. */
-        public object $authorizable,
-
-        /** Permission that was revoked from the identity. */
+        /** Persisted permission row. */
         public Permission $permission,
 
     ) {}

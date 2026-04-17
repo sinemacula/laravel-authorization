@@ -2,13 +2,13 @@
 
 declare(strict_types = 1);
 
-namespace SineMacula\Laravel\Authorization\Events\Permission;
+namespace SineMacula\Laravel\Authorization\Events\Identity;
 
 use SineMacula\Laravel\Authorization\Models\Permission;
 
 /**
- * Dispatched after a permission row is deleted. Carries the final
- * snapshot before the source row disappears.
+ * Dispatched when a permission is granted directly to an authorizable
+ * identity.
  *
  * Part of the SemVer-stable event API; breaking changes require a
  * major version bump.
@@ -18,16 +18,20 @@ use SineMacula\Laravel\Authorization\Models\Permission;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class PermissionDeleted
+final readonly class PermissionGranted implements IdentityEvent
 {
     /**
      * Create a new event instance.
      *
+     * @param  object  $authorizable
      * @param  \SineMacula\Laravel\Authorization\Models\Permission  $permission
      */
     public function __construct(
 
-        /** Permission row captured immediately after deletion. */
+        /** Authorizable identity that received the direct permission grant. */
+        public object $authorizable,
+
+        /** Permission that was granted directly to the identity. */
         public Permission $permission,
 
     ) {}

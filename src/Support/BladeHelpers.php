@@ -152,16 +152,16 @@ final class BladeHelpers
     {
         $items = \is_array($value) ? $value : [$value];
 
-        $result = [];
+        $flattened = [];
 
         foreach ($items as $item) {
             $trimmed = \trim($item);
 
             if ($trimmed !== '') {
-                $result[] = $trimmed;
+                $flattened[] = $trimmed;
             }
         }
 
-        return $result;
+        return $flattened;
     }
 }

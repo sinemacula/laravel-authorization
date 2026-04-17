@@ -29,9 +29,9 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
 final class LastDecisionStore
 {
     /**
-     * Most recent evaluation result captured from any manager scope.
-     *
      * @var \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult|null
+     *
+     * Most recent evaluation result captured from any manager scope
      */
     private ?EvaluationResult $last = null;
 

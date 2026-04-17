@@ -64,6 +64,7 @@ class TenantScope implements Scope
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
      */
+    #[\Override]
     public function apply(Builder $builder, Model $model): void
     {
         $tenant = $this->resolveTenant();

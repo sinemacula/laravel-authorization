@@ -42,7 +42,7 @@ final class StatementTest extends TestCase
             'conditions' => ['tenant' => ['eq' => 'org-1']],
         ]);
 
-        self::assertSame(PolicyEffect::ALLOW, $statement->effect);
+        self::assertSame(PolicyEffect::Allow, $statement->effect);
         self::assertSame(['posts:create'], $statement->actions);
         self::assertSame(['arn:posts:1'], $statement->resources);
         self::assertSame(['tenant' => ['eq' => 'org-1']], $statement->conditions);
@@ -581,7 +581,7 @@ final class StatementTest extends TestCase
     public function testConstructorDefaultResourcesContainsWildcard(): void
     {
         $statement = new Statement(
-            effect: PolicyEffect::ALLOW,
+            effect: PolicyEffect::Allow,
             actions: ['posts:create'],
         );
 
@@ -644,7 +644,7 @@ final class StatementTest extends TestCase
     {
         // Build a statement with a numeric key manually
         $statement = new Statement(
-            effect: PolicyEffect::ALLOW,
+            effect: PolicyEffect::Allow,
             actions: ['x'],
             conditions: [0 => ['eq' => 'val']],
         );
@@ -662,7 +662,7 @@ final class StatementTest extends TestCase
     public function testStringKeyPresentInContextPasses(): void
     {
         $statement = new Statement(
-            effect: PolicyEffect::ALLOW,
+            effect: PolicyEffect::Allow,
             actions: ['x'],
             conditions: ['key' => 'expected'],
         );
@@ -679,7 +679,7 @@ final class StatementTest extends TestCase
     public function testStringKeyAbsentFromContextFails(): void
     {
         $statement = new Statement(
-            effect: PolicyEffect::ALLOW,
+            effect: PolicyEffect::Allow,
             actions: ['x'],
             conditions: ['missing' => 'expected'],
         );
@@ -769,7 +769,7 @@ final class StatementTest extends TestCase
     public function testNonStringOperatorKeyFailsClosed(): void
     {
         $statement = new Statement(
-            effect: PolicyEffect::ALLOW,
+            effect: PolicyEffect::Allow,
             actions: ['x'],
             conditions: ['key' => [0 => 'operand']],
         );

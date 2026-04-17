@@ -20,7 +20,7 @@ class MigrationCollisionException extends \RuntimeException
      */
     public function __construct(
 
-        /** Table name that already existed when the migration tried to create it. */
+        /** Table name that already existed when the migration ran. */
         private readonly string $table,
 
     ) {

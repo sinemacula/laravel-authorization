@@ -17,6 +17,6 @@ namespace SineMacula\Laravel\Authorization\Evaluation\Enums;
  */
 enum PolicyEffect: string
 {
-    case ALLOW = 'allow';
-    case DENY  = 'deny';
+    case Allow = 'allow';
+    case Deny  = 'deny';
 }

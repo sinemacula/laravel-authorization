@@ -5,9 +5,9 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Observers;
 
 use Illuminate\Support\Facades\Event;
-use SineMacula\Laravel\Authorization\Events\Role\RoleCreated;
-use SineMacula\Laravel\Authorization\Events\Role\RoleDeleted;
-use SineMacula\Laravel\Authorization\Events\Role\RoleUpdated;
+use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
+use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
+use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -34,6 +34,8 @@ use WeakMap;
 final class RoleObserver
 {
     /**
+     * @var \WeakMap<\SineMacula\Laravel\Authorization\Models\Role, array<string, mixed>>|null
+     *
      * Pre-save attribute snapshots bridging `updating` and `updated`
      * so the `RoleUpdated` event carries a complete before/after
      * diff. Keyed by the role instance; `WeakMap` means a role that
@@ -46,8 +48,6 @@ final class RoleObserver
      * which produces a fresh instance each time unless the observer
      * is bound as a singleton. Static state is simpler than wiring
      * a singleton binding.
-     *
-     * @var \WeakMap<\SineMacula\Laravel\Authorization\Models\Role, array<string, mixed>>|null
      */
     private static ?\WeakMap $snapshots = null;
 

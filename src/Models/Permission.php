@@ -172,7 +172,11 @@ class Permission extends Model
     /**
      * Roles that carry this permission.
      *
+     * @formatter:off
+     *
      * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany<\SineMacula\Laravel\Authorization\Models\Role, $this>
+     *
+     * @formatter:on
      */
     public function roles(): BelongsToMany
     {

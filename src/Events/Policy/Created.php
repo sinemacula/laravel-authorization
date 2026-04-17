@@ -7,8 +7,10 @@ namespace SineMacula\Laravel\Authorization\Events\Policy;
 use SineMacula\Laravel\Authorization\Models\Policy;
 
 /**
- * Dispatched after a policy row is deleted. Carries the final
- * snapshot before the source row disappears.
+ * Dispatched after a new policy row is persisted.
+ *
+ * Part of the policy-catalogue lifecycle trio (`PolicyCreated`,
+ * `PolicyUpdated`, `PolicyDeleted`) consumed by audit-log sinks.
  *
  * Part of the SemVer-stable event API; breaking changes require a
  * major version bump.
@@ -18,7 +20,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class PolicyDeleted
+final readonly class Created
 {
     /**
      * Create a new event instance.
@@ -27,7 +29,7 @@ final readonly class PolicyDeleted
      */
     public function __construct(
 
-        /** Policy row captured immediately after deletion. */
+        /** Persisted policy row. */
         public Policy $policy,
 
     ) {}

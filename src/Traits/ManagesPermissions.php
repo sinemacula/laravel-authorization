@@ -6,8 +6,8 @@ namespace SineMacula\Laravel\Authorization\Traits;
 
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Support\Facades\Event;
-use SineMacula\Laravel\Authorization\Events\Role\RolePermissionGranted;
-use SineMacula\Laravel\Authorization\Events\Role\RolePermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\Role\PermissionGranted as RolePermissionGranted;
+use SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked as RolePermissionRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
@@ -44,8 +44,12 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
+     * @formatter:off
+     *
      * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany<\SineMacula\Laravel\Authorization\Models\Permission, $this,
      *     \SineMacula\Laravel\Authorization\Models\Pivots\RolePermission, 'pivot'>
+     *
+     * @formatter:on
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      */

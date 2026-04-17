@@ -122,6 +122,6 @@ final class FailClosedPolicyHydrationTest extends TestCase
         $result = Authorization::for($user->fresh())->evaluate('posts:create');
 
         self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $result->reason);
+        self::assertSame(DecisionReason::ExplicitAllow, $result->reason);
     }
 }

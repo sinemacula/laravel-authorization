@@ -11,31 +11,10 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 /**
  * Shared template method for the shipped authorization middleware.
- *
- * Concrete middleware (`RequireRole`, `RequirePermission`) plug
- * three hooks into a single `handle()` body: the capability
- * contract the identity must implement, the per-needle check, and
- * the message rendered on a legitimate deny. Every other step —
- * resolving the current principal, guarding against the anonymous
- * case, flattening pipe-and-comma arguments, distinguishing the
- * misconfiguration failure from an authorization deny — lives
- * here, so the two classes stay three-method leaves and future
- * changes to the handle path land in exactly one file (see
- * issues #81, #82, #83, #85).
- *
- * Principal resolution delegates to the
- * `Authorization::currentPrincipal()` facade so the middleware
- * resolves the same principal as the facade, Gate, and Blade
- * directives — consumers wiring a custom `PrincipalResolver` see
- * it honoured at every surface.
- *
- * Generic parameter `TContract` names the capability contract a
- * concrete subclass binds itself to (`SupportsRoles` for
- * `RequireRole`, `SupportsPermissions` for `RequirePermission`).
- * The bound propagates to `matches()` so subclass implementations
- * declare `TContract $principal` and PHPStan carries the narrowed
- * type across the template-method boundary without an inline
- * `@var` re-assertion (see issue #87).
+ * Concrete subclasses supply the required capability contract, the
+ * per-needle check, and the rejection message; everything else — the
+ * principal lookup, anonymous/misconfig guards, and argument
+ * flattening — lives here.
  *
  * @template TContract of object
  *

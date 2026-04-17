@@ -21,27 +21,10 @@ use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
 use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
 
 /**
- * Eloquent model for role rows.
- *
- * Roles are named buckets of permissions shared across authorizable
- * identities. The `guard_name` column is nullable: a null value
- * marks the role as guard-agnostic (applies to every guard), a
- * concrete string scopes the role to a single guard. The
- * `is_system` flag marks platform-shipped roles as
- * delete-protected: deletion or a rename of an `is_system = true`
- * row raises `SystemRoleProtectedException` unless `forceSystem()`
- * is invoked to unlock the next operation on the instance.
- *
- * Behaviour is split across traits and an observer:
- * - `HasRoleHierarchy` — parent/children/ancestors/descendants plus
- *   the rank-comparison helpers (`outranks`, `outranksOrEquals`,
- *   `isRanked`).
- * - `ManagesPermissions` — the role-side permission API
- *   (`givePermission`, `revokePermission`, `syncPermissions`,
- *   `hasPermission`, `getPermissions`, plus the Spatie aliases).
- * - `RoleObserver` — wired via `#[ObservedBy]`, owns the
- *   `saving` / `updating` / `created` / `updated` / `deleted`
- *   hooks and the tenant-columns + hierarchy-cycle invariants.
+ * Eloquent model for role rows — named buckets of permissions shared
+ * across authorizable identities. Behaviour is composed from
+ * `HasRoleHierarchy`, `ManagesPermissions`, `HasSystemProtection`, and
+ * the `RoleObserver` wired via `#[ObservedBy]`.
  *
  * @property string $id
  * @property string $name

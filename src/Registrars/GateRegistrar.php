@@ -82,25 +82,18 @@ final class GateRegistrar
     private function resolveConflictMode(): GateConflictMode
     {
         /** @var mixed $rawMode */
-        $rawMode = $this->app['config']->get('authorization.gate.on_conflict', GateConflictMode::THROW->value);
+        $rawMode = $this->app['config']->get('authorization.gate.on_conflict', GateConflictMode::Throw->value);
 
         return match (true) {
             $rawMode instanceof GateConflictMode => $rawMode,
-            \is_string($rawMode)                 => GateConflictMode::tryFrom($rawMode) ?? GateConflictMode::THROW,
-            default                              => GateConflictMode::THROW,
+            \is_string($rawMode)                 => GateConflictMode::tryFrom($rawMode) ?? GateConflictMode::Throw,
+            default                              => GateConflictMode::Throw,
         };
     }
 
     /**
-     * Register a single Gate for the supplied enum case.
-     *
-     * Single decision point for every conflict mode. `match` over
-     * the enum is exhaustive at PHPStan level 8 — adding a future
-     * `GateConflictMode` case becomes a clear "unhandled match"
-     * error here rather than silent fall-through under `switch`.
-     * THROW short-circuits with an exception, OVERWRITE proceeds to
-     * redefine the gate, and LOG records the conflict and abandons
-     * the redefine.
+     * Register a single Gate for the supplied enum case, honouring
+     * the configured conflict mode.
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\PermissionEnum  $case
      * @param  \SineMacula\Laravel\Authorization\Enums\GateConflictMode  $onConflict
@@ -113,10 +106,12 @@ final class GateRegistrar
         $permission = $case->toString();
 
         if (Gate::has($permission)) {
+            // Exhaustive match over GateConflictMode: Throw short-circuits,
+            // Overwrite falls through to redefine, Log records and bails.
             $shouldDefine = match ($onConflict) {
-                GateConflictMode::THROW     => throw new GateConflictException($permission),
-                GateConflictMode::OVERWRITE => true,
-                GateConflictMode::LOG       => (function () use ($permission): bool {
+                GateConflictMode::Throw     => throw new GateConflictException($permission),
+                GateConflictMode::Overwrite => true,
+                GateConflictMode::Log       => (function () use ($permission): bool {
                     $this->logGateConflict($permission);
 
                     return false;

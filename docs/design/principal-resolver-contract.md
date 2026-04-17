@@ -13,7 +13,7 @@ middleware and Blade directives.
    the opt-in resolver that consumers wire when they want the standard Laravel auth stack.
 
 2. **The shipped default resolver returns null.** `NullPrincipalResolver::resolve()` always returns `null`, which makes
-   the authorization engine deny every check via the `IMPLICIT_DENY` branch (null principal short-circuits before the
+   the authorization engine deny every check via the `ImplicitDeny` branch (null principal short-circuits before the
    evaluator runs). This makes the package anonymous-safe out of the box -- it can be installed, configured, and tested
    without an authentication layer present.
 
@@ -38,7 +38,7 @@ interface PrincipalResolver
 
 The return type is `?object` rather than a specific interface. The engine does not type-hint any particular principal
 shape -- capability is detected via the `AuthorizableIdentity` contract at evaluation time. A resolver that returns an
-object which does not implement `AuthorizableIdentity` produces an `IMPLICIT_DENY` at the RBAC fallback step because
+object which does not implement `AuthorizableIdentity` produces an `ImplicitDeny` at the RBAC fallback step because
 the manager cannot call `hasPermission()` on an untyped object.
 
 ## Shipped Implementations

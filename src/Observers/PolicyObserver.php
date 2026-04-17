@@ -5,9 +5,9 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Observers;
 
 use Illuminate\Support\Facades\Event;
-use SineMacula\Laravel\Authorization\Events\Policy\PolicyCreated;
-use SineMacula\Laravel\Authorization\Events\Policy\PolicyDeleted;
-use SineMacula\Laravel\Authorization\Events\Policy\PolicyUpdated;
+use SineMacula\Laravel\Authorization\Events\Policy\Created as PolicyCreated;
+use SineMacula\Laravel\Authorization\Events\Policy\Deleted as PolicyDeleted;
+use SineMacula\Laravel\Authorization\Events\Policy\Updated as PolicyUpdated;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use WeakMap;
 
@@ -34,6 +34,8 @@ use WeakMap;
 final class PolicyObserver
 {
     /**
+     * @var \WeakMap<\SineMacula\Laravel\Authorization\Models\Policy, array<string, mixed>>|null
+     *
      * Pre-save attribute snapshots bridging `updating` and `updated`
      * so the `PolicyUpdated` event carries a complete before/after
      * diff. Keyed by the policy instance; `WeakMap` means a policy
@@ -45,8 +47,6 @@ final class PolicyObserver
      * `app()->make(self::class)->method($model)` for each hook,
      * which produces a fresh instance each time unless the observer
      * is bound as a singleton.
-     *
-     * @var \WeakMap<\SineMacula\Laravel\Authorization\Models\Policy, array<string, mixed>>|null
      */
     private static ?\WeakMap $snapshots = null;
 

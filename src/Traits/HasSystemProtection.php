@@ -5,28 +5,10 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Traits;
 
 /**
- * Shared system-row protection for the primitive authorization
- * models (`Role`, `Permission`, `Policy`).
- *
- * A row with `is_system = true` is treated as platform-shipped and
- * refuses `delete` plus any mutation to the protected-attribute
- * list returned by `systemProtectedFields()`. Each consuming model
- * declares:
- *
- * - `systemProtectedFields()` — the attribute names whose dirty
- *   state triggers the guard on `updating` (e.g. `['name']` for
- *   Role / Permission, `['name', 'document']` for Policy).
- * - `systemProtectionException(string $operation)` — factory for
- *   the per-model exception thrown on refusal. The returned
- *   exception is raised verbatim so audit consumers keep the
- *   per-model type discrimination they rely on.
- *
- * The escape hatch is per-instance, single-use, and in-memory:
- * `forceSystem()` unlocks the next protected mutation, and the
- * next `saved` event clears the flag so it cannot hop across an
- * intervening non-protected save (#75).
- *
- * Closes the triplicated protection pattern flagged in #92.
+ * Shared `is_system` row-protection hooks for the primitive
+ * authorization models. Consumers declare the protected-field list
+ * and per-model exception factory; `forceSystem()` provides a
+ * per-instance, single-use bypass.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,12 +18,12 @@ namespace SineMacula\Laravel\Authorization\Traits;
 trait HasSystemProtection // @phpstan-ignore trait.unused
 {
     /**
+     * @var bool
+     *
      * Per-instance escape-hatch flag. When true, the next
      * protected mutation bypasses the system-row check and resets
      * to false on completion. Invoked via `forceSystem()` — never
      * persisted, never inherited across instances.
-     *
-     * @var bool
      */
     private bool $systemProtectionBypassed = false;
 
@@ -52,7 +34,7 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
      *
      *     $model->forceSystem()->delete();
      *
-     * The bypass is **per-instance, single-use, and in-memory** —
+     * The bypass is per-instance, single-use, and in-memory —
      * it never persists to the database, never leaks across
      * instances (a `$model->fresh()` drops it), and resets to
      * false the moment the guard clause consults it.

@@ -28,8 +28,8 @@ final class PolicyEffectTest extends TestCase
      */
     public function testExposesAllowAndDenyCases(): void
     {
-        self::assertSame('allow', PolicyEffect::ALLOW->value);
-        self::assertSame('deny', PolicyEffect::DENY->value);
+        self::assertSame('allow', PolicyEffect::Allow->value);
+        self::assertSame('deny', PolicyEffect::Deny->value);
     }
 
     /**

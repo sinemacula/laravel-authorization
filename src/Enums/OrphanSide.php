@@ -22,10 +22,10 @@ enum OrphanSide: string
     /**
      * The role-side parent is missing.
      */
-    case ROLE = 'role';
+    case Role = 'role';
 
     /**
      * The permission-side parent is missing.
      */
-    case PERMISSION = 'permission';
+    case Permission = 'permission';
 }

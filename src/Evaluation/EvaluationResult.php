@@ -17,38 +17,14 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
+ * @formatter:off
+ *
  * @phpstan-type EvaluationTraceEntry array{policy: string, statement_index: int, decision: \SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision, reason: string}
+ *
+ * @formatter:on
  */
 final readonly class EvaluationResult
 {
-    /**
-     * Reason code indicating an explicit allow from a policy statement.
-     *
-     * @deprecated use DecisionReason::EXPLICIT_ALLOW instead
-     */
-    public const string REASON_EXPLICIT_ALLOW = 'explicit_allow';
-
-    /**
-     * Reason code indicating an explicit deny from a policy statement.
-     *
-     * @deprecated use DecisionReason::EXPLICIT_DENY instead
-     */
-    public const string REASON_EXPLICIT_DENY = 'explicit_deny';
-
-    /**
-     * Reason code indicating the evaluator reached implicit deny.
-     *
-     * @deprecated use DecisionReason::IMPLICIT_DENY instead
-     */
-    public const string REASON_IMPLICIT_DENY = 'implicit_deny';
-
-    /**
-     * Reason code indicating RBAC (roles/permissions) granted the allow.
-     *
-     * @deprecated use DecisionReason::RBAC_ALLOW instead
-     */
-    public const string REASON_RBAC_ALLOW = 'rbac_allow';
-
     /**
      * Create a new evaluation result.
      *
@@ -65,10 +41,10 @@ final readonly class EvaluationResult
         /** Reason code describing how the decision was reached. */
         public DecisionReason $reason,
 
-        /** Statement that produced the decision, or null for implicit/RBAC outcomes. */
+        /** Statement that produced the decision; null for implicit/RBAC. */
         public ?Statement $matchedStatement = null,
 
-        /** Ordered, serialisable trace of every statement the evaluator considered. */
+        /** Ordered, serialisable trace of every statement considered. */
         public array $trace = [],
 
     ) {}
@@ -84,7 +60,7 @@ final readonly class EvaluationResult
     {
         return new self(
             allowed: true,
-            reason: DecisionReason::EXPLICIT_ALLOW,
+            reason: DecisionReason::ExplicitAllow,
             matchedStatement: $statement,
             trace: $trace,
         );
@@ -101,7 +77,7 @@ final readonly class EvaluationResult
     {
         return new self(
             allowed: false,
-            reason: DecisionReason::EXPLICIT_DENY,
+            reason: DecisionReason::ExplicitDeny,
             matchedStatement: $statement,
             trace: $trace,
         );
@@ -117,7 +93,7 @@ final readonly class EvaluationResult
     {
         return new self(
             allowed: false,
-            reason: DecisionReason::IMPLICIT_DENY,
+            reason: DecisionReason::ImplicitDeny,
             trace: $trace,
         );
     }
@@ -132,7 +108,7 @@ final readonly class EvaluationResult
     {
         return new self(
             allowed: true,
-            reason: DecisionReason::RBAC_ALLOW,
+            reason: DecisionReason::RbacAllow,
             trace: $trace,
         );
     }

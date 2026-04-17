@@ -34,6 +34,8 @@ use Illuminate\Support\Arr;
 final class ContextInterpolator
 {
     /**
+     * @var string
+     *
      * Regex pattern matching `${namespace.key}` tokens.
      *
      * Negative lookbehind rejects the `\${` escape sequence.

@@ -21,22 +21,23 @@ enum DecisionReason: string
     /**
      * An explicit allow from a matching policy statement.
      */
-    case EXPLICIT_ALLOW = 'explicit_allow';
+    case ExplicitAllow = 'explicit_allow';
 
     /**
      * An explicit deny from a matching policy statement.
      */
-    case EXPLICIT_DENY = 'explicit_deny';
+    case ExplicitDeny = 'explicit_deny';
 
     /**
      * No statement matched; the evaluator fell through to implicit deny.
      */
-    case IMPLICIT_DENY = 'implicit_deny';
+    case ImplicitDeny = 'implicit_deny';
 
     /**
-     * RBAC (roles/permissions) granted the allow after policy evaluation was indeterminate.
+     * RBAC (roles/permissions) granted the allow after policies were
+     * indeterminate.
      */
-    case RBAC_ALLOW = 'rbac_allow';
+    case RbacAllow = 'rbac_allow';
 
     /**
      * Return a human-readable explanation label for the reason.
@@ -46,10 +47,10 @@ enum DecisionReason: string
     public function label(): string
     {
         return match ($this) {
-            self::EXPLICIT_ALLOW => 'explicit allow from a policy statement',
-            self::EXPLICIT_DENY  => 'explicit deny from a policy statement',
-            self::RBAC_ALLOW     => 'RBAC grant (direct permission or role-inherited)',
-            self::IMPLICIT_DENY  => 'implicit deny (no statement matched)',
+            self::ExplicitAllow => 'explicit allow from a policy statement',
+            self::ExplicitDeny  => 'explicit deny from a policy statement',
+            self::RbacAllow     => 'RBAC grant (direct permission or role-inherited)',
+            self::ImplicitDeny  => 'implicit deny (no statement matched)',
         };
     }
 }

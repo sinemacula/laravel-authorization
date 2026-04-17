@@ -22,7 +22,11 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
  * to OR semantics. For AND across several permissions, chain the
  * middleware — `->middleware(['permission:posts:edit', 'permission:posts:publish'])`.
  *
+ * @formatter:off
+ *
  * @extends \SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware<\SineMacula\Laravel\Authorization\Contracts\SupportsPermissions>
+ *
+ * @formatter:on
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

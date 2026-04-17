@@ -32,11 +32,11 @@ final class EvaluationResultTest extends TestCase
      */
     public function testAllowedFactory(): void
     {
-        $statement = new Statement(PolicyEffect::ALLOW, ['x']);
-        $result    = EvaluationResult::allowed($statement, [['policy' => 'p', 'statement_index' => 0, 'decision' => TraceDecision::MATCHED, 'reason' => 'explicit allow']]);
+        $statement = new Statement(PolicyEffect::Allow, ['x']);
+        $result    = EvaluationResult::allowed($statement, [['policy' => 'p', 'statement_index' => 0, 'decision' => TraceDecision::Matched, 'reason' => 'explicit allow']]);
 
         self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $result->reason);
+        self::assertSame(DecisionReason::ExplicitAllow, $result->reason);
         self::assertSame($statement, $result->matchedStatement);
         self::assertCount(1, $result->trace);
     }
@@ -48,11 +48,11 @@ final class EvaluationResultTest extends TestCase
      */
     public function testExplicitlyDeniedFactory(): void
     {
-        $statement = new Statement(PolicyEffect::DENY, ['x']);
+        $statement = new Statement(PolicyEffect::Deny, ['x']);
         $result    = EvaluationResult::explicitlyDenied($statement);
 
         self::assertFalse($result->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_DENY, $result->reason);
+        self::assertSame(DecisionReason::ExplicitDeny, $result->reason);
         self::assertSame($statement, $result->matchedStatement);
     }
 
@@ -66,7 +66,7 @@ final class EvaluationResultTest extends TestCase
         $result = EvaluationResult::implicitlyDenied();
 
         self::assertFalse($result->allowed);
-        self::assertSame(DecisionReason::IMPLICIT_DENY, $result->reason);
+        self::assertSame(DecisionReason::ImplicitDeny, $result->reason);
         self::assertNull($result->matchedStatement);
     }
 
@@ -80,7 +80,7 @@ final class EvaluationResultTest extends TestCase
         $result = EvaluationResult::rbacAllowed();
 
         self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::RBAC_ALLOW, $result->reason);
+        self::assertSame(DecisionReason::RbacAllow, $result->reason);
         self::assertNull($result->matchedStatement);
     }
 
@@ -92,11 +92,11 @@ final class EvaluationResultTest extends TestCase
     public function testExplainIncludesTraceEntries(): void
     {
         $trace = [
-            ['policy' => 'p', 'statement_index' => 0, 'decision' => TraceDecision::MATCHED, 'reason' => 'explicit allow'],
-            ['policy' => 'p', 'statement_index' => 1, 'decision' => TraceDecision::SKIPPED, 'reason' => 'conditions not satisfied'],
+            ['policy' => 'p', 'statement_index' => 0, 'decision' => TraceDecision::Matched, 'reason' => 'explicit allow'],
+            ['policy' => 'p', 'statement_index' => 1, 'decision' => TraceDecision::Skipped, 'reason' => 'conditions not satisfied'],
         ];
 
-        $result = EvaluationResult::allowed(new Statement(PolicyEffect::ALLOW, ['x']), $trace);
+        $result = EvaluationResult::allowed(new Statement(PolicyEffect::Allow, ['x']), $trace);
 
         $explain = $result->explain();
         self::assertStringContainsString('ALLOW', $explain);
@@ -126,7 +126,7 @@ final class EvaluationResultTest extends TestCase
     public function testExplainCoversEveryReason(): void
     {
         self::assertStringContainsString('RBAC grant', EvaluationResult::rbacAllowed()->explain());
-        self::assertStringContainsString('explicit deny', EvaluationResult::explicitlyDenied(new Statement(PolicyEffect::DENY, ['x']))->explain());
+        self::assertStringContainsString('explicit deny', EvaluationResult::explicitlyDenied(new Statement(PolicyEffect::Deny, ['x']))->explain());
         self::assertStringContainsString('implicit deny', EvaluationResult::implicitlyDenied()->explain());
     }
 }

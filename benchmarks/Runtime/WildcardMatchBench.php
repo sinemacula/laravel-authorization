@@ -67,18 +67,18 @@ final class WildcardMatchBench
     public function setUp(): void
     {
         $this->shallow = new Statement(
-            effect: PolicyEffect::ALLOW,
+            effect: PolicyEffect::Allow,
             actions: ['posts:*'],
         );
 
         $this->literal = new Statement(
-            effect: PolicyEffect::ALLOW,
+            effect: PolicyEffect::Allow,
             actions: [self::ASKED_ACTION],
         );
 
         // 10-segment deep glob — matches a `a:b:c:...:j` action.
         $this->deep = new Statement(
-            effect: PolicyEffect::ALLOW,
+            effect: PolicyEffect::Allow,
             actions: ['a:b:c:d:e:f:g:h:i:*'],
         );
 
@@ -89,7 +89,7 @@ final class WildcardMatchBench
         }
 
         $this->miss = new Statement(
-            effect: PolicyEffect::ALLOW,
+            effect: PolicyEffect::Allow,
             actions: $patterns,
         );
     }

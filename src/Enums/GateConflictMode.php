@@ -22,15 +22,15 @@ enum GateConflictMode: string
     /**
      * Emit a warning and preserve the existing Gate.
      */
-    case LOG = 'log';
+    case Log = 'log';
 
     /**
      * Raise a typed `GateConflictException`.
      */
-    case THROW = 'throw';
+    case Throw = 'throw';
 
     /**
      * Replace the existing Gate with the package-registered one.
      */
-    case OVERWRITE = 'overwrite';
+    case Overwrite = 'overwrite';
 }

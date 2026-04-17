@@ -37,26 +37,22 @@ class AuthorizationManager
     use HasContainerInstance;
 
     /**
+     * @var object|null
+     *
      * Explicit principal supplied via `for()`. Ignored unless the
      * override flag is true.
-     *
-     * @var object|null
      */
     private ?object $principalOverride = null;
 
     /**
+     * @var bool
+     *
      * Whether `for()` has produced the current scope. When false, the
      * manager defers principal resolution to the bound resolver.
-     *
-     * @var bool
      */
     private bool $principalOverridden = false;
 
-    /**
-     * Per-call policy override supplied via `withPolicies()`.
-     *
-     * @var array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>|null
-     */
+    /** @var array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>|null  Per-call policy override supplied via `withPolicies()`. */
     private ?array $policyOverride = null;
 
     /**
@@ -76,13 +72,13 @@ class AuthorizationManager
         /** Bridge to the host application's concept of the current principal. */
         private readonly PrincipalResolver $principalResolver,
 
-        /** Gathers the policy set applicable to a principal on each evaluation. */
+        /** Gathers the policy set applicable to a principal per check. */
         private readonly PolicyResolver $policyResolver,
 
-        /** Shared single-slot store holding the most recent evaluation result across every scoped clone. */
+        /** Shared single-slot store holding the last evaluation result. */
         private readonly LastDecisionStore $lastDecisionStore,
 
-        /** Event dispatcher used to emit decision events, or null when unavailable. */
+        /** Event dispatcher used to emit decision events; null disables. */
         private readonly ?Dispatcher $events = null,
 
     ) {}
@@ -203,7 +199,7 @@ class AuthorizationManager
      * associative array keyed by permission string with boolean
      * values indicating whether the principal is allowed.
      *
-     * **Performance note:** this method performs N evaluations where
+     * Performance note: this method performs N evaluations where
      * N is the total number of registered enum cases. Callers should
      * cache the result when rendering permission-picker UIs or
      * capability checklists rather than calling this on every
@@ -299,16 +295,20 @@ class AuthorizationManager
      * @param  array<string, mixed>  $context
      * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult
      */
-    private function evaluateFor(?object $principal, string $action, ?string $resource, array $context): EvaluationResult
-    {
+    private function evaluateFor(
+        ?object $principal,
+        string $action,
+        ?string $resource,
+        array $context,
+    ): EvaluationResult {
         if ($principal === null) {
             return EvaluationResult::implicitlyDenied();
         }
 
         $policies = $this->gatherPolicies($principal);
         $result   = $this->evaluator->evaluate($policies, $action, $resource, $context, $principal);
-        $decisive = $result->reason === DecisionReason::EXPLICIT_DENY
-            || $result->reason      === DecisionReason::EXPLICIT_ALLOW;
+        $decisive = $result->reason === DecisionReason::ExplicitDeny
+            || $result->reason      === DecisionReason::ExplicitAllow;
 
         if (!$decisive && $principal instanceof AuthorizableIdentity && $principal->hasPermission($action)) {
             return EvaluationResult::rbacAllowed($result->trace);

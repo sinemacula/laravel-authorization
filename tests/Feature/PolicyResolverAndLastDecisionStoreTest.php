@@ -133,7 +133,7 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
         $result = Authorization::for($user)->evaluate('fixed:act');
 
         self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $result->reason);
+        self::assertSame(DecisionReason::ExplicitAllow, $result->reason);
     }
 
     /**
@@ -163,7 +163,7 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
 
         self::assertNotNull($last); // @phpstan-ignore staticMethod.impossibleType
         self::assertFalse($last->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_DENY, $last->reason);
+        self::assertSame(DecisionReason::ExplicitDeny, $last->reason);
     }
 
     /**
@@ -187,7 +187,7 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
 
         self::assertNotNull($last);
         self::assertTrue($last->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $last->reason);
+        self::assertSame(DecisionReason::ExplicitAllow, $last->reason);
     }
 
     /**

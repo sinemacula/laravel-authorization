@@ -24,7 +24,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class PolicyUpdated
+final readonly class Updated
 {
     /**
      * Create a new event instance.

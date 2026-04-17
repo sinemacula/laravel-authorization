@@ -12,12 +12,12 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionGranted;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionRevoked;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyAttached;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyDetached;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleAssigned;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleRevoked;
+use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted as IdentityPermissionGranted;
+use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked as IdentityPermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\Identity\PolicyAttached as IdentityPolicyAttached;
+use SineMacula\Laravel\Authorization\Events\Identity\PolicyDetached as IdentityPolicyDetached;
+use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned as IdentityRoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked as IdentityRoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
@@ -76,7 +76,7 @@ final class AuthorizationManagerTest extends TestCase
 
         $result = Authorization::for($user)->evaluate('posts:create');
         self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::RBAC_ALLOW, $result->reason);
+        self::assertSame(DecisionReason::RbacAllow, $result->reason);
     }
 
     /**
@@ -123,7 +123,7 @@ final class AuthorizationManagerTest extends TestCase
 
         $result = Authorization::for($user)->evaluate('posts:delete');
         self::assertFalse($result->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_DENY, $result->reason);
+        self::assertSame(DecisionReason::ExplicitDeny, $result->reason);
     }
 
     /**
@@ -323,7 +323,7 @@ final class AuthorizationManagerTest extends TestCase
         $result = Authorization::for($user)->withPolicies([$override])->evaluate('ad:hoc');
 
         self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $result->reason);
+        self::assertSame(DecisionReason::ExplicitAllow, $result->reason);
     }
 
     /**

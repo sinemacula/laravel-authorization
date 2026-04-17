@@ -145,6 +145,7 @@ trait AuthorizationAssertions
             /**
              * @return object|null
              */
+            #[\Override]
             public function resolve(): ?object
             {
                 return $this->principal;

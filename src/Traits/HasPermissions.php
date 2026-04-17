@@ -9,9 +9,9 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionGranted;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged as IdentityPermissionExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted as IdentityPermissionGranted;
+use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked as IdentityPermissionRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePermissionPivot;
@@ -47,8 +47,12 @@ trait HasPermissions // @phpstan-ignore trait.unused
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
+     * @formatter:off
+     *
      * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Permission, $this,
      *     \SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePermissionPivot, 'pivot'>
+     *
+     * @formatter:on
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      */

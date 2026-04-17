@@ -4,11 +4,10 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events\Identity;
 
-use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Policy;
 
 /**
- * Dispatched when a permission is granted directly to an authorizable
- * identity.
+ * Dispatched when a policy is detached from an authorizable identity.
  *
  * Part of the SemVer-stable event API; breaking changes require a
  * major version bump.
@@ -18,21 +17,21 @@ use SineMacula\Laravel\Authorization\Models\Permission;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class IdentityPermissionGranted
+final readonly class PolicyDetached implements IdentityEvent
 {
     /**
      * Create a new event instance.
      *
      * @param  object  $authorizable
-     * @param  \SineMacula\Laravel\Authorization\Models\Permission  $permission
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      */
     public function __construct(
 
-        /** Authorizable identity that received the direct permission grant. */
+        /** Authorizable identity that the policy was detached from. */
         public object $authorizable,
 
-        /** Permission that was granted directly to the identity. */
-        public Permission $permission,
+        /** Policy row that was detached from the identity. */
+        public Policy $policy,
 
     ) {}
 }

@@ -41,7 +41,12 @@ interface SupportsPolicies
     /**
      * Replace the identity's attached policies with the supplied set.
      *
+     * @formatter:off
+     *
      * @param  array<int, \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Models\Policy>  $policies
+     *
+     * @formatter:on
+     *
      * @return static
      */
     public function syncPolicies(array $policies): static;

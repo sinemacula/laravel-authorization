@@ -5,27 +5,22 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Listeners;
 
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionGranted;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionRevoked;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyAttached;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyDetached;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleAssigned;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleRevoked;
-use SineMacula\Laravel\Authorization\Events\Role\RolePermissionGranted;
-use SineMacula\Laravel\Authorization\Events\Role\RolePermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\Identity\IdentityEvent;
+use SineMacula\Laravel\Authorization\Events\Role\PermissionGranted as RolePermissionGranted;
+use SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked as RolePermissionRevoked;
 
 /**
  * Event listener that keeps the resolution cache coherent.
  *
  * Two invalidation strategies:
  *
- * - **Principal-scoped events** (`IdentityRoleAssigned`,
+ * - Principal-scoped events (`IdentityRoleAssigned`,
  *   `IdentityRoleRevoked`, `IdentityPermissionGranted`,
  *   `IdentityPermissionRevoked`, `IdentityPolicyAttached`,
  *   `IdentityPolicyDetached`) carry the authorizable that changed. The
  *   listener calls `ResolutionCache::forget($authorizable)` so
  *   only that principal's cached lookups are dropped.
- * - **Role-pivot events** (`RolePermissionGranted`,
+ * - Role-pivot events (`RolePermissionGranted`,
  *   `RolePermissionRevoked`) have no reverse index in a plain
  *   cache store, so the listener branches on store capability:
  *   tag-capable stores (Redis, Memcached, the Laravel array
@@ -58,13 +53,15 @@ final class InvalidateResolutionCache
      * Drop the cached entries belonging to the authorizable on
      * the event.
      *
-     * @param  \SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionGranted|\SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionRevoked|\SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyAttached|\SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyDetached|\SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleAssigned|\SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleRevoked  $event
+     * @param  IdentityEvent  $event
      * @return void
      */
-    public function handlePrincipalMutation(
-        IdentityPermissionGranted|IdentityPermissionRevoked|IdentityPolicyAttached|IdentityPolicyDetached|IdentityRoleAssigned|IdentityRoleRevoked $event,
-    ): void {
-        $this->cache->forget($event->authorizable);
+    public function handlePrincipalMutation(IdentityEvent $event): void
+    {
+        /** @var object $authorizable */
+        $authorizable = $event->authorizable; // @phpstan-ignore property.notFound
+
+        $this->cache->forget($authorizable);
     }
 
     /**
@@ -77,12 +74,16 @@ final class InvalidateResolutionCache
      * flushed so the same request observes the mutation even
      * before any tag flush propagates.
      *
-     * @param  \SineMacula\Laravel\Authorization\Events\Role\RolePermissionGranted|\SineMacula\Laravel\Authorization\Events\Role\RolePermissionRevoked  $event
+     * @formatter:off
+     *
+     * @param  \SineMacula\Laravel\Authorization\Events\Role\PermissionGranted|\SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked  $event
+     *
+     * @formatter:on
+     *
      * @return void
      */
-    public function handleRoleMutation(
-        RolePermissionGranted|RolePermissionRevoked $event,
-    ): void {
+    public function handleRoleMutation(RolePermissionGranted|RolePermissionRevoked $event): void
+    {
         $this->cache->flush();
 
         if ($this->cache->supportsTags()) {

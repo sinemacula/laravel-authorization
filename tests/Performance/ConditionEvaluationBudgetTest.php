@@ -42,7 +42,7 @@ final class ConditionEvaluationBudgetTest extends TestCase
     public function testCanEvaluateFullOperatorChainQuickly(): void
     {
         $statement = new Statement(
-            effect: PolicyEffect::ALLOW,
+            effect: PolicyEffect::Allow,
             actions: ['*'],
             conditions: self::buildConditionChain(),
         );

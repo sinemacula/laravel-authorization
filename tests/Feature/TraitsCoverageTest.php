@@ -100,7 +100,7 @@ final class TraitsCoverageTest extends TestCase
         $user->revokeRole($role);
 
         self::assertFalse($user->fresh()?->hasRole($role)); // @phpstan-ignore nullsafe.neverNull
-        self::assertFalse($user->fresh()?->hasPermission($permission));
+        self::assertFalse($user->fresh()?->hasPermission($permission)); // @phpstan-ignore nullsafe.neverNull
     }
 
     /**

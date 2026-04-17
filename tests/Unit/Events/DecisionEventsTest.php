@@ -40,7 +40,7 @@ final class DecisionEventsTest extends TestCase
     public function testDecisionEvaluatedExposesEveryConstructorArgument(): void
     {
         $principal = new \stdClass;
-        $result    = new EvaluationResult(allowed: true, reason: DecisionReason::EXPLICIT_ALLOW, trace: []);
+        $result    = new EvaluationResult(allowed: true, reason: DecisionReason::ExplicitAllow, trace: []);
         $context   = ['tenant' => 'org-1'];
 
         $event = new DecisionEvaluated(
@@ -67,7 +67,7 @@ final class DecisionEventsTest extends TestCase
      */
     public function testAuthorizationFailedAcceptsNullPrincipalAndExposesArguments(): void
     {
-        $result = new EvaluationResult(allowed: false, reason: DecisionReason::IMPLICIT_DENY, trace: []);
+        $result = new EvaluationResult(allowed: false, reason: DecisionReason::ImplicitDeny, trace: []);
 
         $event = new AuthorizationFailed(
             principal: null,

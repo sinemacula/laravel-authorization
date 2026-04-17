@@ -29,7 +29,7 @@ class InvalidAuthorizationConfigException extends \RuntimeException
      */
     public function __construct(
 
-        /** Dotted config key that triggered the failure (e.g. `authorization.gate.on_conflict`). */
+        /** Dotted config key that triggered the failure. */
         private readonly string $configKey,
 
         /** Human-readable explanation of why the value failed validation. */

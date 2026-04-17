@@ -129,7 +129,7 @@ class RolePermission extends Pivot
         $role = $roleClass::query()->find($roleId);
 
         if ($role === null) {
-            throw new OrphanedRolePermissionException(side: OrphanSide::ROLE, parentId: $roleId);
+            throw new OrphanedRolePermissionException(side: OrphanSide::Role, parentId: $roleId);
         }
 
         return $role;
@@ -177,7 +177,7 @@ class RolePermission extends Pivot
         $permission = $permissionClass::query()->find($permissionId);
 
         if ($permission === null) {
-            throw new OrphanedRolePermissionException(side: OrphanSide::PERMISSION, parentId: $permissionId);
+            throw new OrphanedRolePermissionException(side: OrphanSide::Permission, parentId: $permissionId);
         }
 
         return $permission;

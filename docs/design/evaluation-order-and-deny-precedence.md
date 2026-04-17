@@ -19,13 +19,13 @@ the way it does -- the code and tests encode the *what*; this note encodes the *
 
 3. **The four-step evaluation order is: explicit deny, explicit allow, RBAC, implicit deny.** The evaluator walks every
    statement from every policy in document order. Within that walk:
-   - A matching **deny** statement short-circuits immediately -- the evaluator returns `EXPLICIT_DENY` and stops.
+   - A matching **deny** statement short-circuits immediately -- the evaluator returns `ExplicitDeny` and stops.
    - A matching **allow** statement is recorded but does not short-circuit -- a subsequent deny in the same or a later
      policy still wins.
-   - After all statements have been walked: if at least one allow was recorded, the evaluator returns `EXPLICIT_ALLOW`.
+   - After all statements have been walked: if at least one allow was recorded, the evaluator returns `ExplicitAllow`.
    - If no policy produced a decisive result, the manager falls back to RBAC: if the principal holds the action as a
-     permission (directly or via a role), the result is `RBAC_ALLOW`.
-   - If RBAC also does not match, the result is `IMPLICIT_DENY`.
+     permission (directly or via a role), the result is `RbacAllow`.
+   - If RBAC also does not match, the result is `ImplicitDeny`.
 
 4. **A deny statement whose conditions do not match is skipped, not treated as an explicit deny.** The trace records it
    as `skipped` with the reason `conditions not satisfied`. This is the AWS IAM-compatible behaviour -- a conditional
@@ -42,19 +42,19 @@ A typical evaluation for `Authorization::for($user)->can('posts:create')`:
 1. The manager resolves the principal (the `$user` override from `for()`).
 2. Policies are gathered via the `PolicyResolver` (which may consult a cache).
 3. The evaluator walks every statement of every policy in order, building a trace.
-4. No deny matches, one allow matches -- the evaluator returns `EXPLICIT_ALLOW`.
+4. No deny matches, one allow matches -- the evaluator returns `ExplicitAllow`.
 5. The manager records the result in the `LastDecisionStore` and emits `DecisionEvaluated`.
 
 When no policy matches at all:
 
 1-3. Same as above, but every statement is traced as `skipped`.
-4. The evaluator returns `IMPLICIT_DENY` (no allow, no deny).
+4. The evaluator returns `ImplicitDeny` (no allow, no deny).
 5. The manager checks RBAC: `$user->hasPermission('posts:create')` returns true (direct grant or role-inherited).
-6. The manager returns `RBAC_ALLOW`, preserving the evaluator's trace for audit.
+6. The manager returns `RbacAllow`, preserving the evaluator's trace for audit.
 
 ## Failure / Edge Cases
 
-- **Null principal**: the manager short-circuits to `IMPLICIT_DENY` without consulting the evaluator. This covers
+- **Null principal**: the manager short-circuits to `ImplicitDeny` without consulting the evaluator. This covers
   anonymous requests and misconfigured principal resolvers.
 - **Malformed policy document**: the `HasPolicies` trait drops the bad row from the evaluation set and logs through the
   `authorization` channel. The remaining policies continue to evaluate. A malformed row can never contribute an allow
@@ -74,7 +74,7 @@ When no policy matches at all:
 - `PolicyEvaluatorTest::testExplicitDenyOverridesAllow` -- deny after allow still returns deny.
 - `PolicyEvaluatorTest::testDenyShortCircuits` -- deny stops the trace at one entry.
 - `PolicyEvaluatorTest::testConditionMismatchSkips` -- conditional deny that does not match is skipped.
-- `AuthorizationManagerTest::testRbacAllowedWhenPolicyDoesNotMatch` (Unit) -- RBAC fallback produces `RBAC_ALLOW`.
+- `AuthorizationManagerTest::testRbacAllowedWhenPolicyDoesNotMatch` (Unit) -- RBAC fallback produces `RbacAllow`.
 - `AuthorizationManagerTest::testExplicitDenyOverridesRbac` (Unit) -- deny policy beats RBAC permission.
 - `AuthorizationManagerTest::testExplicitDenyOverridesRoleAllow` (Feature) -- end-to-end deny over role grant.
 

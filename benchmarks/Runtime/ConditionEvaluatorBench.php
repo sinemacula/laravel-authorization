@@ -65,7 +65,7 @@ final class ConditionEvaluatorBench
         $this->context = BenchmarkFixtures::conditionContext();
 
         $this->stringStatement = new Statement(
-            effect: PolicyEffect::ALLOW,
+            effect: PolicyEffect::Allow,
             actions: ['*'],
             conditions: [
                 'tenant' => ['eq' => 'tenant-99'],
@@ -77,7 +77,7 @@ final class ConditionEvaluatorBench
         );
 
         $this->numericStatement = new Statement(
-            effect: PolicyEffect::ALLOW,
+            effect: PolicyEffect::Allow,
             actions: ['*'],
             conditions: [
                 'age'      => ['gt' => 17],
@@ -88,7 +88,7 @@ final class ConditionEvaluatorBench
         );
 
         $this->temporalStatement = new Statement(
-            effect: PolicyEffect::ALLOW,
+            effect: PolicyEffect::Allow,
             actions: ['*'],
             conditions: [
                 'scheduled_at' => ['before' => '2099-01-01T00:00:00Z'],
@@ -98,7 +98,7 @@ final class ConditionEvaluatorBench
         );
 
         $this->setStatement = new Statement(
-            effect: PolicyEffect::ALLOW,
+            effect: PolicyEffect::Allow,
             actions: ['*'],
             conditions: [
                 'country'    => ['in' => ['US', 'GB', 'CA']],
@@ -111,7 +111,7 @@ final class ConditionEvaluatorBench
         );
 
         $this->fullStatement = new Statement(
-            effect: PolicyEffect::ALLOW,
+            effect: PolicyEffect::Allow,
             actions: ['*'],
             conditions: BenchmarkFixtures::conditionChain(),
         );

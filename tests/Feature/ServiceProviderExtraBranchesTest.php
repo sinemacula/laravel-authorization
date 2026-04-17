@@ -127,7 +127,7 @@ final class ServiceProviderExtraBranchesTest extends TestCase
     {
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.gate.on_conflict', GateConflictMode::OVERWRITE);
+        $config->set('authorization.gate.on_conflict', GateConflictMode::Overwrite);
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
         // Pre-bind an existing gate so overwrite mode is the path we
