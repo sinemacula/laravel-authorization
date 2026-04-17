@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
@@ -279,7 +280,9 @@ final class UncoveredBranchesTest extends TestCase
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'ghost', 'guard_name' => 'web']);
         $user->assignRole($role);
         $roleId = (string) $role->getKey();
+        Schema::disableForeignKeyConstraints();
         $role->delete();
+        Schema::enableForeignKeyConstraints();
 
         $this->expectException(UnknownRoleException::class);
         $user->syncRoles([]);
@@ -303,7 +306,9 @@ final class UncoveredBranchesTest extends TestCase
 
         $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'gone', 'guard_name' => 'web']);
         $user->givePermission($permission);
+        Schema::disableForeignKeyConstraints();
         $permission->delete();
+        Schema::enableForeignKeyConstraints();
 
         $this->expectException(UnknownPermissionException::class);
         $user->syncPermissions([]);
