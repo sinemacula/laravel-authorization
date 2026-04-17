@@ -19,13 +19,14 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
  *
  * @SuppressWarnings("php:S1192")
  */
-final class BenchTenant implements AuthorizableTenant
+final class BenchmarkTenant implements AuthorizableTenant
 {
     /**
      * Stable tenant key used by benches.
      *
      * @return string
      */
+    #[\Override]
     public function getKey(): string
     {
         return 'bench-tenant';
@@ -36,6 +37,7 @@ final class BenchTenant implements AuthorizableTenant
      *
      * @return string
      */
+    #[\Override]
     public function getMorphClass(): string
     {
         return 'bench_tenant';

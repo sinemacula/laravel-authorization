@@ -64,57 +64,11 @@ final class ConditionEvaluatorBench
     {
         $this->context = BenchmarkFixtures::conditionContext();
 
-        $this->stringStatement = new Statement(
-            effect: PolicyEffect::ALLOW,
-            actions: ['*'],
-            conditions: [
-                'tenant' => ['eq' => 'tenant-99'],
-                'role'   => ['neq' => 'guest'],
-                'path'   => ['starts_with' => '/admin'],
-                'file'   => ['ends_with' => '.json'],
-                'agent'  => ['string_like' => 'Mozilla/*'],
-            ],
-        );
-
-        $this->numericStatement = new Statement(
-            effect: PolicyEffect::ALLOW,
-            actions: ['*'],
-            conditions: [
-                'age'      => ['gt' => 17],
-                'quota'    => ['gte' => 0],
-                'strikes'  => ['lt' => 3],
-                'priority' => ['lte' => 10],
-            ],
-        );
-
-        $this->temporalStatement = new Statement(
-            effect: PolicyEffect::ALLOW,
-            actions: ['*'],
-            conditions: [
-                'scheduled_at' => ['before' => '2099-01-01T00:00:00Z'],
-                'created_at'   => ['after' => '2000-01-01T00:00:00Z'],
-                'window'       => ['between' => ['2000-01-01T00:00:00Z', '2099-01-01T00:00:00Z']],
-            ],
-        );
-
-        $this->setStatement = new Statement(
-            effect: PolicyEffect::ALLOW,
-            actions: ['*'],
-            conditions: [
-                'country'    => ['in' => ['US', 'GB', 'CA']],
-                'blocklist'  => ['not_in' => ['blocked', 'banned']],
-                'verified'   => ['bool' => true],
-                'deleted_at' => ['null' => true],
-                'email'      => ['not_null' => true],
-                'ip'         => ['cidr' => '10.0.0.0/8'],
-            ],
-        );
-
-        $this->fullStatement = new Statement(
-            effect: PolicyEffect::ALLOW,
-            actions: ['*'],
-            conditions: BenchmarkFixtures::conditionChain(),
-        );
+        $this->stringStatement   = self::buildStringStatement();
+        $this->numericStatement  = self::buildNumericStatement();
+        $this->temporalStatement = self::buildTemporalStatement();
+        $this->setStatement      = self::buildSetStatement();
+        $this->fullStatement     = self::buildFullStatement();
     }
 
     /**
@@ -184,5 +138,97 @@ final class ConditionEvaluatorBench
     public function benchFullChain(): void
     {
         $this->fullStatement->evaluateConditions($this->context);
+    }
+
+    /**
+     * Build the statement covering string operators.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Statement
+     */
+    private static function buildStringStatement(): Statement
+    {
+        return new Statement(
+            effect: PolicyEffect::ALLOW,
+            actions: ['*'],
+            conditions: [
+                'tenant' => ['eq' => 'tenant-99'],
+                'role'   => ['neq' => 'guest'],
+                'path'   => ['starts_with' => '/admin'],
+                'file'   => ['ends_with' => '.json'],
+                'agent'  => ['string_like' => 'Mozilla/*'],
+            ],
+        );
+    }
+
+    /**
+     * Build the statement covering numeric operators.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Statement
+     */
+    private static function buildNumericStatement(): Statement
+    {
+        return new Statement(
+            effect: PolicyEffect::ALLOW,
+            actions: ['*'],
+            conditions: [
+                'age'      => ['gt' => 17],
+                'quota'    => ['gte' => 0],
+                'strikes'  => ['lt' => 3],
+                'priority' => ['lte' => 10],
+            ],
+        );
+    }
+
+    /**
+     * Build the statement covering temporal operators.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Statement
+     */
+    private static function buildTemporalStatement(): Statement
+    {
+        return new Statement(
+            effect: PolicyEffect::ALLOW,
+            actions: ['*'],
+            conditions: [
+                'scheduled_at' => ['before' => '2099-01-01T00:00:00Z'],
+                'created_at'   => ['after' => '2000-01-01T00:00:00Z'],
+                'window'       => ['between' => ['2000-01-01T00:00:00Z', '2099-01-01T00:00:00Z']],
+            ],
+        );
+    }
+
+    /**
+     * Build the statement covering set, boolean, null, and CIDR operators.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Statement
+     */
+    private static function buildSetStatement(): Statement
+    {
+        return new Statement(
+            effect: PolicyEffect::ALLOW,
+            actions: ['*'],
+            conditions: [
+                'country'    => ['in' => ['US', 'GB', 'CA']],
+                'blocklist'  => ['not_in' => ['blocked', 'banned']],
+                'verified'   => ['bool' => true],
+                'deleted_at' => ['null' => true],
+                'email'      => ['not_null' => true],
+                'ip'         => ['cidr' => '10.0.0.0/8'],
+            ],
+        );
+    }
+
+    /**
+     * Build the statement running the full 18-operator chain.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Statement
+     */
+    private static function buildFullStatement(): Statement
+    {
+        return new Statement(
+            effect: PolicyEffect::ALLOW,
+            actions: ['*'],
+            conditions: BenchmarkFixtures::conditionChain(),
+        );
     }
 }

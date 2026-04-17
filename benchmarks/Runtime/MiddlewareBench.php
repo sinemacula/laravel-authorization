@@ -4,10 +4,10 @@ declare(strict_types = 1);
 
 namespace Benchmarks\Runtime;
 
-use Benchmarks\Support\BenchIdentity;
 use Benchmarks\Support\BenchmarkCase;
 use Benchmarks\Support\BenchmarkFixtures;
-use Benchmarks\Support\BenchPrincipalResolver;
+use Benchmarks\Support\BenchmarkIdentity;
+use Benchmarks\Support\BenchmarkPrincipalResolver;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Str;
@@ -42,19 +42,19 @@ use SineMacula\Laravel\Authorization\Models\Role;
 #[Bench\OutputTimeUnit('microseconds')]
 final class MiddlewareBench extends BenchmarkCase
 {
-    /** Role middleware instance under test. */
+    /** @var \SineMacula\Laravel\Authorization\Http\Middleware\RequireRole Role middleware instance under test. */
     /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
     private RequireRole $roleMiddleware;
 
-    /** Permission middleware instance under test. */
+    /** @var \SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission Permission middleware instance under test. */
     /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
     private RequirePermission $permissionMiddleware;
 
-    /** Pass-through next closure — every admit path calls it exactly once. */
+    /** @var \Closure Pass-through next closure — every admit path calls it exactly once. */
     /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
     private \Closure $next;
 
-    /** Incoming request stand-in — shared across every rev. */
+    /** @var \Illuminate\Http\Request Incoming request stand-in — shared across every rev. */
     /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
     private Request $request;
 
@@ -71,7 +71,7 @@ final class MiddlewareBench extends BenchmarkCase
 
         Role::query()->delete();
         Permission::query()->delete();
-        BenchIdentity::query()->delete();
+        BenchmarkIdentity::query()->delete();
 
         $role = Role::create([
             'id'         => (string) Str::uuid(),
@@ -80,6 +80,7 @@ final class MiddlewareBench extends BenchmarkCase
         ]);
 
         foreach (BenchmarkFixtures::permissionNames() as $name) {
+
             $permission = Permission::create([
                 'id'         => (string) Str::uuid(),
                 'name'       => $name,
@@ -88,10 +89,10 @@ final class MiddlewareBench extends BenchmarkCase
             $role->permissions()->attach($permission->getKey());
         }
 
-        $user = BenchIdentity::create(['id' => (string) Str::uuid()]);
+        $user = BenchmarkIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole(BenchmarkFixtures::roleName());
 
-        $app->instance(PrincipalResolver::class, new BenchPrincipalResolver($user));
+        $app->instance(PrincipalResolver::class, new BenchmarkPrincipalResolver($user));
 
         $app->forgetInstance(AuthorizationManager::class);
         $app->forgetInstance('authorization');

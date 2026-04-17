@@ -4,10 +4,10 @@ declare(strict_types = 1);
 
 namespace Benchmarks\Runtime;
 
-use Benchmarks\Support\BenchIdentity;
 use Benchmarks\Support\BenchmarkCase;
 use Benchmarks\Support\BenchmarkFixtures;
-use Benchmarks\Support\BenchPrincipalResolver;
+use Benchmarks\Support\BenchmarkIdentity;
+use Benchmarks\Support\BenchmarkPrincipalResolver;
 use Illuminate\Support\Str;
 use PhpBench\Attributes as Bench;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
@@ -45,8 +45,7 @@ final class BladeHelpersBench extends BenchmarkCase
     /** @var string Benchmarked role name. */
     private string $roleName = '';
 
-    /** Benchmarked permission names. */
-    /** @var array<int, string> */
+    /** @var array<int, string> Benchmarked permission names. */
     private array $permissionNames = [];
 
     /**
@@ -62,7 +61,7 @@ final class BladeHelpersBench extends BenchmarkCase
 
         Role::query()->delete();
         Permission::query()->delete();
-        BenchIdentity::query()->delete();
+        BenchmarkIdentity::query()->delete();
 
         $this->roleName        = BenchmarkFixtures::roleName();
         $this->permissionNames = BenchmarkFixtures::permissionNames();
@@ -74,6 +73,7 @@ final class BladeHelpersBench extends BenchmarkCase
         ]);
 
         foreach ($this->permissionNames as $name) {
+
             $permission = Permission::create([
                 'id'         => (string) Str::uuid(),
                 'name'       => $name,
@@ -82,10 +82,10 @@ final class BladeHelpersBench extends BenchmarkCase
             $role->permissions()->attach($permission->getKey());
         }
 
-        $user = BenchIdentity::create(['id' => (string) Str::uuid()]);
+        $user = BenchmarkIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole($this->roleName);
 
-        $app->instance(PrincipalResolver::class, new BenchPrincipalResolver($user));
+        $app->instance(PrincipalResolver::class, new BenchmarkPrincipalResolver($user));
         $app->forgetInstance(AuthorizationManager::class);
         $app->forgetInstance('authorization');
     }

@@ -38,7 +38,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
 #[Bench\OutputTimeUnit('microseconds')]
 final class WildcardMatchBench
 {
-    /** Action string the shallow / literal subjects match against. */
+    /** @var string Action string the shallow / literal subjects match against. */
     private const string ASKED_ACTION = 'posts:create';
 
     /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement carrying a single shallow prefix pattern. */
