@@ -42,7 +42,12 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * The pivot's `expires_at` column is surfaced via
      * `withPivot()`.
      *
-     * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy, $this, \SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePolicyPivot, 'pivot'>
+     * @phpcs:disable Generic.Files.LineLength.TooLong
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy, $this,
+     *     \SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePolicyPivot, 'pivot'>
+     *
+     * @phpcs:enable Generic.Files.LineLength.TooLong
      */
     public function policies(): MorphToMany
     {
