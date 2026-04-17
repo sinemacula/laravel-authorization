@@ -18,6 +18,8 @@ use Tests\TestCase;
  * the calling class has no `$app` property.
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 final class StandaloneAssertions
 {

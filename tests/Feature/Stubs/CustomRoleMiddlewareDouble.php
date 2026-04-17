@@ -15,6 +15,8 @@ use Illuminate\Http\Request;
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 final class CustomRoleMiddlewareDouble
 {

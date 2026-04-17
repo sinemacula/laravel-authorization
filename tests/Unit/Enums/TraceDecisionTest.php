@@ -15,6 +15,8 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision;
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 #[CoversClass(TraceDecision::class)]
 final class TraceDecisionTest extends TestCase

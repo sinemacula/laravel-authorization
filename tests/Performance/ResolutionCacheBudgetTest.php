@@ -29,6 +29,8 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 #[CoversClass(ResolutionCache::class)]
 final class ResolutionCacheBudgetTest extends TestCase

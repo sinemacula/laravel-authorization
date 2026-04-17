@@ -17,6 +17,8 @@ use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 final class BenchTenantResolver implements TenantResolver
 {

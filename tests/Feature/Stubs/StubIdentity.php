@@ -16,6 +16,8 @@ use SineMacula\Laravel\Authorization\Traits\HasAuthorization;
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 class StubIdentity extends Model implements AuthorizableIdentity
 {

@@ -24,6 +24,8 @@ use Tests\TestCase;
  * service provider wires it up.
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 final class StubPolicyStore implements PolicyStore
 {

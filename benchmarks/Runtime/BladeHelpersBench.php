@@ -36,6 +36,8 @@ use SineMacula\Laravel\Authorization\Support\BladeHelpers;
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 #[Bench\OutputTimeUnit('microseconds')]
 final class BladeHelpersBench extends BenchmarkCase

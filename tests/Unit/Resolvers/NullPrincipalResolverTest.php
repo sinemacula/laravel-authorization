@@ -15,6 +15,8 @@ use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 #[CoversClass(NullPrincipalResolver::class)]
 final class NullPrincipalResolverTest extends TestCase

@@ -34,6 +34,8 @@ use Tests\TestCase;
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 #[CoversTrait(HasPolicies::class)]
 final class FailClosedPolicyHydrationTest extends TestCase

@@ -23,6 +23,8 @@ use SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator;
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 #[CoversClass(ContextInterpolator::class)]
 final class ContextInterpolatorBudgetTest extends TestCase

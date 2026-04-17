@@ -20,6 +20,8 @@ use Tests\TestCase;
  * Stub provider that contributes two permissions under the `web` guard.
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 final class StubPermissionProvider implements PermissionProvider
 {

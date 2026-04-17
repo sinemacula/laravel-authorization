@@ -17,6 +17,8 @@ use PHPUnit\Framework\TestCase;
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 #[CoversNothing]
 final class PackageIsolationTest extends TestCase

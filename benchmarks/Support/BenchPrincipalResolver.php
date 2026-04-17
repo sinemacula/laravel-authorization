@@ -18,6 +18,8 @@ use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 final class BenchPrincipalResolver implements PrincipalResolver
 {

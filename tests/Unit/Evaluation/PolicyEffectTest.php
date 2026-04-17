@@ -15,6 +15,8 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 #[CoversClass(PolicyEffect::class)]
 final class PolicyEffectTest extends TestCase

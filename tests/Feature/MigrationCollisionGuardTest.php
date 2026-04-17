@@ -21,6 +21,8 @@ use Tests\TestCase;
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 #[CoversClass(MigrationCollisionGuard::class)]
 #[CoversClass(MigrationCollisionException::class)]

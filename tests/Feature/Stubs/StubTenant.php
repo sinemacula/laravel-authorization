@@ -14,6 +14,8 @@ use Illuminate\Database\Eloquent\Model;
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 class StubTenant extends Model
 {

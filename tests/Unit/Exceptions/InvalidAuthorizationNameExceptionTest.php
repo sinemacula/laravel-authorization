@@ -16,6 +16,8 @@ use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
  * trait's default label fallback.
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 final class StubAuthorizationEntity // @phpstan-ignore class.missingExtends
 {

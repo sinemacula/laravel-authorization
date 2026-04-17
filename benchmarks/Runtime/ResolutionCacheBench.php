@@ -33,6 +33,8 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 #[Bench\OutputTimeUnit('microseconds')]
 final class ResolutionCacheBench

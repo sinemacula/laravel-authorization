@@ -15,6 +15,8 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 #[CoversClass(DecisionReason::class)]
 final class DecisionReasonTest extends TestCase

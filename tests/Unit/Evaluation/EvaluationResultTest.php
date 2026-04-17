@@ -19,6 +19,8 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 #[CoversClass(EvaluationResult::class)]
 final class EvaluationResultTest extends TestCase

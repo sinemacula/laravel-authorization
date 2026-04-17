@@ -28,6 +28,8 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 #[Bench\OutputTimeUnit('microseconds')]
 final class TenantScopeBench extends BenchmarkCase

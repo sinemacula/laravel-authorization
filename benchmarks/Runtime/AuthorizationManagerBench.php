@@ -34,6 +34,8 @@ use SineMacula\Laravel\Authorization\Models\Role;
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 #[Bench\OutputTimeUnit('microseconds')]
 final class AuthorizationManagerBench extends BenchmarkCase

@@ -17,6 +17,8 @@ use Tests\TestCase;
  * `BladeHelpers::hasAllRoles`, `hasPermission`, and `hasAllPermissions`.
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 final class RolesOnlyPrincipal implements SupportsRoles
 {

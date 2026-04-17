@@ -26,6 +26,8 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 #[CoversNothing]
 final class AuthorizableContractsTest extends TestCase
