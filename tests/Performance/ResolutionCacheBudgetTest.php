@@ -136,13 +136,20 @@ final class ResolutionCacheBudgetTest extends TestCase
     private static function principal(): object
     {
         return new class {
+            /** @var string */
             public string $id = 'budget-principal';
 
+            /**
+             * @return string
+             */
             public function getKey(): string
             {
                 return $this->id;
             }
 
+            /**
+             * @return string
+             */
             public function getMorphClass(): string
             {
                 return 'budget_identity';

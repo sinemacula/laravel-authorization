@@ -44,6 +44,10 @@ final class StatementInterpolationBranchesTest extends TestCase
         ]);
 
         $principal = new class {
+            /**
+             * @param  string  $key
+             * @return string
+             */
             public function getAttribute(string $key): string
             {
                 return $key === 'id' ? 'org-7' : '';

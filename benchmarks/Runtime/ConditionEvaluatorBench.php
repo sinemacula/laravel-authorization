@@ -34,19 +34,19 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
 #[Bench\OutputTimeUnit('microseconds')]
 final class ConditionEvaluatorBench
 {
-    /** Statement covering string operators. */
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement covering string operators. */
     private Statement $stringStatement;
 
-    /** Statement covering numeric operators. */
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement covering numeric operators. */
     private Statement $numericStatement;
 
-    /** Statement covering temporal operators. */
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement covering temporal operators. */
     private Statement $temporalStatement;
 
-    /** Statement covering set / boolean / null / CIDR operators. */
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement covering set / boolean / null / CIDR operators. */
     private Statement $setStatement;
 
-    /** Statement running the full 18-operator chain in one pass. */
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement running the full 18-operator chain in one pass. */
     private Statement $fullStatement;
 
     /** @var array<string, mixed> Matching context reused across revolutions. */

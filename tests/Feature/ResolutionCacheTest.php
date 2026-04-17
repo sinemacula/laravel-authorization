@@ -386,13 +386,22 @@ final class ResolutionCacheTest extends TestCase
         $principalId = 'svc:' . Str::uuid()->toString();
 
         $principal = new class ($principalId) {
+            /**
+             * @param  string  $id
+             */
             public function __construct(private readonly string $id) {}
 
+            /**
+             * @return string
+             */
             public function getMorphClass(): string
             {
                 return 'service-account';
             }
 
+            /**
+             * @return string
+             */
             public function getKey(): string
             {
                 return $this->id;
@@ -504,11 +513,17 @@ final class ResolutionCacheTest extends TestCase
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'fgt');
 
         $principal = new class {
+            /**
+             * @return string
+             */
             public function getMorphClass(): string
             {
                 return 'u';
             }
 
+            /**
+             * @return string
+             */
             public function getKey(): string
             {
                 return '1';
@@ -566,11 +581,17 @@ final class ResolutionCacheTest extends TestCase
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'thr');
 
         $principal = new class {
+            /**
+             * @return string
+             */
             public function getMorphClass(): string
             {
                 return 'th';
             }
 
+            /**
+             * @return string
+             */
             public function getKey(): string
             {
                 return '1';
@@ -602,11 +623,17 @@ final class ResolutionCacheTest extends TestCase
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'csl');
 
         $principal = new class {
+            /**
+             * @return string
+             */
             public function getMorphClass(): string
             {
                 return 'sl';
             }
 
+            /**
+             * @return string
+             */
             public function getKey(): string
             {
                 return '1';
@@ -645,11 +672,17 @@ final class ResolutionCacheTest extends TestCase
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'kf');
 
         $principal = new class {
+            /**
+             * @return string
+             */
             public function getMorphClass(): string
             {
                 return 'int-morph';
             }
 
+            /**
+             * @return int
+             */
             public function getKey(): int
             {
                 return 99;
@@ -675,11 +708,17 @@ final class ResolutionCacheTest extends TestCase
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'spl');
 
         $principal = new class {
+            /**
+             * @return string
+             */
             public function getMorphClass(): string
             {
                 return 'empty-morph';
             }
 
+            /**
+             * @return string
+             */
             public function getKey(): string
             {
                 return '';
@@ -708,11 +747,17 @@ final class ResolutionCacheTest extends TestCase
         $ref = new \ReflectionMethod($cache, 'principalTag');
 
         $principal = new class {
+            /**
+             * @return string
+             */
             public function getMorphClass(): string
             {
                 return 'pt';
             }
 
+            /**
+             * @return string
+             */
             public function getKey(): string
             {
                 return 'abc';
@@ -739,11 +784,17 @@ final class ResolutionCacheTest extends TestCase
         $ref = new \ReflectionMethod($cache, 'tagsFor');
 
         $principal = new class {
+            /**
+             * @return string
+             */
             public function getMorphClass(): string
             {
                 return 'tg';
             }
 
+            /**
+             * @return string
+             */
             public function getKey(): string
             {
                 return '7';
@@ -799,11 +850,17 @@ final class ResolutionCacheTest extends TestCase
         $cache = new ResolutionCache(store: $store, ttl: 0, prefix: 'ttl0');
 
         $principal = new class {
+            /**
+             * @return string
+             */
             public function getMorphClass(): string
             {
                 return 'ttl';
             }
 
+            /**
+             * @return string
+             */
             public function getKey(): string
             {
                 return '1';
@@ -834,11 +891,17 @@ final class ResolutionCacheTest extends TestCase
         $cache  = new ResolutionCache(store: $store, ttl: 300, prefix: 'ttlp');
 
         $principal = new class {
+            /**
+             * @return string
+             */
             public function getMorphClass(): string
             {
                 return 'ttlp';
             }
 
+            /**
+             * @return string
+             */
             public function getKey(): string
             {
                 return '1';
@@ -863,11 +926,17 @@ final class ResolutionCacheTest extends TestCase
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'ttl1');
 
         $principal = new class {
+            /**
+             * @return string
+             */
             public function getMorphClass(): string
             {
                 return 'ttl1';
             }
 
+            /**
+             * @return string
+             */
             public function getKey(): string
             {
                 return '1';
@@ -897,11 +966,17 @@ final class ResolutionCacheTest extends TestCase
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'logk');
 
         $principal = new class {
+            /**
+             * @return string
+             */
             public function getMorphClass(): string
             {
                 return 'lg';
             }
 
+            /**
+             * @return string
+             */
             public function getKey(): string
             {
                 return '1';
@@ -939,11 +1014,17 @@ final class ResolutionCacheTest extends TestCase
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'pol');
 
         $principal = new class {
+            /**
+             * @return string
+             */
             public function getMorphClass(): string
             {
                 return 'pp';
             }
 
+            /**
+             * @return string
+             */
             public function getKey(): string
             {
                 return '1';
@@ -1003,6 +1084,9 @@ final class ResolutionCacheTest extends TestCase
         $cache = new ResolutionCache(store: \Illuminate\Support\Facades\Cache::store('array'), prefix: 'frt');
 
         $emptyRole = new class {
+            /**
+             * @return string
+             */
             public function getKey(): string
             {
                 return '';
@@ -1044,6 +1128,9 @@ final class ResolutionCacheTest extends TestCase
         $cache = new ResolutionCache(store: \Illuminate\Support\Facades\Cache::store('array'), prefix: 'fri');
 
         $intRole = new class {
+            /**
+             * @return int
+             */
             public function getKey(): int
             {
                 return 42;
@@ -1096,7 +1183,11 @@ final class ResolutionCacheTest extends TestCase
             /** @var array<string, mixed> */
             public array $storage = [];
 
-            public function get($key): mixed
+            /**
+             * @param  mixed  $key
+             * @return mixed
+             */
+            public function get(mixed $key): mixed
             {
                 return $this->storage[$key] ?? null;
             }
@@ -1116,7 +1207,13 @@ final class ResolutionCacheTest extends TestCase
                 return $result;
             }
 
-            public function put($key, $value, $seconds): bool
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $value
+             * @param  mixed  $seconds
+             * @return bool
+             */
+            public function put(mixed $key, mixed $value, mixed $seconds): bool
             {
                 $this->storage[$key] = $value;
 
@@ -1126,6 +1223,7 @@ final class ResolutionCacheTest extends TestCase
             /**
              * @param  array<string, mixed>  $values
              * @param  mixed  $seconds
+             * @return bool
              */
             public function putMany(array $values, mixed $seconds): bool
             {
@@ -1136,35 +1234,62 @@ final class ResolutionCacheTest extends TestCase
                 return true;
             }
 
-            public function increment($key, $value = 1): bool|int
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $value
+             * @return bool|int
+             */
+            public function increment(mixed $key, mixed $value = 1): bool|int
             {
                 return false;
             }
 
-            public function decrement($key, $value = 1): bool|int
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $value
+             * @return bool|int
+             */
+            public function decrement(mixed $key, mixed $value = 1): bool|int
             {
                 return false;
             }
 
-            public function forever($key, $value): bool
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $value
+             * @return bool
+             */
+            public function forever(mixed $key, mixed $value): bool
             {
                 $this->storage[$key] = $value;
 
                 return true;
             }
 
-            public function touch($key, $ttl): bool
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $ttl
+             * @return bool
+             */
+            public function touch(mixed $key, mixed $ttl): bool
             {
                 return isset($this->storage[$key]);
             }
 
-            public function forget($key): bool
+            /**
+             * @param  mixed  $key
+             * @return bool
+             */
+            public function forget(mixed $key): bool
             {
                 unset($this->storage[$key]);
 
                 return true;
             }
 
+            /**
+             * @return bool
+             */
             public function flush(): bool
             {
                 $this->storage = [];
@@ -1172,6 +1297,9 @@ final class ResolutionCacheTest extends TestCase
                 return true;
             }
 
+            /**
+             * @return string
+             */
             public function getPrefix(): string
             {
                 return '';

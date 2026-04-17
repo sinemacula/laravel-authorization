@@ -8,17 +8,17 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
-use SineMacula\Laravel\Authorization\Traits\HasRoleHierarchy;
-use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
-use SineMacula\Laravel\Authorization\Traits\HasRoles;
-use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
-use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
-use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
-use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
+use SineMacula\Laravel\Authorization\Traits\HasRoleHierarchy;
+use SineMacula\Laravel\Authorization\Traits\HasRoles;
+use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -37,15 +37,15 @@ use Tests\TestCase;
  */
 #[CoversClass(Role::class)]
 #[CoversClass(RoleObserver::class)]
-#[CoversTrait(HasRoleHierarchy::class)]
-#[CoversTrait(ManagesPermissions::class)]
-#[CoversTrait(HasRoles::class)]
 #[CoversClass(TenantScope::class)]
 #[CoversClass(NullTenantResolver::class)]
 #[CoversClass(ResolutionCacheContext::class)]
 #[CoversClass(InvalidTenantException::class)]
 #[CoversClass(InvalidTenantColumnsException::class)]
 #[CoversClass(GuardScopedLookup::class)]
+#[CoversTrait(HasRoleHierarchy::class)]
+#[CoversTrait(ManagesPermissions::class)]
+#[CoversTrait(HasRoles::class)]
 final class RoleRankTest extends TestCase
 {
     /**

@@ -35,7 +35,7 @@ final class ExceptionMessageKillersTest extends TestCase
      */
     public function testPermissionEnumsScalarMessageShape(): void
     {
-        /** @var ConfigRepository $config */
+        /** @var \Illuminate\Contracts\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class);
         $config->set('authorization.permission_enums', 'not-an-array');
 
@@ -57,7 +57,7 @@ final class ExceptionMessageKillersTest extends TestCase
      */
     public function testPermissionEnumsUnknownClassMessageShape(): void
     {
-        /** @var ConfigRepository $config */
+        /** @var \Illuminate\Contracts\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class);
         $config->set('authorization.permission_enums', ['App\NoSuch\ClassX']);
 
@@ -77,7 +77,7 @@ final class ExceptionMessageKillersTest extends TestCase
      */
     public function testPermissionEnumsNonContractMessageShape(): void
     {
-        /** @var ConfigRepository $config */
+        /** @var \Illuminate\Contracts\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class);
         $config->set('authorization.permission_enums', [\stdClass::class]);
 
@@ -98,7 +98,7 @@ final class ExceptionMessageKillersTest extends TestCase
      */
     public function testPermissionEnumsEmptyEntryMessageShape(): void
     {
-        /** @var ConfigRepository $config */
+        /** @var \Illuminate\Contracts\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class);
         $config->set('authorization.permission_enums', ['']);
 
@@ -119,7 +119,7 @@ final class ExceptionMessageKillersTest extends TestCase
      */
     public function testPermissionProvidersScalarMessageShape(): void
     {
-        /** @var ConfigRepository $config */
+        /** @var \Illuminate\Contracts\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class);
         $config->set('authorization.permission_providers', 42);
 
@@ -140,7 +140,7 @@ final class ExceptionMessageKillersTest extends TestCase
      */
     public function testPermissionProvidersUnknownClassMessageShape(): void
     {
-        /** @var ConfigRepository $config */
+        /** @var \Illuminate\Contracts\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class);
         $config->set('authorization.permission_providers', ['App\NoSuch\ProviderX']);
 
@@ -159,7 +159,7 @@ final class ExceptionMessageKillersTest extends TestCase
      */
     public function testCacheStoreNonStringMessageShape(): void
     {
-        /** @var ConfigRepository $config */
+        /** @var \Illuminate\Contracts\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class);
         $config->set('authorization.cache.store', 42);
 
@@ -250,7 +250,7 @@ final class ExceptionMessageKillersTest extends TestCase
      */
     public function testPrincipalResolverNonStringMessageShape(): void
     {
-        /** @var ConfigRepository $config */
+        /** @var \Illuminate\Contracts\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class);
         $config->set('authorization.principal_resolver', 42);
 

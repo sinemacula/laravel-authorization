@@ -40,7 +40,7 @@ use SineMacula\Laravel\Authorization\Support\BladeHelpers;
 #[Bench\OutputTimeUnit('microseconds')]
 final class BladeHelpersBench extends BenchmarkCase
 {
-    /** Benchmarked role name. */
+    /** @var string Benchmarked role name. */
     private string $roleName = '';
 
     /** Benchmarked permission names. */

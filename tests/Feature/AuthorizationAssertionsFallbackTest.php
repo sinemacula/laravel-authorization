@@ -49,6 +49,7 @@ final class StandaloneAssertions
  *
  * @internal
  */
+// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 #[CoversTrait(AuthorizationAssertions::class)]
 final class AuthorizationAssertionsFallbackTest extends TestCase
 {

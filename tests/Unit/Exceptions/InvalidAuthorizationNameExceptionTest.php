@@ -50,6 +50,7 @@ final class StubAuthorizationEntity
  *
  * @internal
  */
+// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 #[CoversClass(InvalidAuthorizationNameException::class)]
 #[CoversTrait(ValidatesAuthorizationName::class)]
 final class InvalidAuthorizationNameExceptionTest extends TestCase

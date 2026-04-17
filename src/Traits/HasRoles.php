@@ -47,7 +47,8 @@ trait HasRoles // @phpstan-ignore trait.unused
      * `withPivot()` so consumers can inspect remaining lifetime
      * on the cast `pivot` attribute.
      *
-     * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, $this, \SineMacula\Laravel\Authorization\Models\Pivots\AuthorizableRolePivot, 'pivot'>
+     * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role,
+     *     $this, \SineMacula\Laravel\Authorization\Models\Pivots\AuthorizableRolePivot, 'pivot'>
      */
     public function roles(): MorphToMany
     {

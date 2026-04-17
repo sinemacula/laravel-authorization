@@ -128,12 +128,20 @@ final class TenantScopeBudgetTest extends TestCase
  *
  * @internal
  */
+// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 final class CountingTenantResolver implements TenantResolver
 {
+    /** @var int */
     public int $calls = 0;
 
+    /**
+     * @param  \SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant  $tenant
+     */
     public function __construct(private readonly AuthorizableTenant $tenant) {}
 
+    /**
+     * @return object|null
+     */
     public function resolve(): ?object
     {
         $this->calls++;
@@ -149,13 +157,20 @@ final class CountingTenantResolver implements TenantResolver
  *
  * @internal
  */
+// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 final class CountedBenchTenant implements AuthorizableTenant
 {
+    /**
+     * @return string
+     */
     public function getKey(): string
     {
         return 'bench-tenant';
     }
 
+    /**
+     * @return string
+     */
     public function getMorphClass(): string
     {
         return 'bench_tenant';

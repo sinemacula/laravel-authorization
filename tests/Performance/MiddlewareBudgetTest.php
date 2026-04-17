@@ -151,8 +151,14 @@ final class MiddlewareBudgetTest extends TestCase
     private function actAs(object $principal): void
     {
         $resolver = new class ($principal) implements PrincipalResolver {
+            /**
+             * @param  object  $principal
+             */
             public function __construct(private readonly object $principal) {}
 
+            /**
+             * @return object|null
+             */
             public function resolve(): ?object
             {
                 return $this->principal;

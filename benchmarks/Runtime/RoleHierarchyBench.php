@@ -33,13 +33,13 @@ use SineMacula\Laravel\Authorization\Models\Role;
 #[Bench\OutputTimeUnit('microseconds')]
 final class RoleHierarchyBench extends BenchmarkCase
 {
-    /** Leaf role at the tip of the 5-deep ancestor chain. */
+    /** @var \SineMacula\Laravel\Authorization\Models\Role Leaf role at the tip of the 5-deep ancestor chain. */
     private Role $fiveDeepLeaf;
 
-    /** Leaf role at the tip of the 10-deep ancestor chain. */
+    /** @var \SineMacula\Laravel\Authorization\Models\Role Leaf role at the tip of the 10-deep ancestor chain. */
     private Role $tenDeepLeaf;
 
-    /** Root of the 20-wide descendant subtree. */
+    /** @var \SineMacula\Laravel\Authorization\Models\Role Root of the 20-wide descendant subtree. */
     private Role $wideRoot;
 
     /**

@@ -9,22 +9,22 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
-use SineMacula\Laravel\Authorization\Traits\HasRoleHierarchy;
-use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
+use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use SineMacula\Laravel\Authorization\Traits\HasAuthorization;
 use SineMacula\Laravel\Authorization\Traits\HasPermissions;
+use SineMacula\Laravel\Authorization\Traits\HasRoleHierarchy;
 use SineMacula\Laravel\Authorization\Traits\HasRoles;
-use SineMacula\Laravel\Authorization\Scopes\TenantScope;
-use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
-use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
-use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
-use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
-use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
+use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
 use Tests\TestCase;
 
 /**
@@ -44,16 +44,16 @@ use Tests\TestCase;
  */
 #[CoversClass(Role::class)]
 #[CoversClass(RoleObserver::class)]
-#[CoversTrait(HasRoleHierarchy::class)]
-#[CoversTrait(ManagesPermissions::class)]
-#[CoversTrait(HasRoles::class)]
-#[CoversTrait(HasPermissions::class)]
 #[CoversClass(TenantScope::class)]
 #[CoversClass(NullTenantResolver::class)]
 #[CoversClass(ResolutionCacheContext::class)]
 #[CoversClass(InvalidTenantException::class)]
 #[CoversClass(InvalidTenantColumnsException::class)]
 #[CoversClass(GuardScopedLookup::class)]
+#[CoversTrait(HasRoleHierarchy::class)]
+#[CoversTrait(ManagesPermissions::class)]
+#[CoversTrait(HasRoles::class)]
+#[CoversTrait(HasPermissions::class)]
 final class GuardRoutingTest extends TestCase
 {
     /**
@@ -237,15 +237,29 @@ final class GuardRoutingTest extends TestCase
  *
  * @internal
  */
+// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 class ApiGuardedUser extends Model implements AuthorizableIdentity
 {
     use HasAuthorization;
-    public $incrementing  = false;
-    protected $primaryKey = 'id';
-    protected $keyType    = 'string';
-    protected $fillable   = ['id'];
-    protected $table      = 'api_guarded_users';
 
+    /** @var bool */
+    public $incrementing = false;
+
+    /** @var string */
+    protected $primaryKey = 'id';
+
+    /** @var string */
+    protected $keyType = 'string';
+
+    /** @var array<int, string> */
+    protected $fillable = ['id'];
+
+    /** @var string */
+    protected $table = 'api_guarded_users';
+
+    /**
+     * @return string
+     */
     public function getAuthorizationGuard(): string
     {
         return 'api';
@@ -258,12 +272,23 @@ class ApiGuardedUser extends Model implements AuthorizableIdentity
  *
  * @internal
  */
+// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 class DefaultGuardUser extends Model implements AuthorizableIdentity
 {
     use HasAuthorization;
-    public $incrementing  = false;
+
+    /** @var bool */
+    public $incrementing = false;
+
+    /** @var string */
     protected $primaryKey = 'id';
-    protected $keyType    = 'string';
-    protected $fillable   = ['id'];
-    protected $table      = 'stub_identities';
+
+    /** @var string */
+    protected $keyType = 'string';
+
+    /** @var array<int, string> */
+    protected $fillable = ['id'];
+
+    /** @var string */
+    protected $table = 'stub_identities';
 }

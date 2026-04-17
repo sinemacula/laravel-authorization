@@ -31,19 +31,19 @@ final class ContextInterpolatorBench
     /** Resource string used by every subject. */
     private const string RESOURCE = 'posts:42';
 
-    /** Reusable interpolator across revolutions. */
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator Reusable interpolator across revolutions. */
     private ContextInterpolator $interpolator;
 
-    /** 10-token pattern populated by `setUp()`. */
+    /** @var string 10-token pattern populated by `setUp()`. */
     private string $pattern10 = '';
 
-    /** 20-token pattern populated by `setUp()`. */
+    /** @var string 20-token pattern populated by `setUp()`. */
     private string $pattern20 = '';
 
     /** @var array<string, mixed> Context array populated by `setUp()`. */
     private array $context = [];
 
-    /** Plain principal stand-in with scalar attributes. */
+    /** @var object Plain principal stand-in with scalar attributes. */
     private object $principal;
 
     /**
@@ -59,7 +59,10 @@ final class ContextInterpolatorBench
         $this->context      = BenchmarkFixtures::interpolationContext();
 
         $this->principal = new class {
-            public string $id   = 'user-42';
+            /** @var string */
+            public string $id = 'user-42';
+
+            /** @var string */
             public string $name = 'alice';
         };
     }

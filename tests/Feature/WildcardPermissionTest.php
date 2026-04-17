@@ -9,22 +9,22 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Models\Permission;
-use SineMacula\Laravel\Authorization\Observers\PermissionObserver;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Observers\PermissionObserver;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
+use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
+use SineMacula\Laravel\Authorization\Traits\HasPermissions;
 use SineMacula\Laravel\Authorization\Traits\HasRoleHierarchy;
 use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
-use SineMacula\Laravel\Authorization\Traits\HasPermissions;
 use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
-use SineMacula\Laravel\Authorization\Scopes\TenantScope;
-use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
-use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
-use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
-use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
-use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -52,19 +52,19 @@ use Tests\TestCase;
  */
 #[CoversClass(Role::class)]
 #[CoversClass(RoleObserver::class)]
-#[CoversTrait(HasRoleHierarchy::class)]
-#[CoversTrait(ManagesPermissions::class)]
 #[CoversClass(Permission::class)]
 #[CoversClass(PermissionObserver::class)]
 #[CoversClass(Statement::class)]
-#[CoversTrait(HasPermissions::class)]
-#[CoversTrait(ValidatesAuthorizationName::class)]
 #[CoversClass(TenantScope::class)]
 #[CoversClass(NullTenantResolver::class)]
 #[CoversClass(ResolutionCacheContext::class)]
 #[CoversClass(InvalidTenantException::class)]
 #[CoversClass(InvalidTenantColumnsException::class)]
 #[CoversClass(GuardScopedLookup::class)]
+#[CoversTrait(HasRoleHierarchy::class)]
+#[CoversTrait(ManagesPermissions::class)]
+#[CoversTrait(HasPermissions::class)]
+#[CoversTrait(ValidatesAuthorizationName::class)]
 final class WildcardPermissionTest extends TestCase
 {
     /** Canonical asked action used across scenarios. */
@@ -242,8 +242,6 @@ final class WildcardPermissionTest extends TestCase
      * whitespace are rejected at save time so `fnmatch` cannot be
      * tricked into matching through a malformed name.
      *
-     * @dataProvider invalidPermissionNames
-     *
      * @param  string  $name
      * @return void
      */
@@ -294,8 +292,6 @@ final class WildcardPermissionTest extends TestCase
      * The allowed character class covers the common permission
      * shapes — action strings, hyphenated names, underscores, and
      * wildcards.
-     *
-     * @dataProvider validPermissionNames
      *
      * @param  string  $name
      * @return void

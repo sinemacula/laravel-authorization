@@ -10,12 +10,12 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
-use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
-use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
-use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableResource;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
+use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
+use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use Tests\Feature\Stubs\PermissionEnum;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
@@ -75,6 +75,9 @@ final class AuthorizableResourceTest extends TestCase
         ]));
 
         $resource = new class implements AuthorizableResource {
+            /**
+             * @return string
+             */
             public function toResourceIdentifier(): string
             {
                 return 'custom:resource:42';
@@ -108,11 +111,17 @@ final class AuthorizableResourceTest extends TestCase
         // Object implements both AuthorizableResource and __toString —
         // the contract method should win.
         $resource = new class implements AuthorizableResource {
+            /**
+             * @return string
+             */
             public function toResourceIdentifier(): string
             {
                 return 'authorizable:id';
             }
 
+            /**
+             * @return string
+             */
             public function __toString(): string
             {
                 return 'tostring:id';
@@ -144,6 +153,9 @@ final class AuthorizableResourceTest extends TestCase
         ]));
 
         $resource = new class implements AuthorizableResource {
+            /**
+             * @return string
+             */
             public function toResourceIdentifier(): string
             {
                 return 'custom:resource:1';
@@ -162,8 +174,14 @@ final class AuthorizableResourceTest extends TestCase
     private function actAs(StubIdentity $user): void
     {
         $resolver = new class ($user) implements PrincipalResolver {
+            /**
+             * @param  object  $user
+             */
             public function __construct(private readonly object $user) {}
 
+            /**
+             * @return object|null
+             */
             public function resolve(): ?object
             {
                 return $this->user;

@@ -231,21 +231,37 @@ final class UncoveredBranchesTest extends TestCase
 
         // A target that implements SupportsRoles but without a real `roles()` relation.
         $target = new class implements \SineMacula\Laravel\Authorization\Contracts\SupportsRoles {
+            /**
+             * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
+             * @return static
+             */
             public function assignRole(\SineMacula\Laravel\Authorization\Models\Role|string $role): static
             {
                 return $this;
             }
 
+            /**
+             * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
+             * @return static
+             */
             public function revokeRole(\SineMacula\Laravel\Authorization\Models\Role|string $role): static
             {
                 return $this;
             }
 
+            /**
+             * @param  array  $roles
+             * @return static
+             */
             public function syncRoles(array $roles): static
             {
                 return $this;
             }
 
+            /**
+             * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
+             * @return bool
+             */
             public function hasRole(\SineMacula\Laravel\Authorization\Models\Role|string $role): bool
             {
                 return false;
@@ -358,6 +374,9 @@ final class UncoveredBranchesTest extends TestCase
         );
 
         $role = new class {
+            /**
+             * @return string
+             */
             public function getKey(): string
             {
                 return '';
@@ -501,6 +520,9 @@ final class UncoveredBranchesTest extends TestCase
         $this->app->instance(
             \SineMacula\Laravel\Authorization\Contracts\PrincipalResolver::class,
             new class implements \SineMacula\Laravel\Authorization\Contracts\PrincipalResolver {
+                /**
+                 * @return object|null
+                 */
                 public function resolve(): ?object
                 {
                     return new \stdClass;
@@ -551,6 +573,10 @@ final class UncoveredBranchesTest extends TestCase
         $probe = new class {
             use ResolvesPivotExpiry;
 
+            /**
+             * @param  mixed  $raw
+             * @return mixed
+             */
             public function coerce(mixed $raw): mixed
             {
                 return self::authorizationCoerceExpiresAt($raw);
@@ -581,6 +607,11 @@ final class UncoveredBranchesTest extends TestCase
         $probe = new class {
             use ResolvesPivotExpiry;
 
+            /**
+             * @param  ?int  $left
+             * @param  ?int  $right
+             * @return int|null
+             */
             public function min(?int $left, ?int $right): ?int
             {
                 return self::authorizationMinNullable($left, $right);
@@ -606,6 +637,10 @@ final class UncoveredBranchesTest extends TestCase
         $probe = new class {
             use ResolvesPivotExpiry;
 
+            /**
+             * @param  mixed  $value
+             * @return mixed
+             */
             public function coerce(mixed $value): mixed
             {
                 return self::authorizationCoerceGrantExpiry($value);
@@ -635,6 +670,10 @@ final class UncoveredBranchesTest extends TestCase
         $probe = new class {
             use ResolvesPivotExpiry;
 
+            /**
+             * @param  \Illuminate\Database\Eloquent\Model  $model
+             * @return int|null
+             */
             public function seconds(\Illuminate\Database\Eloquent\Model $model): ?int
             {
                 return self::authorizationSecondsUntilPivotExpiry($model, 0);
@@ -660,13 +699,22 @@ final class UncoveredBranchesTest extends TestCase
         // default-channel fallback branch. Implements LoggerInterface
         // so the `logger()` helper's return type is satisfied.
         $fakeLog = new class extends \Psr\Log\AbstractLogger {
-            public int $channelCalls    = 0;
-            public int $warningCalls    = 0;
+            /** @var int */
+            public int $channelCalls = 0;
+
+            /** @var int */
+            public int $warningCalls = 0;
+
+            /** @var string|null */
             public ?string $lastMessage = null;
 
             /** @var array<string, mixed>|null */
             public ?array $lastContext = null;
 
+            /**
+             * @param  string  $name
+             * @return self
+             */
             public function channel(string $name): self
             {
                 $this->channelCalls++;
@@ -674,6 +722,11 @@ final class UncoveredBranchesTest extends TestCase
                 throw new \RuntimeException('channel ' . $name . ' is unavailable');
             }
 
+            /**
+             * @param  string|\Stringable  $message
+             * @param  array  $context
+             * @return void
+             */
             public function warning(string|\Stringable $message, array $context = []): void
             {
                 $this->warningCalls++;
@@ -681,7 +734,13 @@ final class UncoveredBranchesTest extends TestCase
                 $this->lastContext = $context;
             }
 
-            public function log($level, string|\Stringable $message, array $context = []): void {}
+            /**
+             * @param  mixed  $level
+             * @param  string|\Stringable  $message
+             * @param  array  $context
+             * @return void
+             */
+            public function log(mixed $level, string|\Stringable $message, array $context = []): void {}
         };
         $this->app->instance('log', $fakeLog);
 
@@ -742,17 +801,32 @@ final class UncoveredBranchesTest extends TestCase
         // Rebind the logger to one whose `warning()` raises. The
         // method swallows the failure so hydration still succeeds.
         $this->app->instance('log', new class extends \Psr\Log\AbstractLogger {
+            /**
+             * @param  string  $name
+             * @return self
+             */
             public function channel(string $name): self
             {
                 return $this;
             }
 
+            /**
+             * @param  string|\Stringable  $message
+             * @param  array  $context
+             * @return void
+             */
             public function warning(string|\Stringable $message, array $context = []): void
             {
                 throw new \RuntimeException('logger unavailable');
             }
 
-            public function log($level, string|\Stringable $message, array $context = []): void {}
+            /**
+             * @param  mixed  $level
+             * @param  string|\Stringable  $message
+             * @param  array  $context
+             * @return void
+             */
+            public function log(mixed $level, string|\Stringable $message, array $context = []): void {}
         });
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -785,13 +859,22 @@ final class UncoveredBranchesTest extends TestCase
     public function testLogCorruptCacheEntryHandlesChannelMisconfiguration(): void
     {
         $fakeLog = new class extends \Psr\Log\AbstractLogger {
-            public int $channelCalls    = 0;
-            public int $warningCalls    = 0;
+            /** @var int */
+            public int $channelCalls = 0;
+
+            /** @var int */
+            public int $warningCalls = 0;
+
+            /** @var string|null */
             public ?string $lastMessage = null;
 
             /** @var array<string, mixed>|null */
             public ?array $lastContext = null;
 
+            /**
+             * @param  string  $name
+             * @return self
+             */
             public function channel(string $name): self
             {
                 $this->channelCalls++;
@@ -799,6 +882,11 @@ final class UncoveredBranchesTest extends TestCase
                 throw new \RuntimeException('channel ' . $name . ' is unavailable');
             }
 
+            /**
+             * @param  string|\Stringable  $message
+             * @param  array  $context
+             * @return void
+             */
             public function warning(string|\Stringable $message, array $context = []): void
             {
                 $this->warningCalls++;
@@ -806,7 +894,13 @@ final class UncoveredBranchesTest extends TestCase
                 $this->lastContext = $context;
             }
 
-            public function log($level, string|\Stringable $message, array $context = []): void {}
+            /**
+             * @param  mixed  $level
+             * @param  string|\Stringable  $message
+             * @param  array  $context
+             * @return void
+             */
+            public function log(mixed $level, string|\Stringable $message, array $context = []): void {}
         };
         $this->app->instance('log', $fakeLog);
 
@@ -911,57 +1005,104 @@ final class UncoveredBranchesTest extends TestCase
     {
         $driver = new class implements \Illuminate\Contracts\Cache\Store {
             /** @var array<string, mixed> */
-            public array $storage   = [];
-            public int $getCalls    = 0;
+            public array $storage = [];
+
+            /** @var int */
+            public int $getCalls = 0;
+
+            /** @var int */
             public int $forgetCalls = 0;
 
-            public function get($key): mixed
+            /**
+             * @param  mixed  $key
+             * @return mixed
+             */
+            public function get(mixed $key): mixed
             {
                 $this->getCalls++;
 
                 throw new \RuntimeException('transient driver failure');
             }
 
+            /**
+             * @param  array  $keys
+             * @return array<string, mixed>
+             */
             public function many(array $keys): array
             {
                 return [];
             }
 
-            public function put($key, $value, $seconds): bool
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $value
+             * @param  mixed  $seconds
+             * @return bool
+             */
+            public function put(mixed $key, mixed $value, mixed $seconds): bool
             {
                 $this->storage[$key] = $value;
 
                 return true;
             }
 
+            /**
+             * @param  array  $values
+             * @param  mixed  $seconds
+             * @return bool
+             */
             public function putMany(array $values, mixed $seconds): bool
             {
                 return true;
             }
 
-            public function increment($key, $value = 1): bool|int
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $value
+             * @return bool|int
+             */
+            public function increment(mixed $key, mixed $value = 1): bool|int
             {
                 return false;
             }
 
-            public function decrement($key, $value = 1): bool|int
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $value
+             * @return bool|int
+             */
+            public function decrement(mixed $key, mixed $value = 1): bool|int
             {
                 return false;
             }
 
-            public function forever($key, $value): bool
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $value
+             * @return bool
+             */
+            public function forever(mixed $key, mixed $value): bool
             {
                 $this->storage[$key] = $value;
 
                 return true;
             }
 
-            public function touch($key, $ttl): bool
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $ttl
+             * @return bool
+             */
+            public function touch(mixed $key, mixed $ttl): bool
             {
                 return true;
             }
 
-            public function forget($key): bool
+            /**
+             * @param  mixed  $key
+             * @return bool
+             */
+            public function forget(mixed $key): bool
             {
                 $this->forgetCalls++;
                 unset($this->storage[$key]);
@@ -969,6 +1110,9 @@ final class UncoveredBranchesTest extends TestCase
                 return true;
             }
 
+            /**
+             * @return bool
+             */
             public function flush(): bool
             {
                 $this->storage = [];
@@ -976,6 +1120,9 @@ final class UncoveredBranchesTest extends TestCase
                 return true;
             }
 
+            /**
+             * @return string
+             */
             public function getPrefix(): string
             {
                 return '';
@@ -1003,17 +1150,32 @@ final class UncoveredBranchesTest extends TestCase
     public function testLogCorruptCacheEntryTolerantOfLoggerWarningFailure(): void
     {
         $this->app->instance('log', new class extends \Psr\Log\AbstractLogger {
+            /**
+             * @param  string  $name
+             * @return self
+             */
             public function channel(string $name): self
             {
                 return $this;
             }
 
+            /**
+             * @param  string|\Stringable  $message
+             * @param  array  $context
+             * @return void
+             */
             public function warning(string|\Stringable $message, array $context = []): void
             {
                 throw new \RuntimeException('logger unavailable');
             }
 
-            public function log($level, string|\Stringable $message, array $context = []): void {}
+            /**
+             * @param  mixed  $level
+             * @param  string|\Stringable  $message
+             * @param  array  $context
+             * @return void
+             */
+            public function log(mixed $level, string|\Stringable $message, array $context = []): void {}
         });
 
         $driver = self::makeNonTaggableDriver();
@@ -1046,7 +1208,11 @@ final class UncoveredBranchesTest extends TestCase
             /** @var array<string, mixed> */
             public array $storage = [];
 
-            public function get($key): mixed
+            /**
+             * @param  mixed  $key
+             * @return mixed
+             */
+            public function get(mixed $key): mixed
             {
                 return $this->storage[$key] ?? null;
             }
@@ -1066,7 +1232,13 @@ final class UncoveredBranchesTest extends TestCase
                 return $result;
             }
 
-            public function put($key, $value, $seconds): bool
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $value
+             * @param  mixed  $seconds
+             * @return bool
+             */
+            public function put(mixed $key, mixed $value, mixed $seconds): bool
             {
                 $this->storage[$key] = $value;
 
@@ -1086,35 +1258,62 @@ final class UncoveredBranchesTest extends TestCase
                 return true;
             }
 
-            public function increment($key, $value = 1): bool|int
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $value
+             * @return bool|int
+             */
+            public function increment(mixed $key, mixed $value = 1): bool|int
             {
                 return false;
             }
 
-            public function decrement($key, $value = 1): bool|int
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $value
+             * @return bool|int
+             */
+            public function decrement(mixed $key, mixed $value = 1): bool|int
             {
                 return false;
             }
 
-            public function forever($key, $value): bool
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $value
+             * @return bool
+             */
+            public function forever(mixed $key, mixed $value): bool
             {
                 $this->storage[$key] = $value;
 
                 return true;
             }
 
-            public function touch($key, $ttl): bool
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $ttl
+             * @return bool
+             */
+            public function touch(mixed $key, mixed $ttl): bool
             {
                 return isset($this->storage[$key]);
             }
 
-            public function forget($key): bool
+            /**
+             * @param  mixed  $key
+             * @return bool
+             */
+            public function forget(mixed $key): bool
             {
                 unset($this->storage[$key]);
 
                 return true;
             }
 
+            /**
+             * @return bool
+             */
             public function flush(): bool
             {
                 $this->storage = [];
@@ -1122,6 +1321,9 @@ final class UncoveredBranchesTest extends TestCase
                 return true;
             }
 
+            /**
+             * @return string
+             */
             public function getPrefix(): string
             {
                 return '';

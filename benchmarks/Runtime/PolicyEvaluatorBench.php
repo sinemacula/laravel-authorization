@@ -22,13 +22,13 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
  */
 final class PolicyEvaluatorBench
 {
-    /** Evaluator instance used across revolutions. */
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator Evaluator instance used across revolutions. */
     private PolicyEvaluator $evaluator;
 
-    /** Policy with an explicit allow on `posts:create`. */
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\Policy Policy with an explicit allow on `posts:create`. */
     private Policy $allowPolicy;
 
-    /** Policy with both an allow and a deny on `posts:delete`. */
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\Policy Policy with both an allow and a deny on `posts:delete`. */
     private Policy $denyPolicy;
 
     /**

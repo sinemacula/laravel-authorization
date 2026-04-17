@@ -26,7 +26,7 @@ use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
  */
 abstract class TestCase extends OrchestraTestCase
 {
-    /** Process-level flag so the Testbench Blade view cache is cleared once per phpunit run. */
+    /** @var bool Process-level flag so the Testbench Blade view cache is cleared once per phpunit run. */
     private static bool $viewCacheCleared = false;
 
     /**
