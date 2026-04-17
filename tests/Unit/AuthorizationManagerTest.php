@@ -250,6 +250,9 @@ final class AuthorizationManagerTest extends TestCase
         self::assertFalse($manager->can('x'));
     }
 
+    /**
+     * @return void
+     */
     public function testWithPoliciesOverridesEverything(): void
     {
         $store = \Mockery::mock(PolicyStore::class);

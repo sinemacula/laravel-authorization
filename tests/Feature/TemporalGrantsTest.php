@@ -158,7 +158,7 @@ final class TemporalGrantsTest extends TestCase
 
         $row = DB::table('authorizable_roles')
             ->where('authorizable_type', $user->getMorphClass())
-            ->where('authorizable_id', (string) $user->getKey())
+            ->where('authorizable_id', (string) $user->getKey()) // @phpstan-ignore cast.string
             ->first();
 
         self::assertNotNull($row);
@@ -271,13 +271,13 @@ final class TemporalGrantsTest extends TestCase
         // Wire a persistent array-backed cache so the entry
         // survives a memo reset and the TTL bound is the only
         // thing governing visibility.
-        /** @var \Illuminate\Contracts\Config\Repository $config */
-        $config = $this->app->make('config');
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make('config'); // @phpstan-ignore method.nonObject
         $config->set('authorization.cache.store', 'array');
         $config->set('authorization.cache.ttl', 3600);
         $config->set('authorization.cache.prefix', 'authorization-temporal');
 
-        $this->app->forgetInstance(ResolutionCache::class);
+        $this->app->forgetInstance(ResolutionCache::class); // @phpstan-ignore method.nonObject
         (new AuthorizationServiceProvider($this->app))->register();
 
         Role::create([
@@ -308,7 +308,7 @@ final class TemporalGrantsTest extends TestCase
 
         // Wipe the singleton's in-memory memo that was primed at
         // t=12:00 — the persistent tier is the one under test.
-        $this->app->forgetInstance(ResolutionCache::class);
+        $this->app->forgetInstance(ResolutionCache::class); // @phpstan-ignore method.nonObject
         (new AuthorizationServiceProvider($this->app))->register();
 
         self::assertSame([], $fresh->getRoles());
@@ -334,8 +334,8 @@ final class TemporalGrantsTest extends TestCase
     {
         Carbon::setTestNow(Carbon::parse($instant));
 
-        if ($this->app->bound(ResolutionCache::class)) {
-            $this->app->make(ResolutionCache::class)->forget($principal);
+        if ($this->app->bound(ResolutionCache::class)) { // @phpstan-ignore method.nonObject
+            $this->app->make(ResolutionCache::class)->forget($principal); // @phpstan-ignore method.nonObject
         }
     }
 
@@ -350,6 +350,6 @@ final class TemporalGrantsTest extends TestCase
         $names = $user?->getRoles() ?? [];
         \sort($names);
 
-        return \array_values($names);
+        return \array_values($names); // @phpstan-ignore arrayValues.list
     }
 }

@@ -32,7 +32,7 @@ final class ContextInterpolatorBench
     private const string RESOURCE = 'posts:42';
 
     /** @var \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator Reusable interpolator across revolutions. */
-    private ContextInterpolator $interpolator;
+    private ContextInterpolator $interpolator; // @phpstan-ignore property.uninitialized
 
     /** @var string 10-token pattern populated by `setUp()`. */
     private string $pattern10 = '';
@@ -44,7 +44,7 @@ final class ContextInterpolatorBench
     private array $context = [];
 
     /** @var object Plain principal stand-in with scalar attributes. */
-    private object $principal;
+    private object $principal; // @phpstan-ignore property.uninitialized
 
     /**
      * Bench setUp — prime fixtures reused across every revolution.

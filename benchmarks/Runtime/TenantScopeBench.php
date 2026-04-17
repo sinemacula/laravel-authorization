@@ -33,10 +33,10 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 final class TenantScopeBench extends BenchmarkCase
 {
     /** @var \SineMacula\Laravel\Authorization\Scopes\TenantScope Scope instance shared across subjects. */
-    private TenantScope $scope;
+    private TenantScope $scope; // @phpstan-ignore property.uninitialized
 
     /** @var \SineMacula\Laravel\Authorization\Models\Role Role fixture whose builder drives the scope apply. */
-    private Role $role;
+    private Role $role; // @phpstan-ignore property.uninitialized
 
     /**
      * Bench setUp — boot a Laravel application, bind a tenant

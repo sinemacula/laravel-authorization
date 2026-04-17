@@ -51,8 +51,8 @@ final class OctaneResetListenerTest extends TestCase
         // listener is wired against the in-process FQN.
         (new AuthorizationServiceProvider($this->app))->boot();
 
-        /** @var \Illuminate\Contracts\Events\Dispatcher $dispatcher */
-        $dispatcher = $this->app->make(Dispatcher::class);
+        /** @var \Illuminate\Events\Dispatcher $dispatcher */
+        $dispatcher = $this->app->make(Dispatcher::class); // @phpstan-ignore method.nonObject
 
         self::assertTrue(
             $dispatcher->hasListeners(RequestTerminated::class),
@@ -60,7 +60,7 @@ final class OctaneResetListenerTest extends TestCase
         );
 
         /** @var \SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore $store */
-        $store = $this->app->make(LastDecisionStore::class);
+        $store = $this->app->make(LastDecisionStore::class); // @phpstan-ignore method.nonObject
         $store->put(EvaluationResult::rbacAllowed());
 
         self::assertNotNull($store->get());
@@ -68,7 +68,7 @@ final class OctaneResetListenerTest extends TestCase
         $dispatcher->dispatch(new RequestTerminated);
 
         self::assertNull(
-            $this->app->make(LastDecisionStore::class)->get(),
+            $this->app->make(LastDecisionStore::class)->get(), // @phpstan-ignore method.nonObject
             'Dispatching Octane RequestTerminated should clear the LastDecisionStore.',
         );
     }

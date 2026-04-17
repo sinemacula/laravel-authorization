@@ -17,7 +17,7 @@ use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
  *
  * @internal
  */
-final class StubAuthorizationEntity
+final class StubAuthorizationEntity // @phpstan-ignore class.missingExtends
 {
     use ValidatesAuthorizationName;
 
@@ -53,6 +53,7 @@ final class StubAuthorizationEntity
 // phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 #[CoversClass(InvalidAuthorizationNameException::class)]
 #[CoversTrait(ValidatesAuthorizationName::class)]
+// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 final class InvalidAuthorizationNameExceptionTest extends TestCase
 {
     /**

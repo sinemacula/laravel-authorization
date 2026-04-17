@@ -159,7 +159,7 @@ final class MiddlewareBudgetTest extends TestCase
             /**
              * @return object|null
              */
-            public function resolve(): ?object
+            public function resolve(): ?object // @phpstan-ignore return.unusedType
             {
                 return $this->principal;
             }

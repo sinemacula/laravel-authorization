@@ -188,8 +188,8 @@ final class UncoveredBranchesTest extends TestCase
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole($role);
 
-        $this->app->forgetInstance(ResolutionCache::class);
-        $this->app->offsetUnset(ResolutionCache::class);
+        $this->app->forgetInstance(ResolutionCache::class); // @phpstan-ignore method.nonObject
+        $this->app->offsetUnset(ResolutionCache::class); // @phpstan-ignore method.nonObject
 
         $names = $user->fresh()?->getRoles() ?? [];
 
@@ -209,8 +209,8 @@ final class UncoveredBranchesTest extends TestCase
         $user       = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->givePermission($permission);
 
-        $this->app->forgetInstance(ResolutionCache::class);
-        $this->app->offsetUnset(ResolutionCache::class);
+        $this->app->forgetInstance(ResolutionCache::class); // @phpstan-ignore method.nonObject
+        $this->app->offsetUnset(ResolutionCache::class); // @phpstan-ignore method.nonObject
 
         $names = $user->fresh()?->getPermissions() ?? [];
 
@@ -253,7 +253,7 @@ final class UncoveredBranchesTest extends TestCase
              * @param  array  $roles
              * @return static
              */
-            public function syncRoles(array $roles): static
+            public function syncRoles(array $roles): static // @phpstan-ignore missingType.iterableValue
             {
                 return $this;
             }
@@ -346,9 +346,9 @@ final class UncoveredBranchesTest extends TestCase
         // seeded value for a mixed-type list. The filter branch
         // in `rememberStringList` drops the non-string items and
         // returns only the strings.
-        $key = \array_key_first($driver->storage);
+        $key = \array_key_first($driver->storage); // @phpstan-ignore property.notFound
         static::assertIsString($key);
-        $driver->storage[$key] = ['valid:perm', 42, null, 'another:perm'];
+        $driver->storage[$key] = ['valid:perm', 42, null, 'another:perm']; // @phpstan-ignore property.notFound
 
         $fresh = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
 
@@ -428,7 +428,7 @@ final class UncoveredBranchesTest extends TestCase
         $cache->rememberPermissions($principal, static fn (): array => ['a:do']);
         $cache->rememberRoles($principal, static fn (): array => ['admin']);
 
-        static::assertNotEmpty($driver->storage, 'Persistent store should contain entries before forget().');
+        static::assertNotEmpty($driver->storage, 'Persistent store should contain entries before forget().'); // @phpstan-ignore property.notFound
 
         $cache->forget($principal);
 
@@ -506,7 +506,7 @@ final class UncoveredBranchesTest extends TestCase
             new \SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext(maxTtl: 1),
         );
 
-        static::assertSame([], $driver->storage, 'Persistent tier must skip zero/negative TTL writes.');
+        static::assertSame([], $driver->storage, 'Persistent tier must skip zero/negative TTL writes.'); // @phpstan-ignore property.notFound
     }
 
     /**
@@ -517,13 +517,13 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testBladeHelpersHasAllRolesReturnsFalseForNonRoleSupportingPrincipal(): void
     {
-        $this->app->instance(
+        $this->app->instance( // @phpstan-ignore method.nonObject
             \SineMacula\Laravel\Authorization\Contracts\PrincipalResolver::class,
             new class implements \SineMacula\Laravel\Authorization\Contracts\PrincipalResolver {
                 /**
                  * @return object|null
                  */
-                public function resolve(): ?object
+                public function resolve(): ?object // @phpstan-ignore return.unusedType
                 {
                     return new \stdClass;
                 }
@@ -570,6 +570,7 @@ final class UncoveredBranchesTest extends TestCase
         // `authorizationNearestPivotExpirySeconds` which calls
         // `authorizationCoerceExpiresAt`. We invoke via reflection
         // on a freshly-instantiated test-only composer.
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -604,6 +605,7 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testAuthorizationMinNullableReturnsSmallerOfTwoInts(): void
     {
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -634,6 +636,7 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testAuthorizationCoerceGrantExpiryHandlesAllBranches(): void
     {
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -667,6 +670,7 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testSecondsUntilPivotExpiryReturnsNullWhenPivotMissing(): void
     {
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -713,9 +717,11 @@ final class UncoveredBranchesTest extends TestCase
 
             /**
              * @param  string  $name
-             * @return self
+             * @return never
+             *
+             * @throws \RuntimeException
              */
-            public function channel(string $name): self
+            public function channel(string $name): never
             {
                 $this->channelCalls++;
 
@@ -727,7 +733,7 @@ final class UncoveredBranchesTest extends TestCase
              * @param  array  $context
              * @return void
              */
-            public function warning(string|\Stringable $message, array $context = []): void
+            public function warning(string|\Stringable $message, array $context = []): void // @phpstan-ignore missingType.iterableValue
             {
                 $this->warningCalls++;
                 $this->lastMessage = (string) $message;
@@ -740,9 +746,10 @@ final class UncoveredBranchesTest extends TestCase
              * @param  array  $context
              * @return void
              */
-            public function log(mixed $level, string|\Stringable $message, array $context = []): void {}
+            public function log(mixed $level, string|\Stringable $message, array $context = []): void // @phpstan-ignore missingType.iterableValue
+            {}
         };
-        $this->app->instance('log', $fakeLog);
+        $this->app->instance('log', $fakeLog); // @phpstan-ignore method.nonObject
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
@@ -753,14 +760,14 @@ final class UncoveredBranchesTest extends TestCase
         ]);
         $user->attachPolicy($policy);
 
-        $policyId = (string) $policy->getKey();
+        $policyId = (string) $policy->getKey(); // @phpstan-ignore cast.string
 
         // Overwrite the stored document with a JSON-encoded array
         // that lacks the required statements key — the Eloquent
         // array cast yields a decoded value and `EvaluationPolicy::fromArray`
         // then fails the schema validator, triggering the logger
         // fallback path inside `logMalformedPolicy`.
-        \Illuminate\Support\Facades\DB::table((string) config('authorization.tables.policies', 'policies'))
+        \Illuminate\Support\Facades\DB::table((string) config('authorization.tables.policies', 'policies')) // @phpstan-ignore cast.string
             ->where('id', $policyId)
             ->update(['document' => \json_encode(['version' => 'not-an-int'])]);
 
@@ -800,7 +807,9 @@ final class UncoveredBranchesTest extends TestCase
     {
         // Rebind the logger to one whose `warning()` raises. The
         // method swallows the failure so hydration still succeeds.
+        // @phpstan-ignore-next-line method.nonObject
         $this->app->instance('log', new class extends \Psr\Log\AbstractLogger {
+            // @phpstan-ignore method.nonObject
             /**
              * @param  string  $name
              * @return self
@@ -815,7 +824,7 @@ final class UncoveredBranchesTest extends TestCase
              * @param  array  $context
              * @return void
              */
-            public function warning(string|\Stringable $message, array $context = []): void
+            public function warning(string|\Stringable $message, array $context = []): void // @phpstan-ignore missingType.iterableValue
             {
                 throw new \RuntimeException('logger unavailable');
             }
@@ -826,7 +835,8 @@ final class UncoveredBranchesTest extends TestCase
              * @param  array  $context
              * @return void
              */
-            public function log(mixed $level, string|\Stringable $message, array $context = []): void {}
+            public function log(mixed $level, string|\Stringable $message, array $context = []): void // @phpstan-ignore missingType.iterableValue
+            {}
         });
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -840,7 +850,7 @@ final class UncoveredBranchesTest extends TestCase
 
         // Replace with a JSON payload lacking the `statements` key
         // so `EvaluationPolicy::fromArray()` raises.
-        \Illuminate\Support\Facades\DB::table((string) config('authorization.tables.policies', 'policies'))
+        \Illuminate\Support\Facades\DB::table((string) config('authorization.tables.policies', 'policies')) // @phpstan-ignore cast.string
             ->where('id', $policy->getKey())
             ->update(['document' => \json_encode(['version' => 'not-an-int'])]);
 
@@ -873,9 +883,11 @@ final class UncoveredBranchesTest extends TestCase
 
             /**
              * @param  string  $name
-             * @return self
+             * @return never
+             *
+             * @throws \RuntimeException
              */
-            public function channel(string $name): self
+            public function channel(string $name): never
             {
                 $this->channelCalls++;
 
@@ -887,7 +899,7 @@ final class UncoveredBranchesTest extends TestCase
              * @param  array  $context
              * @return void
              */
-            public function warning(string|\Stringable $message, array $context = []): void
+            public function warning(string|\Stringable $message, array $context = []): void // @phpstan-ignore missingType.iterableValue
             {
                 $this->warningCalls++;
                 $this->lastMessage = (string) $message;
@@ -900,9 +912,10 @@ final class UncoveredBranchesTest extends TestCase
              * @param  array  $context
              * @return void
              */
-            public function log(mixed $level, string|\Stringable $message, array $context = []): void {}
+            public function log(mixed $level, string|\Stringable $message, array $context = []): void // @phpstan-ignore missingType.iterableValue
+            {}
         };
-        $this->app->instance('log', $fakeLog);
+        $this->app->instance('log', $fakeLog); // @phpstan-ignore method.nonObject
 
         $driver = self::makeNonTaggableDriver();
         $store  = new \Illuminate\Cache\Repository($driver);
@@ -914,8 +927,8 @@ final class UncoveredBranchesTest extends TestCase
         // raises and the logger branch fires. A non-array element
         // inside the stored list trips `Policy::fromArray()`.
         $cache->rememberPolicies($principal, static fn (): array => []);
-        $key                   = (string) \array_key_first($driver->storage);
-        $driver->storage[$key] = ['not-an-array'];
+        $key                   = (string) \array_key_first($driver->storage); // @phpstan-ignore property.notFound
+        $driver->storage[$key] = ['not-an-array']; // @phpstan-ignore property.notFound
 
         $fresh  = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
         $result = $fresh->rememberPolicies($principal, static fn (): array => []);
@@ -1028,7 +1041,7 @@ final class UncoveredBranchesTest extends TestCase
              * @param  array  $keys
              * @return array<string, mixed>
              */
-            public function many(array $keys): array
+            public function many(array $keys): array // @phpstan-ignore missingType.iterableValue
             {
                 return [];
             }
@@ -1041,7 +1054,7 @@ final class UncoveredBranchesTest extends TestCase
              */
             public function put(mixed $key, mixed $value, mixed $seconds): bool
             {
-                $this->storage[$key] = $value;
+                $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset
 
                 return true;
             }
@@ -1051,7 +1064,7 @@ final class UncoveredBranchesTest extends TestCase
              * @param  mixed  $seconds
              * @return bool
              */
-            public function putMany(array $values, mixed $seconds): bool
+            public function putMany(array $values, mixed $seconds): bool // @phpstan-ignore missingType.iterableValue
             {
                 return true;
             }
@@ -1083,7 +1096,7 @@ final class UncoveredBranchesTest extends TestCase
              */
             public function forever(mixed $key, mixed $value): bool
             {
-                $this->storage[$key] = $value;
+                $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset
 
                 return true;
             }
@@ -1105,7 +1118,7 @@ final class UncoveredBranchesTest extends TestCase
             public function forget(mixed $key): bool
             {
                 $this->forgetCalls++;
-                unset($this->storage[$key]);
+                unset($this->storage[$key]); // @phpstan-ignore offsetAccess.invalidOffset
 
                 return true;
             }
@@ -1149,7 +1162,9 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testLogCorruptCacheEntryTolerantOfLoggerWarningFailure(): void
     {
+        // @phpstan-ignore-next-line method.nonObject
         $this->app->instance('log', new class extends \Psr\Log\AbstractLogger {
+            // @phpstan-ignore method.nonObject
             /**
              * @param  string  $name
              * @return self
@@ -1164,7 +1179,7 @@ final class UncoveredBranchesTest extends TestCase
              * @param  array  $context
              * @return void
              */
-            public function warning(string|\Stringable $message, array $context = []): void
+            public function warning(string|\Stringable $message, array $context = []): void // @phpstan-ignore missingType.iterableValue
             {
                 throw new \RuntimeException('logger unavailable');
             }
@@ -1175,7 +1190,8 @@ final class UncoveredBranchesTest extends TestCase
              * @param  array  $context
              * @return void
              */
-            public function log(mixed $level, string|\Stringable $message, array $context = []): void {}
+            public function log(mixed $level, string|\Stringable $message, array $context = []): void // @phpstan-ignore missingType.iterableValue
+            {}
         });
 
         $driver = self::makeNonTaggableDriver();
@@ -1185,8 +1201,8 @@ final class UncoveredBranchesTest extends TestCase
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         $cache->rememberPolicies($principal, static fn (): array => []);
-        $key                   = (string) \array_key_first($driver->storage);
-        $driver->storage[$key] = ['still-not-an-array'];
+        $key                   = (string) \array_key_first($driver->storage); // @phpstan-ignore property.notFound
+        $driver->storage[$key] = ['still-not-an-array']; // @phpstan-ignore property.notFound
 
         $fresh = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
 
@@ -1214,14 +1230,14 @@ final class UncoveredBranchesTest extends TestCase
              */
             public function get(mixed $key): mixed
             {
-                return $this->storage[$key] ?? null;
+                return $this->storage[$key] ?? null; // @phpstan-ignore offsetAccess.invalidOffset
             }
 
             /**
              * @param  array<int, string>  $keys
              * @return array<string, mixed>
              */
-            public function many(array $keys): array
+            public function many(array $keys): array // @phpstan-ignore method.childParameterType
             {
                 $result = [];
 
@@ -1240,7 +1256,7 @@ final class UncoveredBranchesTest extends TestCase
              */
             public function put(mixed $key, mixed $value, mixed $seconds): bool
             {
-                $this->storage[$key] = $value;
+                $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset
 
                 return true;
             }
@@ -1248,8 +1264,9 @@ final class UncoveredBranchesTest extends TestCase
             /**
              * @param  array<string, mixed>  $values
              * @param  mixed  $seconds
+             * @return bool
              */
-            public function putMany(array $values, mixed $seconds): bool
+            public function putMany(array $values, mixed $seconds): bool // @phpstan-ignore method.childParameterType
             {
                 foreach ($values as $key => $value) {
                     $this->storage[$key] = $value;
@@ -1285,7 +1302,7 @@ final class UncoveredBranchesTest extends TestCase
              */
             public function forever(mixed $key, mixed $value): bool
             {
-                $this->storage[$key] = $value;
+                $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset
 
                 return true;
             }
@@ -1297,7 +1314,7 @@ final class UncoveredBranchesTest extends TestCase
              */
             public function touch(mixed $key, mixed $ttl): bool
             {
-                return isset($this->storage[$key]);
+                return isset($this->storage[$key]); // @phpstan-ignore offsetAccess.invalidOffset
             }
 
             /**
@@ -1306,7 +1323,7 @@ final class UncoveredBranchesTest extends TestCase
              */
             public function forget(mixed $key): bool
             {
-                unset($this->storage[$key]);
+                unset($this->storage[$key]); // @phpstan-ignore offsetAccess.invalidOffset
 
                 return true;
             }

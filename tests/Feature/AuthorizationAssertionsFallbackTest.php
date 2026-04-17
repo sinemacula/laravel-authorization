@@ -51,6 +51,7 @@ final class StandaloneAssertions
  */
 // phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 #[CoversTrait(AuthorizationAssertions::class)]
+// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 final class AuthorizationAssertionsFallbackTest extends TestCase
 {
     /**
@@ -69,6 +70,6 @@ final class AuthorizationAssertionsFallbackTest extends TestCase
 
         // Container-level side-effect: the manager is rebuilt under
         // the swapped principal.
-        self::assertSame($user, $this->app->make(AuthorizationManager::class)->currentPrincipal());
+        self::assertSame($user, $this->app->make(AuthorizationManager::class)->currentPrincipal()); // @phpstan-ignore method.nonObject
     }
 }

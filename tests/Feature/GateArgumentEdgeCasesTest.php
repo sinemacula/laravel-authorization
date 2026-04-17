@@ -54,8 +54,8 @@ final class GateArgumentEdgeCasesTest extends TestCase
     {
         parent::setUp();
 
-        /** @var \Illuminate\Contracts\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class);
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
         (new AuthorizationServiceProvider($this->app))->boot();
@@ -138,14 +138,14 @@ final class GateArgumentEdgeCasesTest extends TestCase
             /**
              * @return object|null
              */
-            public function resolve(): ?object
+            public function resolve(): ?object // @phpstan-ignore return.unusedType
             {
                 return $this->user;
             }
         };
 
-        $this->app->instance(PrincipalResolver::class, $resolver);
-        $this->app->forgetInstance('authorization');
-        $this->app->forgetInstance(AuthorizationManager::class);
+        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject
+        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
+        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
     }
 }

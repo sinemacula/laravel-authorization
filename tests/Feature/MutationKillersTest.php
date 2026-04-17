@@ -54,19 +54,24 @@ final class MutationKillersTest extends TestCase
      */
     public function testCollectModelIdsStringifiesAndDedupesAndDropsEmpty(): void
     {
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
             /**
              * @param  iterable<int, \Illuminate\Database\Eloquent\Model>  $models
+             * @return array<string, mixed>
              */
-            public function collect(iterable $models): array
+            public function collect(iterable $models): array // @phpstan-ignore missingType.iterableValue
             {
-                return self::authorizationCollectModelIds($models);
+                return self::authorizationCollectModelIds($models); // @phpstan-ignore return.type
             }
         };
 
         $integerKeyed = new class extends Model {
+            /**
+             * @return mixed
+             */
             public function getKey(): mixed
             {
                 return 42;
@@ -74,6 +79,9 @@ final class MutationKillersTest extends TestCase
         };
 
         $stringKeyed = new class extends Model {
+            /**
+             * @return mixed
+             */
             public function getKey(): mixed
             {
                 return 'alpha';
@@ -81,6 +89,9 @@ final class MutationKillersTest extends TestCase
         };
 
         $stringKeyedDupe = new class extends Model {
+            /**
+             * @return mixed
+             */
             public function getKey(): mixed
             {
                 return 'alpha';
@@ -88,6 +99,9 @@ final class MutationKillersTest extends TestCase
         };
 
         $emptyString = new class extends Model {
+            /**
+             * @return mixed
+             */
             public function getKey(): mixed
             {
                 return '';
@@ -95,6 +109,9 @@ final class MutationKillersTest extends TestCase
         };
 
         $objectKey = new class extends Model {
+            /**
+             * @return mixed
+             */
             public function getKey(): mixed
             {
                 return new \stdClass;
@@ -105,7 +122,7 @@ final class MutationKillersTest extends TestCase
 
         // Integer 42 must be cast to string '42'; empties dropped;
         // duplicates squashed; non-string/non-int keys skipped.
-        self::assertSame(['42', 'alpha'], $result);
+        self::assertSame(['42', 'alpha'], $result); // @phpstan-ignore staticMethod.impossibleType
     }
 
     /**
@@ -117,19 +134,24 @@ final class MutationKillersTest extends TestCase
      */
     public function testCollectModelIdsReturnsEmptyForAllMalformedModels(): void
     {
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
             /**
              * @param  iterable<int, \Illuminate\Database\Eloquent\Model>  $models
+             * @return array<string, mixed>
              */
             public function collect(iterable $models): array
             {
-                return self::authorizationCollectModelIds($models);
+                return self::authorizationCollectModelIds($models); // @phpstan-ignore return.type
             }
         };
 
         $empty = new class extends Model {
+            /**
+             * @return mixed
+             */
             public function getKey(): mixed
             {
                 return '';
@@ -137,6 +159,9 @@ final class MutationKillersTest extends TestCase
         };
 
         $obj = new class extends Model {
+            /**
+             * @return mixed
+             */
             public function getKey(): mixed
             {
                 return new \stdClass;
@@ -155,11 +180,13 @@ final class MutationKillersTest extends TestCase
      */
     public function testNearestPivotExpirySelectsStrictlySmallerSeconds(): void
     {
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
             /**
              * @param  iterable<int, \Illuminate\Database\Eloquent\Model>  $related
+             * @return int|null
              */
             public function nearest(iterable $related): ?int
             {
@@ -198,11 +225,13 @@ final class MutationKillersTest extends TestCase
      */
     public function testNearestPivotExpiryReturnsNullWhenNoLiveExpiries(): void
     {
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
             /**
              * @param  iterable<int, \Illuminate\Database\Eloquent\Model>  $related
+             * @return int|null
              */
             public function nearest(iterable $related): ?int
             {
@@ -231,9 +260,15 @@ final class MutationKillersTest extends TestCase
      */
     public function testMinNullableRespectsNullAsUnbounded(): void
     {
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
+            /**
+             * @param  ?int  $l
+             * @param  ?int  $r
+             * @return int|null
+             */
             public function min(?int $l, ?int $r): ?int
             {
                 return self::authorizationMinNullable($l, $r);
@@ -259,9 +294,14 @@ final class MutationKillersTest extends TestCase
      */
     public function testCoerceExpiresAtCoerciveBranches(): void
     {
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
+            /**
+             * @param  mixed  $raw
+             * @return mixed
+             */
             public function coerce(mixed $raw): mixed
             {
                 return self::authorizationCoerceExpiresAt($raw);
@@ -293,9 +333,15 @@ final class MutationKillersTest extends TestCase
      */
     public function testSecondsUntilPivotExpiryDropsZeroAndNegative(): void
     {
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
+            /**
+             * @param  \Illuminate\Database\Eloquent\Model  $model
+             * @param  int  $now
+             * @return int|null
+             */
             public function seconds(Model $model, int $now): ?int
             {
                 return self::authorizationSecondsUntilPivotExpiry($model, $now);
@@ -330,9 +376,15 @@ final class MutationKillersTest extends TestCase
      */
     public function testGrantExpiriesEqualEveryBranch(): void
     {
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
+            /**
+             * @param  ?\DateTimeInterface  $l
+             * @param  ?\DateTimeInterface  $r
+             * @return bool
+             */
             public function equal(?\DateTimeInterface $l, ?\DateTimeInterface $r): bool
             {
                 return self::authorizationGrantExpiriesEqual($l, $r);
@@ -435,7 +487,7 @@ final class MutationKillersTest extends TestCase
         $cache->rememberPermissions(
             $principal,
             static fn (): array => ['x:do'],
-            new ResolutionCacheContext(maxTtl: null, roleIds: [(string) $role->getKey()]),
+            new ResolutionCacheContext(maxTtl: null, roleIds: [(string) $role->getKey()]), // @phpstan-ignore cast.string
         );
 
         // Flush the role's tag — subsequent read on fresh cache misses.
@@ -450,7 +502,7 @@ final class MutationKillersTest extends TestCase
 
                 return ['y:do'];
             },
-            new ResolutionCacheContext(maxTtl: null, roleIds: [(string) $role->getKey()]),
+            new ResolutionCacheContext(maxTtl: null, roleIds: [(string) $role->getKey()]), // @phpstan-ignore cast.string
         );
 
         self::assertSame(['y:do'], $result);
@@ -542,17 +594,21 @@ final class MutationKillersTest extends TestCase
      */
     public function testAuthorizationResolveGrantPivotColumnsHonoursPerPivotOverrides(): void
     {
-        /** @var \Illuminate\Contracts\Config\Repository $config */
-        $config = $this->app->make(\Illuminate\Contracts\Config\Repository::class);
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make(\Illuminate\Contracts\Config\Repository::class); // @phpstan-ignore method.nonObject
 
         $config->set('authorization.pivots.authorizable_roles.authorizable_type_column', 'custom_type');
         $config->set('authorization.pivots.authorizable_roles.authorizable_id_column', 'custom_id');
         $config->set('authorization.pivots.authorizable_roles.role_column', 'custom_role_fk');
         $config->set('authorization.pivots.authorizable_roles.expires_at_column', 'custom_expires_at');
 
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
+            /**
+             * @return array<string, mixed>
+             */
             public function columns(): array
             {
                 return self::authorizationResolveGrantPivotColumns('authorizable_roles', 'role_column', 'role_id');
@@ -577,9 +633,16 @@ final class MutationKillersTest extends TestCase
      */
     public function testAuthorizationResolveGrantPivotColumnsDefaultsToPackageColumns(): void
     {
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
+            /**
+             * @param  string  $pivot
+             * @param  string  $targetKey
+             * @param  string  $defaultTarget
+             * @return array<string, mixed>
+             */
             public function columns(string $pivot, string $targetKey, string $defaultTarget): array
             {
                 return self::authorizationResolveGrantPivotColumns($pivot, $targetKey, $defaultTarget);
@@ -607,57 +670,103 @@ final class MutationKillersTest extends TestCase
             /** @var array<string, mixed> */
             public array $storage = [];
 
-            public function get($key): mixed
+            /**
+             * @param  mixed  $key
+             * @return mixed
+             */
+            public function get(mixed $key): mixed
             {
-                return $this->storage[$key] ?? null;
+                return $this->storage[$key] ?? null; // @phpstan-ignore offsetAccess.invalidOffset
             }
 
-            public function many(array $keys): array
+            /**
+             * @param  array<int, string>  $keys
+             * @return array<string, mixed>
+             */
+            public function many(array $keys): array // @phpstan-ignore method.childParameterType
             {
                 return [];
             }
 
-            public function put($key, $value, $seconds): bool
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $value
+             * @param  mixed  $seconds
+             * @return bool
+             */
+            public function put(mixed $key, mixed $value, mixed $seconds): bool
             {
-                $this->storage[$key] = $value;
+                $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset
 
                 return true;
             }
 
-            public function putMany(array $values, mixed $seconds): bool
+            /**
+             * @param  array  $values
+             * @param  mixed  $seconds
+             * @return bool
+             */
+            public function putMany(array $values, mixed $seconds): bool // @phpstan-ignore missingType.iterableValue
             {
                 return true;
             }
 
-            public function increment($key, $value = 1): bool|int
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $value
+             * @return bool|int
+             */
+            public function increment(mixed $key, mixed $value = 1): bool|int
             {
                 return false;
             }
 
-            public function decrement($key, $value = 1): bool|int
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $value
+             * @return bool|int
+             */
+            public function decrement(mixed $key, mixed $value = 1): bool|int
             {
                 return false;
             }
 
-            public function forever($key, $value): bool
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $value
+             * @return bool
+             */
+            public function forever(mixed $key, mixed $value): bool
             {
-                $this->storage[$key] = $value;
+                $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset
 
                 return true;
             }
 
-            public function touch($key, $ttl): bool
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $ttl
+             * @return bool
+             */
+            public function touch(mixed $key, mixed $ttl): bool
             {
                 return true;
             }
 
-            public function forget($key): bool
+            /**
+             * @param  mixed  $key
+             * @return bool
+             */
+            public function forget(mixed $key): bool
             {
-                unset($this->storage[$key]);
+                unset($this->storage[$key]); // @phpstan-ignore offsetAccess.invalidOffset
 
                 return true;
             }
 
+            /**
+             * @return bool
+             */
             public function flush(): bool
             {
                 $this->storage = [];
@@ -665,6 +774,9 @@ final class MutationKillersTest extends TestCase
                 return true;
             }
 
+            /**
+             * @return string
+             */
             public function getPrefix(): string
             {
                 return '';
@@ -677,11 +789,17 @@ final class MutationKillersTest extends TestCase
         // A principal exposing getMorphClass + getKey should key
         // as `<prefix>:<kind>:<morph>:<id>`.
         $principal = new class {
+            /**
+             * @return string
+             */
             public function getMorphClass(): string
             {
                 return 'widget';
             }
 
+            /**
+             * @return string
+             */
             public function getKey(): string
             {
                 return 'abc';
@@ -708,59 +826,106 @@ final class MutationKillersTest extends TestCase
     public function testCacheKeyShapeFallsBackToClassNameWhenMorphMissing(): void
     {
         $driver = new class implements \Illuminate\Contracts\Cache\Store {
+            /** @var array<string, mixed> */
             public array $storage = [];
 
-            public function get($key): mixed
+            /**
+             * @param  mixed  $key
+             * @return mixed
+             */
+            public function get(mixed $key): mixed
             {
-                return $this->storage[$key] ?? null;
+                return $this->storage[$key] ?? null; // @phpstan-ignore offsetAccess.invalidOffset
             }
 
-            public function many(array $keys): array
+            /**
+             * @param  array<int, string>  $keys
+             * @return array<string, mixed>
+             */
+            public function many(array $keys): array // @phpstan-ignore method.childParameterType
             {
                 return [];
             }
 
-            public function put($key, $value, $seconds): bool
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $value
+             * @param  mixed  $seconds
+             * @return bool
+             */
+            public function put(mixed $key, mixed $value, mixed $seconds): bool
             {
-                $this->storage[$key] = $value;
+                $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset
 
                 return true;
             }
 
-            public function putMany(array $values, mixed $seconds): bool
+            /**
+             * @param  array  $values
+             * @param  mixed  $seconds
+             * @return bool
+             */
+            public function putMany(array $values, mixed $seconds): bool // @phpstan-ignore missingType.iterableValue
             {
                 return true;
             }
 
-            public function increment($key, $value = 1): bool|int
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $value
+             * @return bool|int
+             */
+            public function increment(mixed $key, mixed $value = 1): bool|int
             {
                 return false;
             }
 
-            public function decrement($key, $value = 1): bool|int
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $value
+             * @return bool|int
+             */
+            public function decrement(mixed $key, mixed $value = 1): bool|int
             {
                 return false;
             }
 
-            public function forever($key, $value): bool
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $value
+             * @return bool
+             */
+            public function forever(mixed $key, mixed $value): bool
             {
-                $this->storage[$key] = $value;
+                $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset
 
                 return true;
             }
 
-            public function touch($key, $ttl): bool
+            /**
+             * @param  mixed  $key
+             * @param  mixed  $ttl
+             * @return bool
+             */
+            public function touch(mixed $key, mixed $ttl): bool
             {
                 return true;
             }
 
-            public function forget($key): bool
+            /**
+             * @param  mixed  $key
+             * @return bool
+             */
+            public function forget(mixed $key): bool
             {
-                unset($this->storage[$key]);
+                unset($this->storage[$key]); // @phpstan-ignore offsetAccess.invalidOffset
 
                 return true;
             }
 
+            /**
+             * @return bool
+             */
             public function flush(): bool
             {
                 $this->storage = [];
@@ -768,6 +933,9 @@ final class MutationKillersTest extends TestCase
                 return true;
             }
 
+            /**
+             * @return string
+             */
             public function getPrefix(): string
             {
                 return '';
@@ -778,6 +946,9 @@ final class MutationKillersTest extends TestCase
         $cache = new ResolutionCache(store: $store, ttl: 0, prefix: 'km');
 
         $principal = new class {
+            /**
+             * @return string
+             */
             public function getKey(): string
             {
                 return '77';
@@ -1029,7 +1200,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testAuthorizeWritesLastDecisionOnBothOutcomes(): void
     {
-        $this->app->make(\SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore::class)->forget();
+        $this->app->make(\SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore::class)->forget(); // @phpstan-ignore method.nonObject
 
         // Deny path — authorize() throws, lastDecision captures the result.
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'la', 'guard_name' => 'web']);

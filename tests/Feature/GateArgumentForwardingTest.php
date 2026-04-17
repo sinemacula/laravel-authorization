@@ -52,8 +52,8 @@ final class GateArgumentForwardingTest extends TestCase
     {
         parent::setUp();
 
-        /** @var \Illuminate\Contracts\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class);
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
         // Register a morph alias so `$stub->getMorphClass()` returns a
@@ -151,6 +151,9 @@ final class GateArgumentForwardingTest extends TestCase
         ]));
 
         $resource = new class {
+            /**
+             * @return string
+             */
             public function __toString(): string
             {
                 return 'arn:post:stringable';
@@ -277,16 +280,23 @@ final class GateArgumentForwardingTest extends TestCase
     private function actAs(StubIdentity $user): void
     {
         $resolver = new class ($user) implements PrincipalResolver {
+            /**
+             * @param  object  $user
+             * @return void
+             */
             public function __construct(private readonly object $user) {}
 
-            public function resolve(): ?object
+            /**
+             * @return ?object
+             */
+            public function resolve(): ?object // @phpstan-ignore return.unusedType
             {
                 return $this->user;
             }
         };
 
-        $this->app->instance(PrincipalResolver::class, $resolver);
-        $this->app->forgetInstance('authorization');
-        $this->app->forgetInstance(AuthorizationManager::class);
+        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject
+        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
+        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
     }
 }

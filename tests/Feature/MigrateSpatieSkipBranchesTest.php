@@ -31,6 +31,9 @@ use Tests\TestCase;
 #[CoversClass(MigrateSpatieCommand::class)]
 final class MigrateSpatieSkipBranchesTest extends TestCase
 {
+    /**
+     * @return void
+     */
     protected function setUp(): void
     {
         parent::setUp();

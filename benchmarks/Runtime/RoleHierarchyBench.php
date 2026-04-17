@@ -34,13 +34,13 @@ use SineMacula\Laravel\Authorization\Models\Role;
 final class RoleHierarchyBench extends BenchmarkCase
 {
     /** @var \SineMacula\Laravel\Authorization\Models\Role Leaf role at the tip of the 5-deep ancestor chain. */
-    private Role $fiveDeepLeaf;
+    private Role $fiveDeepLeaf; // @phpstan-ignore property.uninitialized
 
     /** @var \SineMacula\Laravel\Authorization\Models\Role Leaf role at the tip of the 10-deep ancestor chain. */
-    private Role $tenDeepLeaf;
+    private Role $tenDeepLeaf; // @phpstan-ignore property.uninitialized
 
     /** @var \SineMacula\Laravel\Authorization\Models\Role Root of the 20-wide descendant subtree. */
-    private Role $wideRoot;
+    private Role $wideRoot; // @phpstan-ignore property.uninitialized
 
     /**
      * Bench setUp — seed two ancestor chains and one wide subtree

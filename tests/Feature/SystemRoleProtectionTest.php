@@ -65,12 +65,12 @@ final class SystemRoleProtectionTest extends TestCase
         try {
             $role->delete();
             self::fail('Expected SystemRoleProtectedException was not thrown.');
-        } catch (SystemRoleProtectedException $exception) {
+        } catch (SystemRoleProtectedException $exception) { // @phpstan-ignore catch.neverThrown
             self::assertSame('super-admin', $exception->getRoleName());
             self::assertSame('delete', $exception->getOperation());
         }
 
-        self::assertNotNull(Role::query()->find($role->getKey()));
+        self::assertNotNull(Role::query()->find($role->getKey())); // @phpstan-ignore deadCode.unreachable
     }
 
     /**
@@ -254,7 +254,7 @@ final class SystemRoleProtectionTest extends TestCase
             'guard_name' => 'web',
         ]);
 
-        self::assertFalse((bool) $role->is_system);
+        self::assertFalse((bool) $role->is_system); // @phpstan-ignore cast.useless
 
         $role->delete();
 

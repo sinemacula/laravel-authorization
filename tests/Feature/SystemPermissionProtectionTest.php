@@ -60,12 +60,12 @@ final class SystemPermissionProtectionTest extends TestCase
         try {
             $permission->delete();
             self::fail('Expected SystemPermissionProtectedException was not thrown.');
-        } catch (SystemPermissionProtectedException $exception) {
+        } catch (SystemPermissionProtectedException $exception) { // @phpstan-ignore catch.neverThrown
             self::assertSame('*:*', $exception->getPermissionName());
             self::assertSame('delete', $exception->getOperation());
         }
 
-        self::assertNotNull(Permission::query()->find($permission->getKey()));
+        self::assertNotNull(Permission::query()->find($permission->getKey())); // @phpstan-ignore deadCode.unreachable
     }
 
     /**
@@ -228,7 +228,7 @@ final class SystemPermissionProtectionTest extends TestCase
             'guard_name' => 'web',
         ]);
 
-        self::assertFalse((bool) $permission->is_system);
+        self::assertFalse((bool) $permission->is_system); // @phpstan-ignore cast.useless
 
         $permission->delete();
 

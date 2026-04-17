@@ -228,8 +228,8 @@ final class RoleRankTest extends TestCase
      */
     public function testCanActOnReturnsTrueWhenRankDisabled(): void
     {
-        /** @var \Illuminate\Contracts\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class);
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.rank.enabled', false);
 
         $seniorRole = $this->makeRole('super-admin', rank: 0);

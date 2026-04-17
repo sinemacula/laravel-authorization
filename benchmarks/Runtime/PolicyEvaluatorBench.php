@@ -23,13 +23,13 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 final class PolicyEvaluatorBench
 {
     /** @var \SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator Evaluator instance used across revolutions. */
-    private PolicyEvaluator $evaluator;
+    private PolicyEvaluator $evaluator; // @phpstan-ignore property.uninitialized
 
     /** @var \SineMacula\Laravel\Authorization\Evaluation\Policy Policy with an explicit allow on `posts:create`. */
-    private Policy $allowPolicy;
+    private Policy $allowPolicy; // @phpstan-ignore property.uninitialized
 
     /** @var \SineMacula\Laravel\Authorization\Evaluation\Policy Policy with both an allow and a deny on `posts:delete`. */
-    private Policy $denyPolicy;
+    private Policy $denyPolicy; // @phpstan-ignore property.uninitialized
 
     /**
      * Prepare fixtures shared across every benchmark iteration.

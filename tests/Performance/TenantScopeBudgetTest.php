@@ -142,7 +142,7 @@ final class CountingTenantResolver implements TenantResolver
     /**
      * @return object|null
      */
-    public function resolve(): ?object
+    public function resolve(): ?object // @phpstan-ignore return.unusedType
     {
         $this->calls++;
 

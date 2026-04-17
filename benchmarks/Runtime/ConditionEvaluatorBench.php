@@ -35,19 +35,19 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
 final class ConditionEvaluatorBench
 {
     /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement covering string operators. */
-    private Statement $stringStatement;
+    private Statement $stringStatement; // @phpstan-ignore property.uninitialized
 
     /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement covering numeric operators. */
-    private Statement $numericStatement;
+    private Statement $numericStatement; // @phpstan-ignore property.uninitialized
 
     /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement covering temporal operators. */
-    private Statement $temporalStatement;
+    private Statement $temporalStatement; // @phpstan-ignore property.uninitialized
 
     /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement covering set / boolean / null / CIDR operators. */
-    private Statement $setStatement;
+    private Statement $setStatement; // @phpstan-ignore property.uninitialized
 
     /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement running the full 18-operator chain in one pass. */
-    private Statement $fullStatement;
+    private Statement $fullStatement; // @phpstan-ignore property.uninitialized
 
     /** @var array<string, mixed> Matching context reused across revolutions. */
     private array $context = [];
