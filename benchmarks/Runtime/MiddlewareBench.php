@@ -41,15 +41,19 @@ use SineMacula\Laravel\Authorization\Models\Role;
 final class MiddlewareBench extends BenchmarkCase
 {
     /** Role middleware instance under test. */
+    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
     private RequireRole $roleMiddleware;
 
     /** Permission middleware instance under test. */
+    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
     private RequirePermission $permissionMiddleware;
 
     /** Pass-through next closure — every admit path calls it exactly once. */
+    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
     private \Closure $next;
 
     /** Incoming request stand-in — shared across every rev. */
+    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
     private Request $request;
 
     /**

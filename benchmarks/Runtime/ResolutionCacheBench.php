@@ -38,24 +38,31 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
 final class ResolutionCacheBench
 {
     /** Cache instance used for the memo-tier subjects (no persistent store). */
+    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
     private ResolutionCache $memoOnly;
 
     /** Cache instance used for the persistent-tier subjects (array-store-backed). */
+    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
     private ResolutionCache $persisted;
 
     /** Cache instance used for the `forget()` subject — reprimed between reps via `setUpForget()`. */
+    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
     private ResolutionCache $forgetTarget;
 
     /** Principal stand-in — primitive object keyed by a stable hash. */
+    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
     private object $principal;
 
     /** Resolved role list primed into the cache before memo / persistent reads. */
+    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
     private \Closure $roleResolver;
 
     /** Resolved permission list primed into the cache before memo reads. */
+    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
     private \Closure $permissionResolver;
 
     /** Policy list primed into the persistent tier before policy reads. */
+    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
     private \Closure $policyResolver;
 
     /**
