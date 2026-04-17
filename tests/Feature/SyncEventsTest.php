@@ -176,21 +176,9 @@ final class SyncEventsTest extends TestCase
      */
     public function testSyncPoliciesDispatchesEventsPerDelta(): void
     {
-        $a = Policy::create([
-            'id'       => (string) Str::uuid(),
-            'name'     => 'a',
-            'document' => ['statements' => [['effect' => 'allow', 'actions' => ['x']]]],
-        ]);
-        $b = Policy::create([
-            'id'       => (string) Str::uuid(),
-            'name'     => 'b',
-            'document' => ['statements' => [['effect' => 'allow', 'actions' => ['y']]]],
-        ]);
-        $c = Policy::create([
-            'id'       => (string) Str::uuid(),
-            'name'     => 'c',
-            'document' => ['statements' => [['effect' => 'allow', 'actions' => ['z']]]],
-        ]);
+        $a = $this->makeNamedPolicy('a', 'x');
+        $b = $this->makeNamedPolicy('b', 'y');
+        $c = $this->makeNamedPolicy('c', 'z');
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->attachPolicy($a);
@@ -279,5 +267,22 @@ final class SyncEventsTest extends TestCase
 
         Event::assertNotDispatched(RolePermissionGranted::class);
         Event::assertNotDispatched(RolePermissionRevoked::class);
+    }
+
+    /**
+     * Persist a minimal allow-only policy under the given name and
+     * single action — sync-event fixture helper.
+     *
+     * @param  string  $name
+     * @param  string  $action
+     * @return \SineMacula\Laravel\Authorization\Models\Policy
+     */
+    private function makeNamedPolicy(string $name, string $action): Policy
+    {
+        return Policy::create([
+            'id'       => (string) Str::uuid(),
+            'name'     => $name,
+            'document' => ['statements' => [['effect' => 'allow', 'actions' => [$action]]]],
+        ]);
     }
 }

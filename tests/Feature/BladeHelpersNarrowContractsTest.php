@@ -6,66 +6,9 @@ namespace Tests\Feature;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
-use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
-use SineMacula\Laravel\Authorization\Models\Role as RoleModel;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
+use Tests\Feature\Stubs\RolesOnlyPrincipal;
 use Tests\TestCase;
-
-/**
- * Principal that satisfies `SupportsRoles` but not `SupportsPermissions`
- * — used to exercise the narrow-contract mismatch branches in
- * `BladeHelpers::hasAllRoles`, `hasPermission`, and `hasAllPermissions`.
- *
- * @internal
- *
- * @SuppressWarnings("php:S1192")
- */
-final class RolesOnlyPrincipal implements SupportsRoles // phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
-{
-    /**
-     * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
-     * @return static
-     */
-    public function assignRole(RoleModel|string $role): static
-    {
-        return $this;
-    }
-
-    /**
-     * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
-     * @return static
-     */
-    public function revokeRole(RoleModel|string $role): static
-    {
-        return $this;
-    }
-
-    /**
-     * @param  array<int, \SineMacula\Laravel\Authorization\Models\Role|string>  $roles
-     * @return static
-     */
-    public function syncRoles(array $roles): static
-    {
-        return $this;
-    }
-
-    /**
-     * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
-     * @return bool
-     */
-    public function hasRole(RoleModel|string $role): bool
-    {
-        return $role === 'editor';
-    }
-
-    /**
-     * @return array<int, string>
-     */
-    public function getRoles(): array
-    {
-        return ['editor'];
-    }
-}
 
 /**
  * Coverage for the narrow-contract mismatch branches of the
@@ -81,7 +24,7 @@ final class RolesOnlyPrincipal implements SupportsRoles // phpcs:ignore PSR1.Cla
  * @internal
  */
 #[CoversClass(BladeHelpers::class)]
-final class BladeHelpersNarrowContractsTest extends TestCase // phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
+final class BladeHelpersNarrowContractsTest extends TestCase
 {
     /**
      * Swap in a resolver that returns a `RolesOnlyPrincipal` before
@@ -89,6 +32,7 @@ final class BladeHelpersNarrowContractsTest extends TestCase // phpcs:ignore PSR
      *
      * @return void
      */
+    #[\Override]
     protected function setUp(): void
     {
         parent::setUp();
@@ -97,22 +41,35 @@ final class BladeHelpersNarrowContractsTest extends TestCase // phpcs:ignore PSR
 
         $resolver = new class ($principal) implements PrincipalResolver {
             /**
-             * @param  \Tests\Feature\RolesOnlyPrincipal  $principal
+             * Create a new resolver wrapping a fixed principal.
+             *
+             * @param  \Tests\Feature\Stubs\RolesOnlyPrincipal  $principal
+             * @return void
              */
-            public function __construct(private readonly RolesOnlyPrincipal $principal) {}
+            public function __construct(
+
+                /** The principal returned by every resolution call. */
+                private readonly RolesOnlyPrincipal $principal,
+
+            ) {}
 
             /**
+             * Resolve the current principal.
+             *
              * @return object|null
+             *
+             * @phpstan-ignore-next-line return.unusedType (test stub always returns non-null)
              */
-            public function resolve(): ?object // @phpstan-ignore return.unusedType
+            #[\Override]
+            public function resolve(): ?object
             {
                 return $this->principal;
             }
         };
 
-        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject
-        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
-        $this->app->forgetInstance(\SineMacula\Laravel\Authorization\AuthorizationManager::class); // @phpstan-ignore method.nonObject
+        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject (test container is non-null)
+        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject (test container is non-null)
+        $this->app->forgetInstance(\SineMacula\Laravel\Authorization\AuthorizationManager::class); // @phpstan-ignore method.nonObject (test container is non-null)
     }
 
     /**

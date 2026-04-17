@@ -68,7 +68,7 @@ final class RoleHierarchyTest extends TestCase
         $parent->givePermission('posts:delete');
         $child->givePermission('posts:create');
 
-        $permissions = $child->fresh()->getPermissions(); // @phpstan-ignore method.nonObject
+        $permissions = $child->fresh()->getPermissions(); // @phpstan-ignore method.nonObject (test container is non-null)
         \sort($permissions);
 
         self::assertSame(['posts:create', 'posts:delete'], $permissions);
@@ -93,7 +93,7 @@ final class RoleHierarchyTest extends TestCase
         $middle->givePermission('posts:edit');
         $leaf->givePermission('posts:view');
 
-        $permissions = $leaf->fresh()->getPermissions(); // @phpstan-ignore method.nonObject
+        $permissions = $leaf->fresh()->getPermissions(); // @phpstan-ignore method.nonObject (test container is non-null)
         \sort($permissions);
 
         self::assertSame(['posts:create', 'posts:edit', 'posts:view'], $permissions);
@@ -110,12 +110,12 @@ final class RoleHierarchyTest extends TestCase
         $parent = $this->makeRole('admin');
         $child  = $this->makeRole('editor', parentId: $parent->getKey());
 
-        $perm = $this->makePermission('posts:create');
+        $permission = $this->makePermission('posts:create');
 
-        $parent->givePermission($perm);
-        $child->givePermission($perm);
+        $parent->givePermission($permission);
+        $child->givePermission($permission);
 
-        $permissions = $child->fresh()->getPermissions(); // @phpstan-ignore method.nonObject
+        $permissions = $child->fresh()->getPermissions(); // @phpstan-ignore method.nonObject (test container is non-null)
 
         self::assertSame(['posts:create'], $permissions);
     }
@@ -133,7 +133,7 @@ final class RoleHierarchyTest extends TestCase
 
         $this->expectException(RoleHierarchyCycleException::class);
 
-        $parent->parent_id = $child->getKey(); // @phpstan-ignore assign.propertyType
+        $parent->parent_id = $child->getKey(); // @phpstan-ignore assign.propertyType (mixed runtime coercion)
         $parent->save();
     }
 
@@ -149,7 +149,7 @@ final class RoleHierarchyTest extends TestCase
 
         $this->expectException(RoleHierarchyCycleException::class);
 
-        $role->parent_id = $role->getKey(); // @phpstan-ignore assign.propertyType
+        $role->parent_id = $role->getKey(); // @phpstan-ignore assign.propertyType (mixed runtime coercion)
         $role->save();
     }
 
@@ -171,15 +171,15 @@ final class RoleHierarchyTest extends TestCase
         $child->givePermission('posts:create');
 
         // Verify inheritance first.
-        $child = $child->fresh(); // @phpstan-ignore assign.propertyType
-        self::assertTrue(\in_array('posts:delete', $child->getPermissions(), true)); // @phpstan-ignore method.nonObject
+        $child = $child->fresh(); // @phpstan-ignore assign.propertyType (mixed runtime coercion)
+        self::assertTrue(\in_array('posts:delete', $child->getPermissions(), true)); // @phpstan-ignore method.nonObject (test container is non-null)
 
         // Remove parent.
-        $child->parent_id = null; // @phpstan-ignore property.nonObject
-        $child->save(); // @phpstan-ignore method.nonObject
+        $child->parent_id = null; // @phpstan-ignore property.nonObject (property on non-null Eloquent row)
+        $child->save(); // @phpstan-ignore method.nonObject (test container is non-null)
 
-        $child = $child->fresh(); // @phpstan-ignore assign.propertyType, method.nonObject
-        self::assertSame(['posts:create'], $child->getPermissions()); // @phpstan-ignore method.nonObject
+        $child = $child->fresh(); // @phpstan-ignore assign.propertyType, method.nonObject (test assigns mixed type to exercise runtime coercion; Testbench app container guaranteed non-null in test lifecycle)
+        self::assertSame(['posts:create'], $child->getPermissions()); // @phpstan-ignore method.nonObject (test container is non-null)
     }
 
     /**
@@ -211,7 +211,7 @@ final class RoleHierarchyTest extends TestCase
     public function testHierarchyDisabledReturnsOnlyDirectPermissions(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.hierarchy.enabled', false);
 
         $parent = $this->makeRole('admin');
@@ -223,7 +223,7 @@ final class RoleHierarchyTest extends TestCase
         $parent->givePermission('posts:delete');
         $child->givePermission('posts:create');
 
-        self::assertSame(['posts:create'], $child->fresh()->getPermissions()); // @phpstan-ignore method.nonObject
+        self::assertSame(['posts:create'], $child->fresh()->getPermissions()); // @phpstan-ignore method.nonObject (test container is non-null)
     }
 
     /**
@@ -240,8 +240,8 @@ final class RoleHierarchyTest extends TestCase
         $ancestors = $leaf->ancestors();
 
         self::assertCount(2, $ancestors);
-        self::assertTrue($ancestors->first()->is($root)); // @phpstan-ignore method.nonObject
-        self::assertTrue($ancestors->last()->is($middle)); // @phpstan-ignore method.nonObject
+        self::assertTrue($ancestors->first()->is($root)); // @phpstan-ignore method.nonObject (test container is non-null)
+        self::assertTrue($ancestors->last()->is($middle)); // @phpstan-ignore method.nonObject (test container is non-null)
     }
 
     /**
@@ -259,10 +259,10 @@ final class RoleHierarchyTest extends TestCase
 
         self::assertCount(2, $descendants);
 
-        $ids = $descendants->map(fn (Role $r): string => (string) $r->getKey())->all(); // @phpstan-ignore cast.string
+        $ids = $descendants->map(fn (Role $r): string => (string) $r->getKey())->all(); // @phpstan-ignore cast.string (stub key cast to string)
 
-        self::assertContains((string) $middle->getKey(), $ids); // @phpstan-ignore cast.string
-        self::assertContains((string) $leaf->getKey(), $ids); // @phpstan-ignore cast.string
+        self::assertContains((string) $middle->getKey(), $ids); // @phpstan-ignore cast.string (stub key cast to string)
+        self::assertContains((string) $leaf->getKey(), $ids); // @phpstan-ignore cast.string (stub key cast to string)
     }
 
     /**
@@ -298,8 +298,8 @@ final class RoleHierarchyTest extends TestCase
         $root  = $this->makeRole('admin');
         $child = $this->makeRole('editor', parentId: $root->getKey());
 
-        $rootId  = (string) $root->getKey(); // @phpstan-ignore cast.string
-        $childId = (string) $child->getKey(); // @phpstan-ignore cast.string
+        $rootId  = (string) $root->getKey(); // @phpstan-ignore cast.string (stub key cast to string)
+        $childId = (string) $child->getKey(); // @phpstan-ignore cast.string (stub key cast to string)
 
         // Bypass the saving hook to inject a cycle: point root's
         // parent at the child so `ancestors()` on child loops.
@@ -307,12 +307,12 @@ final class RoleHierarchyTest extends TestCase
         self::assertSame(1, $updated, 'Cycle-injection update should hit one row.');
 
         try {
-            $child->fresh()->ancestors(); // @phpstan-ignore method.nonObject
+            $child->fresh()->ancestors(); // @phpstan-ignore method.nonObject (test container is non-null)
             self::fail('RoleHierarchyCycleException was not thrown.');
         } catch (RoleHierarchyCycleException $exception) {
             self::assertSame('editor', $exception->getRoleName());
             // The proposed-parent is whatever the walk re-encounters
-            // as it closes the loop — it is the role's *name*, not
+            // as it closes the loop — it is the role's name, not
             // its UUID (the #100 regression guard).
             self::assertSame('admin', $exception->getProposedParentName());
             self::assertStringNotContainsString($rootId, $exception->getMessage());
@@ -336,12 +336,12 @@ final class RoleHierarchyTest extends TestCase
 
         // Inject a cycle bypassing the saving hook: point root's
         // parent at its own child.
-        DB::table('roles')->where('id', (string) $root->getKey()) // @phpstan-ignore cast.string
-            ->update(['parent_id' => (string) $child->getKey()]); // @phpstan-ignore cast.string
+        DB::table('roles')->where('id', (string) $root->getKey()) // @phpstan-ignore cast.string (stub key cast to string)
+            ->update(['parent_id' => (string) $child->getKey()]); // @phpstan-ignore cast.string (stub key cast to string)
 
         $this->expectException(RoleHierarchyCycleException::class);
 
-        $root->fresh()->descendants(); // @phpstan-ignore method.nonObject
+        $root->fresh()->descendants(); // @phpstan-ignore method.nonObject (test container is non-null)
     }
 
     /**
@@ -357,12 +357,12 @@ final class RoleHierarchyTest extends TestCase
 
         // Inject a cycle: point root's parent at its own child so
         // that walking the child's ancestor chain loops.
-        DB::table('roles')->where('id', (string) $root->getKey()) // @phpstan-ignore cast.string
-            ->update(['parent_id' => (string) $child->getKey()]); // @phpstan-ignore cast.string
+        DB::table('roles')->where('id', (string) $root->getKey()) // @phpstan-ignore cast.string (stub key cast to string)
+            ->update(['parent_id' => (string) $child->getKey()]); // @phpstan-ignore cast.string (stub key cast to string)
 
         $this->expectException(RoleHierarchyCycleException::class);
 
-        $root->fresh()->isAncestorOf($child->fresh()); // @phpstan-ignore method.nonObject
+        $root->fresh()->isAncestorOf($child->fresh()); // @phpstan-ignore method.nonObject (test container is non-null)
     }
 
     /**

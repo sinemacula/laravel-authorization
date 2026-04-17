@@ -176,7 +176,7 @@ final class RoleGuardParityTest extends TestCase
         try {
             $role->givePermission($permission);
             self::fail('Expected GuardMismatchException was not thrown.');
-        } catch (GuardMismatchException $exception) { // @phpstan-ignore catch.neverThrown
+        } catch (GuardMismatchException $exception) { // @phpstan-ignore catch.neverThrown (exception-path coverage)
             self::assertSame('editor', $exception->getRoleName());
             self::assertSame('api:call', $exception->getPermissionName());
             self::assertSame('web', $exception->getRoleGuard());

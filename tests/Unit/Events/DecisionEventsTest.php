@@ -40,7 +40,7 @@ final class DecisionEventsTest extends TestCase
     public function testDecisionEvaluatedExposesEveryConstructorArgument(): void
     {
         $principal = new \stdClass;
-        $result    = new EvaluationResult(allowed: true, reason: DecisionReason::EXPLICIT_ALLOW, trace: []);
+        $decision  = new EvaluationResult(allowed: true, reason: DecisionReason::EXPLICIT_ALLOW, trace: []);
         $context   = ['tenant' => 'org-1'];
 
         $event = new DecisionEvaluated(
@@ -48,14 +48,14 @@ final class DecisionEventsTest extends TestCase
             action: 'posts:create',
             resource: 'arn:post:42',
             context: $context,
-            result: $result,
+            result: $decision,
         );
 
         self::assertSame($principal, $event->principal);
         self::assertSame('posts:create', $event->action);
         self::assertSame('arn:post:42', $event->resource);
         self::assertSame($context, $event->context);
-        self::assertSame($result, $event->result);
+        self::assertSame($decision, $event->result);
     }
 
     /**
@@ -67,20 +67,20 @@ final class DecisionEventsTest extends TestCase
      */
     public function testAuthorizationFailedAcceptsNullPrincipalAndExposesArguments(): void
     {
-        $result = new EvaluationResult(allowed: false, reason: DecisionReason::IMPLICIT_DENY, trace: []);
+        $decision = new EvaluationResult(allowed: false, reason: DecisionReason::IMPLICIT_DENY, trace: []);
 
         $event = new AuthorizationFailed(
             principal: null,
             action: 'posts:delete',
             resource: null,
             context: [],
-            result: $result,
+            result: $decision,
         );
 
         self::assertNull($event->principal);
         self::assertSame('posts:delete', $event->action);
         self::assertNull($event->resource);
         self::assertSame([], $event->context);
-        self::assertSame($result, $event->result);
+        self::assertSame($decision, $event->result);
     }
 }

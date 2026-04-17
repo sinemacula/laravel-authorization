@@ -113,15 +113,24 @@ final class PrincipalResolverBindingTest extends TestCase
     {
         $resolver = new class ($principal) implements PrincipalResolver {
             /**
+             * Create a new resolver wrapping a fixed principal.
+             *
              * @param  object|null  $principal
+             * @return void
              */
-            public function __construct(private readonly ?object $principal) {}
+            public function __construct(
+
+                /** The principal returned by every resolution call. */
+                private readonly ?object $principal,
+
+            ) {}
 
             /**
              * Resolve the principal, which may be null.
              *
              * @return object|null
              */
+            #[\Override]
             public function resolve(): ?object
             {
                 return $this->principal;

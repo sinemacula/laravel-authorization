@@ -52,12 +52,13 @@ final class GateArgumentEdgeCasesTest extends TestCase
      *
      * @return void
      */
+    #[\Override]
     protected function setUp(): void
     {
         parent::setUp();
 
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
         (new AuthorizationServiceProvider($this->app))->boot();
@@ -133,21 +134,34 @@ final class GateArgumentEdgeCasesTest extends TestCase
     {
         $resolver = new class ($user) implements PrincipalResolver {
             /**
+             * Create a new resolver wrapping a fixed user.
+             *
              * @param  object  $user
+             * @return void
              */
-            public function __construct(private readonly object $user) {}
+            public function __construct(
+
+                /** The user returned by every resolution call. */
+                private readonly object $user,
+
+            ) {}
 
             /**
+             * Resolve the current principal.
+             *
              * @return object|null
+             *
+             * @phpstan-ignore-next-line return.unusedType (stub returns non-null)
              */
-            public function resolve(): ?object // @phpstan-ignore return.unusedType
+            #[\Override]
+            public function resolve(): ?object
             {
                 return $this->user;
             }
         };
 
-        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject
-        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
-        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
+        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject (test container is non-null)
+        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject (test container is non-null)
+        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject (test container is non-null)
     }
 }

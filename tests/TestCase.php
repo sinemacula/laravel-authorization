@@ -42,6 +42,7 @@ abstract class TestCase extends OrchestraTestCase
      *
      * @return void
      */
+    #[\Override]
     protected function setUp(): void
     {
         if (!self::$viewCacheCleared) {
@@ -65,6 +66,7 @@ abstract class TestCase extends OrchestraTestCase
      * @param  mixed  $app
      * @return array<int, class-string<\Illuminate\Support\ServiceProvider>>
      */
+    #[\Override]
     protected function getPackageProviders(mixed $app): array
     {
         return [
@@ -82,6 +84,7 @@ abstract class TestCase extends OrchestraTestCase
      * @param  mixed  $app
      * @return void
      */
+    #[\Override]
     protected function defineEnvironment(mixed $app): void
     {
         /** @var \Illuminate\Config\Repository $config */
@@ -98,46 +101,59 @@ abstract class TestCase extends OrchestraTestCase
      *
      * @return void
      */
+    #[\Override]
     protected function defineDatabaseMigrations(): void
     {
         $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
+        $this->createStubIdentityTables();
 
-        Schema::create('stub_identities', static function (Blueprint $table): void {
-            $table->string('id')->primary();
-            $table->string('name')->nullable();
-            $table->timestamps();
-        });
+        if (env('DB_CONNECTION', 'sqlite') !== 'sqlite') { // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig (test bootstrap reads env pre-config)
+            $this->registerNonSqliteTeardown();
+        }
+    }
 
-        Schema::create('stub_second_identities', static function (Blueprint $table): void {
-            $table->string('id')->primary();
-            $table->string('name')->nullable();
-            $table->timestamps();
-        });
-
-        Schema::create('stub_tenants', static function (Blueprint $table): void {
-            $table->string('id')->primary();
-            $table->string('name')->nullable();
-            $table->timestamps();
-        });
-
-        if (env('DB_CONNECTION', 'sqlite') !== 'sqlite') { // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig
-            $this->beforeApplicationDestroyed(function (): void {
-                /** @var \Illuminate\Config\Repository $config */
-                $config = app(ConfigRepository::class);
-                /** @var array<string, mixed> $tables */
-                $tables = $config->array('authorization.tables', []);
-
-                foreach ($tables as $table) {
-                    if (is_string($table)) {
-                        Schema::dropIfExists($table);
-                    }
-                }
-
-                Schema::dropIfExists('stub_identities');
-                Schema::dropIfExists('stub_second_identities');
-                Schema::dropIfExists('stub_tenants');
+    /**
+     * Create the `stub_*` fixture tables that back the test-only
+     * identity models.
+     *
+     * @return void
+     */
+    private function createStubIdentityTables(): void
+    {
+        foreach (['stub_identities', 'stub_second_identities', 'stub_tenants'] as $table) {
+            Schema::create($table, static function (Blueprint $schema): void {
+                $schema->string('id')->primary();
+                $schema->string('name')->nullable();
+                $schema->timestamps();
             });
         }
+    }
+
+    /**
+     * On non-SQLite connections the schema persists between runs;
+     * register a teardown hook that drops every configured
+     * authorization table plus the stub-identity tables.
+     *
+     * @return void
+     */
+    private function registerNonSqliteTeardown(): void
+    {
+        $this->beforeApplicationDestroyed(static function (): void {
+            /** @var \Illuminate\Config\Repository $config */
+            $config = app(ConfigRepository::class);
+            /** @var array<string, mixed> $tables */
+            $tables = $config->array('authorization.tables', []);
+
+            foreach ($tables as $table) {
+                if (is_string($table)) {
+                    Schema::dropIfExists($table);
+                }
+            }
+
+            foreach (['stub_identities', 'stub_second_identities', 'stub_tenants'] as $stubTable) {
+                Schema::dropIfExists($stubTable);
+            }
+        });
     }
 
     /**
@@ -148,7 +164,7 @@ abstract class TestCase extends OrchestraTestCase
     private function databaseConnection(): array
     {
         /** @var string $driver */
-        $driver = env('DB_CONNECTION', 'sqlite'); // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig
+        $driver = env('DB_CONNECTION', 'sqlite'); // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig (test bootstrap reads env pre-config)
 
         if ($driver === 'sqlite') {
             return [
@@ -160,11 +176,11 @@ abstract class TestCase extends OrchestraTestCase
 
         return [
             'driver'    => $driver,
-            'host'      => env('DB_HOST', '127.0.0.1'), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig
-            'port'      => env('DB_PORT', $driver === 'pgsql' ? '5432' : '3306'), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig
-            'database'  => env('DB_DATABASE', 'laravel_authorization_test'), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig
-            'username'  => env('DB_USERNAME', 'root'), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig
-            'password'  => env('DB_PASSWORD', ''), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig
+            'host'      => env('DB_HOST', '127.0.0.1'), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig (test bootstrap reads env pre-config)
+            'port'      => env('DB_PORT', $driver === 'pgsql' ? '5432' : '3306'), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig (test bootstrap reads env pre-config)
+            'database'  => env('DB_DATABASE', 'laravel_authorization_test'), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig (test bootstrap reads env pre-config)
+            'username'  => env('DB_USERNAME', 'root'), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig (test bootstrap reads env pre-config)
+            'password'  => env('DB_PASSWORD', ''), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig (test bootstrap reads env pre-config)
             'prefix'    => '',
             'charset'   => $driver === 'pgsql' ? 'utf8' : 'utf8mb4',
             'collation' => $driver === 'pgsql' ? null : 'utf8mb4_unicode_ci',

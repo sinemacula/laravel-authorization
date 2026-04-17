@@ -42,6 +42,7 @@ final class AuthorizationManagerTest extends TestCase
      *
      * @return void
      */
+    #[\Override]
     protected function tearDown(): void
     {
         \Mockery::close();
@@ -128,10 +129,10 @@ final class AuthorizationManagerTest extends TestCase
             ]),
         ]);
 
-        $result = $manager->for($principal)->evaluate('posts:create');
+        $decision = $manager->for($principal)->evaluate('posts:create');
 
-        self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::RBAC_ALLOW, $result->reason);
+        self::assertTrue($decision->allowed);
+        self::assertSame(DecisionReason::RBAC_ALLOW, $decision->reason);
     }
 
     /**
@@ -155,10 +156,10 @@ final class AuthorizationManagerTest extends TestCase
             ]),
         ]);
 
-        $result = $manager->for($principal)->evaluate('posts:create');
+        $decision = $manager->for($principal)->evaluate('posts:create');
 
-        self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $result->reason);
+        self::assertTrue($decision->allowed);
+        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $decision->reason);
     }
 
     /**
@@ -182,10 +183,10 @@ final class AuthorizationManagerTest extends TestCase
             ]),
         ]);
 
-        $result = $manager->for($principal)->evaluate('posts:delete');
+        $decision = $manager->for($principal)->evaluate('posts:delete');
 
-        self::assertFalse($result->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_DENY, $result->reason);
+        self::assertFalse($decision->allowed);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $decision->reason);
     }
 
     /**
@@ -280,9 +281,9 @@ final class AuthorizationManagerTest extends TestCase
             'statements' => [['effect' => 'allow', 'actions' => ['x']]],
         ]);
 
-        $result = $manager->for($principal)->withPolicies([$override])->evaluate('x');
+        $decision = $manager->for($principal)->withPolicies([$override])->evaluate('x');
 
-        self::assertTrue($result->allowed);
+        self::assertTrue($decision->allowed);
     }
 
     /**
@@ -385,9 +386,17 @@ final class AuthorizationManagerTest extends TestCase
 
         $principal = $this->stubAuthorizable(['ok']);
 
-        $manager->for($principal)->authorize('ok');
+        // authorize() returns void on a granted decision and throws
+        // on a denial — confirm the allowed path does not raise.
+        $threw = false;
 
-        $this->expectNotToPerformAssertions();
+        try {
+            $manager->for($principal)->authorize('ok');
+        } catch (\Throwable $exception) {
+            $threw = true;
+        }
+
+        self::assertFalse($threw, 'authorize() must not throw when the decision allows.');
     }
 
     /**
@@ -479,9 +488,9 @@ final class AuthorizationManagerTest extends TestCase
         $scoped = $manager->withPolicies([5 => $policy]);
 
         $principal = $this->stubAuthorizable();
-        $result    = $scoped->for($principal)->evaluate('x');
+        $decision  = $scoped->for($principal)->evaluate('x');
 
-        self::assertTrue($result->allowed);
+        self::assertTrue($decision->allowed);
     }
 
     /**

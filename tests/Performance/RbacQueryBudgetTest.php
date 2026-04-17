@@ -61,6 +61,7 @@ final class RbacQueryBudgetTest extends TestCase
      *
      * @return void
      */
+    #[\Override]
     protected function setUp(): void
     {
         parent::setUp();
@@ -91,23 +92,7 @@ final class RbacQueryBudgetTest extends TestCase
      */
     public function testRepeatedCanEmitsNoAdditionalQueriesAfterFirstResolution(): void
     {
-        $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'editor',
-            'guard_name' => 'web',
-        ]);
-
-        foreach (self::PERMISSION_NAMES as $name) {
-            $permission = Permission::create([
-                'id'         => (string) Str::uuid(),
-                'name'       => $name,
-                'guard_name' => 'web',
-            ]);
-            $role->permissions()->attach($permission->getKey());
-        }
-
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
-        $user->assignRole('editor');
+        $user = $this->makeEditorWithFivePermissions();
 
         $app = $this->app;
         self::assertNotNull($app, 'Testbench application must be booted by setUp().');
@@ -154,5 +139,34 @@ final class RbacQueryBudgetTest extends TestCase
             $followupQueries,
             'Subsequent can() calls must not hit the database — RBAC resolution cache missed.',
         );
+    }
+
+    /**
+     * Seed the `editor` role with five attached permissions and
+     * return a `StubIdentity` assigned to that role.
+     *
+     * @return \Tests\Feature\Stubs\StubIdentity
+     */
+    private function makeEditorWithFivePermissions(): StubIdentity
+    {
+        $role = Role::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => 'editor',
+            'guard_name' => 'web',
+        ]);
+
+        foreach (self::PERMISSION_NAMES as $name) {
+            $permission = Permission::create([
+                'id'         => (string) Str::uuid(),
+                'name'       => $name,
+                'guard_name' => 'web',
+            ]);
+            $role->permissions()->attach($permission->getKey());
+        }
+
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user->assignRole('editor');
+
+        return $user;
     }
 }

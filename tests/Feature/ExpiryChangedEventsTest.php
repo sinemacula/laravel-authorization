@@ -67,6 +67,7 @@ final class ExpiryChangedEventsTest extends TestCase
      *
      * @return void
      */
+    #[\Override]
     protected function tearDown(): void
     {
         Carbon::setTestNow();

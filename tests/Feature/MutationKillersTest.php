@@ -57,7 +57,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testCollectModelIdsStringifiesAndDedupesAndDropsEmpty(): void
     {
-        /** @phpstan-ignore-next-line class.missingExtends */
+        /** @phpstan-ignore-next-line class.missingExtends (stub does not extend Eloquent model) */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -65,67 +65,23 @@ final class MutationKillersTest extends TestCase
              * @param  iterable<int, \Illuminate\Database\Eloquent\Model>  $models
              * @return array<string, mixed>
              */
-            public function collect(iterable $models): array // @phpstan-ignore missingType.iterableValue
+            public function collect(iterable $models): array // @phpstan-ignore missingType.iterableValue (iterable typing relaxed for fixtures)
             {
-                return self::authorizationCollectModelIds($models); // @phpstan-ignore return.type
+                return self::authorizationCollectModelIds($models); // @phpstan-ignore return.type (stub loosens return type)
             }
         };
 
-        $integerKeyed = new class extends Model {
-            /**
-             * @return mixed
-             */
-            public function getKey(): mixed
-            {
-                return 42;
-            }
-        };
-
-        $stringKeyed = new class extends Model {
-            /**
-             * @return mixed
-             */
-            public function getKey(): mixed
-            {
-                return 'alpha';
-            }
-        };
-
-        $stringKeyedDupe = new class extends Model {
-            /**
-             * @return mixed
-             */
-            public function getKey(): mixed
-            {
-                return 'alpha';
-            }
-        };
-
-        $emptyString = new class extends Model {
-            /**
-             * @return mixed
-             */
-            public function getKey(): mixed
-            {
-                return '';
-            }
-        };
-
-        $objectKey = new class extends Model {
-            /**
-             * @return mixed
-             */
-            public function getKey(): mixed
-            {
-                return new \stdClass;
-            }
-        };
-
-        $result = $probe->collect([$integerKeyed, $stringKeyed, $stringKeyedDupe, $emptyString, $objectKey]);
+        $collected = $probe->collect([
+            $this->makeModelWithKey(42),
+            $this->makeModelWithKey('alpha'),
+            $this->makeModelWithKey('alpha'),
+            $this->makeModelWithKey(''),
+            $this->makeModelWithKey(new \stdClass),
+        ]);
 
         // Integer 42 must be cast to string '42'; empties dropped;
         // duplicates squashed; non-string/non-int keys skipped.
-        self::assertSame(['42', 'alpha'], $result); // @phpstan-ignore staticMethod.impossibleType
+        self::assertSame(['42', 'alpha'], $collected); // @phpstan-ignore staticMethod.impossibleType (impossible-type scenario for coverage)
     }
 
     /**
@@ -137,7 +93,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testCollectModelIdsReturnsEmptyForAllMalformedModels(): void
     {
-        /** @phpstan-ignore-next-line class.missingExtends */
+        /** @phpstan-ignore-next-line class.missingExtends (stub does not extend Eloquent model) */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -147,7 +103,7 @@ final class MutationKillersTest extends TestCase
              */
             public function collect(iterable $models): array
             {
-                return self::authorizationCollectModelIds($models); // @phpstan-ignore return.type
+                return self::authorizationCollectModelIds($models); // @phpstan-ignore return.type (stub loosens return type)
             }
         };
 
@@ -161,7 +117,7 @@ final class MutationKillersTest extends TestCase
             }
         };
 
-        $obj = new class extends Model {
+        $objectKeyedIdentity = new class extends Model {
             /**
              * @return mixed
              */
@@ -171,7 +127,7 @@ final class MutationKillersTest extends TestCase
             }
         };
 
-        self::assertSame([], $probe->collect([$empty, $obj, $empty]));
+        self::assertSame([], $probe->collect([$empty, $objectKeyedIdentity, $empty]));
     }
 
     /**
@@ -183,7 +139,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testNearestPivotExpirySelectsStrictlySmallerSeconds(): void
     {
-        /** @phpstan-ignore-next-line class.missingExtends */
+        /** @phpstan-ignore-next-line class.missingExtends (stub does not extend Eloquent model) */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -228,7 +184,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testNearestPivotExpiryReturnsNullWhenNoLiveExpiries(): void
     {
-        /** @phpstan-ignore-next-line class.missingExtends */
+        /** @phpstan-ignore-next-line class.missingExtends (stub does not extend Eloquent model) */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -263,7 +219,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testMinNullableRespectsNullAsUnbounded(): void
     {
-        /** @phpstan-ignore-next-line class.missingExtends */
+        /** @phpstan-ignore-next-line class.missingExtends (stub does not extend Eloquent model) */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -297,7 +253,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testCoerceExpiresAtCoerciveBranches(): void
     {
-        /** @phpstan-ignore-next-line class.missingExtends */
+        /** @phpstan-ignore-next-line class.missingExtends (stub does not extend Eloquent model) */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -311,14 +267,14 @@ final class MutationKillersTest extends TestCase
             }
         };
 
-        $ts = $probe->coerce('2026-06-01 12:00:00');
-        self::assertInstanceOf(\Illuminate\Support\Carbon::class, $ts);
-        self::assertSame('2026-06-01 12:00:00', $ts->toDateTimeString());
+        $timestamp = $probe->coerce('2026-06-01 12:00:00');
+        self::assertInstanceOf(\Illuminate\Support\Carbon::class, $timestamp);
+        self::assertSame('2026-06-01 12:00:00', $timestamp->toDateTimeString());
 
-        $dt = new \DateTimeImmutable('2025-01-01 00:00:00');
-        $ts = $probe->coerce($dt);
-        self::assertInstanceOf(\Illuminate\Support\Carbon::class, $ts);
-        self::assertSame('2025-01-01 00:00:00', $ts->toDateTimeString());
+        $source    = new \DateTimeImmutable('2025-01-01 00:00:00');
+        $timestamp = $probe->coerce($source);
+        self::assertInstanceOf(\Illuminate\Support\Carbon::class, $timestamp);
+        self::assertSame('2025-01-01 00:00:00', $timestamp->toDateTimeString());
 
         self::assertNull($probe->coerce(null));
         self::assertNull($probe->coerce(''));
@@ -336,7 +292,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testSecondsUntilPivotExpiryDropsZeroAndNegative(): void
     {
-        /** @phpstan-ignore-next-line class.missingExtends */
+        /** @phpstan-ignore-next-line class.missingExtends (stub does not extend Eloquent model) */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -379,7 +335,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testGrantExpiriesEqualEveryBranch(): void
     {
-        /** @phpstan-ignore-next-line class.missingExtends */
+        /** @phpstan-ignore-next-line class.missingExtends (stub does not extend Eloquent model) */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -490,25 +446,25 @@ final class MutationKillersTest extends TestCase
         $cache->rememberPermissions(
             $principal,
             static fn (): array => ['x:do'],
-            new ResolutionCacheContext(maxTtl: null, roleIds: [(string) $role->getKey()]), // @phpstan-ignore cast.string
+            new ResolutionCacheContext(maxTtl: null, roleIds: [(string) $role->getKey()]), // @phpstan-ignore cast.string (stub key cast to string)
         );
 
         // Flush the role's tag — subsequent read on fresh cache misses.
         $cache->forgetRoleTags($role);
 
-        $fresh  = new ResolutionCache(store: \Illuminate\Support\Facades\Cache::store('array'), prefix: 'authorization-test');
-        $calls  = 0;
-        $result = $fresh->rememberPermissions(
+        $fresh     = new ResolutionCache(store: \Illuminate\Support\Facades\Cache::store('array'), prefix: 'authorization-test');
+        $calls     = 0;
+        $collected = $fresh->rememberPermissions(
             $principal,
             static function () use (&$calls): array {
                 $calls++;
 
                 return ['y:do'];
             },
-            new ResolutionCacheContext(maxTtl: null, roleIds: [(string) $role->getKey()]), // @phpstan-ignore cast.string
+            new ResolutionCacheContext(maxTtl: null, roleIds: [(string) $role->getKey()]), // @phpstan-ignore cast.string (stub key cast to string)
         );
 
-        self::assertSame(['y:do'], $result);
+        self::assertSame(['y:do'], $collected);
         self::assertSame(1, $calls, 'Resolver should run because tagged-flush invalidated the entry.');
     }
 
@@ -528,9 +484,17 @@ final class MutationKillersTest extends TestCase
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'idem', 'guard_name' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        $expires = new \DateTimeImmutable('+1 hour');
-        $user->assignRole($role, $expires);
-        $user->assignRole($role, $expires);
+        // Anchor Carbon so the computed expiry is deterministic and
+        // identical across both calls — avoids wall-clock drift.
+        \Illuminate\Support\Carbon::setTestNow('2026-01-01 00:00:00');
+
+        try {
+            $expires = \Illuminate\Support\Carbon::now()->addHour()->toDateTimeImmutable();
+            $user->assignRole($role, $expires);
+            $user->assignRole($role, $expires);
+        } finally {
+            \Illuminate\Support\Carbon::setTestNow();
+        }
 
         \Illuminate\Support\Facades\Event::assertNotDispatched(
             \SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleExpiryChanged::class,
@@ -553,8 +517,16 @@ final class MutationKillersTest extends TestCase
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'moving', 'guard_name' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        $user->assignRole($role, new \DateTimeImmutable('+1 hour'));
-        $user->assignRole($role, new \DateTimeImmutable('+2 hours'));
+        // Anchor Carbon so the two expiries are computed against a
+        // fixed instant — keeps the +1h vs +2h delta deterministic.
+        \Illuminate\Support\Carbon::setTestNow('2026-01-01 00:00:00');
+
+        try {
+            $user->assignRole($role, \Illuminate\Support\Carbon::now()->addHour()->toDateTimeImmutable());
+            $user->assignRole($role, \Illuminate\Support\Carbon::now()->addHours(2)->toDateTimeImmutable());
+        } finally {
+            \Illuminate\Support\Carbon::setTestNow();
+        }
 
         \Illuminate\Support\Facades\Event::assertDispatchedTimes(
             \SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleExpiryChanged::class,
@@ -577,8 +549,16 @@ final class MutationKillersTest extends TestCase
         $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'p:m', 'guard_name' => 'web']);
         $user       = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        $user->givePermission($permission, new \DateTimeImmutable('+1 hour'));
-        $user->givePermission($permission, new \DateTimeImmutable('+2 hours'));
+        // Anchor Carbon so the two expiries are computed against a
+        // fixed instant — keeps the +1h vs +2h delta deterministic.
+        \Illuminate\Support\Carbon::setTestNow('2026-01-01 00:00:00');
+
+        try {
+            $user->givePermission($permission, \Illuminate\Support\Carbon::now()->addHour()->toDateTimeImmutable());
+            $user->givePermission($permission, \Illuminate\Support\Carbon::now()->addHours(2)->toDateTimeImmutable());
+        } finally {
+            \Illuminate\Support\Carbon::setTestNow();
+        }
 
         \Illuminate\Support\Facades\Event::assertDispatchedTimes(
             \SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionExpiryChanged::class,
@@ -598,14 +578,14 @@ final class MutationKillersTest extends TestCase
     public function testAuthorizationResolveGrantPivotColumnsHonoursPerPivotOverrides(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(\Illuminate\Contracts\Config\Repository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(\Illuminate\Contracts\Config\Repository::class); // @phpstan-ignore method.nonObject (test container is non-null)
 
         $config->set('authorization.pivots.authorizable_roles.authorizable_type_column', 'custom_type');
         $config->set('authorization.pivots.authorizable_roles.authorizable_id_column', 'custom_id');
         $config->set('authorization.pivots.authorizable_roles.role_column', 'custom_role_fk');
         $config->set('authorization.pivots.authorizable_roles.expires_at_column', 'custom_expires_at');
 
-        /** @phpstan-ignore-next-line class.missingExtends */
+        /** @phpstan-ignore-next-line class.missingExtends (stub does not extend Eloquent model) */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -636,7 +616,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testAuthorizationResolveGrantPivotColumnsDefaultsToPackageColumns(): void
     {
-        /** @phpstan-ignore-next-line class.missingExtends */
+        /** @phpstan-ignore-next-line class.missingExtends (stub does not extend Eloquent model) */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -669,125 +649,9 @@ final class MutationKillersTest extends TestCase
      */
     public function testCacheKeyShapeIsPrefixKindMorphId(): void
     {
-        $driver = new class implements \Illuminate\Contracts\Cache\Store {
-            /** @var array<string, mixed> */
-            public array $storage = [];
-
-            /**
-             * @param  mixed  $key
-             * @return mixed
-             */
-            public function get(mixed $key): mixed
-            {
-                return $this->storage[$key] ?? null; // @phpstan-ignore offsetAccess.invalidOffset
-            }
-
-            /**
-             * @param  array<int, string>  $keys
-             * @return array<string, mixed>
-             */
-            public function many(array $keys): array // @phpstan-ignore method.childParameterType
-            {
-                return [];
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $value
-             * @param  mixed  $seconds
-             * @return bool
-             */
-            public function put(mixed $key, mixed $value, mixed $seconds): bool
-            {
-                $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset
-
-                return true;
-            }
-
-            /**
-             * @param  array  $values
-             * @param  mixed  $seconds
-             * @return bool
-             */
-            public function putMany(array $values, mixed $seconds): bool // @phpstan-ignore missingType.iterableValue
-            {
-                return true;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $value
-             * @return bool|int
-             */
-            public function increment(mixed $key, mixed $value = 1): bool|int
-            {
-                return false;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $value
-             * @return bool|int
-             */
-            public function decrement(mixed $key, mixed $value = 1): bool|int
-            {
-                return false;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $value
-             * @return bool
-             */
-            public function forever(mixed $key, mixed $value): bool
-            {
-                $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset
-
-                return true;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $ttl
-             * @return bool
-             */
-            public function touch(mixed $key, mixed $ttl): bool
-            {
-                return true;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @return bool
-             */
-            public function forget(mixed $key): bool
-            {
-                unset($this->storage[$key]); // @phpstan-ignore offsetAccess.invalidOffset
-
-                return true;
-            }
-
-            /**
-             * @return bool
-             */
-            public function flush(): bool
-            {
-                $this->storage = [];
-
-                return true;
-            }
-
-            /**
-             * @return string
-             */
-            public function getPrefix(): string
-            {
-                return '';
-            }
-        };
-
-        $store = new \Illuminate\Cache\Repository($driver);
-        $cache = new ResolutionCache(store: $store, ttl: 0, prefix: 'km-test');
+        $driver = new \Tests\Feature\Stubs\NonTaggableCacheStore;
+        $store  = new \Illuminate\Cache\Repository($driver);
+        $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'km-test');
 
         // A principal exposing getMorphClass + getKey should key
         // as `<prefix>:<kind>:<morph>:<id>`.
@@ -828,125 +692,9 @@ final class MutationKillersTest extends TestCase
      */
     public function testCacheKeyShapeFallsBackToClassNameWhenMorphMissing(): void
     {
-        $driver = new class implements \Illuminate\Contracts\Cache\Store {
-            /** @var array<string, mixed> */
-            public array $storage = [];
-
-            /**
-             * @param  mixed  $key
-             * @return mixed
-             */
-            public function get(mixed $key): mixed
-            {
-                return $this->storage[$key] ?? null; // @phpstan-ignore offsetAccess.invalidOffset
-            }
-
-            /**
-             * @param  array<int, string>  $keys
-             * @return array<string, mixed>
-             */
-            public function many(array $keys): array // @phpstan-ignore method.childParameterType
-            {
-                return [];
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $value
-             * @param  mixed  $seconds
-             * @return bool
-             */
-            public function put(mixed $key, mixed $value, mixed $seconds): bool
-            {
-                $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset
-
-                return true;
-            }
-
-            /**
-             * @param  array  $values
-             * @param  mixed  $seconds
-             * @return bool
-             */
-            public function putMany(array $values, mixed $seconds): bool // @phpstan-ignore missingType.iterableValue
-            {
-                return true;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $value
-             * @return bool|int
-             */
-            public function increment(mixed $key, mixed $value = 1): bool|int
-            {
-                return false;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $value
-             * @return bool|int
-             */
-            public function decrement(mixed $key, mixed $value = 1): bool|int
-            {
-                return false;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $value
-             * @return bool
-             */
-            public function forever(mixed $key, mixed $value): bool
-            {
-                $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset
-
-                return true;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $ttl
-             * @return bool
-             */
-            public function touch(mixed $key, mixed $ttl): bool
-            {
-                return true;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @return bool
-             */
-            public function forget(mixed $key): bool
-            {
-                unset($this->storage[$key]); // @phpstan-ignore offsetAccess.invalidOffset
-
-                return true;
-            }
-
-            /**
-             * @return bool
-             */
-            public function flush(): bool
-            {
-                $this->storage = [];
-
-                return true;
-            }
-
-            /**
-             * @return string
-             */
-            public function getPrefix(): string
-            {
-                return '';
-            }
-        };
-
-        $store = new \Illuminate\Cache\Repository($driver);
-        $cache = new ResolutionCache(store: $store, ttl: 0, prefix: 'km');
+        $driver = new \Tests\Feature\Stubs\NonTaggableCacheStore;
+        $store  = new \Illuminate\Cache\Repository($driver);
+        $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'km');
 
         $principal = new class {
             /**
@@ -1196,14 +944,14 @@ final class MutationKillersTest extends TestCase
     /**
      * `authorize()` populates the `LastDecisionStore` on both the
      * success and deny paths — pins the MethodCallRemoval mutant
-     * on `$this->lastDecisionStore->put($result)` inside the
+     * on `$this->lastDecisionStore->put($collected)` inside the
      * `authorize` branch (not evaluate).
      *
      * @return void
      */
     public function testAuthorizeWritesLastDecisionOnBothOutcomes(): void
     {
-        $this->app->make(\SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore::class)->forget(); // @phpstan-ignore method.nonObject
+        $this->app->make(\SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore::class)->forget(); // @phpstan-ignore method.nonObject (test container is non-null)
 
         // Deny path — authorize() throws, lastDecision captures the result.
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'la', 'guard_name' => 'web']);
@@ -1283,8 +1031,16 @@ final class MutationKillersTest extends TestCase
         ]);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        $user->attachPolicy($policy, new \DateTimeImmutable('+1 hour'));
-        $user->attachPolicy($policy, new \DateTimeImmutable('+2 hours'));
+        // Anchor Carbon so the two expiries are computed against a
+        // fixed instant — keeps the +1h vs +2h delta deterministic.
+        \Illuminate\Support\Carbon::setTestNow('2026-01-01 00:00:00');
+
+        try {
+            $user->attachPolicy($policy, \Illuminate\Support\Carbon::now()->addHour()->toDateTimeImmutable());
+            $user->attachPolicy($policy, \Illuminate\Support\Carbon::now()->addHours(2)->toDateTimeImmutable());
+        } finally {
+            \Illuminate\Support\Carbon::setTestNow();
+        }
 
         \Illuminate\Support\Facades\Event::assertDispatchedTimes(
             \SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyExpiryChanged::class,
@@ -1311,5 +1067,33 @@ final class MutationKillersTest extends TestCase
             self::assertInstanceOf($class, $exception);
             self::assertStringContainsString($message, $exception->getMessage());
         }
+    }
+
+    /**
+     * Build a throwaway Eloquent model whose `getKey()` returns the
+     * supplied value — fixture helper for the collect-ids test
+     * matrix (integer / string / duplicate / empty / non-scalar).
+     *
+     * @param  mixed  $key
+     * @return \Illuminate\Database\Eloquent\Model
+     */
+    private function makeModelWithKey(mixed $key): Model
+    {
+        $model = new class extends Model {
+            /** @var mixed */
+            public mixed $fixedKey = null;
+
+            /**
+             * @return mixed
+             */
+            public function getKey(): mixed
+            {
+                return $this->fixedKey;
+            }
+        };
+
+        $model->fixedKey = $key;
+
+        return $model;
     }
 }

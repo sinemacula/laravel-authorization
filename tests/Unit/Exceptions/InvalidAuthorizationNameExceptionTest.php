@@ -9,33 +9,7 @@ use PHPUnit\Framework\Attributes\CoversTrait;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameException;
 use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
-
-/**
- * Stub model that uses the base `ValidatesAuthorizationName` trait
- * without overriding `getAuthorizationNameKind()` — exercises the
- * trait's default label fallback.
- *
- * @internal
- *
- * @SuppressWarnings("php:S1192")
- */
-final class StubAuthorizationEntity // @phpstan-ignore class.missingExtends
-{
-    use ValidatesAuthorizationName;
-
-    /** @var array<string, mixed> */
-    public array $attributes = [];
-
-    /**
-     * Expose the protected kind resolver for the test.
-     *
-     * @return string
-     */
-    public function resolveKind(): string
-    {
-        return $this->getAuthorizationNameKind();
-    }
-}
+use Tests\Unit\Exceptions\Stubs\StubAuthorizationEntity;
 
 /**
  * Unit tests for `InvalidAuthorizationNameException` and the
@@ -52,10 +26,8 @@ final class StubAuthorizationEntity // @phpstan-ignore class.missingExtends
  *
  * @internal
  */
-// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 #[CoversClass(InvalidAuthorizationNameException::class)]
 #[CoversTrait(ValidatesAuthorizationName::class)]
-// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 final class InvalidAuthorizationNameExceptionTest extends TestCase
 {
     private const string HAS_SPACE = 'has space';

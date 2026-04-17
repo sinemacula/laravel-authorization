@@ -250,7 +250,7 @@ final class GrantRoleCommandTest extends TestCase
         ]);
 
         $exitCode = Artisan::call('authorization:grant', [
-            'identity' => Role::class . ':' . $role->getKey(), // @phpstan-ignore binaryOp.invalid
+            'identity' => Role::class . ':' . $role->getKey(), // @phpstan-ignore binaryOp.invalid (class string + id fixture)
             'role'     => 'check',
         ]);
         $output = Artisan::output();

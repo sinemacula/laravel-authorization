@@ -154,14 +154,27 @@ final class MiddlewareBudgetTest extends TestCase
     {
         $resolver = new class ($principal) implements PrincipalResolver {
             /**
+             * Create a new resolver wrapping a fixed principal.
+             *
              * @param  object  $principal
+             * @return void
              */
-            public function __construct(private readonly object $principal) {}
+            public function __construct(
+
+                /** The principal returned by every resolution call. */
+                private readonly object $principal,
+
+            ) {}
 
             /**
+             * Resolve the current principal.
+             *
              * @return object|null
+             *
+             * @phpstan-ignore-next-line return.unusedType (stub returns non-null)
              */
-            public function resolve(): ?object // @phpstan-ignore return.unusedType
+            #[\Override]
+            public function resolve(): ?object
             {
                 return $this->principal;
             }

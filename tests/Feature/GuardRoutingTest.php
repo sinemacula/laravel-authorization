@@ -63,6 +63,7 @@ final class GuardRoutingTest extends TestCase
      *
      * @return void
      */
+    #[\Override]
     protected function tearDown(): void
     {
         Schema::dropIfExists('api_guarded_users');
@@ -222,6 +223,7 @@ final class GuardRoutingTest extends TestCase
      *
      * @return void
      */
+    #[\Override]
     protected function defineDatabaseMigrations(): void
     {
         parent::defineDatabaseMigrations();
@@ -254,10 +256,10 @@ class ApiGuardedUser extends Model implements AuthorizableIdentity
     protected $keyType = 'string';
 
     /** @var array<int, string> */
-    protected $fillable = ['id']; // @phpstan-ignore property.phpDocType
+    protected $fillable = ['id']; // @phpstan-ignore property.phpDocType (stub docblock kept loose)
 
     /** @var string */
-    protected $table = 'api_guarded_users'; // @phpstan-ignore property.phpDocType
+    protected $table = 'api_guarded_users'; // @phpstan-ignore property.phpDocType (stub docblock kept loose)
 
     /**
      * @return string
@@ -289,8 +291,8 @@ class DefaultGuardUser extends Model implements AuthorizableIdentity
     protected $keyType = 'string';
 
     /** @var array<int, string> */
-    protected $fillable = ['id']; // @phpstan-ignore property.phpDocType
+    protected $fillable = ['id']; // @phpstan-ignore property.phpDocType (stub docblock kept loose)
 
     /** @var string */
-    protected $table = 'stub_identities'; // @phpstan-ignore property.phpDocType
+    protected $table = 'stub_identities'; // @phpstan-ignore property.phpDocType (stub docblock kept loose)
 }

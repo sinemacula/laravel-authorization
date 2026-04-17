@@ -126,7 +126,7 @@ final class StatementTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        // @phpstan-ignore-next-line
+        // @phpstan-ignore-next-line argument.type (test passes deliberately-invalid input to exercise validation error path)
         Statement::fromArray(['effect' => 'allow', 'actions' => [123]]);
     }
 
@@ -139,7 +139,7 @@ final class StatementTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        // @phpstan-ignore-next-line
+        // @phpstan-ignore-next-line argument.type (test passes deliberately-invalid input to exercise validation error path)
         Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'resources' => 'nope']);
     }
 
@@ -168,7 +168,7 @@ final class StatementTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        // @phpstan-ignore-next-line
+        // @phpstan-ignore-next-line argument.type (test passes deliberately-invalid input to exercise validation error path)
         Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'resources' => [42]]);
     }
 
@@ -181,7 +181,7 @@ final class StatementTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        // @phpstan-ignore-next-line
+        // @phpstan-ignore-next-line argument.type (test passes deliberately-invalid input to exercise validation error path)
         Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => 'nope']);
     }
 
@@ -194,7 +194,7 @@ final class StatementTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        // @phpstan-ignore-next-line
+        // @phpstan-ignore-next-line argument.type (test passes deliberately-invalid input to exercise validation error path)
         Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => [42 => 'v']]);
     }
 
@@ -302,86 +302,12 @@ final class StatementTest extends TestCase
      */
     public static function operatorProvider(): iterable
     {
-        yield from [
-            'eq-true'             => [['tenant' => ['eq' => 'org-1']], ['tenant' => 'org-1'], true],
-            'eq-false'            => [['tenant' => ['eq' => 'org-1']], ['tenant' => 'org-2'], false],
-            'neq-true'            => [['tenant' => ['neq' => 'org-1']], ['tenant' => 'org-2'], true],
-            'neq-false'           => [['tenant' => ['neq' => 'org-1']], ['tenant' => 'org-1'], false],
-            'in-true'             => [['role' => ['in' => ['admin', 'staff']]], ['role' => 'admin'], true],
-            'in-false'            => [['role' => ['in' => ['admin', 'staff']]], ['role' => 'guest'], false],
-            'in-non-array'        => [['role' => ['in' => 'admin']], ['role' => 'admin'], false],
-            'not_in-true'         => [['role' => ['not_in' => ['admin', 'staff']]], ['role' => 'guest'], true],
-            'not_in-false'        => [['role' => ['not_in' => ['admin', 'staff']]], ['role' => 'admin'], false],
-            'starts_with-true'    => [['email' => ['starts_with' => 'admin@']], ['email' => 'admin@example'], true],
-            'ends_with-true'      => [['email' => ['ends_with' => 'sine.co']], ['email' => 'a@sine.co'], true],
-            'cidr-match'          => [['ip' => ['cidr' => '192.168.1.0/24']], ['ip' => '192.168.1.25'], true],
-            'cidr-no-match'       => [['ip' => ['cidr' => '192.168.1.0/24']], ['ip' => '10.0.0.1'], false],
-            'cidr-exact'          => [['ip' => ['cidr' => '192.168.1.1']], ['ip' => '192.168.1.1'], true],
-            'cidr-zero-bits'      => [['ip' => ['cidr' => '0.0.0.0/0']], ['ip' => '1.2.3.4'], true],
-            'cidr-mask-32-match'  => [['ip' => ['cidr' => '192.168.1.1/32']], ['ip' => '192.168.1.1'], true],
-            'cidr-mask-32-miss'   => [['ip' => ['cidr' => '192.168.1.1/32']], ['ip' => '192.168.1.2'], false],
-            'cidr-mask-31-match'  => [['ip' => ['cidr' => '192.168.1.0/31']], ['ip' => '192.168.1.1'], true],
-            'cidr-mask-31-miss'   => [['ip' => ['cidr' => '192.168.1.0/31']], ['ip' => '192.168.1.2'], false],
-            'between-equal-lower' => [['at' => ['between' => ['2026-04-15', '2026-04-20']]], ['at' => '2026-04-15'], true],
-            'between-equal-upper' => [['at' => ['between' => ['2026-04-15', '2026-04-20']]], ['at' => '2026-04-20'], true],
-            'between-just-below'  => [['at' => ['between' => ['2026-04-15', '2026-04-20']]], ['at' => '2026-04-14'], false],
-            'between-just-above'  => [['at' => ['between' => ['2026-04-15', '2026-04-20']]], ['at' => '2026-04-21'], false],
-            'before-equal'        => [['at' => ['before' => '2026-04-15']], ['at' => '2026-04-15'], false],
-            'after-equal'         => [['at' => ['after' => '2026-04-15']], ['at' => '2026-04-15'], false],
-            'cidr-bad-ip'         => [['ip' => ['cidr' => '192.168.1.0/24']], ['ip' => 'not-an-ip'], false],
-            'cidr-bad-bits'       => [['ip' => ['cidr' => '192.168.1.0/abc']], ['ip' => '192.168.1.25'], false],
-            'cidr-bits-too-big'   => [['ip' => ['cidr' => '192.168.1.0/64']], ['ip' => '192.168.1.25'], false],
-            'before-iso'          => [['at' => ['before' => '2026-04-15']], ['at' => '2026-04-14'], true],
-            'before-iso-false'    => [['at' => ['before' => '2026-04-15']], ['at' => '2026-04-16'], false],
-            'after-iso'           => [['at' => ['after' => '2026-04-15']], ['at' => '2026-04-16'], true],
-            'between-iso'         => [['at' => ['between' => ['2026-04-10', '2026-04-20']]], ['at' => '2026-04-15'], true],
-            'between-outside'     => [['at' => ['between' => ['2026-04-10', '2026-04-12']]], ['at' => '2026-04-15'], false],
-            'between-bad-shape'   => [['at' => ['between' => ['2026-04-10']]], ['at' => '2026-04-15'], false],
-            'between-bad-left'    => [['at' => ['between' => ['bad', '2026-04-20']]], ['at' => '2026-04-15'], false],
-            'time-invalid'        => [['at' => ['before' => 'not-a-date']], ['at' => '2026-04-14'], false],
-            'time-int'            => [['at' => ['before' => 2000000000]], ['at' => 1000000000], true],
-            'time-empty-string'   => [['at' => ['before' => '2026-04-15']], ['at' => ''], false],
-
-            // #38 — string_like operator
-            'string_like-match'      => [['name' => ['string_like' => 'admin*']], ['name' => 'admin-user'], true],
-            'string_like-miss'       => [['name' => ['string_like' => 'admin*']], ['name' => 'guest-user'], false],
-            'string_like-question'   => [['name' => ['string_like' => 'user?']], ['name' => 'user1'], true],
-            'string_like-non-string' => [['name' => ['string_like' => 'admin*']], ['name' => 123], false],
-
-            // #38 — null / not_null operators
-            'null-true'              => [['field' => ['null' => true]], ['field' => null], true],
-            'null-false'             => [['field' => ['null' => true]], ['field' => 'value'], false],
-            'null-zero-is-not-null'  => [['field' => ['null' => true]], ['field' => 0], false],
-            'null-empty-is-not-null' => [['field' => ['null' => true]], ['field' => ''], false],
-            'not_null-true'          => [['field' => ['not_null' => true]], ['field' => 'value'], true],
-            'not_null-false'         => [['field' => ['not_null' => true]], ['field' => null], false],
-
-            // #38 — numeric comparison operators
-            'gt-true'                => [['age' => ['gt' => 18]], ['age' => 21], true],
-            'gt-false-equal'         => [['age' => ['gt' => 18]], ['age' => 18], false],
-            'gt-false-less'          => [['age' => ['gt' => 18]], ['age' => 16], false],
-            'gte-true-equal'         => [['age' => ['gte' => 18]], ['age' => 18], true],
-            'gte-true-greater'       => [['age' => ['gte' => 18]], ['age' => 19], true],
-            'gte-false'              => [['age' => ['gte' => 18]], ['age' => 17], false],
-            'lt-true'                => [['age' => ['lt' => 18]], ['age' => 16], true],
-            'lt-false-equal'         => [['age' => ['lt' => 18]], ['age' => 18], false],
-            'lt-false-greater'       => [['age' => ['lt' => 18]], ['age' => 21], false],
-            'lte-true-equal'         => [['age' => ['lte' => 18]], ['age' => 18], true],
-            'lte-true-less'          => [['age' => ['lte' => 18]], ['age' => 17], true],
-            'lte-false'              => [['age' => ['lte' => 18]], ['age' => 19], false],
-            'gt-string-numeric'      => [['age' => ['gt' => '18']], ['age' => '21'], true],
-            'gt-non-numeric-actual'  => [['age' => ['gt' => 18]], ['age' => 'abc'], false],
-            'gt-non-numeric-operand' => [['age' => ['gt' => 'abc']], ['age' => 21], false],
-            'gt-float'               => [['val' => ['gt' => 1.5]], ['val' => 2.5], true],
-
-            // #38 — bool operator
-            'bool-true-string'       => [['flag' => ['bool' => 'true']], ['flag' => true], true],
-            'bool-true-int'          => [['flag' => ['bool' => 1]], ['flag' => 'true'], true],
-            'bool-true-string-one'   => [['flag' => ['bool' => '1']], ['flag' => true], true],
-            'bool-false-mismatch'    => [['flag' => ['bool' => 'true']], ['flag' => false], false],
-            'bool-false-both'        => [['flag' => ['bool' => false]], ['flag' => 0], true],
-            'bool-false-zero-string' => [['flag' => ['bool' => '0']], ['flag' => false], true],
-        ];
+        yield from self::equalityAndMembershipCases();
+        yield from self::stringAndCidrCases();
+        yield from self::temporalCases();
+        yield from self::stringLikeAndNullCases();
+        yield from self::numericComparisonCases();
+        yield from self::boolCases();
     }
 
     /**
@@ -733,7 +659,7 @@ final class StatementTest extends TestCase
         // Confirm non-string throws — that's the array_map callback
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('actions must be strings');
-        // @phpstan-ignore-next-line
+        // @phpstan-ignore-next-line argument.type (test passes deliberately-invalid input to exercise validation error path)
         Statement::fromArray(['effect' => 'allow', 'actions' => ['valid', 42]]);
     }
 
@@ -809,56 +735,7 @@ final class StatementTest extends TestCase
      */
     public function testEveryOperatorArmIsDistinguishable(): void
     {
-        // Each sub-array: [conditions, context, expected]
-        $cases = [
-            // eq vs neq
-            ['k' => ['eq' => 'a'], 'ctx' => 'a', 'expect' => true],
-            ['k' => ['neq' => 'a'], 'ctx' => 'b', 'expect' => true],
-            ['k' => ['neq' => 'a'], 'ctx' => 'a', 'expect' => false],
-
-            // in vs not_in
-            ['k' => ['in' => ['a', 'b']], 'ctx' => 'a', 'expect' => true],
-            ['k' => ['in' => ['a', 'b']], 'ctx' => 'c', 'expect' => false],
-            ['k' => ['not_in' => ['a', 'b']], 'ctx' => 'c', 'expect' => true],
-            ['k' => ['not_in' => ['a', 'b']], 'ctx' => 'a', 'expect' => false],
-
-            // in with non-array operand
-            ['k' => ['in' => 'not-array'], 'ctx' => 'x', 'expect' => false],
-            // not_in with non-array operand
-            ['k' => ['not_in' => 'not-array'], 'ctx' => 'x', 'expect' => false],
-
-            // starts_with / ends_with
-            ['k' => ['starts_with' => 'he'], 'ctx' => 'hello', 'expect' => true],
-            ['k' => ['starts_with' => 'he'], 'ctx' => 'world', 'expect' => false],
-            ['k' => ['ends_with' => 'lo'], 'ctx' => 'hello', 'expect' => true],
-            ['k' => ['ends_with' => 'lo'], 'ctx' => 'world', 'expect' => false],
-
-            // starts_with / ends_with type guard: non-string actual
-            ['k' => ['starts_with' => 'x'], 'ctx' => 123, 'expect' => false],
-            ['k' => ['ends_with' => 'x'], 'ctx' => 123, 'expect' => false],
-            // starts_with / ends_with type guard: non-string operand
-            ['k' => ['starts_with' => 42], 'ctx' => 'hello', 'expect' => false],
-            ['k' => ['ends_with' => 42], 'ctx' => 'hello', 'expect' => false],
-
-            // cidr type guards
-            ['k' => ['cidr' => 123], 'ctx' => '10.0.0.1', 'expect' => false],
-            ['k' => ['cidr' => '10.0.0.0/8'], 'ctx' => 123, 'expect' => false],
-
-            // string_like
-            ['k' => ['string_like' => 'foo*'], 'ctx' => 'foobar', 'expect' => true],
-            ['k' => ['string_like' => 'foo*'], 'ctx' => 'baz', 'expect' => false],
-            // string_like type guards
-            ['k' => ['string_like' => 42], 'ctx' => 'foo', 'expect' => false],
-            ['k' => ['string_like' => 'foo*'], 'ctx' => 42, 'expect' => false],
-
-            // null / not_null
-            ['k' => ['null' => true], 'ctx' => null, 'expect' => true],
-            ['k' => ['null' => true], 'ctx' => 'x', 'expect' => false],
-            ['k' => ['not_null' => true], 'ctx' => 'x', 'expect' => true],
-            ['k' => ['not_null' => true], 'ctx' => null, 'expect' => false],
-        ];
-
-        foreach ($cases as $i => $case) {
+        foreach (self::operatorArmCases() as $i => $case) {
             $statement = Statement::fromArray([
                 'effect'     => 'allow',
                 'actions'    => ['x'],
@@ -1127,5 +1004,184 @@ final class StatementTest extends TestCase
             ['age' => 30],
             $interpolator,
         ));
+    }
+
+    /**
+     * eq / neq / in / not_in cases.
+     *
+     * @return \Generator<string, array{0: array<string, mixed>, 1: array<string, mixed>, 2: bool}>
+     */
+    private static function equalityAndMembershipCases(): iterable
+    {
+        yield 'eq-true' => [['tenant' => ['eq' => 'org-1']], ['tenant' => 'org-1'], true];
+        yield 'eq-false' => [['tenant' => ['eq' => 'org-1']], ['tenant' => 'org-2'], false];
+        yield 'neq-true' => [['tenant' => ['neq' => 'org-1']], ['tenant' => 'org-2'], true];
+        yield 'neq-false' => [['tenant' => ['neq' => 'org-1']], ['tenant' => 'org-1'], false];
+        yield 'in-true' => [['role' => ['in' => ['admin', 'staff']]], ['role' => 'admin'], true];
+        yield 'in-false' => [['role' => ['in' => ['admin', 'staff']]], ['role' => 'guest'], false];
+        yield 'in-non-array' => [['role' => ['in' => 'admin']], ['role' => 'admin'], false];
+        yield 'not_in-true' => [['role' => ['not_in' => ['admin', 'staff']]], ['role' => 'guest'], true];
+        yield 'not_in-false' => [['role' => ['not_in' => ['admin', 'staff']]], ['role' => 'admin'], false];
+    }
+
+    /**
+     * starts_with / ends_with / cidr cases.
+     *
+     * @return \Generator<string, array{0: array<string, mixed>, 1: array<string, mixed>, 2: bool}>
+     */
+    private static function stringAndCidrCases(): iterable
+    {
+        yield 'starts_with-true' => [['email' => ['starts_with' => 'admin@']], ['email' => 'admin@example'], true];
+        yield 'ends_with-true' => [['email' => ['ends_with' => 'sine.co']], ['email' => 'a@sine.co'], true];
+        yield 'cidr-match' => [['ip' => ['cidr' => '192.168.1.0/24']], ['ip' => '192.168.1.25'], true];
+        yield 'cidr-no-match' => [['ip' => ['cidr' => '192.168.1.0/24']], ['ip' => '10.0.0.1'], false];
+        yield 'cidr-exact' => [['ip' => ['cidr' => '192.168.1.1']], ['ip' => '192.168.1.1'], true];
+        yield 'cidr-zero-bits' => [['ip' => ['cidr' => '0.0.0.0/0']], ['ip' => '1.2.3.4'], true];
+        yield 'cidr-mask-32-match' => [['ip' => ['cidr' => '192.168.1.1/32']], ['ip' => '192.168.1.1'], true];
+        yield 'cidr-mask-32-miss' => [['ip' => ['cidr' => '192.168.1.1/32']], ['ip' => '192.168.1.2'], false];
+        yield 'cidr-mask-31-match' => [['ip' => ['cidr' => '192.168.1.0/31']], ['ip' => '192.168.1.1'], true];
+        yield 'cidr-mask-31-miss' => [['ip' => ['cidr' => '192.168.1.0/31']], ['ip' => '192.168.1.2'], false];
+        yield 'cidr-bad-ip' => [['ip' => ['cidr' => '192.168.1.0/24']], ['ip' => 'not-an-ip'], false];
+        yield 'cidr-bad-bits' => [['ip' => ['cidr' => '192.168.1.0/abc']], ['ip' => '192.168.1.25'], false];
+        yield 'cidr-bits-too-big' => [['ip' => ['cidr' => '192.168.1.0/64']], ['ip' => '192.168.1.25'], false];
+    }
+
+    /**
+     * before / after / between cases.
+     *
+     * @return \Generator<string, array{0: array<string, mixed>, 1: array<string, mixed>, 2: bool}>
+     */
+    private static function temporalCases(): iterable
+    {
+        yield 'between-equal-lower' => [['at' => ['between' => ['2026-04-15', '2026-04-20']]], ['at' => '2026-04-15'], true];
+        yield 'between-equal-upper' => [['at' => ['between' => ['2026-04-15', '2026-04-20']]], ['at' => '2026-04-20'], true];
+        yield 'between-just-below' => [['at' => ['between' => ['2026-04-15', '2026-04-20']]], ['at' => '2026-04-14'], false];
+        yield 'between-just-above' => [['at' => ['between' => ['2026-04-15', '2026-04-20']]], ['at' => '2026-04-21'], false];
+        yield 'before-equal' => [['at' => ['before' => '2026-04-15']], ['at' => '2026-04-15'], false];
+        yield 'after-equal' => [['at' => ['after' => '2026-04-15']], ['at' => '2026-04-15'], false];
+        yield 'before-iso' => [['at' => ['before' => '2026-04-15']], ['at' => '2026-04-14'], true];
+        yield 'before-iso-false' => [['at' => ['before' => '2026-04-15']], ['at' => '2026-04-16'], false];
+        yield 'after-iso' => [['at' => ['after' => '2026-04-15']], ['at' => '2026-04-16'], true];
+        yield 'between-iso' => [['at' => ['between' => ['2026-04-10', '2026-04-20']]], ['at' => '2026-04-15'], true];
+        yield 'between-outside' => [['at' => ['between' => ['2026-04-10', '2026-04-12']]], ['at' => '2026-04-15'], false];
+        yield 'between-bad-shape' => [['at' => ['between' => ['2026-04-10']]], ['at' => '2026-04-15'], false];
+        yield 'between-bad-left' => [['at' => ['between' => ['bad', '2026-04-20']]], ['at' => '2026-04-15'], false];
+        yield 'time-invalid' => [['at' => ['before' => 'not-a-date']], ['at' => '2026-04-14'], false];
+        yield 'time-int' => [['at' => ['before' => 2000000000]], ['at' => 1000000000], true];
+        yield 'time-empty-string' => [['at' => ['before' => '2026-04-15']], ['at' => ''], false];
+    }
+
+    /**
+     * string_like / null / not_null cases (#38).
+     *
+     * @return \Generator<string, array{0: array<string, mixed>, 1: array<string, mixed>, 2: bool}>
+     */
+    private static function stringLikeAndNullCases(): iterable
+    {
+        yield 'string_like-match' => [['name' => ['string_like' => 'admin*']], ['name' => 'admin-user'], true];
+        yield 'string_like-miss' => [['name' => ['string_like' => 'admin*']], ['name' => 'guest-user'], false];
+        yield 'string_like-question' => [['name' => ['string_like' => 'user?']], ['name' => 'user1'], true];
+        yield 'string_like-non-string' => [['name' => ['string_like' => 'admin*']], ['name' => 123], false];
+        yield 'null-true' => [['field' => ['null' => true]], ['field' => null], true];
+        yield 'null-false' => [['field' => ['null' => true]], ['field' => 'value'], false];
+        yield 'null-zero-is-not-null' => [['field' => ['null' => true]], ['field' => 0], false];
+        yield 'null-empty-is-not-null' => [['field' => ['null' => true]], ['field' => ''], false];
+        yield 'not_null-true' => [['field' => ['not_null' => true]], ['field' => 'value'], true];
+        yield 'not_null-false' => [['field' => ['not_null' => true]], ['field' => null], false];
+    }
+
+    /**
+     * gt / gte / lt / lte cases (#38).
+     *
+     * @return \Generator<string, array{0: array<string, mixed>, 1: array<string, mixed>, 2: bool}>
+     */
+    private static function numericComparisonCases(): iterable
+    {
+        yield 'gt-true' => [['age' => ['gt' => 18]], ['age' => 21], true];
+        yield 'gt-false-equal' => [['age' => ['gt' => 18]], ['age' => 18], false];
+        yield 'gt-false-less' => [['age' => ['gt' => 18]], ['age' => 16], false];
+        yield 'gte-true-equal' => [['age' => ['gte' => 18]], ['age' => 18], true];
+        yield 'gte-true-greater' => [['age' => ['gte' => 18]], ['age' => 19], true];
+        yield 'gte-false' => [['age' => ['gte' => 18]], ['age' => 17], false];
+        yield 'lt-true' => [['age' => ['lt' => 18]], ['age' => 16], true];
+        yield 'lt-false-equal' => [['age' => ['lt' => 18]], ['age' => 18], false];
+        yield 'lt-false-greater' => [['age' => ['lt' => 18]], ['age' => 21], false];
+        yield 'lte-true-equal' => [['age' => ['lte' => 18]], ['age' => 18], true];
+        yield 'lte-true-less' => [['age' => ['lte' => 18]], ['age' => 17], true];
+        yield 'lte-false' => [['age' => ['lte' => 18]], ['age' => 19], false];
+        yield 'gt-string-numeric' => [['age' => ['gt' => '18']], ['age' => '21'], true];
+        yield 'gt-non-numeric-actual' => [['age' => ['gt' => 18]], ['age' => 'abc'], false];
+        yield 'gt-non-numeric-operand' => [['age' => ['gt' => 'abc']], ['age' => 21], false];
+        yield 'gt-float' => [['val' => ['gt' => 1.5]], ['val' => 2.5], true];
+    }
+
+    /**
+     * bool operator cases (#38).
+     *
+     * @return \Generator<string, array{0: array<string, mixed>, 1: array<string, mixed>, 2: bool}>
+     */
+    private static function boolCases(): iterable
+    {
+        yield 'bool-true-string' => [['flag' => ['bool' => 'true']], ['flag' => true], true];
+        yield 'bool-true-int' => [['flag' => ['bool' => 1]], ['flag' => 'true'], true];
+        yield 'bool-true-string-one' => [['flag' => ['bool' => '1']], ['flag' => true], true];
+        yield 'bool-false-mismatch' => [['flag' => ['bool' => 'true']], ['flag' => false], false];
+        yield 'bool-false-both' => [['flag' => ['bool' => false]], ['flag' => 0], true];
+        yield 'bool-false-zero-string' => [['flag' => ['bool' => '0']], ['flag' => false], true];
+    }
+
+    /**
+     * Fixture list driving `testEveryOperatorArmIsDistinguishable`.
+     * Each row carries the per-operator condition, the actual ctx
+     * value, and the expected evaluation result.
+     *
+     * @return list<array{k: array<string, mixed>, ctx: mixed, expect: bool}>
+     */
+    private static function operatorArmCases(): array
+    {
+        return [
+            // eq vs neq
+            ['k' => ['eq' => 'a'], 'ctx' => 'a', 'expect' => true],
+            ['k' => ['neq' => 'a'], 'ctx' => 'b', 'expect' => true],
+            ['k' => ['neq' => 'a'], 'ctx' => 'a', 'expect' => false],
+
+            // in vs not_in
+            ['k' => ['in' => ['a', 'b']], 'ctx' => 'a', 'expect' => true],
+            ['k' => ['in' => ['a', 'b']], 'ctx' => 'c', 'expect' => false],
+            ['k' => ['not_in' => ['a', 'b']], 'ctx' => 'c', 'expect' => true],
+            ['k' => ['not_in' => ['a', 'b']], 'ctx' => 'a', 'expect' => false],
+
+            // in / not_in with non-array operand
+            ['k' => ['in' => 'not-array'], 'ctx' => 'x', 'expect' => false],
+            ['k' => ['not_in' => 'not-array'], 'ctx' => 'x', 'expect' => false],
+
+            // starts_with / ends_with
+            ['k' => ['starts_with' => 'he'], 'ctx' => 'hello', 'expect' => true],
+            ['k' => ['starts_with' => 'he'], 'ctx' => 'world', 'expect' => false],
+            ['k' => ['ends_with' => 'lo'], 'ctx' => 'hello', 'expect' => true],
+            ['k' => ['ends_with' => 'lo'], 'ctx' => 'world', 'expect' => false],
+
+            // starts_with / ends_with type guards (non-string actual / operand)
+            ['k' => ['starts_with' => 'x'], 'ctx' => 123, 'expect' => false],
+            ['k' => ['ends_with' => 'x'], 'ctx' => 123, 'expect' => false],
+            ['k' => ['starts_with' => 42], 'ctx' => 'hello', 'expect' => false],
+            ['k' => ['ends_with' => 42], 'ctx' => 'hello', 'expect' => false],
+
+            // cidr type guards
+            ['k' => ['cidr' => 123], 'ctx' => '10.0.0.1', 'expect' => false],
+            ['k' => ['cidr' => '10.0.0.0/8'], 'ctx' => 123, 'expect' => false],
+
+            // string_like
+            ['k' => ['string_like' => 'foo*'], 'ctx' => 'foobar', 'expect' => true],
+            ['k' => ['string_like' => 'foo*'], 'ctx' => 'baz', 'expect' => false],
+            ['k' => ['string_like' => 42], 'ctx' => 'foo', 'expect' => false],
+            ['k' => ['string_like' => 'foo*'], 'ctx' => 42, 'expect' => false],
+
+            // null / not_null
+            ['k' => ['null' => true], 'ctx' => null, 'expect' => true],
+            ['k' => ['null' => true], 'ctx' => 'x', 'expect' => false],
+            ['k' => ['not_null' => true], 'ctx' => 'x', 'expect' => true],
+            ['k' => ['not_null' => true], 'ctx' => null, 'expect' => false],
+        ];
     }
 }

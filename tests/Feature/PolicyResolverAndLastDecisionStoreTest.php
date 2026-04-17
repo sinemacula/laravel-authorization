@@ -83,9 +83,29 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
             'statements' => [['effect' => 'allow', 'actions' => ['y']]],
         ]);
 
+        /**
+         * Anonymous policy store returning the captured policy.
+         */
         $store = new class ($storePolicy) implements PolicyStore {
-            public function __construct(private readonly EvaluationPolicy $policy) {}
+            /**
+             * Create a new store wrapping a fixed policy.
+             *
+             * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $policy
+             * @return void
+             */
+            public function __construct(
 
+                /** The policy returned for every principal. */
+                private readonly EvaluationPolicy $policy,
+
+            ) {}
+
+            /**
+             * Return the captured policy for the supplied principal.
+             *
+             * @param  object  $principal
+             * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
+             */
             public function policiesFor(object $principal): array
             {
                 return [$this->policy];
@@ -116,24 +136,42 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
             'statements' => [['effect' => 'allow', 'actions' => ['fixed:act']]],
         ]);
 
-        $this->app->instance(PolicyResolver::class, new class ($fixed) implements PolicyResolver { // @phpstan-ignore method.nonObject
-            public function __construct(private readonly EvaluationPolicy $policy) {}
+        $this->app->instance(PolicyResolver::class, new class ($fixed) implements PolicyResolver { // @phpstan-ignore method.nonObject (test container is non-null)
 
+            /**
+             * Create a new resolver wrapping a fixed policy.
+             *
+             * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $policy
+             * @return void
+             */
+            public function __construct(
+
+                /** The policy returned for every principal. */
+                private readonly EvaluationPolicy $policy,
+
+            ) {}
+
+            /**
+             * Return the captured policy for the supplied principal.
+             *
+             * @param  object  $principal
+             * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
+             */
             public function policiesFor(object $principal): array
             {
                 return [$this->policy];
             }
         });
 
-        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
-        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
+        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject (test container is non-null)
+        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject (test container is non-null)
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        $result = Authorization::for($user)->evaluate('fixed:act');
+        $decision = Authorization::for($user)->evaluate('fixed:act');
 
-        self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $result->reason);
+        self::assertTrue($decision->allowed);
+        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $decision->reason);
     }
 
     /**
@@ -161,7 +199,7 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
 
         $last = Authorization::lastDecision();
 
-        self::assertNotNull($last); // @phpstan-ignore staticMethod.impossibleType
+        self::assertNotNull($last); // @phpstan-ignore staticMethod.impossibleType (impossible-type scenario for coverage)
         self::assertFalse($last->allowed);
         self::assertSame(DecisionReason::EXPLICIT_DENY, $last->reason);
     }
@@ -247,18 +285,40 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
     {
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
+        /**
+         * Anonymous principal resolver returning the captured user.
+         */
         $resolver = new class ($user) implements PrincipalResolver {
-            public function __construct(private readonly object $user) {}
+            /**
+             * Create a new resolver wrapping a fixed user.
+             *
+             * @param  object  $user
+             * @return void
+             */
+            public function __construct(
 
-            public function resolve(): ?object // @phpstan-ignore return.unusedType
+                /** The user returned by every resolution call. */
+                private readonly object $user,
+
+            ) {}
+
+            /**
+             * Resolve the current principal.
+             *
+             * @return object|null
+             *
+             * @phpstan-ignore-next-line return.unusedType (stub returns non-null)
+             */
+            #[\Override]
+            public function resolve(): ?object
             {
                 return $this->user;
             }
         };
 
-        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject
-        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
-        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
+        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject (test container is non-null)
+        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject (test container is non-null)
+        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject (test container is non-null)
 
         return $user;
     }

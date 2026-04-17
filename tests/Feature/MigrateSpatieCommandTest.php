@@ -37,6 +37,7 @@ final class MigrateSpatieCommandTest extends TestCase
      *
      * @return void
      */
+    #[\Override]
     protected function setUp(): void
     {
         parent::setUp();
@@ -54,6 +55,7 @@ final class MigrateSpatieCommandTest extends TestCase
      *
      * @return void
      */
+    #[\Override]
     protected function tearDown(): void
     {
         foreach (['model_has_permissions', 'model_has_roles', 'role_has_permissions', 'permissions', 'roles'] as $table) {
@@ -221,6 +223,7 @@ final class MigrateSpatieCommandTest extends TestCase
      * @param  mixed  $app
      * @return void
      */
+    #[\Override]
     protected function defineEnvironment(mixed $app): void
     {
         parent::defineEnvironment($app);
@@ -244,6 +247,17 @@ final class MigrateSpatieCommandTest extends TestCase
      */
     private function createSpatieTables(): void
     {
+        $this->createSpatieAuthorityTables();
+        $this->createSpatiePivotTables();
+    }
+
+    /**
+     * Create the Spatie role and permission master tables.
+     *
+     * @return void
+     */
+    private function createSpatieAuthorityTables(): void
+    {
         Schema::create('roles', static function (Blueprint $table): void {
             $table->increments('id');
             $table->string('name');
@@ -257,7 +271,15 @@ final class MigrateSpatieCommandTest extends TestCase
             $table->string('guard_name');
             $table->timestamps();
         });
+    }
 
+    /**
+     * Create the Spatie pivot tables (role / model junctions).
+     *
+     * @return void
+     */
+    private function createSpatiePivotTables(): void
+    {
         Schema::create('role_has_permissions', static function (Blueprint $table): void {
             $table->unsignedInteger('permission_id');
             $table->unsignedInteger('role_id');

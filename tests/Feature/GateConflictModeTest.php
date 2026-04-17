@@ -134,7 +134,7 @@ final class GateConflictModeTest extends TestCase
     private function configureGate(string $mode): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.gate.on_conflict', $mode);
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
     }

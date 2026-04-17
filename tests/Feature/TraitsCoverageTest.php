@@ -99,8 +99,8 @@ final class TraitsCoverageTest extends TestCase
         $user->revokePermission($permission);
         $user->revokeRole($role);
 
-        self::assertFalse($user->fresh()?->hasRole($role)); // @phpstan-ignore nullsafe.neverNull
-        self::assertFalse($user->fresh()?->hasPermission($permission));
+        self::assertFalse($user->fresh()?->hasRole($role)); // @phpstan-ignore nullsafe.neverNull (fresh() non-null after persistence)
+        self::assertFalse($user->fresh()?->hasPermission($permission)); // @phpstan-ignore nullsafe.neverNull (fresh() always hydrates after persistence in this test context)
     }
 
     /**
@@ -113,6 +113,6 @@ final class TraitsCoverageTest extends TestCase
     {
         \sort($values);
 
-        return \array_values($values); // @phpstan-ignore arrayValues.list
+        return \array_values($values); // @phpstan-ignore arrayValues.list (numeric-indexed list coerce)
     }
 }

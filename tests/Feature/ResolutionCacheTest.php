@@ -56,18 +56,19 @@ final class ResolutionCacheTest extends TestCase
      *
      * @return void
      */
+    #[\Override]
     protected function setUp(): void
     {
         parent::setUp();
 
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.cache.store', 'array');
         $config->set('authorization.cache.ttl', 0);
         $config->set('authorization.cache.prefix', 'authorization-test');
 
-        $this->app->forgetInstance(ResolutionCache::class); // @phpstan-ignore method.nonObject
-        $this->app->forgetInstance(PolicyResolver::class); // @phpstan-ignore method.nonObject
+        $this->app->forgetInstance(ResolutionCache::class); // @phpstan-ignore method.nonObject (test container is non-null)
+        $this->app->forgetInstance(PolicyResolver::class); // @phpstan-ignore method.nonObject (test container is non-null)
 
         // Re-run the registration so the fresh config is consumed.
         (new AuthorizationServiceProvider($this->app))->register();
@@ -81,7 +82,7 @@ final class ResolutionCacheTest extends TestCase
      */
     public function testInMemoryMemoReturnsCachedValueWithoutInvokingResolver(): void
     {
-        $cache     = $this->app->make(ResolutionCache::class); // @phpstan-ignore method.nonObject
+        $cache     = $this->app->make(ResolutionCache::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         $calls = 0;
@@ -111,7 +112,7 @@ final class ResolutionCacheTest extends TestCase
      */
     public function testPersistentStoreIsReadOnColdMiss(): void
     {
-        $cache     = $this->app->make(ResolutionCache::class); // @phpstan-ignore method.nonObject
+        $cache     = $this->app->make(ResolutionCache::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         $cache->rememberPermissions($principal, static fn (): array => ['posts:create', 'posts:delete']);
@@ -119,7 +120,7 @@ final class ResolutionCacheTest extends TestCase
         /** @var \Illuminate\Contracts\Cache\Repository $store */
         $store = Cache::store('array');
         $keys  = \array_filter(
-            \array_keys((array) $this->extractPrivate($store->getStore(), 'storage') ?? []), // @phpstan-ignore nullCoalesce.expr
+            \array_keys((array) $this->extractPrivate($store->getStore(), 'storage') ?? []), // @phpstan-ignore nullCoalesce.expr (test defensively coalesces known-set value)
             // Laravel's tagged array entries are stored under a
             // `<hash>:<original-key>` shape; the suffix match keeps
             // the assertion faithful to the prefix-scoped entry
@@ -130,10 +131,10 @@ final class ResolutionCacheTest extends TestCase
         self::assertNotEmpty($keys, 'Persistent cache entry should exist under the configured prefix.');
 
         // New cache instance with the same store — simulates a fresh request.
-        $fresh  = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
-        $result = $fresh->rememberPermissions($principal, static fn (): array => \PHPUnit\Framework\Assert::fail('Resolver should not be called on a store hit.'));
+        $fresh         = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
+        $cachedEntries = $fresh->rememberPermissions($principal, static fn (): array => \PHPUnit\Framework\Assert::fail('Resolver should not be called on a store hit.'));
 
-        self::assertSame(['posts:create', 'posts:delete'], $result);
+        self::assertSame(['posts:create', 'posts:delete'], $cachedEntries);
     }
 
     /**
@@ -144,7 +145,7 @@ final class ResolutionCacheTest extends TestCase
      */
     public function testForgetClearsEverySlotForPrincipal(): void
     {
-        $cache     = $this->app->make(ResolutionCache::class); // @phpstan-ignore method.nonObject
+        $cache     = $this->app->make(ResolutionCache::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         $cache->rememberPermissions($principal, static fn (): array => ['a']);
@@ -192,7 +193,7 @@ final class ResolutionCacheTest extends TestCase
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         /** @var \SineMacula\Laravel\Authorization\Contracts\PolicyResolver $resolver */
-        $resolver = $this->app->make(PolicyResolver::class); // @phpstan-ignore method.nonObject
+        $resolver = $this->app->make(PolicyResolver::class); // @phpstan-ignore method.nonObject (test container is non-null)
 
         self::assertSame([], $resolver->policiesFor($user));
 
@@ -213,7 +214,7 @@ final class ResolutionCacheTest extends TestCase
 
     /**
      * `RolePermissionGranted` clears the in-memory memo tier. The
-     * persistent tier is deliberately **not** cleared — the cache
+     * persistent tier is deliberately not cleared — the cache
      * has no reverse index from a role to the identities carrying
      * it, and flushing the whole store would wipe unrelated
      * entries. The test isolates the in-memory behaviour by using
@@ -226,9 +227,9 @@ final class ResolutionCacheTest extends TestCase
     {
         // Rebind the cache to in-memory only so the listener's
         // flush() is the only invalidation path under test.
-        $this->app->instance(ResolutionCache::class, new ResolutionCache(store: null)); // @phpstan-ignore method.nonObject
+        $this->app->instance(ResolutionCache::class, new ResolutionCache(store: null)); // @phpstan-ignore method.nonObject (test container is non-null)
 
-        $cache = $this->app->make(ResolutionCache::class); // @phpstan-ignore method.nonObject
+        $cache = $this->app->make(ResolutionCache::class); // @phpstan-ignore method.nonObject (test container is non-null)
 
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
@@ -277,7 +278,7 @@ final class ResolutionCacheTest extends TestCase
         $second = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard_name' => 'web']);
         $role->givePermission($second);
 
-        $permissions = $user->fresh()?->getPermissions() ?? []; // @phpstan-ignore nullCoalesce.expr, nullsafe.neverNull
+        $permissions = $user->fresh()?->getPermissions() ?? []; // @phpstan-ignore nullCoalesce.expr, nullsafe.neverNull (test defensively coalesces a value known to be set in this scenario; test asserts fresh() returns non-null after persistence in this scenario)
         \sort($permissions);
 
         self::assertSame(['posts:create', 'posts:read'], $permissions);
@@ -298,18 +299,8 @@ final class ResolutionCacheTest extends TestCase
     public function testRolePermissionGrantedFallsBackToMemoFlushOnNonTagStore(): void
     {
         $driver = self::makeNonTaggableDriver();
+        $cache  = $this->bindNonTagResolutionCache($driver);
 
-        $this->app->instance( // @phpstan-ignore method.nonObject
-            ResolutionCache::class,
-            new ResolutionCache(
-                store: new \Illuminate\Cache\Repository($driver),
-                ttl: 0,
-                prefix: 'authorization-test',
-            ),
-        );
-
-        $cache = $this->app->make(ResolutionCache::class); // @phpstan-ignore method.nonObject
-        self::assertInstanceOf(ResolutionCache::class, $cache);
         self::assertFalse($cache->supportsTags());
 
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -318,10 +309,10 @@ final class ResolutionCacheTest extends TestCase
         // resolver runs once and the result is memoised for the
         // lifetime of the process. The persistent tier also
         // receives the same value so we can confirm afterwards
-        // that the listener does *not* touch it.
+        // that the listener does not touch it.
         $cache->rememberPermissions($principal, static fn (): array => ['stale:entry']);
 
-        $keysBefore = \array_keys((array) $this->extractPrivate($driver, 'storage') ?? []); // @phpstan-ignore nullCoalesce.expr
+        $keysBefore = \array_keys((array) $this->extractPrivate($driver, 'storage') ?? []); // @phpstan-ignore nullCoalesce.expr (test defensively coalesces known-set value)
         self::assertNotEmpty($keysBefore, 'Persistent write should populate the non-tag store.');
 
         $role       = Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard_name' => 'web']);
@@ -332,11 +323,11 @@ final class ResolutionCacheTest extends TestCase
         // non-tag branch leaves them to expire on TTL.
         self::assertSame(
             $keysBefore,
-            \array_keys((array) $this->extractPrivate($driver, 'storage') ?? []), // @phpstan-ignore nullCoalesce.expr
+            \array_keys((array) $this->extractPrivate($driver, 'storage') ?? []), // @phpstan-ignore nullCoalesce.expr (test defensively coalesces known-set value)
             'Non-tag store must keep persistent entries after a role-pivot mutation.',
         );
 
-        // But the memo *was* flushed — drop the persistent entry
+        // But the memo was flushed — drop the persistent entry
         // for the original principal (so the store read on the
         // next lookup misses) and observe that the resolver runs
         // again instead of returning the memoised `stale:entry`.
@@ -388,14 +379,27 @@ final class ResolutionCacheTest extends TestCase
     {
         $principalId = 'svc:' . Str::uuid()->toString();
 
+        /**
+         * Non-model principal that exposes morph class and key methods
+         * so the cache keys it through the persistent store.
+         */
         $principal = new class ($principalId) {
             /**
+             * Create a new principal wrapping a fixed identifier.
+             *
              * @param  string  $id
              * @return void
              */
-            public function __construct(private readonly string $id) {}
+            public function __construct(
+
+                /** The stable identifier used as the cache key. */
+                private readonly string $id,
+
+            ) {}
 
             /**
+             * Return the morph class used for cache keying.
+             *
              * @return string
              */
             public function getMorphClass(): string
@@ -404,6 +408,8 @@ final class ResolutionCacheTest extends TestCase
             }
 
             /**
+             * Return the stable identifier used for cache keying.
+             *
              * @return string
              */
             public function getKey(): string
@@ -412,13 +418,13 @@ final class ResolutionCacheTest extends TestCase
             }
         };
 
-        $cache = $this->app->make(ResolutionCache::class); // @phpstan-ignore method.nonObject
+        $cache = $this->app->make(ResolutionCache::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $cache->rememberPermissions($principal, static fn (): array => ['svc:read', 'svc:write']);
 
         /** @var \Illuminate\Contracts\Cache\Repository $store */
         $store = Cache::store('array');
         $keys  = \array_filter(
-            \array_keys((array) $this->extractPrivate($store->getStore(), 'storage') ?? []), // @phpstan-ignore nullCoalesce.expr
+            \array_keys((array) $this->extractPrivate($store->getStore(), 'storage') ?? []), // @phpstan-ignore nullCoalesce.expr (test defensively coalesces known-set value)
             static fn (mixed $key): bool => \is_string($key) && \str_contains($key, 'service-account:' . $principalId),
         );
 
@@ -427,13 +433,13 @@ final class ResolutionCacheTest extends TestCase
         // A fresh cache instance reusing the same store must hit the
         // persistent tier — proves cross-request caching actually
         // works for non-Model principals.
-        $fresh  = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
-        $result = $fresh->rememberPermissions(
+        $fresh         = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
+        $cachedEntries = $fresh->rememberPermissions(
             $principal,
             static fn (): array => \PHPUnit\Framework\Assert::fail('Resolver should not be called on a store hit.'),
         );
 
-        self::assertSame(['svc:read', 'svc:write'], $result);
+        self::assertSame(['svc:read', 'svc:write'], $cachedEntries);
     }
 
     /**
@@ -467,12 +473,12 @@ final class ResolutionCacheTest extends TestCase
         $cache->rememberPolicies($principal, static fn (): array => []);
 
         $keys = \array_filter(
-            \array_keys((array) $this->extractPrivate($driver, 'storage') ?? []), // @phpstan-ignore nullCoalesce.expr
+            \array_keys((array) $this->extractPrivate($driver, 'storage') ?? []), // @phpstan-ignore nullCoalesce.expr (test defensively coalesces known-set value)
             static fn (mixed $key): bool => \is_string($key) && \str_starts_with($key, 'authorization-test:policies:'),
         );
 
         self::assertNotEmpty($keys);
-        $policyKey = (string) \array_values($keys)[0]; // @phpstan-ignore cast.useless
+        $policyKey = (string) \array_values($keys)[0]; // @phpstan-ignore cast.useless (explicit cast for readability)
 
         // Seed a malformed payload — a list of non-array entries
         // will fail the `Policy::fromArray` contract.
@@ -489,9 +495,9 @@ final class ResolutionCacheTest extends TestCase
             ),
         ];
 
-        $result = $fresh->rememberPolicies($principal, static fn (): array => $expected);
+        $cachedEntries = $fresh->rememberPolicies($principal, static fn (): array => $expected);
 
-        self::assertSame($expected, $result);
+        self::assertSame($expected, $cachedEntries);
 
         // Store should have been rewritten with the recomputed
         // (valid) payload, not the corrupt one.
@@ -538,7 +544,7 @@ final class ResolutionCacheTest extends TestCase
         $cache->rememberRoles($principal, static fn (): array => ['r']);
         $cache->rememberPolicies($principal, static fn (): array => []);
 
-        self::assertArrayHasKey('fgt:permissions:u:1', $driver->storage); // @phpstan-ignore property.notFound
+        self::assertArrayHasKey('fgt:permissions:u:1', $driver->storage); // @phpstan-ignore property.notFound (dynamic Eloquent attribute)
         self::assertArrayHasKey('fgt:roles:u:1', $driver->storage);
         self::assertArrayHasKey('fgt:policies:u:1', $driver->storage);
 
@@ -558,16 +564,16 @@ final class ResolutionCacheTest extends TestCase
      */
     public function testRememberPoliciesWithNullContextDefaultsGracefully(): void
     {
-        $cache     = $this->app->make(ResolutionCache::class); // @phpstan-ignore method.nonObject
+        $cache     = $this->app->make(ResolutionCache::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         $expected = [
             new EvaluationPolicy(name: 'ctx-null', statements: []),
         ];
 
-        $result = $cache->rememberPolicies($principal, static fn (): array => $expected, null);
+        $cachedEntries = $cache->rememberPolicies($principal, static fn (): array => $expected, null);
 
-        self::assertSame($expected, $result);
+        self::assertSame($expected, $cachedEntries);
     }
 
     /**
@@ -606,11 +612,11 @@ final class ResolutionCacheTest extends TestCase
         $cache->rememberPolicies($principal, static fn (): array => []);
         $driver->put('thr:policies:th:1', ['not-an-array'], 60);
 
-        $fresh    = new ResolutionCache(store: $store, ttl: 0, prefix: 'thr');
-        $expected = [new EvaluationPolicy(name: 'recovered', statements: [])];
-        $result   = $fresh->rememberPolicies($principal, static fn (): array => $expected);
+        $fresh         = new ResolutionCache(store: $store, ttl: 0, prefix: 'thr');
+        $expected      = [new EvaluationPolicy(name: 'recovered', statements: [])];
+        $cachedEntries = $fresh->rememberPolicies($principal, static fn (): array => $expected);
 
-        self::assertSame($expected, $result);
+        self::assertSame($expected, $cachedEntries);
     }
 
     /**
@@ -658,10 +664,10 @@ final class ResolutionCacheTest extends TestCase
         // Let's use an object to trigger a throw.
         $driver->put('csl:permissions:sl:1', new \stdClass, 60);
 
-        $fresh2 = new ResolutionCache(store: $store, ttl: 0, prefix: 'csl');
-        $result = $fresh2->rememberPermissions($principal, static fn (): array => ['recovered']);
+        $fresh2        = new ResolutionCache(store: $store, ttl: 0, prefix: 'csl');
+        $cachedEntries = $fresh2->rememberPermissions($principal, static fn (): array => ['recovered']);
 
-        self::assertSame(['recovered'], $result);
+        self::assertSame(['recovered'], $cachedEntries);
     }
 
     /**
@@ -696,7 +702,7 @@ final class ResolutionCacheTest extends TestCase
 
         $cache->rememberRoles($principal, static fn (): array => ['r']);
 
-        self::assertArrayHasKey('kf:roles:int-morph:99', $driver->storage); // @phpstan-ignore property.notFound
+        self::assertArrayHasKey('kf:roles:int-morph:99', $driver->storage); // @phpstan-ignore property.notFound (dynamic Eloquent attribute)
     }
 
     /**
@@ -736,7 +742,7 @@ final class ResolutionCacheTest extends TestCase
         $expectedId = "obj:{$hash}";
         $key        = "spl:roles:empty-morph:{$expectedId}";
 
-        self::assertArrayHasKey($key, $driver->storage); // @phpstan-ignore property.notFound
+        self::assertArrayHasKey($key, $driver->storage); // @phpstan-ignore property.notFound (dynamic Eloquent attribute)
     }
 
     /**
@@ -880,7 +886,7 @@ final class ResolutionCacheTest extends TestCase
 
         // The memo is populated but the store should NOT have the entry
         // because the TTL is -1.
-        self::assertEmpty($driver->storage); // @phpstan-ignore property.notFound
+        self::assertEmpty($driver->storage); // @phpstan-ignore property.notFound (dynamic Eloquent attribute)
     }
 
     /**
@@ -915,7 +921,7 @@ final class ResolutionCacheTest extends TestCase
 
         $cache->rememberPermissions($principal, static fn (): array => ['y']);
 
-        self::assertArrayHasKey('ttlp:permissions:ttlp:1', $driver->storage); // @phpstan-ignore property.notFound
+        self::assertArrayHasKey('ttlp:permissions:ttlp:1', $driver->storage); // @phpstan-ignore property.notFound (dynamic Eloquent attribute)
     }
 
     /**
@@ -955,7 +961,7 @@ final class ResolutionCacheTest extends TestCase
             new \SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext(maxTtl: 1),
         );
 
-        self::assertEmpty($driver->storage); // @phpstan-ignore property.notFound
+        self::assertEmpty($driver->storage); // @phpstan-ignore property.notFound (dynamic Eloquent attribute)
     }
 
     /**
@@ -1001,8 +1007,8 @@ final class ResolutionCacheTest extends TestCase
         // We cannot easily assert the exact log call through the
         // authorization channel, but we can confirm the resolver ran
         // (meaning the corrupt path was hit) and the result is correct.
-        $result = $fresh->rememberPermissions($principal, static fn (): array => ['c']);
-        self::assertSame(['b'], $result);
+        $cachedEntries = $fresh->rememberPermissions($principal, static fn (): array => ['c']);
+        self::assertSame(['b'], $cachedEntries);
     }
 
     /**
@@ -1046,14 +1052,14 @@ final class ResolutionCacheTest extends TestCase
         $cache->rememberPolicies($principal, static fn (): array => $original);
 
         // Fresh instance — reads from the store.
-        $fresh  = new ResolutionCache(store: $store, ttl: 0, prefix: 'pol');
-        $result = $fresh->rememberPolicies(
+        $fresh         = new ResolutionCache(store: $store, ttl: 0, prefix: 'pol');
+        $cachedEntries = $fresh->rememberPolicies(
             $principal,
             static fn (): array => \PHPUnit\Framework\Assert::fail('Resolver should not run.'),
         );
 
-        self::assertCount(1, $result);
-        self::assertSame('test-policy', $result[0]->name);
+        self::assertCount(1, $cachedEntries);
+        self::assertSame('test-policy', $cachedEntries[0]->name);
     }
 
     /**
@@ -1074,7 +1080,7 @@ final class ResolutionCacheTest extends TestCase
         $cache->rememberRoles($principal, static fn (): array => ['r']);
 
         $class = $principal::class;
-        self::assertArrayHasKey("nk:roles:{$class}:obj:{$hash}", $driver->storage); // @phpstan-ignore property.notFound
+        self::assertArrayHasKey("nk:roles:{$class}:obj:{$hash}", $driver->storage); // @phpstan-ignore property.notFound (dynamic Eloquent attribute)
     }
 
     /**
@@ -1149,6 +1155,30 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
+     * Bind a fresh `ResolutionCache` backed by the given non-tag
+     * driver and return the container-resolved instance.
+     *
+     * @param  \Illuminate\Contracts\Cache\Store  $driver
+     * @return \SineMacula\Laravel\Authorization\Cache\ResolutionCache
+     */
+    private function bindNonTagResolutionCache(\Illuminate\Contracts\Cache\Store $driver): ResolutionCache
+    {
+        $this->app->instance( // @phpstan-ignore method.nonObject (test container is non-null)
+            ResolutionCache::class,
+            new ResolutionCache(
+                store: new \Illuminate\Cache\Repository($driver),
+                ttl: 0,
+                prefix: 'authorization-test',
+            ),
+        );
+
+        $cache = $this->app->make(ResolutionCache::class); // @phpstan-ignore method.nonObject (test container is non-null)
+        self::assertInstanceOf(ResolutionCache::class, $cache);
+
+        return $cache;
+    }
+
+    /**
      * Read a private property value via reflection — tests that
      * need to inspect the array cache's internal storage.
      *
@@ -1182,135 +1212,10 @@ final class ResolutionCacheTest extends TestCase
      * `Repository` wraps unchanged (no `tags()` method on the
      * driver means `ResolutionCache::isTaggable()` returns false).
      *
-     * @return \Illuminate\Contracts\Cache\Store
+     * @return \Tests\Feature\Stubs\NonTaggableCacheStore
      */
-    private static function makeNonTaggableDriver(): \Illuminate\Contracts\Cache\Store
+    private static function makeNonTaggableDriver(): \Tests\Feature\Stubs\NonTaggableCacheStore
     {
-        return new class implements \Illuminate\Contracts\Cache\Store {
-            /** @var array<string, mixed> */
-            public array $storage = [];
-
-            /**
-             * @param  mixed  $key
-             * @return mixed
-             */
-            public function get(mixed $key): mixed
-            {
-                return $this->storage[$key] ?? null; // @phpstan-ignore offsetAccess.invalidOffset
-            }
-
-            /**
-             * @param  array<int, string>  $keys
-             * @return array<string, mixed>
-             */
-            public function many(array $keys): array // @phpstan-ignore method.childParameterType
-            {
-                $result = [];
-
-                foreach ($keys as $key) {
-                    $result[$key] = $this->storage[$key] ?? null;
-                }
-
-                return $result;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $value
-             * @param  mixed  $seconds
-             * @return bool
-             */
-            public function put(mixed $key, mixed $value, mixed $seconds): bool
-            {
-                $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset
-
-                return true;
-            }
-
-            /**
-             * @param  array<string, mixed>  $values
-             * @param  mixed  $seconds
-             * @return bool
-             */
-            public function putMany(array $values, mixed $seconds): bool // @phpstan-ignore method.childParameterType
-            {
-                foreach ($values as $key => $value) {
-                    $this->storage[$key] = $value;
-                }
-
-                return true;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $value
-             * @return bool|int
-             */
-            public function increment(mixed $key, mixed $value = 1): bool|int
-            {
-                return false;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $value
-             * @return bool|int
-             */
-            public function decrement(mixed $key, mixed $value = 1): bool|int
-            {
-                return false;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $value
-             * @return bool
-             */
-            public function forever(mixed $key, mixed $value): bool
-            {
-                $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset
-
-                return true;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $ttl
-             * @return bool
-             */
-            public function touch(mixed $key, mixed $ttl): bool
-            {
-                return isset($this->storage[$key]); // @phpstan-ignore offsetAccess.invalidOffset
-            }
-
-            /**
-             * @param  mixed  $key
-             * @return bool
-             */
-            public function forget(mixed $key): bool
-            {
-                unset($this->storage[$key]); // @phpstan-ignore offsetAccess.invalidOffset
-
-                return true;
-            }
-
-            /**
-             * @return bool
-             */
-            public function flush(): bool
-            {
-                $this->storage = [];
-
-                return true;
-            }
-
-            /**
-             * @return string
-             */
-            public function getPrefix(): string
-            {
-                return '';
-            }
-        };
+        return new \Tests\Feature\Stubs\NonTaggableCacheStore;
     }
 }

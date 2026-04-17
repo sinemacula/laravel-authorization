@@ -7,37 +7,9 @@ namespace Tests\Feature;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Testing\AuthorizationAssertions;
+use Tests\Feature\Stubs\StandaloneAssertions;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
-
-/**
- * Standalone consumer of `AuthorizationAssertions` that exposes the
- * trait's container-lookup without inheriting from the shipped
- * `Tests\TestCase` (which binds `$this->app` through Laravel's
- * testing trait). Used to drive the `app()` helper fallback when
- * the calling class has no `$app` property.
- *
- * @internal
- *
- * @SuppressWarnings("php:S1192")
- */
-final class StandaloneAssertions
-{
-    use AuthorizationAssertions;
-
-    /**
-     * Delegate to the trait's `actingAsIdentity` method from outside
-     * a PHPUnit test case so the branch that falls back to the
-     * global `app()` helper is exercised.
-     *
-     * @param  object  $principal
-     * @return void
-     */
-    public function swap(object $principal): void
-    {
-        $this->actingAsIdentity($principal);
-    }
-}
 
 /**
  * Coverage for the `app()` fallback branch of
@@ -51,9 +23,7 @@ final class StandaloneAssertions
  *
  * @internal
  */
-// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 #[CoversTrait(AuthorizationAssertions::class)]
-// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 final class AuthorizationAssertionsFallbackTest extends TestCase
 {
     /**
@@ -72,6 +42,6 @@ final class AuthorizationAssertionsFallbackTest extends TestCase
 
         // Container-level side-effect: the manager is rebuilt under
         // the swapped principal.
-        self::assertSame($user, $this->app->make(AuthorizationManager::class)->currentPrincipal()); // @phpstan-ignore method.nonObject
+        self::assertSame($user, $this->app->make(AuthorizationManager::class)->currentPrincipal()); // @phpstan-ignore method.nonObject (test container is non-null)
     }
 }

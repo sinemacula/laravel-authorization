@@ -51,6 +51,7 @@ final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
      *
      * @return void
      */
+    #[\Override]
     protected function tearDown(): void
     {
         Facade::clearResolvedInstances();
@@ -156,9 +157,9 @@ final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
 
         /** @var \Illuminate\Contracts\Foundation\Application&\Mockery\MockInterface $app */
         $app = \Mockery::mock(Application::class);
-        $app->shouldReceive('bound')->andReturnUsing(static fn (string $abstract): bool => $container->bound($abstract)); // @phpstan-ignore method.notFound
-        $app->shouldReceive('runningInConsole')->andReturnFalse(); // @phpstan-ignore method.notFound
-        $app->shouldReceive('make')->andReturnUsing(static fn (string $abstract): mixed => $container->make($abstract)); // @phpstan-ignore method.notFound
+        $app->shouldReceive('bound')->andReturnUsing(static fn (string $abstract): bool => $container->bound($abstract)); // @phpstan-ignore method.notFound (Mockery dynamic call)
+        $app->shouldReceive('runningInConsole')->andReturnFalse(); // @phpstan-ignore method.notFound (Mockery dynamic call)
+        $app->shouldReceive('make')->andReturnUsing(static fn (string $abstract): mixed => $container->make($abstract)); // @phpstan-ignore method.notFound (Mockery dynamic call)
 
         return $app;
     }

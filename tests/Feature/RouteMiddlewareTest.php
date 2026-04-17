@@ -409,7 +409,7 @@ final class RouteMiddlewareTest extends TestCase
     public function testServiceProviderRegistersMiddlewareAliases(): void
     {
         /** @var \Illuminate\Routing\Router $router */
-        $router = $this->app->make(Router::class); // @phpstan-ignore method.nonObject
+        $router = $this->app->make(Router::class); // @phpstan-ignore method.nonObject (test container is non-null)
 
         $middleware = $router->getMiddleware();
 
@@ -427,7 +427,7 @@ final class RouteMiddlewareTest extends TestCase
     public function testServiceProviderDoesNotOverrideExistingAliases(): void
     {
         /** @var \Illuminate\Routing\Router $router */
-        $router = $this->app->make(Router::class); // @phpstan-ignore method.nonObject
+        $router = $this->app->make(Router::class); // @phpstan-ignore method.nonObject (test container is non-null)
 
         $router->aliasMiddleware('role', CustomRoleMiddlewareDouble::class);
 
@@ -487,24 +487,33 @@ final class RouteMiddlewareTest extends TestCase
     {
         $resolver = new class ($principal) implements PrincipalResolver {
             /**
+             * Create a new resolver wrapping a fixed principal.
+             *
              * @param  object|null  $principal
+             * @return void
              */
-            public function __construct(private readonly ?object $principal) {}
+            public function __construct(
+
+                /** The principal returned by every resolution call. */
+                private readonly ?object $principal,
+
+            ) {}
 
             /**
              * Return the principal bound on this scoped resolver.
              *
              * @return object|null
              */
+            #[\Override]
             public function resolve(): ?object
             {
                 return $this->principal;
             }
         };
 
-        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject
-        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
-        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
+        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject (test container is non-null)
+        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject (test container is non-null)
+        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject (test container is non-null)
     }
 
     /**

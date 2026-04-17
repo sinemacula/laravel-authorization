@@ -32,6 +32,7 @@ final class AuthGuardPrincipalResolverTest extends TestCase
      *
      * @return void
      */
+    #[\Override]
     protected function tearDown(): void
     {
         \Mockery::close();
@@ -111,7 +112,7 @@ final class AuthGuardPrincipalResolverTest extends TestCase
         // service container so
         // `authorization.principal_resolver => AuthGuardPrincipalResolver::class`
         // is a valid one-line wiring for consumers.
-        $resolver = $this->app->make(AuthGuardPrincipalResolver::class); // @phpstan-ignore method.nonObject
+        $resolver = $this->app->make(AuthGuardPrincipalResolver::class); // @phpstan-ignore method.nonObject (test container is non-null)
 
         self::assertInstanceOf(AuthGuardPrincipalResolver::class, $resolver);
     }

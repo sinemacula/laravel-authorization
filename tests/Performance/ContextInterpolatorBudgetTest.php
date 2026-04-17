@@ -42,8 +42,15 @@ final class ContextInterpolatorBudgetTest extends TestCase
         $interpolator = new ContextInterpolator;
         $pattern      = self::buildTwentyTokenPattern();
         $context      = self::buildContext();
-        $principal    = new class {
-            public string $id   = 'user-42';
+        /**
+         * Minimal principal stub exposing the fields referenced by
+         * the benchmark pattern.
+         */
+        $principal = new class {
+            /** @var string */
+            public string $id = 'user-42';
+
+            /** @var string */
             public string $name = 'alice';
         };
 

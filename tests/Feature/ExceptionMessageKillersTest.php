@@ -38,7 +38,7 @@ final class ExceptionMessageKillersTest extends TestCase
     public function testPermissionEnumsScalarMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_enums', 'not-an-array');
 
         try {
@@ -60,7 +60,7 @@ final class ExceptionMessageKillersTest extends TestCase
     public function testPermissionEnumsUnknownClassMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_enums', ['App\NoSuch\ClassX']);
 
         try {
@@ -80,7 +80,7 @@ final class ExceptionMessageKillersTest extends TestCase
     public function testPermissionEnumsNonContractMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_enums', [\stdClass::class]);
 
         try {
@@ -101,7 +101,7 @@ final class ExceptionMessageKillersTest extends TestCase
     public function testPermissionEnumsEmptyEntryMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_enums', ['']);
 
         try {
@@ -122,7 +122,7 @@ final class ExceptionMessageKillersTest extends TestCase
     public function testPermissionProvidersScalarMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_providers', 42);
 
         try {
@@ -143,7 +143,7 @@ final class ExceptionMessageKillersTest extends TestCase
     public function testPermissionProvidersUnknownClassMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_providers', ['App\NoSuch\ProviderX']);
 
         try {
@@ -162,7 +162,7 @@ final class ExceptionMessageKillersTest extends TestCase
     public function testCacheStoreNonStringMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.cache.store', 42);
 
         try {
@@ -253,7 +253,7 @@ final class ExceptionMessageKillersTest extends TestCase
     public function testPrincipalResolverNonStringMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.principal_resolver', 42);
 
         try {

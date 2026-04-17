@@ -133,18 +133,31 @@ final class TenantScopeBudgetTest extends TestCase
 // phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 final class CountingTenantResolver implements TenantResolver
 {
-    /** @var int */
+    /** @var int Number of times `resolve` was invoked. */
     public int $calls = 0;
 
     /**
+     * Create a new counting resolver wrapping a fixed tenant.
+     *
      * @param  \SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant  $tenant
+     * @return void
      */
-    public function __construct(private readonly AuthorizableTenant $tenant) {}
+    public function __construct(
+
+        /** The tenant returned by every resolution call. */
+        private readonly AuthorizableTenant $tenant,
+
+    ) {}
 
     /**
+     * Resolve the tenant and increment the call counter.
+     *
      * @return object|null
+     *
+     * @phpstan-ignore-next-line return.unusedType (stub returns non-null)
      */
-    public function resolve(): ?object // @phpstan-ignore return.unusedType
+    #[\Override]
+    public function resolve(): ?object
     {
         $this->calls++;
 

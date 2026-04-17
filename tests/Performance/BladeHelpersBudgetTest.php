@@ -124,9 +124,28 @@ final class BladeHelpersBudgetTest extends TestCase
     private function actAs(object $principal): void
     {
         $resolver = new class ($principal) implements PrincipalResolver {
-            public function __construct(private readonly object $principal) {}
+            /**
+             * Create a new resolver wrapping a fixed principal.
+             *
+             * @param  object  $principal
+             * @return void
+             */
+            public function __construct(
 
-            public function resolve(): ?object // @phpstan-ignore return.unusedType
+                /** The principal returned by every resolution call. */
+                private readonly object $principal,
+
+            ) {}
+
+            /**
+             * Resolve the current principal.
+             *
+             * @return object|null
+             *
+             * @phpstan-ignore-next-line return.unusedType (stub returns non-null)
+             */
+            #[\Override]
+            public function resolve(): ?object
             {
                 return $this->principal;
             }

@@ -213,7 +213,7 @@ final class WhyCanCommandTest extends TestCase
     }
 
     /**
-     * The `NotIdentical` mutant on line 79 checks `$result->trace !== []`.
+     * The `NotIdentical` mutant on line 79 checks `$exitStatus->trace !== []`.
      * An empty-trace output must NOT contain "Trace:".
      *
      * @return void

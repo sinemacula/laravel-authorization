@@ -8,72 +8,14 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
-use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
+use Tests\Feature\Stubs\StubNullGuardProvider;
+use Tests\Feature\Stubs\StubPermissionProvider;
 use Tests\TestCase;
-
-/**
- * Stub provider that contributes two permissions under the `web` guard.
- *
- * @internal
- *
- * @SuppressWarnings("php:S1192")
- */
-final class StubPermissionProvider implements PermissionProvider
-{
-    /**
-     * Return the permission strings this provider contributes.
-     *
-     * @return array<int, string>
-     */
-    public function permissions(): array
-    {
-        return ['media:upload', 'media:delete'];
-    }
-
-    /**
-     * Return the guard name these permissions are scoped to.
-     *
-     * @return string|null
-     */
-    public function guard(): ?string // @phpstan-ignore return.unusedType
-    {
-        return 'web';
-    }
-}
-
-/**
- * Stub provider that contributes guard-agnostic permissions.
- *
- * @internal
- */
-// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
-final class StubNullGuardProvider implements PermissionProvider
-{
-    /**
-     * Return the permission strings this provider contributes.
-     *
-     * @return array<int, string>
-     */
-    public function permissions(): array
-    {
-        return ['billing:view'];
-    }
-
-    /**
-     * Return the guard name these permissions are scoped to.
-     *
-     * @return string|null
-     */
-    public function guard(): ?string
-    {
-        return null;
-    }
-}
 
 /**
  * Feature tests for the `PermissionProvider` boot-time registration.
@@ -88,7 +30,6 @@ final class StubNullGuardProvider implements PermissionProvider
 #[CoversClass(BladeDirectiveRegistrar::class)]
 #[CoversClass(EventListenerRegistrar::class)]
 #[CoversClass(ConfigValidator::class)]
-// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 final class PermissionProviderTest extends TestCase
 {
     /**
@@ -99,7 +40,7 @@ final class PermissionProviderTest extends TestCase
     public function testProviderCreatesPermissionRowsOnBoot(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_providers', [StubPermissionProvider::class]);
 
         (new AuthorizationServiceProvider($this->app))->boot();
@@ -124,7 +65,7 @@ final class PermissionProviderTest extends TestCase
     public function testProviderRegistrationIsIdempotent(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_providers', [StubPermissionProvider::class]);
 
         (new AuthorizationServiceProvider($this->app))->boot();
@@ -132,7 +73,7 @@ final class PermissionProviderTest extends TestCase
 
         self::assertSame(
             1,
-            Permission::where('name', 'media:upload')->where('guard_name', 'web')->count(), // @phpstan-ignore staticMethod.dynamicCall
+            Permission::where('name', 'media:upload')->where('guard_name', 'web')->count(), // @phpstan-ignore staticMethod.dynamicCall (facade indirection)
         );
     }
 
@@ -145,12 +86,12 @@ final class PermissionProviderTest extends TestCase
     public function testNullGuardProviderCreatesAgnosticPermissions(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_providers', [StubNullGuardProvider::class]);
 
         (new AuthorizationServiceProvider($this->app))->boot();
 
-        $permission = Permission::where('name', 'billing:view')->whereNull('guard_name')->first(); // @phpstan-ignore staticMethod.dynamicCall
+        $permission = Permission::where('name', 'billing:view')->whereNull('guard_name')->first(); // @phpstan-ignore staticMethod.dynamicCall (facade indirection)
 
         self::assertNotNull($permission, 'Expected billing:view guard-agnostic permission to exist.');
     }
@@ -166,7 +107,7 @@ final class PermissionProviderTest extends TestCase
         $this->expectExceptionMessageMatches('/does not exist/');
 
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_providers', ['App\NonExistent\Provider']);
 
         (new AuthorizationServiceProvider($this->app))->boot();
@@ -184,7 +125,7 @@ final class PermissionProviderTest extends TestCase
         $this->expectExceptionMessageMatches('/does not implement/');
 
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_providers', [\stdClass::class]);
 
         (new AuthorizationServiceProvider($this->app))->boot();
@@ -198,7 +139,7 @@ final class PermissionProviderTest extends TestCase
     public function testEmptyProvidersArrayIsNoop(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_providers', []);
 
         (new AuthorizationServiceProvider($this->app))->boot();

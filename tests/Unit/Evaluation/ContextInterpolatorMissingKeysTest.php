@@ -39,13 +39,13 @@ final class ContextInterpolatorMissingKeysTest extends TestCase
         $principal    = new \stdClass;
         // No `id` property set.
 
-        $result = $interpolator->interpolate(
+        $interpolated = $interpolator->interpolate(
             'id:${principal.id}',
             $principal,
             null,
             [],
         );
 
-        self::assertSame('id:', $result);
+        self::assertSame('id:', $interpolated);
     }
 }

@@ -37,37 +37,13 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     /**
      * @return void
      */
+    #[\Override]
     protected function setUp(): void
     {
         parent::setUp();
 
-        Schema::create('roles', static function (Blueprint $table): void {
-            $table->increments('id');
-            $table->string('name');
-            $table->string('guard_name');
-            $table->timestamps();
-        });
-        Schema::create('permissions', static function (Blueprint $table): void {
-            $table->increments('id');
-            $table->string('name');
-            $table->string('guard_name');
-            $table->timestamps();
-        });
-        Schema::create('role_has_permissions', static function (Blueprint $table): void {
-            $table->unsignedInteger('permission_id');
-            $table->unsignedInteger('role_id');
-            $table->primary(['permission_id', 'role_id']);
-        });
-        Schema::create('model_has_roles', static function (Blueprint $table): void {
-            $table->unsignedInteger('role_id');
-            $table->string('model_type');
-            $table->unsignedBigInteger('model_id');
-        });
-        Schema::create('model_has_permissions', static function (Blueprint $table): void {
-            $table->unsignedInteger('permission_id');
-            $table->string('model_type');
-            $table->unsignedBigInteger('model_id');
-        });
+        $this->createSpatieAuthorityTables();
+        $this->createSpatiePivotTables();
     }
 
     /**
@@ -76,6 +52,7 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
      *
      * @return void
      */
+    #[\Override]
     protected function tearDown(): void
     {
         foreach (['model_has_permissions', 'model_has_roles', 'role_has_permissions', 'permissions', 'roles'] as $table) {
@@ -134,7 +111,7 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
             ['id' => 2, 'name' => 'b:do', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
         ]);
 
-        // Unmappable rows interleaved before *and* after mappable
+        // Unmappable rows interleaved before and after mappable
         // rows — a `break` mutation would stop processing after
         // the first unmappable row and miss the later mappable
         // one, distinguishing it from the real `continue`.
@@ -538,6 +515,7 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
      * @param  mixed  $app
      * @return void
      */
+    #[\Override]
     protected function defineEnvironment(mixed $app): void
     {
         parent::defineEnvironment($app);
@@ -552,5 +530,50 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
         $config->set('authorization.tables.authorizable_roles', 'auth_authorizable_roles');
         $config->set('authorization.tables.authorizable_permissions', 'auth_authorizable_permissions');
         $config->set('authorization.tables.authorizable_policies', 'auth_authorizable_policies');
+    }
+
+    /**
+     * Create the Spatie role and permission master tables.
+     *
+     * @return void
+     */
+    private function createSpatieAuthorityTables(): void
+    {
+        Schema::create('roles', static function (Blueprint $table): void {
+            $table->increments('id');
+            $table->string('name');
+            $table->string('guard_name');
+            $table->timestamps();
+        });
+        Schema::create('permissions', static function (Blueprint $table): void {
+            $table->increments('id');
+            $table->string('name');
+            $table->string('guard_name');
+            $table->timestamps();
+        });
+    }
+
+    /**
+     * Create the Spatie pivot tables (role / model junctions).
+     *
+     * @return void
+     */
+    private function createSpatiePivotTables(): void
+    {
+        Schema::create('role_has_permissions', static function (Blueprint $table): void {
+            $table->unsignedInteger('permission_id');
+            $table->unsignedInteger('role_id');
+            $table->primary(['permission_id', 'role_id']);
+        });
+        Schema::create('model_has_roles', static function (Blueprint $table): void {
+            $table->unsignedInteger('role_id');
+            $table->string('model_type');
+            $table->unsignedBigInteger('model_id');
+        });
+        Schema::create('model_has_permissions', static function (Blueprint $table): void {
+            $table->unsignedInteger('permission_id');
+            $table->string('model_type');
+            $table->unsignedBigInteger('model_id');
+        });
     }
 }

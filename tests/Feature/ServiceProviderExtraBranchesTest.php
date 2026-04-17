@@ -7,64 +7,16 @@ namespace Tests\Feature;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
-use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
-use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use Tests\Feature\Stubs\PermissionEnum;
+use Tests\Feature\Stubs\StubBadPermissionProvider;
+use Tests\Feature\Stubs\StubPolicyStore;
 use Tests\TestCase;
-
-/**
- * Stub `PolicyStore` implementation used to verify that a bound
- * store is resolved through the singleton container after the
- * service provider wires it up.
- *
- * @internal
- *
- * @SuppressWarnings("php:S1192")
- */
-final class StubPolicyStore implements PolicyStore
-{
-    /**
-     * @param  object  $principal
-     * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
-     */
-    public function policiesFor(object $principal): array
-    {
-        return [];
-    }
-}
-
-/**
- * Stub `PermissionProvider` that returns an empty string and a
- * non-string value — the service provider must skip both without
- * raising, and without creating database rows for them.
- *
- * @internal
- */
-// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
-final class StubBadPermissionProvider implements PermissionProvider
-{
-    /**
-     * @return array<int, mixed>
-     */
-    public function permissions(): array // @phpstan-ignore method.childReturnType
-    {
-        return ['', 42, 'valid:perm'];
-    }
-
-    /**
-     * @return string|null
-     */
-    public function guard(): ?string // @phpstan-ignore return.unusedType
-    {
-        return 'web';
-    }
-}
 
 /**
  * Coverage for the final trio of `AuthorizationServiceProvider`
@@ -88,7 +40,6 @@ final class StubBadPermissionProvider implements PermissionProvider
 #[CoversClass(GateRegistrar::class)]
 #[CoversClass(BladeDirectiveRegistrar::class)]
 #[CoversClass(EventListenerRegistrar::class)]
-// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 final class ServiceProviderExtraBranchesTest extends TestCase
 {
     private const string VALID_PERM   = 'valid:perm';
@@ -103,7 +54,7 @@ final class ServiceProviderExtraBranchesTest extends TestCase
     public function testPolicyStoreIsBoundWhenConfigured(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.policy_store', StubPolicyStore::class);
 
         // Re-run the register phase so the binding is picked up; the
@@ -111,8 +62,8 @@ final class ServiceProviderExtraBranchesTest extends TestCase
         // config sets `policy_store` to null.
         (new AuthorizationServiceProvider($this->app))->register();
 
-        self::assertTrue($this->app->bound(PolicyStore::class)); // @phpstan-ignore method.nonObject
-        self::assertInstanceOf(StubPolicyStore::class, $this->app->make(PolicyStore::class)); // @phpstan-ignore method.nonObject
+        self::assertTrue($this->app->bound(PolicyStore::class)); // @phpstan-ignore method.nonObject (test container is non-null)
+        self::assertInstanceOf(StubPolicyStore::class, $this->app->make(PolicyStore::class)); // @phpstan-ignore method.nonObject (test container is non-null)
     }
 
     /**
@@ -126,7 +77,7 @@ final class ServiceProviderExtraBranchesTest extends TestCase
     public function testGateConflictModeEnumInstanceIsAcceptedVerbatim(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.gate.on_conflict', GateConflictMode::OVERWRITE);
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
@@ -152,7 +103,7 @@ final class ServiceProviderExtraBranchesTest extends TestCase
     public function testPermissionProviderSkipsEmptyAndNonStringEntries(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_providers', [StubBadPermissionProvider::class]);
 
         (new AuthorizationServiceProvider($this->app))->boot();
@@ -174,7 +125,7 @@ final class ServiceProviderExtraBranchesTest extends TestCase
     public function testRegisterGatesSkipsNonStringEnumEntries(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_enums', [123, \stdClass::class, PermissionEnum::class]);
         $config->set('authorization.gate.on_conflict', 'overwrite');
 
@@ -196,7 +147,7 @@ final class ServiceProviderExtraBranchesTest extends TestCase
     public function testRegisterPermissionProvidersSkipsBadEntries(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_providers', [
             123,                                    // non-string
             \stdClass::class,                       // string but not a provider

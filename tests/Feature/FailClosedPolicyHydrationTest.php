@@ -75,7 +75,7 @@ final class FailClosedPolicyHydrationTest extends TestCase
         DB::table('authorizable_policies')->insert([
             'policy_id'         => $badId,
             'authorizable_type' => $user->getMorphClass(),
-            'authorizable_id'   => (string) $user->getKey(), // @phpstan-ignore cast.string
+            'authorizable_id'   => (string) $user->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
         ]);
 
         // getPolicies() yields only the good policy — no
@@ -116,12 +116,12 @@ final class FailClosedPolicyHydrationTest extends TestCase
         DB::table('authorizable_policies')->insert([
             'policy_id'         => $badId,
             'authorizable_type' => $user->getMorphClass(),
-            'authorizable_id'   => (string) $user->getKey(), // @phpstan-ignore cast.string
+            'authorizable_id'   => (string) $user->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
         ]);
 
-        $result = Authorization::for($user->fresh())->evaluate('posts:create');
+        $decision = Authorization::for($user->fresh())->evaluate('posts:create');
 
-        self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $result->reason);
+        self::assertTrue($decision->allowed);
+        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $decision->reason);
     }
 }

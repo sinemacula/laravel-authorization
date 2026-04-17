@@ -74,9 +74,9 @@ final class AuthorizationManagerTest extends TestCase
         $user = StubIdentity::create(['id' => '1705066a-b10d-4f4a-8aba-73758a3a381a']);
         $user->givePermission('posts:create');
 
-        $result = Authorization::for($user)->evaluate('posts:create');
-        self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::RBAC_ALLOW, $result->reason);
+        $decision = Authorization::for($user)->evaluate('posts:create');
+        self::assertTrue($decision->allowed);
+        self::assertSame(DecisionReason::RBAC_ALLOW, $decision->reason);
     }
 
     /**
@@ -121,9 +121,9 @@ final class AuthorizationManagerTest extends TestCase
         $user->assignRole('admin');
         $user->attachPolicy($policy);
 
-        $result = Authorization::for($user)->evaluate('posts:delete');
-        self::assertFalse($result->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_DENY, $result->reason);
+        $decision = Authorization::for($user)->evaluate('posts:delete');
+        self::assertFalse($decision->allowed);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $decision->reason);
     }
 
     /**
@@ -273,7 +273,7 @@ final class AuthorizationManagerTest extends TestCase
     public function testGateParity(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make('config'); // @phpstan-ignore method.nonObject
+        $config = $this->app->make('config'); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_enums', [\Tests\Feature\Stubs\PermissionEnum::class]);
 
         (new \SineMacula\Laravel\Authorization\AuthorizationServiceProvider($this->app))->boot();
@@ -320,10 +320,10 @@ final class AuthorizationManagerTest extends TestCase
             'statements' => [['effect' => 'allow', 'actions' => ['ad:hoc']]],
         ]);
 
-        $result = Authorization::for($user)->withPolicies([$override])->evaluate('ad:hoc');
+        $decision = Authorization::for($user)->withPolicies([$override])->evaluate('ad:hoc');
 
-        self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $result->reason);
+        self::assertTrue($decision->allowed);
+        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $decision->reason);
     }
 
     /**
@@ -380,6 +380,6 @@ final class AuthorizationManagerTest extends TestCase
     {
         \sort($values);
 
-        return \array_values($values); // @phpstan-ignore arrayValues.list
+        return \array_values($values); // @phpstan-ignore arrayValues.list (numeric-indexed list coerce)
     }
 }

@@ -33,12 +33,13 @@ final class EffectivePermissionsTest extends TestCase
      *
      * @return void
      */
+    #[\Override]
     protected function setUp(): void
     {
         parent::setUp();
 
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
     }
 
@@ -133,7 +134,7 @@ final class EffectivePermissionsTest extends TestCase
     public function testEmptyEnumsReturnsEmptyMap(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_enums', []);
 
         $user = StubIdentity::create(['id' => '327dffb4-192c-485f-810c-169d121b9f73']);

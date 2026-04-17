@@ -21,21 +21,6 @@ use Tests\TestCase;
 /**
  * Feature coverage for the shipped Blade directives (issue #34).
  *
- * The service provider registers a `Blade::if`-backed set of
- * directives (`@role`, `@permission`, `@anyrole`, `@allroles`,
- * `@anypermission`, `@allpermissions`, plus Spatie-compat aliases
- * `@hasrole`, `@hasanyrole`, `@hasallroles`) and a companion
- * `@endunlessrole` directive. Every directive resolves the current
- * principal through `PrincipalResolver` and delegates to
- * `BladeHelpers`.
- *
- * Test templates keep whitespace either side of each directive.
- * Blade's statement regex is `\B@…`, which requires a non-word
- * boundary before the `@`; a literal token like `yes@endrole`
- * leaves the closing directive unmatched and produces a PHP
- * parse error. The assertions `trim()` the rendered output so
- * the leading/trailing whitespace does not mask the content.
- *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -78,6 +63,12 @@ final class BladeDirectivesTest extends TestCase
 
         $this->actAs($user);
 
+        // Keep whitespace either side of each directive: Blade's
+        // statement regex is `\B@…`, which requires a non-word
+        // boundary before the `@`; a literal token like `yes@endrole`
+        // leaves the closing directive unmatched and produces a PHP
+        // parse error. The render helper trims the output so the
+        // leading/trailing whitespace does not mask the content.
         $output = $this->render('@role(\'admin\') yes @endrole');
 
         self::assertSame('yes', $output);
@@ -508,22 +499,31 @@ final class BladeDirectivesTest extends TestCase
     {
         $resolver = new class ($principal) implements PrincipalResolver {
             /**
+             * Create a new resolver wrapping a fixed principal.
+             *
              * @param  object|null  $principal
+             * @return void
              */
-            public function __construct(private readonly ?object $principal) {}
+            public function __construct(
+
+                /** The principal returned by every resolution call. */
+                private readonly ?object $principal,
+
+            ) {}
 
             /**
              * Return the principal bound on this scoped resolver.
              *
              * @return object|null
              */
+            #[\Override]
             public function resolve(): ?object
             {
                 return $this->principal;
             }
         };
 
-        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject
+        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject (test container is non-null)
     }
 
     /**

@@ -50,7 +50,7 @@ final class ConfigValidationTest extends TestCase
     public function testDefaultConfigPassesValidation(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
 
         (new AuthorizationServiceProvider($this->app))->boot();
 
@@ -65,7 +65,7 @@ final class ConfigValidationTest extends TestCase
     public function testValidPermissionEnumPasses(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
         ConfigValidator::validate((array) $config->get('authorization'), $this->app);
@@ -82,7 +82,7 @@ final class ConfigValidationTest extends TestCase
     public function testInvalidGateOnConflictIsRejected(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.gate.on_conflict', 'explode');
 
         try {
@@ -103,7 +103,7 @@ final class ConfigValidationTest extends TestCase
     public function testPermissionEnumMissingClassIsRejected(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_enums', ['App\Does\Not\Exist']);
 
         try {
@@ -124,7 +124,7 @@ final class ConfigValidationTest extends TestCase
     public function testPermissionEnumWrongContractIsRejected(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_enums', [\stdClass::class]);
 
         $this->expectException(InvalidAuthorizationConfigException::class);
@@ -141,7 +141,7 @@ final class ConfigValidationTest extends TestCase
     public function testNullPrincipalResolverIsRejected(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.principal_resolver', null);
 
         try {
@@ -162,7 +162,7 @@ final class ConfigValidationTest extends TestCase
     public function testPrincipalResolverWrongContractIsRejected(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.principal_resolver', \stdClass::class);
 
         $this->expectException(InvalidAuthorizationConfigException::class);
@@ -178,7 +178,7 @@ final class ConfigValidationTest extends TestCase
     public function testShippedPrincipalResolverPasses(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.principal_resolver', NullPrincipalResolver::class);
 
         ConfigValidator::validate((array) $config->get('authorization'), $this->app);
@@ -195,7 +195,7 @@ final class ConfigValidationTest extends TestCase
     public function testPolicyStoreWrongContractIsRejected(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.policy_store', \stdClass::class);
 
         $this->expectException(InvalidAuthorizationConfigException::class);
@@ -212,7 +212,7 @@ final class ConfigValidationTest extends TestCase
     public function testUnknownCacheStoreIsRejected(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.cache.store', 'does-not-exist');
 
         try {
@@ -233,7 +233,7 @@ final class ConfigValidationTest extends TestCase
     public function testKnownCacheStorePasses(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.cache.store', 'array');
 
         ConfigValidator::validate((array) $config->get('authorization'), $this->app);
@@ -265,7 +265,7 @@ final class ConfigValidationTest extends TestCase
     public function testMalformedPermissionEnumEntryIsRejected(mixed $entry): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_enums', [$entry]);
 
         $this->expectException(InvalidAuthorizationConfigException::class);
@@ -283,7 +283,7 @@ final class ConfigValidationTest extends TestCase
     public function testGateOnConflictAcceptsEnumInstance(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.gate.on_conflict', \SineMacula\Laravel\Authorization\Enums\GateConflictMode::THROW);
 
         ConfigValidator::validate((array) $config->get('authorization'), $this->app);
@@ -302,7 +302,7 @@ final class ConfigValidationTest extends TestCase
     public function testGateOnConflictRejectionListsEveryEnumSentinel(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.gate.on_conflict', 'Log');
 
         try {
@@ -332,7 +332,7 @@ final class ConfigValidationTest extends TestCase
     public function testPermissionEnumWrongContractMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_enums', [\stdClass::class]);
 
         try {
@@ -356,7 +356,7 @@ final class ConfigValidationTest extends TestCase
     public function testPermissionProviderWrongContractMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_providers', [\stdClass::class]);
 
         try {
@@ -380,7 +380,7 @@ final class ConfigValidationTest extends TestCase
     public function testGateOnConflictRejectionMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.gate.on_conflict', 42);
 
         try {
@@ -408,7 +408,7 @@ final class ConfigValidationTest extends TestCase
     public function testPrincipalResolverNonStringMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.principal_resolver', 42);
 
         try {
@@ -431,7 +431,7 @@ final class ConfigValidationTest extends TestCase
     public function testAssertImplementsContractMissingClassMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.principal_resolver', 'App\Does\Not\Exist');
 
         try {
@@ -454,7 +454,7 @@ final class ConfigValidationTest extends TestCase
     public function testAssertImplementsContractWrongContractMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.principal_resolver', \stdClass::class);
 
         try {
@@ -477,7 +477,7 @@ final class ConfigValidationTest extends TestCase
     public function testCacheStoreNonStringMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.cache.store', 42);
 
         try {
@@ -499,7 +499,7 @@ final class ConfigValidationTest extends TestCase
     public function testCacheStoreEmptyStringIsRejected(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.cache.store', '');
 
         $this->expectException(InvalidAuthorizationConfigException::class);
@@ -517,7 +517,7 @@ final class ConfigValidationTest extends TestCase
     public function testAssertImplementsContractThrowIsEssential(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.policy_store', \stdClass::class);
 
         $this->expectException(InvalidAuthorizationConfigException::class);
@@ -535,7 +535,7 @@ final class ConfigValidationTest extends TestCase
     public function testPermissionProvidersNonArrayRejectionMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_providers', 'not-an-array');
 
         try {
@@ -557,7 +557,7 @@ final class ConfigValidationTest extends TestCase
     public function testPermissionEnumsNonArrayRejectionMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_enums', 'not-an-array');
 
         try {
@@ -579,7 +579,7 @@ final class ConfigValidationTest extends TestCase
     public function testPermissionProviderMissingClassMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_providers', ['App\Missing\Provider']);
 
         try {
@@ -600,7 +600,7 @@ final class ConfigValidationTest extends TestCase
     public function testPermissionProviderMalformedEntryIsRejected(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.permission_providers', ['']);
 
         $this->expectException(InvalidAuthorizationConfigException::class);
@@ -617,7 +617,7 @@ final class ConfigValidationTest extends TestCase
     public function testTenantResolverWrongContractIsRejected(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
         $config->set('authorization.tenant_resolver', \stdClass::class);
 
         try {
