@@ -16,11 +16,10 @@ use Tests\TestCase;
 /**
  * Performance budget for `Role::ancestors()` walks.
  *
- * Role hierarchy traversal runs on every `getPermissions()` call
- * when hierarchy is enabled (the default). A 10-deep chain is the
- * deepest production hierarchy the package expects to see (org →
- * division → team → squad → role → seat plus extension levels);
- * the budget catches a regression that turns the walk into a
+ * Role hierarchy traversal runs on every `getPermissions()` call when hierarchy
+ * is enabled (the default). A 10-deep chain is the deepest production hierarchy
+ * the package expects to see (org → division → team → squad → role → seat plus
+ * extension levels); the budget catches a regression that turns the walk into a
  * database-bound loop rather than a lazy-load chain.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -37,10 +36,10 @@ use Tests\TestCase;
 final class RoleHierarchyBudgetTest extends TestCase
 {
     /**
-     * A single ancestors walk on a 10-deep chain must complete in
-     * under 50ms on the reference machine. Observed ~2.2ms on the
-     * reference machine; budget is ~20× to tolerate CI variance
-     * and the inherent cost of SQLite lazy loads.
+     * A single ancestors walk on a 10-deep chain must complete in under 50ms on
+     * the reference machine. Observed ~2.2ms on the reference machine; budget
+     * is ~20× to tolerate CI variance and the inherent cost of SQLite lazy
+     * loads.
      *
      * @return void
      */
@@ -62,10 +61,10 @@ final class RoleHierarchyBudgetTest extends TestCase
     }
 
     /**
-     * The `ancestors()` walk must return a full chain of 9
-     * parents for a 10-deep leaf — guards against a regression
-     * where the walk terminates early (missing permissions in
-     * inherited rollup) or double-counts (cycle-detection bug).
+     * The `ancestors()` walk must return a full chain of 9 parents for a
+     * 10-deep leaf — guards against a regression where the walk terminates
+     * early (missing permissions in inherited rollup) or double-counts
+     * (cycle-detection bug).
      *
      * @return void
      */
@@ -81,8 +80,8 @@ final class RoleHierarchyBudgetTest extends TestCase
     }
 
     /**
-     * Build an ancestor chain `depth` roles deep, returning the
-     * leaf — same shape as the matching bench fixture.
+     * Build an ancestor chain `depth` roles deep, returning the leaf — same
+     * shape as the matching bench fixture.
      *
      * @param  int  $depth
      * @return \SineMacula\Laravel\Authorization\Models\Role

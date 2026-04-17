@@ -85,8 +85,8 @@ final class WildcardPermissionTest extends TestCase
     }
 
     /**
-     * The wildcard does not cross the action prefix — a held
-     * `posts:*` does not satisfy `users:create`.
+     * The wildcard does not cross the action prefix — a held `posts:*` does not
+     * satisfy `users:create`.
      *
      * @return void
      */
@@ -111,9 +111,8 @@ final class WildcardPermissionTest extends TestCase
     }
 
     /**
-     * The super-admin principal holds `*:*` and satisfies every
-     * concrete asked permission — including prefixes it has never
-     * seen before.
+     * The super-admin principal holds `*:*` and satisfies every concrete asked
+     * permission — including prefixes it has never seen before.
      *
      * @return void
      */
@@ -130,9 +129,8 @@ final class WildcardPermissionTest extends TestCase
     }
 
     /**
-     * A role holding `posts:*` also answers `hasPermission` with
-     * the wildcard semantics, so the check is symmetrical on both
-     * sides of the RBAC edge.
+     * A role holding `posts:*` also answers `hasPermission` with the wildcard
+     * semantics, so the check is symmetrical on both sides of the RBAC edge.
      *
      * @return void
      */
@@ -159,8 +157,8 @@ final class WildcardPermissionTest extends TestCase
     }
 
     /**
-     * Wildcard matching is inherited through roles — a role
-     * holding `posts:*` flows through to the identity.
+     * Wildcard matching is inherited through roles — a role holding `posts:*`
+     * flows through to the identity.
      *
      * @return void
      */
@@ -185,8 +183,8 @@ final class WildcardPermissionTest extends TestCase
     }
 
     /**
-     * Statement resource matching treats backslashes literally —
-     * an FQN-shaped resource identifier reaches the matcher unescaped.
+     * Statement resource matching treats backslashes literally — an FQN-shaped
+     * resource identifier reaches the matcher unescaped.
      *
      * @return void
      */
@@ -208,8 +206,8 @@ final class WildcardPermissionTest extends TestCase
     }
 
     /**
-     * Statement action matching also accepts backslash-bearing
-     * patterns literally.
+     * Statement action matching also accepts backslash-bearing patterns
+     * literally.
      *
      * @return void
      */
@@ -240,9 +238,9 @@ final class WildcardPermissionTest extends TestCase
     }
 
     /**
-     * Every name the evaluator walks is safe — metacharacters and
-     * whitespace are rejected at save time so `fnmatch` cannot be
-     * tricked into matching through a malformed name.
+     * Every name the evaluator walks is safe — metacharacters and whitespace
+     * are rejected at save time so `fnmatch` cannot be tricked into matching
+     * through a malformed name.
      *
      * @param  string  $name
      * @return void
@@ -291,9 +289,8 @@ final class WildcardPermissionTest extends TestCase
     }
 
     /**
-     * The allowed character class covers the common permission
-     * shapes — action strings, hyphenated names, underscores, and
-     * wildcards.
+     * The allowed character class covers the common permission shapes — action
+     * strings, hyphenated names, underscores, and wildcards.
      *
      * @param  string  $name
      * @return void
@@ -311,8 +308,8 @@ final class WildcardPermissionTest extends TestCase
     }
 
     /**
-     * Attach a single permission (created if missing) to a fresh
-     * authorizable and return the identity.
+     * Attach a single permission (created if missing) to a fresh authorizable
+     * and return the identity.
      *
      * @param  string  $name
      * @return \Tests\Feature\Stubs\StubIdentity

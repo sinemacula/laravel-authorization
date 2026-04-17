@@ -16,11 +16,10 @@ use Tests\TestCase;
 /**
  * Feature coverage for the system-policy protection flag.
  *
- * `is_system = true` blocks the next delete, rename, or document
- * rewrite on the instance unless `forceSystem()` is called first;
- * the bypass is per-instance, in-memory, and single-use — it does
- * not persist across `$policy->fresh()` hydrations and re-arms on
- * the next protected mutation. The document guard closes #91.
+ * `is_system = true` blocks the next delete, rename, or document rewrite on the
+ * instance unless `forceSystem()` is called first; the bypass is per-instance,
+ * in-memory, and single-use — it does not persist across `$policy->fresh()`
+ * hydrations and re-arms on the next protected mutation.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,8 +35,7 @@ use Tests\TestCase;
 final class SystemPolicyProtectionTest extends TestCase
 {
     /**
-     * Deleting a system policy without the escape hatch is
-     * refused.
+     * Deleting a system policy without the escape hatch is refused.
      *
      * @return void
      */
@@ -57,8 +55,7 @@ final class SystemPolicyProtectionTest extends TestCase
     }
 
     /**
-     * Renaming a system policy without the escape hatch is
-     * refused.
+     * Renaming a system policy without the escape hatch is refused.
      *
      * @return void
      */
@@ -109,9 +106,9 @@ final class SystemPolicyProtectionTest extends TestCase
     }
 
     /**
-     * Non-protected updates — description changes — pass without
-     * needing the escape hatch. (`name` and `document` are
-     * protected; `description` is not.).
+     * Non-protected updates — description changes — pass without needing the
+     * escape hatch. (`name` and `document` are protected; `description` is
+     * not.).
      *
      * @return void
      */
@@ -129,8 +126,8 @@ final class SystemPolicyProtectionTest extends TestCase
     }
 
     /**
-     * The bypass is single-use — after one protected mutation
-     * the next one re-arms.
+     * The bypass is single-use — after one protected mutation the next one
+     * re-arms.
      *
      * @return void
      */
@@ -151,9 +148,9 @@ final class SystemPolicyProtectionTest extends TestCase
     }
 
     /**
-     * `forceSystem()` is consumed by an intervening non-protected
-     * save (e.g. a description update), so a subsequent rename
-     * without re-arming the bypass is refused.
+     * `forceSystem()` is consumed by an intervening non-protected save (e.g. a
+     * description update), so a subsequent rename without re-arming the bypass
+     * is refused.
      *
      * @return void
      */
@@ -172,8 +169,7 @@ final class SystemPolicyProtectionTest extends TestCase
     }
 
     /**
-     * Non-system policies behave as before — no protection, no
-     * bypass required.
+     * Non-system policies behave as before — no protection, no bypass required.
      *
      * @return void
      */
@@ -201,10 +197,9 @@ final class SystemPolicyProtectionTest extends TestCase
     }
 
     /**
-     * Rewriting the document on a system policy without the
-     * escape hatch is refused — the document carries the
-     * authorization payload and is the security-relevant field
-     * on the Policy table (#91).
+     * Rewriting the document on a system policy without the escape hatch is
+     * refused — the document carries the authorization payload and is the
+     * security-relevant field on the Policy table.
      *
      * @return void
      */
@@ -231,8 +226,7 @@ final class SystemPolicyProtectionTest extends TestCase
     }
 
     /**
-     * `forceSystem()` unlocks the next document rewrite on a
-     * system policy.
+     * `forceSystem()` unlocks the next document rewrite on a system policy.
      *
      * @return void
      */
@@ -263,8 +257,8 @@ final class SystemPolicyProtectionTest extends TestCase
     }
 
     /**
-     * Create a system-flagged policy with a minimal valid
-     * document for protection scenarios.
+     * Create a system-flagged policy with a minimal valid document for
+     * protection scenarios.
      *
      * @param  string  $name
      * @return \SineMacula\Laravel\Authorization\Models\Policy

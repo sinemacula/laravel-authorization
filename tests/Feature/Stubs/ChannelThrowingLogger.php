@@ -7,15 +7,14 @@ namespace Tests\Feature\Stubs;
 use Psr\Log\AbstractLogger;
 
 /**
- * Fake logger whose `channel()` always raises — drives the
- * default-channel fallback path in authorization loggers.
+ * Fake logger whose `channel()` always raises — drives the default-channel
+ * fallback path in authorization loggers.
  *
- * The trait / cache layer calls `logger()->channel('authorization')`
- * first, and on failure falls back to `logger()->warning(...)` on
- * the default channel. This stub records the call counts, the last
- * message, and the last context so assertions can pin the fallback
- * branch ran and the emitted payload stays honest against
- * mutation-kill flags.
+ * The trait / cache layer calls `logger()->channel('authorization')` first, and
+ * on failure falls back to `logger()->warning(...)` on the default channel.
+ * This stub records the call counts, the last message, and the last context so
+ * assertions can pin the fallback branch ran and the emitted payload stays
+ * honest against mutation-kill flags.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

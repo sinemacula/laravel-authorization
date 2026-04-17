@@ -57,8 +57,8 @@ final class PermissionProviderTest extends TestCase
     }
 
     /**
-     * Provider registration is idempotent — booting twice does not
-     * create duplicate rows.
+     * Provider registration is idempotent — booting twice does not create
+     * duplicate rows.
      *
      * @return void
      */
@@ -78,8 +78,7 @@ final class PermissionProviderTest extends TestCase
     }
 
     /**
-     * A provider with a null guard creates guard-agnostic permission
-     * rows.
+     * A provider with a null guard creates guard-agnostic permission rows.
      *
      * @return void
      */
@@ -114,8 +113,7 @@ final class PermissionProviderTest extends TestCase
     }
 
     /**
-     * Config validation rejects a class that does not implement the
-     * contract.
+     * Config validation rejects a class that does not implement the contract.
      *
      * @return void
      */

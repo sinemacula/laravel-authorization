@@ -7,9 +7,9 @@ namespace Tests\Feature\Stubs;
 use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
 
 /**
- * Stub `PermissionProvider` that returns an empty string and a
- * non-string value — the service provider must skip both without
- * raising, and without creating database rows for them.
+ * Stub `PermissionProvider` that returns an empty string and a non-string value
+ * — the service provider must skip both without raising, and without creating
+ * database rows for them.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

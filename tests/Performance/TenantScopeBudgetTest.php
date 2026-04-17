@@ -16,17 +16,15 @@ use Tests\TestCase;
 /**
  * Performance budget for `TenantScope::apply()`.
  *
- * The scope fires on every Eloquent query against `Role` and
- * `Permission`. The memoisation tier ensures that after the first
- * resolver call, repeated applies on the same container pay only
- * the constant-time memo lookup — the bench measures the raw cost,
- * this test asserts the shape of the amortised lookup.
+ * The scope fires on every Eloquent query against `Role` and `Permission`. The
+ * memoisation tier ensures that after the first resolver call, repeated applies
+ * on the same container pay only the constant-time memo lookup — the bench
+ * measures the raw cost, this test asserts the shape of the amortised lookup.
  *
- * The test proves the memoisation contract: the resolver is
- * invoked exactly once across N warm applies in the same
- * container. A regression that stops respecting the memo (an
- * accidental flush per apply, a container rebuild on every
- * query) manifests as an N-call resolver count — caught here.
+ * The test proves the memoisation contract: the resolver is invoked exactly
+ * once across N warm applies in the same container. A regression that stops
+ * respecting the memo (an accidental flush per apply, a container rebuild on
+ * every query) manifests as an N-call resolver count — caught here.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -39,10 +37,9 @@ use Tests\TestCase;
 final class TenantScopeBudgetTest extends TestCase
 {
     /**
-     * The memoisation tier must cap the resolver to a single call
-     * across repeated apply invocations within the same
-     * container — the core "constant-time after first resolve"
-     * contract from the scope's docblock.
+     * The memoisation tier must cap the resolver to a single call across
+     * repeated apply invocations within the same container — the core
+     * "constant-time after first resolve" contract from the scope's docblock.
      *
      * @return void
      */
@@ -80,10 +77,9 @@ final class TenantScopeBudgetTest extends TestCase
     }
 
     /**
-     * 1,000 warm applies must complete under 250ms on the
-     * reference machine. The bench reports ~85μs per call (~85ms
-     * total); the budget gives ~3× headroom so normal CI variance
-     * never trips it.
+     * 1,000 warm applies must complete under 250ms on the reference machine.
+     * The bench reports ~85μs per call (~85ms total); the budget gives ~3×
+     * headroom so normal CI variance never trips it.
      *
      * @return void
      */
@@ -124,9 +120,8 @@ final class TenantScopeBudgetTest extends TestCase
 }
 
 /**
- * Counting tenant resolver used by the memo-contract assertion —
- * exposes `$calls` so the test can prove single-invocation
- * semantics.
+ * Counting tenant resolver used by the memo-contract assertion — exposes
+ * `$calls` so the test can prove single-invocation semantics.
  *
  * @internal
  */
@@ -166,9 +161,8 @@ final class CountingTenantResolver implements TenantResolver
 }
 
 /**
- * Minimal tenant fixture — kept here rather than in a shared
- * helper so the performance suite has no runtime dependency on
- * the benchmark-support tree.
+ * Minimal tenant fixture — kept here rather than in a shared helper so the
+ * performance suite has no runtime dependency on the benchmark-support tree.
  *
  * @internal
  */

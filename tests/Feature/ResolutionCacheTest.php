@@ -24,14 +24,13 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Feature coverage for the resolution cache, its invalidation
- * listener, and the caching policy-resolver decorator.
+ * Feature coverage for the resolution cache, its invalidation listener, and the
+ * caching policy-resolver decorator.
  *
- * Covers the two tiers (in-memory memo + optional persistent
- * store), the principal-scoped invalidation path
- * (`IdentityRoleAssigned` / `IdentityPermissionGranted` /
- * `IdentityPolicyAttached` and their inverses), and the broad
- * in-memory flush triggered by role-pivot mutations.
+ * Covers the two tiers (in-memory memo + optional persistent store), the
+ * principal-scoped invalidation path (`IdentityRoleAssigned` /
+ * `IdentityPermissionGranted` / `IdentityPolicyAttached` and their inverses),
+ * and the broad in-memory flush triggered by role-pivot mutations.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,8 +50,8 @@ use Tests\TestCase;
 final class ResolutionCacheTest extends TestCase
 {
     /**
-     * Enable the persistent cache tier on the array store and
-     * boot a fresh service-provider so bindings pick it up.
+     * Enable the persistent cache tier on the array store and boot a fresh
+     * service-provider so bindings pick it up.
      *
      * @return void
      */
@@ -75,8 +74,8 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * The in-memory memo returns the same array on subsequent
-     * calls without invoking the resolver.
+     * The in-memory memo returns the same array on subsequent calls without
+     * invoking the resolver.
      *
      * @return void
      */
@@ -105,8 +104,8 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * The persistent store is populated on cold miss and read on
-     * subsequent resolution from a fresh cache instance.
+     * The persistent store is populated on cold miss and read on subsequent
+     * resolution from a fresh cache instance.
      *
      * @return void
      */
@@ -138,8 +137,8 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `forget()` drops every slot for the principal — memo and
-     * persistent store alike.
+     * `forget()` drops every slot for the principal — memo and persistent store
+     * alike.
      *
      * @return void
      */
@@ -164,8 +163,8 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `IdentityRoleAssigned` invalidates the principal's cached
-     * role / permission slots.
+     * `IdentityRoleAssigned` invalidates the principal's cached role /
+     * permission slots.
      *
      * @return void
      */
@@ -183,8 +182,8 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `IdentityPolicyAttached` invalidates the principal's cached
-     * policy slot via the caching resolver decorator.
+     * `IdentityPolicyAttached` invalidates the principal's cached policy slot
+     * via the caching resolver decorator.
      *
      * @return void
      */
@@ -213,13 +212,12 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `RolePermissionGranted` clears the in-memory memo tier. The
-     * persistent tier is deliberately not cleared — the cache
-     * has no reverse index from a role to the identities carrying
-     * it, and flushing the whole store would wipe unrelated
-     * entries. The test isolates the in-memory behaviour by using
-     * a memory-only cache instance so the stale-until-TTL gap on
-     * the persistent tier does not mask the flush.
+     * `RolePermissionGranted` clears the in-memory memo tier. The persistent
+     * tier is deliberately not cleared — the cache has no reverse index from a
+     * role to the identities carrying it, and flushing the whole store would
+     * wipe unrelated entries. The test isolates the in-memory behaviour by
+     * using a memory-only cache instance so the stale-until-TTL gap on the
+     * persistent tier does not mask the flush.
      *
      * @return void
      */
@@ -245,14 +243,12 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * On a tag-capable store, a `RolePermissionGranted` event
-     * invalidates the persistent cache entry for every principal
-     * tagged with the mutated role — the reverse-index gap called
-     * out in ISSUES.md #68. The test assigns the role to the
-     * principal (so the entry carries the role tag), primes
-     * `getPermissions()` into the persistent tier, then grants a
-     * new permission to the role and asserts the next read sees
-     * the mutation without any manual `forget()` call.
+     * On a tag-capable store, a `RolePermissionGranted` event invalidates the
+     * persistent cache entry for every principal tagged with the mutated role.
+     * The test assigns the role to the principal (so the entry carries the role
+     * tag), primes `getPermissions()` into the persistent tier, then grants a
+     * new permission to the role and asserts the next read sees the mutation
+     * without any manual `forget()` call.
      *
      * @return void
      */
@@ -278,21 +274,21 @@ final class ResolutionCacheTest extends TestCase
         $second = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard_name' => 'web']);
         $role->givePermission($second);
 
-        $permissions = $user->fresh()?->getPermissions() ?? []; // @phpstan-ignore nullCoalesce.expr, nullsafe.neverNull (test defensively coalesces a value known to be set in this scenario; test asserts fresh() returns non-null after persistence in this scenario)
+        // @phpstan-ignore-next-line nullCoalesce.expr, nullsafe.neverNull (defensive coalesce; fresh() non-null post-persist)
+        $permissions = $user->fresh()?->getPermissions() ?? [];
         \sort($permissions);
 
         self::assertSame(['posts:create', 'posts:read'], $permissions);
     }
 
     /**
-     * On a non-tag store, `RolePermissionGranted` cannot reach a
-     * reverse index into the persistent tier, so the listener
-     * falls back to `flush()` on the in-memory memo and leaves
-     * the persistent tier to expire on TTL (the documented
-     * stale-until-TTL behaviour for File / Database drivers).
-     * This is regression coverage for the non-tag branch of the
-     * invalidation path — `supportsTags()` reports false, and
-     * the memo flush is the only observable side effect.
+     * On a non-tag store, `RolePermissionGranted` cannot reach a reverse index
+     * into the persistent tier, so the listener falls back to `flush()` on the
+     * in-memory memo and leaves the persistent tier to expire on TTL (the
+     * documented stale-until-TTL behaviour for File / Database drivers). This
+     * is regression coverage for the non-tag branch of the invalidation path —
+     * `supportsTags()` reports false, and the memo flush is the only observable
+     * side effect.
      *
      * @return void
      */
@@ -342,9 +338,8 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `syncRoles()` bypasses the canonical event path but still
-     * invalidates the cache — the trait calls `forget()` directly
-     * after `sync()`.
+     * `syncRoles()` bypasses the canonical event path but still invalidates the
+     * cache — the trait calls `forget()` directly after `sync()`.
      *
      * @return void
      */
@@ -370,8 +365,7 @@ final class ResolutionCacheTest extends TestCase
      * A non-Eloquent principal — a plain object implementing
      * `AuthorizableIdentity` without extending `Model` — still gets
      * cross-request persistent-cache benefit when it exposes the
-     * `getMorphClass()` / `getKey()` duck-typed pair. Regression
-     * coverage for ISSUES.md #70.
+     * `getMorphClass()` / `getKey()` duck-typed pair.
      *
      * @return void
      */
@@ -380,8 +374,8 @@ final class ResolutionCacheTest extends TestCase
         $principalId = 'svc:' . Str::uuid()->toString();
 
         /**
-         * Non-model principal that exposes morph class and key methods
-         * so the cache keys it through the persistent store.
+         * Non-model principal that exposes morph class and key methods so the
+         * cache keys it through the persistent store.
          */
         $principal = new class ($principalId) {
             /**
@@ -443,11 +437,9 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * A corrupt persistent-cache payload (wrong shape, partial
-     * data) must not propagate as an exception — the entry is
-     * forgotten, the resolver runs fresh, and the store is
-     * rewritten with the new value. Regression coverage for
-     * ISSUES.md #71.
+     * A corrupt persistent-cache payload (wrong shape, partial data) must not
+     * propagate as an exception — the entry is forgotten, the resolver runs
+     * fresh, and the store is rewritten with the new value.
      *
      * @return void
      */
@@ -510,8 +502,8 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `forget()` drops all three slots from the persistent store on
-     * a non-taggable store — pins the `['policies', 'permissions', 'roles']`
+     * `forget()` drops all three slots from the persistent store on a
+     * non-taggable store — pins the `['policies', 'permissions', 'roles']`
      * array against ArrayItemRemoval mutations on line 214.
      *
      * @return void
@@ -557,8 +549,8 @@ final class ResolutionCacheTest extends TestCase
 
     /**
      * `rememberPolicies()` with null context defaults to a fresh
-     * `ResolutionCacheContext` — pins the `$context ?? new ...`
-     * coalesce on line 98.
+     * `ResolutionCacheContext` — pins the `$context ?? new ...` coalesce on
+     * line 98.
      *
      * @return void
      */
@@ -578,9 +570,8 @@ final class ResolutionCacheTest extends TestCase
 
     /**
      * Non-array entries in a policy cache document raise
-     * `UnexpectedValueException` which is caught, the key is
-     * forgotten, and the resolver re-fires. Pins the Throw_
-     * mutant on line 116.
+     * `UnexpectedValueException` which is caught, the key is forgotten, and the
+     * resolver re-fires. Pins the Throw_ mutant on line 116.
      *
      * @return void
      */
@@ -621,8 +612,7 @@ final class ResolutionCacheTest extends TestCase
 
     /**
      * `forgetFromStore` is called during the corrupt-entry path in
-     * `rememberStringList` — pins the MethodCallRemoval mutant on
-     * line 318.
+     * `rememberStringList` — pins the MethodCallRemoval mutant on line 318.
      *
      * @return void
      */
@@ -671,8 +661,8 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `keyFor()` with an integer getKey returns the string cast.
-     * Pins CastString on line 386 and LogicalOr mutants on line 385.
+     * `keyFor()` with an integer getKey returns the string cast. Pins
+     * CastString on line 386 and LogicalOr mutants on line 385.
      *
      * @return void
      */
@@ -706,9 +696,9 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `keyFor()` falls back to `obj:spl_object_hash` when getKey
-     * returns empty string. Pins the `$id === null` branch on line
-     * 394 and the Concat/ConcatOperandRemoval mutants on line 395.
+     * `keyFor()` falls back to `obj:spl_object_hash` when getKey returns empty
+     * string. Pins the `$id === null` branch on line 394 and the
+     * Concat/ConcatOperandRemoval mutants on line 395.
      *
      * @return void
      */
@@ -746,8 +736,8 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `principalTag` is assembled as `<prefix>:principal:<keyFor>`.
-     * Pins the Concat/ConcatOperandRemoval mutants on line 411.
+     * `principalTag` is assembled as `<prefix>:principal:<keyFor>`. Pins the
+     * Concat/ConcatOperandRemoval mutants on line 411.
      *
      * @return void
      */
@@ -781,10 +771,9 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `tagsFor` includes the prefix tag, principal tag, and per-role
-     * tags while skipping empty role IDs. Pins ArrayItemRemoval on
-     * line 425, Continue_ on line 429, and UnwrapArrayUnique /
-     * UnwrapArrayValues on line 435.
+     * `tagsFor` includes the prefix tag, principal tag, and per-role tags while
+     * skipping empty role IDs. Pins ArrayItemRemoval on line 425, Continue_ on
+     * line 429, and UnwrapArrayUnique / UnwrapArrayValues on line 435.
      *
      * @return void
      */
@@ -826,8 +815,8 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `isTaggable()` return value is memoised and returned on
-     * subsequent calls. Pins the ReturnRemoval mutant on line 461.
+     * `isTaggable()` return value is memoised and returned on subsequent calls.
+     * Pins the ReturnRemoval mutant on line 461.
      *
      * @return void
      */
@@ -845,9 +834,9 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `putInStore` skips the write when computed TTL is zero or
-     * negative. Pins the `<= 0` vs `< 0` mutant on line 613 and
-     * the LogicalAnd/ReturnRemoval on lines 613-614.
+     * `putInStore` skips the write when computed TTL is zero or negative. Pins
+     * the `<= 0` vs `< 0` mutant on line 613 and the LogicalAnd/ReturnRemoval
+     * on lines 613-614.
      *
      * @return void
      */
@@ -890,8 +879,8 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `putInStore` uses the configured TTL when `$maxTtl` is null
-     * and TTL > 0. Pins the non-forever branch on line 632.
+     * `putInStore` uses the configured TTL when `$maxTtl` is null and TTL > 0.
+     * Pins the non-forever branch on line 632.
      *
      * @return void
      */
@@ -925,8 +914,8 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `putInStore` with maxTtl=1 writes with computed TTL = 0
-     * which should be skipped (boundary test for `<= 0`).
+     * `putInStore` with maxTtl=1 writes with computed TTL = 0 which should be
+     * skipped (boundary test for `<= 0`).
      *
      * @return void
      */
@@ -965,8 +954,8 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `logCorruptCacheEntry` includes the cache key in the log
-     * message. Pins the ConcatOperandRemoval mutant on line 563.
+     * `logCorruptCacheEntry` includes the cache key in the log message. Pins
+     * the ConcatOperandRemoval mutant on line 563.
      *
      * @return void
      */
@@ -1012,9 +1001,9 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `rememberPolicies` maps each policy through `toArray()` when
-     * writing to the store and reads them back via `fromArray()`.
-     * Pins the ArrayOneItem mutant on line 145 (putInStore args).
+     * `rememberPolicies` maps each policy through `toArray()` when writing to
+     * the store and reads them back via `fromArray()`. Pins the ArrayOneItem
+     * mutant on line 145 (putInStore args).
      *
      * @return void
      */
@@ -1084,9 +1073,9 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `forgetRoleTags()` is a no-op when the role's `getKey()`
-     * returns empty string. Pins the LogicalAnd on line 376 and
-     * the `$id === ''` guard on line 241/243.
+     * `forgetRoleTags()` is a no-op when the role's `getKey()` returns empty
+     * string. Pins the LogicalAnd on line 376 and the `$id === ''` guard on
+     * line 241/243.
      *
      * @return void
      */
@@ -1111,8 +1100,8 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `forgetRoleTags()` is a no-op when the role has no getKey
-     * method. Pins the `method_exists` guard on line 240.
+     * `forgetRoleTags()` is a no-op when the role has no getKey method. Pins
+     * the `method_exists` guard on line 240.
      *
      * @return void
      */
@@ -1128,9 +1117,9 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `forgetRoleTags()` flushes entries tagged with the role's
-     * integer key (coerced to string). Pins the CastString on 386
-     * and the `is_int` branch on line 385.
+     * `forgetRoleTags()` flushes entries tagged with the role's integer key
+     * (coerced to string). Pins the CastString on 386 and the `is_int` branch
+     * on line 385.
      *
      * @return void
      */
@@ -1155,8 +1144,8 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * Bind a fresh `ResolutionCache` backed by the given non-tag
-     * driver and return the container-resolved instance.
+     * Bind a fresh `ResolutionCache` backed by the given non-tag driver and
+     * return the container-resolved instance.
      *
      * @param  \Illuminate\Contracts\Cache\Store  $driver
      * @return \SineMacula\Laravel\Authorization\Cache\ResolutionCache
@@ -1179,8 +1168,8 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * Read a private property value via reflection — tests that
-     * need to inspect the array cache's internal storage.
+     * Read a private property value via reflection — tests that need to inspect
+     * the array cache's internal storage.
      *
      * @param  object  $object
      * @param  string  $property
@@ -1207,10 +1196,10 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * Build a bare non-taggable `Store` — an in-memory analogue of
-     * the shipped File / Database drivers that the Laravel
-     * `Repository` wraps unchanged (no `tags()` method on the
-     * driver means `ResolutionCache::isTaggable()` returns false).
+     * Build a bare non-taggable `Store` — an in-memory analogue of the shipped
+     * File / Database drivers that the Laravel `Repository` wraps unchanged (no
+     * `tags()` method on the driver means `ResolutionCache::isTaggable()`
+     * returns false).
      *
      * @return \Tests\Feature\Stubs\NonTaggableCacheStore
      */

@@ -100,7 +100,8 @@ final class ContextInterpolatorTest extends TestCase
     }
 
     /**
-     * `${resource.type}` extracts the segment before `:` from the resource string.
+     * `${resource.type}` extracts the segment before `:` from the resource
+     * string.
      *
      * @return void
      */
@@ -400,13 +401,13 @@ final class ContextInterpolatorTest extends TestCase
     // ------------------------------------------------------------------
 
     /**
-     * When preg_replace_callback returns null (regex failure), the
-     * coalesce (`$interpolated ?? $pattern`) falls back to the original
-     * pattern. Kills the Coalesce mutant on line 57.
+     * When preg_replace_callback returns null (regex failure), the coalesce
+     * (`$interpolated ?? $pattern`) falls back to the original pattern. Kills
+     * the Coalesce mutant on line 57.
      *
-     * In practice preg_replace_callback returns a string, so we
-     * verify the happy path: the result is the str_replace output,
-     * not the raw preg_replace_callback output.
+     * In practice preg_replace_callback returns a string, so we verify the
+     * happy path: the result is the str_replace output, not the raw
+     * preg_replace_callback output.
      *
      * @return void
      */
@@ -430,8 +431,8 @@ final class ContextInterpolatorTest extends TestCase
     /**
      * The dot-position split must correctly extract namespace and key.
      * Decrementing/incrementing the integer offsets (DecrementInteger,
-     * IncrementInteger) or unwrapping substr (UnwrapSubstr) would
-     * corrupt the namespace or key.
+     * IncrementInteger) or unwrapping substr (UnwrapSubstr) would corrupt the
+     * namespace or key.
      *
      * @return void
      */
@@ -449,8 +450,8 @@ final class ContextInterpolatorTest extends TestCase
     }
 
     /**
-     * Token without a dot: namespace = full token, key = ''.
-     * Kills the Ternary mutant that swaps the branches on line 72/73.
+     * Token without a dot: namespace = full token, key = ''. Kills the Ternary
+     * mutant that swaps the branches on line 72/73.
      *
      * @return void
      */
@@ -484,9 +485,9 @@ final class ContextInterpolatorTest extends TestCase
     // ------------------------------------------------------------------
 
     /**
-     * Each namespace arm (principal, context, resource) must route to
-     * the correct resolver. Removing any arm (MatchArmRemoval) would
-     * cause a `\UnhandledMatchError` or misroute.
+     * Each namespace arm (principal, context, resource) must route to the
+     * correct resolver. Removing any arm (MatchArmRemoval) would cause a
+     * `\UnhandledMatchError` or misroute.
      *
      * @return void
      */
@@ -525,8 +526,8 @@ final class ContextInterpolatorTest extends TestCase
     // ------------------------------------------------------------------
 
     /**
-     * Null principal OR empty key → null. Both conditions individually
-     * must fail. Kills the Identical/LogicalOr mutants on line 100.
+     * Null principal OR empty key → null. Both conditions individually must
+     * fail. Kills the Identical/LogicalOr mutants on line 100.
      *
      * @return void
      */
@@ -580,9 +581,9 @@ final class ContextInterpolatorTest extends TestCase
     }
 
     /**
-     * ElseIfNegation on line 115: when the principal has no getAttribute
-     * but has a matching property, property_exists should be used.
-     * Negating it would skip property access.
+     * ElseIfNegation on line 115: when the principal has no getAttribute but
+     * has a matching property, property_exists should be used. Negating it
+     * would skip property access.
      *
      * @return void
      */
@@ -625,8 +626,8 @@ final class ContextInterpolatorTest extends TestCase
     }
 
     /**
-     * Non-scalar context value → null → empty string. Kills the
-     * Ternary mutant on line 161.
+     * Non-scalar context value → null → empty string. Kills the Ternary mutant
+     * on line 161.
      *
      * @return void
      */
@@ -664,8 +665,8 @@ final class ContextInterpolatorTest extends TestCase
     // ------------------------------------------------------------------
 
     /**
-     * Null resource OR empty key → null. Kills LogicalOr and Identical
-     * mutants on line 177.
+     * Null resource OR empty key → null. Kills LogicalOr and Identical mutants
+     * on line 177.
      *
      * @return void
      */
@@ -681,9 +682,9 @@ final class ContextInterpolatorTest extends TestCase
     }
 
     /**
-     * Resource id/type with colon splits correctly. Without colon,
-     * both return full string. Kills MatchArmRemoval on line 183 and
-     * the substr mutants on lines 184-185.
+     * Resource id/type with colon splits correctly. Without colon, both return
+     * full string. Kills MatchArmRemoval on line 183 and the substr mutants on
+     * lines 184-185.
      *
      * @return void
      */
@@ -709,10 +710,10 @@ final class ContextInterpolatorTest extends TestCase
     }
 
     /**
-     * The colon-position arithmetic in substr must be exact.
-     * `colonPos + 1` for id means the character after the colon.
-     * `0, colonPos` for type means everything before the colon.
-     * Decrementing/incrementing these would shift the boundary.
+     * The colon-position arithmetic in substr must be exact. `colonPos + 1` for
+     * id means the character after the colon. `0, colonPos` for type means
+     * everything before the colon. Decrementing/incrementing these would shift
+     * the boundary.
      *
      * @return void
      */
@@ -741,9 +742,9 @@ final class ContextInterpolatorTest extends TestCase
     }
 
     /**
-     * The `$value === null` check on line 82 distinguishes unresolved
-     * tokens from resolved empty strings. Negating it would print the
-     * null value instead of logging and returning empty.
+     * The `$value === null` check on line 82 distinguishes unresolved tokens
+     * from resolved empty strings. Negating it would print the null value
+     * instead of logging and returning empty.
      *
      * @return void
      */

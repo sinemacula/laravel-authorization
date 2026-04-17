@@ -16,11 +16,11 @@ use Tests\TestCase;
 /**
  * Feature tests for the `authorization:migrate-spatie` Artisan command.
  *
- * To avoid table-name collisions between Spatie's default schema and
- * this package's defaults (both use `roles`, `permissions`), the test
- * configures the package to use `auth_`-prefixed target table names.
- * This mirrors the real-world scenario where a consumer configures
- * different table names before running the migration.
+ * To avoid table-name collisions between Spatie's default schema and this
+ * package's defaults (both use `roles`, `permissions`), the test configures the
+ * package to use `auth_`-prefixed target table names. This mirrors the
+ * real-world scenario where a consumer configures different table names before
+ * running the migration.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -47,11 +47,11 @@ final class MigrateSpatieCommandTest extends TestCase
     }
 
     /**
-     * Drop the Spatie-style fixture tables so they do not leak across
-     * tests on persistent-connection drivers (MySQL / Postgres). The
-     * shipped `TestCase::defineDatabaseMigrations()` already drops the
-     * package's own tables via `authorization.tables`; this hook
-     * cleans up the Spatie-style tables the migration command reads.
+     * Drop the Spatie-style fixture tables so they do not leak across tests on
+     * persistent-connection drivers (MySQL / Postgres). The shipped
+     * `TestCase::defineDatabaseMigrations()` already drops the package's own
+     * tables via `authorization.tables`; this hook cleans up the Spatie-style
+     * tables the migration command reads.
      *
      * @return void
      */
@@ -217,8 +217,8 @@ final class MigrateSpatieCommandTest extends TestCase
     }
 
     /**
-     * Configure the package to use prefixed target table names so they
-     * do not collide with Spatie's source tables.
+     * Configure the package to use prefixed target table names so they do not
+     * collide with Spatie's source tables.
      *
      * @param  mixed  $app
      * @return void

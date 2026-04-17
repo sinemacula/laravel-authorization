@@ -13,10 +13,10 @@ use Tests\TestCase;
 
 /**
  * Coverage for the `app()` fallback branch of
- * `AuthorizationAssertions::actingAsIdentity`. The trait keeps a
- * `$this->app` reference path for Laravel's testing base class but
- * drops to the global `app()` helper for consumers who compose the
- * trait into arbitrary assertion utilities.
+ * `AuthorizationAssertions::actingAsIdentity`. The trait keeps a `$this->app`
+ * reference path for Laravel's testing base class but drops to the global
+ * `app()` helper for consumers who compose the trait into arbitrary assertion
+ * utilities.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -27,9 +27,8 @@ use Tests\TestCase;
 final class AuthorizationAssertionsFallbackTest extends TestCase
 {
     /**
-     * A standalone class that uses the trait without owning an
-     * `$app` property falls back to `app()` and still swaps the
-     * resolver correctly.
+     * A standalone class that uses the trait without owning an `$app` property
+     * falls back to `app()` and still swaps the resolver correctly.
      *
      * @return void
      */

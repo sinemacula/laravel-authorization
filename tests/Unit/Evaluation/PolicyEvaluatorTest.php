@@ -158,8 +158,8 @@ final class PolicyEvaluatorTest extends TestCase
     }
 
     /**
-     * The first matched allow is preserved across subsequent matches
-     * (kills the AssignCoalesce mutation).
+     * The first matched allow is preserved across subsequent matches (kills the
+     * AssignCoalesce mutation).
      *
      * @return void
      */

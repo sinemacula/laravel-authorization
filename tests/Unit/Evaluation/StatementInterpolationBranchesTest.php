@@ -10,8 +10,8 @@ use SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 
 /**
- * Coverage for the three operand shapes `Statement::interpolateOperands`
- * must handle when an interpolator is supplied:
+ * Coverage for the three operand shapes `Statement::interpolateOperands` must
+ * handle when an interpolator is supplied:
  *
  * - A plain string operand is interpolated directly.
  * - An array operand with a non-string value passes the non-string
@@ -31,9 +31,9 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
 final class StatementInterpolationBranchesTest extends TestCase
 {
     /**
-     * A scalar string condition operand is interpolated directly —
-     * the payload is the operand, not an operator map — and compared
-     * by identity against the context value.
+     * A scalar string condition operand is interpolated directly — the payload
+     * is the operand, not an operator map — and compared by identity against
+     * the context value.
      *
      * @return void
      */
@@ -70,9 +70,9 @@ final class StatementInterpolationBranchesTest extends TestCase
     }
 
     /**
-     * An array operand that contains a non-string entry passes the
-     * non-string through unchanged — e.g. a boolean flag or an
-     * integer bound against the context.
+     * An array operand that contains a non-string entry passes the non-string
+     * through unchanged — e.g. a boolean flag or an integer bound against the
+     * context.
      *
      * @return void
      */
@@ -93,8 +93,8 @@ final class StatementInterpolationBranchesTest extends TestCase
 
     /**
      * A non-string, non-array operand (boolean) passes through
-     * `interpolateOperands` verbatim and is compared by identity
-     * against the context value.
+     * `interpolateOperands` verbatim and is compared by identity against the
+     * context value.
      *
      * @return void
      */

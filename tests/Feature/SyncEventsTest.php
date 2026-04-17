@@ -35,15 +35,13 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Feature coverage for the per-row events that `sync*` methods
- * dispatch (issue #56).
+ * Feature coverage for the per-row events that `sync*` methods dispatch.
  *
- * Each `sync*` method on the trait triad and on `Role` consults
- * the delta returned by Eloquent's `sync()` and dispatches the
- * matching single-item event for every attached and detached
- * pivot row, so audit consumers receive the same per-row signal
- * they would for the corresponding `assignRole` / `givePermission`
- * / `attachPolicy` / role-side `givePermission` calls.
+ * Each `sync*` method on the trait triad and on `Role` consults the delta
+ * returned by Eloquent's `sync()` and dispatches the matching single-item event
+ * for every attached and detached pivot row, so audit consumers receive the
+ * same per-row signal they would for the corresponding `assignRole` /
+ * `givePermission` / `attachPolicy` / role-side `givePermission` calls.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -76,8 +74,8 @@ use Tests\TestCase;
 final class SyncEventsTest extends TestCase
 {
     /**
-     * `syncRoles` adding two and removing one fires two
-     * `IdentityRoleAssigned` and one `IdentityRoleRevoked`.
+     * `syncRoles` adding two and removing one fires two `IdentityRoleAssigned`
+     * and one `IdentityRoleRevoked`.
      *
      * @return void
      */
@@ -111,8 +109,8 @@ final class SyncEventsTest extends TestCase
     }
 
     /**
-     * Re-syncing the same set of roles dispatches no events —
-     * `sync()` produces an empty `attached` / `detached` delta.
+     * Re-syncing the same set of roles dispatches no events — `sync()` produces
+     * an empty `attached` / `detached` delta.
      *
      * @return void
      */
@@ -134,8 +132,7 @@ final class SyncEventsTest extends TestCase
 
     /**
      * `syncPermissions` adding two and removing one fires two
-     * `IdentityPermissionGranted` and one
-     * `IdentityPermissionRevoked`.
+     * `IdentityPermissionGranted` and one `IdentityPermissionRevoked`.
      *
      * @return void
      */
@@ -204,8 +201,8 @@ final class SyncEventsTest extends TestCase
     }
 
     /**
-     * `Role::syncPermissions` adding two and removing one fires
-     * two `RolePermissionGranted` and one `RolePermissionRevoked`.
+     * `Role::syncPermissions` adding two and removing one fires two
+     * `RolePermissionGranted` and one `RolePermissionRevoked`.
      *
      * @return void
      */
@@ -270,8 +267,8 @@ final class SyncEventsTest extends TestCase
     }
 
     /**
-     * Persist a minimal allow-only policy under the given name and
-     * single action — sync-event fixture helper.
+     * Persist a minimal allow-only policy under the given name and single
+     * action — sync-event fixture helper.
      *
      * @param  string  $name
      * @param  string  $action

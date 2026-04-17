@@ -22,11 +22,11 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Coverage-focused feature tests that reach the narrow branches not
- * hit by the main behavioural suites: relation-loaded unset paths,
- * fallback paths when the resolution cache is unbound, lookup-by-id
- * throws, non-tag cache store branches, empty-string guards on
- * cache keys, and Spatie migration skip branches.
+ * Coverage-focused feature tests that reach the narrow branches not hit by the
+ * main behavioural suites: relation-loaded unset paths, fallback paths when the
+ * resolution cache is unbound, lookup-by-id throws, non-tag cache store
+ * branches, empty-string guards on cache keys, and Spatie migration skip
+ * branches.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -46,10 +46,9 @@ use Tests\TestCase;
 final class UncoveredBranchesTest extends TestCase
 {
     /**
-     * Loading the roles relation and then calling `assignRole()`
-     * must purge the loaded-relation cache so a subsequent read
-     * sees the freshly-attached row. Targets the
-     * `unset($this->relations['roles'])` branch.
+     * Loading the roles relation and then calling `assignRole()` must purge the
+     * loaded-relation cache so a subsequent read sees the freshly-attached row.
+     * Targets the `unset($this->relations['roles'])` branch.
      *
      * @return void
      */
@@ -69,8 +68,8 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * Same invariant for `syncRoles()` — the relation cache must
-     * be purged so a follow-up read sees the new roster.
+     * Same invariant for `syncRoles()` — the relation cache must be purged so a
+     * follow-up read sees the new roster.
      *
      * @return void
      */
@@ -90,8 +89,7 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * `givePermission()` must clear the loaded-permissions
-     * relation cache.
+     * `givePermission()` must clear the loaded-permissions relation cache.
      *
      * @return void
      */
@@ -109,8 +107,7 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * `syncPermissions()` must clear the loaded-permissions
-     * relation cache.
+     * `syncPermissions()` must clear the loaded-permissions relation cache.
      *
      * @return void
      */
@@ -130,8 +127,7 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * `attachPolicy()` must clear the loaded-policies relation
-     * cache.
+     * `attachPolicy()` must clear the loaded-policies relation cache.
      *
      * @return void
      */
@@ -153,8 +149,7 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * `syncPolicies()` must clear the loaded-policies relation
-     * cache.
+     * `syncPolicies()` must clear the loaded-policies relation cache.
      *
      * @return void
      */
@@ -180,9 +175,9 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * When the resolution cache is not bound to the container,
-     * `getRoles()` falls back to `computeRoles()` directly.
-     * Targets `HasRoles::getRoles()` line 242.
+     * When the resolution cache is not bound to the container, `getRoles()`
+     * falls back to `computeRoles()` directly. Targets `HasRoles::getRoles()`
+     * line 242.
      *
      * @return void
      */
@@ -202,8 +197,8 @@ final class UncoveredBranchesTest extends TestCase
 
     /**
      * When the resolution cache is not bound to the container,
-     * `getPermissions()` falls back to `computePermissions()`
-     * directly. Targets `HasPermissions::getPermissions()` line 250.
+     * `getPermissions()` falls back to `computePermissions()` directly. Targets
+     * `HasPermissions::getPermissions()` line 250.
      *
      * @return void
      */
@@ -222,8 +217,8 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * `canActOn()` returns false when the target doesn't expose a
-     * `roles()` method. Targets `HasRoles::canActOn()` line 289.
+     * `canActOn()` returns false when the target doesn't expose a `roles()`
+     * method. Targets `HasRoles::canActOn()` line 289.
      *
      * @return void
      */
@@ -284,9 +279,8 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * `resolveRoleById()` throws when the ID is unknown. Targets
-     * `HasRoles` line 376 via `syncRoles()` detachment with a
-     * deleted row.
+     * `resolveRoleById()` throws when the ID is unknown. Targets `HasRoles`
+     * line 376 via `syncRoles()` detachment with a deleted row.
      *
      * @return void
      */
@@ -302,10 +296,10 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * `resolvePermissionById()` throws when the ID is unknown.
-     * Targets `HasPermissions` line 351 — the private resolver
-     * invoked by `syncPermissions()` when the sync delta surfaces
-     * a detached ID whose row no longer exists.
+     * `resolvePermissionById()` throws when the ID is unknown. Targets
+     * `HasPermissions` line 351 — the private resolver invoked by
+     * `syncPermissions()` when the sync delta surfaces a detached ID whose row
+     * no longer exists.
      *
      * @return void
      */
@@ -321,14 +315,12 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * A cached permissions entry whose resolver returns nothing and
-     * whose stored value is the empty array hits the
-     * `array_filter(is_string)` branch that discards non-string
-     * entries — we sneak one in via the fresh cache to cover the
-     * filter branch on `rememberStringList`.
+     * A cached permissions entry whose resolver returns nothing and whose
+     * stored value is the empty array hits the `array_filter(is_string)` branch
+     * that discards non-string entries — we sneak one in via the fresh cache to
+     * cover the filter branch on `rememberStringList`.
      *
-     * Targets `ResolutionCache::rememberStringList` line 308 filter
-     * branch.
+     * Targets `ResolutionCache::rememberStringList` line 308 filter branch.
      *
      * @return void
      */
@@ -362,10 +354,9 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * `forgetRoleTags()` is a no-op when the role exposes no key.
-     * Targets `ResolutionCache::forgetRoleTags` line 240 (empty ID
-     * early return) via a role-like object whose `getKey()` yields
-     * an empty string.
+     * `forgetRoleTags()` is a no-op when the role exposes no key. Targets
+     * `ResolutionCache::forgetRoleTags` line 240 (empty ID early return) via a
+     * role-like object whose `getKey()` yields an empty string.
      *
      * @return void
      */
@@ -416,8 +407,8 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * `forget()` on a non-tag store iterates every slot. Targets
-     * lines 210-211 of `ResolutionCache::forget`.
+     * `forget()` on a non-tag store iterates every slot. Targets lines 210-211
+     * of `ResolutionCache::forget`.
      *
      * @return void
      */
@@ -441,8 +432,8 @@ final class UncoveredBranchesTest extends TestCase
 
     /**
      * Principal with an object that exposes neither `getKey()` nor
-     * `getMorphClass()` falls back to the `spl_object_hash`-based
-     * key path. Targets `ResolutionCache::keyFor` line 391.
+     * `getMorphClass()` falls back to the `spl_object_hash`-based key path.
+     * Targets `ResolutionCache::keyFor` line 391.
      *
      * @return void
      */
@@ -488,8 +479,8 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * A `putInStore` call with a `maxTtl` of zero short-circuits
-     * without writing. Targets line 595 of `ResolutionCache`.
+     * A `putInStore` call with a `maxTtl` of zero short-circuits without
+     * writing. Targets line 595 of `ResolutionCache`.
      *
      * @return void
      */
@@ -514,8 +505,8 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * `BladeHelpers::hasAllRoles` returns false when the principal
-     * does not implement `SupportsRoles`. Targets line 80.
+     * `BladeHelpers::hasAllRoles` returns false when the principal does not
+     * implement `SupportsRoles`. Targets line 80.
      *
      * @return void
      */
@@ -545,10 +536,10 @@ final class UncoveredBranchesTest extends TestCase
     // the `roles` / `permissions` names are free for the Spatie source schema.
 
     /**
-     * `ResolvesPivotExpiry::authorizationCoerceExpiresAt` returns
-     * a Carbon instance when the raw pivot value is a non-empty
-     * string. Targets lines 135-136 of the trait via a temporal
-     * role assignment routed through `getRoles()`.
+     * `ResolvesPivotExpiry::authorizationCoerceExpiresAt` returns a Carbon
+     * instance when the raw pivot value is a non-empty string. Targets lines
+     * 135-136 of the trait via a temporal role assignment routed through
+     * `getRoles()`.
      *
      * @return void
      */
@@ -564,9 +555,8 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * `ResolvesPivotExpiry::authorizationCoerceExpiresAt` returns
-     * null when the raw pivot value is an empty string. Targets
-     * line 139 of the trait.
+     * `ResolvesPivotExpiry::authorizationCoerceExpiresAt` returns null when the
+     * raw pivot value is an empty string. Targets line 139 of the trait.
      *
      * @return void
      */
@@ -605,8 +595,8 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * `ResolvesPivotExpiry::authorizationMinNullable` returns the
-     * smaller of two non-null seconds. Targets line 160.
+     * `ResolvesPivotExpiry::authorizationMinNullable` returns the smaller of
+     * two non-null seconds. Targets line 160.
      *
      * @return void
      */
@@ -635,9 +625,9 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * `ResolvesPivotExpiry::authorizationCoerceGrantExpiry` returns
-     * the DateTimeInterface unchanged, parses strings, and null-pads
-     * everything else. Targets lines 254-262.
+     * `ResolvesPivotExpiry::authorizationCoerceGrantExpiry` returns the
+     * DateTimeInterface unchanged, parses strings, and null-pads everything
+     * else. Targets lines 254-262.
      *
      * @return void
      */
@@ -669,9 +659,8 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * `ResolvesPivotExpiry::authorizationSecondsUntilPivotExpiry`
-     * returns null when the pivot is absent on the model. Targets
-     * line 100.
+     * `ResolvesPivotExpiry::authorizationSecondsUntilPivotExpiry` returns null
+     * when the pivot is absent on the model. Targets line 100.
      *
      * @return void
      */
@@ -697,9 +686,9 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * When `logger()->channel('authorization')` throws, the
-     * malformed-policy logger falls back to the default channel.
-     * Targets lines 272-273 of `HasPolicies::logMalformedPolicy`.
+     * When `logger()->channel('authorization')` throws, the malformed-policy
+     * logger falls back to the default channel. Targets lines 272-273 of
+     * `HasPolicies::logMalformedPolicy`.
      *
      * @return void
      */
@@ -757,9 +746,8 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * `logMalformedPolicy` also tolerates a logger that throws on
-     * the warning call itself. Targets line 284 of
-     * `HasPolicies::logMalformedPolicy`.
+     * `logMalformedPolicy` also tolerates a logger that throws on the warning
+     * call itself. Targets line 284 of `HasPolicies::logMalformedPolicy`.
      *
      * @return void
      */
@@ -794,9 +782,10 @@ final class UncoveredBranchesTest extends TestCase
              * @param  string|\Stringable  $message
              * @param  array  $context
              * @return void
+             *
+             * @phpstan-ignore missingType.iterableValue (iterable typing relaxed for fixtures)
              */
-            public function log(mixed $level, string|\Stringable $message, array $context = []): void // @phpstan-ignore missingType.iterableValue (iterable typing relaxed for fixtures)
-            {}
+            public function log(mixed $level, string|\Stringable $message, array $context = []): void {}
         });
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -819,10 +808,9 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * A corrupt cache payload triggers the warning path on a
-     * misconfigured `authorization` channel — the cache falls
-     * back to the default channel. Targets lines 542-543 and 553
-     * of `ResolutionCache::logCorruptCacheEntry`.
+     * A corrupt cache payload triggers the warning path on a misconfigured
+     * `authorization` channel — the cache falls back to the default channel.
+     * Targets lines 542-543 and 553 of `ResolutionCache::logCorruptCacheEntry`.
      *
      * @return void
      */
@@ -865,9 +853,9 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * `rememberPolicies` returns the memoised value on a second
-     * call without hitting the persistent store. Targets line 99
-     * of `ResolutionCache::rememberPolicies`.
+     * `rememberPolicies` returns the memoised value on a second call without
+     * hitting the persistent store. Targets line 99 of
+     * `ResolutionCache::rememberPolicies`.
      *
      * @return void
      */
@@ -888,9 +876,9 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * A valid persistent policy document payload round-trips
-     * through `rememberPolicies`. Targets line 116 (`fromArray`
-     * call inside the hydration loop) of `ResolutionCache`.
+     * A valid persistent policy document payload round-trips through
+     * `rememberPolicies`. Targets line 116 (`fromArray` call inside the
+     * hydration loop) of `ResolutionCache`.
      *
      * @return void
      */
@@ -922,9 +910,8 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * A driver whose `get()` raises triggers the corrupt-entry
-     * recovery path in `rememberStringList`. Targets lines 310,
-     * 313, 314 of `ResolutionCache`.
+     * A driver whose `get()` raises triggers the corrupt-entry recovery path in
+     * `rememberStringList`. Targets lines 310, 313, 314 of `ResolutionCache`.
      *
      * @return void
      */
@@ -945,8 +932,8 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * `logCorruptCacheEntry` tolerates a logger whose `warning()`
-     * raises. Targets line 553 of `ResolutionCache`.
+     * `logCorruptCacheEntry` tolerates a logger whose `warning()` raises.
+     * Targets line 553 of `ResolutionCache`.
      *
      * @return void
      */
@@ -979,9 +966,10 @@ final class UncoveredBranchesTest extends TestCase
              * @param  string|\Stringable  $message
              * @param  array  $context
              * @return void
+             *
+             * @phpstan-ignore missingType.iterableValue (iterable typing relaxed for fixtures)
              */
-            public function log(mixed $level, string|\Stringable $message, array $context = []): void // @phpstan-ignore missingType.iterableValue (iterable typing relaxed for fixtures)
-            {}
+            public function log(mixed $level, string|\Stringable $message, array $context = []): void {}
         });
 
         $driver = self::makeNonTaggableDriver();
@@ -1003,8 +991,8 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * Build a bare non-taggable `Store` — mirrors the helper used
-     * by `ResolutionCacheTest`.
+     * Build a bare non-taggable `Store` — mirrors the helper used by
+     * `ResolutionCacheTest`.
      *
      * @return \Tests\Feature\Stubs\NonTaggableCacheStore
      */

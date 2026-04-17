@@ -23,8 +23,8 @@ use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
 use Tests\TestCase;
 
 /**
- * Coverage for two `Role` model branches that the primary suites
- * do not exercise:
+ * Coverage for two `Role` model branches that the primary suites do not
+ * exercise:
  *
  * - `givePermission()` and `syncPermissions()` clear the eager-loaded
  *   `permissions` relation when mutation occurs, so subsequent
@@ -57,8 +57,8 @@ use Tests\TestCase;
 final class RoleModelEdgeCasesTest extends TestCase
 {
     /**
-     * `givePermission()` evicts the eager-loaded permissions
-     * relation so the next access re-queries the pivot.
+     * `givePermission()` evicts the eager-loaded permissions relation so the
+     * next access re-queries the pivot.
      *
      * @return void
      */
@@ -87,8 +87,8 @@ final class RoleModelEdgeCasesTest extends TestCase
     }
 
     /**
-     * `syncPermissions()` evicts the eager-loaded permissions
-     * relation after the sync completes.
+     * `syncPermissions()` evicts the eager-loaded permissions relation after
+     * the sync completes.
      *
      * @return void
      */
@@ -115,11 +115,10 @@ final class RoleModelEdgeCasesTest extends TestCase
     }
 
     /**
-     * When a role's `parent_id` points at a row that has been
-     * deleted out from under it (orphaned FK), `ancestors()`
-     * breaks the walk at the missing link rather than throwing.
-     * Protects consumers against a corrupted hierarchy surfacing
-     * as an exception during evaluation.
+     * When a role's `parent_id` points at a row that has been deleted out from
+     * under it (orphaned FK), `ancestors()` breaks the walk at the missing link
+     * rather than throwing. Protects consumers against a corrupted hierarchy
+     * surfacing as an exception during evaluation.
      *
      * @return void
      */
@@ -149,11 +148,10 @@ final class RoleModelEdgeCasesTest extends TestCase
     }
 
     /**
-     * `resolvePermissionById()` raises `UnknownPermissionException`
-     * when the supplied key does not resolve to a row. The public
-     * sync surface cannot reach this directly without a racing
-     * delete, so the test invokes the method via reflection against
-     * a key that does not exist.
+     * `resolvePermissionById()` raises `UnknownPermissionException` when the
+     * supplied key does not resolve to a row. The public sync surface cannot
+     * reach this directly without a racing delete, so the test invokes the
+     * method via reflection against a key that does not exist.
      *
      * @return void
      *

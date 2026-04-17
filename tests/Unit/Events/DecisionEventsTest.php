@@ -15,10 +15,10 @@ use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
  * Unit tests for the two manager-dispatched decision events.
  *
  * Both events are promoted-parameter readonly value objects on the
- * SemVer-stable event API. The manager constructs them around the
- * principal, action, resource, context, and the full `EvaluationResult`,
- * and the test fixes the shape of each property so audit listeners
- * and consumer dashboards can bind against a stable surface.
+ * SemVer-stable event API. The manager constructs them around the principal,
+ * action, resource, context, and the full `EvaluationResult`, and the test
+ * fixes the shape of each property so audit listeners and consumer dashboards
+ * can bind against a stable surface.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,8 +32,8 @@ use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 final class DecisionEventsTest extends TestCase
 {
     /**
-     * `DecisionEvaluated` exposes every constructor argument through
-     * readonly properties.
+     * `DecisionEvaluated` exposes every constructor argument through readonly
+     * properties.
      *
      * @return void
      */
@@ -59,9 +59,8 @@ final class DecisionEventsTest extends TestCase
     }
 
     /**
-     * `AuthorizationFailed` exposes every constructor argument
-     * through readonly properties and accepts a null principal for
-     * anonymous denials.
+     * `AuthorizationFailed` exposes every constructor argument through readonly
+     * properties and accepts a null principal for anonymous denials.
      *
      * @return void
      */

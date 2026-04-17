@@ -32,9 +32,8 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * End-to-end feature tests exercising the authorization manager, the
- * Eloquent traits, and the RBAC / policy interplay against a live
- * SQLite schema.
+ * End-to-end feature tests exercising the authorization manager, the Eloquent
+ * traits, and the RBAC / policy interplay against a live SQLite schema.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -50,7 +49,8 @@ use Tests\TestCase;
 final class AuthorizationManagerTest extends TestCase
 {
     /**
-     * Anonymous resolver yields implicit deny on can() and throws from authorize().
+     * Anonymous resolver yields implicit deny on can() and throws from
+     * authorize().
      *
      * @return void
      */
@@ -266,7 +266,8 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * Gate parity — Gate::allows and Authorization::can return identical verdicts.
+     * Gate parity — Gate::allows and Authorization::can return identical
+     * verdicts.
      *
      * @return void
      */
@@ -288,7 +289,8 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * authorize() fires AuthorizationFailed and DecisionEvaluated before throwing.
+     * authorize() fires AuthorizationFailed and DecisionEvaluated before
+     * throwing.
      *
      * @return void
      */
@@ -354,10 +356,9 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * `Authorization::currentPrincipal()` returns the principal
-     * the resolver currently reports — the single accessor
-     * every surface (middleware, Blade, future consumers)
-     * delegates to (see issue #85).
+     * `Authorization::currentPrincipal()` returns the principal the resolver
+     * currently reports — the single accessor every surface (middleware, Blade,
+     * future consumers) delegates to.
      *
      * @return void
      */

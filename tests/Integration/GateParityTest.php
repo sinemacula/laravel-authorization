@@ -26,12 +26,11 @@ use Tests\TestCase;
  * permission-enum case.
  *
  * For each `PermissionEnum` case the decision returned by
- * `Gate::forUser($user)->allows(...)` must equal the decision
- * returned by `Authorization::for($user)->can(...)`. The four
- * scenarios exercised here span the package's 4-step evaluator —
- * granted permission (RBAC allow), missing permission (implicit
- * deny), policy-denied (explicit deny), and resource + context
- * forwarding through the Gate tail.
+ * `Gate::forUser($user)->allows(...)` must equal the decision returned by
+ * `Authorization::for($user)->can(...)`. The four scenarios exercised here span
+ * the package's 4-step evaluator — granted permission (RBAC allow), missing
+ * permission (implicit deny), policy-denied (explicit deny), and resource +
+ * context forwarding through the Gate tail.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,8 +50,8 @@ final class GateParityTest extends TestCase
     private const string MATCHING_RESOURCE = 'arn:post:42';
 
     /**
-     * Register the demo permission enum and re-boot the provider so
-     * every enum case has a matching Gate.
+     * Register the demo permission enum and re-boot the provider so every enum
+     * case has a matching Gate.
      *
      * @return void
      */
@@ -73,8 +72,8 @@ final class GateParityTest extends TestCase
     }
 
     /**
-     * Granted RBAC permission: Gate and facade both allow every
-     * registered enum case that maps to a granted permission.
+     * Granted RBAC permission: Gate and facade both allow every registered enum
+     * case that maps to a granted permission.
      *
      * @return void
      */
@@ -104,8 +103,8 @@ final class GateParityTest extends TestCase
     }
 
     /**
-     * Explicit policy deny: Gate and facade both deny even when RBAC
-     * would otherwise allow.
+     * Explicit policy deny: Gate and facade both deny even when RBAC would
+     * otherwise allow.
      *
      * @return void
      */
@@ -132,10 +131,9 @@ final class GateParityTest extends TestCase
     }
 
     /**
-     * Resource + context forwarding: a policy scoped to a specific
-     * resource and condition context yields matching decisions from
-     * both the Gate tail-argument path and the facade's
-     * `(resource, context)` pair.
+     * Resource + context forwarding: a policy scoped to a specific resource and
+     * condition context yields matching decisions from both the Gate
+     * tail-argument path and the facade's `(resource, context)` pair.
      *
      * @return void
      */
@@ -182,8 +180,8 @@ final class GateParityTest extends TestCase
     }
 
     /**
-     * Assert the Gate decision and facade decision agree for the
-     * supplied enum case.
+     * Assert the Gate decision and facade decision agree for the supplied enum
+     * case.
      *
      * @param  \Tests\Feature\Stubs\StubIdentity  $user
      * @param  \Tests\Feature\Stubs\PermissionEnum  $case

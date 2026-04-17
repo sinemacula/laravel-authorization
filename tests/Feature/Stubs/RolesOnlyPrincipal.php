@@ -8,8 +8,8 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 use SineMacula\Laravel\Authorization\Models\Role as RoleModel;
 
 /**
- * Principal that satisfies `SupportsRoles` but not `SupportsPermissions`
- * — used to exercise the narrow-contract mismatch branches in
+ * Principal that satisfies `SupportsRoles` but not `SupportsPermissions` — used
+ * to exercise the narrow-contract mismatch branches in
  * `BladeHelpers::hasAllRoles`, `hasPermission`, and `hasAllPermissions`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

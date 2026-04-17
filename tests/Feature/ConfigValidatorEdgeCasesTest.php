@@ -12,12 +12,11 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
 use Tests\TestCase;
 
 /**
- * Coverage for `ConfigValidator` branches that reject non-array
- * container keys, empty entries, non-string scalars, and the
- * no-op short-circuit the validator takes when the cache container
- * binding is not present (unit-level embedding). Each test drives
- * the shipped validator through a single misconfiguration that a
- * consumer can realistically set.
+ * Coverage for `ConfigValidator` branches that reject non-array container keys,
+ * empty entries, non-string scalars, and the no-op short-circuit the validator
+ * takes when the cache container binding is not present (unit-level embedding).
+ * Each test drives the shipped validator through a single misconfiguration that
+ * a consumer can realistically set.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,8 +30,8 @@ use Tests\TestCase;
 final class ConfigValidatorEdgeCasesTest extends TestCase
 {
     /**
-     * `permission_enums` must be an array — a scalar is rejected
-     * with a typed exception.
+     * `permission_enums` must be an array — a scalar is rejected with a typed
+     * exception.
      *
      * @return void
      */
@@ -49,8 +48,8 @@ final class ConfigValidatorEdgeCasesTest extends TestCase
     }
 
     /**
-     * `permission_providers` must be an array — a scalar is rejected
-     * with a typed exception.
+     * `permission_providers` must be an array — a scalar is rejected with a
+     * typed exception.
      *
      * @return void
      */
@@ -84,8 +83,8 @@ final class ConfigValidatorEdgeCasesTest extends TestCase
     }
 
     /**
-     * `cache.store` must be a string — an integer is rejected by
-     * the typed validator before the cache manager is consulted.
+     * `cache.store` must be a string — an integer is rejected by the typed
+     * validator before the cache manager is consulted.
      *
      * @return void
      */
@@ -102,9 +101,9 @@ final class ConfigValidatorEdgeCasesTest extends TestCase
     }
 
     /**
-     * When the container has no `cache` binding the validator
-     * short-circuits without raising — library-mode embedding
-     * where Laravel's cache manager is never wired up.
+     * When the container has no `cache` binding the validator short-circuits
+     * without raising — library-mode embedding where Laravel's cache manager is
+     * never wired up.
      *
      * @return void
      */
@@ -121,8 +120,8 @@ final class ConfigValidatorEdgeCasesTest extends TestCase
     }
 
     /**
-     * `principal_resolver` must be a class-string — a non-string
-     * value is rejected before `class_exists` is invoked.
+     * `principal_resolver` must be a class-string — a non-string value is
+     * rejected before `class_exists` is invoked.
      *
      * @return void
      */
@@ -139,9 +138,9 @@ final class ConfigValidatorEdgeCasesTest extends TestCase
     }
 
     /**
-     * The `describe` formatter renders non-scalars as their debug
-     * type — reached via a non-scalar `gate.on_conflict` that drops
-     * through to the error branch.
+     * The `describe` formatter renders non-scalars as their debug type —
+     * reached via a non-scalar `gate.on_conflict` that drops through to the
+     * error branch.
      *
      * @return void
      */

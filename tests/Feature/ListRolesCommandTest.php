@@ -88,9 +88,9 @@ final class ListRolesCommandTest extends TestCase
     }
 
     /**
-     * The table output includes the ID, name, guard, system flag,
-     * and permission count columns. Pins the ArrayItemRemoval
-     * mutants on lines 69 and 74, and the CastString on line 79.
+     * The table output includes the ID, name, guard, system flag, and
+     * permission count columns. Pins the ArrayItemRemoval mutants on lines 69
+     * and 74, and the CastString on line 79.
      *
      * @return void
      */
@@ -124,8 +124,8 @@ final class ListRolesCommandTest extends TestCase
     }
 
     /**
-     * A role with null guard_name renders "(any)". Pins the
-     * null-coalesce on guard_name.
+     * A role with null guard_name renders "(any)". Pins the null-coalesce on
+     * guard_name.
      *
      * @return void
      */
@@ -145,8 +145,8 @@ final class ListRolesCommandTest extends TestCase
     }
 
     /**
-     * The ReturnRemoval mutant on line 65 is killed by verifying
-     * the command returns SUCCESS (0), not FAILURE.
+     * The ReturnRemoval mutant on line 65 is killed by verifying the command
+     * returns SUCCESS (0), not FAILURE.
      *
      * @return void
      */

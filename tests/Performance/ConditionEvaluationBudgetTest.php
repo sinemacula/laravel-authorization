@@ -13,12 +13,11 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
 /**
  * Performance budget for `Statement::evaluateConditions()`.
  *
- * Conditions are the heaviest per-statement work the evaluator does.
- * The full 18-operator surface (string, numeric, temporal, set,
- * boolean, null, CIDR) is exercised in one chain to guard against
- * drift in any individual arm — a regression in a single operator
- * moves the aggregate enough to trip the budget well before it
- * affects a production workload.
+ * Conditions are the heaviest per-statement work the evaluator does. The full
+ * 18-operator surface (string, numeric, temporal, set, boolean, null, CIDR) is
+ * exercised in one chain to guard against drift in any individual arm — a
+ * regression in a single operator moves the aggregate enough to trip the budget
+ * well before it affects a production workload.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,10 +31,10 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
 final class ConditionEvaluationBudgetTest extends TestCase
 {
     /**
-     * Evaluating an 18-operator condition chain 1,000 times must
-     * complete in under half a second on the reference machine.
-     * Observed ~55μs per call on the reference machine (≈55ms
-     * total); budget is ~10× to tolerate CI variance.
+     * Evaluating an 18-operator condition chain 1,000 times must complete in
+     * under half a second on the reference machine. Observed ~55μs per call on
+     * the reference machine (≈55ms total); budget is ~10× to tolerate CI
+     * variance.
      *
      * @return void
      */
@@ -65,9 +64,9 @@ final class ConditionEvaluationBudgetTest extends TestCase
 
     /**
      * Build the 18-operator condition chain — every branch in
-     * `Statement::evaluateOperator()` appears exactly once. Kept
-     * here rather than in a shared helper so the performance suite
-     * has no runtime dependency on the benchmark-support tree.
+     * `Statement::evaluateOperator()` appears exactly once. Kept here rather
+     * than in a shared helper so the performance suite has no runtime
+     * dependency on the benchmark-support tree.
      *
      * @return array<string, mixed>
      */
@@ -96,8 +95,8 @@ final class ConditionEvaluationBudgetTest extends TestCase
     }
 
     /**
-     * Build the matching context — every operator resolves truthy
-     * so the full chain runs to completion.
+     * Build the matching context — every operator resolves truthy so the full
+     * chain runs to completion.
      *
      * @return array<string, mixed>
      */

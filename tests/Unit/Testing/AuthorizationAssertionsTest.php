@@ -153,8 +153,8 @@ final class AuthorizationAssertionsTest extends TestCase
     }
 
     /**
-     * `actingAsIdentity` swaps the resolver so the facade works
-     * without explicit `for()`.
+     * `actingAsIdentity` swaps the resolver so the facade works without
+     * explicit `for()`.
      *
      * @return void
      */
@@ -175,8 +175,8 @@ final class AuthorizationAssertionsTest extends TestCase
     }
 
     /**
-     * `assertCan` includes the resource in its failure message when
-     * one is supplied.
+     * `assertCan` includes the resource in its failure message when one is
+     * supplied.
      *
      * @return void
      */

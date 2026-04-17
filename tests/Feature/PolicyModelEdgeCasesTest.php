@@ -35,10 +35,9 @@ use Tests\TestCase;
 final class PolicyModelEdgeCasesTest extends TestCase
 {
     /**
-     * An empty JSON string value is neither an array nor a parseable
-     * JSON string — `normaliseDocument()` rejects it with the typed
-     * exception rather than hydrating an evaluation policy from a
-     * non-object payload.
+     * An empty JSON string value is neither an array nor a parseable JSON
+     * string — `normaliseDocument()` rejects it with the typed exception rather
+     * than hydrating an evaluation policy from a non-object payload.
      *
      * @return void
      */
@@ -60,10 +59,10 @@ final class PolicyModelEdgeCasesTest extends TestCase
     }
 
     /**
-     * A row whose `document` column was written through a raw
-     * insert can contain bytes that fail at read time —
-     * `toEvaluationPolicy()` wraps the inner failure in a typed
-     * exception so callers can handle the failure uniformly.
+     * A row whose `document` column was written through a raw insert can
+     * contain bytes that fail at read time — `toEvaluationPolicy()` wraps the
+     * inner failure in a typed exception so callers can handle the failure
+     * uniformly.
      *
      * @return void
      */

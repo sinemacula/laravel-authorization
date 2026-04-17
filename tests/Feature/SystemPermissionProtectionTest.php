@@ -20,11 +20,10 @@ use Tests\TestCase;
 /**
  * Feature coverage for the system-permission protection flag.
  *
- * `is_system = true` blocks the next delete or rename on the
- * instance unless `forceSystem()` is called first; the bypass is
- * per-instance, in-memory, and single-use — it does not persist
- * across `$permission->fresh()` hydrations and re-arms on the next
- * protected mutation.
+ * `is_system = true` blocks the next delete or rename on the instance unless
+ * `forceSystem()` is called first; the bypass is per-instance, in-memory, and
+ * single-use — it does not persist across `$permission->fresh()` hydrations and
+ * re-arms on the next protected mutation.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -45,8 +44,7 @@ use Tests\TestCase;
 final class SystemPermissionProtectionTest extends TestCase
 {
     /**
-     * Deleting a system permission without the escape hatch is
-     * refused.
+     * Deleting a system permission without the escape hatch is refused.
      *
      * @return void
      */
@@ -71,8 +69,7 @@ final class SystemPermissionProtectionTest extends TestCase
     }
 
     /**
-     * Renaming a system permission without the escape hatch is
-     * refused.
+     * Renaming a system permission without the escape hatch is refused.
      *
      * @return void
      */
@@ -140,8 +137,8 @@ final class SystemPermissionProtectionTest extends TestCase
     }
 
     /**
-     * Non-rename updates — description, guard_name swap — pass
-     * without needing the escape hatch.
+     * Non-rename updates — description, guard_name swap — pass without needing
+     * the escape hatch.
      *
      * @return void
      */
@@ -164,8 +161,8 @@ final class SystemPermissionProtectionTest extends TestCase
     }
 
     /**
-     * The bypass is single-use — after one protected mutation
-     * the next one re-arms.
+     * The bypass is single-use — after one protected mutation the next one
+     * re-arms.
      *
      * @return void
      */
@@ -191,9 +188,9 @@ final class SystemPermissionProtectionTest extends TestCase
     }
 
     /**
-     * `forceSystem()` is consumed by an intervening non-protected
-     * save (e.g. a description update), so a subsequent rename
-     * without re-arming the bypass is refused.
+     * `forceSystem()` is consumed by an intervening non-protected save (e.g. a
+     * description update), so a subsequent rename without re-arming the bypass
+     * is refused.
      *
      * @return void
      */
@@ -217,8 +214,8 @@ final class SystemPermissionProtectionTest extends TestCase
     }
 
     /**
-     * Non-system permissions behave as before — no protection,
-     * no bypass required.
+     * Non-system permissions behave as before — no protection, no bypass
+     * required.
      *
      * @return void
      */

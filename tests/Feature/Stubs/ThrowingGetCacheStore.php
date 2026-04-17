@@ -10,10 +10,10 @@ use Illuminate\Contracts\Cache\Store;
  * Non-taggable cache store whose `get()` always throws.
  *
  * Used to drive the corrupt-entry recovery path in
- * `ResolutionCache::rememberStringList`, which must tolerate a
- * driver that raises on read and fall back to the resolver.
- * `getCalls` / `forgetCalls` counters let the caller assert that
- * both the read attempt and the subsequent cleanup ran.
+ * `ResolutionCache::rememberStringList`, which must tolerate a driver that
+ * raises on read and fall back to the resolver. `getCalls` / `forgetCalls`
+ * counters let the caller assert that both the read attempt and the subsequent
+ * cleanup ran.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

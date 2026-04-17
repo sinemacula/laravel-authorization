@@ -24,14 +24,13 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Feature coverage for temporal grants (issue #30).
+ * Feature coverage for temporal grants.
  *
- * Each `authorizable_*` pivot carries a nullable `expires_at`
- * column. Null means "forever"; a concrete timestamp bounds the
- * grant and is filtered out of the relation the moment the clock
- * passes it, without requiring a sweeper run. Admin-time APIs
- * accept the optional `$expiresAt` parameter on
- * `assignRole()` / `givePermission()` / `attachPolicy()`.
+ * Each `authorizable_*` pivot carries a nullable `expires_at` column. Null
+ * means "forever"; a concrete timestamp bounds the grant and is filtered out of
+ * the relation the moment the clock passes it, without requiring a sweeper run.
+ * Admin-time APIs accept the optional `$expiresAt` parameter on `assignRole()`
+ * / `givePermission()` / `attachPolicy()`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,8 +50,8 @@ use Tests\TestCase;
 final class TemporalGrantsTest extends TestCase
 {
     /**
-     * Reset the Carbon test now between tests so wall-clock
-     * travel never leaks across scenarios.
+     * Reset the Carbon test now between tests so wall-clock travel never leaks
+     * across scenarios.
      *
      * @return void
      */
@@ -65,8 +64,8 @@ final class TemporalGrantsTest extends TestCase
     }
 
     /**
-     * A role assigned with a future `expiresAt` is present on
-     * the relation until the clock passes the expiry.
+     * A role assigned with a future `expiresAt` is present on the relation
+     * until the clock passes the expiry.
      *
      * @return void
      */
@@ -90,8 +89,8 @@ final class TemporalGrantsTest extends TestCase
     }
 
     /**
-     * A permission with a future expiry resolves under
-     * `hasPermission()` until the clock passes the expiry.
+     * A permission with a future expiry resolves under `hasPermission()` until
+     * the clock passes the expiry.
      *
      * @return void
      */
@@ -115,9 +114,8 @@ final class TemporalGrantsTest extends TestCase
     }
 
     /**
-     * A policy attached with a future expiry is returned by
-     * `getPolicies()` until the clock passes the expiry, then
-     * disappears.
+     * A policy attached with a future expiry is returned by `getPolicies()`
+     * until the clock passes the expiry, then disappears.
      *
      * @return void
      */
@@ -143,8 +141,8 @@ final class TemporalGrantsTest extends TestCase
     }
 
     /**
-     * Passing no `expiresAt` (the default) creates a forever
-     * grant — no `expires_at` is persisted on the pivot.
+     * Passing no `expiresAt` (the default) creates a forever grant — no
+     * `expires_at` is persisted on the pivot.
      *
      * @return void
      */
@@ -169,10 +167,9 @@ final class TemporalGrantsTest extends TestCase
     }
 
     /**
-     * `pivot->expires_at` is cast to a Carbon instance so
-     * consumers can render remaining lifetime without parsing
-     * the string themselves — `withCasts()` on each relation
-     * backs up the claim in the relation docblock (issue #78).
+     * `pivot->expires_at` is cast to a Carbon instance so consumers can render
+     * remaining lifetime without parsing the string themselves — `withCasts()`
+     * on each relation backs up the claim in the relation docblock.
      *
      * @return void
      */
@@ -198,9 +195,9 @@ final class TemporalGrantsTest extends TestCase
     }
 
     /**
-     * A past-dated grant is invisible on the relation the moment
-     * it is persisted — the filter evaluates against the current
-     * time on every read, not just at load time.
+     * A past-dated grant is invisible on the relation the moment it is
+     * persisted — the filter evaluates against the current time on every read,
+     * not just at load time.
      *
      * @return void
      */
@@ -221,9 +218,9 @@ final class TemporalGrantsTest extends TestCase
     }
 
     /**
-     * A temporal grant and a forever grant to the same identity
-     * coexist on separate pivots — the forever grant stays even
-     * after the temporal one expires.
+     * A temporal grant and a forever grant to the same identity coexist on
+     * separate pivots — the forever grant stays even after the temporal one
+     * expires.
      *
      * @return void
      */
@@ -259,13 +256,11 @@ final class TemporalGrantsTest extends TestCase
     }
 
     /**
-     * A cached `getRoles()` snapshot bounded by a temporal grant's
-     * `expires_at` invalidates itself once the clock passes the
-     * expiry — no manual `forget()` call required. Regression
-     * coverage for ISSUES.md #77: the cache writes the entry
-     * with `min(configured-ttl, seconds-until-nearest-expiry) -
-     * 1s` so wall-clock advance alone is enough to drop the
-     * stored row.
+     * A cached `getRoles()` snapshot bounded by a temporal grant's `expires_at`
+     * invalidates itself once the clock passes the expiry — no manual
+     * `forget()` call required. The cache writes the entry with
+     * `min(configured-ttl, seconds-until-nearest- expiry) - 1s` so wall-clock
+     * advance alone is enough to drop the stored row.
      *
      * @return void
      */
@@ -318,16 +313,15 @@ final class TemporalGrantsTest extends TestCase
     }
 
     /**
-     * Advance the clock and invalidate the resolution cache for
-     * the supplied principal in the same step.
+     * Advance the clock and invalidate the resolution cache for the supplied
+     * principal in the same step.
      *
-     * Temporal grants are filtered at the DB layer on every
-     * relation read, but the `ResolutionCache` has no way to
-     * observe wall-clock advance — when present it memoises the
-     * role / permission list per principal and keeps returning
-     * the cached set until an invalidation event fires. Tests
-     * that walk the clock forward must drop the memoised entry
-     * manually so the next read observes the expiry.
+     * Temporal grants are filtered at the DB layer on every relation read, but
+     * the `ResolutionCache` has no way to observe wall-clock advance — when
+     * present it memoises the role / permission list per principal and keeps
+     * returning the cached set until an invalidation event fires. Tests that
+     * walk the clock forward must drop the memoised entry manually so the next
+     * read observes the expiry.
      *
      * @param  string  $instant
      * @param  object  $principal

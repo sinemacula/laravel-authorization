@@ -24,11 +24,11 @@ use Tests\TestCase;
  * Feature coverage for the Gate closure's argument forwarding.
  *
  * Laravel dispatches the full argument tail to a Gate callback —
- * `Gate::allows('posts:create', $post)` reaches the closure as
- * `(?$user, $post)`. The service provider must translate that tail
- * into the authorization manager's `(resource, context)` pair so
- * policies that condition on resources or context are reachable via
- * `$user->can()`, `@can`, `Gate::allows`, and the `can:` middleware.
+ * `Gate::allows('posts:create', $post)` reaches the closure as `(?$user,
+ * $post)`. The service provider must translate that tail into the authorization
+ * manager's `(resource, context)` pair so policies that condition on resources
+ * or context are reachable via `$user->can()`, `@can`, `Gate::allows`, and the
+ * `can:` middleware.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -45,8 +45,8 @@ use Tests\TestCase;
 final class GateArgumentForwardingTest extends TestCase
 {
     /**
-     * Boot the provider with the demo permission enum so the Gate
-     * is wired for each test.
+     * Boot the provider with the demo permission enum so the Gate is wired for
+     * each test.
      *
      * @return void
      */
@@ -68,8 +68,8 @@ final class GateArgumentForwardingTest extends TestCase
     }
 
     /**
-     * Reset morph map state after each test so cross-test leakage
-     * cannot mask a regression.
+     * Reset morph map state after each test so cross-test leakage cannot mask a
+     * regression.
      *
      * @return void
      */
@@ -82,8 +82,7 @@ final class GateArgumentForwardingTest extends TestCase
     }
 
     /**
-     * A string resource argument is forwarded to the evaluator's
-     * resource slot.
+     * A string resource argument is forwarded to the evaluator's resource slot.
      *
      * @return void
      */
@@ -107,9 +106,8 @@ final class GateArgumentForwardingTest extends TestCase
     }
 
     /**
-     * An Eloquent model argument is stringified as
-     * `{morphClass}:{key}` so it matches the convention used by the
-     * package's polymorphic pivots.
+     * An Eloquent model argument is stringified as `{morphClass}:{key}` so it
+     * matches the convention used by the package's polymorphic pivots.
      *
      * @return void
      */
@@ -168,8 +166,8 @@ final class GateArgumentForwardingTest extends TestCase
     }
 
     /**
-     * An associative array argument is forwarded as the context map
-     * with no resource set.
+     * An associative array argument is forwarded as the context map with no
+     * resource set.
      *
      * @return void
      */
@@ -195,9 +193,8 @@ final class GateArgumentForwardingTest extends TestCase
     }
 
     /**
-     * A resource followed by a context array combines both — the
-     * evaluator sees the resource identifier and the context map
-     * simultaneously.
+     * A resource followed by a context array combines both — the evaluator sees
+     * the resource identifier and the context map simultaneously.
      *
      * @return void
      */
@@ -225,8 +222,8 @@ final class GateArgumentForwardingTest extends TestCase
     }
 
     /**
-     * Calls with no extra arguments still evaluate against the
-     * principal's RBAC grants — parity with the pre-fix behaviour.
+     * Calls with no extra arguments still evaluate against the principal's RBAC
+     * grants — parity with the pre-fix behaviour.
      *
      * @return void
      */
@@ -249,8 +246,8 @@ final class GateArgumentForwardingTest extends TestCase
     }
 
     /**
-     * Unmappable non-object, non-array trailing arguments are
-     * silently discarded rather than guessed at.
+     * Unmappable non-object, non-array trailing arguments are silently
+     * discarded rather than guessed at.
      *
      * @return void
      */
@@ -275,8 +272,7 @@ final class GateArgumentForwardingTest extends TestCase
 
     /**
      * Swap the principal resolver for one that returns the supplied
-     * authorizable and refresh the manager so the next facade call
-     * picks it up.
+     * authorizable and refresh the manager so the next facade call picks it up.
      *
      * @param  \Tests\Feature\Stubs\StubIdentity  $user
      * @return void

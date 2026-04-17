@@ -23,8 +23,8 @@ use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
 
 /**
- * Unit tests for the authorization manager using stub principals and
- * a real evaluator — no Laravel boot required.
+ * Unit tests for the authorization manager using stub principals and a real
+ * evaluator — no Laravel boot required.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -136,7 +136,8 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * Policy explicit allow takes precedence (and the RBAC fallback is skipped).
+     * Policy explicit allow takes precedence (and the RBAC fallback is
+     * skipped).
      *
      * @return void
      */
@@ -195,8 +196,8 @@ final class AuthorizationManagerTest extends TestCase
      * @return void
      */
     /**
-     * withPolicies returns a fresh scope and does not mutate the
-     * originating manager (kills the "remove clone" mutant).
+     * withPolicies returns a fresh scope and does not mutate the originating
+     * manager (kills the "remove clone" mutant).
      *
      * @return void
      */
@@ -343,7 +344,8 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * authorize() dispatches both DecisionEvaluated and AuthorizationFailed before throwing.
+     * authorize() dispatches both DecisionEvaluated and AuthorizationFailed
+     * before throwing.
      *
      * @return void
      */
@@ -400,7 +402,8 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * Resolver-provided principal is consumed when no for() override is in play.
+     * Resolver-provided principal is consumed when no for() override is in
+     * play.
      *
      * @return void
      */
@@ -441,8 +444,8 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * `evaluate()` writes the result to the last-decision store.
-     * Pins the MethodCallRemoval mutant on line 145.
+     * `evaluate()` writes the result to the last-decision store. Pins the
+     * MethodCallRemoval mutant on line 145.
      *
      * @return void
      */
@@ -465,8 +468,8 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * `withPolicies()` wraps the input through `array_values()`.
-     * Pins the UnwrapArrayValues mutant on line 267.
+     * `withPolicies()` wraps the input through `array_values()`. Pins the
+     * UnwrapArrayValues mutant on line 267.
      *
      * @return void
      */
@@ -494,8 +497,8 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * `dispatch()` is a no-op when events is null. Pins the
-     * NullSafeMethodCall mutant on line 349.
+     * `dispatch()` is a no-op when events is null. Pins the NullSafeMethodCall
+     * mutant on line 349.
      *
      * @return void
      */
@@ -516,8 +519,8 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * `for()` produces a clone. The clone's principal override is
-     * isolated. Pins the CloneRemoval mutant on line 249.
+     * `for()` produces a clone. The clone's principal override is isolated.
+     * Pins the CloneRemoval mutant on line 249.
      *
      * @return void
      */
@@ -547,8 +550,8 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * Build a stubbed authorizable principal returning the supplied
-     * permissions and policies.
+     * Build a stubbed authorizable principal returning the supplied permissions
+     * and policies.
      *
      * @param  array<int, string>  $permissions
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies

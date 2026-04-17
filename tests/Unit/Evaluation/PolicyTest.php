@@ -145,8 +145,8 @@ final class PolicyTest extends TestCase
     }
 
     /**
-     * toArray emits version, name and statements in canonical order
-     * (kills the version-key literal mutants).
+     * toArray emits version, name and statements in canonical order (kills the
+     * version-key literal mutants).
      *
      * @return void
      */
@@ -184,13 +184,11 @@ final class PolicyTest extends TestCase
     }
 
     /**
-     * Lock the v1 document shape. The fixture exercises every
-     * slot — effect, actions, resources, and a condition map
-     * with multiple operators — and round-trips it through
-     * `fromArray` / `toArray`. If a future schema change alters
-     * the canonical layout without bumping `Policy::CURRENT_VERSION`,
-     * this test fails loudly and forces the change to land
-     * deliberately.
+     * Lock the v1 document shape. The fixture exercises every slot — effect,
+     * actions, resources, and a condition map with multiple operators — and
+     * round-trips it through `fromArray` / `toArray`. If a future schema change
+     * alters the canonical layout without bumping `Policy::CURRENT_VERSION`,
+     * this test fails loudly and forces the change to land deliberately.
      *
      * @return void
      */
@@ -226,11 +224,10 @@ final class PolicyTest extends TestCase
     }
 
     /**
-     * An explicit future `version` is preserved on the round
-     * trip. This pins the forward-compatibility contract: even if
-     * the current engine would evaluate a v2 document identically
-     * to v1, the persisted version number must flow through
-     * untouched so downstream tooling can detect the bump.
+     * An explicit future `version` is preserved on the round trip. This pins
+     * the forward-compatibility contract: even if the current engine would
+     * evaluate a v2 document identically to v1, the persisted version number
+     * must flow through untouched so downstream tooling can detect the bump.
      *
      * @return void
      */

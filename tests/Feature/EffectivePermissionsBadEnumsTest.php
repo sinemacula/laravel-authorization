@@ -12,11 +12,11 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Feature tests covering the `effectivePermissions()` filter branch
- * that rejects non-string or non-enum entries from the configured
+ * Feature tests covering the `effectivePermissions()` filter branch that
+ * rejects non-string or non-enum entries from the configured
  * `authorization.permission_enums` list. Guards the manager against
- * misconfigured arrays — booleans, integers, string class-names that
- * are not enums — without letting the call blow up at runtime.
+ * misconfigured arrays — booleans, integers, string class-names that are not
+ * enums — without letting the call blow up at runtime.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,9 +29,9 @@ use Tests\TestCase;
 final class EffectivePermissionsBadEnumsTest extends TestCase
 {
     /**
-     * Non-string and non-enum entries in the configured list are
-     * silently skipped so misconfiguration can never cascade into a
-     * TypeError mid-request.
+     * Non-string and non-enum entries in the configured list are silently
+     * skipped so misconfiguration can never cascade into a TypeError
+     * mid-request.
      *
      * @return void
      */

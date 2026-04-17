@@ -13,17 +13,16 @@ use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use Tests\TestCase;
 
 /**
- * Feature coverage for the `vendor:publish` tag mappings exposed by
- * the service provider.
+ * Feature coverage for the `vendor:publish` tag mappings exposed by the service
+ * provider.
  *
  * Asserts the package registers exactly two publishable groups —
- * `authorization-config` and `authorization-migrations` — and that
- * each tag resolves to the shipped source path on disk. File
- * creation is not asserted because Testbench treats
- * `vendor:publish` as a no-op when the target file already exists;
- * the `ServiceProvider::$publishes` registry is the canonical
- * source of truth and is inspected directly via the framework's
- * public `pathsToPublish()` accessor.
+ * `authorization-config` and `authorization-migrations` — and that each tag
+ * resolves to the shipped source path on disk. File creation is not asserted
+ * because Testbench treats `vendor:publish` as a no-op when the target file
+ * already exists; the `ServiceProvider::$publishes` registry is the canonical
+ * source of truth and is inspected directly via the framework's public
+ * `pathsToPublish()` accessor.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -39,9 +38,8 @@ use Tests\TestCase;
 final class PublishingTagsTest extends TestCase
 {
     /**
-     * `authorization-config` tag publishes the shipped config file
-     * into `config/authorization.php` relative to the host
-     * application.
+     * `authorization-config` tag publishes the shipped config file into
+     * `config/authorization.php` relative to the host application.
      *
      * @return void
      */
@@ -82,9 +80,8 @@ final class PublishingTagsTest extends TestCase
     }
 
     /**
-     * `authorization-migrations` tag publishes the shipped migrations
-     * directory into the host application's `database/migrations`
-     * tree.
+     * `authorization-migrations` tag publishes the shipped migrations directory
+     * into the host application's `database/migrations` tree.
      *
      * @return void
      */

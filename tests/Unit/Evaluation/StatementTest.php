@@ -347,7 +347,7 @@ final class StatementTest extends TestCase
     }
 
     // ------------------------------------------------------------------
-    // #37 — Context variable interpolation wired into Statement
+    // Context variable interpolation wired into Statement
     // ------------------------------------------------------------------
 
     /**
@@ -414,8 +414,8 @@ final class StatementTest extends TestCase
     }
 
     /**
-     * Interpolated condition operand resolves principal id before
-     * operator evaluation.
+     * Interpolated condition operand resolves principal id before operator
+     * evaluation.
      *
      * @return void
      */
@@ -498,9 +498,9 @@ final class StatementTest extends TestCase
     // ------------------------------------------------------------------
 
     /**
-     * The constructor default for resources is `['*']` — removing the
-     * `'*'` element (ArrayItemRemoval on line 44) would break the
-     * default wildcard behaviour.
+     * The constructor default for resources is `['*']` — removing the `'*'`
+     * element (ArrayItemRemoval on line 44) would break the default wildcard
+     * behaviour.
      *
      * @return void
      */
@@ -520,9 +520,9 @@ final class StatementTest extends TestCase
     // ------------------------------------------------------------------
 
     /**
-     * When a condition entry fails, evaluateConditions returns false.
-     * If the foreach were skipped (Foreach_ mutant on line 138),
-     * it would always return true.
+     * When a condition entry fails, evaluateConditions returns false. If the
+     * foreach were skipped (Foreach_ mutant on line 138), it would always
+     * return true.
      *
      * @return void
      */
@@ -538,8 +538,8 @@ final class StatementTest extends TestCase
     }
 
     /**
-     * The `!` before evaluateConditionEntry matters — flipping it
-     * (LogicalNot mutant on line 139) would invert the whole result.
+     * The `!` before evaluateConditionEntry matters — flipping it (LogicalNot
+     * mutant on line 139) would invert the whole result.
      *
      * @return void
      */
@@ -560,9 +560,9 @@ final class StatementTest extends TestCase
     // ------------------------------------------------------------------
 
     /**
-     * Integer condition keys cause the entry to fail (non-string key).
-     * If the `!\is_string($key)` check is negated or the `||` changed
-     * to `&&`, the behaviour changes.
+     * Integer condition keys cause the entry to fail (non-string key). If the
+     * `!\is_string($key)` check is negated or the `||` changed to `&&`, the
+     * behaviour changes.
      *
      * @return void
      */
@@ -597,8 +597,8 @@ final class StatementTest extends TestCase
     }
 
     /**
-     * A string key NOT in context should fail. Kills mutants that
-     * negate array_key_exists.
+     * A string key NOT in context should fail. Kills mutants that negate
+     * array_key_exists.
      *
      * @return void
      */
@@ -618,9 +618,9 @@ final class StatementTest extends TestCase
     // ------------------------------------------------------------------
 
     /**
-     * resolveConditions preserves every key-value pair from the
-     * input — removing the assignment (ArrayItemRemoval on line 232)
-     * would produce an empty map.
+     * resolveConditions preserves every key-value pair from the input —
+     * removing the assignment (ArrayItemRemoval on line 232) would produce an
+     * empty map.
      *
      * @return void
      */
@@ -668,9 +668,8 @@ final class StatementTest extends TestCase
     // ------------------------------------------------------------------
 
     /**
-     * Non-array condition where actual === expected.
-     * Kills the LogicalNot on line 388 (`!\is_array`) and Foreach_
-     * on line 392.
+     * Non-array condition where actual === expected. Kills the LogicalNot on
+     * line 388 (`!\is_array`) and Foreach_ on line 392.
      *
      * @return void
      */
@@ -687,8 +686,8 @@ final class StatementTest extends TestCase
     }
 
     /**
-     * Non-string operator key in the condition map causes failure.
-     * Kills the `!\is_string($operator)` check on line 393.
+     * Non-string operator key in the condition map causes failure. Kills the
+     * `!\is_string($operator)` check on line 393.
      *
      * @return void
      */
@@ -704,8 +703,8 @@ final class StatementTest extends TestCase
     }
 
     /**
-     * Multiple operators must all pass — the foreach short-circuits
-     * on the first failure. Kills TrueValue on line 398.
+     * Multiple operators must all pass — the foreach short-circuits on the
+     * first failure. Kills TrueValue on line 398.
      *
      * @return void
      */
@@ -727,9 +726,9 @@ final class StatementTest extends TestCase
     // ------------------------------------------------------------------
 
     /**
-     * Each operator arm is individually distinguishable when tested
-     * against specific values. Removing any arm would cause a
-     * `\UnhandledMatchError` or fall through to `default`.
+     * Each operator arm is individually distinguishable when tested against
+     * specific values. Removing any arm would cause a `\UnhandledMatchError` or
+     * fall through to `default`.
      *
      * @return void
      */
@@ -751,8 +750,8 @@ final class StatementTest extends TestCase
     }
 
     /**
-     * The `in` operator requires is_array(operand) AND in_array check.
-     * Negating `\in_array` or the `\is_array` changes the result.
+     * The `in` operator requires is_array(operand) AND in_array check. Negating
+     * `\in_array` or the `\is_array` changes the result.
      *
      * @return void
      */
@@ -790,8 +789,8 @@ final class StatementTest extends TestCase
     }
 
     /**
-     * `cidr` operator needs both actual and operand to be strings.
-     * Tests kill the LogicalAnd mutants on line 416.
+     * `cidr` operator needs both actual and operand to be strings. Tests kill
+     * the LogicalAnd mutants on line 416.
      *
      * @return void
      */
@@ -809,9 +808,8 @@ final class StatementTest extends TestCase
     }
 
     /**
-     * `starts_with` needs string actual AND string operand AND
-     * str_starts_with to match. Tests kill the triple LogicalAnd
-     * mutants on line 417.
+     * `starts_with` needs string actual AND string operand AND str_starts_with
+     * to match. Tests kill the triple LogicalAnd mutants on line 417.
      *
      * @return void
      */
@@ -830,9 +828,8 @@ final class StatementTest extends TestCase
     }
 
     /**
-     * `ends_with` needs string actual AND string operand AND
-     * str_ends_with to match. Tests kill the triple LogicalAnd
-     * mutants on line 418.
+     * `ends_with` needs string actual AND string operand AND str_ends_with to
+     * match. Tests kill the triple LogicalAnd mutants on line 418.
      *
      * @return void
      */
@@ -850,9 +847,8 @@ final class StatementTest extends TestCase
     }
 
     /**
-     * `string_like` needs string actual AND string operand AND
-     * fnmatch to match. Tests kill the triple LogicalAnd mutants
-     * on line 422.
+     * `string_like` needs string actual AND string operand AND fnmatch to
+     * match. Tests kill the triple LogicalAnd mutants on line 422.
      *
      * @return void
      */
@@ -871,8 +867,8 @@ final class StatementTest extends TestCase
 
     /**
      * `null` operator: actual === null must be true iff actual is null.
-     * `not_null`: actual !== null must be true iff actual is not null.
-     * Kills Identical mutants on lines 423-424.
+     * `not_null`: actual !== null must be true iff actual is not null. Kills
+     * Identical mutants on lines 423-424.
      *
      * @return void
      */
@@ -901,9 +897,8 @@ final class StatementTest extends TestCase
     }
 
     /**
-     * `eq` uses `===` and `neq` uses `!==`. Swapping them produces
-     * different results. Kills Identical/NotIdentical mutants on
-     * lines 412-413.
+     * `eq` uses `===` and `neq` uses `!==`. Swapping them produces different
+     * results. Kills Identical/NotIdentical mutants on lines 412-413.
      *
      * @return void
      */
@@ -935,10 +930,10 @@ final class StatementTest extends TestCase
     // ------------------------------------------------------------------
 
     /**
-     * Condition operands that are arrays get their string values
-     * interpolated while non-strings pass through unchanged.
-     * The operator map `['eq' => '${principal.id}']` has a string
-     * value that must be interpolated by interpolateOperands.
+     * Condition operands that are arrays get their string values interpolated
+     * while non-strings pass through unchanged. The operator map `['eq' =>
+     * '${principal.id}']` has a string value that must be interpolated by
+     * interpolateOperands.
      *
      * @return void
      */
@@ -1072,7 +1067,7 @@ final class StatementTest extends TestCase
     }
 
     /**
-     * string_like / null / not_null cases (#38).
+     * string_like / null / not_null cases.
      *
      * @return \Generator<string, array{0: array<string, mixed>, 1: array<string, mixed>, 2: bool}>
      */
@@ -1091,7 +1086,7 @@ final class StatementTest extends TestCase
     }
 
     /**
-     * gt / gte / lt / lte cases (#38).
+     * gt / gte / lt / lte cases.
      *
      * @return \Generator<string, array{0: array<string, mixed>, 1: array<string, mixed>, 2: bool}>
      */
@@ -1116,7 +1111,7 @@ final class StatementTest extends TestCase
     }
 
     /**
-     * bool operator cases (#38).
+     * bool operator cases.
      *
      * @return \Generator<string, array{0: array<string, mixed>, 1: array<string, mixed>, 2: bool}>
      */
@@ -1131,9 +1126,9 @@ final class StatementTest extends TestCase
     }
 
     /**
-     * Fixture list driving `testEveryOperatorArmIsDistinguishable`.
-     * Each row carries the per-operator condition, the actual ctx
-     * value, and the expected evaluation result.
+     * Fixture list driving `testEveryOperatorArmIsDistinguishable`. Each row
+     * carries the per-operator condition, the actual ctx value, and the
+     * expected evaluation result.
      *
      * @return list<array{k: array<string, mixed>, ctx: mixed, expect: bool}>
      */

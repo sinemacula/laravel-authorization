@@ -7,9 +7,9 @@ namespace Tests\Unit\Exceptions\Stubs;
 use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
 
 /**
- * Stub model that uses the base `ValidatesAuthorizationName` trait
- * without overriding `getAuthorizationNameKind()` — exercises the
- * trait's default label fallback.
+ * Stub model that uses the base `ValidatesAuthorizationName` trait without
+ * overriding `getAuthorizationNameKind()` — exercises the trait's default label
+ * fallback.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

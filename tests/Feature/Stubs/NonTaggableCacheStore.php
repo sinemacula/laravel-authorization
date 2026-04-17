@@ -9,10 +9,10 @@ use Illuminate\Contracts\Cache\Store;
 /**
  * In-memory, non-taggable cache store used by resolution-cache tests.
  *
- * Mirrors the minimum surface of the shipped File / Database drivers
- * that Laravel's `Repository` wraps unchanged. The absence of a
- * `tags()` method means `ResolutionCache::isTaggable()` reports false,
- * exercising the non-tag code branches in the cache layer.
+ * Mirrors the minimum surface of the shipped File / Database drivers that
+ * Laravel's `Repository` wraps unchanged. The absence of a `tags()` method
+ * means `ResolutionCache::isTaggable()` reports false, exercising the non-tag
+ * code branches in the cache layer.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -11,12 +11,11 @@ use Tests\Feature\Stubs\RolesOnlyPrincipal;
 use Tests\TestCase;
 
 /**
- * Coverage for the narrow-contract mismatch branches of the
- * shipped Blade helpers. A principal that implements
- * `SupportsRoles` but not `SupportsPermissions` must still resolve
- * role directives successfully, while every permission-scoped
- * directive falls back to a safe `false` — keeping the view layer
- * fail-closed when consumers compose narrow contracts per-role.
+ * Coverage for the narrow-contract mismatch branches of the shipped Blade
+ * helpers. A principal that implements `SupportsRoles` but not
+ * `SupportsPermissions` must still resolve role directives successfully, while
+ * every permission-scoped directive falls back to a safe `false` — keeping the
+ * view layer fail-closed when consumers compose narrow contracts per-role.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -27,8 +26,7 @@ use Tests\TestCase;
 final class BladeHelpersNarrowContractsTest extends TestCase
 {
     /**
-     * Swap in a resolver that returns a `RolesOnlyPrincipal` before
-     * every test.
+     * Swap in a resolver that returns a `RolesOnlyPrincipal` before every test.
      *
      * @return void
      */
@@ -73,8 +71,8 @@ final class BladeHelpersNarrowContractsTest extends TestCase
     }
 
     /**
-     * A principal that supports only roles still resolves
-     * `hasAllRoles` honestly.
+     * A principal that supports only roles still resolves `hasAllRoles`
+     * honestly.
      *
      * @return void
      */
@@ -85,9 +83,8 @@ final class BladeHelpersNarrowContractsTest extends TestCase
     }
 
     /**
-     * A principal that does not implement `SupportsPermissions`
-     * yields `false` from the any-permission helper — the narrow
-     * contract mismatch branch.
+     * A principal that does not implement `SupportsPermissions` yields `false`
+     * from the any-permission helper — the narrow contract mismatch branch.
      *
      * @return void
      */
@@ -97,8 +94,8 @@ final class BladeHelpersNarrowContractsTest extends TestCase
     }
 
     /**
-     * A principal that does not implement `SupportsPermissions`
-     * yields `false` from the all-permissions helper.
+     * A principal that does not implement `SupportsPermissions` yields `false`
+     * from the all-permissions helper.
      *
      * @return void
      */

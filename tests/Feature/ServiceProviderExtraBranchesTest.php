@@ -19,8 +19,7 @@ use Tests\Feature\Stubs\StubPolicyStore;
 use Tests\TestCase;
 
 /**
- * Coverage for the final trio of `AuthorizationServiceProvider`
- * branches:
+ * Coverage for the final trio of `AuthorizationServiceProvider` branches:
  *
  * - A concrete `policy_store` class triggers the singleton binding
  *   in `registerPolicyStore`.
@@ -46,8 +45,8 @@ final class ServiceProviderExtraBranchesTest extends TestCase
     private const string POSTS_CREATE = 'posts:create';
 
     /**
-     * Setting a concrete `policy_store` class triggers the optional
-     * singleton bind so the manager's policy resolver can pick it up.
+     * Setting a concrete `policy_store` class triggers the optional singleton
+     * bind so the manager's policy resolver can pick it up.
      *
      * @return void
      */
@@ -68,9 +67,8 @@ final class ServiceProviderExtraBranchesTest extends TestCase
 
     /**
      * A native `GateConflictMode` enum value for
-     * `authorization.gate.on_conflict` is passed through verbatim —
-     * the service provider does not try to cast it or fall back to
-     * the default.
+     * `authorization.gate.on_conflict` is passed through verbatim — the service
+     * provider does not try to cast it or fall back to the default.
      *
      * @return void
      */
@@ -94,9 +92,8 @@ final class ServiceProviderExtraBranchesTest extends TestCase
     }
 
     /**
-     * A provider that yields empty or non-string permission values
-     * skips those entries without raising, and still persists the
-     * well-formed ones.
+     * A provider that yields empty or non-string permission values skips those
+     * entries without raising, and still persists the well-formed ones.
      *
      * @return void
      */
@@ -113,12 +110,12 @@ final class ServiceProviderExtraBranchesTest extends TestCase
     }
 
     /**
-     * A `permission_enums` entry that is not a string (or does not
-     * subclass the `PermissionEnum` contract) is skipped by
-     * `registerGates` at runtime. ConfigValidator is swapped out via
-     * `registerGates` directly — the validator rejects the same
-     * shape earlier in boot, so this test calls the register method
-     * via reflection to exercise the runtime guard in isolation.
+     * A `permission_enums` entry that is not a string (or does not subclass the
+     * `PermissionEnum` contract) is skipped by `registerGates` at runtime.
+     * ConfigValidator is swapped out via `registerGates` directly — the
+     * validator rejects the same shape earlier in boot, so this test calls the
+     * register method via reflection to exercise the runtime guard in
+     * isolation.
      *
      * @return void
      */
@@ -137,10 +134,10 @@ final class ServiceProviderExtraBranchesTest extends TestCase
     }
 
     /**
-     * `registerPermissionProviders` defensively skips entries that
-     * are not class-strings or do not implement `PermissionProvider`
-     * — the upstream `ConfigValidator` rejects the same shape, so
-     * this exercises the runtime guard via reflection.
+     * `registerPermissionProviders` defensively skips entries that are not
+     * class-strings or do not implement `PermissionProvider` — the upstream
+     * `ConfigValidator` rejects the same shape, so this exercises the runtime
+     * guard via reflection.
      *
      * @return void
      */

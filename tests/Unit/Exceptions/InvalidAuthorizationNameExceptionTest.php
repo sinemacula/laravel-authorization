@@ -15,11 +15,10 @@ use Tests\Unit\Exceptions\Stubs\StubAuthorizationEntity;
  * Unit tests for `InvalidAuthorizationNameException` and the
  * `ValidatesAuthorizationName` trait's default kind fallback.
  *
- * The exception is thrown by the name mutator shared by the Role,
- * Permission, and Policy models; the constructor, `getKind()`, and
- * `getName()` accessors are part of the SemVer-stable API surface
- * and are consumed by the demo app's error handler to render
- * human-readable validation messages.
+ * The exception is thrown by the name mutator shared by the Role, Permission,
+ * and Policy models; the constructor, `getKind()`, and `getName()` accessors
+ * are part of the SemVer-stable API surface and are consumed by the demo app's
+ * error handler to render human-readable validation messages.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -33,9 +32,8 @@ final class InvalidAuthorizationNameExceptionTest extends TestCase
     private const string HAS_SPACE = 'has space';
 
     /**
-     * The constructor formats a stable message that identifies both
-     * the entity kind and the offending name, and exposes both
-     * through typed accessors.
+     * The constructor formats a stable message that identifies both the entity
+     * kind and the offending name, and exposes both through typed accessors.
      *
      * @return void
      */
@@ -50,9 +48,8 @@ final class InvalidAuthorizationNameExceptionTest extends TestCase
     }
 
     /**
-     * Consumers that use the trait without overriding the kind
-     * resolver fall back to the generic `authorization entity`
-     * label.
+     * Consumers that use the trait without overriding the kind resolver fall
+     * back to the generic `authorization entity` label.
      *
      * @return void
      */
@@ -64,8 +61,8 @@ final class InvalidAuthorizationNameExceptionTest extends TestCase
     }
 
     /**
-     * The trait's name mutator raises the typed exception with the
-     * default kind label when the consumer has not overridden it.
+     * The trait's name mutator raises the typed exception with the default kind
+     * label when the consumer has not overridden it.
      *
      * @return void
      */
@@ -83,8 +80,8 @@ final class InvalidAuthorizationNameExceptionTest extends TestCase
     }
 
     /**
-     * Non-string inputs are reported as empty-string names so the
-     * error message remains parseable.
+     * Non-string inputs are reported as empty-string names so the error message
+     * remains parseable.
      *
      * @return void
      */

@@ -10,8 +10,8 @@ use PHPUnit\Framework\TestCase;
 /**
  * Enforces the standalone-first invariant: the runtime `require` block in
  * `composer.json` must never depend on a sibling `sinemacula/laravel-*`
- * package. Runs as part of the test suite so regressions are caught
- * locally, not only in CI.
+ * package. Runs as part of the test suite so regressions are caught locally,
+ * not only in CI.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -24,8 +24,8 @@ use PHPUnit\Framework\TestCase;
 final class PackageIsolationTest extends TestCase
 {
     /**
-     * The runtime `require` block must not contain any
-     * `sinemacula/laravel-*` package entry.
+     * The runtime `require` block must not contain any `sinemacula/laravel-*`
+     * package entry.
      *
      * @return void
      */

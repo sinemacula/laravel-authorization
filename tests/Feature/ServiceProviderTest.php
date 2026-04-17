@@ -21,8 +21,8 @@ use Tests\Feature\Stubs\PermissionEnum;
 use Tests\TestCase;
 
 /**
- * Feature tests exercising the service provider's container bindings,
- * config publishing, and Gate auto-wiring.
+ * Feature tests exercising the service provider's container bindings, config
+ * publishing, and Gate auto-wiring.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

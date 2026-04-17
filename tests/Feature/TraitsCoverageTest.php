@@ -15,8 +15,8 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Coverage-focused feature tests that exercise the trait helpers not
- * already covered by the manager-driven feature suite.
+ * Coverage-focused feature tests that exercise the trait helpers not already
+ * covered by the manager-driven feature suite.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

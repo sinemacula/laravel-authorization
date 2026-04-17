@@ -19,8 +19,8 @@ use Tests\TestCase;
 /**
  * Feature coverage for the nullable `category` column on permissions.
  *
- * Verifies that a permission created with a category value persists
- * and reloads correctly, and that the column remains nullable.
+ * Verifies that a permission created with a category value persists and reloads
+ * correctly, and that the column remains nullable.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

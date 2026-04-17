@@ -138,8 +138,8 @@ final class GrantRoleCommandTest extends TestCase
     }
 
     /**
-     * A failed grant outputs the exception message. Pins the
-     * MethodCallRemoval mutant on line 65 of GrantRoleCommand.
+     * A failed grant outputs the exception message. Pins the MethodCallRemoval
+     * mutant on line 65 of GrantRoleCommand.
      *
      * @return void
      */
@@ -158,9 +158,9 @@ final class GrantRoleCommandTest extends TestCase
     }
 
     /**
-     * Success message includes both the role name and identity arg.
-     * Pins the ReturnRemoval on line 59 (FAILURE return prevents
-     * reaching the info line).
+     * Success message includes both the role name and identity arg. Pins the
+     * ReturnRemoval on line 59 (FAILURE return prevents reaching the info
+     * line).
      *
      * @return void
      */
@@ -182,8 +182,8 @@ final class GrantRoleCommandTest extends TestCase
     }
 
     /**
-     * Fails with empty identity key segment. Pins the
-     * `$parts[1] === ''` branch in ResolvesIdentity line 36.
+     * Fails with empty identity key segment. Pins the `$parts[1] === ''` branch
+     * in ResolvesIdentity line 36.
      *
      * @return void
      */
@@ -199,8 +199,8 @@ final class GrantRoleCommandTest extends TestCase
     }
 
     /**
-     * Fails with empty type segment. Pins the `$parts[0] === ''`
-     * branch in ResolvesIdentity line 36.
+     * Fails with empty type segment. Pins the `$parts[0] === ''` branch in
+     * ResolvesIdentity line 36.
      *
      * @return void
      */
@@ -233,9 +233,9 @@ final class GrantRoleCommandTest extends TestCase
     }
 
     /**
-     * Fails when model does not implement AuthorizableIdentity.
-     * Pins the `!$model instanceof AuthorizableIdentity` branch
-     * in ResolvesIdentity lines 71-73 and the Concat on line 73.
+     * Fails when model does not implement AuthorizableIdentity. Pins the
+     * `!$model instanceof AuthorizableIdentity` branch in ResolvesIdentity
+     * lines 71-73 and the Concat on line 73.
      *
      * @return void
      */
@@ -260,8 +260,8 @@ final class GrantRoleCommandTest extends TestCase
     }
 
     /**
-     * Error message for unresolvable class includes the morph type.
-     * Pins the Concat/ConcatOperandRemoval on ResolvesIdentity line 49.
+     * Error message for unresolvable class includes the morph type. Pins the
+     * Concat/ConcatOperandRemoval on ResolvesIdentity line 49.
      *
      * @return void
      */
@@ -279,8 +279,7 @@ final class GrantRoleCommandTest extends TestCase
 
     /**
      * Error message for missing model includes the key. Pins the
-     * MethodCallRemoval on ResolvesIdentity line 66 and
-     * Concat on line 73.
+     * MethodCallRemoval on ResolvesIdentity line 66 and Concat on line 73.
      *
      * @return void
      */

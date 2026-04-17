@@ -16,11 +16,10 @@ use Tests\TestCase;
 /**
  * Integration coverage for custom `PrincipalResolver` bindings.
  *
- * Confirms that a host-application-supplied resolver flows through
- * the facade end-to-end: the manager consults it on every call,
- * null resolution degrades to an implicit deny, and rebinding the
- * contract between evaluations is honoured by the manager
- * singleton once the container instance is flushed.
+ * Confirms that a host-application-supplied resolver flows through the facade
+ * end-to-end: the manager consults it on every call, null resolution degrades
+ * to an implicit deny, and rebinding the contract between evaluations is
+ * honoured by the manager singleton once the container instance is flushed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,8 +41,8 @@ final class PrincipalResolverBindingTest extends TestCase
     private const string EXPORT_REPORTS_PERMISSION = 'reports:export';
 
     /**
-     * A custom resolver returning a real user is consulted by the
-     * facade and decisions honour the user's permissions.
+     * A custom resolver returning a real user is consulted by the facade and
+     * decisions honour the user's permissions.
      *
      * @return void
      */
@@ -58,9 +57,8 @@ final class PrincipalResolverBindingTest extends TestCase
     }
 
     /**
-     * A custom resolver returning null produces an implicit deny on
-     * every facade call regardless of permissions persisted on
-     * other identities.
+     * A custom resolver returning null produces an implicit deny on every
+     * facade call regardless of permissions persisted on other identities.
      *
      * @return void
      */
@@ -77,9 +75,9 @@ final class PrincipalResolverBindingTest extends TestCase
     }
 
     /**
-     * Swapping the resolver between evaluations is honoured by the
-     * manager singleton once the container instance is flushed and
-     * the facade's cached resolution is cleared.
+     * Swapping the resolver between evaluations is honoured by the manager
+     * singleton once the container instance is flushed and the facade's cached
+     * resolution is cleared.
      *
      * @return void
      */
@@ -102,9 +100,9 @@ final class PrincipalResolverBindingTest extends TestCase
     }
 
     /**
-     * Bind a resolver that returns the supplied principal and flush
-     * every cached handle to the manager so the next facade call
-     * reconstructs it against the new binding.
+     * Bind a resolver that returns the supplied principal and flush every
+     * cached handle to the manager so the next facade call reconstructs it
+     * against the new binding.
      *
      * @param  object|null  $principal
      * @return void

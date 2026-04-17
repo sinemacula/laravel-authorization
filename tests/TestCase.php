@@ -13,11 +13,10 @@ use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 /**
  * Shared base test case for the package's Testbench-powered tests.
  *
- * Boots a minimal Testbench application with the authorization service
- * provider registered, an in-memory SQLite connection, and the shipped
- * `authorization` config block seeded. Subclasses may override the
- * environment and migration hooks to adjust per-test config or create
- * additional tables.
+ * Boots a minimal Testbench application with the authorization service provider
+ * registered, an in-memory SQLite connection, and the shipped `authorization`
+ * config block seeded. Subclasses may override the environment and migration
+ * hooks to adjust per-test config or create additional tables.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -30,15 +29,14 @@ abstract class TestCase extends OrchestraTestCase
     private static bool $viewCacheCleared = false;
 
     /**
-     * Clear Testbench's shared compiled-view cache once per phpunit
-     * process. Blade compiles anonymous templates (including those
-     * passed to `Blade::render()`) into
-     * `vendor/orchestra/testbench-core/laravel/storage/framework/views/`
-     * keyed by template-string hash. The directory persists across
-     * runs, so a compiled template baked without a directive that
-     * later gets registered keeps producing uncompiled output until
-     * the cache is flushed. Clearing per-process keeps the fix cheap
-     * (one sweep per worker, not per test).
+     * Clear Testbench's shared compiled-view cache once per phpunit process.
+     * Blade compiles anonymous templates (including those passed to
+     * `Blade::render()`) into
+     * `vendor/orchestra/testbench-core/laravel/storage/framework/views/` keyed
+     * by template-string hash. The directory persists across runs, so a
+     * compiled template baked without a directive that later gets registered
+     * keeps producing uncompiled output until the cache is flushed. Clearing
+     * per-process keeps the fix cheap (one sweep per worker, not per test).
      *
      * @return void
      */
@@ -77,9 +75,9 @@ abstract class TestCase extends OrchestraTestCase
     /**
      * Seed the database connection and package config defaults.
      *
-     * Reads `DB_CONNECTION` from the environment to select the driver.
-     * Defaults to in-memory SQLite when unset, so local development
-     * needs no extra configuration.
+     * Reads `DB_CONNECTION` from the environment to select the driver. Defaults
+     * to in-memory SQLite when unset, so local development needs no extra
+     * configuration.
      *
      * @param  mixed  $app
      * @return void
@@ -95,9 +93,8 @@ abstract class TestCase extends OrchestraTestCase
     }
 
     /**
-     * Run the package's shipped migrations and any fixture tables so
-     * tests that persist roles, permissions, or policies have a
-     * working schema.
+     * Run the package's shipped migrations and any fixture tables so tests that
+     * persist roles, permissions, or policies have a working schema.
      *
      * @return void
      */
@@ -113,8 +110,8 @@ abstract class TestCase extends OrchestraTestCase
     }
 
     /**
-     * Create the `stub_*` fixture tables that back the test-only
-     * identity models.
+     * Create the `stub_*` fixture tables that back the test-only identity
+     * models.
      *
      * @return void
      */
@@ -130,9 +127,9 @@ abstract class TestCase extends OrchestraTestCase
     }
 
     /**
-     * On non-SQLite connections the schema persists between runs;
-     * register a teardown hook that drops every configured
-     * authorization table plus the stub-identity tables.
+     * On non-SQLite connections the schema persists between runs; register a
+     * teardown hook that drops every configured authorization table plus the
+     * stub-identity tables.
      *
      * @return void
      */

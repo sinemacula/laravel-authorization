@@ -47,8 +47,8 @@ use Tests\TestCase;
 final class GateArgumentEdgeCasesTest extends TestCase
 {
     /**
-     * Boot the provider with the demo permission enum so the Gate
-     * is wired for each test.
+     * Boot the provider with the demo permission enum so the Gate is wired for
+     * each test.
      *
      * @return void
      */
@@ -65,10 +65,9 @@ final class GateArgumentEdgeCasesTest extends TestCase
     }
 
     /**
-     * When the outer `arguments` list contains a single assoc array
-     * at index 0, the closure treats it as the context map with no
-     * resource — matching the documented `Gate::allows('x', [$ctx])`
-     * idiom.
+     * When the outer `arguments` list contains a single assoc array at index 0,
+     * the closure treats it as the context map with no resource — matching the
+     * documented `Gate::allows('x', [$ctx])` idiom.
      *
      * @return void
      */
@@ -96,9 +95,9 @@ final class GateArgumentEdgeCasesTest extends TestCase
     }
 
     /**
-     * A non-string, non-object leading entry (integer) coerces to a
-     * null resource — the Gate still dispatches, evaluating against
-     * the principal's RBAC alone.
+     * A non-string, non-object leading entry (integer) coerces to a null
+     * resource — the Gate still dispatches, evaluating against the principal's
+     * RBAC alone.
      *
      * @return void
      */
@@ -124,8 +123,7 @@ final class GateArgumentEdgeCasesTest extends TestCase
 
     /**
      * Swap the principal resolver for one that returns the supplied
-     * authorizable and refresh the manager so the next facade call
-     * picks it up.
+     * authorizable and refresh the manager so the next facade call picks it up.
      *
      * @param  \Tests\Feature\Stubs\StubIdentity  $user
      * @return void
