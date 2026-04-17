@@ -34,12 +34,12 @@ final class PolymorphicIdentityTest extends TestCase
      */
     public function testTwoDistinctIdentityModelsShareARole(): void
     {
-        $role       = Role::create(['id' => '01J0000000000000000ROLE01', 'name' => 'shared', 'guard_name' => 'web']);
-        $permission = Permission::create(['id' => '01J0000000000000000PERM01', 'name' => 'thing:do', 'guard_name' => 'web']);
+        $role       = Role::create(['id' => 'f7e19d53-dd4e-49a2-8f1e-288453bffc75', 'name' => 'shared', 'guard_name' => 'web']);
+        $permission = Permission::create(['id' => '9044baf5-429e-4b72-836a-73ca15cf8f8a', 'name' => 'thing:do', 'guard_name' => 'web']);
         $role->permissions()->attach($permission->getKey());
 
-        $first  = StubIdentity::create(['id' => '01J0000000000000000USR101']);
-        $second = StubSecondIdentity::create(['id' => '01J0000000000000000USR102']);
+        $first  = StubIdentity::create(['id' => '3a7d2eb1-f646-4131-897c-8d0a1a6ecaad']);
+        $second = StubSecondIdentity::create(['id' => 'eb79f1c6-3794-4840-8f3c-8a8421db18b8']);
 
         $first->assignRole('shared');
         $second->assignRole('shared');

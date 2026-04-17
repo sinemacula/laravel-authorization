@@ -61,7 +61,7 @@ final class AuthorizationAssertionsFallbackTest extends TestCase
      */
     public function testAppHelperFallbackSwapsResolver(): void
     {
-        $user   = StubIdentity::create(['id' => '01JASSERTFALLBACK0000USR1']);
+        $user   = StubIdentity::create(['id' => '4356ef82-867e-4edb-8906-e7457c1e23e9']);
         $helper = new StandaloneAssertions;
 
         $helper->swap($user);

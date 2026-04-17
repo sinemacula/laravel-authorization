@@ -47,9 +47,9 @@ final class EffectivePermissionsTest extends TestCase
      */
     public function testDirectGrantShowsTrueInEffectiveMap(): void
     {
-        Permission::create(['id' => '01JEFFPERM000000000000001', 'name' => 'posts:create', 'guard_name' => 'web']);
+        Permission::create(['id' => '6e0d87a1-a966-4767-8c29-2e0075b7b4e2', 'name' => 'posts:create', 'guard_name' => 'web']);
 
-        $user = StubIdentity::create(['id' => '01JEFFPERM00000000000USR1']);
+        $user = StubIdentity::create(['id' => '4eaa47a6-4a3a-488d-8d0a-2082bb056ec0']);
         $user->givePermission('posts:create');
 
         $effective = Authorization::for($user)->effectivePermissions();
@@ -67,11 +67,11 @@ final class EffectivePermissionsTest extends TestCase
      */
     public function testRoleInheritedPermissionShowsTrueInEffectiveMap(): void
     {
-        $role       = Role::create(['id' => '01JEFFPERM00000000000ROL1', 'name' => 'editor', 'guard_name' => 'web']);
-        $permission = Permission::create(['id' => '01JEFFPERM000000000000002', 'name' => 'posts:create', 'guard_name' => 'web']);
+        $role       = Role::create(['id' => 'c3af7a8c-6e21-4cf2-88a3-36175d9060b2', 'name' => 'editor', 'guard_name' => 'web']);
+        $permission = Permission::create(['id' => 'daf362a8-707d-4446-80db-7e5525abcdea', 'name' => 'posts:create', 'guard_name' => 'web']);
         $role->permissions()->attach($permission->getKey());
 
-        $user = StubIdentity::create(['id' => '01JEFFPERM00000000000USR2']);
+        $user = StubIdentity::create(['id' => '7c747a9a-f770-4e3e-8a33-e4d401f1d76b']);
         $user->assignRole('editor');
 
         $effective = Authorization::for($user)->effectivePermissions();
@@ -87,9 +87,9 @@ final class EffectivePermissionsTest extends TestCase
      */
     public function testExplicitDenyPolicyOverridesDirectGrant(): void
     {
-        Permission::create(['id' => '01JEFFPERM000000000000003', 'name' => 'posts:delete', 'guard_name' => 'web']);
+        Permission::create(['id' => '81d87da5-61fb-4a82-8773-9878ae064d11', 'name' => 'posts:delete', 'guard_name' => 'web']);
 
-        $user = StubIdentity::create(['id' => '01JEFFPERM00000000000USR3']);
+        $user = StubIdentity::create(['id' => '9813af0f-b8a4-44d3-8d9b-a1f5400dfc07']);
         $user->givePermission('posts:delete');
 
         $user->attachPolicy(Policy::create([
@@ -134,7 +134,7 @@ final class EffectivePermissionsTest extends TestCase
         $config = $this->app->make(ConfigRepository::class);
         $config->set('authorization.permission_enums', []);
 
-        $user = StubIdentity::create(['id' => '01JEFFPERM00000000000USR4']);
+        $user = StubIdentity::create(['id' => '327dffb4-192c-485f-810c-169d121b9f73']);
 
         $effective = Authorization::for($user)->effectivePermissions();
 

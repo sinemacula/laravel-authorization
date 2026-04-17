@@ -254,7 +254,7 @@ final class AuthorizationManagerTest extends TestCase
         Event::fake();
 
         Permission::create(['id' => '7b2cc2e2-1f29-4467-8a74-844bedaac2d2', 'name' => 'ev:do', 'guard_name' => 'web']);
-        $user = StubIdentity::create(['id' => '01J00000000000000000USR10']);
+        $user = StubIdentity::create(['id' => '6df993ba-ca47-4224-8ecf-1742ca42e42d']);
 
         $user->givePermission('ev:do');
         $user->revokePermission('ev:do');
@@ -276,9 +276,9 @@ final class AuthorizationManagerTest extends TestCase
 
         (new \SineMacula\Laravel\Authorization\AuthorizationServiceProvider($this->app))->boot();
 
-        Permission::create(['id' => '01J00000000000000000POS11', 'name' => 'posts:create', 'guard_name' => 'web']);
+        Permission::create(['id' => '70be15aa-1ce5-4c1f-87a5-1c8e91a02587', 'name' => 'posts:create', 'guard_name' => 'web']);
 
-        $user = StubIdentity::create(['id' => '01J00000000000000000USR11']);
+        $user = StubIdentity::create(['id' => 'd004aa1d-ff0c-4776-8a4c-d975b6c671a1']);
         $user->givePermission('posts:create');
 
         self::assertTrue(Authorization::for($user)->can('posts:create'));
@@ -311,7 +311,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testWithPoliciesOverridesPrincipalPolicies(): void
     {
-        $user = StubIdentity::create(['id' => '01J00000000000000000USR12']);
+        $user = StubIdentity::create(['id' => '2fb407a0-1304-45b9-8c18-80b048cc3196']);
 
         $override = EvaluationPolicy::fromArray([
             'name'       => 'ad-hoc',
@@ -331,10 +331,10 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testSpatieAliasesMirrorCanonical(): void
     {
-        Permission::create(['id' => '01J00000000000000000POS12', 'name' => 'spatie:do', 'guard_name' => 'web']);
+        Permission::create(['id' => 'aefe96cf-321f-4555-8ab0-0abd787416d8', 'name' => 'spatie:do', 'guard_name' => 'web']);
         Role::create(['id' => 'e50e9f4f-2d91-41ec-8466-4af39743951b', 'name' => 'spatie-role', 'guard_name' => 'web']);
 
-        $user = StubIdentity::create(['id' => '01J00000000000000000USR13']);
+        $user = StubIdentity::create(['id' => 'ee7ee7dc-2f40-46b6-8cc2-d7e13e2a8825']);
 
         // Aliases mirror canonical helpers.
         $user->givePermissionTo('spatie:do');

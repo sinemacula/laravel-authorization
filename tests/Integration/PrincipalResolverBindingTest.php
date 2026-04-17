@@ -83,8 +83,8 @@ final class PrincipalResolverBindingTest extends TestCase
      */
     public function testResolverSwapMidRequestIsHonouredByManagerSingleton(): void
     {
-        $first  = $this->makeIdentityWithPermission(self::VIEW_REPORTS_PERMISSION, id: '01J0000000000000000USR201');
-        $second = $this->makeIdentityWithPermission(self::EXPORT_REPORTS_PERMISSION, id: '01J0000000000000000USR202');
+        $first  = $this->makeIdentityWithPermission(self::VIEW_REPORTS_PERMISSION, id: '48a03f8a-ca3c-4605-8bae-6dee34e05da0');
+        $second = $this->makeIdentityWithPermission(self::EXPORT_REPORTS_PERMISSION, id: '8d041bf6-f7ea-4515-8e48-28ecf95dee37');
 
         $this->bindResolverReturning($first);
 

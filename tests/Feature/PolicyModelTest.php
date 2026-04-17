@@ -31,7 +31,7 @@ final class PolicyModelTest extends TestCase
     public function testRoundTripsThroughDatabase(): void
     {
         $policy = Policy::create([
-            'id'       => '01J00000000000000000POL10',
+            'id'       => 'f5a39899-959b-462f-8ab2-faf25b8e31db',
             'name'     => 'full-round-trip',
             'document' => [
                 'statements' => [
@@ -63,7 +63,7 @@ final class PolicyModelTest extends TestCase
         $this->expectException(InvalidPolicyDocumentException::class);
 
         Policy::create([
-            'id'       => '01J00000000000000000POL11',
+            'id'       => 'bf46448c-09ea-46f7-8e60-0f2ab3bb57ca',
             'name'     => 'bad',
             'document' => ['statements' => [['effect' => 'audit', 'actions' => ['x']]]],
         ]);
@@ -82,7 +82,7 @@ final class PolicyModelTest extends TestCase
         self::assertIsString($json);
 
         $policy = Policy::create([
-            'id'       => '01J00000000000000000POL12',
+            'id'       => 'f8c6e7d0-ea9f-473c-8ed7-f51e299466f1',
             'name'     => 'json-string',
             'document' => $json,
         ]);

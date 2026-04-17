@@ -57,6 +57,21 @@ final class SpatieMigrationTest extends TestCase
     }
 
     /**
+     * Drop the Spatie-style fixture tables so they do not leak across
+     * tests on persistent-connection drivers (MySQL / Postgres).
+     *
+     * @return void
+     */
+    protected function tearDown(): void
+    {
+        foreach (['model_has_permissions', 'model_has_roles', 'role_has_permissions', 'permissions', 'roles'] as $table) {
+            Schema::dropIfExists($table);
+        }
+
+        parent::tearDown();
+    }
+
+    /**
      * Roles migrate from Spatie's auto-increment table into the
      * package's UUID-keyed `auth_roles` table.
      *

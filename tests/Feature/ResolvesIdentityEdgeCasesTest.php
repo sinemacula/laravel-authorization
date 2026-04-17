@@ -58,10 +58,10 @@ final class ResolvesIdentityEdgeCasesTest extends TestCase
      */
     public function testFailsWhenModelDoesNotImplementAuthorizableIdentity(): void
     {
-        StubTenant::create(['id' => '01JRIEDGE00000000000TEN01']);
+        StubTenant::create(['id' => 'cf202d80-1117-4cd7-86bc-757a4bb0c95b']);
 
         $exitCode = Artisan::call('authorization:grant', [
-            'identity' => StubTenant::class . ':01JRIEDGE00000000000TEN01',
+            'identity' => StubTenant::class . ':cf202d80-1117-4cd7-86bc-757a4bb0c95b',
             'role'     => 'editor',
         ]);
 

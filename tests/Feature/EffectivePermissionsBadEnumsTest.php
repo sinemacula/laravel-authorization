@@ -44,7 +44,7 @@ final class EffectivePermissionsBadEnumsTest extends TestCase
             null,                            // null entry
         ]);
 
-        $user = StubIdentity::create(['id' => '01JEFFPERMBADENUMS000USR1']);
+        $user = StubIdentity::create(['id' => 'ff985fd2-2a0a-4a27-82bd-dcd3ce983740']);
 
         $effective = Authorization::for($user)->effectivePermissions();
 

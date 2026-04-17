@@ -43,14 +43,14 @@ final class PolicyModelEdgeCasesTest extends TestCase
     public function testNonArrayNonJsonDocumentIsRejected(): void
     {
         DB::table('policies')->insert([
-            'id'         => '01JPOLBAD0000000000000002',
+            'id'         => 'a6b38f42-3129-4279-8eea-f0b718f94a76',
             'name'       => 'bad-doc-scalar',
             'document'   => 'null',
             'created_at' => now(),
             'updated_at' => now(),
         ]);
 
-        $policy = Policy::findOrFail('01JPOLBAD0000000000000002');
+        $policy = Policy::findOrFail('a6b38f42-3129-4279-8eea-f0b718f94a76');
 
         $this->expectException(InvalidPolicyDocumentException::class);
 
@@ -68,14 +68,14 @@ final class PolicyModelEdgeCasesTest extends TestCase
     public function testToEvaluationPolicyWrapsReadTimeFailures(): void
     {
         DB::table('policies')->insert([
-            'id'         => '01JPOLBAD0000000000000001',
+            'id'         => '55ca4f44-7257-4d16-8870-8e1c550b3f88',
             'name'       => 'corrupted',
             'document'   => \json_encode(['statements' => [['effect' => 'bogus', 'actions' => ['x']]]]),
             'created_at' => now(),
             'updated_at' => now(),
         ]);
 
-        $policy = Policy::findOrFail('01JPOLBAD0000000000000001');
+        $policy = Policy::findOrFail('55ca4f44-7257-4d16-8870-8e1c550b3f88');
 
         $this->expectException(InvalidPolicyDocumentException::class);
 
