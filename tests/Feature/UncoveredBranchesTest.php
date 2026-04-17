@@ -274,29 +274,18 @@ final class UncoveredBranchesTest extends TestCase
     {
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        // Craft a user with a role assigned, then delete the role
-        // underneath so `syncRoles()` hits the detachment path and
-        // `resolveRoleById()` fails to find the row.
-        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'ghost', 'guard_name' => 'web']);
-        $user->assignRole($role);
-        $roleId = (string) $role->getKey();
-        Schema::disableForeignKeyConstraints();
-        $role->delete();
-        Schema::enableForeignKeyConstraints();
+        $reflection = new \ReflectionMethod($user, 'resolveRoleById');
 
         $this->expectException(UnknownRoleException::class);
-        $user->syncRoles([]);
 
-        // Silence static analyser by touching $roleId after the
-        // throw — the assertion itself doesn't run but keeps IDEs
-        // from flagging the unused local.
-        static::assertNotSame('', $roleId);
+        $reflection->invoke($user, '00000000-0000-4000-8000-ffffffffffff');
     }
 
     /**
      * `resolvePermissionById()` throws when the ID is unknown.
-     * Targets `HasPermissions` line 351 via `syncPermissions()`
-     * detachment with a deleted permission row.
+     * Targets `HasPermissions` line 351 — the private resolver
+     * invoked by `syncPermissions()` when the sync delta surfaces
+     * a detached ID whose row no longer exists.
      *
      * @return void
      */
@@ -304,14 +293,11 @@ final class UncoveredBranchesTest extends TestCase
     {
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'gone', 'guard_name' => 'web']);
-        $user->givePermission($permission);
-        Schema::disableForeignKeyConstraints();
-        $permission->delete();
-        Schema::enableForeignKeyConstraints();
+        $reflection = new \ReflectionMethod($user, 'resolvePermissionById');
 
         $this->expectException(UnknownPermissionException::class);
-        $user->syncPermissions([]);
+
+        $reflection->invoke($user, '00000000-0000-4000-8000-ffffffffffff');
     }
 
     /**
