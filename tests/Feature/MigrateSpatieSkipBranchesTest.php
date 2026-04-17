@@ -37,6 +37,15 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
      *
      * @return void
      */
+    protected function tearDown(): void
+    {
+        foreach (['model_has_permissions', 'model_has_roles', 'role_has_permissions', 'permissions', 'roles'] as $table) {
+            Schema::dropIfExists($table);
+        }
+
+        parent::tearDown();
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
