@@ -30,14 +30,14 @@ final class ListPermissionsCommandTest extends TestCase
     public function testListsAllPermissions(): void
     {
         $permission = Permission::create([
-            'id'         => '01J0000000000000000000LPEA',
+            'id'         => 'ce531769-59b0-4882-8032-8e1bec3f6be3',
             'name'       => 'posts:create',
             'guard_name' => 'web',
             'is_system'  => true,
         ]);
 
         $role = Role::create([
-            'id'         => '01J0000000000000000000LROA',
+            'id'         => '2298f05e-8e84-4d89-8853-0c77a714b221',
             'name'       => 'editor',
             'guard_name' => 'web',
         ]);
@@ -60,8 +60,8 @@ final class ListPermissionsCommandTest extends TestCase
      */
     public function testFiltersByGuard(): void
     {
-        Permission::create(['id' => '01J0000000000000000000LPE2', 'name' => 'web:do', 'guard_name' => 'web']);
-        Permission::create(['id' => '01J0000000000000000000LPE3', 'name' => 'api:do', 'guard_name' => 'api']);
+        Permission::create(['id' => '0bbc4051-26a7-46ba-84bb-1c83d2269a7e', 'name' => 'web:do', 'guard_name' => 'web']);
+        Permission::create(['id' => '5843b7ec-50c9-45cd-8c4b-6032a53b343b', 'name' => 'api:do', 'guard_name' => 'api']);
 
         $exitCode = Artisan::call('authorization:list-permissions', ['--guard' => 'api']);
         $output   = Artisan::output();

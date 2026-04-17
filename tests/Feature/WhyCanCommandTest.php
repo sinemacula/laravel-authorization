@@ -31,15 +31,15 @@ final class WhyCanCommandTest extends TestCase
      */
     public function testReportsAllowedViaRbac(): void
     {
-        $role       = Role::create(['id' => '01J0000000000000000000WROL', 'name' => 'editor', 'guard_name' => 'web']);
-        $permission = Permission::create(['id' => '01J0000000000000000000WPER', 'name' => 'posts:edit', 'guard_name' => 'web']);
+        $role       = Role::create(['id' => 'b0f398ae-5148-47f4-87f6-de35c0472093', 'name' => 'editor', 'guard_name' => 'web']);
+        $permission = Permission::create(['id' => '030ab20c-62a1-4c84-87e2-9f77cdc856c0', 'name' => 'posts:edit', 'guard_name' => 'web']);
         $role->permissions()->attach($permission->getKey());
 
-        $user = StubIdentity::create(['id' => '01J0000000000000000000WUSR']);
+        $user = StubIdentity::create(['id' => '9db25f66-208f-4f49-858f-7434e5982961']);
         $user->assignRole('editor');
 
         $exitCode = Artisan::call('authorization:why-can', [
-            'identity' => StubIdentity::class . ':01J0000000000000000000WUSR',
+            'identity' => StubIdentity::class . ':9db25f66-208f-4f49-858f-7434e5982961',
             'action'   => 'posts:edit',
         ]);
         $output = Artisan::output();
@@ -56,10 +56,10 @@ final class WhyCanCommandTest extends TestCase
      */
     public function testReportsDeniedWhenNoPermission(): void
     {
-        StubIdentity::create(['id' => '01J0000000000000000000WUS2']);
+        StubIdentity::create(['id' => 'b41330b3-b19e-409b-8d85-1e1eafbbbdb8']);
 
         $exitCode = Artisan::call('authorization:why-can', [
-            'identity' => StubIdentity::class . ':01J0000000000000000000WUS2',
+            'identity' => StubIdentity::class . ':b41330b3-b19e-409b-8d85-1e1eafbbbdb8',
             'action'   => 'posts:delete',
         ]);
         $output = Artisan::output();
@@ -76,12 +76,12 @@ final class WhyCanCommandTest extends TestCase
      */
     public function testReportsDeniedFromExplicitDenyPolicy(): void
     {
-        $role       = Role::create(['id' => '01J0000000000000000000WRO2', 'name' => 'admin', 'guard_name' => 'web']);
-        $permission = Permission::create(['id' => '01J0000000000000000000WPE2', 'name' => 'posts:delete', 'guard_name' => 'web']);
+        $role       = Role::create(['id' => 'cc63f23a-abaf-4fe7-8244-dff37bb878a6', 'name' => 'admin', 'guard_name' => 'web']);
+        $permission = Permission::create(['id' => 'ac3459db-f8a4-410a-80c6-1c2412a8f324', 'name' => 'posts:delete', 'guard_name' => 'web']);
         $role->permissions()->attach($permission->getKey());
 
         $policy = Policy::create([
-            'id'       => '01J0000000000000000000WPOL',
+            'id'       => '3f6c67e2-e4b8-46bc-8d60-83b1c97c3044',
             'name'     => 'deny-delete',
             'document' => [
                 'name'       => 'deny-delete',
@@ -89,12 +89,12 @@ final class WhyCanCommandTest extends TestCase
             ],
         ]);
 
-        $user = StubIdentity::create(['id' => '01J0000000000000000000WUS3']);
+        $user = StubIdentity::create(['id' => 'c42bf7e4-de42-476d-87c1-ae438ca8c05d']);
         $user->assignRole('admin');
         $user->attachPolicy($policy);
 
         $exitCode = Artisan::call('authorization:why-can', [
-            'identity' => StubIdentity::class . ':01J0000000000000000000WUS3',
+            'identity' => StubIdentity::class . ':c42bf7e4-de42-476d-87c1-ae438ca8c05d',
             'action'   => 'posts:delete',
         ]);
         $output = Artisan::output();
@@ -111,10 +111,10 @@ final class WhyCanCommandTest extends TestCase
      */
     public function testAcceptsOptionalResource(): void
     {
-        StubIdentity::create(['id' => '01J0000000000000000000WUS4']);
+        StubIdentity::create(['id' => 'feae9208-1bcc-49b0-830d-d70871c6eb41']);
 
         $exitCode = Artisan::call('authorization:why-can', [
-            'identity' => StubIdentity::class . ':01J0000000000000000000WUS4',
+            'identity' => StubIdentity::class . ':feae9208-1bcc-49b0-830d-d70871c6eb41',
             'action'   => 'posts:edit',
             'resource' => 'post:42',
         ]);

@@ -30,14 +30,14 @@ final class ListRolesCommandTest extends TestCase
     public function testListsAllRoles(): void
     {
         $role = Role::create([
-            'id'         => '01J0000000000000000000LROL',
+            'id'         => '0c0045ec-a918-4272-83ae-f5d7afa6d6ee',
             'name'       => 'admin',
             'guard_name' => 'web',
             'is_system'  => true,
         ]);
 
         $permission = Permission::create([
-            'id'         => '01J0000000000000000000LPER',
+            'id'         => 'f9ba2d63-6080-4337-848b-300ba8ddf2b8',
             'name'       => 'posts:create',
             'guard_name' => 'web',
         ]);
@@ -60,8 +60,8 @@ final class ListRolesCommandTest extends TestCase
      */
     public function testFiltersByGuard(): void
     {
-        Role::create(['id' => '01J0000000000000000000LRO2', 'name' => 'web-role', 'guard_name' => 'web']);
-        Role::create(['id' => '01J0000000000000000000LRO3', 'name' => 'api-role', 'guard_name' => 'api']);
+        Role::create(['id' => '25615f6f-958a-454d-8fbe-18897de1f95c', 'name' => 'web-role', 'guard_name' => 'web']);
+        Role::create(['id' => '895d173b-0e19-45a1-80f8-320bd067e6e3', 'name' => 'api-role', 'guard_name' => 'api']);
 
         $exitCode = Artisan::call('authorization:list-roles', ['--guard' => 'api']);
         $output   = Artisan::output();

@@ -29,14 +29,14 @@ final class RevokeRoleCommandTest extends TestCase
      */
     public function testRevokesRoleFromIdentity(): void
     {
-        Role::create(['id' => '01J0000000000000000000RROL', 'name' => 'editor', 'guard_name' => 'web']);
-        $user = StubIdentity::create(['id' => '01J0000000000000000000RUSR']);
+        Role::create(['id' => 'c7916105-9686-4752-8e5f-2370eb494a02', 'name' => 'editor', 'guard_name' => 'web']);
+        $user = StubIdentity::create(['id' => '0e4acbbb-88e6-47d4-8ed1-93b6f54a4a44']);
         $user->assignRole('editor');
 
         self::assertTrue($user->hasRole('editor'));
 
         $exitCode = Artisan::call('authorization:revoke', [
-            'identity' => StubIdentity::class . ':01J0000000000000000000RUSR',
+            'identity' => StubIdentity::class . ':0e4acbbb-88e6-47d4-8ed1-93b6f54a4a44',
             'role'     => 'editor',
         ]);
 
@@ -69,10 +69,10 @@ final class RevokeRoleCommandTest extends TestCase
      */
     public function testFailsWhenRoleDoesNotExist(): void
     {
-        StubIdentity::create(['id' => '01J0000000000000000000RUS2']);
+        StubIdentity::create(['id' => 'e8afdc3b-ab3b-4603-857e-a38b28b2f537']);
 
         $exitCode = Artisan::call('authorization:revoke', [
-            'identity' => StubIdentity::class . ':01J0000000000000000000RUS2',
+            'identity' => StubIdentity::class . ':e8afdc3b-ab3b-4603-857e-a38b28b2f537',
             'role'     => 'nonexistent',
         ]);
 

@@ -83,8 +83,8 @@ final class TraitsCoverageTest extends TestCase
      */
     public function testRoleAndPermissionAcceptModelInstances(): void
     {
-        $role       = Role::create(['id' => '01J0000000000000000ROLEMA1', 'name' => 'mod', 'guard_name' => 'web']);
-        $permission = Permission::create(['id' => '01J0000000000000000PERMMA1', 'name' => 'mod:do', 'guard_name' => 'web']);
+        $role       = Role::create(['id' => '9e8c50ef-c078-4e48-8085-a15e365f1b34', 'name' => 'mod', 'guard_name' => 'web']);
+        $permission = Permission::create(['id' => '76186991-c4cc-42cb-8ef2-f83d7c13e46b', 'name' => 'mod:do', 'guard_name' => 'web']);
 
         $user = StubIdentity::create(['id' => '01J0000000000000000USRMA1']);
 

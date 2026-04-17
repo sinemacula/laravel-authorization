@@ -32,11 +32,11 @@ final class GrantRoleCommandTest extends TestCase
     {
         Relation::morphMap(['stub_identity' => StubIdentity::class]);
 
-        Role::create(['id' => '01J0000000000000000000GROL', 'name' => 'editor', 'guard_name' => 'web']);
-        $user = StubIdentity::create(['id' => '01J0000000000000000000GUSR']);
+        Role::create(['id' => '42008342-6351-490d-8a02-9615371eeb8d', 'name' => 'editor', 'guard_name' => 'web']);
+        $user = StubIdentity::create(['id' => 'af0f3486-876c-46ac-85fe-a5b7335b394a']);
 
         $exitCode = Artisan::call('authorization:grant', [
-            'identity' => 'stub_identity:01J0000000000000000000GUSR',
+            'identity' => 'stub_identity:af0f3486-876c-46ac-85fe-a5b7335b394a',
             'role'     => 'editor',
         ]);
 
@@ -59,17 +59,17 @@ final class GrantRoleCommandTest extends TestCase
      */
     public function testGrantsRoleViaClassName(): void
     {
-        Role::create(['id' => '01J0000000000000000000GRO2', 'name' => 'admin', 'guard_name' => 'web']);
-        StubIdentity::create(['id' => '01J0000000000000000000GUS2']);
+        Role::create(['id' => 'cbe9505c-00d8-4985-89ed-9bae2eb5e5b4', 'name' => 'admin', 'guard_name' => 'web']);
+        StubIdentity::create(['id' => 'abca5c3d-111a-4cdb-8a40-0916dbac1d93']);
 
         $exitCode = Artisan::call('authorization:grant', [
-            'identity' => StubIdentity::class . ':01J0000000000000000000GUS2',
+            'identity' => StubIdentity::class . ':abca5c3d-111a-4cdb-8a40-0916dbac1d93',
             'role'     => 'admin',
         ]);
 
         self::assertSame(0, $exitCode);
         /** @var \Tests\Feature\Stubs\StubIdentity $found */
-        $found = StubIdentity::find('01J0000000000000000000GUS2');
+        $found = StubIdentity::find('abca5c3d-111a-4cdb-8a40-0916dbac1d93');
         self::assertTrue($found->hasRole('admin'));
     }
 
@@ -125,10 +125,10 @@ final class GrantRoleCommandTest extends TestCase
      */
     public function testFailsWhenRoleDoesNotExist(): void
     {
-        StubIdentity::create(['id' => '01J0000000000000000000GUS3']);
+        StubIdentity::create(['id' => '538d1787-6f8a-44cc-81ad-19f2980fc83b']);
 
         $exitCode = Artisan::call('authorization:grant', [
-            'identity' => StubIdentity::class . ':01J0000000000000000000GUS3',
+            'identity' => StubIdentity::class . ':538d1787-6f8a-44cc-81ad-19f2980fc83b',
             'role'     => 'nonexistent',
         ]);
 

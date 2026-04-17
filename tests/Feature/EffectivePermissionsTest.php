@@ -93,7 +93,7 @@ final class EffectivePermissionsTest extends TestCase
         $user->givePermission('posts:delete');
 
         $user->attachPolicy(Policy::create([
-            'id'       => '01JEFFPERM0000000000000P01',
+            'id'       => 'b78828f3-bd2c-4143-8635-8597e0e03300',
             'name'     => 'deny-posts-delete',
             'document' => [
                 'statements' => [

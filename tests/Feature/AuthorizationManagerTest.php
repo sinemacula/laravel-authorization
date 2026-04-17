@@ -67,9 +67,9 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testDirectPermissionGrantsAllow(): void
     {
-        Permission::create(['id' => '01J0000000000000000000POS1', 'name' => 'posts:create', 'guard_name' => 'web']);
+        Permission::create(['id' => '7a5c8f67-eba9-492b-8a42-a49ec654b516', 'name' => 'posts:create', 'guard_name' => 'web']);
 
-        $user = StubIdentity::create(['id' => '01J0000000000000000000USR1']);
+        $user = StubIdentity::create(['id' => '1705066a-b10d-4f4a-8aba-73758a3a381a']);
         $user->givePermission('posts:create');
 
         $result = Authorization::for($user)->evaluate('posts:create');
@@ -84,11 +84,11 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testRoleInheritedPermissionGrantsAllow(): void
     {
-        $role       = Role::create(['id' => '01J0000000000000000000ROL1', 'name' => 'editor', 'guard_name' => 'web']);
-        $permission = Permission::create(['id' => '01J0000000000000000000POS2', 'name' => 'posts:update', 'guard_name' => 'web']);
+        $role       = Role::create(['id' => '73b70528-9653-431a-8837-48847b3ee826', 'name' => 'editor', 'guard_name' => 'web']);
+        $permission = Permission::create(['id' => 'de7fb420-9d52-4329-8c2e-eb88b1cdc77c', 'name' => 'posts:update', 'guard_name' => 'web']);
         $role->permissions()->attach($permission->getKey());
 
-        $user = StubIdentity::create(['id' => '01J0000000000000000000USR2']);
+        $user = StubIdentity::create(['id' => '3acbd94d-7c5c-475b-82a3-791fa9c24234']);
         $user->assignRole('editor');
 
         self::assertTrue($user->hasPermission('posts:update'));
@@ -102,12 +102,12 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testExplicitDenyOverridesRoleAllow(): void
     {
-        $role       = Role::create(['id' => '01J0000000000000000000ROL2', 'name' => 'admin', 'guard_name' => 'web']);
-        $permission = Permission::create(['id' => '01J0000000000000000000POS3', 'name' => 'posts:delete', 'guard_name' => 'web']);
+        $role       = Role::create(['id' => '5596d2e7-ed0e-4a25-8b13-556e36de93e9', 'name' => 'admin', 'guard_name' => 'web']);
+        $permission = Permission::create(['id' => 'cad09583-86ca-42b3-89fc-9dde9a3020b6', 'name' => 'posts:delete', 'guard_name' => 'web']);
         $role->permissions()->attach($permission->getKey());
 
         $policy = Policy::create([
-            'id'       => '01J0000000000000000000POL1',
+            'id'       => '7a5569df-ae91-42fd-8279-523c451fd857',
             'name'     => 'deny-posts-delete',
             'document' => [
                 'name'       => 'deny-posts-delete',
@@ -115,7 +115,7 @@ final class AuthorizationManagerTest extends TestCase
             ],
         ]);
 
-        $user = StubIdentity::create(['id' => '01J0000000000000000000USR3']);
+        $user = StubIdentity::create(['id' => 'd37fe6a3-e6ec-45a4-88b2-96baaf2f17c4']);
         $user->assignRole('admin');
         $user->attachPolicy($policy);
 
@@ -131,12 +131,12 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testRemovingDenyFlipsDecision(): void
     {
-        $role       = Role::create(['id' => '01J0000000000000000000ROL3', 'name' => 'admin', 'guard_name' => 'web']);
-        $permission = Permission::create(['id' => '01J0000000000000000000POS4', 'name' => 'posts:delete', 'guard_name' => 'web']);
+        $role       = Role::create(['id' => '892c12f1-70f5-4a5d-83c0-946bfd611a71', 'name' => 'admin', 'guard_name' => 'web']);
+        $permission = Permission::create(['id' => '6d4ddc84-e926-4fa9-819b-716c3a423654', 'name' => 'posts:delete', 'guard_name' => 'web']);
         $role->permissions()->attach($permission->getKey());
 
         $policy = Policy::create([
-            'id'       => '01J0000000000000000000POL2',
+            'id'       => '7692f1c6-5cb7-480c-8240-100f24f97644',
             'name'     => 'deny-posts-delete',
             'document' => [
                 'name'       => 'deny-posts-delete',
@@ -144,7 +144,7 @@ final class AuthorizationManagerTest extends TestCase
             ],
         ]);
 
-        $user = StubIdentity::create(['id' => '01J0000000000000000000USR4']);
+        $user = StubIdentity::create(['id' => '7c6fe0b1-55e4-4483-8474-9f2ade6dc73d']);
         $user->assignRole('admin');
         $user->attachPolicy($policy);
 
@@ -164,8 +164,8 @@ final class AuthorizationManagerTest extends TestCase
     {
         Event::fake();
 
-        Role::create(['id' => '01J0000000000000000000ROL4', 'name' => 'writer', 'guard_name' => 'web']);
-        $user = StubIdentity::create(['id' => '01J0000000000000000000USR5']);
+        Role::create(['id' => '9e294583-8b87-4fea-86ba-15de1a2f73ed', 'name' => 'writer', 'guard_name' => 'web']);
+        $user = StubIdentity::create(['id' => 'd53f6d56-30fd-417c-8edc-450a2096f822']);
 
         $user->assignRole('writer');
         $user->assignRole('writer');
@@ -187,7 +187,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $this->expectException(UnknownRoleException::class);
 
-        StubIdentity::create(['id' => '01J0000000000000000000USR6'])->assignRole('nope');
+        StubIdentity::create(['id' => 'f265c4ee-d540-40df-8d50-2f4acbcd6112'])->assignRole('nope');
     }
 
     /**
@@ -199,7 +199,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $this->expectException(UnknownPermissionException::class);
 
-        StubIdentity::create(['id' => '01J0000000000000000000USR7'])->givePermission('nope');
+        StubIdentity::create(['id' => '4b74b79a-93c7-4b83-8e2e-fb14dc72bf8c'])->givePermission('nope');
     }
 
     /**
@@ -209,11 +209,11 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testSyncRolesReplacesSet(): void
     {
-        Role::create(['id' => '01J0000000000000000000ROL5', 'name' => 'a', 'guard_name' => 'web']);
-        Role::create(['id' => '01J0000000000000000000ROL6', 'name' => 'b', 'guard_name' => 'web']);
-        Role::create(['id' => '01J0000000000000000000ROL7', 'name' => 'c', 'guard_name' => 'web']);
+        Role::create(['id' => '1ea0f4c9-a06c-4c53-86a7-4807d569a51c', 'name' => 'a', 'guard_name' => 'web']);
+        Role::create(['id' => 'b4a0f6f6-1195-48e2-8020-eb84a104928b', 'name' => 'b', 'guard_name' => 'web']);
+        Role::create(['id' => '4948f001-2d70-46c7-8b17-687e7a55479d', 'name' => 'c', 'guard_name' => 'web']);
 
-        $user = StubIdentity::create(['id' => '01J0000000000000000000USR8']);
+        $user = StubIdentity::create(['id' => '1bf39684-eb97-4b99-8898-2971c1e19c35']);
         $user->syncRoles(['a', 'b']);
         self::assertSame(['a', 'b'], self::sortedValues($user->fresh()?->getRoles() ?? []));
 
@@ -231,12 +231,12 @@ final class AuthorizationManagerTest extends TestCase
         Event::fake();
 
         $policy = Policy::create([
-            'id'       => '01J0000000000000000000POL3',
+            'id'       => 'a63d903f-96a8-4448-8a48-73767b061ece',
             'name'     => 'event-policy',
             'document' => ['statements' => [['effect' => 'allow', 'actions' => ['x']]]],
         ]);
 
-        $user = StubIdentity::create(['id' => '01J0000000000000000000USR9']);
+        $user = StubIdentity::create(['id' => '0ab8aac8-e17c-4b6b-87b4-6e37afd18d0e']);
         $user->attachPolicy($policy);
         $user->detachPolicy($policy);
 
@@ -253,7 +253,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         Event::fake();
 
-        Permission::create(['id' => '01J0000000000000000000POS5', 'name' => 'ev:do', 'guard_name' => 'web']);
+        Permission::create(['id' => '7b2cc2e2-1f29-4467-8a74-844bedaac2d2', 'name' => 'ev:do', 'guard_name' => 'web']);
         $user = StubIdentity::create(['id' => '01J00000000000000000USR10']);
 
         $user->givePermission('ev:do');
@@ -332,7 +332,7 @@ final class AuthorizationManagerTest extends TestCase
     public function testSpatieAliasesMirrorCanonical(): void
     {
         Permission::create(['id' => '01J00000000000000000POS12', 'name' => 'spatie:do', 'guard_name' => 'web']);
-        Role::create(['id' => '01J0000000000000000000ROL8', 'name' => 'spatie-role', 'guard_name' => 'web']);
+        Role::create(['id' => 'e50e9f4f-2d91-41ec-8466-4af39743951b', 'name' => 'spatie-role', 'guard_name' => 'web']);
 
         $user = StubIdentity::create(['id' => '01J00000000000000000USR13']);
 
@@ -363,7 +363,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         self::assertNull(Authorization::currentPrincipal());
 
-        $user = StubIdentity::create(['id' => '01J0000000000000000000USR8']);
+        $user = StubIdentity::create(['id' => '1bf39684-eb97-4b99-8898-2971c1e19c35']);
 
         self::assertSame($user, Authorization::for($user)->currentPrincipal());
     }
