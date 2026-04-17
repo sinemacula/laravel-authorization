@@ -39,16 +39,16 @@ final class WildcardMatchBench
     /** Action string the shallow / literal subjects match against. */
     private const string ASKED_ACTION = 'posts:create';
 
-    /** Statement carrying a single shallow prefix pattern. */
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement carrying a single shallow prefix pattern. */
     private Statement $shallow;
 
-    /** Statement carrying a single literal (no wildcards) action pattern. */
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement carrying a single literal (no wildcards) action pattern. */
     private Statement $literal;
 
-    /** Statement carrying a 10-segment-deep wildcard pattern. */
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement carrying a 10-segment-deep wildcard pattern. */
     private Statement $deep;
 
-    /** Statement carrying 100 patterns that all miss the asked action. */
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement carrying 100 patterns that all miss the asked action. */
     private Statement $miss;
 
     /**
