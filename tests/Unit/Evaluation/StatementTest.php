@@ -295,7 +295,7 @@ final class StatementTest extends TestCase
     /**
      * Data provider for operators.
      *
-     * @return array<string, array{0: array<string, mixed>, 1: array<string, mixed>, 2: bool}>
+     * @return \Generator<string, array{0: array<string, mixed>, 1: array<string, mixed>, 2: bool}>
      */
     public static function operatorProvider(): iterable
     {
