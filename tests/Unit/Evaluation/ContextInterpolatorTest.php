@@ -390,4 +390,367 @@ final class ContextInterpolatorTest extends TestCase
         // 'context' alone (no dot sub-key) should resolve to empty
         self::assertSame('', $result);
     }
+
+    // ------------------------------------------------------------------
+    // Mutation-kill: interpolate method (lines 54, 57)
+    // ------------------------------------------------------------------
+
+    /**
+     * When preg_replace_callback returns null (regex failure), the
+     * coalesce (`$result ?? $pattern`) falls back to the original
+     * pattern. Kills the Coalesce mutant on line 57.
+     *
+     * In practice preg_replace_callback returns a string, so we
+     * verify the happy path: the result is the str_replace output,
+     * not the raw preg_replace_callback output.
+     *
+     * @return void
+     */
+    public function testEscapedAndUnescapedTokensInSameString(): void
+    {
+        $result = $this->interpolator->interpolate(
+            '${context.a}:\${literal}',
+            null,
+            null,
+            ['a' => 'resolved'],
+        );
+
+        // The `${context.a}` token resolves, the `\${literal}` unescapes to `${literal}`
+        self::assertSame('resolved:${literal}', $result);
+    }
+
+    // ------------------------------------------------------------------
+    // Mutation-kill: resolveToken namespace/key splitting (lines 72-73)
+    // ------------------------------------------------------------------
+
+    /**
+     * The dot-position split must correctly extract namespace and key.
+     * Decrementing/incrementing the integer offsets (DecrementInteger,
+     * IncrementInteger) or unwrapping substr (UnwrapSubstr) would
+     * corrupt the namespace or key.
+     *
+     * @return void
+     */
+    public function testResolveTokenSplitsNamespaceAndKeyCorrectly(): void
+    {
+        // "context.tenant_id" should split to namespace="context", key="tenant_id"
+        $result = $this->interpolator->interpolate(
+            '${context.tenant_id}',
+            null,
+            null,
+            ['tenant_id' => 'org-1'],
+        );
+
+        self::assertSame('org-1', $result);
+    }
+
+    /**
+     * Token without a dot: namespace = full token, key = ''.
+     * Kills the Ternary mutant that swaps the branches on line 72/73.
+     *
+     * @return void
+     */
+    public function testTokenWithoutDotUsesFullTokenAsNamespace(): void
+    {
+        // 'context' alone with no dot → namespace='context', key=''
+        // Empty key on context → null → empty string
+        $result = $this->interpolator->interpolate(
+            '${context}',
+            null,
+            null,
+            ['tenant' => 'org-1'],
+        );
+
+        self::assertSame('', $result);
+
+        // 'principal' alone with no dot → namespace='principal', key=''
+        // Empty key on principal → null → empty string
+        $result = $this->interpolator->interpolate(
+            '${principal}',
+            new \stdClass,
+            null,
+            [],
+        );
+
+        self::assertSame('', $result);
+    }
+
+    // ------------------------------------------------------------------
+    // Mutation-kill: resolveToken match arms (line 75)
+    // ------------------------------------------------------------------
+
+    /**
+     * Each namespace arm (principal, context, resource) must route to
+     * the correct resolver. Removing any arm (MatchArmRemoval) would
+     * cause a `\UnhandledMatchError` or misroute.
+     *
+     * @return void
+     */
+    public function testAllNamespaceArmsRoute(): void
+    {
+        $principal = new class {
+            /**
+             * @param  string  $key
+             * @return string|null
+             */
+            public function getAttribute(string $key): ?string
+            {
+                return $key === 'name' ? 'Alice' : null;
+            }
+        };
+
+        // principal namespace
+        $result = $this->interpolator->interpolate('${principal.name}', $principal, null, []);
+        self::assertSame('Alice', $result);
+
+        // context namespace
+        $result = $this->interpolator->interpolate('${context.env}', null, null, ['env' => 'prod']);
+        self::assertSame('prod', $result);
+
+        // resource namespace
+        $result = $this->interpolator->interpolate('${resource.id}', null, 'posts:42', []);
+        self::assertSame('42', $result);
+
+        // default (unknown) namespace
+        $result = $this->interpolator->interpolate('${unknown.key}', null, null, []);
+        self::assertSame('', $result);
+    }
+
+    // ------------------------------------------------------------------
+    // Mutation-kill: resolvePrincipal (lines 100, 104, 115, 123)
+    // ------------------------------------------------------------------
+
+    /**
+     * Null principal OR empty key → null. Both conditions individually
+     * must fail. Kills the Identical/LogicalOr mutants on line 100.
+     *
+     * @return void
+     */
+    public function testResolvePrincipalNullPrincipalOrEmptyKeyReturnsNull(): void
+    {
+        // Null principal → empty
+        $result = $this->interpolator->interpolate('${principal.id}', null, null, []);
+        self::assertSame('', $result);
+
+        // Non-null principal but empty key → empty (bare `${principal}`)
+        $result = $this->interpolator->interpolate('${principal}', new \stdClass, null, []);
+        self::assertSame('', $result);
+
+        // Non-null principal and non-empty key → resolves
+        $principal     = new \stdClass;
+        $principal->id = 'abc';
+        $result        = $this->interpolator->interpolate('${principal.id}', $principal, null, []);
+        self::assertSame('abc', $result);
+    }
+
+    /**
+     * `key === 'type'` check on line 104 routes to resolvePrincipalType.
+     * Negating the Identical would skip it.
+     *
+     * @return void
+     */
+    public function testPrincipalTypeKeyRoutesToTypeResolver(): void
+    {
+        $principal = new class {
+            /**
+             * @return string
+             */
+            public function getMorphClass(): string
+            {
+                return 'user';
+            }
+
+            /**
+             * @param  string  $key
+             * @return string|null
+             */
+            public function getAttribute(string $key): ?string
+            {
+                return $key === 'type' ? 'wrong-path' : null;
+            }
+        };
+
+        // 'type' key should go through getMorphClass, not getAttribute
+        $result = $this->interpolator->interpolate('${principal.type}', $principal, null, []);
+        self::assertSame('user', $result);
+    }
+
+    /**
+     * ElseIfNegation on line 115: when the principal has no getAttribute
+     * but has a matching property, property_exists should be used.
+     * Negating it would skip property access.
+     *
+     * @return void
+     */
+    public function testPlainObjectPropertyAccessPath(): void
+    {
+        $principal       = new \stdClass;
+        $principal->name = 'Bob';
+
+        $result = $this->interpolator->interpolate('${principal.name}', $principal, null, []);
+        self::assertSame('Bob', $result);
+    }
+
+    /**
+     * Ternary on line 123: scalar values return as-is, non-scalar → null.
+     *
+     * @return void
+     */
+    public function testNonScalarPropertyResolvesToEmpty(): void
+    {
+        $principal        = new \stdClass;
+        $principal->items = ['a', 'b'];
+
+        $result = $this->interpolator->interpolate('${principal.items}', $principal, null, []);
+        self::assertSame('', $result);
+    }
+
+    // ------------------------------------------------------------------
+    // Mutation-kill: resolveContext (lines 154, 161)
+    // ------------------------------------------------------------------
+
+    /**
+     * Empty key in context → null. Kills the Identical mutant on line 154.
+     *
+     * @return void
+     */
+    public function testResolveContextEmptyKeyReturnsNull(): void
+    {
+        $result = $this->interpolator->interpolate('${context}', null, null, ['key' => 'val']);
+        self::assertSame('', $result);
+    }
+
+    /**
+     * Non-scalar context value → null → empty string. Kills the
+     * Ternary mutant on line 161.
+     *
+     * @return void
+     */
+    public function testResolveContextNonScalarReturnsEmpty(): void
+    {
+        $result = $this->interpolator->interpolate(
+            '${context.nested}',
+            null,
+            null,
+            ['nested' => ['a' => 'b']],
+        );
+
+        self::assertSame('', $result);
+    }
+
+    /**
+     * Scalar context value returns correctly.
+     *
+     * @return void
+     */
+    public function testResolveContextScalarReturns(): void
+    {
+        $result = $this->interpolator->interpolate(
+            '${context.count}',
+            null,
+            null,
+            ['count' => 42],
+        );
+
+        self::assertSame('42', $result);
+    }
+
+    // ------------------------------------------------------------------
+    // Mutation-kill: resolveResource (lines 177, 183-185)
+    // ------------------------------------------------------------------
+
+    /**
+     * Null resource OR empty key → null. Kills LogicalOr and Identical
+     * mutants on line 177.
+     *
+     * @return void
+     */
+    public function testResolveResourceNullOrEmptyKeyReturnsNull(): void
+    {
+        // Null resource → empty
+        $result = $this->interpolator->interpolate('${resource.id}', null, null, []);
+        self::assertSame('', $result);
+
+        // Non-null resource but empty key (bare `${resource}`)
+        $result = $this->interpolator->interpolate('${resource}', null, 'posts:42', []);
+        self::assertSame('', $result);
+    }
+
+    /**
+     * Resource id/type with colon splits correctly. Without colon,
+     * both return full string. Kills MatchArmRemoval on line 183 and
+     * the substr mutants on lines 184-185.
+     *
+     * @return void
+     */
+    public function testResolveResourceIdAndTypeWithAndWithoutColon(): void
+    {
+        // With colon: id = after colon, type = before colon
+        $resultId = $this->interpolator->interpolate('${resource.id}', null, 'posts:42', []);
+        self::assertSame('42', $resultId);
+
+        $resultType = $this->interpolator->interpolate('${resource.type}', null, 'posts:42', []);
+        self::assertSame('posts', $resultType);
+
+        // Without colon: both return full string
+        $resultId = $this->interpolator->interpolate('${resource.id}', null, 'global', []);
+        self::assertSame('global', $resultId);
+
+        $resultType = $this->interpolator->interpolate('${resource.type}', null, 'global', []);
+        self::assertSame('global', $resultType);
+
+        // Unknown resource key → empty
+        $resultUnknown = $this->interpolator->interpolate('${resource.foo}', null, 'posts:42', []);
+        self::assertSame('', $resultUnknown);
+    }
+
+    /**
+     * The colon-position arithmetic in substr must be exact.
+     * `colonPos + 1` for id means the character after the colon.
+     * `0, colonPos` for type means everything before the colon.
+     * Decrementing/incrementing these would shift the boundary.
+     *
+     * @return void
+     */
+    public function testResourceColonSplitBoundaryPrecision(): void
+    {
+        // Single-char segments around a colon
+        $resultId = $this->interpolator->interpolate('${resource.id}', null, 'A:B', []);
+        self::assertSame('B', $resultId);
+
+        $resultType = $this->interpolator->interpolate('${resource.type}', null, 'A:B', []);
+        self::assertSame('A', $resultType);
+
+        // Colon at start
+        $resultId = $this->interpolator->interpolate('${resource.id}', null, ':trailing', []);
+        self::assertSame('trailing', $resultId);
+
+        $resultType = $this->interpolator->interpolate('${resource.type}', null, ':trailing', []);
+        self::assertSame('', $resultType);
+
+        // Colon at end
+        $resultId = $this->interpolator->interpolate('${resource.id}', null, 'leading:', []);
+        self::assertSame('', $resultId);
+
+        $resultType = $this->interpolator->interpolate('${resource.type}', null, 'leading:', []);
+        self::assertSame('leading', $resultType);
+    }
+
+    /**
+     * The `$value === null` check on line 82 distinguishes unresolved
+     * tokens from resolved empty strings. Negating it would print the
+     * null value instead of logging and returning empty.
+     *
+     * @return void
+     */
+    public function testNullValueTriggersLogAndReturnsEmpty(): void
+    {
+        // Unknown namespace → null → empty string
+        $result = $this->interpolator->interpolate('${bogus.key}', null, null, []);
+        self::assertSame('', $result);
+
+        // Known namespace, valid key → non-null → actual value
+        $result = $this->interpolator->interpolate('${context.x}', null, null, ['x' => 'val']);
+        self::assertSame('val', $result);
+    }
 }

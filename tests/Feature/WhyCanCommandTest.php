@@ -138,4 +138,95 @@ final class WhyCanCommandTest extends TestCase
 
         self::assertSame(1, $exitCode);
     }
+
+    /**
+     * Output includes the Action and Resource labels. Pins
+     * MethodCallRemoval mutants on lines 75-77 and the Concat
+     * mutants on line 76.
+     *
+     * @return void
+     */
+    public function testOutputIncludesActionAndResourceLabels(): void
+    {
+        StubIdentity::create(['id' => 'd0d0d0d0-0000-0000-0000-000000000001']);
+
+        $exitCode = Artisan::call('authorization:why-can', [
+            'identity' => StubIdentity::class . ':d0d0d0d0-0000-0000-0000-000000000001',
+            'action'   => 'custom:action',
+        ]);
+        $output = Artisan::output();
+
+        self::assertSame(0, $exitCode);
+        self::assertStringContainsString('Action:   custom:action', $output);
+        self::assertStringContainsString('Resource: (none)', $output);
+        self::assertStringContainsString('Reason:', $output);
+        self::assertStringContainsString('Result:', $output);
+    }
+
+    /**
+     * The `verdictColor` private method returns 'green' for allowed
+     * and 'red' for denied. Pins the Ternary mutant on line 106.
+     *
+     * @return void
+     */
+    public function testVerdictColorReturnsCorrectValues(): void
+    {
+        $command = new WhyCanCommand;
+        $ref     = new \ReflectionMethod($command, 'verdictColor');
+
+        self::assertSame('green', $ref->invoke($command, true));
+        self::assertSame('red', $ref->invoke($command, false));
+    }
+
+    /**
+     * The trace output includes each entry's decision, policy, index
+     * and reason. Pins the Foreach_ mutant on line 82 and the
+     * MethodCallRemoval on line 83.
+     *
+     * @return void
+     */
+    public function testTraceOutputIncludesEntries(): void
+    {
+        $policy = Policy::create([
+            'id'       => 'f1f1f1f1-0000-0000-0000-000000000001',
+            'name'     => 'trace-policy',
+            'document' => [
+                'name'       => 'trace-policy',
+                'statements' => [['effect' => 'deny', 'actions' => ['trace:action']]],
+            ],
+        ]);
+
+        $user = StubIdentity::create(['id' => 'f2f2f2f2-0000-0000-0000-000000000001']);
+        $user->attachPolicy($policy);
+
+        $exitCode = Artisan::call('authorization:why-can', [
+            'identity' => StubIdentity::class . ':f2f2f2f2-0000-0000-0000-000000000001',
+            'action'   => 'trace:action',
+        ]);
+        $output = Artisan::output();
+
+        self::assertSame(0, $exitCode);
+        self::assertStringContainsString('Trace:', $output);
+        self::assertStringContainsString('trace-policy', $output);
+    }
+
+    /**
+     * The `NotIdentical` mutant on line 79 checks `$result->trace !== []`.
+     * An empty-trace output must NOT contain "Trace:".
+     *
+     * @return void
+     */
+    public function testEmptyTraceOmitsTraceSection(): void
+    {
+        StubIdentity::create(['id' => 'f3f3f3f3-0000-0000-0000-000000000001']);
+
+        $exitCode = Artisan::call('authorization:why-can', [
+            'identity' => StubIdentity::class . ':f3f3f3f3-0000-0000-0000-000000000001',
+            'action'   => 'no:match',
+        ]);
+        $output = Artisan::output();
+
+        self::assertSame(0, $exitCode);
+        self::assertStringNotContainsString('Trace:', $output);
+    }
 }

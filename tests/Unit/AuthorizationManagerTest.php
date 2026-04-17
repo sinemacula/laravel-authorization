@@ -426,6 +426,112 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * `evaluate()` writes the result to the last-decision store.
+     * Pins the MethodCallRemoval mutant on line 145.
+     *
+     * @return void
+     */
+    public function testEvaluateWritesToLastDecisionStore(): void
+    {
+        $store   = new LastDecisionStore;
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator,
+            principalResolver: new NullPrincipalResolver,
+            policyResolver: new DefaultPolicyResolver,
+            lastDecisionStore: $store,
+        );
+
+        self::assertNull($manager->lastDecision());
+
+        $manager->evaluate('some:action');
+
+        self::assertNotNull($manager->lastDecision());
+        self::assertSame(DecisionReason::IMPLICIT_DENY, $manager->lastDecision()->reason);
+    }
+
+    /**
+     * `withPolicies()` wraps the input through `array_values()`.
+     * Pins the UnwrapArrayValues mutant on line 267.
+     *
+     * @return void
+     */
+    public function testWithPoliciesReindexesArray(): void
+    {
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator,
+            principalResolver: new NullPrincipalResolver,
+            policyResolver: new DefaultPolicyResolver,
+            lastDecisionStore: new LastDecisionStore,
+        );
+
+        $policy = Policy::fromArray([
+            'name'       => 'reindex',
+            'statements' => [['effect' => 'allow', 'actions' => ['x']]],
+        ]);
+
+        // Provide a non-zero-indexed array.
+        $scoped = $manager->withPolicies([5 => $policy]);
+
+        $principal = $this->stubAuthorizable();
+        $result    = $scoped->for($principal)->evaluate('x');
+
+        self::assertTrue($result->allowed);
+    }
+
+    /**
+     * `dispatch()` is a no-op when events is null. Pins the
+     * NullSafeMethodCall mutant on line 349.
+     *
+     * @return void
+     */
+    public function testDispatchNoOpWithoutEvents(): void
+    {
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator,
+            principalResolver: new NullPrincipalResolver,
+            policyResolver: new DefaultPolicyResolver,
+            lastDecisionStore: new LastDecisionStore,
+            events: null,
+        );
+
+        // Should not throw.
+        $manager->evaluate('x');
+
+        self::assertTrue(true, 'dispatch() must not throw when events is null.');
+    }
+
+    /**
+     * `for()` produces a clone. The clone's principal override is
+     * isolated. Pins the CloneRemoval mutant on line 249.
+     *
+     * @return void
+     */
+    public function testForCloneIsolatesPrincipalOverride(): void
+    {
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator,
+            principalResolver: new NullPrincipalResolver,
+            policyResolver: new DefaultPolicyResolver,
+            lastDecisionStore: new LastDecisionStore,
+        );
+
+        $a = $this->stubAuthorizable(['a:do']);
+        $b = $this->stubAuthorizable(['b:do']);
+
+        $scopedA = $manager->for($a);
+        $scopedB = $manager->for($b);
+
+        // Each scope sees only its own principal.
+        self::assertTrue($scopedA->can('a:do'));
+        self::assertFalse($scopedA->can('b:do'));
+        self::assertTrue($scopedB->can('b:do'));
+        self::assertFalse($scopedB->can('a:do'));
+
+        // Original remains anonymous.
+        self::assertFalse($manager->can('a:do'));
+    }
+
+    /**
      * Build a stubbed authorizable principal returning the supplied
      * permissions and policies.
      *

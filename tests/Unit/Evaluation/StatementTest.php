@@ -297,9 +297,9 @@ final class StatementTest extends TestCase
      *
      * @return array<string, array{0: array<string, mixed>, 1: array<string, mixed>, 2: bool}>
      */
-    public static function operatorProvider(): array
+    public static function operatorProvider(): iterable
     {
-        return [
+        yield from [
             'eq-true'             => [['tenant' => ['eq' => 'org-1']], ['tenant' => 'org-1'], true],
             'eq-false'            => [['tenant' => ['eq' => 'org-1']], ['tenant' => 'org-2'], false],
             'neq-true'            => [['tenant' => ['neq' => 'org-1']], ['tenant' => 'org-2'], true],
@@ -562,5 +562,567 @@ final class StatementTest extends TestCase
 
         self::assertTrue($statement->matches('read', 'posts:42', $interpolator));
         self::assertTrue($statement->matches('read', 'posts:99', $interpolator));
+    }
+
+    // ------------------------------------------------------------------
+    // Mutation-kill: default resources value contains '*'
+    // ------------------------------------------------------------------
+
+    /**
+     * The constructor default for resources is `['*']` — removing the
+     * `'*'` element (ArrayItemRemoval on line 44) would break the
+     * default wildcard behaviour.
+     *
+     * @return void
+     */
+    public function testConstructorDefaultResourcesContainsWildcard(): void
+    {
+        $statement = new Statement(
+            effect: PolicyEffect::ALLOW,
+            actions: ['posts:create'],
+        );
+
+        self::assertSame(['*'], $statement->resources);
+        self::assertTrue($statement->matches('posts:create', 'any-resource'));
+    }
+
+    // ------------------------------------------------------------------
+    // Mutation-kill: evaluateConditions foreach body
+    // ------------------------------------------------------------------
+
+    /**
+     * When a condition entry fails, evaluateConditions returns false.
+     * If the foreach were skipped (Foreach_ mutant on line 138),
+     * it would always return true.
+     *
+     * @return void
+     */
+    public function testEvaluateConditionsReturnsFalseWhenEntryFails(): void
+    {
+        $statement = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['x'],
+            'conditions' => ['missing_key' => ['eq' => 'value']],
+        ]);
+
+        self::assertFalse($statement->evaluateConditions([]));
+    }
+
+    /**
+     * The `!` before evaluateConditionEntry matters — flipping it
+     * (LogicalNot mutant on line 139) would invert the whole result.
+     *
+     * @return void
+     */
+    public function testEvaluateConditionsPassesWhenAllEntriesPass(): void
+    {
+        $statement = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['x'],
+            'conditions' => ['a' => ['eq' => 1], 'b' => ['eq' => 2]],
+        ]);
+
+        self::assertTrue($statement->evaluateConditions(['a' => 1, 'b' => 2]));
+        self::assertFalse($statement->evaluateConditions(['a' => 1, 'b' => 99]));
+    }
+
+    // ------------------------------------------------------------------
+    // Mutation-kill: evaluateConditionEntry boundary (line 166)
+    // ------------------------------------------------------------------
+
+    /**
+     * Integer condition keys cause the entry to fail (non-string key).
+     * If the `!\is_string($key)` check is negated or the `||` changed
+     * to `&&`, the behaviour changes.
+     *
+     * @return void
+     */
+    public function testIntegerConditionKeyFailsClosed(): void
+    {
+        // Build a statement with a numeric key manually
+        $statement = new Statement(
+            effect: PolicyEffect::ALLOW,
+            actions: ['x'],
+            conditions: [0 => ['eq' => 'val']],
+        );
+
+        // The integer key '0' is not a string, so condition should fail
+        self::assertFalse($statement->evaluateConditions(['0' => 'val']));
+    }
+
+    /**
+     * A string key that exists in context should pass when the value matches.
+     * Kills the LogicalOrNegation / LogicalOrAllSubExprNegation mutants.
+     *
+     * @return void
+     */
+    public function testStringKeyPresentInContextPasses(): void
+    {
+        $statement = new Statement(
+            effect: PolicyEffect::ALLOW,
+            actions: ['x'],
+            conditions: ['key' => 'expected'],
+        );
+
+        self::assertTrue($statement->evaluateConditions(['key' => 'expected']));
+    }
+
+    /**
+     * A string key NOT in context should fail. Kills mutants that
+     * negate array_key_exists.
+     *
+     * @return void
+     */
+    public function testStringKeyAbsentFromContextFails(): void
+    {
+        $statement = new Statement(
+            effect: PolicyEffect::ALLOW,
+            actions: ['x'],
+            conditions: ['missing' => 'expected'],
+        );
+
+        self::assertFalse($statement->evaluateConditions(['other' => 'expected']));
+    }
+
+    // ------------------------------------------------------------------
+    // Mutation-kill: resolveConditions ArrayItemRemoval (line 232)
+    // ------------------------------------------------------------------
+
+    /**
+     * resolveConditions preserves every key-value pair from the
+     * input — removing the assignment (ArrayItemRemoval on line 232)
+     * would produce an empty map.
+     *
+     * @return void
+     */
+    public function testResolveConditionsPreservesAllEntries(): void
+    {
+        $statement = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['x'],
+            'conditions' => ['a' => 'one', 'b' => 'two'],
+        ]);
+
+        self::assertSame(['a' => 'one', 'b' => 'two'], $statement->conditions);
+    }
+
+    // ------------------------------------------------------------------
+    // Mutation-kill: normaliseStringList (line 277)
+    // ------------------------------------------------------------------
+
+    /**
+     * normaliseStringList re-indexes non-sequential keys. Unwrapping
+     * array_values or array_map would break validation or indexing.
+     *
+     * @return void
+     */
+    public function testNormaliseStringListReindexes(): void
+    {
+        $statement = Statement::fromArray([
+            'effect'    => 'allow',
+            'actions'   => ['a', 'b', 'c'],
+            'resources' => ['r1', 'r2'],
+        ]);
+
+        self::assertSame(['a', 'b', 'c'], $statement->actions);
+        self::assertSame(['r1', 'r2'], $statement->resources);
+
+        // Confirm non-string throws — that's the array_map callback
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('actions must be strings');
+        // @phpstan-ignore-next-line
+        Statement::fromArray(['effect' => 'allow', 'actions' => ['valid', 42]]);
+    }
+
+    // ------------------------------------------------------------------
+    // Mutation-kill: evaluateCondition (lines 388-398)
+    // ------------------------------------------------------------------
+
+    /**
+     * Non-array condition where actual === expected.
+     * Kills the LogicalNot on line 388 (`!\is_array`) and Foreach_
+     * on line 392.
+     *
+     * @return void
+     */
+    public function testEvaluateConditionNonArrayMatch(): void
+    {
+        $statement = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['x'],
+            'conditions' => ['key' => 'value'],
+        ]);
+
+        self::assertTrue($statement->evaluateConditions(['key' => 'value']));
+        self::assertFalse($statement->evaluateConditions(['key' => 'other']));
+    }
+
+    /**
+     * Non-string operator key in the condition map causes failure.
+     * Kills the `!\is_string($operator)` check on line 393.
+     *
+     * @return void
+     */
+    public function testNonStringOperatorKeyFailsClosed(): void
+    {
+        $statement = new Statement(
+            effect: PolicyEffect::ALLOW,
+            actions: ['x'],
+            conditions: ['key' => [0 => 'operand']],
+        );
+
+        self::assertFalse($statement->evaluateConditions(['key' => 'operand']));
+    }
+
+    /**
+     * Multiple operators must all pass — the foreach short-circuits
+     * on the first failure. Kills TrueValue on line 398.
+     *
+     * @return void
+     */
+    public function testMultipleOperatorsMustAllPass(): void
+    {
+        $statement = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['x'],
+            'conditions' => ['age' => ['gte' => 18, 'lte' => 65]],
+        ]);
+
+        self::assertTrue($statement->evaluateConditions(['age' => 30]));
+        self::assertFalse($statement->evaluateConditions(['age' => 10]));
+        self::assertFalse($statement->evaluateConditions(['age' => 70]));
+    }
+
+    // ------------------------------------------------------------------
+    // Mutation-kill: evaluateOperator match arms (lines 411-430)
+    // ------------------------------------------------------------------
+
+    /**
+     * Each operator arm is individually distinguishable when tested
+     * against specific values. Removing any arm would cause a
+     * `\UnhandledMatchError` or fall through to `default`.
+     *
+     * @return void
+     */
+    public function testEveryOperatorArmIsDistinguishable(): void
+    {
+        // Each sub-array: [conditions, context, expected]
+        $cases = [
+            // eq vs neq
+            ['k' => ['eq' => 'a'], 'ctx' => 'a', 'expect' => true],
+            ['k' => ['neq' => 'a'], 'ctx' => 'b', 'expect' => true],
+            ['k' => ['neq' => 'a'], 'ctx' => 'a', 'expect' => false],
+
+            // in vs not_in
+            ['k' => ['in' => ['a', 'b']], 'ctx' => 'a', 'expect' => true],
+            ['k' => ['in' => ['a', 'b']], 'ctx' => 'c', 'expect' => false],
+            ['k' => ['not_in' => ['a', 'b']], 'ctx' => 'c', 'expect' => true],
+            ['k' => ['not_in' => ['a', 'b']], 'ctx' => 'a', 'expect' => false],
+
+            // in with non-array operand
+            ['k' => ['in' => 'not-array'], 'ctx' => 'x', 'expect' => false],
+            // not_in with non-array operand
+            ['k' => ['not_in' => 'not-array'], 'ctx' => 'x', 'expect' => false],
+
+            // starts_with / ends_with
+            ['k' => ['starts_with' => 'he'], 'ctx' => 'hello', 'expect' => true],
+            ['k' => ['starts_with' => 'he'], 'ctx' => 'world', 'expect' => false],
+            ['k' => ['ends_with' => 'lo'], 'ctx' => 'hello', 'expect' => true],
+            ['k' => ['ends_with' => 'lo'], 'ctx' => 'world', 'expect' => false],
+
+            // starts_with / ends_with type guard: non-string actual
+            ['k' => ['starts_with' => 'x'], 'ctx' => 123, 'expect' => false],
+            ['k' => ['ends_with' => 'x'], 'ctx' => 123, 'expect' => false],
+            // starts_with / ends_with type guard: non-string operand
+            ['k' => ['starts_with' => 42], 'ctx' => 'hello', 'expect' => false],
+            ['k' => ['ends_with' => 42], 'ctx' => 'hello', 'expect' => false],
+
+            // cidr type guards
+            ['k' => ['cidr' => 123], 'ctx' => '10.0.0.1', 'expect' => false],
+            ['k' => ['cidr' => '10.0.0.0/8'], 'ctx' => 123, 'expect' => false],
+
+            // string_like
+            ['k' => ['string_like' => 'foo*'], 'ctx' => 'foobar', 'expect' => true],
+            ['k' => ['string_like' => 'foo*'], 'ctx' => 'baz', 'expect' => false],
+            // string_like type guards
+            ['k' => ['string_like' => 42], 'ctx' => 'foo', 'expect' => false],
+            ['k' => ['string_like' => 'foo*'], 'ctx' => 42, 'expect' => false],
+
+            // null / not_null
+            ['k' => ['null' => true], 'ctx' => null, 'expect' => true],
+            ['k' => ['null' => true], 'ctx' => 'x', 'expect' => false],
+            ['k' => ['not_null' => true], 'ctx' => 'x', 'expect' => true],
+            ['k' => ['not_null' => true], 'ctx' => null, 'expect' => false],
+        ];
+
+        foreach ($cases as $i => $case) {
+            $statement = Statement::fromArray([
+                'effect'     => 'allow',
+                'actions'    => ['x'],
+                'conditions' => ['k' => $case['k']],
+            ]);
+
+            self::assertSame(
+                $case['expect'],
+                $statement->evaluateConditions(['k' => $case['ctx']]),
+                "Case {$i} failed",
+            );
+        }
+    }
+
+    /**
+     * The `in` operator requires is_array(operand) AND in_array check.
+     * Negating `\in_array` or the `\is_array` changes the result.
+     *
+     * @return void
+     */
+    public function testInOperatorRequiresBothArrayAndMembership(): void
+    {
+        $statement = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['x'],
+            'conditions' => ['role' => ['in' => ['admin', 'editor']]],
+        ]);
+
+        // Actual value is in the list
+        self::assertTrue($statement->evaluateConditions(['role' => 'admin']));
+        // Actual value is NOT in the list
+        self::assertFalse($statement->evaluateConditions(['role' => 'guest']));
+    }
+
+    /**
+     * The `not_in` operator requires is_array(operand) AND !in_array.
+     *
+     * @return void
+     */
+    public function testNotInOperatorLogic(): void
+    {
+        $statement = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['x'],
+            'conditions' => ['role' => ['not_in' => ['admin', 'editor']]],
+        ]);
+
+        // Value NOT in the list → true
+        self::assertTrue($statement->evaluateConditions(['role' => 'guest']));
+        // Value IN the list → false
+        self::assertFalse($statement->evaluateConditions(['role' => 'admin']));
+    }
+
+    /**
+     * `cidr` operator needs both actual and operand to be strings.
+     * Tests kill the LogicalAnd mutants on line 416.
+     *
+     * @return void
+     */
+    public function testCidrOperatorTypeGuards(): void
+    {
+        // Non-string actual
+        $stmt = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['x'],
+            'conditions' => ['ip' => ['cidr' => '10.0.0.0/8']],
+        ]);
+
+        self::assertFalse($stmt->evaluateConditions(['ip' => 123]));
+        self::assertTrue($stmt->evaluateConditions(['ip' => '10.0.0.1']));
+    }
+
+    /**
+     * `starts_with` needs string actual AND string operand AND
+     * str_starts_with to match. Tests kill the triple LogicalAnd
+     * mutants on line 417.
+     *
+     * @return void
+     */
+    public function testStartsWithTypeGuardsAndLogic(): void
+    {
+        // String match
+        $stmt = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['x'],
+            'conditions' => ['val' => ['starts_with' => 'pre']],
+        ]);
+
+        self::assertTrue($stmt->evaluateConditions(['val' => 'prefix']));
+        self::assertFalse($stmt->evaluateConditions(['val' => 'suffix']));
+        self::assertFalse($stmt->evaluateConditions(['val' => 123]));
+    }
+
+    /**
+     * `ends_with` needs string actual AND string operand AND
+     * str_ends_with to match. Tests kill the triple LogicalAnd
+     * mutants on line 418.
+     *
+     * @return void
+     */
+    public function testEndsWithTypeGuardsAndLogic(): void
+    {
+        $stmt = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['x'],
+            'conditions' => ['val' => ['ends_with' => 'fix']],
+        ]);
+
+        self::assertTrue($stmt->evaluateConditions(['val' => 'suffix']));
+        self::assertFalse($stmt->evaluateConditions(['val' => 'hello']));
+        self::assertFalse($stmt->evaluateConditions(['val' => 123]));
+    }
+
+    /**
+     * `string_like` needs string actual AND string operand AND
+     * fnmatch to match. Tests kill the triple LogicalAnd mutants
+     * on line 422.
+     *
+     * @return void
+     */
+    public function testStringLikeTypeGuardsAndLogic(): void
+    {
+        $stmt = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['x'],
+            'conditions' => ['val' => ['string_like' => 'foo*']],
+        ]);
+
+        self::assertTrue($stmt->evaluateConditions(['val' => 'foobar']));
+        self::assertFalse($stmt->evaluateConditions(['val' => 'bazbar']));
+        self::assertFalse($stmt->evaluateConditions(['val' => 42]));
+    }
+
+    /**
+     * `null` operator: actual === null must be true iff actual is null.
+     * `not_null`: actual !== null must be true iff actual is not null.
+     * Kills Identical mutants on lines 423-424.
+     *
+     * @return void
+     */
+    public function testNullNotNullOperatorsDistinct(): void
+    {
+        $stmtNull = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['x'],
+            'conditions' => ['k' => ['null' => true]],
+        ]);
+
+        self::assertTrue($stmtNull->evaluateConditions(['k' => null]));
+        self::assertFalse($stmtNull->evaluateConditions(['k' => 0]));
+        self::assertFalse($stmtNull->evaluateConditions(['k' => '']));
+        self::assertFalse($stmtNull->evaluateConditions(['k' => false]));
+
+        $stmtNotNull = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['x'],
+            'conditions' => ['k' => ['not_null' => true]],
+        ]);
+
+        self::assertTrue($stmtNotNull->evaluateConditions(['k' => 'x']));
+        self::assertTrue($stmtNotNull->evaluateConditions(['k' => 0]));
+        self::assertFalse($stmtNotNull->evaluateConditions(['k' => null]));
+    }
+
+    /**
+     * `eq` uses `===` and `neq` uses `!==`. Swapping them produces
+     * different results. Kills Identical/NotIdentical mutants on
+     * lines 412-413.
+     *
+     * @return void
+     */
+    public function testEqNeqAreStrictlyOpposite(): void
+    {
+        $stmtEq = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['x'],
+            'conditions' => ['k' => ['eq' => 'a']],
+        ]);
+
+        $stmtNeq = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['x'],
+            'conditions' => ['k' => ['neq' => 'a']],
+        ]);
+
+        // eq: true when same, false when different
+        self::assertTrue($stmtEq->evaluateConditions(['k' => 'a']));
+        self::assertFalse($stmtEq->evaluateConditions(['k' => 'b']));
+
+        // neq: opposite
+        self::assertFalse($stmtNeq->evaluateConditions(['k' => 'a']));
+        self::assertTrue($stmtNeq->evaluateConditions(['k' => 'b']));
+    }
+
+    // ------------------------------------------------------------------
+    // Mutation-kill: interpolateOperands (lines 353-377)
+    // ------------------------------------------------------------------
+
+    /**
+     * Condition operands that are arrays get their string values
+     * interpolated while non-strings pass through unchanged.
+     * The operator map `['eq' => '${principal.id}']` has a string
+     * value that must be interpolated by interpolateOperands.
+     *
+     * @return void
+     */
+    public function testInterpolateOperandsInterpolatesArrayStringValues(): void
+    {
+        $principal = new class {
+            /**
+             * @param  string  $key
+             * @return string|null
+             */
+            public function getAttribute(string $key): ?string
+            {
+                return $key === 'id' ? '42' : null;
+            }
+        };
+
+        $statement = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['x'],
+            'conditions' => ['owner' => ['eq' => '${principal.id}']],
+        ]);
+
+        $interpolator = new ContextInterpolator;
+
+        // '${principal.id}' interpolates to '42'
+        self::assertTrue($statement->evaluateConditions(
+            ['owner' => '42'],
+            $interpolator,
+            $principal,
+        ));
+
+        // '99' does not match '42'
+        self::assertFalse($statement->evaluateConditions(
+            ['owner' => '99'],
+            $interpolator,
+            $principal,
+        ));
+    }
+
+    /**
+     * Non-string, non-array condition operands pass through the
+     * interpolateOperands method unchanged.
+     *
+     * @return void
+     */
+    public function testInterpolateOperandsNonStringNonArrayPassesThrough(): void
+    {
+        $statement = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['x'],
+            'conditions' => ['age' => 25],
+        ]);
+
+        $interpolator = new ContextInterpolator;
+
+        // Integer condition should match by identity
+        self::assertTrue($statement->evaluateConditions(
+            ['age' => 25],
+            $interpolator,
+        ));
+
+        self::assertFalse($statement->evaluateConditions(
+            ['age' => 30],
+            $interpolator,
+        ));
     }
 }

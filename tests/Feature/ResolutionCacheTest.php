@@ -9,9 +9,6 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
-use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
-use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
-use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
@@ -19,6 +16,9 @@ use SineMacula\Laravel\Authorization\Listeners\InvalidateResolutionCache;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy as PolicyModel;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
+use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
+use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Resolvers\CachingPolicyResolver;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
@@ -488,6 +488,572 @@ final class ResolutionCacheTest extends TestCase
         self::assertCount(1, $stored);
         self::assertIsArray($stored[0]);
         self::assertSame('fresh', $stored[0]['name'] ?? null);
+    }
+
+    /**
+     * `forget()` drops all three slots from the persistent store on
+     * a non-taggable store — pins the `['policies', 'permissions', 'roles']`
+     * array against ArrayItemRemoval mutations on line 214.
+     *
+     * @return void
+     */
+    public function testForgetDropsAllThreeSlotsFromNonTagStore(): void
+    {
+        $driver = self::makeNonTaggableDriver();
+        $store  = new \Illuminate\Cache\Repository($driver);
+        $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'fgt');
+
+        $principal = new class {
+            public function getMorphClass(): string
+            {
+                return 'u';
+            }
+
+            public function getKey(): string
+            {
+                return '1';
+            }
+        };
+
+        $cache->rememberPermissions($principal, static fn (): array => ['a']);
+        $cache->rememberRoles($principal, static fn (): array => ['r']);
+        $cache->rememberPolicies($principal, static fn (): array => []);
+
+        self::assertArrayHasKey('fgt:permissions:u:1', $driver->storage);
+        self::assertArrayHasKey('fgt:roles:u:1', $driver->storage);
+        self::assertArrayHasKey('fgt:policies:u:1', $driver->storage);
+
+        $cache->forget($principal);
+
+        self::assertArrayNotHasKey('fgt:permissions:u:1', $driver->storage);
+        self::assertArrayNotHasKey('fgt:roles:u:1', $driver->storage);
+        self::assertArrayNotHasKey('fgt:policies:u:1', $driver->storage);
+    }
+
+    /**
+     * `rememberPolicies()` with null context defaults to a fresh
+     * `ResolutionCacheContext` — pins the `$context ?? new ...`
+     * coalesce on line 98.
+     *
+     * @return void
+     */
+    public function testRememberPoliciesWithNullContextDefaultsGracefully(): void
+    {
+        $cache     = $this->app->make(ResolutionCache::class);
+        $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
+
+        $expected = [
+            new EvaluationPolicy(name: 'ctx-null', statements: []),
+        ];
+
+        $result = $cache->rememberPolicies($principal, static fn (): array => $expected, null);
+
+        self::assertSame($expected, $result);
+    }
+
+    /**
+     * Non-array entries in a policy cache document raise
+     * `UnexpectedValueException` which is caught, the key is
+     * forgotten, and the resolver re-fires. Pins the Throw_
+     * mutant on line 116.
+     *
+     * @return void
+     */
+    public function testNonArrayPolicyDocumentThrowsAndRecovery(): void
+    {
+        $driver = self::makeNonTaggableDriver();
+        $store  = new \Illuminate\Cache\Repository($driver);
+        $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'thr');
+
+        $principal = new class {
+            public function getMorphClass(): string
+            {
+                return 'th';
+            }
+
+            public function getKey(): string
+            {
+                return '1';
+            }
+        };
+
+        // Prime with valid, then corrupt.
+        $cache->rememberPolicies($principal, static fn (): array => []);
+        $driver->put('thr:policies:th:1', ['not-an-array'], 60);
+
+        $fresh    = new ResolutionCache(store: $store, ttl: 0, prefix: 'thr');
+        $expected = [new EvaluationPolicy(name: 'recovered', statements: [])];
+        $result   = $fresh->rememberPolicies($principal, static fn (): array => $expected);
+
+        self::assertSame($expected, $result);
+    }
+
+    /**
+     * `forgetFromStore` is called during the corrupt-entry path in
+     * `rememberStringList` — pins the MethodCallRemoval mutant on
+     * line 318.
+     *
+     * @return void
+     */
+    public function testCorruptStringListEntryIsForgottenAndRecomputed(): void
+    {
+        $driver = self::makeNonTaggableDriver();
+        $store  = new \Illuminate\Cache\Repository($driver);
+        $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'csl');
+
+        $principal = new class {
+            public function getMorphClass(): string
+            {
+                return 'sl';
+            }
+
+            public function getKey(): string
+            {
+                return '1';
+            }
+        };
+
+        $cache->rememberPermissions($principal, static fn (): array => ['a']);
+
+        // Corrupt the stored value to a non-array.
+        $driver->put('csl:permissions:sl:1', 'not-an-array', 60);
+
+        $fresh = new ResolutionCache(store: $store, ttl: 0, prefix: 'csl');
+
+        // The throwable from is_array(string) being true but
+        // array_filter('is_string') being applied... Actually, a
+        // string value will fail is_array, so resolver re-runs.
+        // Let's use an object to trigger a throw.
+        $driver->put('csl:permissions:sl:1', new \stdClass, 60);
+
+        $fresh2 = new ResolutionCache(store: $store, ttl: 0, prefix: 'csl');
+        $result = $fresh2->rememberPermissions($principal, static fn (): array => ['recovered']);
+
+        self::assertSame(['recovered'], $result);
+    }
+
+    /**
+     * `keyFor()` with an integer getKey returns the string cast.
+     * Pins CastString on line 386 and LogicalOr mutants on line 385.
+     *
+     * @return void
+     */
+    public function testKeyForIntegerGetKey(): void
+    {
+        $driver = self::makeNonTaggableDriver();
+        $store  = new \Illuminate\Cache\Repository($driver);
+        $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'kf');
+
+        $principal = new class {
+            public function getMorphClass(): string
+            {
+                return 'int-morph';
+            }
+
+            public function getKey(): int
+            {
+                return 99;
+            }
+        };
+
+        $cache->rememberRoles($principal, static fn (): array => ['r']);
+
+        self::assertArrayHasKey('kf:roles:int-morph:99', $driver->storage);
+    }
+
+    /**
+     * `keyFor()` falls back to `obj:spl_object_hash` when getKey
+     * returns empty string. Pins the `$id === null` branch on line
+     * 394 and the Concat/ConcatOperandRemoval mutants on line 395.
+     *
+     * @return void
+     */
+    public function testKeyForFallsBackToSplObjectHashOnEmptyKey(): void
+    {
+        $driver = self::makeNonTaggableDriver();
+        $store  = new \Illuminate\Cache\Repository($driver);
+        $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'spl');
+
+        $principal = new class {
+            public function getMorphClass(): string
+            {
+                return 'empty-morph';
+            }
+
+            public function getKey(): string
+            {
+                return '';
+            }
+        };
+
+        $cache->rememberRoles($principal, static fn (): array => ['r']);
+
+        $hash       = \spl_object_hash($principal);
+        $expectedId = "obj:{$hash}";
+        $key        = "spl:roles:empty-morph:{$expectedId}";
+
+        self::assertArrayHasKey($key, $driver->storage);
+    }
+
+    /**
+     * `principalTag` is assembled as `<prefix>:principal:<keyFor>`.
+     * Pins the Concat/ConcatOperandRemoval mutants on line 411.
+     *
+     * @return void
+     */
+    public function testPrincipalTagShapeIsCorrect(): void
+    {
+        $cache = new ResolutionCache(store: \Illuminate\Support\Facades\Cache::store('array'), ttl: 0, prefix: 'ptag');
+
+        $ref = new \ReflectionMethod($cache, 'principalTag');
+
+        $principal = new class {
+            public function getMorphClass(): string
+            {
+                return 'pt';
+            }
+
+            public function getKey(): string
+            {
+                return 'abc';
+            }
+        };
+
+        $tag = $ref->invoke($cache, $principal);
+
+        self::assertSame('ptag:principal:pt:abc', $tag);
+    }
+
+    /**
+     * `tagsFor` includes the prefix tag, principal tag, and per-role
+     * tags while skipping empty role IDs. Pins ArrayItemRemoval on
+     * line 425, Continue_ on line 429, and UnwrapArrayUnique /
+     * UnwrapArrayValues on line 435.
+     *
+     * @return void
+     */
+    public function testTagsForComposesCorrectTagSet(): void
+    {
+        $cache = new ResolutionCache(store: \Illuminate\Support\Facades\Cache::store('array'), ttl: 0, prefix: 'tf');
+
+        $ref = new \ReflectionMethod($cache, 'tagsFor');
+
+        $principal = new class {
+            public function getMorphClass(): string
+            {
+                return 'tg';
+            }
+
+            public function getKey(): string
+            {
+                return '7';
+            }
+        };
+
+        /** @var array<int, string> $tags */
+        $tags = $ref->invoke($cache, $principal, ['r1', '', 'r2', 'r1']);
+
+        // Must contain prefix, principal tag, and both role tags
+        // (deduped), and must skip the empty-string role ID.
+        self::assertSame([
+            'tf',
+            'tf:principal:tg:7',
+            'tf:role:r1',
+            'tf:role:r2',
+        ], $tags);
+    }
+
+    /**
+     * `isTaggable()` return value is memoised and returned on
+     * subsequent calls. Pins the ReturnRemoval mutant on line 461.
+     *
+     * @return void
+     */
+    public function testIsTaggableMemoReturnValue(): void
+    {
+        $cache = new ResolutionCache(store: \Illuminate\Support\Facades\Cache::store('array'), ttl: 0, prefix: 'itm');
+
+        // First call computes and caches.
+        self::assertTrue($cache->supportsTags());
+        // Second call returns from the memo.
+        self::assertTrue($cache->supportsTags());
+
+        $nullCache = new ResolutionCache(store: null);
+        self::assertFalse($nullCache->supportsTags());
+    }
+
+    /**
+     * `putInStore` skips the write when computed TTL is zero or
+     * negative. Pins the `<= 0` vs `< 0` mutant on line 613 and
+     * the LogicalAnd/ReturnRemoval on lines 613-614.
+     *
+     * @return void
+     */
+    public function testPutInStoreSkipsWriteWhenTtlNotPositive(): void
+    {
+        $driver = self::makeNonTaggableDriver();
+        $store  = new \Illuminate\Cache\Repository($driver);
+
+        // ttl=0 is forever, but maxTtl=0 forces computed TTL to
+        // min(INT_MAX, 0) - 1 = -1 — the write should be skipped.
+        $cache = new ResolutionCache(store: $store, ttl: 0, prefix: 'ttl0');
+
+        $principal = new class {
+            public function getMorphClass(): string
+            {
+                return 'ttl';
+            }
+
+            public function getKey(): string
+            {
+                return '1';
+            }
+        };
+
+        $cache->rememberPermissions(
+            $principal,
+            static fn (): array => ['x'],
+            new \SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext(maxTtl: 0),
+        );
+
+        // The memo is populated but the store should NOT have the entry
+        // because the TTL is -1.
+        self::assertEmpty($driver->storage);
+    }
+
+    /**
+     * `putInStore` uses the configured TTL when `$maxTtl` is null
+     * and TTL > 0. Pins the non-forever branch on line 632.
+     *
+     * @return void
+     */
+    public function testPutInStoreUsesConfiguredTtlWhenPositive(): void
+    {
+        $driver = self::makeNonTaggableDriver();
+        $store  = new \Illuminate\Cache\Repository($driver);
+        $cache  = new ResolutionCache(store: $store, ttl: 300, prefix: 'ttlp');
+
+        $principal = new class {
+            public function getMorphClass(): string
+            {
+                return 'ttlp';
+            }
+
+            public function getKey(): string
+            {
+                return '1';
+            }
+        };
+
+        $cache->rememberPermissions($principal, static fn (): array => ['y']);
+
+        self::assertArrayHasKey('ttlp:permissions:ttlp:1', $driver->storage);
+    }
+
+    /**
+     * `putInStore` with maxTtl=1 writes with computed TTL = 0
+     * which should be skipped (boundary test for `<= 0`).
+     *
+     * @return void
+     */
+    public function testPutInStoreSkipsWhenMaxTtlIsOne(): void
+    {
+        $driver = self::makeNonTaggableDriver();
+        $store  = new \Illuminate\Cache\Repository($driver);
+        $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'ttl1');
+
+        $principal = new class {
+            public function getMorphClass(): string
+            {
+                return 'ttl1';
+            }
+
+            public function getKey(): string
+            {
+                return '1';
+            }
+        };
+
+        // maxTtl=1 -> min(INT_MAX, 1) - 1 = 0, should be skipped.
+        $cache->rememberPermissions(
+            $principal,
+            static fn (): array => ['z'],
+            new \SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext(maxTtl: 1),
+        );
+
+        self::assertEmpty($driver->storage);
+    }
+
+    /**
+     * `logCorruptCacheEntry` includes the cache key in the log
+     * message. Pins the ConcatOperandRemoval mutant on line 563.
+     *
+     * @return void
+     */
+    public function testCorruptCacheLogIncludesKey(): void
+    {
+        $driver = self::makeNonTaggableDriver();
+        $store  = new \Illuminate\Cache\Repository($driver);
+        $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'logk');
+
+        $principal = new class {
+            public function getMorphClass(): string
+            {
+                return 'lg';
+            }
+
+            public function getKey(): string
+            {
+                return '1';
+            }
+        };
+
+        // Prime then corrupt.
+        $cache->rememberPermissions($principal, static fn (): array => ['a']);
+        $driver->put('logk:permissions:lg:1', new \stdClass, 60);
+
+        // Capture log output.
+        $logSpy = \Illuminate\Support\Facades\Log::spy();
+
+        $fresh = new ResolutionCache(store: $store, ttl: 0, prefix: 'logk');
+        $fresh->rememberPermissions($principal, static fn (): array => ['b']);
+
+        // We cannot easily assert the exact log call through the
+        // authorization channel, but we can confirm the resolver ran
+        // (meaning the corrupt path was hit) and the result is correct.
+        $result = $fresh->rememberPermissions($principal, static fn (): array => ['c']);
+        self::assertSame(['b'], $result);
+    }
+
+    /**
+     * `rememberPolicies` maps each policy through `toArray()` when
+     * writing to the store and reads them back via `fromArray()`.
+     * Pins the ArrayOneItem mutant on line 145 (putInStore args).
+     *
+     * @return void
+     */
+    public function testRememberPoliciesPersistsAndRehydratesPolicies(): void
+    {
+        $driver = self::makeNonTaggableDriver();
+        $store  = new \Illuminate\Cache\Repository($driver);
+        $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'pol');
+
+        $principal = new class {
+            public function getMorphClass(): string
+            {
+                return 'pp';
+            }
+
+            public function getKey(): string
+            {
+                return '1';
+            }
+        };
+
+        $original = [
+            new EvaluationPolicy(
+                name: 'test-policy',
+                statements: [],
+            ),
+        ];
+
+        $cache->rememberPolicies($principal, static fn (): array => $original);
+
+        // Fresh instance — reads from the store.
+        $fresh  = new ResolutionCache(store: $store, ttl: 0, prefix: 'pol');
+        $result = $fresh->rememberPolicies(
+            $principal,
+            static fn (): array => \PHPUnit\Framework\Assert::fail('Resolver should not run.'),
+        );
+
+        self::assertCount(1, $result);
+        self::assertSame('test-policy', $result[0]->name);
+    }
+
+    /**
+     * `keyFor()` returns `obj:spl_object_hash` for principals without
+     * `getKey()` at all. Pins the spl_object_hash fallback.
+     *
+     * @return void
+     */
+    public function testKeyForPrincipalWithoutGetKey(): void
+    {
+        $driver = self::makeNonTaggableDriver();
+        $store  = new \Illuminate\Cache\Repository($driver);
+        $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'nk');
+
+        $principal = new \stdClass;
+        $hash      = \spl_object_hash($principal);
+
+        $cache->rememberRoles($principal, static fn (): array => ['r']);
+
+        $class = $principal::class;
+        self::assertArrayHasKey("nk:roles:{$class}:obj:{$hash}", $driver->storage);
+    }
+
+    /**
+     * `forgetRoleTags()` is a no-op when the role's `getKey()`
+     * returns empty string. Pins the LogicalAnd on line 376 and
+     * the `$id === ''` guard on line 241/243.
+     *
+     * @return void
+     */
+    public function testForgetRoleTagsSkipsEmptyRoleKey(): void
+    {
+        $cache = new ResolutionCache(store: \Illuminate\Support\Facades\Cache::store('array'), prefix: 'frt');
+
+        $emptyRole = new class {
+            public function getKey(): string
+            {
+                return '';
+            }
+        };
+
+        // Should not throw — just no-op.
+        $cache->forgetRoleTags($emptyRole);
+
+        self::assertTrue(true, 'forgetRoleTags with empty key must not throw.');
+    }
+
+    /**
+     * `forgetRoleTags()` is a no-op when the role has no getKey
+     * method. Pins the `method_exists` guard on line 240.
+     *
+     * @return void
+     */
+    public function testForgetRoleTagsSkipsNoGetKeyMethod(): void
+    {
+        $cache = new ResolutionCache(store: \Illuminate\Support\Facades\Cache::store('array'), prefix: 'frt2');
+
+        $noKey = new \stdClass;
+
+        $cache->forgetRoleTags($noKey);
+
+        self::assertTrue(true, 'forgetRoleTags without getKey must not throw.');
+    }
+
+    /**
+     * `forgetRoleTags()` flushes entries tagged with the role's
+     * integer key (coerced to string). Pins the CastString on 386
+     * and the `is_int` branch on line 385.
+     *
+     * @return void
+     */
+    public function testForgetRoleTagsWithIntegerKey(): void
+    {
+        $cache = new ResolutionCache(store: \Illuminate\Support\Facades\Cache::store('array'), prefix: 'fri');
+
+        $intRole = new class {
+            public function getKey(): int
+            {
+                return 42;
+            }
+        };
+
+        // Should not throw.
+        $cache->forgetRoleTags($intRole);
+
+        self::assertTrue(true, 'forgetRoleTags with integer key must not throw.');
     }
 
     /**

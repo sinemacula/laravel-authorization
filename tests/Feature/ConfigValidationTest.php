@@ -8,11 +8,11 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
+use SineMacula\Laravel\Authorization\Config\ConfigValidator;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
-use SineMacula\Laravel\Authorization\Config\ConfigValidator;
-use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
 use Tests\Feature\Stubs\PermissionEnum;
 use Tests\TestCase;
@@ -254,8 +254,6 @@ final class ConfigValidationTest extends TestCase
      * Non-string `permission_enums` entries are caught before any
      * class lookup runs.
      *
-     * @dataProvider malformedPermissionEnumEntries
-     *
      * @param  mixed  $entry
      * @return void
      */
@@ -313,6 +311,319 @@ final class ConfigValidationTest extends TestCase
             self::assertStringContainsString('\'throw\'', $reason);
             self::assertStringContainsString('\'overwrite\'', $reason);
             self::assertStringContainsString('\'Log\' (string)', $reason);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // Mutation-kill: exception message shapes (Concat / ConcatOperandRemoval)
+    // ------------------------------------------------------------------
+
+    /**
+     * `permission_enums` wrong-contract rejection message includes
+     * both the class name and the contract name. Kills Concat and
+     * ConcatOperandRemoval mutants on line 81.
+     *
+     * @return void
+     */
+    public function testPermissionEnumWrongContractMessageShape(): void
+    {
+        /** @var \Illuminate\Contracts\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class);
+        $config->set('authorization.permission_enums', [\stdClass::class]);
+
+        try {
+            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            $reason = $exception->getReason();
+            self::assertStringContainsString(\stdClass::class, $reason);
+            self::assertStringContainsString('does not implement', $reason);
+            self::assertStringContainsString('PermissionEnum', $reason);
+        }
+    }
+
+    /**
+     * `permission_providers` wrong-contract rejection message includes
+     * both the class name and the contract name. Kills Concat and
+     * ConcatOperandRemoval mutants on line 111.
+     *
+     * @return void
+     */
+    public function testPermissionProviderWrongContractMessageShape(): void
+    {
+        /** @var \Illuminate\Contracts\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class);
+        $config->set('authorization.permission_providers', [\stdClass::class]);
+
+        try {
+            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            $reason = $exception->getReason();
+            self::assertStringContainsString(\stdClass::class, $reason);
+            self::assertStringContainsString('does not implement', $reason);
+            self::assertStringContainsString('PermissionProvider', $reason);
+        }
+    }
+
+    /**
+     * `gate.on_conflict` rejection message includes the value
+     * description and the accepted sentinel list. Kills Concat
+     * and ConcatOperandRemoval mutants on line 139.
+     *
+     * @return void
+     */
+    public function testGateOnConflictRejectionMessageShape(): void
+    {
+        /** @var \Illuminate\Contracts\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class);
+        $config->set('authorization.gate.on_conflict', 42);
+
+        try {
+            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            $reason = $exception->getReason();
+            // Must contain "expected one of [...]"
+            self::assertStringContainsString('expected one of', $reason);
+            // Must contain the offending value description
+            self::assertStringContainsString('42', $reason);
+            self::assertStringContainsString('int', $reason);
+            // Must contain at least one sentinel
+            self::assertStringContainsString('\'log\'', $reason);
+        }
+    }
+
+    /**
+     * `principal_resolver` rejection message when passed a
+     * non-string. Kills Concat and ConcatOperandRemoval on line 157
+     * (via assertImplementsContract at line 262).
+     *
+     * @return void
+     */
+    public function testPrincipalResolverNonStringMessageShape(): void
+    {
+        /** @var \Illuminate\Contracts\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class);
+        $config->set('authorization.principal_resolver', 42);
+
+        try {
+            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            $reason = $exception->getReason();
+            self::assertStringContainsString('expected a class-string', $reason);
+            self::assertStringContainsString('42', $reason);
+            self::assertStringContainsString('int', $reason);
+        }
+    }
+
+    /**
+     * `assertImplementsContract` with a missing class. Kills Concat
+     * mutants on line 244 (via the "does not exist" branch).
+     *
+     * @return void
+     */
+    public function testAssertImplementsContractMissingClassMessageShape(): void
+    {
+        /** @var \Illuminate\Contracts\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class);
+        $config->set('authorization.principal_resolver', 'App\Does\Not\Exist');
+
+        try {
+            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            $reason = $exception->getReason();
+            self::assertStringContainsString('App\Does\Not\Exist', $reason);
+            self::assertStringContainsString('does not exist', $reason);
+        }
+    }
+
+    /**
+     * `assertImplementsContract` with a class that doesn't implement
+     * the contract. Kills Concat mutants on line 262 (the "does not
+     * implement" branch) and the LogicalAnd on line 269.
+     *
+     * @return void
+     */
+    public function testAssertImplementsContractWrongContractMessageShape(): void
+    {
+        /** @var \Illuminate\Contracts\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class);
+        $config->set('authorization.principal_resolver', \stdClass::class);
+
+        try {
+            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            $reason = $exception->getReason();
+            self::assertStringContainsString(\stdClass::class, $reason);
+            self::assertStringContainsString('does not implement', $reason);
+            self::assertStringContainsString('PrincipalResolver', $reason);
+        }
+    }
+
+    /**
+     * `cache.store` non-string rejection message shape. Kills
+     * Concat and ConcatOperandRemoval on line 234 (via describe()).
+     *
+     * @return void
+     */
+    public function testCacheStoreNonStringMessageShape(): void
+    {
+        /** @var \Illuminate\Contracts\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class);
+        $config->set('authorization.cache.store', 42);
+
+        try {
+            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            $reason = $exception->getReason();
+            self::assertStringContainsString('expected a cache-store name string', $reason);
+            self::assertStringContainsString('42', $reason);
+            self::assertStringContainsString('int', $reason);
+        }
+    }
+
+    /**
+     * `cache.store` empty string is rejected like non-string.
+     *
+     * @return void
+     */
+    public function testCacheStoreEmptyStringIsRejected(): void
+    {
+        /** @var \Illuminate\Contracts\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class);
+        $config->set('authorization.cache.store', '');
+
+        $this->expectException(InvalidAuthorizationConfigException::class);
+
+        ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+    }
+
+    /**
+     * Throw_ removal on line 266: if the assertImplementsContract
+     * throw is removed, no exception occurs for a wrong-contract class.
+     * This test proves the throw is essential.
+     *
+     * @return void
+     */
+    public function testAssertImplementsContractThrowIsEssential(): void
+    {
+        /** @var \Illuminate\Contracts\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class);
+        $config->set('authorization.policy_store', \stdClass::class);
+
+        $this->expectException(InvalidAuthorizationConfigException::class);
+
+        ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+    }
+
+    /**
+     * `permission_providers` non-array is rejected with a type
+     * description. Kills Concat mutants on the permission_providers
+     * non-array branch.
+     *
+     * @return void
+     */
+    public function testPermissionProvidersNonArrayRejectionMessageShape(): void
+    {
+        /** @var \Illuminate\Contracts\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class);
+        $config->set('authorization.permission_providers', 'not-an-array');
+
+        try {
+            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            $reason = $exception->getReason();
+            self::assertStringContainsString('expected an array', $reason);
+            self::assertStringContainsString('string', $reason);
+        }
+    }
+
+    /**
+     * `permission_enums` non-array is rejected with a type
+     * description.
+     *
+     * @return void
+     */
+    public function testPermissionEnumsNonArrayRejectionMessageShape(): void
+    {
+        /** @var \Illuminate\Contracts\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class);
+        $config->set('authorization.permission_enums', 'not-an-array');
+
+        try {
+            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            $reason = $exception->getReason();
+            self::assertStringContainsString('expected an array', $reason);
+            self::assertStringContainsString('string', $reason);
+        }
+    }
+
+    /**
+     * `permission_providers` entry that is a missing class. Kills
+     * Concat mutants on the "does not exist" branch for providers.
+     *
+     * @return void
+     */
+    public function testPermissionProviderMissingClassMessageShape(): void
+    {
+        /** @var \Illuminate\Contracts\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class);
+        $config->set('authorization.permission_providers', ['App\Missing\Provider']);
+
+        try {
+            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            $reason = $exception->getReason();
+            self::assertStringContainsString('App\Missing\Provider', $reason);
+            self::assertStringContainsString('does not exist', $reason);
+        }
+    }
+
+    /**
+     * `permission_providers` malformed entry (non-string / empty).
+     *
+     * @return void
+     */
+    public function testPermissionProviderMalformedEntryIsRejected(): void
+    {
+        /** @var \Illuminate\Contracts\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class);
+        $config->set('authorization.permission_providers', ['']);
+
+        $this->expectException(InvalidAuthorizationConfigException::class);
+
+        ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+    }
+
+    /**
+     * `tenant_resolver` with wrong contract is rejected. Kills
+     * the assertImplementsContract path for tenant_resolver.
+     *
+     * @return void
+     */
+    public function testTenantResolverWrongContractIsRejected(): void
+    {
+        /** @var \Illuminate\Contracts\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class);
+        $config->set('authorization.tenant_resolver', \stdClass::class);
+
+        try {
+            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            $reason = $exception->getReason();
+            self::assertStringContainsString(\stdClass::class, $reason);
+            self::assertStringContainsString('does not implement', $reason);
+            self::assertStringContainsString('TenantResolver', $reason);
         }
     }
 }

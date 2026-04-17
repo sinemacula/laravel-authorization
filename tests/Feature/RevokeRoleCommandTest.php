@@ -78,4 +78,48 @@ final class RevokeRoleCommandTest extends TestCase
 
         self::assertSame(1, $exitCode);
     }
+
+    /**
+     * A failed revoke outputs the exception message. Pins the
+     * MethodCallRemoval mutant on line 65 of RevokeRoleCommand.
+     *
+     * @return void
+     */
+    public function testFailedRevokeOutputsErrorMessage(): void
+    {
+        StubIdentity::create(['id' => 'b1b1b1b1-0000-0000-0000-000000000001']);
+
+        $exitCode = Artisan::call('authorization:revoke', [
+            'identity' => StubIdentity::class . ':b1b1b1b1-0000-0000-0000-000000000001',
+            'role'     => 'does-not-exist',
+        ]);
+        $output = Artisan::output();
+
+        self::assertSame(1, $exitCode);
+        self::assertNotEmpty(\trim($output), 'Error message must be printed on failure.');
+    }
+
+    /**
+     * Success message includes both the role name and identity arg.
+     * Pins the ReturnRemoval on line 59.
+     *
+     * @return void
+     */
+    public function testSuccessMessageIncludesRoleAndIdentity(): void
+    {
+        Role::create(['id' => 'b2b2b2b2-0000-0000-0000-000000000001', 'name' => 'rev-role', 'guard_name' => 'web']);
+        $user = StubIdentity::create(['id' => 'b3b3b3b3-0000-0000-0000-000000000001']);
+        $user->assignRole('rev-role');
+
+        $identity = StubIdentity::class . ':b3b3b3b3-0000-0000-0000-000000000001';
+        $exitCode = Artisan::call('authorization:revoke', [
+            'identity' => $identity,
+            'role'     => 'rev-role',
+        ]);
+        $output = Artisan::output();
+
+        self::assertSame(0, $exitCode);
+        self::assertStringContainsString('rev-role', $output);
+        self::assertStringContainsString($identity, $output);
+    }
 }
