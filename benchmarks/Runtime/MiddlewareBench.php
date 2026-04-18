@@ -42,20 +42,32 @@ use SineMacula\Laravel\Authorization\Models\Role;
 #[Bench\OutputTimeUnit('microseconds')]
 final class MiddlewareBench extends BenchmarkCase
 {
-    /** @var \SineMacula\Laravel\Authorization\Http\Middleware\RequireRole Role middleware instance under test. */
-    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
+    /**
+     * @var \SineMacula\Laravel\Authorization\Http\Middleware\RequireRole role middleware instance under test
+     *
+     * @phpstan-ignore property.uninitialized, missingType.callable
+     */
     private RequireRole $roleMiddleware;
 
-    /** @var \SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission Permission middleware instance under test. */
-    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
+    /**
+     * @var \SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission permission middleware instance under test
+     *
+     * @phpstan-ignore property.uninitialized, missingType.callable
+     */
     private RequirePermission $permissionMiddleware;
 
-    /** @var \Closure Pass-through next closure — every admit path calls it exactly once. */
-    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
+    /**
+     * @var \Closure pass-through next closure — every admit path calls it exactly once
+     *
+     * @phpstan-ignore property.uninitialized, missingType.callable
+     */
     private \Closure $next;
 
-    /** @var \Illuminate\Http\Request Incoming request stand-in — shared across every rev. */
-    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
+    /**
+     * @var \Illuminate\Http\Request incoming request stand-in — shared across every rev
+     *
+     * @phpstan-ignore property.uninitialized, missingType.callable
+     */
     private Request $request;
 
     /**

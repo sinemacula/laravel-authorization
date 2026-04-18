@@ -19,11 +19,10 @@ use SineMacula\Laravel\Authorization\Support\BladeHelpers;
 /**
  * PHPBench micro-benchmark for the Blade runtime helpers.
  *
- * Blade directives compile into static calls on `BladeHelpers`
- * that resolve the current principal through the package
- * `PrincipalResolver` on every render. A single page renders one
- * directive per permission-gated block, so the per-directive
- * cost scales with page complexity.
+ * Blade directives compile into static calls on `BladeHelpers` that resolve
+ * the current principal through the package `PrincipalResolver` on every
+ * render. A single page renders one directive per permission-gated block, so
+ * the per-directive cost scales with page complexity.
  *
  * The bench exercises four shapes:
  *
@@ -49,9 +48,9 @@ final class BladeHelpersBench extends BenchmarkCase
     private array $permissionNames = [];
 
     /**
-     * Bench setUp — boot the application, seed a role that
-     * carries the fixture permissions, attach it to the
-     * principal, and bind a principal resolver slot.
+     * Bench setUp — boot the application, seed a role that carries the fixture
+     * permissions, attach it to the principal, and bind a principal resolver
+     * slot.
      *
      * @return void
      */

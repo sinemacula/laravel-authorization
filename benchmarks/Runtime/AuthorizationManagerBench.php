@@ -15,8 +15,7 @@ use SineMacula\Laravel\Authorization\Models\Policy as PolicyModel;
 use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
- * PHPBench micro-benchmark for the full `AuthorizationManager`
- * pipeline.
+ * PHPBench micro-benchmark for the full `AuthorizationManager` pipeline.
  *
  * Exercises the four decision paths that matter in production:
  *
@@ -25,10 +24,9 @@ use SineMacula\Laravel\Authorization\Models\Role;
  * - explicit policy deny overriding an RBAC allow;
  * - implicit deny (no matching statement, no RBAC grant).
  *
- * Each subject drives the pipeline through principal resolution
- * (the explicit `for($user)` override), policy gathering, statement
- * evaluation, and RBAC fallback — the same chain the facade invokes
- * on every request.
+ * Each subject drives the pipeline through principal resolution (the explicit
+ * `for($user)` override), policy gathering, statement evaluation, and RBAC
+ * fallback — the same chain the facade invokes on every request.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -47,9 +45,9 @@ final class AuthorizationManagerBench extends BenchmarkCase
     private ?BenchmarkIdentity $user = null;
 
     /**
-     * Bench setUp — boot the application, seed a role carrying the
-     * fixture permissions, attach an allow-and-deny policy, and
-     * resolve the container-bound manager.
+     * Bench setUp — boot the application, seed a role carrying the fixture
+     * permissions, attach an allow-and-deny policy, and resolve the
+     * container-bound manager.
      *
      * @return void
      */
@@ -70,9 +68,9 @@ final class AuthorizationManagerBench extends BenchmarkCase
     }
 
     /**
-     * Return the manager seeded by `setUp()`, asserting it is
-     * populated — PHPBench `@BeforeMethods` guarantees the setup
-     * hook has run before the subject methods.
+     * Return the manager seeded by `setUp()`, asserting it is populated —
+     * PHPBench `@BeforeMethods` guarantees the setup hook has run before the
+     * subject methods.
      *
      * @return \SineMacula\Laravel\Authorization\AuthorizationManager
      */
@@ -148,8 +146,8 @@ final class AuthorizationManagerBench extends BenchmarkCase
     }
 
     /**
-     * Truncate the fixture tables so each iteration starts from a
-     * known-empty state.
+     * Truncate the fixture tables so each iteration starts from a known-empty
+     * state.
      *
      * @return void
      */
@@ -162,8 +160,8 @@ final class AuthorizationManagerBench extends BenchmarkCase
     }
 
     /**
-     * Seed a role carrying the fixture permissions, create the
-     * principal, and assign the role.
+     * Seed a role carrying the fixture permissions, create the principal, and
+     * assign the role.
      *
      * @return \Benchmarks\Support\BenchmarkIdentity
      */

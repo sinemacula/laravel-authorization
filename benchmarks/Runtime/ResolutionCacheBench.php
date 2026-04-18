@@ -39,32 +39,53 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
 #[Bench\OutputTimeUnit('microseconds')]
 final class ResolutionCacheBench
 {
-    /** @var \SineMacula\Laravel\Authorization\Cache\ResolutionCache Cache instance used for the memo-tier subjects (no persistent store). */
-    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
+    /**
+     * @var \SineMacula\Laravel\Authorization\Cache\ResolutionCache cache instance used for the memo-tier subjects (no persistent store)
+     *
+     * @phpstan-ignore property.uninitialized, missingType.callable
+     */
     private ResolutionCache $memoOnly;
 
-    /** @var \SineMacula\Laravel\Authorization\Cache\ResolutionCache Cache instance used for the persistent-tier subjects (array-store-backed). */
-    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
+    /**
+     * @var \SineMacula\Laravel\Authorization\Cache\ResolutionCache cache instance used for the persistent-tier subjects (array-store-backed)
+     *
+     * @phpstan-ignore property.uninitialized, missingType.callable
+     */
     private ResolutionCache $persisted;
 
-    /** @var \SineMacula\Laravel\Authorization\Cache\ResolutionCache Cache instance used for the `forget()` subject — reprimed between reps via `setUpForget()`. */
-    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
+    /**
+     * @var \SineMacula\Laravel\Authorization\Cache\ResolutionCache cache instance used for the `forget()` subject — reprimed between reps via `setUpForget()`
+     *
+     * @phpstan-ignore property.uninitialized, missingType.callable
+     */
     private ResolutionCache $forgetTarget;
 
-    /** @var object Principal stand-in — primitive object keyed by a stable hash. */
-    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
+    /**
+     * @var object principal stand-in — primitive object keyed by a stable hash
+     *
+     * @phpstan-ignore property.uninitialized, missingType.callable
+     */
     private object $principal;
 
-    /** @var \Closure Resolved role list primed into the cache before memo / persistent reads. */
-    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
+    /**
+     * @var \Closure resolved role list primed into the cache before memo / persistent reads
+     *
+     * @phpstan-ignore property.uninitialized, missingType.callable
+     */
     private \Closure $roleResolver;
 
-    /** @var \Closure Resolved permission list primed into the cache before memo reads. */
-    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
+    /**
+     * @var \Closure resolved permission list primed into the cache before memo reads
+     *
+     * @phpstan-ignore property.uninitialized, missingType.callable
+     */
     private \Closure $permissionResolver;
 
-    /** @var \Closure Policy list primed into the persistent tier before policy reads. */
-    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
+    /**
+     * @var \Closure policy list primed into the persistent tier before policy reads
+     *
+     * @phpstan-ignore property.uninitialized, missingType.callable
+     */
     private \Closure $policyResolver;
 
     /**
