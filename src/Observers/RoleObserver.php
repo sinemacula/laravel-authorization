@@ -32,7 +32,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
  */
 final class RoleObserver
 {
-    /** @var \WeakMap<\SineMacula\Laravel\Authorization\Models\Role, array<string, mixed>>|null Pre-update snapshots bridging `updating` and `updated`; static so it survives per-event observer resolution. */
+    /** @var \WeakMap<\SineMacula\Laravel\Authorization\Models\Role, array<string, mixed>>|null Pre-update snapshots keyed by model. */
     private static ?\WeakMap $snapshots = null;
 
     /**

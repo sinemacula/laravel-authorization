@@ -77,7 +77,12 @@ class TenantScopingTest extends TestCase
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
         Permission::create(['name' => 'global-perm', 'guard_name' => 'web']);
-        Permission::create(['name' => 'tenant-perm', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
+        Permission::create([
+            'name'        => 'tenant-perm',
+            'guard_name'  => 'web',
+            'tenant_type' => $tenantA->getMorphClass(),
+            // @phpstan-ignore-next-line cast.string
+            'tenant_id' => (string) $tenantA->getKey(),
         ]);
 
         static::assertCount(2, Permission::all());
@@ -94,9 +99,19 @@ class TenantScopingTest extends TestCase
         $tenantB = StubTenant::create(['id' => 'tenant-b', 'name' => 'Tenant B']);
 
         Role::create(['name' => 'global-role', 'guard_name' => 'web']);
-        Role::create(['name' => 'role-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
+        Role::create([
+            'name'        => 'role-a',
+            'guard_name'  => 'web',
+            'tenant_type' => $tenantA->getMorphClass(),
+            // @phpstan-ignore-next-line cast.string
+            'tenant_id' => (string) $tenantA->getKey(),
         ]);
-        Role::create(['name' => 'role-b', 'guard_name' => 'web', 'tenant_type' => $tenantB->getMorphClass(), 'tenant_id' => (string) $tenantB->getKey(), // @phpstan-ignore cast.string
+        Role::create([
+            'name'        => 'role-b',
+            'guard_name'  => 'web',
+            'tenant_type' => $tenantB->getMorphClass(),
+            // @phpstan-ignore-next-line cast.string
+            'tenant_id' => (string) $tenantB->getKey(),
         ]);
 
         $this->bindTenantResolver($tenantA);
@@ -119,7 +134,12 @@ class TenantScopingTest extends TestCase
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
         $tenantB = StubTenant::create(['id' => 'tenant-b', 'name' => 'Tenant B']);
 
-        Role::create(['name' => 'role-b', 'guard_name' => 'web', 'tenant_type' => $tenantB->getMorphClass(), 'tenant_id' => (string) $tenantB->getKey(), // @phpstan-ignore cast.string
+        Role::create([
+            'name'        => 'role-b',
+            'guard_name'  => 'web',
+            'tenant_type' => $tenantB->getMorphClass(),
+            // @phpstan-ignore-next-line cast.string
+            'tenant_id' => (string) $tenantB->getKey(),
         ]);
 
         $this->bindTenantResolver($tenantA);
@@ -157,9 +177,19 @@ class TenantScopingTest extends TestCase
         $tenantB = StubTenant::create(['id' => 'tenant-b', 'name' => 'Tenant B']);
 
         Permission::create(['name' => 'global-perm', 'guard_name' => 'web']);
-        Permission::create(['name' => 'perm-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
+        Permission::create([
+            'name'        => 'perm-a',
+            'guard_name'  => 'web',
+            'tenant_type' => $tenantA->getMorphClass(),
+            // @phpstan-ignore-next-line cast.string
+            'tenant_id' => (string) $tenantA->getKey(),
         ]);
-        Permission::create(['name' => 'perm-b', 'guard_name' => 'web', 'tenant_type' => $tenantB->getMorphClass(), 'tenant_id' => (string) $tenantB->getKey(), // @phpstan-ignore cast.string
+        Permission::create([
+            'name'        => 'perm-b',
+            'guard_name'  => 'web',
+            'tenant_type' => $tenantB->getMorphClass(),
+            // @phpstan-ignore-next-line cast.string
+            'tenant_id' => (string) $tenantB->getKey(),
         ]);
 
         $this->bindTenantResolver($tenantA);
@@ -184,7 +214,12 @@ class TenantScopingTest extends TestCase
         // Create a global role and a tenant-owned role with the
         // same name but different guard to avoid the unique constraint.
         Role::create(['name' => 'editor', 'guard_name' => null]);
-        Role::create(['name' => 'editor', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
+        Role::create([
+            'name'        => 'editor',
+            'guard_name'  => 'web',
+            'tenant_type' => $tenantA->getMorphClass(),
+            // @phpstan-ignore-next-line cast.string
+            'tenant_id' => (string) $tenantA->getKey(),
         ]);
 
         $this->bindTenantResolver($tenantA);
@@ -205,7 +240,12 @@ class TenantScopingTest extends TestCase
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
         Permission::create(['name' => 'posts:edit', 'guard_name' => null]);
-        Permission::create(['name' => 'posts:edit', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
+        Permission::create([
+            'name'        => 'posts:edit',
+            'guard_name'  => 'web',
+            'tenant_type' => $tenantA->getMorphClass(),
+            // @phpstan-ignore-next-line cast.string
+            'tenant_id' => (string) $tenantA->getKey(),
         ]);
 
         $this->bindTenantResolver($tenantA);
@@ -339,9 +379,19 @@ class TenantScopingTest extends TestCase
         $tenantB = StubTenant::create(['id' => 'tenant-b', 'name' => 'Tenant B']);
 
         Role::create(['name' => 'global', 'guard_name' => 'web']);
-        Role::create(['name' => 'role-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
+        Role::create([
+            'name'        => 'role-a',
+            'guard_name'  => 'web',
+            'tenant_type' => $tenantA->getMorphClass(),
+            // @phpstan-ignore-next-line cast.string
+            'tenant_id' => (string) $tenantA->getKey(),
         ]);
-        Role::create(['name' => 'role-b', 'guard_name' => 'web', 'tenant_type' => $tenantB->getMorphClass(), 'tenant_id' => (string) $tenantB->getKey(), // @phpstan-ignore cast.string
+        Role::create([
+            'name'        => 'role-b',
+            'guard_name'  => 'web',
+            'tenant_type' => $tenantB->getMorphClass(),
+            // @phpstan-ignore-next-line cast.string
+            'tenant_id' => (string) $tenantB->getKey(),
         ]);
 
         $roles = Role::forTenant($tenantA)->get();
@@ -360,7 +410,12 @@ class TenantScopingTest extends TestCase
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
         Role::create(['name' => 'global', 'guard_name' => 'web']);
-        Role::create(['name' => 'role-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
+        Role::create([
+            'name'        => 'role-a',
+            'guard_name'  => 'web',
+            'tenant_type' => $tenantA->getMorphClass(),
+            // @phpstan-ignore-next-line cast.string
+            'tenant_id' => (string) $tenantA->getKey(),
         ]);
 
         $roles = Role::globalOnly()->get();
@@ -380,9 +435,19 @@ class TenantScopingTest extends TestCase
         $tenantB = StubTenant::create(['id' => 'tenant-b', 'name' => 'Tenant B']);
 
         Permission::create(['name' => 'global-perm', 'guard_name' => 'web']);
-        Permission::create(['name' => 'perm-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
+        Permission::create([
+            'name'        => 'perm-a',
+            'guard_name'  => 'web',
+            'tenant_type' => $tenantA->getMorphClass(),
+            // @phpstan-ignore-next-line cast.string
+            'tenant_id' => (string) $tenantA->getKey(),
         ]);
-        Permission::create(['name' => 'perm-b', 'guard_name' => 'web', 'tenant_type' => $tenantB->getMorphClass(), 'tenant_id' => (string) $tenantB->getKey(), // @phpstan-ignore cast.string
+        Permission::create([
+            'name'        => 'perm-b',
+            'guard_name'  => 'web',
+            'tenant_type' => $tenantB->getMorphClass(),
+            // @phpstan-ignore-next-line cast.string
+            'tenant_id' => (string) $tenantB->getKey(),
         ]);
 
         $perms = Permission::forTenant($tenantA)->get();
@@ -401,7 +466,12 @@ class TenantScopingTest extends TestCase
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
         Permission::create(['name' => 'global-perm', 'guard_name' => 'web']);
-        Permission::create(['name' => 'perm-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
+        Permission::create([
+            'name'        => 'perm-a',
+            'guard_name'  => 'web',
+            'tenant_type' => $tenantA->getMorphClass(),
+            // @phpstan-ignore-next-line cast.string
+            'tenant_id' => (string) $tenantA->getKey(),
         ]);
 
         $perms = Permission::globalOnly()->get();
@@ -547,10 +617,20 @@ class TenantScopingTest extends TestCase
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
-        Role::create(['name' => 'role-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
+        Role::create([
+            'name'        => 'role-a',
+            'guard_name'  => 'web',
+            'tenant_type' => $tenantA->getMorphClass(),
+            // @phpstan-ignore-next-line cast.string
+            'tenant_id' => (string) $tenantA->getKey(),
         ]);
         Role::create(['name' => 'global-role', 'guard_name' => 'web']);
-        Permission::create(['name' => 'perm-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
+        Permission::create([
+            'name'        => 'perm-a',
+            'guard_name'  => 'web',
+            'tenant_type' => $tenantA->getMorphClass(),
+            // @phpstan-ignore-next-line cast.string
+            'tenant_id' => (string) $tenantA->getKey(),
         ]);
 
         /**
