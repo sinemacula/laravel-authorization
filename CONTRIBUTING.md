@@ -56,7 +56,7 @@ Run the full test suite before submitting:
 
 ```bash
 composer test             # All suites in parallel (Paratest)
-composer test-coverage    # With clover coverage report
+composer test:coverage    # With clover coverage report
 ```
 
 Individual suites:

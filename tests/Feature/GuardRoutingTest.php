@@ -57,16 +57,24 @@ use Tests\TestCase;
 final class GuardRoutingTest extends TestCase
 {
     /**
-     * Clean up the api-guard stub table after each test.
+     * Ensure the api-guard stub table exists whenever this suite runs. Needs to
+     * work regardless of whether `migrate:fresh` already ran in this process,
+     * so it's keyed off `Schema::hasTable` rather than the
+     * `DatabaseRefreshed` hook.
      *
      * @return void
      */
     #[\Override]
-    protected function tearDown(): void
+    protected function setUp(): void
     {
-        Schema::dropIfExists('api_guarded_users');
+        parent::setUp();
 
-        parent::tearDown();
+        if (!Schema::hasTable('api_guarded_users')) {
+            Schema::create('api_guarded_users', static function ($table): void {
+                $table->string('id')->primary();
+                $table->timestamps();
+            });
+        }
     }
 
     /**
@@ -210,23 +218,6 @@ final class GuardRoutingTest extends TestCase
         $user->assignRole('default-bound');
 
         self::assertTrue($user->fresh()?->hasRole('default-bound'));
-    }
-
-    /**
-     * Define a separate table for the api-guard stub so the two identity shapes
-     * coexist alongside the default-guard stub.
-     *
-     * @return void
-     */
-    #[\Override]
-    protected function defineDatabaseMigrations(): void
-    {
-        parent::defineDatabaseMigrations();
-
-        Schema::create('api_guarded_users', static function ($table): void {
-            $table->string('id')->primary();
-            $table->timestamps();
-        });
     }
 }
 

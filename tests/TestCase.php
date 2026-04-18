@@ -6,6 +6,7 @@ namespace Tests;
 
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
 use Orchestra\Testbench\TestCase as OrchestraTestCase;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
@@ -14,9 +15,9 @@ use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
  * Shared base test case for the package's Testbench-powered tests.
  *
  * Boots a minimal Testbench application with the authorization service provider
- * registered, an in-memory SQLite connection, and the shipped `authorization`
- * config block seeded. Subclasses may override the environment and migration
- * hooks to adjust per-test config or create additional tables.
+ * registered and a driver selected via `DB_CONNECTION`. Uses Laravel's
+ * `RefreshDatabase` trait so migrations run once per phpunit process and every
+ * test wraps its work in a rolled-back transaction.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -25,6 +26,8 @@ use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
  */
 abstract class TestCase extends OrchestraTestCase
 {
+    use RefreshDatabase;
+
     /** @var bool Process-level flag so the Testbench Blade view cache is cleared once per phpunit run. */
     private static bool $viewCacheCleared = false;
 
@@ -93,20 +96,36 @@ abstract class TestCase extends OrchestraTestCase
     }
 
     /**
-     * Run the package's shipped migrations and any fixture tables so tests that
-     * persist roles, permissions, or policies have a working schema.
+     * Register the package migration path on the migrator so `migrate:fresh`
+     * picks it up.
+     *
+     * Uses `load_migration_paths` directly instead of `loadMigrationsFrom` so
+     * Testbench never caches a per-test `MigrateProcessor` — which under
+     * `RefreshDatabase` would otherwise run `migrate:rollback` in teardown and
+     * fight the transactional rollback (fatal on Postgres once a test raises
+     * an exception, silently corrupting state on MySQL).
      *
      * @return void
      */
     #[\Override]
     protected function defineDatabaseMigrations(): void
     {
-        $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
-        $this->createStubIdentityTables();
+        \Orchestra\Testbench\load_migration_paths($this->app, __DIR__ . '/../database/migrations');
+    }
 
-        if (env('DB_CONNECTION', 'sqlite') !== 'sqlite') { // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig
-            $this->registerNonSqliteTeardown();
-        }
+    /**
+     * Create fixture tables that live outside the package migrations after the
+     * `migrate:fresh` run has completed.
+     *
+     * Fires on the `DatabaseRefreshed` event, so the stub tables get created
+     * exactly once per phpunit process alongside the package schema.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function defineDatabaseMigrationsAfterDatabaseRefreshed(): void
+    {
+        $this->createStubIdentityTables();
     }
 
     /**
@@ -124,33 +143,6 @@ abstract class TestCase extends OrchestraTestCase
                 $schema->timestamps();
             });
         }
-    }
-
-    /**
-     * On non-SQLite connections the schema persists between runs; register a
-     * teardown hook that drops every configured authorization table plus the
-     * stub-identity tables.
-     *
-     * @return void
-     */
-    private function registerNonSqliteTeardown(): void
-    {
-        $this->beforeApplicationDestroyed(static function (): void {
-            /** @var \Illuminate\Config\Repository $config */
-            $config = app(ConfigRepository::class);
-            /** @var array<string, mixed> $tables */
-            $tables = $config->array('authorization.tables', []);
-
-            foreach ($tables as $table) {
-                if (is_string($table)) {
-                    Schema::dropIfExists($table);
-                }
-            }
-
-            foreach (['stub_identities', 'stub_second_identities', 'stub_tenants'] as $stubTable) {
-                Schema::dropIfExists($stubTable);
-            }
-        });
     }
 
     /**
