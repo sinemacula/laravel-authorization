@@ -8,9 +8,7 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
-use function Orchestra\Testbench\load_migration_paths;
 use Orchestra\Testbench\TestCase as OrchestraTestCase;
-
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 
 /**
@@ -112,7 +110,7 @@ abstract class TestCase extends OrchestraTestCase
     #[\Override]
     protected function defineDatabaseMigrations(): void
     {
-        load_migration_paths($this->app, __DIR__ . '/../database/migrations');
+        \Orchestra\Testbench\load_migration_paths($this->app, __DIR__ . '/../database/migrations');
     }
 
     /**
