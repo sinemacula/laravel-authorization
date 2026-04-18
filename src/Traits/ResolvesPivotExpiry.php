@@ -60,7 +60,7 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      * tells the cache to honour its configured TTL verbatim. A
      * concrete positive integer asks the cache to bound the entry
      * lifetime by that window so it invalidates itself in step
-     * with the DB-level filter — closing ISSUES.md #77.
+     * with the DB-level filter.
      *
      * @param  iterable<int, \Illuminate\Database\Eloquent\Model>  $related
      * @return int|null
@@ -94,8 +94,10 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      * @param  int  $nowTimestamp
      * @return int|null
      */
-    private static function authorizationSecondsUntilPivotExpiry(\Illuminate\Database\Eloquent\Model $model, int $nowTimestamp): ?int
-    {
+    private static function authorizationSecondsUntilPivotExpiry(
+        \Illuminate\Database\Eloquent\Model $model,
+        int $nowTimestamp,
+    ): ?int {
         // Pivots on relation-bound models arrive as either a concrete
         // `Pivot` instance or, in mutation-kill fixtures, a plain
         // `stdClass` with a scalar `expires_at`. The tests in
@@ -175,14 +177,12 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      * the surface-specific grant method.
      *
      * Column names are supplied by the caller from the per-table
-     * `authorization.pivots.*` config block so a consumer who
-     * swaps a pivot column name (type / id / FK / expires_at) at
-     * the config seam sees the override honoured here as well —
-     * closing the coupling regression flagged in #95.
+     * `authorization.pivots.*` config block so a consumer who swaps a
+     * pivot column name (type / id / FK / expires_at) at the config seam
+     * sees the override honoured here as well.
      *
      * Shared by the three authorizable-identity traits so the
-     * expiry-change detection machinery lives in one place (see
-     * #94).
+     * expiry-change detection machinery lives in one place.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $identity
      * @param  string  $table
@@ -190,8 +190,12 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      * @param  string  $targetId
      * @return array{exists: bool, expires_at: \DateTimeInterface|null}
      */
-    private static function authorizationReadGrantPivot(\Illuminate\Database\Eloquent\Model $identity, string $table, array $columns, string $targetId): array
-    {
+    private static function authorizationReadGrantPivot(
+        \Illuminate\Database\Eloquent\Model $identity,
+        string $table,
+        array $columns,
+        string $targetId,
+    ): array {
         $row = DB::table($table)
             ->where($columns['authorizable_type'], $identity->getMorphClass())
             ->where($columns['authorizable_id'], (string) $identity->getKey())
@@ -224,8 +228,11 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      * @param  string  $defaultTarget
      * @return array{authorizable_type: string, authorizable_id: string, target: string, expires_at: string}
      */
-    private static function authorizationResolveGrantPivotColumns(string $pivot, string $targetKey, string $defaultTarget): array
-    {
+    private static function authorizationResolveGrantPivotColumns(
+        string $pivot,
+        string $targetKey,
+        string $defaultTarget,
+    ): array {
         $prefix = 'authorization.pivots.' . $pivot . '.';
 
         /** @var string $type */
@@ -249,7 +256,7 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      * Coerce a raw pivot `expires_at` value (string from a DB
      * query, Carbon, `DateTimeInterface`, or null) into a
      * `DateTimeInterface` or null. Shared by the three
-     * authorizable-identity traits (see #94).
+     * authorizable-identity traits.
      *
      * @param  mixed  $value
      * @return \DateTimeInterface|null
@@ -273,7 +280,7 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      * (forever vs. expiring); two concrete instants are compared
      * by their UTC timestamp so DST and timezone normalisation do
      * not produce spurious false positives. Shared by the three
-     * authorizable-identity traits (see #94).
+     * authorizable-identity traits.
      *
      * @param  \DateTimeInterface|null  $left
      * @param  \DateTimeInterface|null  $right

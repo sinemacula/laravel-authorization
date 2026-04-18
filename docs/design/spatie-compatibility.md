@@ -124,22 +124,22 @@ listed role. The "must have all" case is expressed via middleware chaining (`->m
 
 ## Event names
 
-The package deliberately names its events with explicit scope prefixes rather than adopting Spatie's unqualified
+The package deliberately scopes its events by namespace rather than adopting Spatie's unqualified
 names. The difference is intentional — a `RoleAssigned` listener that expected the role-catalogue lifecycle trio in
-Spatie would silently bind to identity-level assignments in this package, so the names are non-overlapping on
-purpose.
+Spatie would silently bind to identity-level assignments in this package, so the namespace makes the scope explicit
+on purpose.
 
-| Spatie event                | Our event                       | Why the name differs               |
-|-----------------------------|---------------------------------|------------------------------------|
-| `RoleAssigned`              | `IdentityRoleAssigned`          | Explicit identity scope            |
-| `RoleRevoked`               | `IdentityRoleRevoked`           | Explicit identity scope            |
-| `PermissionAssigned`        | `IdentityPermissionGranted`     | Scope + "granted" per IAM vocab    |
-| `PermissionRevoked`         | `IdentityPermissionRevoked`     | Explicit identity scope            |
+| Spatie event                | Our event                                | Why the name differs               |
+|-----------------------------|------------------------------------------|------------------------------------|
+| `RoleAssigned`              | `Events\Identity\RoleAssigned`           | Explicit identity scope            |
+| `RoleRevoked`               | `Events\Identity\RoleRevoked`            | Explicit identity scope            |
+| `PermissionAssigned`        | `Events\Identity\PermissionGranted`      | Scope + "granted" per IAM vocab    |
+| `PermissionRevoked`         | `Events\Identity\PermissionRevoked`      | Explicit identity scope            |
 
-The `Role*`, `Permission*`, and `Policy*` lifecycle events (`RoleCreated`, `PermissionUpdated`, `PolicyDeleted`,
-etc.) cover the *catalogue* lifecycle — the role/permission/policy rows themselves — and are distinct from the
-identity-level events. The `RolePermissionGranted` / `RolePermissionRevoked` pair fires when permissions are
-attached to or detached from a role, which Spatie does not emit as a distinct event.
+The `Events\Role\*`, `Events\Permission\*`, and `Events\Policy\*` lifecycle events (`Created`, `Updated`, `Deleted`)
+cover the *catalogue* lifecycle — the role/permission/policy rows themselves — and are distinct from the
+identity-level events. The `Events\Role\PermissionGranted` / `Events\Role\PermissionRevoked` pair fires when
+permissions are attached to or detached from a role, which Spatie does not emit as a distinct event.
 
 The package also ships `AuthorizationFailed` (hard-denial, fired from `authorize()` before the exception is thrown)
 and `DecisionEvaluated` (every evaluation path, success or denial) — Spatie has no equivalents; audit consumers

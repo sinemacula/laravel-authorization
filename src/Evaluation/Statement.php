@@ -37,13 +37,13 @@ final readonly class Statement
         /** Effect contributed when this statement matches — allow or deny. */
         public PolicyEffect $effect,
 
-        /** Action patterns this statement matches against, evaluated with fnmatch. */
+        /** Action patterns this statement matches, evaluated with fnmatch. */
         public array $actions,
 
         /** Resource patterns this statement applies to; defaults to `['*']`. */
         public array $resources = ['*'],
 
-        /** Condition map keyed by context key, each mapped to an operator payload. */
+        /** Condition map keyed by context key; each value is an operator map. */
         public array $conditions = [],
 
     ) {}
@@ -362,15 +362,15 @@ final readonly class Statement
         }
 
         if (\is_array($expected)) {
-            $result = [];
+            $interpolated = [];
 
             foreach ($expected as $key => $value) {
-                $result[$key] = \is_string($value)
+                $interpolated[$key] = \is_string($value)
                     ? $interpolator->interpolate($value, $principal, $resource, $context)
                     : $value;
             }
 
-            return $result;
+            return $interpolated;
         }
 
         return $expected;
@@ -409,17 +409,17 @@ final readonly class Statement
     private static function evaluateOperator(string $operator, mixed $operand, mixed $actual): bool
     {
         return match ($operator) {
-            'eq'          => $actual === $operand,
-            'neq'         => $actual !== $operand,
-            'in'          => \is_array($operand) && \in_array($actual, $operand, true),
-            'not_in'      => \is_array($operand) && !\in_array($actual, $operand, true),
-            'cidr'        => \is_string($actual) && \is_string($operand) && ConditionEvaluator::matchesCidr($actual, $operand),
-            'starts_with' => \is_string($actual) && \is_string($operand) && \str_starts_with($actual, $operand),
-            'ends_with'   => \is_string($actual) && \is_string($operand) && \str_ends_with($actual, $operand),
+            'eq'     => $actual === $operand,
+            'neq'    => $actual !== $operand,
+            'in'     => \is_array($operand) && \in_array($actual, $operand, true),
+            'not_in' => \is_array($operand) && !\in_array($actual, $operand, true),
+            'cidr',
+            'starts_with',
+            'ends_with',
+            'string_like' => self::evaluateStringOperator($operator, $operand, $actual),
             'before'      => ConditionEvaluator::compareTimes($actual, $operand, '<'),
             'after'       => ConditionEvaluator::compareTimes($actual, $operand, '>'),
             'between'     => ConditionEvaluator::matchesBetween($actual, $operand),
-            'string_like' => \is_string($actual) && \is_string($operand) && \fnmatch($operand, $actual, \FNM_NOESCAPE),
             'null'        => $actual === null,
             'not_null'    => $actual !== null,
             'gt'          => ConditionEvaluator::compareNumeric($actual, $operand, '>'),
@@ -428,6 +428,31 @@ final readonly class Statement
             'lte'         => ConditionEvaluator::compareNumeric($actual, $operand, '<='),
             'bool'        => ConditionEvaluator::matchesBool($actual, $operand),
             default       => ConditionEvaluator::logUnknownOperator($operator),
+        };
+    }
+
+    /**
+     * Evaluate the string-predicate operators (`cidr`, `starts_with`,
+     * `ends_with`, `string_like`) — all of which require both sides
+     * to be strings before dispatching to their concrete predicate.
+     *
+     * @param  string  $operator
+     * @param  mixed  $operand
+     * @param  mixed  $actual
+     * @return bool
+     */
+    private static function evaluateStringOperator(string $operator, mixed $operand, mixed $actual): bool
+    {
+        if (!\is_string($actual) || !\is_string($operand)) {
+            return false;
+        }
+
+        return match ($operator) {
+            'cidr'        => ConditionEvaluator::matchesCidr($actual, $operand),
+            'starts_with' => \str_starts_with($actual, $operand),
+            'ends_with'   => \str_ends_with($actual, $operand),
+            'string_like' => \fnmatch($operand, $actual, \FNM_NOESCAPE),
+            default       => false,
         };
     }
 }

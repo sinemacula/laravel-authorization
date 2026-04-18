@@ -16,7 +16,7 @@ use Illuminate\Database\Eloquent\Relations\MorphPivot;
  * split lets future per-table fields (tenant scoping, granted-by
  * audit, policy-attachment approval workflow) land on the specific
  * subclass without leaking the cast surface across the other two
- * tables (see issue #90).
+ * tables.
  *
  * Consumers inspecting `$role->pivot->expires_at` receive a
  * `Carbon|null` (matching the relation docblocks) rather than the
@@ -29,11 +29,7 @@ use Illuminate\Database\Eloquent\Relations\MorphPivot;
  */
 abstract class AuthorizableGrantPivot extends MorphPivot
 {
-    /**
-     * Cast map for the pivot row.
-     *
-     * @var array<string, string>
-     */
+    /** @var array<string, string> Cast map for the pivot row. */
     protected $casts = [
         'expires_at' => 'datetime',
     ];

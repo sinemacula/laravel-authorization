@@ -27,7 +27,7 @@ class InvalidAuthorizationNameException extends \RuntimeException
      */
     public function __construct(
 
-        /** Short label identifying the entity whose name was rejected ("role" or "permission"). */
+        /** Short label for the rejected entity ("role" or "permission"). */
         private readonly string $kind,
 
         /** Offending name attribute as it was supplied to the model. */

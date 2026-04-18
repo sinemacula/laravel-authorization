@@ -15,7 +15,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
  * a distinct signal a consumer who re-grants an existing forever
  * permission with an expiry would shorten it (or extend an
  * expiring grant to forever) without an audit trail. This event
- * fires alongside `IdentityPermissionGranted` whenever the prior
+ * fires alongside `PermissionGranted` whenever the prior
  * pivot's `expires_at` differs from the supplied value, so audit
  * consumers can render the expiry mutation as its own row.
  *
@@ -27,7 +27,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class IdentityPermissionExpiryChanged
+final readonly class PermissionExpiryChanged implements IdentityEvent
 {
     /**
      * Create a new event instance.

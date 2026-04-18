@@ -13,7 +13,7 @@ namespace SineMacula\Laravel\Authorization\Models\Pivots;
  * across three tables) so future per-table fields — tenant
  * scoping, granted-by audit, approval workflow — can land here
  * without leaking across the sibling `authorizable_permissions`
- * and `authorizable_policies` tables (see issue #90).
+ * and `authorizable_policies` tables.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

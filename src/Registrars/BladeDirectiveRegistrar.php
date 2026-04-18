@@ -25,7 +25,7 @@ use SineMacula\Laravel\Authorization\Support\BladeHelpers;
  * Every canonical and compat name gets a matching
  * `@endunless<name>` alias that emits the same `endif;`, so both
  * idioms compile cleanly regardless of which closing spelling the
- * consumer reaches for (see issue #86).
+ * consumer reaches for.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

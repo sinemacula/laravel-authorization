@@ -6,8 +6,8 @@ namespace SineMacula\Laravel\Authorization\Traits;
 
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Support\Facades\Event;
-use SineMacula\Laravel\Authorization\Events\Role\RolePermissionGranted;
-use SineMacula\Laravel\Authorization\Events\Role\RolePermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\Role\PermissionGranted as RolePermissionGranted;
+use SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked as RolePermissionRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
@@ -44,8 +44,12 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
+     * @formatter:off
+     *
      * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany<\SineMacula\Laravel\Authorization\Models\Permission, $this,
      *     \SineMacula\Laravel\Authorization\Models\Pivots\RolePermission, 'pivot'>
+     *
+     * @formatter:on
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      */
@@ -267,7 +271,7 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
      * back to the package default when the role itself is
      * guard-agnostic (null `guard_name`). Delegates the query to
      * `Permission::resolveByName()` so both sides share one
-     * implementation (see #55).
+     * implementation.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return \SineMacula\Laravel\Authorization\Models\Permission

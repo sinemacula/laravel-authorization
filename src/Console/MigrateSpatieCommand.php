@@ -25,11 +25,7 @@ use Illuminate\Support\Str;
  */
 class MigrateSpatieCommand extends Command
 {
-    /**
-     * Spatie source table names.
-     *
-     * @var list<string>
-     */
+    /** @var list<string> Spatie source table names. */
     private const array SPATIE_TABLES = [
         'roles',
         'permissions',
@@ -38,21 +34,13 @@ class MigrateSpatieCommand extends Command
         'model_has_permissions',
     ];
 
-    /**
-     * The console command signature.
-     *
-     * @var string
-     */
+    /** @var string The console command signature. */
     protected $signature = <<<'EOD'
         authorization:migrate-spatie
                                     {--dry-run : Report counts without writing}
         EOD;
 
-    /**
-     * The console command description.
-     *
-     * @var string
-     */
+    /** @var string The console command description. */
     protected $description = 'Migrate data from Spatie laravel-permission tables into this package';
 
     /**
@@ -87,13 +75,7 @@ class MigrateSpatieCommand extends Command
             'authorizable_permissions' => 0,
         ];
 
-        /** @var array<int|string, string> $roleIdMap */
-        $roleIdMap = [];
-
-        /** @var array<int|string, string> $permissionIdMap */
-        $permissionIdMap = [];
-
-        $callback = function () use ($dryRun, &$counts, &$roleIdMap, &$permissionIdMap): void {
+        $callback = function () use ($dryRun, &$counts): void {
             $roleIdMap       = $this->migrateRoles($dryRun, $counts);
             $permissionIdMap = $this->migratePermissions($dryRun, $counts);
             $this->migrateRolePermissions($roleIdMap, $permissionIdMap, $dryRun, $counts);
@@ -107,6 +89,21 @@ class MigrateSpatieCommand extends Command
             DB::transaction($callback);
         }
 
+        $this->renderMigrationSummary($counts, $dryRun);
+
+        return self::SUCCESS;
+    }
+
+    /**
+     * Render the post-migration summary table and the dry-run
+     * reminder when applicable.
+     *
+     * @param  array<string, int>  $counts
+     * @param  bool  $dryRun
+     * @return void
+     */
+    private function renderMigrationSummary(array $counts, bool $dryRun): void
+    {
         $this->line('');
         $this->info('Migration summary:');
         $this->table(
@@ -122,8 +119,6 @@ class MigrateSpatieCommand extends Command
             $this->line('');
             $this->warn('No data was written (dry run). Re-run without --dry-run to apply.');
         }
-
-        return self::SUCCESS;
     }
 
     /**
@@ -191,19 +186,19 @@ class MigrateSpatieCommand extends Command
         $rows = DB::table('roles')->get();
 
         foreach ($rows as $row) {
-            /** @var array{id: int|string, name: string, guard_name: string|null, created_at: string|null, updated_at: string|null} $data */
-            $data  = (array) $row;
-            $newId = \is_int($data['id']) ? (string) Str::orderedUuid() : $data['id'];
+            /** @var array{id: int|string, name: string, guard_name: string|null, created_at: string|null, updated_at: string|null} $roleRow */
+            $roleRow = (array) $row;
+            $newId   = \is_int($roleRow['id']) ? (string) Str::orderedUuid() : $roleRow['id'];
 
-            $idMap[$data['id']] = $newId;
+            $idMap[$roleRow['id']] = $newId;
 
             if (!$dryRun) {
                 DB::table($targetTable)->insert([
                     'id'         => $newId,
-                    'name'       => $data['name'],
-                    'guard_name' => $data['guard_name'] ?? null,
-                    'created_at' => $data['created_at'] ?? now(),
-                    'updated_at' => $data['updated_at'] ?? now(),
+                    'name'       => $roleRow['name'],
+                    'guard_name' => $roleRow['guard_name'] ?? null,
+                    'created_at' => $roleRow['created_at'] ?? now(),
+                    'updated_at' => $roleRow['updated_at'] ?? now(),
                 ]);
             }
 
@@ -231,19 +226,19 @@ class MigrateSpatieCommand extends Command
         $rows = DB::table('permissions')->get();
 
         foreach ($rows as $row) {
-            /** @var array{id: int|string, name: string, guard_name: string|null, created_at: string|null, updated_at: string|null} $data */
-            $data  = (array) $row;
-            $newId = \is_int($data['id']) ? (string) Str::orderedUuid() : $data['id'];
+            /** @var array{id: int|string, name: string, guard_name: string|null, created_at: string|null, updated_at: string|null} $permissionRow */
+            $permissionRow = (array) $row;
+            $newId         = \is_int($permissionRow['id']) ? (string) Str::orderedUuid() : $permissionRow['id'];
 
-            $idMap[$data['id']] = $newId;
+            $idMap[$permissionRow['id']] = $newId;
 
             if (!$dryRun) {
                 DB::table($targetTable)->insert([
                     'id'         => $newId,
-                    'name'       => $data['name'],
-                    'guard_name' => $data['guard_name'] ?? null,
-                    'created_at' => $data['created_at'] ?? now(),
-                    'updated_at' => $data['updated_at'] ?? now(),
+                    'name'       => $permissionRow['name'],
+                    'guard_name' => $permissionRow['guard_name'] ?? null,
+                    'created_at' => $permissionRow['created_at'] ?? now(),
+                    'updated_at' => $permissionRow['updated_at'] ?? now(),
                 ]);
             }
 
@@ -262,18 +257,22 @@ class MigrateSpatieCommand extends Command
      * @param  array<string, int>  $counts
      * @return void
      */
-    private function migrateRolePermissions(array $roleIdMap, array $permissionIdMap, bool $dryRun, array &$counts): void
-    {
+    private function migrateRolePermissions(
+        array $roleIdMap,
+        array $permissionIdMap,
+        bool $dryRun,
+        array &$counts,
+    ): void {
         /** @var string $targetTable */
         $targetTable = config('authorization.tables.role_permissions', 'role_permissions');
 
         $rows = DB::table('role_has_permissions')->get();
 
         foreach ($rows as $row) {
-            /** @var array{permission_id: int|string, role_id: int|string} $data */
-            $data               = (array) $row;
-            $mappedRoleId       = $roleIdMap[$data['role_id']]             ?? null;
-            $mappedPermissionId = $permissionIdMap[$data['permission_id']] ?? null;
+            /** @var array{permission_id: int|string, role_id: int|string} $rolePermissionRow */
+            $rolePermissionRow  = (array) $row;
+            $mappedRoleId       = $roleIdMap[$rolePermissionRow['role_id']]             ?? null;
+            $mappedPermissionId = $permissionIdMap[$rolePermissionRow['permission_id']] ?? null;
 
             if ($mappedRoleId === null || $mappedPermissionId === null) {
                 continue;
@@ -306,9 +305,9 @@ class MigrateSpatieCommand extends Command
         $rows = DB::table('model_has_roles')->get();
 
         foreach ($rows as $row) {
-            /** @var array{role_id: int|string, model_type: string, model_id: int|string} $data */
-            $data         = (array) $row;
-            $mappedRoleId = $roleIdMap[$data['role_id']] ?? null;
+            /** @var array{role_id: int|string, model_type: string, model_id: int|string} $modelRoleRow */
+            $modelRoleRow = (array) $row;
+            $mappedRoleId = $roleIdMap[$modelRoleRow['role_id']] ?? null;
 
             if ($mappedRoleId === null) {
                 continue;
@@ -316,8 +315,8 @@ class MigrateSpatieCommand extends Command
 
             if (!$dryRun) {
                 DB::table($targetTable)->insert([
-                    'authorizable_type' => $data['model_type'],
-                    'authorizable_id'   => (string) $data['model_id'],
+                    'authorizable_type' => $modelRoleRow['model_type'],
+                    'authorizable_id'   => (string) $modelRoleRow['model_id'],
                     'role_id'           => $mappedRoleId,
                 ]);
             }
@@ -342,9 +341,9 @@ class MigrateSpatieCommand extends Command
         $rows = DB::table('model_has_permissions')->get();
 
         foreach ($rows as $row) {
-            /** @var array{permission_id: int|string, model_type: string, model_id: int|string} $data */
-            $data               = (array) $row;
-            $mappedPermissionId = $permissionIdMap[$data['permission_id']] ?? null;
+            /** @var array{permission_id: int|string, model_type: string, model_id: int|string} $modelPermissionRow */
+            $modelPermissionRow = (array) $row;
+            $mappedPermissionId = $permissionIdMap[$modelPermissionRow['permission_id']] ?? null;
 
             if ($mappedPermissionId === null) {
                 continue;
@@ -352,8 +351,8 @@ class MigrateSpatieCommand extends Command
 
             if (!$dryRun) {
                 DB::table($targetTable)->insert([
-                    'authorizable_type' => $data['model_type'],
-                    'authorizable_id'   => (string) $data['model_id'],
+                    'authorizable_type' => $modelPermissionRow['model_type'],
+                    'authorizable_id'   => (string) $modelPermissionRow['model_id'],
                     'permission_id'     => $mappedPermissionId,
                 ]);
             }

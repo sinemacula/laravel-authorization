@@ -10,9 +10,9 @@ use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleAssigned;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleRevoked;
+use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned as IdentityRoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged as IdentityRoleExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked as IdentityRoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizableRolePivot;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -227,7 +227,7 @@ trait HasRoles // @phpstan-ignore trait.unused
      * tags). The persistent-tier TTL is additionally bounded by
      * the nearest upcoming `expires_at` across the relation's
      * pivot rows so temporal grants invalidate themselves at the
-     * exact moment they lapse (#77).
+     * exact moment they lapse.
      *
      * @return array<int, string>
      */
@@ -328,7 +328,7 @@ trait HasRoles // @phpstan-ignore trait.unused
      * guard routes its lookups against its own guard's rows instead
      * of the package default. Delegates the actual query to
      * `Role::resolveByName()` so both identity-side and any other
-     * caller share one implementation (see #96).
+     * caller share one implementation.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @return \SineMacula\Laravel\Authorization\Models\Role

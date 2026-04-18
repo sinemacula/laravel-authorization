@@ -7,7 +7,7 @@ namespace SineMacula\Laravel\Authorization\Events\Identity;
 use SineMacula\Laravel\Authorization\Models\Policy;
 
 /**
- * Dispatched when a policy is detached from an authorizable identity.
+ * Dispatched when a policy is attached to an authorizable identity.
  *
  * Part of the SemVer-stable event API; breaking changes require a
  * major version bump.
@@ -17,7 +17,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class IdentityPolicyDetached
+final readonly class PolicyAttached implements IdentityEvent
 {
     /**
      * Create a new event instance.
@@ -27,10 +27,10 @@ final readonly class IdentityPolicyDetached
      */
     public function __construct(
 
-        /** Authorizable identity that the policy was detached from. */
+        /** Authorizable identity that the policy was attached to. */
         public object $authorizable,
 
-        /** Policy row that was detached from the identity. */
+        /** Policy row that was attached to the identity. */
         public Policy $policy,
 
     ) {}

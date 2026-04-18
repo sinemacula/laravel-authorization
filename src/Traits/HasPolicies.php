@@ -9,9 +9,9 @@ use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyAttached;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyDetached;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Identity\PolicyAttached as IdentityPolicyAttached;
+use SineMacula\Laravel\Authorization\Events\Identity\PolicyDetached as IdentityPolicyDetached;
+use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged as IdentityPolicyExpiryChanged;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePolicyPivot;
 use SineMacula\Laravel\Authorization\Models\Policy;
 
@@ -44,8 +44,12 @@ trait HasPolicies // @phpstan-ignore trait.unused
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
+     * @formatter:off
+     *
      * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy, $this,
      *     \SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePolicyPivot, 'pivot'>
+     *
+     * @formatter:on
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      */
@@ -172,7 +176,12 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * that resolve to a non-Policy model (or nothing) are
      * skipped without raising.
      *
+     * @formatter:off
+     *
      * @param  array<int, \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Models\Policy>  $policies
+     *
+     * @formatter:on
+     *
      * @return static
      */
     public function syncPolicies(array $policies): static

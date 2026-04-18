@@ -12,7 +12,7 @@ namespace SineMacula\Laravel\Authorization\Enums;
  * to register. Backed by strings so consumers configure the
  * policy with a human-readable sentinel in `config/authorization.php`
  * while the service provider and validator consume a type-checked
- * enum value instead of a stringly-typed `match` (see issue #58).
+ * enum value instead of a stringly-typed `match`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

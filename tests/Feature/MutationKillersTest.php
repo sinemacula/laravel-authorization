@@ -474,7 +474,7 @@ final class MutationKillersTest extends TestCase
     public function testAssignRoleIsIdempotentWhenExpiryUnchanged(): void
     {
         \Illuminate\Support\Facades\Event::fake(
-            [\SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleExpiryChanged::class],
+            [\SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged::class],
         );
 
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'idem', 'guard_name' => 'web']);
@@ -493,7 +493,7 @@ final class MutationKillersTest extends TestCase
         }
 
         \Illuminate\Support\Facades\Event::assertNotDispatched(
-            \SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleExpiryChanged::class,
+            \SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged::class,
         );
     }
 
@@ -507,7 +507,7 @@ final class MutationKillersTest extends TestCase
     public function testAssignRoleFiresExpiryChangedWhenWindowMoves(): void
     {
         \Illuminate\Support\Facades\Event::fake(
-            [\SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleExpiryChanged::class],
+            [\SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged::class],
         );
 
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'moving', 'guard_name' => 'web']);
@@ -525,7 +525,7 @@ final class MutationKillersTest extends TestCase
         }
 
         \Illuminate\Support\Facades\Event::assertDispatchedTimes(
-            \SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleExpiryChanged::class,
+            \SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged::class,
             1,
         );
     }
@@ -539,7 +539,7 @@ final class MutationKillersTest extends TestCase
     public function testGivePermissionFiresExpiryChangedWhenWindowMoves(): void
     {
         \Illuminate\Support\Facades\Event::fake(
-            [\SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionExpiryChanged::class],
+            [\SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged::class],
         );
 
         $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'p:m', 'guard_name' => 'web']);
@@ -557,7 +557,7 @@ final class MutationKillersTest extends TestCase
         }
 
         \Illuminate\Support\Facades\Event::assertDispatchedTimes(
-            \SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionExpiryChanged::class,
+            \SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged::class,
             1,
         );
     }
@@ -1011,7 +1011,7 @@ final class MutationKillersTest extends TestCase
     public function testAttachPolicyFiresExpiryChangedWhenWindowMoves(): void
     {
         \Illuminate\Support\Facades\Event::fake(
-            [\SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyExpiryChanged::class],
+            [\SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged::class],
         );
 
         $policy = \SineMacula\Laravel\Authorization\Models\Policy::create([
@@ -1033,7 +1033,7 @@ final class MutationKillersTest extends TestCase
         }
 
         \Illuminate\Support\Facades\Event::assertDispatchedTimes(
-            \SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyExpiryChanged::class,
+            \SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged::class,
             1,
         );
     }

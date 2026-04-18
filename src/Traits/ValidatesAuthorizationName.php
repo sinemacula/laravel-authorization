@@ -29,7 +29,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameExceptio
  */
 trait ValidatesAuthorizationName // @phpstan-ignore trait.unused
 {
-    /** Pattern permitted in role and permission names. */
+    /** @var string Pattern permitted in role and permission names. */
     private const string NAME_PATTERN = '/^[A-Za-z0-9_\-:*]+$/';
 
     /**

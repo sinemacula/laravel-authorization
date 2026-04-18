@@ -278,8 +278,7 @@ final class ConfigValidator
      * Every value — scalar or otherwise — is rendered in the same
      * shape: the literal followed by the parenthesised debug type.
      * Operators grepping production logs for misconfiguration get
-     * predictable output regardless of the value's runtime type
-     * (see issue #74).
+     * predictable output regardless of the value's runtime type.
      *
      * @param  mixed  $value
      * @return string

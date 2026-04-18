@@ -14,6 +14,8 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
  * call is forwarded to a fresh manager scope so `for()` /
  * `withPolicies()` chains do not leak between requests.
  *
+ * @formatter:off
+ *
  * @method static bool can(string $action, string|null $resource = null, array<string, mixed> $context = [])
  * @method static void authorize(string $action, string|null $resource = null, array<string, mixed> $context = [])
  * @method static \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult evaluate(string $action, string|null $resource = null, array<string, mixed> $context = [])
@@ -24,6 +26,8 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
  * @method static string explain(string $action, string|null $resource = null, array<string, mixed> $context = [])
  * @method static array<string, bool> effectivePermissions(array<string, mixed> $context = [])
  * @method static object|null currentPrincipal()
+ *
+ * @formatter:on
  *
  * @see AuthorizationManager
  *

@@ -39,19 +39,19 @@ final readonly class DecisionEvaluated
      */
     public function __construct(
 
-        /** Acting principal at the time of evaluation, or null when anonymous. */
+        /** Acting principal at evaluation time, or null when anonymous. */
         public ?object $principal,
 
         /** Action string that was checked. */
         public string $action,
 
-        /** Resource identifier the action targets, or null for resource-less checks. */
+        /** Resource identifier the action targets; null for resource-less. */
         public ?string $resource,
 
         /** Evaluation context passed through to policy statements. */
         public array $context,
 
-        /** Final evaluation result, including the reproducible statement trace. */
+        /** Final evaluation result, including the reproducible trace. */
         public EvaluationResult $result,
 
     ) {}

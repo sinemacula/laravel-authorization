@@ -9,9 +9,9 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionGranted;
-use SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged as IdentityPermissionExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted as IdentityPermissionGranted;
+use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked as IdentityPermissionRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePermissionPivot;
@@ -47,8 +47,12 @@ trait HasPermissions // @phpstan-ignore trait.unused
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
+     * @formatter:off
+     *
      * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Permission, $this,
      *     \SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePermissionPivot, 'pivot'>
+     *
+     * @formatter:on
      *
      * @phpcs:enable Generic.Files.LineLength.TooLong
      */
@@ -226,13 +230,12 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * Return the union of direct and role-inherited permission names.
      *
      * The persistent-tier TTL is bounded by the nearest upcoming
-     * `expires_at` across both the identity's direct permission
-     * pivot and its role pivot, so temporal grants on either
-     * side invalidate the entry at the moment they lapse (#77).
-     * The role IDs are tagged into the entry so a
-     * `RolePermissionGranted` / `RolePermissionRevoked` event
-     * flushes every principal carrying the mutated role on
-     * tag-capable stores (#68).
+     * `expires_at` across both the identity's direct permission pivot
+     * and its role pivot, so temporal grants on either side invalidate
+     * the entry at the moment they lapse. The role IDs are tagged into
+     * the entry so a `RolePermissionGranted` / `RolePermissionRevoked`
+     * event flushes every principal carrying the mutated role on
+     * tag-capable stores.
      *
      * @return array<int, string>
      */
@@ -316,7 +319,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * guard routes its lookups against its own guard's rows instead
      * of the package default. Delegates the actual query to
      * `Permission::resolveByName()` so both identity-side and
-     * role-side lookups share one implementation (see #55).
+     * role-side lookups share one implementation.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return \SineMacula\Laravel\Authorization\Models\Permission

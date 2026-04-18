@@ -15,17 +15,9 @@ use SineMacula\Laravel\Authorization\Exceptions\GateConflictException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 
 /**
- * Walk every configured permission enum and register a matching
- * Laravel Gate.
- *
- * Laravel's Gate never dispatches to an action it has not been told
- * about, so an empty `authorization.permission_enums` config leaves
- * `Gate::allows(...)`, `$user->can(...)`, `@can(...)`, and the
- * `can:` middleware silent — they return false for every action.
- * The `Authorization` facade still works out of the box; the Gate
- * surface only lights up once a `PermissionEnum` is registered
- * here. Consumers using the facade exclusively can leave the
- * config empty and this registrar is a no-op.
+ * Walk every configured permission enum and register a matching Laravel
+ * Gate. With no enums configured the registrar is a no-op and the Gate
+ * surface stays silent; the `Authorization` facade continues to work.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -92,15 +84,8 @@ final class GateRegistrar
     }
 
     /**
-     * Register a single Gate for the supplied enum case.
-     *
-     * Single decision point for every conflict mode. `match` over
-     * the enum is exhaustive at PHPStan level 8 — adding a future
-     * `GateConflictMode` case becomes a clear "unhandled match"
-     * error here rather than silent fall-through under `switch`.
-     * THROW short-circuits with an exception, OVERWRITE proceeds to
-     * redefine the gate, and LOG records the conflict and abandons
-     * the redefine.
+     * Register a single Gate for the supplied enum case, honouring
+     * the configured conflict mode.
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\PermissionEnum  $case
      * @param  \SineMacula\Laravel\Authorization\Enums\GateConflictMode  $onConflict
@@ -113,6 +98,8 @@ final class GateRegistrar
         $permission = $case->toString();
 
         if (Gate::has($permission)) {
+            // Exhaustive match over GateConflictMode: Throw short-circuits,
+            // Overwrite falls through to redefine, Log records and bails.
             $shouldDefine = match ($onConflict) {
                 GateConflictMode::THROW     => throw new GateConflictException($permission),
                 GateConflictMode::OVERWRITE => true,
@@ -143,33 +130,10 @@ final class GateRegistrar
     }
 
     /**
-     * Translate the arguments Laravel hands to a Gate callback into
-     * the `(resource, context)` pair the authorization manager
-     * accepts.
-     *
-     * Laravel's Gate spreads the argument tail into the callback
-     * with PHP's `...` operator, so an associative array ends up in
-     * the variadic parameter under its original string keys rather
-     * than at numeric index 0. The translation treats positional
-     * entries (integer keys) and named entries (string keys)
-     * separately:
-     *
-     * - The first positional argument is the resource identifier.
-     *   Strings pass through unchanged, Eloquent models become
-     *   `{morphClass}:{key}` (matching the polymorphic pivots'
-     *   convention — register a morph alias on the consumer side
-     *   to avoid FQN backslashes leaking into resource strings),
-     *   stringable objects are cast via `__toString`, and anything
-     *   else yields a null resource.
-     * - A positional array at index 0 that is string-keyed is
-     *   treated as a context map with no resource, covering the
-     *   `Gate::allows('edit', ['tenant' => '…'])` idiom.
-     * - Any string-keyed array found after the resource slot is
-     *   merged into the context. String-keyed entries in the
-     *   variadic itself (PHP spread of an assoc array) flow
-     *   directly into the context.
-     * - Unmappable trailing positional values are discarded rather
-     *   than guessed at.
+     * Translate the arguments Laravel hands to a Gate callback into the
+     * `(resource, context)` pair the authorization manager accepts.
+     * Positional entries map to the resource identifier; string keys and
+     * string-keyed arrays merge into the context map.
      *
      * @param  array<int|string, mixed>  $arguments
      * @return array{0: string|null, 1: array<string, mixed>}

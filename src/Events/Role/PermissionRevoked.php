@@ -8,12 +8,12 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
- * Dispatched when a permission is attached to a role.
+ * Dispatched when a permission is detached from a role.
  *
- * Distinct from `IdentityPermissionGranted`, which fires when a
- * permission is attached directly to an authorizable identity. Audit
- * consumers use the event class to distinguish role-catalogue
- * mutations from identity-level grants.
+ * Distinct from `IdentityPermissionRevoked`, which fires when a
+ * direct permission grant is removed from an authorizable identity.
+ * Audit consumers use the event class to distinguish role-catalogue
+ * mutations from identity-level revocations.
  *
  * Part of the SemVer-stable event API; breaking changes require a
  * major version bump.
@@ -23,7 +23,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class RolePermissionGranted
+final readonly class PermissionRevoked
 {
     /**
      * Create a new event instance.
@@ -33,10 +33,10 @@ final readonly class RolePermissionGranted
      */
     public function __construct(
 
-        /** Role that received the permission attachment. */
+        /** Role whose permission attachment was removed. */
         public Role $role,
 
-        /** Permission that was attached to the role. */
+        /** Permission that was detached from the role. */
         public Permission $permission,
 
     ) {}
