@@ -12,16 +12,15 @@ use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
 /**
  * Performance budget for `Policy::fromArray()`.
  *
- * The parse path turns serialised policy documents into immutable
- * `Policy` value objects on every cache-miss boundary — cold-start
- * hydration, corrupt-entry recovery, and the persistent tier's cold
- * read. A regression in parse throughput compounds across every
- * cache miss in a request, so the suite codifies a loose wall-clock
- * budget to catch runaway allocations or accidental reflection use
- * in the parse path.
+ * The parse path turns serialised policy documents into immutable `Policy`
+ * value objects on every cache-miss boundary — cold-start hydration,
+ * corrupt-entry recovery, and the persistent tier's cold read. A regression in
+ * parse throughput compounds across every cache miss in a request, so the suite
+ * codifies a loose wall-clock budget to catch runaway allocations or accidental
+ * reflection use in the parse path.
  *
- * Budget is set generously — the PHPBench suite tracks the actual
- * micro-trend, this test is the safety net.
+ * Budget is set generously — the PHPBench suite tracks the actual micro-trend,
+ * this test is the safety net.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -35,9 +34,9 @@ use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
 final class PolicyParseBudgetTest extends TestCase
 {
     /**
-     * Parsing a 20-statement policy document (each with 5 actions,
-     * 3 resources, and 2 conditions) 1,000 times must complete in
-     * under one second on the reference machine.
+     * Parsing a 20-statement policy document (each with 5 actions, 3 resources,
+     * and 2 conditions) 1,000 times must complete in under one second on the
+     * reference machine.
      *
      * @return void
      */
@@ -61,10 +60,9 @@ final class PolicyParseBudgetTest extends TestCase
     }
 
     /**
-     * Build the fixture document — kept here rather than in a
-     * shared helper so the performance suite has no runtime
-     * dependency on the benchmark-support tree and stays
-     * self-contained.
+     * Build the fixture document — kept here rather than in a shared helper so
+     * the performance suite has no runtime dependency on the benchmark-support
+     * tree and stays self-contained.
      *
      * @return array<string, mixed>
      */

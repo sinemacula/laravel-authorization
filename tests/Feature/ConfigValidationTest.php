@@ -20,9 +20,9 @@ use Tests\TestCase;
 /**
  * Feature coverage for the boot-time config validator.
  *
- * Every supported key gets a rejection case (type mismatch,
- * missing class, wrong contract, unknown cache store) and a
- * happy-path case so the defaults keep passing.
+ * Every supported key gets a rejection case (type mismatch, missing class,
+ * wrong contract, unknown cache store) and a happy-path case so the defaults
+ * keep passing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,8 +42,8 @@ use Tests\TestCase;
 final class ConfigValidationTest extends TestCase
 {
     /**
-     * The shipped defaults pass validation end-to-end — booting
-     * the provider with the merged config must not throw.
+     * The shipped defaults pass validation end-to-end — booting the provider
+     * with the merged config must not throw.
      *
      * @return void
      */
@@ -74,8 +74,8 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * `gate.on_conflict` outside the three sentinels is rejected
-     * with a pointer to the offending key.
+     * `gate.on_conflict` outside the three sentinels is rejected with a pointer
+     * to the offending key.
      *
      * @return void
      */
@@ -95,8 +95,8 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * A `permission_enums` entry that does not resolve to a class
-     * is rejected with a concrete error.
+     * A `permission_enums` entry that does not resolve to a class is rejected
+     * with a concrete error.
      *
      * @return void
      */
@@ -116,8 +116,8 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * A `permission_enums` entry that resolves to a class not
-     * implementing the contract is rejected.
+     * A `permission_enums` entry that resolves to a class not implementing the
+     * contract is rejected.
      *
      * @return void
      */
@@ -133,8 +133,8 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * A null `principal_resolver` is rejected — the package ships
-     * a safe default that consumers can fall back to explicitly.
+     * A null `principal_resolver` is rejected — the package ships a safe
+     * default that consumers can fall back to explicitly.
      *
      * @return void
      */
@@ -154,8 +154,8 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * A `principal_resolver` value that does not implement the
-     * contract is rejected.
+     * A `principal_resolver` value that does not implement the contract is
+     * rejected.
      *
      * @return void
      */
@@ -187,8 +187,8 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * A non-null `policy_store` that does not implement the
-     * contract is rejected.
+     * A non-null `policy_store` that does not implement the contract is
+     * rejected.
      *
      * @return void
      */
@@ -204,8 +204,8 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * An unknown `cache.store` name is rejected with a helpful
-     * message identifying the missing store.
+     * An unknown `cache.store` name is rejected with a helpful message
+     * identifying the missing store.
      *
      * @return void
      */
@@ -225,8 +225,8 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * A configured cache store (`array` is always available in
-     * Testbench) passes validation.
+     * A configured cache store (`array` is always available in Testbench)
+     * passes validation.
      *
      * @return void
      */
@@ -255,8 +255,8 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * Non-string `permission_enums` entries are caught before any
-     * class lookup runs.
+     * Non-string `permission_enums` entries are caught before any class lookup
+     * runs.
      *
      * @param  mixed  $entry
      * @return void
@@ -274,9 +274,8 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * Passing an already-coerced `GateConflictMode` value skips
-     * the string path and passes validation. Covers the enum-type
-     * migration in issue #58.
+     * Passing an already-coerced `GateConflictMode` value skips the string path
+     * and passes validation.
      *
      * @return void
      */
@@ -292,10 +291,9 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * The validator lists every enum-backed sentinel in its
-     * rejection message — the operator gets the accepted set
-     * verbatim without having to find the enum source. Covers
-     * #58 together with the consistent describe-shape fix (#74).
+     * The validator lists every enum-backed sentinel in its rejection message —
+     * the operator gets the accepted set verbatim without having to find the
+     * enum source.
      *
      * @return void
      */
@@ -323,9 +321,9 @@ final class ConfigValidationTest extends TestCase
     // ------------------------------------------------------------------
 
     /**
-     * `permission_enums` wrong-contract rejection message includes
-     * both the class name and the contract name. Kills Concat and
-     * ConcatOperandRemoval mutants on line 81.
+     * `permission_enums` wrong-contract rejection message includes both the
+     * class name and the contract name. Kills Concat and ConcatOperandRemoval
+     * mutants on line 81.
      *
      * @return void
      */
@@ -347,9 +345,9 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * `permission_providers` wrong-contract rejection message includes
-     * both the class name and the contract name. Kills Concat and
-     * ConcatOperandRemoval mutants on line 111.
+     * `permission_providers` wrong-contract rejection message includes both the
+     * class name and the contract name. Kills Concat and ConcatOperandRemoval
+     * mutants on line 111.
      *
      * @return void
      */
@@ -371,9 +369,9 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * `gate.on_conflict` rejection message includes the value
-     * description and the accepted sentinel list. Kills Concat
-     * and ConcatOperandRemoval mutants on line 139.
+     * `gate.on_conflict` rejection message includes the value description and
+     * the accepted sentinel list. Kills Concat and ConcatOperandRemoval mutants
+     * on line 139.
      *
      * @return void
      */
@@ -399,9 +397,9 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * `principal_resolver` rejection message when passed a
-     * non-string. Kills Concat and ConcatOperandRemoval on line 157
-     * (via assertImplementsContract at line 262).
+     * `principal_resolver` rejection message when passed a non-string. Kills
+     * Concat and ConcatOperandRemoval on line 157 (via assertImplementsContract
+     * at line 262).
      *
      * @return void
      */
@@ -423,8 +421,8 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * `assertImplementsContract` with a missing class. Kills Concat
-     * mutants on line 244 (via the "does not exist" branch).
+     * `assertImplementsContract` with a missing class. Kills Concat mutants on
+     * line 244 (via the "does not exist" branch).
      *
      * @return void
      */
@@ -445,9 +443,9 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * `assertImplementsContract` with a class that doesn't implement
-     * the contract. Kills Concat mutants on line 262 (the "does not
-     * implement" branch) and the LogicalAnd on line 269.
+     * `assertImplementsContract` with a class that doesn't implement the
+     * contract. Kills Concat mutants on line 262 (the "does not implement"
+     * branch) and the LogicalAnd on line 269.
      *
      * @return void
      */
@@ -469,8 +467,8 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * `cache.store` non-string rejection message shape. Kills
-     * Concat and ConcatOperandRemoval on line 234 (via describe()).
+     * `cache.store` non-string rejection message shape. Kills Concat and
+     * ConcatOperandRemoval on line 234 (via describe()).
      *
      * @return void
      */
@@ -508,9 +506,9 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * Throw_ removal on line 266: if the assertImplementsContract
-     * throw is removed, no exception occurs for a wrong-contract class.
-     * This test proves the throw is essential.
+     * Throw_ removal on line 266: if the assertImplementsContract throw is
+     * removed, no exception occurs for a wrong-contract class. This test proves
+     * the throw is essential.
      *
      * @return void
      */
@@ -526,9 +524,8 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * `permission_providers` non-array is rejected with a type
-     * description. Kills Concat mutants on the permission_providers
-     * non-array branch.
+     * `permission_providers` non-array is rejected with a type description.
+     * Kills Concat mutants on the permission_providers non-array branch.
      *
      * @return void
      */
@@ -549,8 +546,7 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * `permission_enums` non-array is rejected with a type
-     * description.
+     * `permission_enums` non-array is rejected with a type description.
      *
      * @return void
      */
@@ -571,8 +567,8 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * `permission_providers` entry that is a missing class. Kills
-     * Concat mutants on the "does not exist" branch for providers.
+     * `permission_providers` entry that is a missing class. Kills Concat
+     * mutants on the "does not exist" branch for providers.
      *
      * @return void
      */
@@ -609,8 +605,8 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * `tenant_resolver` with wrong contract is rejected. Kills
-     * the assertImplementsContract path for tenant_resolver.
+     * `tenant_resolver` with wrong contract is rejected. Kills the
+     * assertImplementsContract path for tenant_resolver.
      *
      * @return void
      */

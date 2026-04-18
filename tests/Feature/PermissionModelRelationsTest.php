@@ -19,15 +19,15 @@ use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use Tests\TestCase;
 
 /**
- * Coverage for the `Permission` model's reverse-role relation and
- * the `resolveByName()` unknown-name branch that is not otherwise
- * reached from the role-scoped test suites.
+ * Coverage for the `Permission` model's reverse-role relation and the
+ * `resolveByName()` unknown-name branch that is not otherwise reached from the
+ * role-scoped test suites.
  *
- * The `roles()` accessor drives reverse navigation — consumers who
- * have a permission in hand and want to know which roles carry it —
- * and its binding reads the swappable model class and pivot table
- * names from the shipped config, so the relation must be exercised
- * end-to-end (config lookup + pivot navigation + attached roles).
+ * The `roles()` accessor drives reverse navigation — consumers who have a
+ * permission in hand and want to know which roles carry it — and its binding
+ * reads the swappable model class and pivot table names from the shipped
+ * config, so the relation must be exercised end-to-end (config lookup + pivot
+ * navigation + attached roles).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -47,8 +47,8 @@ use Tests\TestCase;
 final class PermissionModelRelationsTest extends TestCase
 {
     /**
-     * `Permission::roles()` returns every role that has the
-     * permission attached via the role-permission pivot.
+     * `Permission::roles()` returns every role that has the permission attached
+     * via the role-permission pivot.
      *
      * @return void
      */
@@ -75,9 +75,9 @@ final class PermissionModelRelationsTest extends TestCase
     }
 
     /**
-     * `Permission::resolveByName()` raises
-     * `UnknownPermissionException` when no row matches — the typed
-     * failure surface documented for the shared resolution helper.
+     * `Permission::resolveByName()` raises `UnknownPermissionException` when no
+     * row matches — the typed failure surface documented for the shared
+     * resolution helper.
      *
      * @return void
      */

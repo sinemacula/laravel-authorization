@@ -27,10 +27,10 @@ use Tests\TestCase;
 /**
  * Feature coverage for the role permission-management API.
  *
- * The surface mirrors the identity-side `HasPermissions` trait —
- * string or model input, guard-agnostic lookup, idempotent attach,
- * typed error on an unknown permission — so consumers can reach for
- * the same verbs on both sides of the RBAC edge.
+ * The surface mirrors the identity-side `HasPermissions` trait — string or
+ * model input, guard-agnostic lookup, idempotent attach, typed error on an
+ * unknown permission — so consumers can reach for the same verbs on both sides
+ * of the RBAC edge.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -60,8 +60,8 @@ final class RolePermissionApiTest extends TestCase
     private const string PERMISSION_NAME = 'posts:create';
 
     /**
-     * givePermission attaches a permission by string name and
-     * dispatches the RolePermissionGranted event.
+     * givePermission attaches a permission by string name and dispatches the
+     * RolePermissionGranted event.
      *
      * @return void
      */
@@ -83,8 +83,8 @@ final class RolePermissionApiTest extends TestCase
     }
 
     /**
-     * givePermission accepts a Permission model instance and
-     * bypasses the string-lookup path.
+     * givePermission accepts a Permission model instance and bypasses the
+     * string-lookup path.
      *
      * @return void
      */
@@ -99,8 +99,8 @@ final class RolePermissionApiTest extends TestCase
     }
 
     /**
-     * Re-attaching a permission is idempotent — no duplicate pivot
-     * row, no second event (sync-without-detaching semantics).
+     * Re-attaching a permission is idempotent — no duplicate pivot row, no
+     * second event (sync-without-detaching semantics).
      *
      * @return void
      */
@@ -159,8 +159,7 @@ final class RolePermissionApiTest extends TestCase
     }
 
     /**
-     * getPermissions returns the unique set of attached permission
-     * names.
+     * getPermissions returns the unique set of attached permission names.
      *
      * @return void
      */
@@ -190,8 +189,7 @@ final class RolePermissionApiTest extends TestCase
     }
 
     /**
-     * A guard-agnostic permission attaches cleanly to a
-     * guard-specific role.
+     * A guard-agnostic permission attaches cleanly to a guard-specific role.
      *
      * @return void
      */

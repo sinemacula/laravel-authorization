@@ -9,61 +9,31 @@ use PHPUnit\Framework\Attributes\CoversTrait;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameException;
 use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
-
-/**
- * Stub model that uses the base `ValidatesAuthorizationName` trait
- * without overriding `getAuthorizationNameKind()` — exercises the
- * trait's default label fallback.
- *
- * @internal
- *
- * @SuppressWarnings("php:S1192")
- */
-final class StubAuthorizationEntity // @phpstan-ignore class.missingExtends
-{
-    use ValidatesAuthorizationName;
-
-    /** @var array<string, mixed> */
-    public array $attributes = [];
-
-    /**
-     * Expose the protected kind resolver for the test.
-     *
-     * @return string
-     */
-    public function resolveKind(): string
-    {
-        return $this->getAuthorizationNameKind();
-    }
-}
+use Tests\Unit\Exceptions\Stubs\StubAuthorizationEntity;
 
 /**
  * Unit tests for `InvalidAuthorizationNameException` and the
  * `ValidatesAuthorizationName` trait's default kind fallback.
  *
- * The exception is thrown by the name mutator shared by the Role,
- * Permission, and Policy models; the constructor, `getKind()`, and
- * `getName()` accessors are part of the SemVer-stable API surface
- * and are consumed by the demo app's error handler to render
- * human-readable validation messages.
+ * The exception is thrown by the name mutator shared by the Role, Permission,
+ * and Policy models; the constructor, `getKind()`, and `getName()` accessors
+ * are part of the SemVer-stable API surface and are consumed by the demo app's
+ * error handler to render human-readable validation messages.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
  */
-// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 #[CoversClass(InvalidAuthorizationNameException::class)]
 #[CoversTrait(ValidatesAuthorizationName::class)]
-// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 final class InvalidAuthorizationNameExceptionTest extends TestCase
 {
     private const string HAS_SPACE = 'has space';
 
     /**
-     * The constructor formats a stable message that identifies both
-     * the entity kind and the offending name, and exposes both
-     * through typed accessors.
+     * The constructor formats a stable message that identifies both the entity
+     * kind and the offending name, and exposes both through typed accessors.
      *
      * @return void
      */
@@ -78,9 +48,8 @@ final class InvalidAuthorizationNameExceptionTest extends TestCase
     }
 
     /**
-     * Consumers that use the trait without overriding the kind
-     * resolver fall back to the generic `authorization entity`
-     * label.
+     * Consumers that use the trait without overriding the kind resolver fall
+     * back to the generic `authorization entity` label.
      *
      * @return void
      */
@@ -92,8 +61,8 @@ final class InvalidAuthorizationNameExceptionTest extends TestCase
     }
 
     /**
-     * The trait's name mutator raises the typed exception with the
-     * default kind label when the consumer has not overridden it.
+     * The trait's name mutator raises the typed exception with the default kind
+     * label when the consumer has not overridden it.
      *
      * @return void
      */
@@ -111,8 +80,8 @@ final class InvalidAuthorizationNameExceptionTest extends TestCase
     }
 
     /**
-     * Non-string inputs are reported as empty-string names so the
-     * error message remains parseable.
+     * Non-string inputs are reported as empty-string names so the error message
+     * remains parseable.
      *
      * @return void
      */

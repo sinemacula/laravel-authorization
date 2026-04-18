@@ -16,9 +16,9 @@ use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use Tests\TestCase;
 
 /**
- * Feature coverage for the Octane request-boundary reset listener
- * the service provider wires when the Octane event class is present
- * in the host application. Closes ISSUES.md #66.
+ * Feature coverage for the Octane request-boundary reset listener the service
+ * provider wires when the Octane event class is present in the host
+ * application.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -35,10 +35,9 @@ use Tests\TestCase;
 final class OctaneResetListenerTest extends TestCase
 {
     /**
-     * Firing the Octane request-terminated event clears the
-     * last-decision store so the next request inside the same
-     * worker process does not see the previous request's result
-     * via `Authorization::lastDecision()`.
+     * Firing the Octane request-terminated event clears the last-decision store
+     * so the next request inside the same worker process does not see the
+     * previous request's result via `Authorization::lastDecision()`.
      *
      * @return void
      */
@@ -76,11 +75,10 @@ final class OctaneResetListenerTest extends TestCase
     }
 
     /**
-     * The store's `reset()` method is the seam the listener calls
-     * and the documented manual reset surface for non-Octane
-     * long-running workers. Verifies the rename slot semantics
-     * stay coherent — `reset()` clears the slot the same way
-     * `forget()` does.
+     * The store's `reset()` method is the seam the listener calls and the
+     * documented manual reset surface for non-Octane long-running workers.
+     * Verifies the rename slot semantics stay coherent — `reset()` clears the
+     * slot the same way `forget()` does.
      *
      * @return void
      */

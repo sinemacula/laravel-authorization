@@ -19,15 +19,13 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Performance budget for `RequireRole` / `RequirePermission`
- * middleware.
+ * Performance budget for `RequireRole` / `RequirePermission` middleware.
  *
- * The middleware runs on every request decorated with `role:` or
- * `permission:`. The budget bounds the admit-path cost on 500
- * iterations — enough to amortise microsecond-level jitter while
- * staying well under a second so the suite stays fast. Observed
- * ~25μs per admit for RequireRole and ~72μs for RequirePermission
- * on the reference machine.
+ * The middleware runs on every request decorated with `role:` or `permission:`.
+ * The budget bounds the admit-path cost on 500 iterations — enough to amortise
+ * microsecond-level jitter while staying well under a second so the suite stays
+ * fast. Observed ~25μs per admit for RequireRole and ~72μs for
+ * RequirePermission on the reference machine.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,9 +40,9 @@ use Tests\TestCase;
 final class MiddlewareBudgetTest extends TestCase
 {
     /**
-     * 500 admit-path invocations of `RequireRole::handle()` must
-     * complete in under 250ms on the reference machine (~25μs
-     * per call observed; ~10× budget for CI variance).
+     * 500 admit-path invocations of `RequireRole::handle()` must complete in
+     * under 250ms on the reference machine (~25μs per call observed; ~10×
+     * budget for CI variance).
      *
      * @return void
      */
@@ -74,10 +72,9 @@ final class MiddlewareBudgetTest extends TestCase
     }
 
     /**
-     * 500 admit-path invocations of `RequirePermission::handle()`
-     * must complete in under 500ms on the reference machine
-     * (~72μs per call observed; the role-inherited resolve is the
-     * heavier path).
+     * 500 admit-path invocations of `RequirePermission::handle()` must complete
+     * in under 500ms on the reference machine (~72μs per call observed; the
+     * role-inherited resolve is the heavier path).
      *
      * @return void
      */
@@ -142,10 +139,9 @@ final class MiddlewareBudgetTest extends TestCase
     }
 
     /**
-     * Bind a principal resolver that returns the supplied
-     * principal — mirrors the helper used by the feature
-     * `RouteMiddlewareTest` so both suites exercise the
-     * middleware through the package's own resolver contract.
+     * Bind a principal resolver that returns the supplied principal — mirrors
+     * the helper used by the feature `RouteMiddlewareTest` so both suites
+     * exercise the middleware through the package's own resolver contract.
      *
      * @param  object  $principal
      * @return void
@@ -154,14 +150,27 @@ final class MiddlewareBudgetTest extends TestCase
     {
         $resolver = new class ($principal) implements PrincipalResolver {
             /**
+             * Create a new resolver wrapping a fixed principal.
+             *
              * @param  object  $principal
+             * @return void
              */
-            public function __construct(private readonly object $principal) {}
+            public function __construct(
+
+                /** The principal returned by every resolution call. */
+                private readonly object $principal,
+
+            ) {}
 
             /**
+             * Resolve the current principal.
+             *
              * @return object|null
+             *
+             * @phpstan-ignore-next-line return.unusedType
              */
-            public function resolve(): ?object // @phpstan-ignore return.unusedType
+            #[\Override]
+            public function resolve(): ?object
             {
                 return $this->principal;
             }

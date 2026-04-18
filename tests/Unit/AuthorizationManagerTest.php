@@ -23,8 +23,8 @@ use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
 
 /**
- * Unit tests for the authorization manager using stub principals and
- * a real evaluator — no Laravel boot required.
+ * Unit tests for the authorization manager using stub principals and a real
+ * evaluator — no Laravel boot required.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,6 +42,7 @@ final class AuthorizationManagerTest extends TestCase
      *
      * @return void
      */
+    #[\Override]
     protected function tearDown(): void
     {
         \Mockery::close();
@@ -128,14 +129,15 @@ final class AuthorizationManagerTest extends TestCase
             ]),
         ]);
 
-        $result = $manager->for($principal)->evaluate('posts:create');
+        $decision = $manager->for($principal)->evaluate('posts:create');
 
-        self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::RBAC_ALLOW, $result->reason);
+        self::assertTrue($decision->allowed);
+        self::assertSame(DecisionReason::RBAC_ALLOW, $decision->reason);
     }
 
     /**
-     * Policy explicit allow takes precedence (and the RBAC fallback is skipped).
+     * Policy explicit allow takes precedence (and the RBAC fallback is
+     * skipped).
      *
      * @return void
      */
@@ -155,10 +157,10 @@ final class AuthorizationManagerTest extends TestCase
             ]),
         ]);
 
-        $result = $manager->for($principal)->evaluate('posts:create');
+        $decision = $manager->for($principal)->evaluate('posts:create');
 
-        self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $result->reason);
+        self::assertTrue($decision->allowed);
+        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $decision->reason);
     }
 
     /**
@@ -182,10 +184,10 @@ final class AuthorizationManagerTest extends TestCase
             ]),
         ]);
 
-        $result = $manager->for($principal)->evaluate('posts:delete');
+        $decision = $manager->for($principal)->evaluate('posts:delete');
 
-        self::assertFalse($result->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_DENY, $result->reason);
+        self::assertFalse($decision->allowed);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $decision->reason);
     }
 
     /**
@@ -194,8 +196,8 @@ final class AuthorizationManagerTest extends TestCase
      * @return void
      */
     /**
-     * withPolicies returns a fresh scope and does not mutate the
-     * originating manager (kills the "remove clone" mutant).
+     * withPolicies returns a fresh scope and does not mutate the originating
+     * manager (kills the "remove clone" mutant).
      *
      * @return void
      */
@@ -280,9 +282,9 @@ final class AuthorizationManagerTest extends TestCase
             'statements' => [['effect' => 'allow', 'actions' => ['x']]],
         ]);
 
-        $result = $manager->for($principal)->withPolicies([$override])->evaluate('x');
+        $decision = $manager->for($principal)->withPolicies([$override])->evaluate('x');
 
-        self::assertTrue($result->allowed);
+        self::assertTrue($decision->allowed);
     }
 
     /**
@@ -342,7 +344,8 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * authorize() dispatches both DecisionEvaluated and AuthorizationFailed before throwing.
+     * authorize() dispatches both DecisionEvaluated and AuthorizationFailed
+     * before throwing.
      *
      * @return void
      */
@@ -385,13 +388,22 @@ final class AuthorizationManagerTest extends TestCase
 
         $principal = $this->stubAuthorizable(['ok']);
 
-        $manager->for($principal)->authorize('ok');
+        // authorize() returns void on a granted decision and throws
+        // on a denial — confirm the allowed path does not raise.
+        $threw = false;
 
-        $this->expectNotToPerformAssertions();
+        try {
+            $manager->for($principal)->authorize('ok');
+        } catch (\Throwable $exception) {
+            $threw = true;
+        }
+
+        self::assertFalse($threw, 'authorize() must not throw when the decision allows.');
     }
 
     /**
-     * Resolver-provided principal is consumed when no for() override is in play.
+     * Resolver-provided principal is consumed when no for() override is in
+     * play.
      *
      * @return void
      */
@@ -432,8 +444,8 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * `evaluate()` writes the result to the last-decision store.
-     * Pins the MethodCallRemoval mutant on line 145.
+     * `evaluate()` writes the result to the last-decision store. Pins the
+     * MethodCallRemoval mutant on line 145.
      *
      * @return void
      */
@@ -456,8 +468,8 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * `withPolicies()` wraps the input through `array_values()`.
-     * Pins the UnwrapArrayValues mutant on line 267.
+     * `withPolicies()` wraps the input through `array_values()`. Pins the
+     * UnwrapArrayValues mutant on line 267.
      *
      * @return void
      */
@@ -479,14 +491,14 @@ final class AuthorizationManagerTest extends TestCase
         $scoped = $manager->withPolicies([5 => $policy]);
 
         $principal = $this->stubAuthorizable();
-        $result    = $scoped->for($principal)->evaluate('x');
+        $decision  = $scoped->for($principal)->evaluate('x');
 
-        self::assertTrue($result->allowed);
+        self::assertTrue($decision->allowed);
     }
 
     /**
-     * `dispatch()` is a no-op when events is null. Pins the
-     * NullSafeMethodCall mutant on line 349.
+     * `dispatch()` is a no-op when events is null. Pins the NullSafeMethodCall
+     * mutant on line 349.
      *
      * @return void
      */
@@ -507,8 +519,8 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * `for()` produces a clone. The clone's principal override is
-     * isolated. Pins the CloneRemoval mutant on line 249.
+     * `for()` produces a clone. The clone's principal override is isolated.
+     * Pins the CloneRemoval mutant on line 249.
      *
      * @return void
      */
@@ -538,8 +550,8 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * Build a stubbed authorizable principal returning the supplied
-     * permissions and policies.
+     * Build a stubbed authorizable principal returning the supplied permissions
+     * and policies.
      *
      * @param  array<int, string>  $permissions
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies

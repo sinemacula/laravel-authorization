@@ -42,13 +42,13 @@ final class ExceptionsTest extends TestCase
     public function testAuthorizationException(): void
     {
         $statement = new Statement(PolicyEffect::DENY, ['x']);
-        $result    = EvaluationResult::explicitlyDenied($statement);
-        $exception = new AuthorizationException('posts:create', 'arn:posts:1', $result);
+        $decision  = EvaluationResult::explicitlyDenied($statement);
+        $exception = new AuthorizationException('posts:create', 'arn:posts:1', $decision);
 
         self::assertSame(403, $exception->getCode());
         self::assertSame('posts:create', $exception->getAction());
         self::assertSame('arn:posts:1', $exception->getResource());
-        self::assertSame($result, $exception->getResult());
+        self::assertSame($decision, $exception->getResult());
         self::assertStringContainsString('on resource \'arn:posts:1\'', $exception->getMessage());
     }
 

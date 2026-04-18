@@ -142,9 +142,8 @@ final class WhyCanCommandTest extends TestCase
     }
 
     /**
-     * Output includes the Action and Resource labels. Pins
-     * MethodCallRemoval mutants on lines 75-77 and the Concat
-     * mutants on line 76.
+     * Output includes the Action and Resource labels. Pins MethodCallRemoval
+     * mutants on lines 75-77 and the Concat mutants on line 76.
      *
      * @return void
      */
@@ -166,8 +165,8 @@ final class WhyCanCommandTest extends TestCase
     }
 
     /**
-     * The `verdictColor` private method returns 'green' for allowed
-     * and 'red' for denied. Pins the Ternary mutant on line 106.
+     * The `verdictColor` private method returns 'green' for allowed and 'red'
+     * for denied. Pins the Ternary mutant on line 106.
      *
      * @return void
      */
@@ -181,9 +180,9 @@ final class WhyCanCommandTest extends TestCase
     }
 
     /**
-     * The trace output includes each entry's decision, policy, index
-     * and reason. Pins the Foreach_ mutant on line 82 and the
-     * MethodCallRemoval on line 83.
+     * The trace output includes each entry's decision, policy, index and
+     * reason. Pins the Foreach_ mutant on line 82 and the MethodCallRemoval on
+     * line 83.
      *
      * @return void
      */
@@ -213,7 +212,7 @@ final class WhyCanCommandTest extends TestCase
     }
 
     /**
-     * The `NotIdentical` mutant on line 79 checks `$result->trace !== []`.
+     * The `NotIdentical` mutant on line 79 checks `$exitStatus->trace !== []`.
      * An empty-trace output must NOT contain "Trace:".
      *
      * @return void

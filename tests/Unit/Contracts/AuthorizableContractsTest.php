@@ -12,15 +12,13 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsPolicies;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 
 /**
- * Unit tests for the interface-segregated authorizable contract
- * surface.
+ * Unit tests for the interface-segregated authorizable contract surface.
  *
- * Consumers who only use a subset of the surface can typehint on
- * the narrow siblings (`SupportsRoles`, `SupportsPermissions`,
- * `SupportsPolicies`). The composite `AuthorizableIdentity`
- * extends all three, so existing implementers stay satisfied and
- * `instanceof` checks keep working against the fat and narrow
- * contracts alike.
+ * Consumers who only use a subset of the surface can typehint on the narrow
+ * siblings (`SupportsRoles`, `SupportsPermissions`, `SupportsPolicies`). The
+ * composite `AuthorizableIdentity` extends all three, so existing implementers
+ * stay satisfied and `instanceof` checks keep working against the fat and
+ * narrow contracts alike.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -33,8 +31,8 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 final class AuthorizableContractsTest extends TestCase
 {
     /**
-     * Every narrow contract is extended by the composite — pins
-     * the interface-segregation invariant.
+     * Every narrow contract is extended by the composite — pins the
+     * interface-segregation invariant.
      *
      * @return void
      */
@@ -49,10 +47,9 @@ final class AuthorizableContractsTest extends TestCase
     }
 
     /**
-     * Each narrow contract declares only the methods on its
-     * slice — role helpers on `SupportsRoles`, permission
-     * helpers on `SupportsPermissions`, policy helpers on
-     * `SupportsPolicies`.
+     * Each narrow contract declares only the methods on its slice — role
+     * helpers on `SupportsRoles`, permission helpers on `SupportsPermissions`,
+     * policy helpers on `SupportsPolicies`.
      *
      * @return void
      */

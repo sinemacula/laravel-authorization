@@ -18,15 +18,14 @@ use Tests\Feature\Stubs\PermissionEnum;
 use Tests\TestCase;
 
 /**
- * Dedicated feature coverage for the three Gate auto-wiring conflict
- * modes driven by `authorization.gate.on_conflict`.
+ * Dedicated feature coverage for the three Gate auto-wiring conflict modes
+ * driven by `authorization.gate.on_conflict`.
  *
- * Each scenario pre-registers a Gate under the same name as a
- * permission-enum case, reboots the provider, and asserts the
- * mode-specific behaviour: `log` preserves the existing Gate and
- * emits a warning, `throw` raises `GateConflictException`, and
- * `overwrite` replaces the existing closure with the package's
- * authorization-backed one.
+ * Each scenario pre-registers a Gate under the same name as a permission-enum
+ * case, reboots the provider, and asserts the mode-specific behaviour: `log`
+ * preserves the existing Gate and emits a warning, `throw` raises
+ * `GateConflictException`, and `overwrite` replaces the existing closure with
+ * the package's authorization-backed one.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -45,8 +44,8 @@ final class GateConflictModeTest extends TestCase
     private const string CONFLICTING_PERMISSION = 'posts:create';
 
     /**
-     * `log` mode preserves the pre-existing Gate and emits a warning
-     * via the global `Log` facade, which the spy captures.
+     * `log` mode preserves the pre-existing Gate and emits a warning via the
+     * global `Log` facade, which the spy captures.
      *
      * @return void
      */
@@ -78,8 +77,8 @@ final class GateConflictModeTest extends TestCase
     }
 
     /**
-     * `throw` mode raises `GateConflictException` at boot when a
-     * conflicting Gate is already defined.
+     * `throw` mode raises `GateConflictException` at boot when a conflicting
+     * Gate is already defined.
      *
      * @return void
      */
@@ -100,9 +99,8 @@ final class GateConflictModeTest extends TestCase
     }
 
     /**
-     * `overwrite` mode replaces the pre-existing Gate with the
-     * package-owned closure that delegates to the authorization
-     * manager.
+     * `overwrite` mode replaces the pre-existing Gate with the package-owned
+     * closure that delegates to the authorization manager.
      *
      * @return void
      */
@@ -125,8 +123,7 @@ final class GateConflictModeTest extends TestCase
     }
 
     /**
-     * Seed the conflict mode and enum registration used by every
-     * scenario.
+     * Seed the conflict mode and enum registration used by every scenario.
      *
      * @param  string  $mode
      * @return void

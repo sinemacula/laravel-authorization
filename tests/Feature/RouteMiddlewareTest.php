@@ -29,15 +29,13 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Feature coverage for the shipped route middleware (issues #33,
- * #81, #82, #83).
+ * Feature coverage for the shipped route middleware.
  *
- * Each test binds a scoped `PrincipalResolver` that returns the
- * chosen principal, then invokes `handle()` directly — this
- * verifies the middleware resolves through the package's own
- * resolver contract (not `$request->user()`) and keeps the tests
- * orthogonal to Laravel's auth-provider plumbing. Service-provider
- * aliasing is covered separately via the router binding.
+ * Each test binds a scoped `PrincipalResolver` that returns the chosen
+ * principal, then invokes `handle()` directly — this verifies the middleware
+ * resolves through the package's own resolver contract (not `$request->user()`)
+ * and keeps the tests orthogonal to Laravel's auth-provider plumbing.
+ * Service-provider aliasing is covered separately via the router binding.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -56,18 +54,12 @@ use Tests\TestCase;
 #[CoversClass(EventListenerRegistrar::class)]
 final class RouteMiddlewareTest extends TestCase
 {
-    /**
-     * Permission string reused across the `permission` middleware
-     * coverage. Deduplicated to a constant so the same literal does
-     * not appear inline in many places.
-     *
-     * @var string
-     */
+    /** @var string Permission string reused across the `permission` middleware coverage. */
     private const string PERMISSION = 'posts:edit';
 
     /**
-     * Unauthenticated requests raise `AuthenticationException` —
-     * Laravel's exception handler renders that as a 401.
+     * Unauthenticated requests raise `AuthenticationException` — Laravel's
+     * exception handler renders that as a 401.
      *
      * @return void
      */
@@ -82,11 +74,10 @@ final class RouteMiddlewareTest extends TestCase
     }
 
     /**
-     * An authenticated identity that does not implement
-     * `SupportsRoles` is a misconfiguration — the middleware
-     * must raise the typed misconfiguration exception (HTTP 500
-     * semantics), not an `AccessDeniedHttpException` that looks
-     * like a legitimate deny.
+     * An authenticated identity that does not implement `SupportsRoles` is a
+     * misconfiguration — the middleware must raise the typed misconfiguration
+     * exception (HTTP 500 semantics), not an `AccessDeniedHttpException` that
+     * looks like a legitimate deny.
      *
      * @return void
      */
@@ -151,8 +142,8 @@ final class RouteMiddlewareTest extends TestCase
     }
 
     /**
-     * Comma-separated role arguments (Laravel native) resolve to
-     * OR semantics — holding either role is enough.
+     * Comma-separated role arguments (Laravel native) resolve to OR semantics —
+     * holding either role is enough.
      *
      * @return void
      */
@@ -186,8 +177,8 @@ final class RouteMiddlewareTest extends TestCase
     }
 
     /**
-     * Pipe-separated role arguments (Spatie convention) expand
-     * identically to the comma form — holding either role suffices.
+     * Pipe-separated role arguments (Spatie convention) expand identically to
+     * the comma form — holding either role suffices.
      *
      * @return void
      */
@@ -220,8 +211,8 @@ final class RouteMiddlewareTest extends TestCase
     }
 
     /**
-     * Mixed separator forms are tolerated — a pipe inside one
-     * argument and a comma across arguments should both expand.
+     * Mixed separator forms are tolerated — a pipe inside one argument and a
+     * comma across arguments should both expand.
      *
      * @return void
      */
@@ -250,8 +241,8 @@ final class RouteMiddlewareTest extends TestCase
     }
 
     /**
-     * `RequirePermission` rejects unauthenticated requests the same
-     * way `RequireRole` does.
+     * `RequirePermission` rejects unauthenticated requests the same way
+     * `RequireRole` does.
      *
      * @return void
      */
@@ -266,8 +257,8 @@ final class RouteMiddlewareTest extends TestCase
     }
 
     /**
-     * Identities without `SupportsPermissions` raise the typed
-     * misconfiguration exception — same contract as `RequireRole`.
+     * Identities without `SupportsPermissions` raise the typed misconfiguration
+     * exception — same contract as `RequireRole`.
      *
      * @return void
      */
@@ -367,8 +358,8 @@ final class RouteMiddlewareTest extends TestCase
     }
 
     /**
-     * Pipe-separated permission arguments resolve to OR semantics —
-     * holding either permission suffices.
+     * Pipe-separated permission arguments resolve to OR semantics — holding
+     * either permission suffices.
      *
      * @return void
      */
@@ -401,8 +392,8 @@ final class RouteMiddlewareTest extends TestCase
     }
 
     /**
-     * The service provider registers the `role` and `permission`
-     * aliases against the router's middleware map.
+     * The service provider registers the `role` and `permission` aliases
+     * against the router's middleware map.
      *
      * @return void
      */
@@ -418,9 +409,8 @@ final class RouteMiddlewareTest extends TestCase
     }
 
     /**
-     * Pre-existing alias bindings are preserved — the provider
-     * never clobbers a consumer's own `role` / `permission`
-     * middleware.
+     * Pre-existing alias bindings are preserved — the provider never clobbers a
+     * consumer's own `role` / `permission` middleware.
      *
      * @return void
      */
@@ -440,10 +430,9 @@ final class RouteMiddlewareTest extends TestCase
 
     /**
      * The middleware resolves the principal through the bound
-     * `PrincipalResolver` (see issue #82). A request carrying a
-     * `$request->user()` that does NOT match the resolver's
-     * answer must not leak in — the resolver is the single
-     * source of truth.
+     * `PrincipalResolver`. A request carrying a `$request->user()` that does
+     * NOT match the resolver's answer must not leak in — the resolver is the
+     * single source of truth.
      *
      * @return void
      */
@@ -476,9 +465,8 @@ final class RouteMiddlewareTest extends TestCase
     }
 
     /**
-     * Bind a scoped `PrincipalResolver` that returns the supplied
-     * principal and drop the memoised manager so the next facade
-     * call picks it up.
+     * Bind a scoped `PrincipalResolver` that returns the supplied principal and
+     * drop the memoised manager so the next facade call picks it up.
      *
      * @param  object|null  $principal
      * @return void
@@ -487,15 +475,24 @@ final class RouteMiddlewareTest extends TestCase
     {
         $resolver = new class ($principal) implements PrincipalResolver {
             /**
+             * Create a new resolver wrapping a fixed principal.
+             *
              * @param  object|null  $principal
+             * @return void
              */
-            public function __construct(private readonly ?object $principal) {}
+            public function __construct(
+
+                /** The principal returned by every resolution call. */
+                private readonly ?object $principal,
+
+            ) {}
 
             /**
              * Return the principal bound on this scoped resolver.
              *
              * @return object|null
              */
+            #[\Override]
             public function resolve(): ?object
             {
                 return $this->principal;
@@ -508,9 +505,9 @@ final class RouteMiddlewareTest extends TestCase
     }
 
     /**
-     * Build an incoming request. The middleware no longer pulls
-     * the user from `$request->user()`, so the request itself is
-     * just a transport — nothing is attached to it.
+     * Build an incoming request. The middleware no longer pulls the user from
+     * `$request->user()`, so the request itself is just a transport — nothing
+     * is attached to it.
      *
      * @return \Illuminate\Http\Request
      */
@@ -520,8 +517,8 @@ final class RouteMiddlewareTest extends TestCase
     }
 
     /**
-     * A pass-through `$next` closure that proves the middleware
-     * forwarded the request.
+     * A pass-through `$next` closure that proves the middleware forwarded the
+     * request.
      *
      * @return \Closure(\Illuminate\Http\Request): \Illuminate\Http\Response
      */

@@ -20,15 +20,13 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Mutation-killer feature tests targeting the `ResolvesPivotExpiry`
- * helper, the `ResolutionCache` TTL / key routing, and the
- * authorizable-identity trait branches whose semantic mutants
- * escaped the initial mutation sweep.
+ * Mutation-killer feature tests targeting the `ResolvesPivotExpiry` helper, the
+ * `ResolutionCache` TTL / key routing, and the authorizable-identity trait
+ * branches whose semantic mutants escaped the initial mutation sweep.
  *
- * These tests assert exact values (counts, keys, time bounds) so
- * subtle mutations — `<` vs `<=`, `||` vs `&&`, off-by-one on
- * integer literals, cast removal — surface as failures rather
- * than silently passing.
+ * These tests assert exact values (counts, keys, time bounds) so subtle
+ * mutations — `<` vs `<=`, `||` vs `&&`, off-by-one on integer literals, cast
+ * removal — surface as failures rather than silently passing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -49,9 +47,9 @@ use Tests\TestCase;
 final class MutationKillersTest extends TestCase
 {
     /**
-     * `authorizationCollectModelIds` stringifies integer keys, drops
-     * empty strings, and dedupes. The assertions pin all three
-     * behaviours so a logical / cast / unique mutant breaks.
+     * `authorizationCollectModelIds` stringifies integer keys, drops empty
+     * strings, and dedupes. The assertions pin all three behaviours so a
+     * logical / cast / unique mutant breaks.
      *
      * @return void
      */
@@ -71,67 +69,22 @@ final class MutationKillersTest extends TestCase
             }
         };
 
-        $integerKeyed = new class extends Model {
-            /**
-             * @return mixed
-             */
-            public function getKey(): mixed
-            {
-                return 42;
-            }
-        };
-
-        $stringKeyed = new class extends Model {
-            /**
-             * @return mixed
-             */
-            public function getKey(): mixed
-            {
-                return 'alpha';
-            }
-        };
-
-        $stringKeyedDupe = new class extends Model {
-            /**
-             * @return mixed
-             */
-            public function getKey(): mixed
-            {
-                return 'alpha';
-            }
-        };
-
-        $emptyString = new class extends Model {
-            /**
-             * @return mixed
-             */
-            public function getKey(): mixed
-            {
-                return '';
-            }
-        };
-
-        $objectKey = new class extends Model {
-            /**
-             * @return mixed
-             */
-            public function getKey(): mixed
-            {
-                return new \stdClass;
-            }
-        };
-
-        $result = $probe->collect([$integerKeyed, $stringKeyed, $stringKeyedDupe, $emptyString, $objectKey]);
+        $collected = $probe->collect([
+            $this->makeModelWithKey(42),
+            $this->makeModelWithKey('alpha'),
+            $this->makeModelWithKey('alpha'),
+            $this->makeModelWithKey(''),
+            $this->makeModelWithKey(new \stdClass),
+        ]);
 
         // Integer 42 must be cast to string '42'; empties dropped;
         // duplicates squashed; non-string/non-int keys skipped.
-        self::assertSame(['42', 'alpha'], $result); // @phpstan-ignore staticMethod.impossibleType
+        self::assertSame(['42', 'alpha'], $collected); // @phpstan-ignore staticMethod.impossibleType
     }
 
     /**
-     * `authorizationCollectModelIds` returns an empty array when
-     * every model is malformed — pins the foreach iteration against
-     * Foreach_ / break mutants.
+     * `authorizationCollectModelIds` returns an empty array when every model is
+     * malformed — pins the foreach iteration against Foreach_ / break mutants.
      *
      * @return void
      */
@@ -161,7 +114,7 @@ final class MutationKillersTest extends TestCase
             }
         };
 
-        $obj = new class extends Model {
+        $objectKeyedIdentity = new class extends Model {
             /**
              * @return mixed
              */
@@ -171,13 +124,13 @@ final class MutationKillersTest extends TestCase
             }
         };
 
-        self::assertSame([], $probe->collect([$empty, $obj, $empty]));
+        self::assertSame([], $probe->collect([$empty, $objectKeyedIdentity, $empty]));
     }
 
     /**
-     * `authorizationNearestPivotExpirySeconds` returns the smallest
-     * positive seconds-until-expiry across pivot rows. Pins the
-     * strict less-than comparison against `<=` mutants.
+     * `authorizationNearestPivotExpirySeconds` returns the smallest positive
+     * seconds-until-expiry across pivot rows. Pins the strict less-than
+     * comparison against `<=` mutants.
      *
      * @return void
      */
@@ -220,9 +173,9 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `authorizationNearestPivotExpirySeconds` returns null when no
-     * pivot row carries a live expiry — pins the null-return
-     * against ReturnRemoval / null-default mutants.
+     * `authorizationNearestPivotExpirySeconds` returns null when no pivot row
+     * carries a live expiry — pins the null-return against ReturnRemoval /
+     * null-default mutants.
      *
      * @return void
      */
@@ -255,9 +208,9 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `authorizationMinNullable` returns the smaller value, treats
-     * null as "no bound". Pins the min-branch against arithmetic
-     * mutants and null-left/right swap mutants.
+     * `authorizationMinNullable` returns the smaller value, treats null as "no
+     * bound". Pins the min-branch against arithmetic mutants and
+     * null-left/right swap mutants.
      *
      * @return void
      */
@@ -289,9 +242,9 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `authorizationCoerceExpiresAt` returns a Carbon for strings
-     * and DateTime values, null for everything else. Pins the
-     * string-not-empty and DateTime instanceof branches.
+     * `authorizationCoerceExpiresAt` returns a Carbon for strings and DateTime
+     * values, null for everything else. Pins the string-not-empty and DateTime
+     * instanceof branches.
      *
      * @return void
      */
@@ -311,14 +264,14 @@ final class MutationKillersTest extends TestCase
             }
         };
 
-        $ts = $probe->coerce('2026-06-01 12:00:00');
-        self::assertInstanceOf(\Illuminate\Support\Carbon::class, $ts);
-        self::assertSame('2026-06-01 12:00:00', $ts->toDateTimeString());
+        $timestamp = $probe->coerce('2026-06-01 12:00:00');
+        self::assertInstanceOf(\Illuminate\Support\Carbon::class, $timestamp);
+        self::assertSame('2026-06-01 12:00:00', $timestamp->toDateTimeString());
 
-        $dt = new \DateTimeImmutable('2025-01-01 00:00:00');
-        $ts = $probe->coerce($dt);
-        self::assertInstanceOf(\Illuminate\Support\Carbon::class, $ts);
-        self::assertSame('2025-01-01 00:00:00', $ts->toDateTimeString());
+        $source    = new \DateTimeImmutable('2025-01-01 00:00:00');
+        $timestamp = $probe->coerce($source);
+        self::assertInstanceOf(\Illuminate\Support\Carbon::class, $timestamp);
+        self::assertSame('2025-01-01 00:00:00', $timestamp->toDateTimeString());
 
         self::assertNull($probe->coerce(null));
         self::assertNull($probe->coerce(''));
@@ -328,9 +281,9 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `authorizationSecondsUntilPivotExpiry` subtracts `nowTimestamp`
-     * from the pivot expiry and returns null when the result is zero
-     * or negative. Pins the `> 0` branch against `>= 0` mutants.
+     * `authorizationSecondsUntilPivotExpiry` subtracts `nowTimestamp` from the
+     * pivot expiry and returns null when the result is zero or negative. Pins
+     * the `> 0` branch against `>= 0` mutants.
      *
      * @return void
      */
@@ -371,9 +324,9 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `authorizationGrantExpiriesEqual` compares two DateTimes by
-     * UTC timestamp and treats two nulls as equal. Pins every
-     * equality branch against mutation.
+     * `authorizationGrantExpiriesEqual` compares two DateTimes by UTC timestamp
+     * and treats two nulls as equal. Pins every equality branch against
+     * mutation.
      *
      * @return void
      */
@@ -407,10 +360,9 @@ final class MutationKillersTest extends TestCase
 
     /**
      * `ResolutionCache::resolveTtl` returns `[true, 0]` for a
-     * forever-configured cache with no `$maxTtl`, `[false, ttl]`
-     * when just the config applies, and `[false, min - 1]` when
-     * `$maxTtl` bounds the window. Pins the subtraction-of-1,
-     * min comparison, and forever short-circuit.
+     * forever-configured cache with no `$maxTtl`, `[false, ttl]` when just the
+     * config applies, and `[false, min - 1]` when `$maxTtl` bounds the window.
+     * Pins the subtraction-of-1, min comparison, and forever short-circuit.
      *
      * @return void
      */
@@ -455,9 +407,9 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `ResolutionCache::supportsTags` reports the tag capability of
-     * the configured store and memoises the probe. Pins the memo
-     * short-circuit so `PropertyAssign` / `Coalesce` mutations break.
+     * `ResolutionCache::supportsTags` reports the tag capability of the
+     * configured store and memoises the probe. Pins the memo short-circuit so
+     * `PropertyAssign` / `Coalesce` mutations break.
      *
      * @return void
      */
@@ -473,9 +425,9 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `forgetRoleTags()` on a taggable store emits a tag-flush
-     * call exactly once per role with a non-empty key. Pins both
-     * the empty-key skip and the tag-flush side effect.
+     * `forgetRoleTags()` on a taggable store emits a tag-flush call exactly
+     * once per role with a non-empty key. Pins both the empty-key skip and the
+     * tag-flush side effect.
      *
      * @return void
      */
@@ -496,9 +448,9 @@ final class MutationKillersTest extends TestCase
         // Flush the role's tag — subsequent read on fresh cache misses.
         $cache->forgetRoleTags($role);
 
-        $fresh  = new ResolutionCache(store: \Illuminate\Support\Facades\Cache::store('array'), prefix: 'authorization-test');
-        $calls  = 0;
-        $result = $fresh->rememberPermissions(
+        $fresh     = new ResolutionCache(store: \Illuminate\Support\Facades\Cache::store('array'), prefix: 'authorization-test');
+        $calls     = 0;
+        $collected = $fresh->rememberPermissions(
             $principal,
             static function () use (&$calls): array {
                 $calls++;
@@ -508,14 +460,14 @@ final class MutationKillersTest extends TestCase
             new ResolutionCacheContext(maxTtl: null, roleIds: [(string) $role->getKey()]), // @phpstan-ignore cast.string
         );
 
-        self::assertSame(['y:do'], $result);
+        self::assertSame(['y:do'], $collected);
         self::assertSame(1, $calls, 'Resolver should run because tagged-flush invalidated the entry.');
     }
 
     /**
-     * `assignRole()` fires `IdentityRoleAssigned` exactly once for
-     * a first-time grant and does not re-fire if the expiry is
-     * unchanged — pins the expiry-equality branch.
+     * `assignRole()` fires `IdentityRoleAssigned` exactly once for a first-time
+     * grant and does not re-fire if the expiry is unchanged — pins the
+     * expiry-equality branch.
      *
      * @return void
      */
@@ -528,9 +480,17 @@ final class MutationKillersTest extends TestCase
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'idem', 'guard_name' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        $expires = new \DateTimeImmutable('+1 hour');
-        $user->assignRole($role, $expires);
-        $user->assignRole($role, $expires);
+        // Anchor Carbon so the computed expiry is deterministic and
+        // identical across both calls — avoids wall-clock drift.
+        \Illuminate\Support\Carbon::setTestNow('2026-01-01 00:00:00');
+
+        try {
+            $expires = \Illuminate\Support\Carbon::now()->addHour()->toDateTimeImmutable();
+            $user->assignRole($role, $expires);
+            $user->assignRole($role, $expires);
+        } finally {
+            \Illuminate\Support\Carbon::setTestNow();
+        }
 
         \Illuminate\Support\Facades\Event::assertNotDispatched(
             \SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleExpiryChanged::class,
@@ -538,9 +498,9 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `assignRole()` with a different expiry fires
-     * `IdentityRoleExpiryChanged` — pins the `!grantExpiriesEqual`
-     * branch against LogicalAnd/Negation mutations.
+     * `assignRole()` with a different expiry fires `IdentityRoleExpiryChanged`
+     * — pins the `!grantExpiriesEqual` branch against LogicalAnd/Negation
+     * mutations.
      *
      * @return void
      */
@@ -553,8 +513,16 @@ final class MutationKillersTest extends TestCase
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'moving', 'guard_name' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        $user->assignRole($role, new \DateTimeImmutable('+1 hour'));
-        $user->assignRole($role, new \DateTimeImmutable('+2 hours'));
+        // Anchor Carbon so the two expiries are computed against a
+        // fixed instant — keeps the +1h vs +2h delta deterministic.
+        \Illuminate\Support\Carbon::setTestNow('2026-01-01 00:00:00');
+
+        try {
+            $user->assignRole($role, \Illuminate\Support\Carbon::now()->addHour()->toDateTimeImmutable());
+            $user->assignRole($role, \Illuminate\Support\Carbon::now()->addHours(2)->toDateTimeImmutable());
+        } finally {
+            \Illuminate\Support\Carbon::setTestNow();
+        }
 
         \Illuminate\Support\Facades\Event::assertDispatchedTimes(
             \SineMacula\Laravel\Authorization\Events\Identity\IdentityRoleExpiryChanged::class,
@@ -577,8 +545,16 @@ final class MutationKillersTest extends TestCase
         $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'p:m', 'guard_name' => 'web']);
         $user       = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        $user->givePermission($permission, new \DateTimeImmutable('+1 hour'));
-        $user->givePermission($permission, new \DateTimeImmutable('+2 hours'));
+        // Anchor Carbon so the two expiries are computed against a
+        // fixed instant — keeps the +1h vs +2h delta deterministic.
+        \Illuminate\Support\Carbon::setTestNow('2026-01-01 00:00:00');
+
+        try {
+            $user->givePermission($permission, \Illuminate\Support\Carbon::now()->addHour()->toDateTimeImmutable());
+            $user->givePermission($permission, \Illuminate\Support\Carbon::now()->addHours(2)->toDateTimeImmutable());
+        } finally {
+            \Illuminate\Support\Carbon::setTestNow();
+        }
 
         \Illuminate\Support\Facades\Event::assertDispatchedTimes(
             \SineMacula\Laravel\Authorization\Events\Identity\IdentityPermissionExpiryChanged::class,
@@ -587,11 +563,10 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `authorizationResolveGrantPivotColumns` reads the per-pivot
-     * column map from `authorization.pivots.<pivot>.<column>`. A
-     * custom override at each config path is applied — pins every
-     * concat operand in the prefix assembly (line 224) and each
-     * `$prefix . 'column'` call.
+     * `authorizationResolveGrantPivotColumns` reads the per-pivot column map
+     * from `authorization.pivots.<pivot>.<column>`. A custom override at each
+     * config path is applied — pins every concat operand in the prefix assembly
+     * (line 224) and each `$prefix . 'column'` call.
      *
      * @return void
      */
@@ -627,10 +602,9 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * Without an override, `authorizationResolveGrantPivotColumns`
-     * returns the package defaults for each column. Pins the
-     * default values passed as second argument to each `config()`
-     * call.
+     * Without an override, `authorizationResolveGrantPivotColumns` returns the
+     * package defaults for each column. Pins the default values passed as
+     * second argument to each `config()` call.
      *
      * @return void
      */
@@ -661,133 +635,17 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * The cache key is built as `<prefix>:<kind>:<morph>:<id>` —
-     * targeted assertions pin the exact shape so concat-removal
-     * and concat-reorder mutations around `keyFor()` break.
+     * The cache key is built as `<prefix>:<kind>:<morph>:<id>` — targeted
+     * assertions pin the exact shape so concat-removal and concat-reorder
+     * mutations around `keyFor()` break.
      *
      * @return void
      */
     public function testCacheKeyShapeIsPrefixKindMorphId(): void
     {
-        $driver = new class implements \Illuminate\Contracts\Cache\Store {
-            /** @var array<string, mixed> */
-            public array $storage = [];
-
-            /**
-             * @param  mixed  $key
-             * @return mixed
-             */
-            public function get(mixed $key): mixed
-            {
-                return $this->storage[$key] ?? null; // @phpstan-ignore offsetAccess.invalidOffset
-            }
-
-            /**
-             * @param  array<int, string>  $keys
-             * @return array<string, mixed>
-             */
-            public function many(array $keys): array // @phpstan-ignore method.childParameterType
-            {
-                return [];
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $value
-             * @param  mixed  $seconds
-             * @return bool
-             */
-            public function put(mixed $key, mixed $value, mixed $seconds): bool
-            {
-                $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset
-
-                return true;
-            }
-
-            /**
-             * @param  array  $values
-             * @param  mixed  $seconds
-             * @return bool
-             */
-            public function putMany(array $values, mixed $seconds): bool // @phpstan-ignore missingType.iterableValue
-            {
-                return true;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $value
-             * @return bool|int
-             */
-            public function increment(mixed $key, mixed $value = 1): bool|int
-            {
-                return false;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $value
-             * @return bool|int
-             */
-            public function decrement(mixed $key, mixed $value = 1): bool|int
-            {
-                return false;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $value
-             * @return bool
-             */
-            public function forever(mixed $key, mixed $value): bool
-            {
-                $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset
-
-                return true;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $ttl
-             * @return bool
-             */
-            public function touch(mixed $key, mixed $ttl): bool
-            {
-                return true;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @return bool
-             */
-            public function forget(mixed $key): bool
-            {
-                unset($this->storage[$key]); // @phpstan-ignore offsetAccess.invalidOffset
-
-                return true;
-            }
-
-            /**
-             * @return bool
-             */
-            public function flush(): bool
-            {
-                $this->storage = [];
-
-                return true;
-            }
-
-            /**
-             * @return string
-             */
-            public function getPrefix(): string
-            {
-                return '';
-            }
-        };
-
-        $store = new \Illuminate\Cache\Repository($driver);
-        $cache = new ResolutionCache(store: $store, ttl: 0, prefix: 'km-test');
+        $driver = new \Tests\Feature\Stubs\NonTaggableCacheStore;
+        $store  = new \Illuminate\Cache\Repository($driver);
+        $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'km-test');
 
         // A principal exposing getMorphClass + getKey should key
         // as `<prefix>:<kind>:<morph>:<id>`.
@@ -820,133 +678,16 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * When a principal lacks `getMorphClass`, the key falls back
-     * to `<FQCN>:<id>` — pins the type coalesce against Coalesce
-     * mutants.
+     * When a principal lacks `getMorphClass`, the key falls back to
+     * `<FQCN>:<id>` — pins the type coalesce against Coalesce mutants.
      *
      * @return void
      */
     public function testCacheKeyShapeFallsBackToClassNameWhenMorphMissing(): void
     {
-        $driver = new class implements \Illuminate\Contracts\Cache\Store {
-            /** @var array<string, mixed> */
-            public array $storage = [];
-
-            /**
-             * @param  mixed  $key
-             * @return mixed
-             */
-            public function get(mixed $key): mixed
-            {
-                return $this->storage[$key] ?? null; // @phpstan-ignore offsetAccess.invalidOffset
-            }
-
-            /**
-             * @param  array<int, string>  $keys
-             * @return array<string, mixed>
-             */
-            public function many(array $keys): array // @phpstan-ignore method.childParameterType
-            {
-                return [];
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $value
-             * @param  mixed  $seconds
-             * @return bool
-             */
-            public function put(mixed $key, mixed $value, mixed $seconds): bool
-            {
-                $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset
-
-                return true;
-            }
-
-            /**
-             * @param  array  $values
-             * @param  mixed  $seconds
-             * @return bool
-             */
-            public function putMany(array $values, mixed $seconds): bool // @phpstan-ignore missingType.iterableValue
-            {
-                return true;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $value
-             * @return bool|int
-             */
-            public function increment(mixed $key, mixed $value = 1): bool|int
-            {
-                return false;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $value
-             * @return bool|int
-             */
-            public function decrement(mixed $key, mixed $value = 1): bool|int
-            {
-                return false;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $value
-             * @return bool
-             */
-            public function forever(mixed $key, mixed $value): bool
-            {
-                $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset
-
-                return true;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @param  mixed  $ttl
-             * @return bool
-             */
-            public function touch(mixed $key, mixed $ttl): bool
-            {
-                return true;
-            }
-
-            /**
-             * @param  mixed  $key
-             * @return bool
-             */
-            public function forget(mixed $key): bool
-            {
-                unset($this->storage[$key]); // @phpstan-ignore offsetAccess.invalidOffset
-
-                return true;
-            }
-
-            /**
-             * @return bool
-             */
-            public function flush(): bool
-            {
-                $this->storage = [];
-
-                return true;
-            }
-
-            /**
-             * @return string
-             */
-            public function getPrefix(): string
-            {
-                return '';
-            }
-        };
-
-        $store = new \Illuminate\Cache\Repository($driver);
-        $cache = new ResolutionCache(store: $store, ttl: 0, prefix: 'km');
+        $driver = new \Tests\Feature\Stubs\NonTaggableCacheStore;
+        $store  = new \Illuminate\Cache\Repository($driver);
+        $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'km');
 
         $principal = new class {
             /**
@@ -965,9 +706,9 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `Statement::fromArray` distinguishes between missing and
-     * wrong-type effect values — pins the `!isset($x) || !is_string`
-     * branch against `&&` mutants.
+     * `Statement::fromArray` distinguishes between missing and wrong-type
+     * effect values — pins the `!isset($x) || !is_string` branch against `&&`
+     * mutants.
      *
      * @return void
      */
@@ -994,8 +735,8 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `Statement::fromArray` rejects missing, non-array, and empty
-     * actions — pins each of the three `||` sub-expressions.
+     * `Statement::fromArray` rejects missing, non-array, and empty actions —
+     * pins each of the three `||` sub-expressions.
      *
      * @return void
      */
@@ -1032,8 +773,8 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * An invalid effect string yields the correctly quoted
-     * message. Pins the trailing `:'{$data['effect']}'` concat.
+     * An invalid effect string yields the correctly quoted message. Pins the
+     * trailing `:'{$data['effect']}'` concat.
      *
      * @return void
      */
@@ -1051,9 +792,8 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * Default `resources` value is `['*']`. Pins the
-     * `public array $resources = ['*'];` default against
-     * ArrayItemRemoval.
+     * Default `resources` value is `['*']`. Pins the `public array $resources =
+     * ['*'];` default against ArrayItemRemoval.
      *
      * @return void
      */
@@ -1068,8 +808,8 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `compareNumeric` returns false for non-numeric actual /
-     * operand inputs, and performs strict comparison for numeric.
+     * `compareNumeric` returns false for non-numeric actual / operand inputs,
+     * and performs strict comparison for numeric.
      *
      * @return void
      */
@@ -1087,8 +827,8 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `matchesBool` coerces both sides before equality — pins
-     * the symmetric coercion against mutants that skip one side.
+     * `matchesBool` coerces both sides before equality — pins the symmetric
+     * coercion against mutants that skip one side.
      *
      * @return void
      */
@@ -1105,9 +845,8 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `matchesCidr` handles exact-match, /0 mask, /32 mask, and
-     * bad-input cases. Pins the `0 ? 0 : (-1 << (32 - $bits))`
-     * ternary.
+     * `matchesCidr` handles exact-match, /0 mask, /32 mask, and bad-input
+     * cases. Pins the `0 ? 0 : (-1 << (32 - $bits))` ternary.
      *
      * @return void
      */
@@ -1138,9 +877,9 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `compareTimes` uses the `<` / `>` comparator; anything else
-     * returns false. Pins the default-arm `false` against
-     * FalseValue / MatchArmRemoval mutants.
+     * `compareTimes` uses the `<` / `>` comparator; anything else returns
+     * false. Pins the default-arm `false` against FalseValue / MatchArmRemoval
+     * mutants.
      *
      * @return void
      */
@@ -1163,9 +902,9 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `matchesBetween` requires both bounds; returns false on
-     * missing operand keys, malformed operand, or out-of-range
-     * values. Pins the `>=` and `<=` inclusive bounds.
+     * `matchesBetween` requires both bounds; returns false on missing operand
+     * keys, malformed operand, or out-of-range values. Pins the `>=` and `<=`
+     * inclusive bounds.
      *
      * @return void
      */
@@ -1194,10 +933,10 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `authorize()` populates the `LastDecisionStore` on both the
-     * success and deny paths — pins the MethodCallRemoval mutant
-     * on `$this->lastDecisionStore->put($result)` inside the
-     * `authorize` branch (not evaluate).
+     * `authorize()` populates the `LastDecisionStore` on both the success and
+     * deny paths — pins the MethodCallRemoval mutant on
+     * `$this->lastDecisionStore->put($collected)` inside the `authorize` branch
+     * (not evaluate).
      *
      * @return void
      */
@@ -1231,9 +970,8 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `withPolicies()` returns a cloned manager — pins the
-     * CloneRemoval mutant on `$scoped = clone $this;`. The two
-     * managers must be distinct instances.
+     * `withPolicies()` returns a cloned manager — pins the CloneRemoval mutant
+     * on `$scoped = clone $this;`. The two managers must be distinct instances.
      *
      * @return void
      */
@@ -1283,8 +1021,16 @@ final class MutationKillersTest extends TestCase
         ]);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        $user->attachPolicy($policy, new \DateTimeImmutable('+1 hour'));
-        $user->attachPolicy($policy, new \DateTimeImmutable('+2 hours'));
+        // Anchor Carbon so the two expiries are computed against a
+        // fixed instant — keeps the +1h vs +2h delta deterministic.
+        \Illuminate\Support\Carbon::setTestNow('2026-01-01 00:00:00');
+
+        try {
+            $user->attachPolicy($policy, \Illuminate\Support\Carbon::now()->addHour()->toDateTimeImmutable());
+            $user->attachPolicy($policy, \Illuminate\Support\Carbon::now()->addHours(2)->toDateTimeImmutable());
+        } finally {
+            \Illuminate\Support\Carbon::setTestNow();
+        }
 
         \Illuminate\Support\Facades\Event::assertDispatchedTimes(
             \SineMacula\Laravel\Authorization\Events\Identity\IdentityPolicyExpiryChanged::class,
@@ -1293,9 +1039,9 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * Run a callable and assert it throws the expected exception
-     * class with the expected message. Shared helper for the
-     * `resolveEffect` / `resolveActions` branches.
+     * Run a callable and assert it throws the expected exception class with the
+     * expected message. Shared helper for the `resolveEffect` /
+     * `resolveActions` branches.
      *
      * @param  callable(): mixed  $callable
      * @param  class-string<\Throwable>  $class
@@ -1311,5 +1057,33 @@ final class MutationKillersTest extends TestCase
             self::assertInstanceOf($class, $exception);
             self::assertStringContainsString($message, $exception->getMessage());
         }
+    }
+
+    /**
+     * Build a throwaway Eloquent model whose `getKey()` returns the supplied
+     * value — fixture helper for the collect-ids test matrix (integer / string
+     * / duplicate / empty / non-scalar).
+     *
+     * @param  mixed  $key
+     * @return \Illuminate\Database\Eloquent\Model
+     */
+    private function makeModelWithKey(mixed $key): Model
+    {
+        $model = new class extends Model {
+            /** @var mixed */
+            public mixed $fixedKey = null;
+
+            /**
+             * @return mixed
+             */
+            public function getKey(): mixed
+            {
+                return $this->fixedKey;
+            }
+        };
+
+        $model->fixedKey = $key;
+
+        return $model;
     }
 }

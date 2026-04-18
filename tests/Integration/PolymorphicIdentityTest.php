@@ -14,9 +14,9 @@ use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\TestCase;
 
 /**
- * Integration tests covering polymorphic identity support — two
- * unrelated models share the same role and produce identical
- * decisions without model-class collisions.
+ * Integration tests covering polymorphic identity support — two unrelated
+ * models share the same role and produce identical decisions without
+ * model-class collisions.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,8 +29,8 @@ use Tests\TestCase;
 final class PolymorphicIdentityTest extends TestCase
 {
     /**
-     * Two unrelated identity models share a role and are granted the
-     * same permission without any model-class collisions.
+     * Two unrelated identity models share a role and are granted the same
+     * permission without any model-class collisions.
      *
      * @return void
      */
@@ -71,6 +71,7 @@ final class PolymorphicIdentityTest extends TestCase
 
         \sort($types);
 
-        return \array_values($types); // @phpstan-ignore return.type, arrayValues.list
+        // @phpstan-ignore-next-line return.type, arrayValues.list
+        return \array_values($types);
     }
 }

@@ -34,13 +34,12 @@ use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
 use Tests\TestCase;
 
 /**
- * Feature coverage for the row-lifecycle events on `Role`,
- * `Permission`, and `Policy`.
+ * Feature coverage for the row-lifecycle events on `Role`, `Permission`, and
+ * `Policy`.
  *
- * Each primitive ships a `Created` / `Updated` / `Deleted` trio.
- * The `Updated` variant carries the dirty attributes so audit
- * consumers can render a before/after diff without a second
- * round-trip.
+ * Each primitive ships a `Created` / `Updated` / `Deleted` trio. The `Updated`
+ * variant carries the dirty attributes so audit consumers can render a
+ * before/after diff without a second round-trip.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -99,10 +98,9 @@ final class LifecycleEventsTest extends TestCase
     }
 
     /**
-     * Updating a role dispatches `RoleUpdated` carrying both the
-     * pre-save (`before`) and post-save (`after`) snapshots so an
-     * audit consumer can render the diff without a second
-     * round-trip (issue #73).
+     * Updating a role dispatches `RoleUpdated` carrying both the pre-save
+     * (`before`) and post-save (`after`) snapshots so an audit consumer can
+     * render the diff without a second round-trip.
      *
      * @return void
      */
@@ -129,9 +127,8 @@ final class LifecycleEventsTest extends TestCase
     }
 
     /**
-     * The `before` map captures the pre-save value even when the
-     * pre-save value was null (the row had no description before
-     * the first set).
+     * The `before` map captures the pre-save value even when the pre-save value
+     * was null (the row had no description before the first set).
      *
      * @return void
      */
@@ -176,7 +173,8 @@ final class LifecycleEventsTest extends TestCase
 
         Event::assertDispatched(
             RoleDeleted::class,
-            static fn (RoleDeleted $event): bool => (string) $event->role->getKey() === (string) $role->getKey(), // @phpstan-ignore cast.string, cast.string
+            // @phpstan-ignore-next-line cast.string, cast.string
+            static fn (RoleDeleted $event): bool => (string) $event->role->getKey() === (string) $role->getKey(),
         );
     }
 
@@ -202,8 +200,8 @@ final class LifecycleEventsTest extends TestCase
     }
 
     /**
-     * Updating a permission dispatches `PermissionUpdated` with
-     * the before/after diff (issue #73).
+     * Updating a permission dispatches `PermissionUpdated` with the
+     * before/after diff.
      *
      * @return void
      */
@@ -230,8 +228,8 @@ final class LifecycleEventsTest extends TestCase
     }
 
     /**
-     * The `before` map captures null when the prior value was
-     * null (first-time set on a previously empty column).
+     * The `before` map captures null when the prior value was null (first-time
+     * set on a previously empty column).
      *
      * @return void
      */
@@ -276,7 +274,8 @@ final class LifecycleEventsTest extends TestCase
 
         Event::assertDispatched(
             PermissionDeleted::class,
-            static fn (PermissionDeleted $event): bool => (string) $event->permission->getKey() === (string) $permission->getKey(), // @phpstan-ignore cast.string, cast.string
+            // @phpstan-ignore-next-line cast.string, cast.string
+            static fn (PermissionDeleted $event): bool => (string) $event->permission->getKey() === (string) $permission->getKey(),
         );
     }
 
@@ -304,8 +303,7 @@ final class LifecycleEventsTest extends TestCase
     }
 
     /**
-     * Updating a policy dispatches `PolicyUpdated` with the
-     * before/after diff (issue #73).
+     * Updating a policy dispatches `PolicyUpdated` with the before/after diff.
      *
      * @return void
      */
@@ -334,8 +332,8 @@ final class LifecycleEventsTest extends TestCase
     }
 
     /**
-     * The `before` map captures null when the prior value was
-     * null (first-time set on a previously empty column).
+     * The `before` map captures null when the prior value was null (first-time
+     * set on a previously empty column).
      *
      * @return void
      */

@@ -25,16 +25,14 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Feature coverage for the expiry-changed event family
- * (issue #80).
+ * Feature coverage for the expiry-changed event family.
  *
- * `assignRole()` / `givePermission()` / `attachPolicy()` write
- * through `syncWithoutDetaching` and so silently overwrite an
- * existing pivot row's `expires_at`. The expiry-changed events
- * give audit consumers a distinct signal for the case where the
- * pre-write `expires_at` differs from the supplied value, fired
- * alongside the existing `Assigned` / `Granted` / `Attached`
- * event. A fresh grant fires only the `Assigned` / `Granted` /
+ * `assignRole()` / `givePermission()` / `attachPolicy()` write through
+ * `syncWithoutDetaching` and so silently overwrite an existing pivot row's
+ * `expires_at`. The expiry-changed events give audit consumers a distinct
+ * signal for the case where the pre-write `expires_at` differs from the
+ * supplied value, fired alongside the existing `Assigned` / `Granted` /
+ * `Attached` event. A fresh grant fires only the `Assigned` / `Granted` /
  * `Attached` event.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -62,11 +60,12 @@ final class ExpiryChangedEventsTest extends TestCase
     private const string POLICY_ACTION = 'systems:override';
 
     /**
-     * Reset the Carbon test now between tests so wall-clock
-     * travel never leaks across scenarios.
+     * Reset the Carbon test now between tests so wall-clock travel never leaks
+     * across scenarios.
      *
      * @return void
      */
+    #[\Override]
     protected function tearDown(): void
     {
         Carbon::setTestNow();
@@ -75,9 +74,8 @@ final class ExpiryChangedEventsTest extends TestCase
     }
 
     /**
-     * Re-assigning a forever role grant with an expiry shortens
-     * it and fires `IdentityRoleExpiryChanged` alongside the
-     * usual `IdentityRoleAssigned`.
+     * Re-assigning a forever role grant with an expiry shortens it and fires
+     * `IdentityRoleExpiryChanged` alongside the usual `IdentityRoleAssigned`.
      *
      * @return void
      */
@@ -107,8 +105,8 @@ final class ExpiryChangedEventsTest extends TestCase
     }
 
     /**
-     * Re-assigning an expiring role grant with a null expiry
-     * extends it to forever and fires the expiry-changed event.
+     * Re-assigning an expiring role grant with a null expiry extends it to
+     * forever and fires the expiry-changed event.
      *
      * @return void
      */
@@ -137,8 +135,8 @@ final class ExpiryChangedEventsTest extends TestCase
     }
 
     /**
-     * Re-assigning a role with the same expiry value fires no
-     * expiry-changed event.
+     * Re-assigning a role with the same expiry value fires no expiry-changed
+     * event.
      *
      * @return void
      */
@@ -162,9 +160,8 @@ final class ExpiryChangedEventsTest extends TestCase
     }
 
     /**
-     * A fresh role grant fires only `IdentityRoleAssigned` —
-     * the expiry-changed event is reserved for mutations of an
-     * existing pivot row.
+     * A fresh role grant fires only `IdentityRoleAssigned` — the expiry-changed
+     * event is reserved for mutations of an existing pivot row.
      *
      * @return void
      */
@@ -187,8 +184,8 @@ final class ExpiryChangedEventsTest extends TestCase
     }
 
     /**
-     * Re-granting a forever permission with an expiry shortens
-     * it and fires `IdentityPermissionExpiryChanged`.
+     * Re-granting a forever permission with an expiry shortens it and fires
+     * `IdentityPermissionExpiryChanged`.
      *
      * @return void
      */
@@ -218,8 +215,8 @@ final class ExpiryChangedEventsTest extends TestCase
     }
 
     /**
-     * Re-granting an expiring permission with a null expiry
-     * extends it to forever and fires the expiry-changed event.
+     * Re-granting an expiring permission with a null expiry extends it to
+     * forever and fires the expiry-changed event.
      *
      * @return void
      */
@@ -248,8 +245,8 @@ final class ExpiryChangedEventsTest extends TestCase
     }
 
     /**
-     * Re-granting a permission with the same expiry value fires
-     * no expiry-changed event.
+     * Re-granting a permission with the same expiry value fires no
+     * expiry-changed event.
      *
      * @return void
      */
@@ -273,8 +270,8 @@ final class ExpiryChangedEventsTest extends TestCase
     }
 
     /**
-     * Re-attaching a forever policy with an expiry shortens it
-     * and fires `IdentityPolicyExpiryChanged`.
+     * Re-attaching a forever policy with an expiry shortens it and fires
+     * `IdentityPolicyExpiryChanged`.
      *
      * @return void
      */
@@ -304,8 +301,8 @@ final class ExpiryChangedEventsTest extends TestCase
     }
 
     /**
-     * Re-attaching an expiring policy with a null expiry extends
-     * it to forever and fires the expiry-changed event.
+     * Re-attaching an expiring policy with a null expiry extends it to forever
+     * and fires the expiry-changed event.
      *
      * @return void
      */
@@ -334,8 +331,8 @@ final class ExpiryChangedEventsTest extends TestCase
     }
 
     /**
-     * Re-attaching a policy with the same expiry value fires no
-     * expiry-changed event.
+     * Re-attaching a policy with the same expiry value fires no expiry-changed
+     * event.
      *
      * @return void
      */
@@ -359,9 +356,8 @@ final class ExpiryChangedEventsTest extends TestCase
     }
 
     /**
-     * A fresh policy attachment fires only
-     * `IdentityPolicyAttached` — the expiry-changed event is
-     * reserved for mutations of an existing pivot row.
+     * A fresh policy attachment fires only `IdentityPolicyAttached` — the
+     * expiry-changed event is reserved for mutations of an existing pivot row.
      *
      * @return void
      */

@@ -15,13 +15,12 @@ use Tests\TestCase;
 
 /**
  * Coverage-focused feature tests for the skip branches in
- * `MigrateSpatieCommand` — unmapped role, permission, and policy
- * references plus the missing-target-table failure path.
+ * `MigrateSpatieCommand` — unmapped role, permission, and policy references
+ * plus the missing-target-table failure path.
  *
  * Package target tables are configured to the `auth_` prefix at
- * environment-definition time so the Spatie source names
- * (`roles`, `permissions`, ...) are free for the source schema
- * created inside `setUp()`.
+ * environment-definition time so the Spatie source names (`roles`,
+ * `permissions`, ...) are free for the source schema created inside `setUp()`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,37 +36,13 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     /**
      * @return void
      */
+    #[\Override]
     protected function setUp(): void
     {
         parent::setUp();
 
-        Schema::create('roles', static function (Blueprint $table): void {
-            $table->increments('id');
-            $table->string('name');
-            $table->string('guard_name');
-            $table->timestamps();
-        });
-        Schema::create('permissions', static function (Blueprint $table): void {
-            $table->increments('id');
-            $table->string('name');
-            $table->string('guard_name');
-            $table->timestamps();
-        });
-        Schema::create('role_has_permissions', static function (Blueprint $table): void {
-            $table->unsignedInteger('permission_id');
-            $table->unsignedInteger('role_id');
-            $table->primary(['permission_id', 'role_id']);
-        });
-        Schema::create('model_has_roles', static function (Blueprint $table): void {
-            $table->unsignedInteger('role_id');
-            $table->string('model_type');
-            $table->unsignedBigInteger('model_id');
-        });
-        Schema::create('model_has_permissions', static function (Blueprint $table): void {
-            $table->unsignedInteger('permission_id');
-            $table->string('model_type');
-            $table->unsignedBigInteger('model_id');
-        });
+        $this->createSpatieAuthorityTables();
+        $this->createSpatiePivotTables();
     }
 
     /**
@@ -76,6 +51,7 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
      *
      * @return void
      */
+    #[\Override]
     protected function tearDown(): void
     {
         foreach (['model_has_permissions', 'model_has_roles', 'role_has_permissions', 'permissions', 'roles'] as $table) {
@@ -86,14 +62,13 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     }
 
     /**
-     * `verifyTargetSchema()` fails when a target table is missing.
-     * Targets lines 70, 167, 169 of `MigrateSpatieCommand`.
+     * `verifyTargetSchema()` fails when a target table is missing. Targets
+     * lines 70, 167, 169 of `MigrateSpatieCommand`.
      *
-     * The previously-migrated `auth_authorizable_roles` table is
-     * dropped so the command's schema probe fails without
-     * poisoning the test-tier migrator (rewriting the config at
-     * this point would have it roll back tables under the wrong
-     * name on teardown).
+     * The previously-migrated `auth_authorizable_roles` table is dropped so the
+     * command's schema probe fails without poisoning the test-tier migrator
+     * (rewriting the config at this point would have it roll back tables under
+     * the wrong name on teardown).
      *
      * @return void
      */
@@ -117,9 +92,8 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     }
 
     /**
-     * Unmapped rows in `role_has_permissions` are skipped without
-     * aborting the migration. Targets line 279 of
-     * `MigrateSpatieCommand`.
+     * Unmapped rows in `role_has_permissions` are skipped without aborting the
+     * migration. Targets line 279 of `MigrateSpatieCommand`.
      *
      * @return void
      */
@@ -134,7 +108,7 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
             ['id' => 2, 'name' => 'b:do', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
         ]);
 
-        // Unmappable rows interleaved before *and* after mappable
+        // Unmappable rows interleaved before and after mappable
         // rows — a `break` mutation would stop processing after
         // the first unmappable row and miss the later mappable
         // one, distinguishing it from the real `continue`.
@@ -152,8 +126,7 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     }
 
     /**
-     * Unmapped rows in `model_has_roles` are skipped. Targets
-     * line 314.
+     * Unmapped rows in `model_has_roles` are skipped. Targets line 314.
      *
      * @return void
      */
@@ -178,8 +151,7 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     }
 
     /**
-     * Unmapped rows in `model_has_permissions` are skipped.
-     * Targets line 350.
+     * Unmapped rows in `model_has_permissions` are skipped. Targets line 350.
      *
      * @return void
      */
@@ -204,10 +176,9 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     }
 
     /**
-     * The summary table output reflects zero counts when every
-     * Spatie table is empty — pins the counter initialisation
-     * against IncrementInteger / DecrementInteger mutations on
-     * the `=> 0` seeds.
+     * The summary table output reflects zero counts when every Spatie table is
+     * empty — pins the counter initialisation against IncrementInteger /
+     * DecrementInteger mutations on the `=> 0` seeds.
      *
      * @return void
      */
@@ -231,9 +202,9 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     }
 
     /**
-     * The summary table output with seeded rows reports exact
-     * counts — pins the counter increment (`$counts['roles']++`)
-     * against Increment / Decrement / UnwrapPostInc mutations.
+     * The summary table output with seeded rows reports exact counts — pins the
+     * counter increment (`$counts['roles']++`) against Increment / Decrement /
+     * UnwrapPostInc mutations.
      *
      * @return void
      */
@@ -270,9 +241,8 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     }
 
     /**
-     * Dry run renders the "No data was written" warning message —
-     * pins the dry-run banner against ConcatOperandRemoval and
-     * string-message mutations.
+     * Dry run renders the "No data was written" warning message — pins the
+     * dry-run banner against ConcatOperandRemoval and string-message mutations.
      *
      * @return void
      */
@@ -291,9 +261,8 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     }
 
     /**
-     * The command coerces the `--dry-run` option to bool so an
-     * integer-shaped "0" still writes. Pins the (bool) cast
-     * against CastBool mutation.
+     * The command coerces the `--dry-run` option to bool so an integer-shaped
+     * "0" still writes. Pins the (bool) cast against CastBool mutation.
      *
      * @return void
      */
@@ -309,8 +278,8 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     }
 
     /**
-     * The dry-run banner info message is rendered. Pins the
-     * MethodCallRemoval mutant on line 78.
+     * The dry-run banner info message is rendered. Pins the MethodCallRemoval
+     * mutant on line 78.
      *
      * @return void
      */
@@ -323,8 +292,8 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     }
 
     /**
-     * The summary table headers include both "Target Table" and
-     * "Rows". Pins the ArrayItemRemoval mutant on line 113.
+     * The summary table headers include both "Target Table" and "Rows". Pins
+     * the ArrayItemRemoval mutant on line 113.
      *
      * @return void
      */
@@ -338,9 +307,9 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     }
 
     /**
-     * Dry-run mode calls the callback directly (no transaction)
-     * and still reports counts. Pins the IfNegation on line 104
-     * and the FunctionCallRemoval on line 105.
+     * Dry-run mode calls the callback directly (no transaction) and still
+     * reports counts. Pins the IfNegation on line 104 and the
+     * FunctionCallRemoval on line 105.
      *
      * @return void
      */
@@ -382,8 +351,8 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     }
 
     /**
-     * The `(string) $count` cast on line 115 is pinned by
-     * verifying table rows display as string numbers.
+     * The `(string) $count` cast on line 115 is pinned by verifying table rows
+     * display as string numbers.
      *
      * @return void
      */
@@ -401,8 +370,8 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     }
 
     /**
-     * Roles with integer IDs get converted to UUID strings. Pins
-     * the CastString on `(string) Str::orderedUuid()` on line 196.
+     * Roles with integer IDs get converted to UUID strings. Pins the CastString
+     * on `(string) Str::orderedUuid()` on line 196.
      *
      * @return void
      */
@@ -423,8 +392,8 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     }
 
     /**
-     * Null timestamps in source data are replaced with `now()`.
-     * Pins the Coalesce mutants on lines 205-206 and 245-246.
+     * Null timestamps in source data are replaced with `now()`. Pins the
+     * Coalesce mutants on lines 205-206 and 245-246.
      *
      * @return void
      */
@@ -444,9 +413,9 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     }
 
     /**
-     * The `(string) $data['model_id']` cast on lines 320 and 356
-     * is pinned by verifying integer model IDs are stored as
-     * strings in the authorizable_id column.
+     * The `(string) $data['model_id']` cast on lines 320 and 356 is pinned by
+     * verifying integer model IDs are stored as strings in the authorizable_id
+     * column.
      *
      * @return void
      */
@@ -477,9 +446,9 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     }
 
     /**
-     * The summary table lists all five target tables. Pins the
-     * ArrayItemRemoval mutant on line 154 of `verifyTargetSchema`
-     * (which would drop one table check from the config loop).
+     * The summary table lists all five target tables. Pins the ArrayItemRemoval
+     * mutant on line 154 of `verifyTargetSchema` (which would drop one table
+     * check from the config loop).
      *
      * @return void
      */
@@ -496,8 +465,8 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     }
 
     /**
-     * Non-dry-run uses a transaction. Pins the `DB::transaction()`
-     * on line 107 (MethodCallRemoval on line 110 for `$this->line`).
+     * Non-dry-run uses a transaction. Pins the `DB::transaction()` on line 107
+     * (MethodCallRemoval on line 110 for `$this->line`).
      *
      * @return void
      */
@@ -513,8 +482,8 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     }
 
     /**
-     * Null guard_name passes through as null. Pins the Coalesce
-     * mutants on `$data['guard_name'] ?? null`.
+     * Null guard_name passes through as null. Pins the Coalesce mutants on
+     * `$data['guard_name'] ?? null`.
      *
      * @return void
      */
@@ -532,12 +501,13 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     }
 
     /**
-     * Configure the package to use prefixed target table names so they
-     * do not collide with Spatie's source tables.
+     * Configure the package to use prefixed target table names so they do not
+     * collide with Spatie's source tables.
      *
      * @param  mixed  $app
      * @return void
      */
+    #[\Override]
     protected function defineEnvironment(mixed $app): void
     {
         parent::defineEnvironment($app);
@@ -552,5 +522,50 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
         $config->set('authorization.tables.authorizable_roles', 'auth_authorizable_roles');
         $config->set('authorization.tables.authorizable_permissions', 'auth_authorizable_permissions');
         $config->set('authorization.tables.authorizable_policies', 'auth_authorizable_policies');
+    }
+
+    /**
+     * Create the Spatie role and permission master tables.
+     *
+     * @return void
+     */
+    private function createSpatieAuthorityTables(): void
+    {
+        Schema::create('roles', static function (Blueprint $table): void {
+            $table->increments('id');
+            $table->string('name');
+            $table->string('guard_name');
+            $table->timestamps();
+        });
+        Schema::create('permissions', static function (Blueprint $table): void {
+            $table->increments('id');
+            $table->string('name');
+            $table->string('guard_name');
+            $table->timestamps();
+        });
+    }
+
+    /**
+     * Create the Spatie pivot tables (role / model junctions).
+     *
+     * @return void
+     */
+    private function createSpatiePivotTables(): void
+    {
+        Schema::create('role_has_permissions', static function (Blueprint $table): void {
+            $table->unsignedInteger('permission_id');
+            $table->unsignedInteger('role_id');
+            $table->primary(['permission_id', 'role_id']);
+        });
+        Schema::create('model_has_roles', static function (Blueprint $table): void {
+            $table->unsignedInteger('role_id');
+            $table->string('model_type');
+            $table->unsignedBigInteger('model_id');
+        });
+        Schema::create('model_has_permissions', static function (Blueprint $table): void {
+            $table->unsignedInteger('permission_id');
+            $table->string('model_type');
+            $table->unsignedBigInteger('model_id');
+        });
     }
 }

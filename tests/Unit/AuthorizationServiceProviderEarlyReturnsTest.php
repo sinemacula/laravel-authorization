@@ -16,21 +16,18 @@ use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 
 /**
- * Unit coverage for the service provider's defensive early-return
- * branches.
+ * Unit coverage for the service provider's defensive early-return branches.
  *
- * Each of the boot-time wiring methods
- * (`registerCacheInvalidationListeners`, `registerOctaneResetListener`,
- * `registerRouteMiddleware`, `registerBladeDirectives`,
- * `offerPublishing`) short-circuits when its required container
- * binding is absent. These branches matter for library-mode
- * embedding — non-Laravel applications that load the package for
- * its core evaluator without wanting the full framework glue.
+ * Each of the boot-time wiring methods (`registerCacheInvalidationListeners`,
+ * `registerOctaneResetListener`, `registerRouteMiddleware`,
+ * `registerBladeDirectives`, `offerPublishing`) short-circuits when its
+ * required container binding is absent. These branches matter for library-mode
+ * embedding — non-Laravel applications that load the package for its core
+ * evaluator without wanting the full framework glue.
  *
- * The tests exercise each branch against a bare `Container` that
- * never binds `events`, `router`, `blade.compiler`, or the Octane
- * request class, and an application whose `runningInConsole()`
- * returns false.
+ * The tests exercise each branch against a bare `Container` that never binds
+ * `events`, `router`, `blade.compiler`, or the Octane request class, and an
+ * application whose `runningInConsole()` returns false.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -46,11 +43,12 @@ use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
 {
     /**
-     * Swap the facade root after each test to avoid leaking Mockery
-     * doubles into other suites.
+     * Swap the facade root after each test to avoid leaking Mockery doubles
+     * into other suites.
      *
      * @return void
      */
+    #[\Override]
     protected function tearDown(): void
     {
         Facade::clearResolvedInstances();
@@ -61,8 +59,8 @@ final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
     }
 
     /**
-     * When the container has no `Dispatcher` binding the cache
-     * invalidation wiring short-circuits without raising.
+     * When the container has no `Dispatcher` binding the cache invalidation
+     * wiring short-circuits without raising.
      *
      * @return void
      */
@@ -76,9 +74,9 @@ final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
     }
 
     /**
-     * The Octane reset listener registration short-circuits when the
-     * container has no `Dispatcher` binding — covers the second half
-     * of the `!class_exists(...) || !bound(Dispatcher)` guard.
+     * The Octane reset listener registration short-circuits when the container
+     * has no `Dispatcher` binding — covers the second half of the
+     * `!class_exists(...) || !bound(Dispatcher)` guard.
      *
      * @return void
      */
@@ -93,8 +91,8 @@ final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
     }
 
     /**
-     * Route middleware registration short-circuits when the
-     * container has no `router` binding.
+     * Route middleware registration short-circuits when the container has no
+     * `router` binding.
      *
      * @return void
      */
@@ -109,8 +107,8 @@ final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
     }
 
     /**
-     * Blade directive registration short-circuits when the
-     * container has no `blade.compiler` binding.
+     * Blade directive registration short-circuits when the container has no
+     * `blade.compiler` binding.
      *
      * @return void
      */
@@ -124,8 +122,8 @@ final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
     }
 
     /**
-     * Asset publishing short-circuits when the application is not
-     * running in the console.
+     * Asset publishing short-circuits when the application is not running in
+     * the console.
      *
      * @return void
      */
@@ -144,9 +142,9 @@ final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
     }
 
     /**
-     * Build a minimal `Application` double whose `bound()` mirrors a
-     * bare `Container` so the provider's container probes behave
-     * exactly as they would under non-Laravel embedding.
+     * Build a minimal `Application` double whose `bound()` mirrors a bare
+     * `Container` so the provider's container probes behave exactly as they
+     * would under non-Laravel embedding.
      *
      * @return \Illuminate\Contracts\Foundation\Application
      */
@@ -164,9 +162,9 @@ final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
     }
 
     /**
-     * Invoke a protected method on the service provider via
-     * reflection so the early-return branches can be exercised
-     * without booting the full framework.
+     * Invoke a protected method on the service provider via reflection so the
+     * early-return branches can be exercised without booting the full
+     * framework.
      *
      * @param  \SineMacula\Laravel\Authorization\AuthorizationServiceProvider  $provider
      * @param  string  $method

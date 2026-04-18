@@ -9,6 +9,8 @@
             "Bash(git fetch *)",
             "Bash(qlty check *)",
             "Bash(gh search *)",
+            "Bash(composer check *)",
+            "Bash(composer show *)",
             "mcp__plugin_github_github__pull_request_read"
         ]
     }

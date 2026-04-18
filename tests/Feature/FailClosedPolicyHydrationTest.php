@@ -17,17 +17,16 @@ use Tests\TestCase;
 /**
  * Feature coverage for the fail-closed hydration path.
  *
- * `HasPolicies::getPolicies()` must not bubble a single malformed
- * row out to the request: the spec mandates deny-biased behaviour
- * — the bad row is dropped, the remaining policies continue to
- * evaluate, and an `ALLOW` statement from a broken document can
- * never win because the row was never hydrated.
+ * `HasPolicies::getPolicies()` must not bubble a single malformed row out to
+ * the request: the spec mandates deny-biased behaviour — the bad row is
+ * dropped, the remaining policies continue to evaluate, and an `ALLOW`
+ * statement from a broken document can never win because the row was never
+ * hydrated.
  *
- * The test uses `DB::table()` to bypass the Eloquent mutator and
- * persist a malformed document directly — the mutator's
- * validation path is the write-side guardrail; this covers the
- * read-side equivalent when a bad row reaches the database by
- * some other route (direct SQL, cross-database import, corrupted
+ * The test uses `DB::table()` to bypass the Eloquent mutator and persist a
+ * malformed document directly — the mutator's validation path is the write-side
+ * guardrail; this covers the read-side equivalent when a bad row reaches the
+ * database by some other route (direct SQL, cross-database import, corrupted
  * backup).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -41,8 +40,8 @@ use Tests\TestCase;
 final class FailClosedPolicyHydrationTest extends TestCase
 {
     /**
-     * A malformed policy row is silently skipped and the
-     * remaining policies still evaluate.
+     * A malformed policy row is silently skipped and the remaining policies
+     * still evaluate.
      *
      * @return void
      */
@@ -87,9 +86,9 @@ final class FailClosedPolicyHydrationTest extends TestCase
     }
 
     /**
-     * A full authorization check still produces a decision when
-     * a malformed row is attached — the engine stays deny-biased
-     * by excluding the bad row from the evaluation set.
+     * A full authorization check still produces a decision when a malformed row
+     * is attached — the engine stays deny-biased by excluding the bad row from
+     * the evaluation set.
      *
      * @return void
      */
@@ -119,9 +118,9 @@ final class FailClosedPolicyHydrationTest extends TestCase
             'authorizable_id'   => (string) $user->getKey(), // @phpstan-ignore cast.string
         ]);
 
-        $result = Authorization::for($user->fresh())->evaluate('posts:create');
+        $decision = Authorization::for($user->fresh())->evaluate('posts:create');
 
-        self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $result->reason);
+        self::assertTrue($decision->allowed);
+        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $decision->reason);
     }
 }

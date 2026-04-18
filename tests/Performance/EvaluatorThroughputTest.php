@@ -10,12 +10,11 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 
 /**
- * Performance tests codifying lightweight budgets on the evaluator
- * hot path.
+ * Performance tests codifying lightweight budgets on the evaluator hot path.
  *
- * Budgets are deliberately loose — the suite's job is to stop
- * catastrophic regressions, not to benchmark CPU throughput (the
- * PHPBench suite handles that).
+ * Budgets are deliberately loose — the suite's job is to stop catastrophic
+ * regressions, not to benchmark CPU throughput (the PHPBench suite handles
+ * that).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -28,8 +27,8 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 final class EvaluatorThroughputTest extends TestCase
 {
     /**
-     * The evaluator can walk a 100-statement policy 1,000 times in
-     * under half a second on a reference machine.
+     * The evaluator can walk a 100-statement policy 1,000 times in under half a
+     * second on a reference machine.
      *
      * @return void
      */

@@ -7,9 +7,9 @@ namespace Tests\Feature\Stubs;
 use Illuminate\Http\Request;
 
 /**
- * Stand-in middleware used by `RouteMiddlewareTest` to verify the
- * service provider keeps hands off an alias a consumer has already
- * wired to their own class.
+ * Stand-in middleware used by `RouteMiddlewareTest` to verify the service
+ * provider keeps hands off an alias a consumer has already wired to their own
+ * class.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -21,12 +21,11 @@ use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
 /**
- * Feature tests for row-level multi-tenant role and permission
- * scoping.
+ * Feature tests for row-level multi-tenant role and permission scoping.
  *
- * Verifies that the `TenantScope` global scope, `TenantResolver`
- * contract, and the tenant ownership helpers on `Role` and
- * `Permission` behave correctly under various tenant contexts.
+ * Verifies that the `TenantScope` global scope, `TenantResolver` contract, and
+ * the tenant ownership helpers on `Role` and `Permission` behave correctly
+ * under various tenant contexts.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -47,17 +46,32 @@ use Tests\TestCase;
 #[CoversClass(InvalidAuthorizationConfigException::class)]
 class TenantScopingTest extends TestCase
 {
+    /**
+     * When no tenant resolver is bound every role remains visible.
+     *
+     * @return void
+     */
     public function testNullResolverShowsAllRoles(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
         Role::create(['name' => 'global-role', 'guard_name' => 'web']);
-        Role::create(['name' => 'tenant-role', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
+        Role::create([
+            'name'        => 'tenant-role',
+            'guard_name'  => 'web',
+            'tenant_type' => $tenantA->getMorphClass(),
+            // @phpstan-ignore-next-line cast.string
+            'tenant_id' => (string) $tenantA->getKey(),
         ]);
 
         static::assertCount(2, Role::all());
     }
 
+    /**
+     * When no tenant resolver is bound every permission remains visible.
+     *
+     * @return void
+     */
     public function testNullResolverShowsAllPermissions(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
@@ -69,6 +83,11 @@ class TenantScopingTest extends TestCase
         static::assertCount(2, Permission::all());
     }
 
+    /**
+     * An active tenant sees both global roles and its own roles.
+     *
+     * @return void
+     */
     public function testActiveTenantSeesGlobalAndOwnRoles(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
@@ -90,6 +109,11 @@ class TenantScopingTest extends TestCase
         static::assertFalse($roles->pluck('name')->contains('role-b'));
     }
 
+    /**
+     * Roles owned by a different tenant must be filtered out.
+     *
+     * @return void
+     */
     public function testDifferentTenantRolesAreInvisible(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
@@ -103,6 +127,11 @@ class TenantScopingTest extends TestCase
         static::assertCount(0, Role::all());
     }
 
+    /**
+     * Global roles stay visible no matter which tenant is active.
+     *
+     * @return void
+     */
     public function testGlobalRolesAlwaysVisibleRegardlessOfTenant(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
@@ -117,6 +146,11 @@ class TenantScopingTest extends TestCase
         static::assertSame('global-role', $roles->first()->name); // @phpstan-ignore property.nonObject
     }
 
+    /**
+     * An active tenant sees both global permissions and its own.
+     *
+     * @return void
+     */
     public function testActiveTenantSeesGlobalAndOwnPermissions(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
@@ -138,6 +172,11 @@ class TenantScopingTest extends TestCase
         static::assertFalse($perms->pluck('name')->contains('perm-b'));
     }
 
+    /**
+     * Name-based role resolution honours the active tenant scope.
+     *
+     * @return void
+     */
     public function testResolveByNameReturnsTenantScopedRole(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
@@ -156,6 +195,11 @@ class TenantScopingTest extends TestCase
         static::assertSame((string) $tenantA->getKey(), $resolved->tenant_id); // @phpstan-ignore cast.string
     }
 
+    /**
+     * Name-based permission resolution honours the tenant scope.
+     *
+     * @return void
+     */
     public function testResolveByNameReturnsTenantScopedPermission(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
@@ -172,6 +216,11 @@ class TenantScopingTest extends TestCase
         static::assertSame((string) $tenantA->getKey(), $resolved->tenant_id); // @phpstan-ignore cast.string
     }
 
+    /**
+     * Creating a role with a tenant stores both tenant columns.
+     *
+     * @return void
+     */
     public function testCreatingRoleWithTenantPersistsCorrectly(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
@@ -193,21 +242,31 @@ class TenantScopingTest extends TestCase
         static::assertSame((string) $tenantA->getKey(), $fresh->tenant_id); // @phpstan-ignore cast.string, property.notFound
     }
 
+    /**
+     * Creating a permission with a tenant stores both tenant columns.
+     *
+     * @return void
+     */
     public function testCreatingPermissionWithTenantPersistsCorrectly(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
-        $perm = Permission::create([
+        $permission = Permission::create([
             'name'        => 'tenant-perm',
             'guard_name'  => 'web',
             'tenant_type' => $tenantA->getMorphClass(),
             'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
-        static::assertSame($tenantA->getMorphClass(), $perm->tenant_type);
-        static::assertSame((string) $tenantA->getKey(), $perm->tenant_id); // @phpstan-ignore cast.string
+        static::assertSame($tenantA->getMorphClass(), $permission->tenant_type);
+        static::assertSame((string) $tenantA->getKey(), $permission->tenant_id); // @phpstan-ignore cast.string
     }
 
+    /**
+     * `isGlobal` returns true for a role with no tenant owner.
+     *
+     * @return void
+     */
     public function testIsGlobalReturnsTrueForGlobalRole(): void
     {
         $role = Role::create(['name' => 'global', 'guard_name' => 'web']);
@@ -216,6 +275,11 @@ class TenantScopingTest extends TestCase
         static::assertFalse($role->isTenantOwned());
     }
 
+    /**
+     * `isTenantOwned` returns true for a tenant-owned role.
+     *
+     * @return void
+     */
     public function testIsTenantOwnedReturnsTrueForTenantRole(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
@@ -231,29 +295,44 @@ class TenantScopingTest extends TestCase
         static::assertFalse($role->isGlobal());
     }
 
+    /**
+     * `isGlobal` returns true for a permission with no tenant owner.
+     *
+     * @return void
+     */
     public function testIsGlobalReturnsTrueForGlobalPermission(): void
     {
-        $perm = Permission::create(['name' => 'global-perm', 'guard_name' => 'web']);
+        $permission = Permission::create(['name' => 'global-perm', 'guard_name' => 'web']);
 
-        static::assertTrue($perm->isGlobal());
-        static::assertFalse($perm->isTenantOwned());
+        static::assertTrue($permission->isGlobal());
+        static::assertFalse($permission->isTenantOwned());
     }
 
+    /**
+     * `isTenantOwned` returns true for a tenant-owned permission.
+     *
+     * @return void
+     */
     public function testIsTenantOwnedReturnsTrueForTenantPermission(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
-        $perm = Permission::create([
+        $permission = Permission::create([
             'name'        => 'posts:edit',
             'guard_name'  => 'web',
             'tenant_type' => $tenantA->getMorphClass(),
             'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
-        static::assertTrue($perm->isTenantOwned());
-        static::assertFalse($perm->isGlobal());
+        static::assertTrue($permission->isTenantOwned());
+        static::assertFalse($permission->isGlobal());
     }
 
+    /**
+     * `forTenant` scope filters roles to the given tenant.
+     *
+     * @return void
+     */
     public function testScopeForTenantFiltersRolesByTenant(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
@@ -271,6 +350,11 @@ class TenantScopingTest extends TestCase
         static::assertSame('role-a', $roles->first()->name); // @phpstan-ignore property.nonObject
     }
 
+    /**
+     * `globalOnly` scope returns only tenant-less roles.
+     *
+     * @return void
+     */
     public function testScopeGlobalOnlyFiltersRoles(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
@@ -285,6 +369,11 @@ class TenantScopingTest extends TestCase
         static::assertSame('global', $roles->first()->name); // @phpstan-ignore property.nonObject
     }
 
+    /**
+     * `forTenant` scope filters permissions to the given tenant.
+     *
+     * @return void
+     */
     public function testScopeForTenantFiltersPermissionsByTenant(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
@@ -302,6 +391,11 @@ class TenantScopingTest extends TestCase
         static::assertSame('perm-a', $perms->first()->name); // @phpstan-ignore property.nonObject
     }
 
+    /**
+     * `globalOnly` scope returns only tenant-less permissions.
+     *
+     * @return void
+     */
     public function testScopeGlobalOnlyFiltersPermissions(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
@@ -316,6 +410,11 @@ class TenantScopingTest extends TestCase
         static::assertSame('global-perm', $perms->first()->name); // @phpstan-ignore property.nonObject
     }
 
+    /**
+     * An identity assigned a tenant role receives the expected permissions.
+     *
+     * @return void
+     */
     public function testIdentityWithTenantRoleGetsCorrectPermissions(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
@@ -327,14 +426,14 @@ class TenantScopingTest extends TestCase
             'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
-        $perm = Permission::create([
+        $permission = Permission::create([
             'name'        => 'posts:edit',
             'guard_name'  => 'web',
             'tenant_type' => $tenantA->getMorphClass(),
             'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
-        $role->givePermission($perm);
+        $role->givePermission($permission);
 
         $identity = StubIdentity::create(['id' => 'user-1', 'name' => 'Alice']);
         $identity->assignRole($role);
@@ -345,6 +444,11 @@ class TenantScopingTest extends TestCase
         static::assertTrue($identity->hasPermission('posts:edit'));
     }
 
+    /**
+     * The polymorphic tenant relation resolves on a role.
+     *
+     * @return void
+     */
     public function testTenantRelationResolvesOnRole(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
@@ -362,6 +466,11 @@ class TenantScopingTest extends TestCase
         static::assertSame('tenant-a', (string) $resolved->getKey()); // @phpstan-ignore cast.string
     }
 
+    /**
+     * The tenant relation returns null for a global role.
+     *
+     * @return void
+     */
     public function testTenantRelationReturnsNullForGlobalRole(): void
     {
         $role = Role::create(['name' => 'global', 'guard_name' => 'web']);
@@ -369,23 +478,33 @@ class TenantScopingTest extends TestCase
         static::assertNull($role->tenant);
     }
 
+    /**
+     * The polymorphic tenant relation resolves on a permission.
+     *
+     * @return void
+     */
     public function testTenantRelationResolvesOnPermission(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
-        $perm = Permission::create([
+        $permission = Permission::create([
             'name'        => 'posts:edit',
             'guard_name'  => 'web',
             'tenant_type' => $tenantA->getMorphClass(),
             'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
-        $resolved = $perm->tenant;
+        $resolved = $permission->tenant;
 
         static::assertNotNull($resolved);
         static::assertSame('tenant-a', (string) $resolved->getKey()); // @phpstan-ignore cast.string
     }
 
+    /**
+     * An invalid tenant-resolver config raises a validation exception.
+     *
+     * @return void
+     */
     public function testInvalidTenantResolverConfigThrows(): void
     {
         $this->app['config']->set('authorization.tenant_resolver', 'NonExistent\Class'); // @phpstan-ignore offsetAccess.notFound, method.nonObject
@@ -399,6 +518,11 @@ class TenantScopingTest extends TestCase
         \SineMacula\Laravel\Authorization\Config\ConfigValidator::validate($config, $this->app);
     }
 
+    /**
+     * A null tenant-resolver config passes validation.
+     *
+     * @return void
+     */
     public function testNullTenantResolverConfigPassesValidation(): void
     {
         $this->app['config']->set('authorization.tenant_resolver', null); // @phpstan-ignore offsetAccess.notFound, method.nonObject
@@ -412,10 +536,10 @@ class TenantScopingTest extends TestCase
     }
 
     /**
-     * The `TenantResolver` is consulted at most once per scope
-     * instance per container lifetime — a spy resolver wrapping a
-     * concrete tenant records one `resolve()` invocation regardless
-     * of how many Eloquent queries the scope filters (issue #103).
+     * The `TenantResolver` is consulted at most once per scope instance per
+     * container lifetime — a spy resolver wrapping a concrete tenant records
+     * one `resolve()` invocation regardless of how many Eloquent queries the
+     * scope filters.
      *
      * @return void
      */
@@ -429,11 +553,32 @@ class TenantScopingTest extends TestCase
         Permission::create(['name' => 'perm-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
+        /**
+         * Counting tenant resolver used to verify memoisation.
+         */
         $spy = new class ($tenantA) implements TenantResolver {
+            /** @var int Number of times `resolve` was invoked. */
             public int $calls = 0;
 
-            public function __construct(private readonly ?object $tenant) {}
+            /**
+             * Create a new spy wrapping a fixed tenant.
+             *
+             * @param  object|null  $tenant
+             * @return void
+             */
+            public function __construct(
 
+                /** The tenant returned by every resolution call. */
+                private readonly ?object $tenant,
+
+            ) {}
+
+            /**
+             * Resolve the tenant and increment the call counter.
+             *
+             * @return object|null
+             */
+            #[\Override]
             public function resolve(): ?object
             {
                 $this->calls++;
@@ -468,10 +613,9 @@ class TenantScopingTest extends TestCase
     }
 
     /**
-     * A resolver that returns an object which is neither an
-     * Eloquent `Model` nor an `AuthorizableTenant` implementer is
-     * refused at the scope boundary with `InvalidTenantException`
-     * (issue #104) — no silent `spl_object_hash` fallback.
+     * A resolver that returns an object which is neither an Eloquent `Model`
+     * nor an `AuthorizableTenant` implementer is refused at the scope boundary
+     * with `InvalidTenantException` — no silent `spl_object_hash` fallback.
      *
      * @return void
      */
@@ -488,9 +632,9 @@ class TenantScopingTest extends TestCase
     }
 
     /**
-     * A custom tenant implementing `AuthorizableTenant` is accepted
-     * by the scope and matches rows written with the contract's
-     * `getMorphClass()` / `getKey()` values (issue #104).
+     * A custom tenant implementing `AuthorizableTenant` is accepted by the
+     * scope and matches rows written with the contract's `getMorphClass()` /
+     * `getKey()` values.
      *
      * @return void
      */
@@ -533,9 +677,8 @@ class TenantScopingTest extends TestCase
     }
 
     /**
-     * Persisting a Role with only `tenant_type` (tenant_id null)
-     * raises `InvalidTenantColumnsException` before the row hits
-     * the database (issue #105).
+     * Persisting a Role with only `tenant_type` (tenant_id null) raises
+     * `InvalidTenantColumnsException` before the row hits the database.
      *
      * @return void
      */
@@ -553,8 +696,8 @@ class TenantScopingTest extends TestCase
     }
 
     /**
-     * The inverse case — `tenant_id` set with `tenant_type` null —
-     * is refused with the same exception (issue #105).
+     * The inverse case — `tenant_id` set with `tenant_type` null — is refused
+     * with the same exception.
      *
      * @return void
      */
@@ -572,8 +715,7 @@ class TenantScopingTest extends TestCase
     }
 
     /**
-     * Permissions carry the same tenant-column invariant (issue
-     * #105).
+     * Permissions carry the same tenant-column invariant.
      *
      * @return void
      */
@@ -598,10 +740,32 @@ class TenantScopingTest extends TestCase
      */
     private function bindTenantResolver(?object $tenant): void
     {
-        $this->app->singleton(TenantResolver::class, static function () use ($tenant): TenantResolver { // @phpstan-ignore method.nonObject
-            return new class ($tenant) implements TenantResolver {
-                public function __construct(private readonly ?object $tenant) {}
+        // @phpstan-ignore-next-line method.nonObject
+        $this->app->singleton(TenantResolver::class, static function () use ($tenant): TenantResolver {
 
+            /**
+             * Test resolver that returns the captured tenant verbatim.
+             */
+            return new class ($tenant) implements TenantResolver {
+                /**
+                 * Create a new resolver wrapping a fixed tenant.
+                 *
+                 * @param  object|null  $tenant
+                 * @return void
+                 */
+                public function __construct(
+
+                    /** The tenant returned by every resolution call. */
+                    private readonly ?object $tenant,
+
+                ) {}
+
+                /**
+                 * Resolve the current tenant.
+                 *
+                 * @return object|null
+                 */
+                #[\Override]
                 public function resolve(): ?object
                 {
                     return $this->tenant;
@@ -613,9 +777,9 @@ class TenantScopingTest extends TestCase
     }
 
     /**
-     * Flush the per-instance tenant memo on the global scopes
-     * registered on `Role` and `Permission` so a re-bound resolver
-     * is observed on the next query.
+     * Flush the per-instance tenant memo on the global scopes registered on
+     * `Role` and `Permission` so a re-bound resolver is observed on the next
+     * query.
      *
      * @return void
      */

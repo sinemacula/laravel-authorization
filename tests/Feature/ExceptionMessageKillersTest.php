@@ -11,10 +11,9 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
 use Tests\TestCase;
 
 /**
- * Mutation-killer coverage for exception message strings assembled
- * via `.` concat. Each test pins the exact rendered message
- * content so ConcatOperandRemoval / Concat reordering mutations
- * fail.
+ * Mutation-killer coverage for exception message strings assembled via `.`
+ * concat. Each test pins the exact rendered message content so
+ * ConcatOperandRemoval / Concat reordering mutations fail.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -30,8 +29,8 @@ use Tests\TestCase;
 final class ExceptionMessageKillersTest extends TestCase
 {
     /**
-     * `permission_enums` rejects a scalar with a message that
-     * names the debug type at the end. Pins the full concat.
+     * `permission_enums` rejects a scalar with a message that names the debug
+     * type at the end. Pins the full concat.
      *
      * @return void
      */
@@ -51,9 +50,8 @@ final class ExceptionMessageKillersTest extends TestCase
     }
 
     /**
-     * A non-existent `permission_enums` entry yields a message
-     * that quotes the class name in single quotes and says
-     * "does not exist.".
+     * A non-existent `permission_enums` entry yields a message that quotes the
+     * class name in single quotes and says "does not exist.".
      *
      * @return void
      */
@@ -72,8 +70,8 @@ final class ExceptionMessageKillersTest extends TestCase
     }
 
     /**
-     * An existing class that doesn't implement `PermissionEnum`
-     * yields a message naming the class and the contract FQCN.
+     * An existing class that doesn't implement `PermissionEnum` yields a
+     * message naming the class and the contract FQCN.
      *
      * @return void
      */
@@ -114,8 +112,8 @@ final class ExceptionMessageKillersTest extends TestCase
     }
 
     /**
-     * `permission_providers` with a scalar payload yields the
-     * typed message naming the config key and the debug type.
+     * `permission_providers` with a scalar payload yields the typed message
+     * naming the config key and the debug type.
      *
      * @return void
      */
@@ -135,8 +133,8 @@ final class ExceptionMessageKillersTest extends TestCase
     }
 
     /**
-     * An unknown `permission_providers` class yields the correctly
-     * quoted message.
+     * An unknown `permission_providers` class yields the correctly quoted
+     * message.
      *
      * @return void
      */
@@ -175,10 +173,10 @@ final class ExceptionMessageKillersTest extends TestCase
     }
 
     /**
-     * `AuthorizationMiddlewareMisconfiguredException` shortens the
-     * FQCN to the trailing class name and embeds it at the exact
-     * position in the message. Pins the `strrpos + 1` arithmetic
-     * against Increment / Decrement / UnwrapSubstr mutations.
+     * `AuthorizationMiddlewareMisconfiguredException` shortens the FQCN to the
+     * trailing class name and embeds it at the exact position in the message.
+     * Pins the `strrpos + 1` arithmetic against Increment / Decrement /
+     * UnwrapSubstr mutations.
      *
      * @return void
      */
@@ -197,9 +195,8 @@ final class ExceptionMessageKillersTest extends TestCase
     }
 
     /**
-     * A contract with no namespace separator falls back to the
-     * raw string — pins the `strrpos !== false` ternary false
-     * branch.
+     * A contract with no namespace separator falls back to the raw string —
+     * pins the `strrpos !== false` ternary false branch.
      *
      * @return void
      */
@@ -214,10 +211,9 @@ final class ExceptionMessageKillersTest extends TestCase
     }
 
     /**
-     * `GuardMismatchException` assembles its message via three
-     * concat segments and carries HTTP status 422. Pins the
-     * concat content and the status code against
-     * Increment / Decrement / ConcatOperandRemoval mutants.
+     * `GuardMismatchException` assembles its message via three concat segments
+     * and carries HTTP status 422. Pins the concat content and the status code
+     * against Increment / Decrement / ConcatOperandRemoval mutants.
      *
      * @return void
      */
@@ -245,8 +241,7 @@ final class ExceptionMessageKillersTest extends TestCase
     }
 
     /**
-     * `principal_resolver` non-string message names the offending
-     * type.
+     * `principal_resolver` non-string message names the offending type.
      *
      * @return void
      */

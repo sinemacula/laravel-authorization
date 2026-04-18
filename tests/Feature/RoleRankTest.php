@@ -26,9 +26,8 @@ use Tests\TestCase;
  * Feature tests for role rank / seniority.
  *
  * Validates the rank column, the `isRanked()`, `outranks()`, and
- * `outranksOrEquals()` helpers on the Role model, and the
- * `canActOn()` advisory helper on identities using the `HasRoles`
- * trait.
+ * `outranksOrEquals()` helpers on the Role model, and the `canActOn()` advisory
+ * helper on identities using the `HasRoles` trait.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -223,8 +222,7 @@ final class RoleRankTest extends TestCase
     }
 
     /**
-     * `canActOn()` returns true for everything when `rank.enabled`
-     * is false.
+     * `canActOn()` returns true for everything when `rank.enabled` is false.
      *
      * @return void
      */
@@ -283,8 +281,7 @@ final class RoleRankTest extends TestCase
     }
 
     /**
-     * `isRanked()` returns true for ranked roles and false for
-     * unranked roles.
+     * `isRanked()` returns true for ranked roles and false for unranked roles.
      *
      * @return void
      */

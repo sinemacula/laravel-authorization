@@ -21,14 +21,13 @@ use Tests\TestCase;
 /**
  * Direct unit-style coverage for the `RolePermission` pivot.
  *
- * The existing feature tests drive the pivot through the Role API;
- * this suite instantiates the pivot directly and pins each branch
- * of `ensureGuardParity()` — the in-memory parent fast-path, the
- * orphan-parent exception, and the configurable column-name
- * fallbacks. A future refactor of `Role::permissions()` that stops
- * routing through `using(RolePermission::class)` would leave the
- * feature tests green; this suite is the safety net for the
- * model-layer invariant.
+ * The existing feature tests drive the pivot through the Role API; this suite
+ * instantiates the pivot directly and pins each branch of `ensureGuardParity()`
+ * — the in-memory parent fast-path, the orphan-parent exception, and the
+ * configurable column-name fallbacks. A future refactor of
+ * `Role::permissions()` that stops routing through
+ * `using(RolePermission::class)` would leave the feature tests green; this
+ * suite is the safety net for the model-layer invariant.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -43,8 +42,8 @@ use Tests\TestCase;
 final class RolePermissionPivotTest extends TestCase
 {
     /**
-     * Matching concrete guards on a directly-instantiated pivot
-     * save cleanly and land in the pivot table.
+     * Matching concrete guards on a directly-instantiated pivot save cleanly
+     * and land in the pivot table.
      *
      * @return void
      */
@@ -70,9 +69,9 @@ final class RolePermissionPivotTest extends TestCase
     }
 
     /**
-     * A directly-instantiated pivot with two concrete, different
-     * guards raises `GuardMismatchException` from the `saving`
-     * hook — the invariant holds outside the relation path.
+     * A directly-instantiated pivot with two concrete, different guards raises
+     * `GuardMismatchException` from the `saving` hook — the invariant holds
+     * outside the relation path.
      *
      * @return void
      */
@@ -92,9 +91,9 @@ final class RolePermissionPivotTest extends TestCase
     }
 
     /**
-     * Either side null on the pivot attributes short-circuits the
-     * guard check — the FK constraint at the DB layer owns the
-     * "required column" rule, not the guard-parity invariant.
+     * Either side null on the pivot attributes short-circuits the guard check —
+     * the FK constraint at the DB layer owns the "required column" rule, not
+     * the guard-parity invariant.
      *
      * @return void
      */
@@ -124,9 +123,9 @@ final class RolePermissionPivotTest extends TestCase
     }
 
     /**
-     * When the role parent is attached via the pivot's `role`
-     * relation, the guard-parity hook reads it from memory — no
-     * `find()` query is issued for that side.
+     * When the role parent is attached via the pivot's `role` relation, the
+     * guard-parity hook reads it from memory — no `find()` query is issued for
+     * that side.
      *
      * @return void
      */
@@ -163,9 +162,8 @@ final class RolePermissionPivotTest extends TestCase
     }
 
     /**
-     * The `pivotParent` set by a `BelongsToMany` attach path is
-     * treated as an authoritative role-side source — no lookup
-     * for that side either.
+     * The `pivotParent` set by a `BelongsToMany` attach path is treated as an
+     * authoritative role-side source — no lookup for that side either.
      *
      * @return void
      */
@@ -191,9 +189,9 @@ final class RolePermissionPivotTest extends TestCase
     }
 
     /**
-     * A pivot attached to a role ID with no matching row raises
-     * the typed `OrphanedRolePermissionException` — the DB-layer
-     * FK constraint is not relied upon.
+     * A pivot attached to a role ID with no matching row raises the typed
+     * `OrphanedRolePermissionException` — the DB-layer FK constraint is not
+     * relied upon.
      *
      * @return void
      */
@@ -216,8 +214,8 @@ final class RolePermissionPivotTest extends TestCase
     }
 
     /**
-     * A pivot attached to a permission ID with no matching row
-     * raises the typed `OrphanedRolePermissionException`.
+     * A pivot attached to a permission ID with no matching row raises the typed
+     * `OrphanedRolePermissionException`.
      *
      * @return void
      */
@@ -240,9 +238,9 @@ final class RolePermissionPivotTest extends TestCase
     }
 
     /**
-     * The pivot reads its column names from config when no
-     * relation supplies pivot keys — the default stays
-     * `role_id` / `permission_id` and guard-parity still fires.
+     * The pivot reads its column names from config when no relation supplies
+     * pivot keys — the default stays `role_id` / `permission_id` and
+     * guard-parity still fires.
      *
      * @return void
      */
@@ -268,10 +266,9 @@ final class RolePermissionPivotTest extends TestCase
     }
 
     /**
-     * When the consumer overrides the pivot column names via
-     * config and ships a matching schema, the pivot's guard-parity
-     * check reads attributes from the new columns — a renamed
-     * schema does not silently disable the invariant.
+     * When the consumer overrides the pivot column names via config and ships a
+     * matching schema, the pivot's guard-parity check reads attributes from the
+     * new columns — a renamed schema does not silently disable the invariant.
      *
      * @return void
      */

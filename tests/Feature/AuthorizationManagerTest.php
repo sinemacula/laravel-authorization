@@ -32,9 +32,8 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * End-to-end feature tests exercising the authorization manager, the
- * Eloquent traits, and the RBAC / policy interplay against a live
- * SQLite schema.
+ * End-to-end feature tests exercising the authorization manager, the Eloquent
+ * traits, and the RBAC / policy interplay against a live SQLite schema.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -50,7 +49,8 @@ use Tests\TestCase;
 final class AuthorizationManagerTest extends TestCase
 {
     /**
-     * Anonymous resolver yields implicit deny on can() and throws from authorize().
+     * Anonymous resolver yields implicit deny on can() and throws from
+     * authorize().
      *
      * @return void
      */
@@ -74,9 +74,9 @@ final class AuthorizationManagerTest extends TestCase
         $user = StubIdentity::create(['id' => '1705066a-b10d-4f4a-8aba-73758a3a381a']);
         $user->givePermission('posts:create');
 
-        $result = Authorization::for($user)->evaluate('posts:create');
-        self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::RBAC_ALLOW, $result->reason);
+        $decision = Authorization::for($user)->evaluate('posts:create');
+        self::assertTrue($decision->allowed);
+        self::assertSame(DecisionReason::RBAC_ALLOW, $decision->reason);
     }
 
     /**
@@ -121,9 +121,9 @@ final class AuthorizationManagerTest extends TestCase
         $user->assignRole('admin');
         $user->attachPolicy($policy);
 
-        $result = Authorization::for($user)->evaluate('posts:delete');
-        self::assertFalse($result->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_DENY, $result->reason);
+        $decision = Authorization::for($user)->evaluate('posts:delete');
+        self::assertFalse($decision->allowed);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $decision->reason);
     }
 
     /**
@@ -266,7 +266,8 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * Gate parity — Gate::allows and Authorization::can return identical verdicts.
+     * Gate parity — Gate::allows and Authorization::can return identical
+     * verdicts.
      *
      * @return void
      */
@@ -288,7 +289,8 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * authorize() fires AuthorizationFailed and DecisionEvaluated before throwing.
+     * authorize() fires AuthorizationFailed and DecisionEvaluated before
+     * throwing.
      *
      * @return void
      */
@@ -320,10 +322,10 @@ final class AuthorizationManagerTest extends TestCase
             'statements' => [['effect' => 'allow', 'actions' => ['ad:hoc']]],
         ]);
 
-        $result = Authorization::for($user)->withPolicies([$override])->evaluate('ad:hoc');
+        $decision = Authorization::for($user)->withPolicies([$override])->evaluate('ad:hoc');
 
-        self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $result->reason);
+        self::assertTrue($decision->allowed);
+        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $decision->reason);
     }
 
     /**
@@ -354,10 +356,9 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * `Authorization::currentPrincipal()` returns the principal
-     * the resolver currently reports — the single accessor
-     * every surface (middleware, Blade, future consumers)
-     * delegates to (see issue #85).
+     * `Authorization::currentPrincipal()` returns the principal the resolver
+     * currently reports — the single accessor every surface (middleware, Blade,
+     * future consumers) delegates to.
      *
      * @return void
      */

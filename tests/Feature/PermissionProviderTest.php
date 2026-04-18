@@ -8,72 +8,14 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
-use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
+use Tests\Feature\Stubs\StubNullGuardProvider;
+use Tests\Feature\Stubs\StubPermissionProvider;
 use Tests\TestCase;
-
-/**
- * Stub provider that contributes two permissions under the `web` guard.
- *
- * @internal
- *
- * @SuppressWarnings("php:S1192")
- */
-final class StubPermissionProvider implements PermissionProvider
-{
-    /**
-     * Return the permission strings this provider contributes.
-     *
-     * @return array<int, string>
-     */
-    public function permissions(): array
-    {
-        return ['media:upload', 'media:delete'];
-    }
-
-    /**
-     * Return the guard name these permissions are scoped to.
-     *
-     * @return string|null
-     */
-    public function guard(): ?string // @phpstan-ignore return.unusedType
-    {
-        return 'web';
-    }
-}
-
-/**
- * Stub provider that contributes guard-agnostic permissions.
- *
- * @internal
- */
-// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
-final class StubNullGuardProvider implements PermissionProvider
-{
-    /**
-     * Return the permission strings this provider contributes.
-     *
-     * @return array<int, string>
-     */
-    public function permissions(): array
-    {
-        return ['billing:view'];
-    }
-
-    /**
-     * Return the guard name these permissions are scoped to.
-     *
-     * @return string|null
-     */
-    public function guard(): ?string
-    {
-        return null;
-    }
-}
 
 /**
  * Feature tests for the `PermissionProvider` boot-time registration.
@@ -88,7 +30,6 @@ final class StubNullGuardProvider implements PermissionProvider
 #[CoversClass(BladeDirectiveRegistrar::class)]
 #[CoversClass(EventListenerRegistrar::class)]
 #[CoversClass(ConfigValidator::class)]
-// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 final class PermissionProviderTest extends TestCase
 {
     /**
@@ -116,8 +57,8 @@ final class PermissionProviderTest extends TestCase
     }
 
     /**
-     * Provider registration is idempotent — booting twice does not
-     * create duplicate rows.
+     * Provider registration is idempotent — booting twice does not create
+     * duplicate rows.
      *
      * @return void
      */
@@ -137,8 +78,7 @@ final class PermissionProviderTest extends TestCase
     }
 
     /**
-     * A provider with a null guard creates guard-agnostic permission
-     * rows.
+     * A provider with a null guard creates guard-agnostic permission rows.
      *
      * @return void
      */
@@ -173,8 +113,7 @@ final class PermissionProviderTest extends TestCase
     }
 
     /**
-     * Config validation rejects a class that does not implement the
-     * contract.
+     * Config validation rejects a class that does not implement the contract.
      *
      * @return void
      */
