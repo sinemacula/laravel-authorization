@@ -107,6 +107,7 @@ abstract class BenchmarkCase
         \sort($files);
 
         foreach ($files as $file) {
+
             // Laravel migrations are anonymous-class returning files
             // that expose no class symbol for `use` — dynamic include
             // is the idiomatic Laravel loader and matches the shape

@@ -9,7 +9,7 @@ use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
 /**
  * Non-null tenant resolver used by the tenant-scope bench.
  *
- * Returns a stable `BenchTenant` every call so the memoised
+ * Returns a stable `BenchmarkTenant` every call so the memoised
  * resolver result is identity-stable across the request and the
  * warm / cold benches measure only the scope apply path.
  *
@@ -20,15 +20,18 @@ use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
  *
  * @SuppressWarnings("php:S1192")
  */
-final class BenchTenantResolver implements TenantResolver
+final class BenchmarkTenantResolver implements TenantResolver
 {
     /**
-     * Return a fresh `BenchTenant`.
+     * Return a fresh `BenchmarkTenant`.
      *
      * @return object|null
+     *
+     * @phpstan-ignore-next-line return.unusedType
      */
-    public function resolve(): ?object // @phpstan-ignore return.unusedType
+    #[\Override]
+    public function resolve(): ?object
     {
-        return new BenchTenant;
+        return new BenchmarkTenant;
     }
 }
