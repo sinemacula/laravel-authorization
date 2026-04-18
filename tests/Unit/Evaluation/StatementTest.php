@@ -126,7 +126,7 @@ final class StatementTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        // @phpstan-ignore-next-line argument.type (test passes deliberately-invalid input to exercise validation error path)
+        // @phpstan-ignore-next-line argument.type
         Statement::fromArray(['effect' => 'allow', 'actions' => [123]]);
     }
 
@@ -139,7 +139,7 @@ final class StatementTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        // @phpstan-ignore-next-line argument.type (test passes deliberately-invalid input to exercise validation error path)
+        // @phpstan-ignore-next-line argument.type
         Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'resources' => 'nope']);
     }
 
@@ -168,7 +168,7 @@ final class StatementTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        // @phpstan-ignore-next-line argument.type (test passes deliberately-invalid input to exercise validation error path)
+        // @phpstan-ignore-next-line argument.type
         Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'resources' => [42]]);
     }
 
@@ -181,7 +181,7 @@ final class StatementTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        // @phpstan-ignore-next-line argument.type (test passes deliberately-invalid input to exercise validation error path)
+        // @phpstan-ignore-next-line argument.type
         Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => 'nope']);
     }
 
@@ -194,7 +194,7 @@ final class StatementTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        // @phpstan-ignore-next-line argument.type (test passes deliberately-invalid input to exercise validation error path)
+        // @phpstan-ignore-next-line argument.type
         Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => [42 => 'v']]);
     }
 
@@ -659,7 +659,7 @@ final class StatementTest extends TestCase
         // Confirm non-string throws — that's the array_map callback
         $this->expectException(\InvalidArgumentException::class);
         $this->expectExceptionMessage('actions must be strings');
-        // @phpstan-ignore-next-line argument.type (test passes deliberately-invalid input to exercise validation error path)
+        // @phpstan-ignore-next-line argument.type
         Statement::fromArray(['effect' => 'allow', 'actions' => ['valid', 42]]);
     }
 

@@ -104,7 +104,7 @@ abstract class TestCase extends OrchestraTestCase
         $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
         $this->createStubIdentityTables();
 
-        if (env('DB_CONNECTION', 'sqlite') !== 'sqlite') { // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig (test bootstrap reads env pre-config)
+        if (env('DB_CONNECTION', 'sqlite') !== 'sqlite') { // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig
             $this->registerNonSqliteTeardown();
         }
     }
@@ -161,7 +161,7 @@ abstract class TestCase extends OrchestraTestCase
     private function databaseConnection(): array
     {
         /** @var string $driver */
-        $driver = env('DB_CONNECTION', 'sqlite'); // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig (test bootstrap reads env pre-config)
+        $driver = env('DB_CONNECTION', 'sqlite'); // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig
 
         if ($driver === 'sqlite') {
             return [
@@ -173,11 +173,11 @@ abstract class TestCase extends OrchestraTestCase
 
         return [
             'driver'    => $driver,
-            'host'      => env('DB_HOST', '127.0.0.1'), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig (test bootstrap reads env pre-config)
-            'port'      => env('DB_PORT', $driver === 'pgsql' ? '5432' : '3306'), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig (test bootstrap reads env pre-config)
-            'database'  => env('DB_DATABASE', 'laravel_authorization_test'), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig (test bootstrap reads env pre-config)
-            'username'  => env('DB_USERNAME', 'root'), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig (test bootstrap reads env pre-config)
-            'password'  => env('DB_PASSWORD', ''), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig (test bootstrap reads env pre-config)
+            'host'      => env('DB_HOST', '127.0.0.1'), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig
+            'port'      => env('DB_PORT', $driver === 'pgsql' ? '5432' : '3306'), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig
+            'database'  => env('DB_DATABASE', 'laravel_authorization_test'), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig
+            'username'  => env('DB_USERNAME', 'root'), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig
+            'password'  => env('DB_PASSWORD', ''), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig
             'prefix'    => '',
             'charset'   => $driver === 'pgsql' ? 'utf8' : 'utf8mb4',
             'collation' => $driver === 'pgsql' ? null : 'utf8mb4_unicode_ci',

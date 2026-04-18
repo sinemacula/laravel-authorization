@@ -53,7 +53,7 @@ final class ServiceProviderExtraBranchesTest extends TestCase
     public function testPolicyStoreIsBoundWhenConfigured(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.policy_store', StubPolicyStore::class);
 
         // Re-run the register phase so the binding is picked up; the
@@ -61,8 +61,8 @@ final class ServiceProviderExtraBranchesTest extends TestCase
         // config sets `policy_store` to null.
         (new AuthorizationServiceProvider($this->app))->register();
 
-        self::assertTrue($this->app->bound(PolicyStore::class)); // @phpstan-ignore method.nonObject (test container is non-null)
-        self::assertInstanceOf(StubPolicyStore::class, $this->app->make(PolicyStore::class)); // @phpstan-ignore method.nonObject (test container is non-null)
+        self::assertTrue($this->app->bound(PolicyStore::class)); // @phpstan-ignore method.nonObject
+        self::assertInstanceOf(StubPolicyStore::class, $this->app->make(PolicyStore::class)); // @phpstan-ignore method.nonObject
     }
 
     /**
@@ -75,7 +75,7 @@ final class ServiceProviderExtraBranchesTest extends TestCase
     public function testGateConflictModeEnumInstanceIsAcceptedVerbatim(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.gate.on_conflict', GateConflictMode::OVERWRITE);
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
@@ -100,7 +100,7 @@ final class ServiceProviderExtraBranchesTest extends TestCase
     public function testPermissionProviderSkipsEmptyAndNonStringEntries(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.permission_providers', [StubBadPermissionProvider::class]);
 
         (new AuthorizationServiceProvider($this->app))->boot();
@@ -122,7 +122,7 @@ final class ServiceProviderExtraBranchesTest extends TestCase
     public function testRegisterGatesSkipsNonStringEnumEntries(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.permission_enums', [123, \stdClass::class, PermissionEnum::class]);
         $config->set('authorization.gate.on_conflict', 'overwrite');
 
@@ -144,7 +144,7 @@ final class ServiceProviderExtraBranchesTest extends TestCase
     public function testRegisterPermissionProvidersSkipsBadEntries(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.permission_providers', [
             123,                                    // non-string
             \stdClass::class,                       // string but not a provider

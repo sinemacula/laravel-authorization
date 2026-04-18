@@ -61,7 +61,7 @@ final class GateParityTest extends TestCase
         parent::setUp();
 
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
         // The default is `throw`; the provider's previous boot has
         // already defined the Gate under a fresh app, so re-booting

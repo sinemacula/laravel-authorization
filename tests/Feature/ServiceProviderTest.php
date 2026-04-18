@@ -46,9 +46,9 @@ final class ServiceProviderTest extends TestCase
      */
     public function testBindsManagerEvaluatorAndResolver(): void
     {
-        self::assertInstanceOf(PolicyEvaluator::class, $this->app->make(PolicyEvaluator::class)); // @phpstan-ignore method.nonObject (test container is non-null)
-        self::assertInstanceOf(NullPrincipalResolver::class, $this->app->make(PrincipalResolver::class)); // @phpstan-ignore method.nonObject (test container is non-null)
-        self::assertInstanceOf(AuthorizationManager::class, $this->app->make('authorization')); // @phpstan-ignore method.nonObject (test container is non-null)
+        self::assertInstanceOf(PolicyEvaluator::class, $this->app->make(PolicyEvaluator::class)); // @phpstan-ignore method.nonObject
+        self::assertInstanceOf(NullPrincipalResolver::class, $this->app->make(PrincipalResolver::class)); // @phpstan-ignore method.nonObject
+        self::assertInstanceOf(AuthorizationManager::class, $this->app->make('authorization')); // @phpstan-ignore method.nonObject
         /** @var \Illuminate\Foundation\Application $app */
         $app = $this->app;
         self::assertSame($app->make('authorization'), $app->make(AuthorizationManager::class));
@@ -62,7 +62,7 @@ final class ServiceProviderTest extends TestCase
     public function testMergesDefaultConfig(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
 
         self::assertSame('web', $config->get('authorization.defaults.guard'));
         self::assertSame('throw', $config->get('authorization.gate.on_conflict'));
@@ -77,7 +77,7 @@ final class ServiceProviderTest extends TestCase
     public function testRegistersGateForEachEnumCase(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
         // Re-boot the provider so the new config is picked up.
@@ -98,7 +98,7 @@ final class ServiceProviderTest extends TestCase
         Gate::define('posts:create', static fn (): bool => true);
 
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.gate.on_conflict', 'throw');
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
@@ -118,7 +118,7 @@ final class ServiceProviderTest extends TestCase
         Gate::define('posts:create', static fn (?object $user = null): bool => true);
 
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.gate.on_conflict', 'log');
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
@@ -140,7 +140,7 @@ final class ServiceProviderTest extends TestCase
         Gate::define('posts:create', static fn (): bool => true);
 
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.gate.on_conflict', 'overwrite');
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 

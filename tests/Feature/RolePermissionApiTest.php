@@ -112,7 +112,7 @@ final class RolePermissionApiTest extends TestCase
         $role->givePermission(self::PERMISSION_NAME);
         $role->givePermission(self::PERMISSION_NAME);
 
-        self::assertCount(1, $role->fresh()?->permissions ?? []); // @phpstan-ignore nullsafe.neverNull (fresh() non-null after persistence)
+        self::assertCount(1, $role->fresh()?->permissions ?? []); // @phpstan-ignore nullsafe.neverNull
     }
 
     /**
@@ -264,6 +264,6 @@ final class RolePermissionApiTest extends TestCase
         $names = $role->fresh()?->getPermissions() ?? [];
         \sort($names);
 
-        return \array_values($names); // @phpstan-ignore arrayValues.list (numeric-indexed list coerce)
+        return \array_values($names); // @phpstan-ignore arrayValues.list
     }
 }

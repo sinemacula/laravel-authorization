@@ -55,7 +55,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testCollectModelIdsStringifiesAndDedupesAndDropsEmpty(): void
     {
-        /** @phpstan-ignore-next-line class.missingExtends (stub does not extend Eloquent model) */
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -63,9 +63,9 @@ final class MutationKillersTest extends TestCase
              * @param  iterable<int, \Illuminate\Database\Eloquent\Model>  $models
              * @return array<string, mixed>
              */
-            public function collect(iterable $models): array // @phpstan-ignore missingType.iterableValue (iterable typing relaxed for fixtures)
+            public function collect(iterable $models): array // @phpstan-ignore missingType.iterableValue
             {
-                return self::authorizationCollectModelIds($models); // @phpstan-ignore return.type (stub loosens return type)
+                return self::authorizationCollectModelIds($models); // @phpstan-ignore return.type
             }
         };
 
@@ -79,7 +79,7 @@ final class MutationKillersTest extends TestCase
 
         // Integer 42 must be cast to string '42'; empties dropped;
         // duplicates squashed; non-string/non-int keys skipped.
-        self::assertSame(['42', 'alpha'], $collected); // @phpstan-ignore staticMethod.impossibleType (impossible-type scenario for coverage)
+        self::assertSame(['42', 'alpha'], $collected); // @phpstan-ignore staticMethod.impossibleType
     }
 
     /**
@@ -90,7 +90,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testCollectModelIdsReturnsEmptyForAllMalformedModels(): void
     {
-        /** @phpstan-ignore-next-line class.missingExtends (stub does not extend Eloquent model) */
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -100,7 +100,7 @@ final class MutationKillersTest extends TestCase
              */
             public function collect(iterable $models): array
             {
-                return self::authorizationCollectModelIds($models); // @phpstan-ignore return.type (stub loosens return type)
+                return self::authorizationCollectModelIds($models); // @phpstan-ignore return.type
             }
         };
 
@@ -136,7 +136,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testNearestPivotExpirySelectsStrictlySmallerSeconds(): void
     {
-        /** @phpstan-ignore-next-line class.missingExtends (stub does not extend Eloquent model) */
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -181,7 +181,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testNearestPivotExpiryReturnsNullWhenNoLiveExpiries(): void
     {
-        /** @phpstan-ignore-next-line class.missingExtends (stub does not extend Eloquent model) */
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -216,7 +216,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testMinNullableRespectsNullAsUnbounded(): void
     {
-        /** @phpstan-ignore-next-line class.missingExtends (stub does not extend Eloquent model) */
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -250,7 +250,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testCoerceExpiresAtCoerciveBranches(): void
     {
-        /** @phpstan-ignore-next-line class.missingExtends (stub does not extend Eloquent model) */
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -289,7 +289,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testSecondsUntilPivotExpiryDropsZeroAndNegative(): void
     {
-        /** @phpstan-ignore-next-line class.missingExtends (stub does not extend Eloquent model) */
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -332,7 +332,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testGrantExpiriesEqualEveryBranch(): void
     {
-        /** @phpstan-ignore-next-line class.missingExtends (stub does not extend Eloquent model) */
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -442,7 +442,7 @@ final class MutationKillersTest extends TestCase
         $cache->rememberPermissions(
             $principal,
             static fn (): array => ['x:do'],
-            new ResolutionCacheContext(maxTtl: null, roleIds: [(string) $role->getKey()]), // @phpstan-ignore cast.string (stub key cast to string)
+            new ResolutionCacheContext(maxTtl: null, roleIds: [(string) $role->getKey()]), // @phpstan-ignore cast.string
         );
 
         // Flush the role's tag — subsequent read on fresh cache misses.
@@ -457,7 +457,7 @@ final class MutationKillersTest extends TestCase
 
                 return ['y:do'];
             },
-            new ResolutionCacheContext(maxTtl: null, roleIds: [(string) $role->getKey()]), // @phpstan-ignore cast.string (stub key cast to string)
+            new ResolutionCacheContext(maxTtl: null, roleIds: [(string) $role->getKey()]), // @phpstan-ignore cast.string
         );
 
         self::assertSame(['y:do'], $collected);
@@ -573,14 +573,14 @@ final class MutationKillersTest extends TestCase
     public function testAuthorizationResolveGrantPivotColumnsHonoursPerPivotOverrides(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(\Illuminate\Contracts\Config\Repository::class); // @phpstan-ignore method.nonObject (test container is non-null)
+        $config = $this->app->make(\Illuminate\Contracts\Config\Repository::class); // @phpstan-ignore method.nonObject
 
         $config->set('authorization.pivots.authorizable_roles.authorizable_type_column', 'custom_type');
         $config->set('authorization.pivots.authorizable_roles.authorizable_id_column', 'custom_id');
         $config->set('authorization.pivots.authorizable_roles.role_column', 'custom_role_fk');
         $config->set('authorization.pivots.authorizable_roles.expires_at_column', 'custom_expires_at');
 
-        /** @phpstan-ignore-next-line class.missingExtends (stub does not extend Eloquent model) */
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -610,7 +610,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testAuthorizationResolveGrantPivotColumnsDefaultsToPackageColumns(): void
     {
-        /** @phpstan-ignore-next-line class.missingExtends (stub does not extend Eloquent model) */
+        /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
 
@@ -942,7 +942,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testAuthorizeWritesLastDecisionOnBothOutcomes(): void
     {
-        $this->app->make(\SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore::class)->forget(); // @phpstan-ignore method.nonObject (test container is non-null)
+        $this->app->make(\SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore::class)->forget(); // @phpstan-ignore method.nonObject
 
         // Deny path — authorize() throws, lastDecision captures the result.
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'la', 'guard_name' => 'web']);

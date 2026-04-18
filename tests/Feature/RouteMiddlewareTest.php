@@ -400,7 +400,7 @@ final class RouteMiddlewareTest extends TestCase
     public function testServiceProviderRegistersMiddlewareAliases(): void
     {
         /** @var \Illuminate\Routing\Router $router */
-        $router = $this->app->make(Router::class); // @phpstan-ignore method.nonObject (test container is non-null)
+        $router = $this->app->make(Router::class); // @phpstan-ignore method.nonObject
 
         $middleware = $router->getMiddleware();
 
@@ -417,7 +417,7 @@ final class RouteMiddlewareTest extends TestCase
     public function testServiceProviderDoesNotOverrideExistingAliases(): void
     {
         /** @var \Illuminate\Routing\Router $router */
-        $router = $this->app->make(Router::class); // @phpstan-ignore method.nonObject (test container is non-null)
+        $router = $this->app->make(Router::class); // @phpstan-ignore method.nonObject
 
         $router->aliasMiddleware('role', CustomRoleMiddlewareDouble::class);
 
@@ -499,9 +499,9 @@ final class RouteMiddlewareTest extends TestCase
             }
         };
 
-        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject (test container is non-null)
-        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject (test container is non-null)
-        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject (test container is non-null)
+        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject
+        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
+        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
     }
 
     /**

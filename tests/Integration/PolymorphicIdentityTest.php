@@ -71,7 +71,7 @@ final class PolymorphicIdentityTest extends TestCase
 
         \sort($types);
 
-        // @phpstan-ignore-next-line return.type, arrayValues.list (stub loosens type; numeric-indexed list intentional)
+        // @phpstan-ignore-next-line return.type, arrayValues.list
         return \array_values($types);
     }
 }

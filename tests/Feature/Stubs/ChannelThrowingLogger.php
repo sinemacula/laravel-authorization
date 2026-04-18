@@ -55,11 +55,11 @@ final class ChannelThrowingLogger extends AbstractLogger
      * @param  array  $context
      * @return void
      */
-    public function warning(string|\Stringable $message, array $context = []): void // @phpstan-ignore missingType.iterableValue (iterable typing relaxed for fixtures)
+    public function warning(string|\Stringable $message, array $context = []): void // @phpstan-ignore missingType.iterableValue
     {
         $this->warningCalls++;
         $this->lastMessage = (string) $message;
-        $this->lastContext = $context; // @phpstan-ignore assign.propertyType (fixture relaxes typed property)
+        $this->lastContext = $context; // @phpstan-ignore assign.propertyType
     }
 
     /**
@@ -68,6 +68,6 @@ final class ChannelThrowingLogger extends AbstractLogger
      * @param  array  $context
      * @return void
      */
-    public function log(mixed $level, string|\Stringable $message, array $context = []): void // @phpstan-ignore missingType.iterableValue (iterable typing relaxed for fixtures)
+    public function log(mixed $level, string|\Stringable $message, array $context = []): void // @phpstan-ignore missingType.iterableValue
     {}
 }

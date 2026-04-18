@@ -141,7 +141,7 @@ final class BladeHelpersBudgetTest extends TestCase
              *
              * @return object|null
              *
-             * @phpstan-ignore-next-line return.unusedType (stub returns non-null)
+             * @phpstan-ignore-next-line return.unusedType
              */
             #[\Override]
             public function resolve(): ?object

@@ -56,7 +56,7 @@ final class BladeHelpersNarrowContractsTest extends TestCase
              *
              * @return object|null
              *
-             * @phpstan-ignore-next-line return.unusedType (test stub always returns non-null)
+             * @phpstan-ignore-next-line return.unusedType
              */
             #[\Override]
             public function resolve(): ?object
@@ -65,9 +65,9 @@ final class BladeHelpersNarrowContractsTest extends TestCase
             }
         };
 
-        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject (test container is non-null)
-        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject (test container is non-null)
-        $this->app->forgetInstance(\SineMacula\Laravel\Authorization\AuthorizationManager::class); // @phpstan-ignore method.nonObject (test container is non-null)
+        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject
+        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
+        $this->app->forgetInstance(\SineMacula\Laravel\Authorization\AuthorizationManager::class); // @phpstan-ignore method.nonObject
     }
 
     /**

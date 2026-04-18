@@ -18,7 +18,7 @@ use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
  *
  * @SuppressWarnings("php:S1192")
  */
-final class StubAuthorizationEntity // @phpstan-ignore class.missingExtends (stub does not extend Eloquent model)
+final class StubAuthorizationEntity // @phpstan-ignore class.missingExtends
 {
     use ValidatesAuthorizationName;
 

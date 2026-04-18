@@ -136,7 +136,7 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
             'statements' => [['effect' => 'allow', 'actions' => ['fixed:act']]],
         ]);
 
-        $this->app->instance(PolicyResolver::class, new class ($fixed) implements PolicyResolver { // @phpstan-ignore method.nonObject (test container is non-null)
+        $this->app->instance(PolicyResolver::class, new class ($fixed) implements PolicyResolver { // @phpstan-ignore method.nonObject
 
             /**
              * Create a new resolver wrapping a fixed policy.
@@ -163,8 +163,8 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
             }
         });
 
-        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject (test container is non-null)
-        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject (test container is non-null)
+        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
+        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
@@ -198,7 +198,7 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
 
         $last = Authorization::lastDecision();
 
-        self::assertNotNull($last); // @phpstan-ignore staticMethod.impossibleType (impossible-type scenario for coverage)
+        self::assertNotNull($last); // @phpstan-ignore staticMethod.impossibleType
         self::assertFalse($last->allowed);
         self::assertSame(DecisionReason::EXPLICIT_DENY, $last->reason);
     }
@@ -303,7 +303,7 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
              *
              * @return object|null
              *
-             * @phpstan-ignore-next-line return.unusedType (stub returns non-null)
+             * @phpstan-ignore-next-line return.unusedType
              */
             #[\Override]
             public function resolve(): ?object
@@ -312,9 +312,9 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
             }
         };
 
-        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject (test container is non-null)
-        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject (test container is non-null)
-        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject (test container is non-null)
+        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject
+        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
+        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
 
         return $user;
     }

@@ -41,6 +41,6 @@ final class AuthorizationAssertionsFallbackTest extends TestCase
 
         // Container-level side-effect: the manager is rebuilt under
         // the swapped principal.
-        self::assertSame($user, $this->app->make(AuthorizationManager::class)->currentPrincipal()); // @phpstan-ignore method.nonObject (test container is non-null)
+        self::assertSame($user, $this->app->make(AuthorizationManager::class)->currentPrincipal()); // @phpstan-ignore method.nonObject
     }
 }

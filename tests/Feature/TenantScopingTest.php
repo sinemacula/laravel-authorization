@@ -60,7 +60,7 @@ class TenantScopingTest extends TestCase
             'name'        => 'tenant-role',
             'guard_name'  => 'web',
             'tenant_type' => $tenantA->getMorphClass(),
-            // @phpstan-ignore-next-line cast.string (stub key cast to string)
+            // @phpstan-ignore-next-line cast.string
             'tenant_id' => (string) $tenantA->getKey(),
         ]);
 
@@ -77,7 +77,7 @@ class TenantScopingTest extends TestCase
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
         Permission::create(['name' => 'global-perm', 'guard_name' => 'web']);
-        Permission::create(['name' => 'tenant-perm', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+        Permission::create(['name' => 'tenant-perm', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
         static::assertCount(2, Permission::all());
@@ -94,9 +94,9 @@ class TenantScopingTest extends TestCase
         $tenantB = StubTenant::create(['id' => 'tenant-b', 'name' => 'Tenant B']);
 
         Role::create(['name' => 'global-role', 'guard_name' => 'web']);
-        Role::create(['name' => 'role-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+        Role::create(['name' => 'role-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
-        Role::create(['name' => 'role-b', 'guard_name' => 'web', 'tenant_type' => $tenantB->getMorphClass(), 'tenant_id' => (string) $tenantB->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+        Role::create(['name' => 'role-b', 'guard_name' => 'web', 'tenant_type' => $tenantB->getMorphClass(), 'tenant_id' => (string) $tenantB->getKey(), // @phpstan-ignore cast.string
         ]);
 
         $this->bindTenantResolver($tenantA);
@@ -119,7 +119,7 @@ class TenantScopingTest extends TestCase
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
         $tenantB = StubTenant::create(['id' => 'tenant-b', 'name' => 'Tenant B']);
 
-        Role::create(['name' => 'role-b', 'guard_name' => 'web', 'tenant_type' => $tenantB->getMorphClass(), 'tenant_id' => (string) $tenantB->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+        Role::create(['name' => 'role-b', 'guard_name' => 'web', 'tenant_type' => $tenantB->getMorphClass(), 'tenant_id' => (string) $tenantB->getKey(), // @phpstan-ignore cast.string
         ]);
 
         $this->bindTenantResolver($tenantA);
@@ -143,7 +143,7 @@ class TenantScopingTest extends TestCase
         $roles = Role::all();
 
         static::assertCount(1, $roles);
-        static::assertSame('global-role', $roles->first()->name); // @phpstan-ignore property.nonObject (property on non-null Eloquent row)
+        static::assertSame('global-role', $roles->first()->name); // @phpstan-ignore property.nonObject
     }
 
     /**
@@ -157,9 +157,9 @@ class TenantScopingTest extends TestCase
         $tenantB = StubTenant::create(['id' => 'tenant-b', 'name' => 'Tenant B']);
 
         Permission::create(['name' => 'global-perm', 'guard_name' => 'web']);
-        Permission::create(['name' => 'perm-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+        Permission::create(['name' => 'perm-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
-        Permission::create(['name' => 'perm-b', 'guard_name' => 'web', 'tenant_type' => $tenantB->getMorphClass(), 'tenant_id' => (string) $tenantB->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+        Permission::create(['name' => 'perm-b', 'guard_name' => 'web', 'tenant_type' => $tenantB->getMorphClass(), 'tenant_id' => (string) $tenantB->getKey(), // @phpstan-ignore cast.string
         ]);
 
         $this->bindTenantResolver($tenantA);
@@ -184,7 +184,7 @@ class TenantScopingTest extends TestCase
         // Create a global role and a tenant-owned role with the
         // same name but different guard to avoid the unique constraint.
         Role::create(['name' => 'editor', 'guard_name' => null]);
-        Role::create(['name' => 'editor', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+        Role::create(['name' => 'editor', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
         $this->bindTenantResolver($tenantA);
@@ -192,7 +192,7 @@ class TenantScopingTest extends TestCase
         $resolved = Role::resolveByName('editor', 'web');
 
         static::assertTrue($resolved->isTenantOwned());
-        static::assertSame((string) $tenantA->getKey(), $resolved->tenant_id); // @phpstan-ignore cast.string (stub key cast to string)
+        static::assertSame((string) $tenantA->getKey(), $resolved->tenant_id); // @phpstan-ignore cast.string
     }
 
     /**
@@ -205,7 +205,7 @@ class TenantScopingTest extends TestCase
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
         Permission::create(['name' => 'posts:edit', 'guard_name' => null]);
-        Permission::create(['name' => 'posts:edit', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+        Permission::create(['name' => 'posts:edit', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
         $this->bindTenantResolver($tenantA);
@@ -213,7 +213,7 @@ class TenantScopingTest extends TestCase
         $resolved = Permission::resolveByName('posts:edit', 'web');
 
         static::assertTrue($resolved->isTenantOwned());
-        static::assertSame((string) $tenantA->getKey(), $resolved->tenant_id); // @phpstan-ignore cast.string (stub key cast to string)
+        static::assertSame((string) $tenantA->getKey(), $resolved->tenant_id); // @phpstan-ignore cast.string
     }
 
     /**
@@ -229,17 +229,17 @@ class TenantScopingTest extends TestCase
             'name'        => 'tenant-editor',
             'guard_name'  => 'web',
             'tenant_type' => $tenantA->getMorphClass(),
-            'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+            'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
         static::assertSame($tenantA->getMorphClass(), $role->tenant_type);
-        static::assertSame((string) $tenantA->getKey(), $role->tenant_id); // @phpstan-ignore cast.string (stub key cast to string)
+        static::assertSame((string) $tenantA->getKey(), $role->tenant_id); // @phpstan-ignore cast.string
 
         $fresh = Role::withoutGlobalScopes()->find($role->getKey());
 
         static::assertNotNull($fresh);
-        static::assertSame($tenantA->getMorphClass(), $fresh->tenant_type); // @phpstan-ignore property.notFound (dynamic Eloquent attribute)
-        static::assertSame((string) $tenantA->getKey(), $fresh->tenant_id); // @phpstan-ignore cast.string, property.notFound (test stub key cast to string is intentional for tenant morph id; test inspects dynamically-set Eloquent attribute)
+        static::assertSame($tenantA->getMorphClass(), $fresh->tenant_type); // @phpstan-ignore property.notFound
+        static::assertSame((string) $tenantA->getKey(), $fresh->tenant_id); // @phpstan-ignore cast.string, property.notFound
     }
 
     /**
@@ -255,11 +255,11 @@ class TenantScopingTest extends TestCase
             'name'        => 'tenant-perm',
             'guard_name'  => 'web',
             'tenant_type' => $tenantA->getMorphClass(),
-            'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+            'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
         static::assertSame($tenantA->getMorphClass(), $permission->tenant_type);
-        static::assertSame((string) $tenantA->getKey(), $permission->tenant_id); // @phpstan-ignore cast.string (stub key cast to string)
+        static::assertSame((string) $tenantA->getKey(), $permission->tenant_id); // @phpstan-ignore cast.string
     }
 
     /**
@@ -288,7 +288,7 @@ class TenantScopingTest extends TestCase
             'name'        => 'editor',
             'guard_name'  => 'web',
             'tenant_type' => $tenantA->getMorphClass(),
-            'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+            'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
         static::assertTrue($role->isTenantOwned());
@@ -321,7 +321,7 @@ class TenantScopingTest extends TestCase
             'name'        => 'posts:edit',
             'guard_name'  => 'web',
             'tenant_type' => $tenantA->getMorphClass(),
-            'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+            'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
         static::assertTrue($permission->isTenantOwned());
@@ -339,15 +339,15 @@ class TenantScopingTest extends TestCase
         $tenantB = StubTenant::create(['id' => 'tenant-b', 'name' => 'Tenant B']);
 
         Role::create(['name' => 'global', 'guard_name' => 'web']);
-        Role::create(['name' => 'role-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+        Role::create(['name' => 'role-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
-        Role::create(['name' => 'role-b', 'guard_name' => 'web', 'tenant_type' => $tenantB->getMorphClass(), 'tenant_id' => (string) $tenantB->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+        Role::create(['name' => 'role-b', 'guard_name' => 'web', 'tenant_type' => $tenantB->getMorphClass(), 'tenant_id' => (string) $tenantB->getKey(), // @phpstan-ignore cast.string
         ]);
 
         $roles = Role::forTenant($tenantA)->get();
 
         static::assertCount(1, $roles);
-        static::assertSame('role-a', $roles->first()->name); // @phpstan-ignore property.nonObject (property on non-null Eloquent row)
+        static::assertSame('role-a', $roles->first()->name); // @phpstan-ignore property.nonObject
     }
 
     /**
@@ -360,13 +360,13 @@ class TenantScopingTest extends TestCase
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
         Role::create(['name' => 'global', 'guard_name' => 'web']);
-        Role::create(['name' => 'role-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+        Role::create(['name' => 'role-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
         $roles = Role::globalOnly()->get();
 
         static::assertCount(1, $roles);
-        static::assertSame('global', $roles->first()->name); // @phpstan-ignore property.nonObject (property on non-null Eloquent row)
+        static::assertSame('global', $roles->first()->name); // @phpstan-ignore property.nonObject
     }
 
     /**
@@ -380,15 +380,15 @@ class TenantScopingTest extends TestCase
         $tenantB = StubTenant::create(['id' => 'tenant-b', 'name' => 'Tenant B']);
 
         Permission::create(['name' => 'global-perm', 'guard_name' => 'web']);
-        Permission::create(['name' => 'perm-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+        Permission::create(['name' => 'perm-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
-        Permission::create(['name' => 'perm-b', 'guard_name' => 'web', 'tenant_type' => $tenantB->getMorphClass(), 'tenant_id' => (string) $tenantB->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+        Permission::create(['name' => 'perm-b', 'guard_name' => 'web', 'tenant_type' => $tenantB->getMorphClass(), 'tenant_id' => (string) $tenantB->getKey(), // @phpstan-ignore cast.string
         ]);
 
         $perms = Permission::forTenant($tenantA)->get();
 
         static::assertCount(1, $perms);
-        static::assertSame('perm-a', $perms->first()->name); // @phpstan-ignore property.nonObject (property on non-null Eloquent row)
+        static::assertSame('perm-a', $perms->first()->name); // @phpstan-ignore property.nonObject
     }
 
     /**
@@ -401,13 +401,13 @@ class TenantScopingTest extends TestCase
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
         Permission::create(['name' => 'global-perm', 'guard_name' => 'web']);
-        Permission::create(['name' => 'perm-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+        Permission::create(['name' => 'perm-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
         $perms = Permission::globalOnly()->get();
 
         static::assertCount(1, $perms);
-        static::assertSame('global-perm', $perms->first()->name); // @phpstan-ignore property.nonObject (property on non-null Eloquent row)
+        static::assertSame('global-perm', $perms->first()->name); // @phpstan-ignore property.nonObject
     }
 
     /**
@@ -423,14 +423,14 @@ class TenantScopingTest extends TestCase
             'name'        => 'editor',
             'guard_name'  => 'web',
             'tenant_type' => $tenantA->getMorphClass(),
-            'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+            'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
         $permission = Permission::create([
             'name'        => 'posts:edit',
             'guard_name'  => 'web',
             'tenant_type' => $tenantA->getMorphClass(),
-            'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+            'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
         $role->givePermission($permission);
@@ -457,13 +457,13 @@ class TenantScopingTest extends TestCase
             'name'        => 'editor',
             'guard_name'  => 'web',
             'tenant_type' => $tenantA->getMorphClass(),
-            'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+            'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
         $resolved = $role->tenant;
 
         static::assertNotNull($resolved);
-        static::assertSame('tenant-a', (string) $resolved->getKey()); // @phpstan-ignore cast.string (stub key cast to string)
+        static::assertSame('tenant-a', (string) $resolved->getKey()); // @phpstan-ignore cast.string
     }
 
     /**
@@ -491,13 +491,13 @@ class TenantScopingTest extends TestCase
             'name'        => 'posts:edit',
             'guard_name'  => 'web',
             'tenant_type' => $tenantA->getMorphClass(),
-            'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+            'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
         $resolved = $permission->tenant;
 
         static::assertNotNull($resolved);
-        static::assertSame('tenant-a', (string) $resolved->getKey()); // @phpstan-ignore cast.string (stub key cast to string)
+        static::assertSame('tenant-a', (string) $resolved->getKey()); // @phpstan-ignore cast.string
     }
 
     /**
@@ -507,13 +507,13 @@ class TenantScopingTest extends TestCase
      */
     public function testInvalidTenantResolverConfigThrows(): void
     {
-        $this->app['config']->set('authorization.tenant_resolver', 'NonExistent\Class'); // @phpstan-ignore offsetAccess.notFound, method.nonObject (test asserts known array key from factory-created fixture; Testbench app container guaranteed non-null in test lifecycle)
+        $this->app['config']->set('authorization.tenant_resolver', 'NonExistent\Class'); // @phpstan-ignore offsetAccess.notFound, method.nonObject
 
         $this->expectException(\SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException::class);
         $this->expectExceptionMessageMatches('/tenant_resolver/');
 
         /** @var array<string, mixed> $config */
-        $config = $this->app['config']->get('authorization', []); // @phpstan-ignore offsetAccess.notFound, method.nonObject (test asserts known array key from factory-created fixture; Testbench app container guaranteed non-null in test lifecycle)
+        $config = $this->app['config']->get('authorization', []); // @phpstan-ignore offsetAccess.notFound, method.nonObject
 
         \SineMacula\Laravel\Authorization\Config\ConfigValidator::validate($config, $this->app);
     }
@@ -525,10 +525,10 @@ class TenantScopingTest extends TestCase
      */
     public function testNullTenantResolverConfigPassesValidation(): void
     {
-        $this->app['config']->set('authorization.tenant_resolver', null); // @phpstan-ignore offsetAccess.notFound, method.nonObject (test asserts known array key from factory-created fixture; Testbench app container guaranteed non-null in test lifecycle)
+        $this->app['config']->set('authorization.tenant_resolver', null); // @phpstan-ignore offsetAccess.notFound, method.nonObject
 
         /** @var array<string, mixed> $config */
-        $config = $this->app['config']->get('authorization', []); // @phpstan-ignore offsetAccess.notFound, method.nonObject (test asserts known array key from factory-created fixture; Testbench app container guaranteed non-null in test lifecycle)
+        $config = $this->app['config']->get('authorization', []); // @phpstan-ignore offsetAccess.notFound, method.nonObject
 
         \SineMacula\Laravel\Authorization\Config\ConfigValidator::validate($config, $this->app);
 
@@ -547,10 +547,10 @@ class TenantScopingTest extends TestCase
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
-        Role::create(['name' => 'role-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+        Role::create(['name' => 'role-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
         Role::create(['name' => 'global-role', 'guard_name' => 'web']);
-        Permission::create(['name' => 'perm-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string (stub key cast to string)
+        Permission::create(['name' => 'perm-a', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
         /**
@@ -662,7 +662,7 @@ class TenantScopingTest extends TestCase
             'name'        => 'custom-role',
             'guard_name'  => 'web',
             'tenant_type' => $customTenant->getMorphClass(),
-            'tenant_id'   => (string) $customTenant->getKey(), // @phpstan-ignore cast.useless (explicit cast for readability)
+            'tenant_id'   => (string) $customTenant->getKey(), // @phpstan-ignore cast.useless
         ]);
         Role::create(['name' => 'global-role', 'guard_name' => 'web']);
 
@@ -740,7 +740,7 @@ class TenantScopingTest extends TestCase
      */
     private function bindTenantResolver(?object $tenant): void
     {
-        // @phpstan-ignore-next-line method.nonObject (test container is non-null)
+        // @phpstan-ignore-next-line method.nonObject
         $this->app->singleton(TenantResolver::class, static function () use ($tenant): TenantResolver {
 
             /**
@@ -786,7 +786,7 @@ class TenantScopingTest extends TestCase
     private function flushTenantScopeMemos(): void
     {
         foreach ([Role::class, Permission::class] as $class) {
-            /** @var \SineMacula\Laravel\Authorization\Scopes\TenantScope|null $scope */ // @phpstan-ignore varTag.type (var docblock widened)
+            /** @var \SineMacula\Laravel\Authorization\Scopes\TenantScope|null $scope */ // @phpstan-ignore varTag.type
             $scope = $class::getGlobalScope(TenantScope::class);
 
             $scope?->flushResolvedTenant();

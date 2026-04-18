@@ -173,7 +173,7 @@ final class LifecycleEventsTest extends TestCase
 
         Event::assertDispatched(
             RoleDeleted::class,
-            // @phpstan-ignore-next-line cast.string, cast.string (stub key cast)
+            // @phpstan-ignore-next-line cast.string, cast.string
             static fn (RoleDeleted $event): bool => (string) $event->role->getKey() === (string) $role->getKey(),
         );
     }
@@ -274,7 +274,7 @@ final class LifecycleEventsTest extends TestCase
 
         Event::assertDispatched(
             PermissionDeleted::class,
-            // @phpstan-ignore-next-line cast.string, cast.string (stub key cast)
+            // @phpstan-ignore-next-line cast.string, cast.string
             static fn (PermissionDeleted $event): bool => (string) $event->permission->getKey() === (string) $permission->getKey(),
         );
     }
@@ -382,7 +382,7 @@ final class LifecycleEventsTest extends TestCase
 
         Event::assertDispatched(
             PolicyDeleted::class,
-            static fn (PolicyDeleted $event): bool => (string) $event->policy->getKey() === (string) $policy->getKey(), // @phpstan-ignore cast.string, cast.string (stub key cast to string)
+            static fn (PolicyDeleted $event): bool => (string) $event->policy->getKey() === (string) $policy->getKey(), // @phpstan-ignore cast.string, cast.string
         );
     }
 }

@@ -512,7 +512,7 @@ final class BladeDirectivesTest extends TestCase
             }
         };
 
-        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject (test container is non-null)
+        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject
     }
 
     /**

@@ -123,7 +123,7 @@ final class PolicyTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        // @phpstan-ignore-next-line argument.type (test passes deliberately-invalid input to exercise validation error path)
+        // @phpstan-ignore-next-line argument.type
         Policy::fromArray(['name' => 'x', 'statements' => ['not-an-array']]);
     }
 
@@ -136,7 +136,7 @@ final class PolicyTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        // @phpstan-ignore-next-line argument.type (test passes deliberately-invalid input to exercise validation error path)
+        // @phpstan-ignore-next-line argument.type
         Policy::fromArray([
             'version'    => '1',
             'name'       => 'x',
@@ -179,7 +179,7 @@ final class PolicyTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        // @phpstan-ignore-next-line argument.type (test passes deliberately-invalid input to exercise validation error path)
+        // @phpstan-ignore-next-line argument.type
         Policy::fromArray(['name' => 42, 'statements' => []]);
     }
 

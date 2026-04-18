@@ -30,14 +30,14 @@ final class NonTaggableCacheStore implements Store
      */
     public function get(mixed $key): mixed
     {
-        return $this->storage[$key] ?? null; // @phpstan-ignore offsetAccess.invalidOffset (known array key from fixture)
+        return $this->storage[$key] ?? null; // @phpstan-ignore offsetAccess.invalidOffset
     }
 
     /**
      * @param  array<int, string>  $keys
      * @return array<string, mixed>
      */
-    public function many(array $keys): array // @phpstan-ignore method.childParameterType (stub narrows parameter type)
+    public function many(array $keys): array // @phpstan-ignore method.childParameterType
     {
         $cachedEntries = [];
 
@@ -56,7 +56,7 @@ final class NonTaggableCacheStore implements Store
      */
     public function put(mixed $key, mixed $value, mixed $seconds): bool
     {
-        $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset (known array key from fixture)
+        $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset
 
         return true;
     }
@@ -66,7 +66,7 @@ final class NonTaggableCacheStore implements Store
      * @param  mixed  $seconds
      * @return bool
      */
-    public function putMany(array $values, mixed $seconds): bool // @phpstan-ignore method.childParameterType (stub narrows parameter type)
+    public function putMany(array $values, mixed $seconds): bool // @phpstan-ignore method.childParameterType
     {
         foreach ($values as $key => $value) {
             $this->storage[$key] = $value;
@@ -102,7 +102,7 @@ final class NonTaggableCacheStore implements Store
      */
     public function forever(mixed $key, mixed $value): bool
     {
-        $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset (known array key from fixture)
+        $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset
 
         return true;
     }
@@ -114,7 +114,7 @@ final class NonTaggableCacheStore implements Store
      */
     public function touch(mixed $key, mixed $ttl): bool
     {
-        return isset($this->storage[$key]); // @phpstan-ignore offsetAccess.invalidOffset (known array key from fixture)
+        return isset($this->storage[$key]); // @phpstan-ignore offsetAccess.invalidOffset
     }
 
     /**
@@ -123,7 +123,7 @@ final class NonTaggableCacheStore implements Store
      */
     public function forget(mixed $key): bool
     {
-        unset($this->storage[$key]); // @phpstan-ignore offsetAccess.invalidOffset (known array key from fixture)
+        unset($this->storage[$key]); // @phpstan-ignore offsetAccess.invalidOffset
 
         return true;
     }

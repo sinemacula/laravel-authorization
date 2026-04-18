@@ -251,10 +251,10 @@ class ApiGuardedUser extends Model implements AuthorizableIdentity
     protected $keyType = 'string';
 
     /** @var array<int, string> */
-    protected $fillable = ['id']; // @phpstan-ignore property.phpDocType (stub docblock kept loose)
+    protected $fillable = ['id']; // @phpstan-ignore property.phpDocType
 
     /** @var string */
-    protected $table = 'api_guarded_users'; // @phpstan-ignore property.phpDocType (stub docblock kept loose)
+    protected $table = 'api_guarded_users'; // @phpstan-ignore property.phpDocType
 
     /**
      * @return string
@@ -286,8 +286,8 @@ class DefaultGuardUser extends Model implements AuthorizableIdentity
     protected $keyType = 'string';
 
     /** @var array<int, string> */
-    protected $fillable = ['id']; // @phpstan-ignore property.phpDocType (stub docblock kept loose)
+    protected $fillable = ['id']; // @phpstan-ignore property.phpDocType
 
     /** @var string */
-    protected $table = 'stub_identities'; // @phpstan-ignore property.phpDocType (stub docblock kept loose)
+    protected $table = 'stub_identities'; // @phpstan-ignore property.phpDocType
 }

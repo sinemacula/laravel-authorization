@@ -23,7 +23,7 @@ final class StubBadPermissionProvider implements PermissionProvider
      *
      * @return array<int, mixed>
      */
-    public function permissions(): array // @phpstan-ignore method.childReturnType (stub narrows return type)
+    public function permissions(): array // @phpstan-ignore method.childReturnType
     {
         return ['', 42, 'valid:perm'];
     }
@@ -33,7 +33,7 @@ final class StubBadPermissionProvider implements PermissionProvider
      *
      * @return string|null
      */
-    public function guard(): ?string // @phpstan-ignore return.unusedType (stub returns non-null)
+    public function guard(): ?string // @phpstan-ignore return.unusedType
     {
         return 'web';
     }

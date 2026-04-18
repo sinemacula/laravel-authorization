@@ -214,7 +214,7 @@ final class GuardAgnosticLookupTest extends TestCase
             'guard_name' => null,
         ]);
 
-        self::assertSame(2, Role::query()->where('name', self::PRECEDENCE_ROLE)->count()); // @phpstan-ignore staticMethod.dynamicCall (facade indirection)
+        self::assertSame(2, Role::query()->where('name', self::PRECEDENCE_ROLE)->count()); // @phpstan-ignore staticMethod.dynamicCall
         self::assertNotNull($agnostic->getKey());
     }
 

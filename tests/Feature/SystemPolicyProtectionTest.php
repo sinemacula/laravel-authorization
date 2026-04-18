@@ -46,12 +46,12 @@ final class SystemPolicyProtectionTest extends TestCase
         try {
             $policy->delete();
             self::fail('Expected SystemPolicyProtectedException was not thrown.');
-        } catch (SystemPolicyProtectedException $exception) { // @phpstan-ignore catch.neverThrown (exception-path coverage)
+        } catch (SystemPolicyProtectedException $exception) { // @phpstan-ignore catch.neverThrown
             self::assertSame('break-glass', $exception->getPolicyName());
             self::assertSame('delete', $exception->getOperation());
         }
 
-        self::assertNotNull(Policy::query()->find($policy->getKey())); // @phpstan-ignore deadCode.unreachable (defensive branch for coverage)
+        self::assertNotNull(Policy::query()->find($policy->getKey())); // @phpstan-ignore deadCode.unreachable
     }
 
     /**
@@ -189,7 +189,7 @@ final class SystemPolicyProtectionTest extends TestCase
             ],
         ]);
 
-        self::assertFalse((bool) $policy->is_system); // @phpstan-ignore cast.useless (explicit cast for readability)
+        self::assertFalse((bool) $policy->is_system); // @phpstan-ignore cast.useless
 
         $policy->delete();
 

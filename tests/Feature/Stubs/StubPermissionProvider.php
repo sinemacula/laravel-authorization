@@ -33,7 +33,7 @@ final class StubPermissionProvider implements PermissionProvider
      *
      * @return string|null
      */
-    public function guard(): ?string // @phpstan-ignore return.unusedType (stub returns non-null)
+    public function guard(): ?string // @phpstan-ignore return.unusedType
     {
         return 'web';
     }

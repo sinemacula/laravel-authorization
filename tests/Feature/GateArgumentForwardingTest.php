@@ -56,7 +56,7 @@ final class GateArgumentForwardingTest extends TestCase
         parent::setUp();
 
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject (test container is non-null)
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
         // Register a morph alias so `$stub->getMorphClass()` returns a
@@ -298,7 +298,7 @@ final class GateArgumentForwardingTest extends TestCase
              *
              * @return object|null
              *
-             * @phpstan-ignore-next-line return.unusedType (stub returns non-null)
+             * @phpstan-ignore-next-line return.unusedType
              */
             #[\Override]
             public function resolve(): ?object
@@ -307,8 +307,8 @@ final class GateArgumentForwardingTest extends TestCase
             }
         };
 
-        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject (test container is non-null)
-        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject (test container is non-null)
-        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject (test container is non-null)
+        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject
+        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
+        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
     }
 }
