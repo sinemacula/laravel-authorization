@@ -21,8 +21,8 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Feature coverage for the `PolicyResolver` seam and the
- * `LastDecisionStore` / `Authorization::lastDecision()` surface.
+ * Feature coverage for the `PolicyResolver` seam and the `LastDecisionStore` /
+ * `Authorization::lastDecision()` surface.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,8 +37,8 @@ use Tests\TestCase;
 final class PolicyResolverAndLastDecisionStoreTest extends TestCase
 {
     /**
-     * `DefaultPolicyResolver` returns the principal's attached
-     * policies when no external store is configured.
+     * `DefaultPolicyResolver` returns the principal's attached policies when no
+     * external store is configured.
      *
      * @return void
      */
@@ -62,8 +62,8 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
     }
 
     /**
-     * `DefaultPolicyResolver` unions the store's policies with
-     * the principal's attached policies.
+     * `DefaultPolicyResolver` unions the store's policies with the principal's
+     * attached policies.
      *
      * @return void
      */
@@ -83,9 +83,29 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
             'statements' => [['effect' => 'allow', 'actions' => ['y']]],
         ]);
 
+        /**
+         * Anonymous policy store returning the captured policy.
+         */
         $store = new class ($storePolicy) implements PolicyStore {
-            public function __construct(private readonly EvaluationPolicy $policy) {}
+            /**
+             * Create a new store wrapping a fixed policy.
+             *
+             * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $policy
+             * @return void
+             */
+            public function __construct(
 
+                /** The policy returned for every principal. */
+                private readonly EvaluationPolicy $policy,
+
+            ) {}
+
+            /**
+             * Return the captured policy for the supplied principal.
+             *
+             * @param  object  $principal
+             * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
+             */
             public function policiesFor(object $principal): array
             {
                 return [$this->policy];
@@ -103,9 +123,9 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
     }
 
     /**
-     * Binding a custom `PolicyResolver` swaps the gathering
-     * strategy — the manager never hits the Eloquent layer when
-     * the resolver returns a fixed list.
+     * Binding a custom `PolicyResolver` swaps the gathering strategy — the
+     * manager never hits the Eloquent layer when the resolver returns a fixed
+     * list.
      *
      * @return void
      */
@@ -117,8 +137,26 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
         ]);
 
         $this->app->instance(PolicyResolver::class, new class ($fixed) implements PolicyResolver { // @phpstan-ignore method.nonObject
-            public function __construct(private readonly EvaluationPolicy $policy) {}
 
+            /**
+             * Create a new resolver wrapping a fixed policy.
+             *
+             * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $policy
+             * @return void
+             */
+            public function __construct(
+
+                /** The policy returned for every principal. */
+                private readonly EvaluationPolicy $policy,
+
+            ) {}
+
+            /**
+             * Return the captured policy for the supplied principal.
+             *
+             * @param  object  $principal
+             * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
+             */
             public function policiesFor(object $principal): array
             {
                 return [$this->policy];
@@ -130,16 +168,15 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        $result = Authorization::for($user)->evaluate('fixed:act');
+        $decision = Authorization::for($user)->evaluate('fixed:act');
 
-        self::assertTrue($result->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $result->reason);
+        self::assertTrue($decision->allowed);
+        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $decision->reason);
     }
 
     /**
-     * `Authorization::lastDecision()` returns the most recent
-     * evaluation result even when the decision was produced by a
-     * scoped clone via `for()`.
+     * `Authorization::lastDecision()` returns the most recent evaluation result
+     * even when the decision was produced by a scoped clone via `for()`.
      *
      * @return void
      */
@@ -167,8 +204,8 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
     }
 
     /**
-     * `Authorization::lastDecision()` survives `withPolicies()`
-     * scoping too — the store is shared across every clone.
+     * `Authorization::lastDecision()` survives `withPolicies()` scoping too —
+     * the store is shared across every clone.
      *
      * @return void
      */
@@ -191,9 +228,8 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
     }
 
     /**
-     * `forgetLastDecision()` clears the store so long-running
-     * workers can reset between requests without a stale decision
-     * leaking through.
+     * `forgetLastDecision()` clears the store so long-running workers can reset
+     * between requests without a stale decision leaking through.
      *
      * @return void
      */
@@ -211,10 +247,9 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
     }
 
     /**
-     * `Authorization::explain()` returns the same human-readable
-     * summary that the trace-aware `EvaluationResult::explain()`
-     * produces — the shortcut exists so error-handler output and
-     * the CLI path can stay terse.
+     * `Authorization::explain()` returns the same human-readable summary that
+     * the trace-aware `EvaluationResult::explain()` produces — the shortcut
+     * exists so error-handler output and the CLI path can stay terse.
      *
      * @return void
      */
@@ -237,9 +272,8 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
     }
 
     /**
-     * Bind a principal resolver that returns a freshly-created
-     * StubIdentity so the facade picks it up via the configured
-     * resolver.
+     * Bind a principal resolver that returns a freshly-created StubIdentity so
+     * the facade picks it up via the configured resolver.
      *
      * @return \Tests\Feature\Stubs\StubIdentity
      */
@@ -247,10 +281,32 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
     {
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
+        /**
+         * Anonymous principal resolver returning the captured user.
+         */
         $resolver = new class ($user) implements PrincipalResolver {
-            public function __construct(private readonly object $user) {}
+            /**
+             * Create a new resolver wrapping a fixed user.
+             *
+             * @param  object  $user
+             * @return void
+             */
+            public function __construct(
 
-            public function resolve(): ?object // @phpstan-ignore return.unusedType
+                /** The user returned by every resolution call. */
+                private readonly object $user,
+
+            ) {}
+
+            /**
+             * Resolve the current principal.
+             *
+             * @return object|null
+             *
+             * @phpstan-ignore-next-line return.unusedType
+             */
+            #[\Override]
+            public function resolve(): ?object
             {
                 return $this->user;
             }

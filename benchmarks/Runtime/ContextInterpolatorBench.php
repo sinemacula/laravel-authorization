@@ -30,7 +30,7 @@ use SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator;
 #[Bench\OutputTimeUnit('microseconds')]
 final class ContextInterpolatorBench
 {
-    /** Resource string used by every subject. */
+    /** @var string Resource string used by every subject. */
     private const string RESOURCE = 'posts:42';
 
     /** @var \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator Reusable interpolator across revolutions. */

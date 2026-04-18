@@ -21,14 +21,17 @@ use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
  *
  * @SuppressWarnings("php:S1192")
  */
-final class BenchPrincipalResolver implements PrincipalResolver
+final class BenchmarkPrincipalResolver implements PrincipalResolver
 {
     /**
      * Create a new resolver instance.
      *
      * @param  object|null  $principal
      */
-    public function __construct(private ?object $principal = null) {}
+    public function __construct(
+        /** @var object|null Currently slotted principal returned by `resolve()`. */
+        private ?object $principal = null,
+    ) {}
 
     /**
      * Swap the resolved principal — used by benches that carve
@@ -47,6 +50,7 @@ final class BenchPrincipalResolver implements PrincipalResolver
      *
      * @return object|null
      */
+    #[\Override]
     public function resolve(): ?object
     {
         return $this->principal;

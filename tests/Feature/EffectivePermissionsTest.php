@@ -33,6 +33,7 @@ final class EffectivePermissionsTest extends TestCase
      *
      * @return void
      */
+    #[\Override]
     protected function setUp(): void
     {
         parent::setUp();
@@ -82,8 +83,7 @@ final class EffectivePermissionsTest extends TestCase
     }
 
     /**
-     * Explicit deny policy overrides a direct grant in the effective
-     * map.
+     * Explicit deny policy overrides a direct grant in the effective map.
      *
      * @return void
      */

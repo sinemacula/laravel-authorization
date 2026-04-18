@@ -21,7 +21,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision;
  */
 final class PolicyEvaluator
 {
-    /** @var \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null Shared interpolator instance, created lazily. */
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null */
     private ?ContextInterpolator $interpolator = null;
 
     /**
@@ -35,65 +35,79 @@ final class PolicyEvaluator
      * @param  object|null  $principal
      * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult
      */
-    public function evaluate(array $policies, string $action, ?string $resource = null, array $context = [], ?object $principal = null): EvaluationResult
-    {
+    public function evaluate(
+        array $policies,
+        string $action,
+        ?string $resource = null,
+        array $context = [],
+        ?object $principal = null,
+    ): EvaluationResult {
         $interpolator = $this->interpolator();
 
+        // @formatter:off
         /** @var list<array{policy: string, statement_index: int, decision: \SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision, reason: string}> $trace */
+        // @formatter:on
         $trace          = [];
         $allowStatement = null;
 
         foreach ($policies as $policy) {
             foreach ($policy->statements as $index => $statement) {
-                if (!$statement->matches($action, $resource, $interpolator, $principal, $context)) {
-                    $trace[] = [
-                        'policy'          => $policy->name,
-                        'statement_index' => $index,
-                        'decision'        => TraceDecision::SKIPPED,
-                        'reason'          => 'action/resource did not match',
-                    ];
-
-                    continue;
-                }
-
-                if (!$statement->evaluateConditions($context, $interpolator, $principal, $resource)) {
-                    $trace[] = [
-                        'policy'          => $policy->name,
-                        'statement_index' => $index,
-                        'decision'        => TraceDecision::SKIPPED,
-                        'reason'          => 'conditions not satisfied',
-                    ];
-
-                    continue;
-                }
-
-                if ($statement->effect === PolicyEffect::DENY) {
-                    $trace[] = [
-                        'policy'          => $policy->name,
-                        'statement_index' => $index,
-                        'decision'        => TraceDecision::MATCHED,
-                        'reason'          => 'explicit deny',
-                    ];
-
-                    return EvaluationResult::explicitlyDenied($statement, $trace);
-                }
+                $reason        = $this->classifyStatement($statement, $action, $resource, $context, $principal, $interpolator);
+                $traceDecision = $reason === 'action/resource did not match' || $reason === 'conditions not satisfied'
+                    ? TraceDecision::SKIPPED
+                    : TraceDecision::MATCHED;
 
                 $trace[] = [
                     'policy'          => $policy->name,
                     'statement_index' => $index,
-                    'decision'        => TraceDecision::MATCHED,
-                    'reason'          => 'explicit allow',
+                    'decision'        => $traceDecision,
+                    'reason'          => $reason,
                 ];
 
-                $allowStatement ??= $statement;
+                if ($reason === 'explicit deny') {
+                    return EvaluationResult::explicitlyDenied($statement, $trace);
+                }
+
+                if ($reason === 'explicit allow') {
+                    $allowStatement ??= $statement;
+                }
             }
         }
 
-        if ($allowStatement !== null) {
-            return EvaluationResult::allowed($allowStatement, $trace);
+        return $allowStatement !== null
+            ? EvaluationResult::allowed($allowStatement, $trace)
+            : EvaluationResult::implicitlyDenied($trace);
+    }
+
+    /**
+     * Classify a statement against the evaluation inputs into one of
+     * the four trace reasons used by `evaluate()`.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
+     * @param  string  $action
+     * @param  string|null  $resource
+     * @param  array<string, mixed>  $context
+     * @param  object|null  $principal
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator  $interpolator
+     * @return string
+     */
+    private function classifyStatement(
+        Statement $statement,
+        string $action,
+        ?string $resource,
+        array $context,
+        ?object $principal,
+        ContextInterpolator $interpolator,
+    ): string {
+        if (!$statement->matches($action, $resource, $interpolator, $principal, $context)) {
+            return 'action/resource did not match';
         }
 
-        return EvaluationResult::implicitlyDenied($trace);
+        if (!$statement->evaluateConditions($context, $interpolator, $principal, $resource)) {
+            return 'conditions not satisfied';
+        }
+
+        return $statement->effect === PolicyEffect::DENY ? 'explicit deny' : 'explicit allow';
     }
 
     /**

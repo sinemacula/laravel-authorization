@@ -10,9 +10,9 @@ use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
  * Dispatched immediately before an authorization exception is thrown
  * from the manager's `authorize()` entry point.
  *
- * This event is the **hard-denial signal**: it fires only when
+ * This event is the hard-denial signal: it fires only when
  * `authorize()` is about to raise `AuthorizationException`. A
- * `can()` call returning false is a soft denial and does **not**
+ * `can()` call returning false is a soft denial and does not
  * fire this event — use `DecisionEvaluated` (which fires on every
  * evaluation regardless of outcome) and filter on
  * `$event->result->allowed === false` when a full denial audit is
@@ -40,19 +40,19 @@ final readonly class AuthorizationFailed
      */
     public function __construct(
 
-        /** Acting principal at the time of evaluation, or null when anonymous. */
+        /** Acting principal at evaluation time, or null when anonymous. */
         public ?object $principal,
 
         /** Action string that was checked. */
         public string $action,
 
-        /** Resource identifier the action targets, or null for resource-less checks. */
+        /** Resource identifier the action targets; null for resource-less. */
         public ?string $resource,
 
         /** Evaluation context passed through to policy statements. */
         public array $context,
 
-        /** Final evaluation result, including the reproducible statement trace. */
+        /** Final evaluation result, including the reproducible trace. */
         public EvaluationResult $result,
 
     ) {}

@@ -24,7 +24,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class PolicyUpdated
+final readonly class Updated
 {
     /**
      * Create a new event instance.
@@ -37,11 +37,7 @@ final readonly class PolicyUpdated
         /** Updated policy row in its post-save state. */
         public Policy $policy,
 
-        /**
-         * Before/after attribute diff captured across the update.
-         *
-         * @var array{before: array<string, mixed>, after: array<string, mixed>}
-         */
+        /** Before/after attribute diff captured across the update. */
         public array $changes,
 
     ) {}

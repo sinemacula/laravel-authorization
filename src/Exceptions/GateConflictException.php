@@ -21,7 +21,7 @@ class GateConflictException extends \RuntimeException
      */
     public function __construct(
 
-        /** Permission whose Gate registration collided with an existing Gate. */
+        /** Permission whose Gate registration collided with an existing. */
         private readonly string $permission,
 
     ) {

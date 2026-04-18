@@ -25,6 +25,7 @@ final class NullPrincipalResolver implements PrincipalResolver
      *
      * @return object|null
      */
+    #[\Override]
     public function resolve(): ?object
     {
         return null;

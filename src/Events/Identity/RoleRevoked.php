@@ -2,16 +2,12 @@
 
 declare(strict_types = 1);
 
-namespace SineMacula\Laravel\Authorization\Events\Role;
+namespace SineMacula\Laravel\Authorization\Events\Identity;
 
 use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
- * Dispatched after a role row is deleted.
- *
- * Carries the final snapshot of the row so audit consumers can
- * persist the deleted entity's last-known state before the source
- * row disappears.
+ * Dispatched when a role is revoked from an authorizable identity.
  *
  * Part of the SemVer-stable event API; breaking changes require a
  * major version bump.
@@ -21,16 +17,20 @@ use SineMacula\Laravel\Authorization\Models\Role;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class RoleDeleted
+final readonly class RoleRevoked implements IdentityEvent
 {
     /**
      * Create a new event instance.
      *
+     * @param  object  $authorizable
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      */
     public function __construct(
 
-        /** Role row captured immediately after deletion. */
+        /** Authorizable identity that the role was revoked from. */
+        public object $authorizable,
+
+        /** Role that was revoked from the identity. */
         public Role $role,
 
     ) {}

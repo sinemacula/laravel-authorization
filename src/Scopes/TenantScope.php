@@ -36,23 +36,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
  */
 class TenantScope implements Scope
 {
-    /**
-     * Memoised tenant resolver result, keyed by the container
-     * instance whose `TenantResolver` binding produced it.
-     *
-     * Eloquent invokes `apply()` for every query against the
-     * scoped model, so calling the resolver on every invocation is
-     * wasteful when the resolver does non-trivial work (DB lookup,
-     * JWT decode, cache miss). Keying the memo by
-     * `spl_object_id(container)` means long-lived processes
-     * (Octane / RoadRunner / Swoole) that rebuild the container
-     * between requests automatically invalidate the memo — the
-     * next `apply()` observes a new container hash and re-resolves.
-     * The old entry is replaced, not accumulated, so the memo
-     * never holds more than one live request's tenant.
-     *
-     * @var array{container_id: int, tenant: object|null}|null
-     */
+    /** @var array{container_id: int, tenant: object|null}|null Per-container memo of the resolved tenant, rebuilt when the container changes. */
     private ?array $resolvedTenantMemo = null;
 
     /**
@@ -64,6 +48,7 @@ class TenantScope implements Scope
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
      */
+    #[\Override]
     public function apply(Builder $builder, Model $model): void
     {
         $tenant = $this->resolveTenant();

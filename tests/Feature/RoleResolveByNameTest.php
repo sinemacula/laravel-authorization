@@ -21,12 +21,11 @@ use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
 use Tests\TestCase;
 
 /**
- * Feature coverage for `Role::resolveByName()` (#96).
+ * Feature coverage for `Role::resolveByName()`.
  *
  * Mirrors the guard-precedence query centralised in
- * `Permission::resolveByName()` — guard-specific rows outrank
- * guard-agnostic rows, and an unknown name raises
- * `UnknownRoleException`.
+ * `Permission::resolveByName()` — guard-specific rows outrank guard-agnostic
+ * rows, and an unknown name raises `UnknownRoleException`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -49,8 +48,8 @@ use Tests\TestCase;
 final class RoleResolveByNameTest extends TestCase
 {
     /**
-     * `resolveByName` returns the guard-specific row when both
-     * guard-specific and guard-agnostic rows exist.
+     * `resolveByName` returns the guard-specific row when both guard-specific
+     * and guard-agnostic rows exist.
      *
      * @return void
      */
@@ -74,8 +73,8 @@ final class RoleResolveByNameTest extends TestCase
     }
 
     /**
-     * `resolveByName` falls back to the guard-agnostic row when
-     * no guard-specific match exists.
+     * `resolveByName` falls back to the guard-agnostic row when no
+     * guard-specific match exists.
      *
      * @return void
      */
@@ -93,8 +92,7 @@ final class RoleResolveByNameTest extends TestCase
     }
 
     /**
-     * `resolveByName` with a null guard uses the configured
-     * default guard.
+     * `resolveByName` with a null guard uses the configured default guard.
      *
      * @return void
      */
@@ -112,8 +110,8 @@ final class RoleResolveByNameTest extends TestCase
     }
 
     /**
-     * `resolveByName` throws `UnknownRoleException` when no
-     * matching row exists.
+     * `resolveByName` throws `UnknownRoleException` when no matching row
+     * exists.
      *
      * @return void
      */

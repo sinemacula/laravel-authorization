@@ -7,13 +7,11 @@ namespace SineMacula\Laravel\Authorization\Events\Role;
 use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
- * Dispatched after a new role row is persisted.
+ * Dispatched after a role row is deleted.
  *
- * Part of the role-catalogue lifecycle trio (`RoleCreated`,
- * `RoleUpdated`, `RoleDeleted`) consumed by audit-log sinks
- * responsible for reconstructing the "who created which role
- * when" trail required by SOC 2 / ISO 27001 change-management
- * controls.
+ * Carries the final snapshot of the row so audit consumers can
+ * persist the deleted entity's last-known state before the source
+ * row disappears.
  *
  * Part of the SemVer-stable event API; breaking changes require a
  * major version bump.
@@ -23,7 +21,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class RoleCreated
+final readonly class Deleted
 {
     /**
      * Create a new event instance.
@@ -32,7 +30,7 @@ final readonly class RoleCreated
      */
     public function __construct(
 
-        /** Persisted role row. */
+        /** Role row captured immediately after deletion. */
         public Role $role,
 
     ) {}

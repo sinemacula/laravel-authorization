@@ -82,8 +82,8 @@ final class RevokeRoleCommandTest extends TestCase
     }
 
     /**
-     * A failed revoke outputs the exception message. Pins the
-     * MethodCallRemoval mutant on line 65 of RevokeRoleCommand.
+     * A failed revoke outputs the exception message. Pins the MethodCallRemoval
+     * mutant on line 65 of RevokeRoleCommand.
      *
      * @return void
      */
@@ -102,8 +102,8 @@ final class RevokeRoleCommandTest extends TestCase
     }
 
     /**
-     * Success message includes both the role name and identity arg.
-     * Pins the ReturnRemoval on line 59.
+     * Success message includes both the role name and identity arg. Pins the
+     * ReturnRemoval on line 59.
      *
      * @return void
      */

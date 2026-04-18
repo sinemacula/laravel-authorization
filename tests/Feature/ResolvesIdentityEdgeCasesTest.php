@@ -11,8 +11,8 @@ use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
 /**
- * Feature tests covering the two `ResolvesIdentity` error paths that
- * are not exercised by the happy-path command suites:
+ * Feature tests covering the two `ResolvesIdentity` error paths that are not
+ * exercised by the happy-path command suites:
  *
  * - A morph alias resolves to a real, loadable class that is not an
  *   Eloquent `Model` (the `is_subclass_of($class, Model::class)`
@@ -21,8 +21,8 @@ use Tests\TestCase;
  *   not implement `AuthorizableIdentity` (the final safety net before
  *   the trait returns the model).
  *
- * Both branches emit a console error and return `null`, which the
- * consuming commands translate to `FAILURE`.
+ * Both branches emit a console error and return `null`, which the consuming
+ * commands translate to `FAILURE`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -35,8 +35,8 @@ use Tests\TestCase;
 final class ResolvesIdentityEdgeCasesTest extends TestCase
 {
     /**
-     * When the resolved class exists but is not an Eloquent model,
-     * the command reports the error and fails.
+     * When the resolved class exists but is not an Eloquent model, the command
+     * reports the error and fails.
      *
      * @return void
      */
@@ -53,8 +53,8 @@ final class ResolvesIdentityEdgeCasesTest extends TestCase
 
     /**
      * When the resolved model is Eloquent but does not implement
-     * `AuthorizableIdentity`, the command reports the error and
-     * fails before it tries to delegate a role grant to the model.
+     * `AuthorizableIdentity`, the command reports the error and fails before it
+     * tries to delegate a role grant to the model.
      *
      * @return void
      */

@@ -25,11 +25,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
  */
 class RolePermission extends Pivot
 {
-    /**
-     * Pivot tables do not auto-increment (composite PK).
-     *
-     * @var bool
-     */
+    /** @var bool Pivot tables do not auto-increment (composite PK). */
     public $incrementing = false;
 
     /**
@@ -45,22 +41,10 @@ class RolePermission extends Pivot
     }
 
     /**
-     * Reject a save when the role's guard and the permission's
-     * guard are concrete and different.
-     *
-     * Guard-agnostic rows (null `guard_name`) are compatible with
-     * every guard and pass the check unconditionally. Parent
-     * models are read from the in-memory `pivotParent` or the
-     * pivot's own loaded `role` / `permission` relations when
-     * available, so the typical
-     * `$role->givePermission($permission)` and
-     * `$role->syncPermissions([...])` paths never issue extra
-     * lookups. A `find()` is only used when neither side is
-     * already hydrated. A missing parent row raises
-     * `OrphanedRolePermissionException` rather than silently
-     * passing — the DB-layer FK constraint is absent on SQLite
-     * (default) and on any environment running with
-     * `foreign_key_checks = OFF`, so the pivot cannot rely on it.
+     * Reject a save when the role's and permission's guards are concrete
+     * and different. Guard-agnostic (`null`) rows pass. Parent models are
+     * resolved from the in-memory `pivotParent` / loaded relations where
+     * possible; a missing parent raises `OrphanedRolePermissionException`.
      *
      * @return void
      *

@@ -17,13 +17,13 @@ use Tests\TestCase;
 /**
  * Feature coverage for the nullable `guard_name` semantics.
  *
- * A null `guard_name` marks a role or permission as guard-agnostic
- * — the row applies to every guard. String lookups (`assignRole`,
- * `givePermission`, `hasRole`, `hasPermission`) resolve against the
- * configured default guard first and fall back to the guard-agnostic
- * row when no guard-specific match exists. The uniqueness invariant
- * for the null-guard slot is enforced by a functional unique index
- * on `(name, COALESCE(guard_name, ''))` at the data layer.
+ * A null `guard_name` marks a role or permission as guard-agnostic — the row
+ * applies to every guard. String lookups (`assignRole`, `givePermission`,
+ * `hasRole`, `hasPermission`) resolve against the configured default guard
+ * first and fall back to the guard-agnostic row when no guard-specific match
+ * exists. The uniqueness invariant for the null-guard slot is enforced by a
+ * functional unique index on `(name, COALESCE(guard_name, ''))` at the data
+ * layer.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -49,8 +49,7 @@ final class GuardAgnosticLookupTest extends TestCase
     private const string PRECEDENCE_PERMISSION = 'posts:edit';
 
     /**
-     * A role with a null `guard_name` resolves via string name on any
-     * guard.
+     * A role with a null `guard_name` resolves via string name on any guard.
      *
      * @return void
      */
@@ -70,8 +69,8 @@ final class GuardAgnosticLookupTest extends TestCase
     }
 
     /**
-     * A permission with a null `guard_name` resolves via string name
-     * on any guard.
+     * A permission with a null `guard_name` resolves via string name on any
+     * guard.
      *
      * @return void
      */
@@ -91,8 +90,8 @@ final class GuardAgnosticLookupTest extends TestCase
     }
 
     /**
-     * A guard-specific role takes precedence over a guard-agnostic
-     * role with the same name when both are present.
+     * A guard-specific role takes precedence over a guard-agnostic role with
+     * the same name when both are present.
      *
      * @return void
      */
@@ -121,9 +120,8 @@ final class GuardAgnosticLookupTest extends TestCase
     }
 
     /**
-     * A guard-specific permission takes precedence over a
-     * guard-agnostic permission with the same name when both are
-     * present.
+     * A guard-specific permission takes precedence over a guard-agnostic
+     * permission with the same name when both are present.
      *
      * @return void
      */
@@ -152,8 +150,7 @@ final class GuardAgnosticLookupTest extends TestCase
     }
 
     /**
-     * A second guard-agnostic role with the same name is rejected at
-     * save time.
+     * A second guard-agnostic role with the same name is rejected at save time.
      *
      * @return void
      */
@@ -175,8 +172,8 @@ final class GuardAgnosticLookupTest extends TestCase
     }
 
     /**
-     * A second guard-agnostic permission with the same name is
-     * rejected at save time.
+     * A second guard-agnostic permission with the same name is rejected at save
+     * time.
      *
      * @return void
      */
@@ -198,9 +195,8 @@ final class GuardAgnosticLookupTest extends TestCase
     }
 
     /**
-     * Guard-specific and guard-agnostic rows with the same name may
-     * co-exist — the unique-guard-agnostic invariant targets only
-     * the null-guard slot.
+     * Guard-specific and guard-agnostic rows with the same name may co-exist —
+     * the unique-guard-agnostic invariant targets only the null-guard slot.
      *
      * @return void
      */
@@ -248,8 +244,8 @@ final class GuardAgnosticLookupTest extends TestCase
     }
 
     /**
-     * Re-saving an existing guard-agnostic row (no data change) is
-     * allowed — the invariant ignores the row against itself.
+     * Re-saving an existing guard-agnostic row (no data change) is allowed —
+     * the invariant ignores the row against itself.
      *
      * @return void
      */

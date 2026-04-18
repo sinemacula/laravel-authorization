@@ -38,24 +38,20 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
 #[Bench\OutputTimeUnit('microseconds')]
 final class WildcardMatchBench
 {
-    /** Action string the shallow / literal subjects match against. */
+    /** @var string Action string the shallow / literal subjects match against. */
     private const string ASKED_ACTION = 'posts:create';
 
-    /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement carrying a single shallow prefix pattern. */
-    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
-    private Statement $shallow;
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement statement carrying a single shallow prefix pattern. */
+    private Statement $shallow; // @phpstan-ignore property.uninitialized, missingType.callable
 
-    /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement carrying a single literal (no wildcards) action pattern. */
-    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
-    private Statement $literal;
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement statement carrying a single literal (no wildcards) action pattern. */
+    private Statement $literal; // @phpstan-ignore property.uninitialized, missingType.callable
 
-    /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement carrying a 10-segment-deep wildcard pattern. */
-    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
-    private Statement $deep;
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement statement carrying a 10-segment-deep wildcard pattern. */
+    private Statement $deep; // @phpstan-ignore property.uninitialized, missingType.callable
 
-    /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement carrying 100 patterns that all miss the asked action. */
-    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
-    private Statement $miss;
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement statement carrying 100 patterns that all miss the asked action. */
+    private Statement $miss; // @phpstan-ignore property.uninitialized, missingType.callable
 
     /**
      * Bench setUp — materialise the four statement fixtures once

@@ -88,9 +88,9 @@ final class ListPermissionsCommandTest extends TestCase
     }
 
     /**
-     * The table output includes ID, name, guard, system flag, and
-     * role count columns. Pins the ArrayItemRemoval mutants on
-     * lines 69 and 74, and the CastString on line 79.
+     * The table output includes ID, name, guard, system flag, and role count
+     * columns. Pins the ArrayItemRemoval mutants on lines 69 and 74, and the
+     * CastString on line 79.
      *
      * @return void
      */
@@ -145,8 +145,8 @@ final class ListPermissionsCommandTest extends TestCase
     }
 
     /**
-     * The ReturnRemoval mutant on line 65 is killed by verifying
-     * the command returns SUCCESS (0).
+     * The ReturnRemoval mutant on line 65 is killed by verifying the command
+     * returns SUCCESS (0).
      *
      * @return void
      */

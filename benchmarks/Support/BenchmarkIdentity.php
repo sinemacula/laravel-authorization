@@ -22,7 +22,7 @@ use SineMacula\Laravel\Authorization\Traits\HasAuthorization;
  *
  * @SuppressWarnings("php:S1192")
  */
-class BenchIdentity extends Model implements AuthorizableIdentity
+class BenchmarkIdentity extends Model implements AuthorizableIdentity
 {
     use HasAuthorization;
 

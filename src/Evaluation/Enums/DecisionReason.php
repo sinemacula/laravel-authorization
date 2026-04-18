@@ -34,7 +34,8 @@ enum DecisionReason: string
     case IMPLICIT_DENY = 'implicit_deny';
 
     /**
-     * RBAC (roles/permissions) granted the allow after policy evaluation was indeterminate.
+     * RBAC (roles/permissions) granted the allow after policies were
+     * indeterminate.
      */
     case RBAC_ALLOW = 'rbac_allow';
 

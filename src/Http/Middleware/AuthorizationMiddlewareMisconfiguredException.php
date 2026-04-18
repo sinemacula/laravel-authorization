@@ -17,8 +17,7 @@ use LogicException;
  * legitimate authorization deny. Laravel's default exception
  * handler renders unhandled logic exceptions as HTTP 500, which is
  * the correct signal for security-audit consumers and monitoring
- * dashboards — distinct from the HTTP 403 raised for a real deny
- * (see issue #83).
+ * dashboards — distinct from the HTTP 403 raised for a real deny.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

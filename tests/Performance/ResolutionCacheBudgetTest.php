@@ -14,16 +14,14 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
 /**
  * Performance budget for `ResolutionCache` memo-tier reads.
  *
- * The in-memory memo sits on every repeated `can()` and
- * `hasPermission()` call within a request. A regression in the
- * memo-tier lookup compounds linearly with check count, so the
- * suite codifies a loose wall-clock bound on 10,000 memo-hit
- * lookups — catches a 10× regression, tolerates CI variance.
+ * The in-memory memo sits on every repeated `can()` and `hasPermission()` call
+ * within a request. A regression in the memo-tier lookup compounds linearly
+ * with check count, so the suite codifies a loose wall-clock bound on 10,000
+ * memo-hit lookups — catches a 10× regression, tolerates CI variance.
  *
- * A second subject verifies that the persistent-tier entry's TTL
- * is bounded below the configured `ttl` when a temporal-grant
- * `maxTtl` is supplied — a correctness-adjacent budget that
- * guards the critical self-invalidation path (ISSUES.md #77).
+ * A second subject verifies that the persistent-tier entry's TTL is bounded
+ * below the configured `ttl` when a temporal-grant `maxTtl` is supplied — a
+ * correctness-adjacent budget that guards the critical self-invalidation path.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -35,30 +33,17 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
 #[CoversClass(ResolutionCache::class)]
 final class ResolutionCacheBudgetTest extends TestCase
 {
-    /**
-     * Permission name used across the memo-hit and round-trip
-     * subjects — deduplicated to a constant so the same literal
-     * does not appear inline in multiple places.
-     *
-     * @var string
-     */
+    /** @var string Permission name shared by the memo-hit and round-trip subjects. */
     private const string PERMISSION = 'posts:create';
 
-    /**
-     * Companion permission used alongside `PERMISSION` in the
-     * persistent-tier round-trip subject — deduplicated so the
-     * same literal does not appear inline.
-     *
-     * @var string
-     */
+    /** @var string Companion permission used alongside `PERMISSION` in the round-trip subject. */
     private const string PERMISSION_READ = 'posts:read';
 
     /**
-     * A primed memo-tier read must stay under ~1μs per call.
-     * Observed ~2μs per call on the reference machine; budget is
-     * 5× that for headroom against CI variance while still
-     * catching a runaway `in_array` or accidental store lookup
-     * regression.
+     * A primed memo-tier read must stay under ~1μs per call. Observed ~2μs per
+     * call on the reference machine; budget is 5× that for headroom against CI
+     * variance while still catching a runaway `in_array` or accidental store
+     * lookup regression.
      *
      * @return void
      */
@@ -87,27 +72,26 @@ final class ResolutionCacheBudgetTest extends TestCase
     }
 
     /**
-     * A temporal-grant `maxTtl` must bound the persistent-tier
-     * entry's lifetime — `resolveTtl()` returns `min(ttl, maxTtl) - 1`.
-     * The budget here is correctness-adjacent: a re-read of the
-     * same slot must round-trip the value even when `maxTtl` is
-     * the only lifetime input (`ttl = 0`, "forever"), proving the
-     * bounded-TTL write path executed rather than the short-circuit
-     * no-op (which triggers when the computed seconds ≤ 0).
+     * A temporal-grant `maxTtl` must bound the persistent-tier entry's lifetime
+     * — `resolveTtl()` returns `min(ttl, maxTtl) - 1`. The budget here is
+     * correctness-adjacent: a re-read of the same slot must round-trip the
+     * value even when `maxTtl` is the only lifetime input (`ttl = 0`,
+     * "forever"), proving the bounded-TTL write path executed rather than the
+     * short-circuit no-op (which triggers when the computed seconds ≤ 0).
      *
      * @return void
      */
     public function testTemporalGrantBoundsPersistentTierTtl(): void
     {
-        $arrayStore = new ArrayStore;
-        $repo       = new CacheRepository($arrayStore);
+        $arrayStore      = new ArrayStore;
+        $cacheRepository = new CacheRepository($arrayStore);
 
         // ttl = 0 (forever) but maxTtl = 30s → entry must store
         // with a 29s lifetime, not forever. A separate cache
         // instance reads through the same store so the memo tier
         // cannot mask a missing persistent-tier write.
-        $writer    = new ResolutionCache(store: $repo, ttl: 0, prefix: 'budget');
-        $reader    = new ResolutionCache(store: $repo, ttl: 0, prefix: 'budget');
+        $writer    = new ResolutionCache(store: $cacheRepository, ttl: 0, prefix: 'budget');
+        $reader    = new ResolutionCache(store: $cacheRepository, ttl: 0, prefix: 'budget');
         $principal = self::principal();
         $context   = new ResolutionCacheContext(maxTtl: 30);
 

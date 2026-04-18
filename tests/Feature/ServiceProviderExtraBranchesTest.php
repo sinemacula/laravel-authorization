@@ -7,68 +7,19 @@ namespace Tests\Feature;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
-use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
-use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use Tests\Feature\Stubs\PermissionEnum;
+use Tests\Feature\Stubs\StubBadPermissionProvider;
+use Tests\Feature\Stubs\StubPolicyStore;
 use Tests\TestCase;
 
 /**
- * Stub `PolicyStore` implementation used to verify that a bound
- * store is resolved through the singleton container after the
- * service provider wires it up.
- *
- * @internal
- *
- * @SuppressWarnings("php:S1192")
- */
-final class StubPolicyStore implements PolicyStore
-{
-    /**
-     * @param  object  $principal
-     * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
-     */
-    public function policiesFor(object $principal): array
-    {
-        return [];
-    }
-}
-
-/**
- * Stub `PermissionProvider` that returns an empty string and a
- * non-string value — the service provider must skip both without
- * raising, and without creating database rows for them.
- *
- * @internal
- */
-// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
-final class StubBadPermissionProvider implements PermissionProvider
-{
-    /**
-     * @return array<int, mixed>
-     */
-    public function permissions(): array // @phpstan-ignore method.childReturnType
-    {
-        return ['', 42, 'valid:perm'];
-    }
-
-    /**
-     * @return string|null
-     */
-    public function guard(): ?string // @phpstan-ignore return.unusedType
-    {
-        return 'web';
-    }
-}
-
-/**
- * Coverage for the final trio of `AuthorizationServiceProvider`
- * branches:
+ * Coverage for the final trio of `AuthorizationServiceProvider` branches:
  *
  * - A concrete `policy_store` class triggers the singleton binding
  *   in `registerPolicyStore`.
@@ -88,15 +39,14 @@ final class StubBadPermissionProvider implements PermissionProvider
 #[CoversClass(GateRegistrar::class)]
 #[CoversClass(BladeDirectiveRegistrar::class)]
 #[CoversClass(EventListenerRegistrar::class)]
-// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
 final class ServiceProviderExtraBranchesTest extends TestCase
 {
     private const string VALID_PERM   = 'valid:perm';
     private const string POSTS_CREATE = 'posts:create';
 
     /**
-     * Setting a concrete `policy_store` class triggers the optional
-     * singleton bind so the manager's policy resolver can pick it up.
+     * Setting a concrete `policy_store` class triggers the optional singleton
+     * bind so the manager's policy resolver can pick it up.
      *
      * @return void
      */
@@ -117,9 +67,8 @@ final class ServiceProviderExtraBranchesTest extends TestCase
 
     /**
      * A native `GateConflictMode` enum value for
-     * `authorization.gate.on_conflict` is passed through verbatim —
-     * the service provider does not try to cast it or fall back to
-     * the default.
+     * `authorization.gate.on_conflict` is passed through verbatim — the service
+     * provider does not try to cast it or fall back to the default.
      *
      * @return void
      */
@@ -143,9 +92,8 @@ final class ServiceProviderExtraBranchesTest extends TestCase
     }
 
     /**
-     * A provider that yields empty or non-string permission values
-     * skips those entries without raising, and still persists the
-     * well-formed ones.
+     * A provider that yields empty or non-string permission values skips those
+     * entries without raising, and still persists the well-formed ones.
      *
      * @return void
      */
@@ -162,12 +110,12 @@ final class ServiceProviderExtraBranchesTest extends TestCase
     }
 
     /**
-     * A `permission_enums` entry that is not a string (or does not
-     * subclass the `PermissionEnum` contract) is skipped by
-     * `registerGates` at runtime. ConfigValidator is swapped out via
-     * `registerGates` directly — the validator rejects the same
-     * shape earlier in boot, so this test calls the register method
-     * via reflection to exercise the runtime guard in isolation.
+     * A `permission_enums` entry that is not a string (or does not subclass the
+     * `PermissionEnum` contract) is skipped by `registerGates` at runtime.
+     * ConfigValidator is swapped out via `registerGates` directly — the
+     * validator rejects the same shape earlier in boot, so this test calls the
+     * register method via reflection to exercise the runtime guard in
+     * isolation.
      *
      * @return void
      */
@@ -186,10 +134,10 @@ final class ServiceProviderExtraBranchesTest extends TestCase
     }
 
     /**
-     * `registerPermissionProviders` defensively skips entries that
-     * are not class-strings or do not implement `PermissionProvider`
-     * — the upstream `ConfigValidator` rejects the same shape, so
-     * this exercises the runtime guard via reflection.
+     * `registerPermissionProviders` defensively skips entries that are not
+     * class-strings or do not implement `PermissionProvider` — the upstream
+     * `ConfigValidator` rejects the same shape, so this exercises the runtime
+     * guard via reflection.
      *
      * @return void
      */

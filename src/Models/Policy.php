@@ -40,14 +40,10 @@ class Policy extends Model
 {
     use HasSystemProtection, HasUuids;
 
-    /** Placeholder name used when exception context has no policy name available. */
+    /** @var string Placeholder used when exception context lacks a policy name. */
     private const string UNNAMED_PLACEHOLDER = '[unnamed]';
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var list<string>
-     */
+    /** @var list<string> Attributes that are mass assignable. */
     protected $fillable = [
         'name',
         'description',
@@ -55,11 +51,7 @@ class Policy extends Model
         'is_system',
     ];
 
-    /**
-     * The attribute casts.
-     *
-     * @var array<string, string>
-     */
+    /** @var array<string, string> Attribute cast map. */
     protected $casts = [
         'document'  => 'array',
         'is_system' => 'boolean',
@@ -139,7 +131,7 @@ class Policy extends Model
      * system-protection guard on `updating`. For policies, both
      * `name` and `document` changes are protected — the document
      * carries the authorization payload and its mutation is the
-     * security-relevant edit on the Policy table (#91).
+     * security-relevant edit on the Policy table.
      *
      * @return list<string>
      */
@@ -172,6 +164,8 @@ class Policy extends Model
      *
      * @param  mixed  $value
      * @return array<string, mixed>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
      */
     private function normaliseDocument(mixed $value): array
     {

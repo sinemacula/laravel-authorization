@@ -27,9 +27,9 @@ use Tests\TestCase;
 /**
  * Feature tests for role hierarchy / inheritance.
  *
- * Validates the parent-child tree on the Role model, permission
- * inheritance through ancestors, cycle detection on save, and the
- * hierarchy-enabled config toggle.
+ * Validates the parent-child tree on the Role model, permission inheritance
+ * through ancestors, cycle detection on save, and the hierarchy-enabled config
+ * toggle.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -52,8 +52,7 @@ use Tests\TestCase;
 final class RoleHierarchyTest extends TestCase
 {
     /**
-     * A child role inherits its parent's permissions via
-     * `getPermissions()`.
+     * A child role inherits its parent's permissions via `getPermissions()`.
      *
      * @return void
      */
@@ -100,8 +99,8 @@ final class RoleHierarchyTest extends TestCase
     }
 
     /**
-     * Direct permissions on a child are unioned with inherited ones
-     * (no duplicates).
+     * Direct permissions on a child are unioned with inherited ones (no
+     * duplicates).
      *
      * @return void
      */
@@ -110,10 +109,10 @@ final class RoleHierarchyTest extends TestCase
         $parent = $this->makeRole('admin');
         $child  = $this->makeRole('editor', parentId: $parent->getKey());
 
-        $perm = $this->makePermission('posts:create');
+        $permission = $this->makePermission('posts:create');
 
-        $parent->givePermission($perm);
-        $child->givePermission($perm);
+        $parent->givePermission($permission);
+        $child->givePermission($permission);
 
         $permissions = $child->fresh()->getPermissions(); // @phpstan-ignore method.nonObject
 
@@ -138,8 +137,8 @@ final class RoleHierarchyTest extends TestCase
     }
 
     /**
-     * A self-referential parent (role is its own parent) throws the
-     * cycle exception.
+     * A self-referential parent (role is its own parent) throws the cycle
+     * exception.
      *
      * @return void
      */
@@ -154,8 +153,7 @@ final class RoleHierarchyTest extends TestCase
     }
 
     /**
-     * Removing a parent (`parent_id = null`) works and stops
-     * inheritance.
+     * Removing a parent (`parent_id = null`) works and stops inheritance.
      *
      * @return void
      */
@@ -178,7 +176,8 @@ final class RoleHierarchyTest extends TestCase
         $child->parent_id = null; // @phpstan-ignore property.nonObject
         $child->save(); // @phpstan-ignore method.nonObject
 
-        $child = $child->fresh(); // @phpstan-ignore assign.propertyType, method.nonObject
+        // @phpstan-ignore-next-line assign.propertyType, method.nonObject
+        $child = $child->fresh();
         self::assertSame(['posts:create'], $child->getPermissions()); // @phpstan-ignore method.nonObject
     }
 
@@ -203,8 +202,8 @@ final class RoleHierarchyTest extends TestCase
     }
 
     /**
-     * With `hierarchy.enabled = false`, `getPermissions()` returns
-     * only direct permissions even when parent is set.
+     * With `hierarchy.enabled = false`, `getPermissions()` returns only direct
+     * permissions even when parent is set.
      *
      * @return void
      */
@@ -287,9 +286,8 @@ final class RoleHierarchyTest extends TestCase
     }
 
     /**
-     * Cycle detection in `ancestors()` carries the proposed parent's
-     * name — not its UUID — so caught-exception output is readable
-     * (issue #100).
+     * Cycle detection in `ancestors()` carries the proposed parent's name — not
+     * its UUID — so caught-exception output is readable.
      *
      * @return void
      */
@@ -312,8 +310,8 @@ final class RoleHierarchyTest extends TestCase
         } catch (RoleHierarchyCycleException $exception) {
             self::assertSame('editor', $exception->getRoleName());
             // The proposed-parent is whatever the walk re-encounters
-            // as it closes the loop — it is the role's *name*, not
-            // its UUID (the #100 regression guard).
+            // as it closes the loop — it is the role's name, not
+            // its UUID.
             self::assertSame('admin', $exception->getProposedParentName());
             self::assertStringNotContainsString($rootId, $exception->getMessage());
             self::assertStringNotContainsString($childId, $exception->getMessage());
@@ -323,9 +321,9 @@ final class RoleHierarchyTest extends TestCase
     }
 
     /**
-     * `descendants()` terminates safely (no infinite loop) when a
-     * cycle has been injected directly into the database, bypassing
-     * the Eloquent saving-hook guard (issue #101).
+     * `descendants()` terminates safely (no infinite loop) when a cycle has
+     * been injected directly into the database, bypassing the Eloquent
+     * saving-hook guard.
      *
      * @return void
      */
@@ -345,8 +343,8 @@ final class RoleHierarchyTest extends TestCase
     }
 
     /**
-     * `isAncestorOf()` terminates safely on a database-level cycle
-     * (issue #102) — guarded by the `ancestors()` walk's cycle set.
+     * `isAncestorOf()` terminates safely on a database-level cycle — guarded by
+     * the `ancestors()` walk's cycle set.
      *
      * @return void
      */

@@ -49,6 +49,7 @@ final class DefaultPolicyResolver implements PolicyResolver
      * @param  object  $principal
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
      */
+    #[\Override]
     public function policiesFor(object $principal): array
     {
         $policies = [];

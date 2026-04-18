@@ -17,17 +17,15 @@ use Tests\TestCase;
  * End-to-end integration coverage for the `authorization:migrate-spatie`
  * Artisan command.
  *
- * Creates Spatie's default schema inline, seeds representative rows
- * across all five source tables, and asserts each target table
- * receives the correct row count, UUID rewrites, and morph-column
- * mappings after the command runs. Unlike the Feature-level smoke
- * test, this suite exercises the whole pipeline end-to-end against
- * the shipped migrations (via the in-memory SQLite connection) and
- * asserts each of the bullets in ISSUES.md #4 individually.
+ * Creates Spatie's default schema inline, seeds representative rows across all
+ * five source tables, and asserts each target table receives the correct row
+ * count, UUID rewrites, and morph-column mappings after the command runs.
+ * Unlike the Feature-level smoke test, this suite exercises the whole pipeline
+ * end-to-end against the shipped migrations (via the in-memory SQLite
+ * connection) and asserts each migration invariant individually.
  *
- * The package's target tables are renamed with an `auth_` prefix
- * so they do not collide with Spatie's default `roles` /
- * `permissions` source-table names.
+ * The package's target tables are renamed with an `auth_` prefix so they do not
+ * collide with Spatie's default `roles` / `permissions` source-table names.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -50,6 +48,7 @@ final class SpatieMigrationTest extends TestCase
      *
      * @return void
      */
+    #[\Override]
     protected function setUp(): void
     {
         parent::setUp();
@@ -59,11 +58,12 @@ final class SpatieMigrationTest extends TestCase
     }
 
     /**
-     * Drop the Spatie-style fixture tables so they do not leak across
-     * tests on persistent-connection drivers (MySQL / Postgres).
+     * Drop the Spatie-style fixture tables so they do not leak across tests on
+     * persistent-connection drivers (MySQL / Postgres).
      *
      * @return void
      */
+    #[\Override]
     protected function tearDown(): void
     {
         foreach (['model_has_permissions', 'model_has_roles', 'role_has_permissions', 'permissions', 'roles'] as $table) {
@@ -74,8 +74,8 @@ final class SpatieMigrationTest extends TestCase
     }
 
     /**
-     * Roles migrate from Spatie's auto-increment table into the
-     * package's UUID-keyed `auth_roles` table.
+     * Roles migrate from Spatie's auto-increment table into the package's
+     * UUID-keyed `auth_roles` table.
      *
      * @return void
      */
@@ -100,8 +100,8 @@ final class SpatieMigrationTest extends TestCase
     }
 
     /**
-     * Permissions migrate from Spatie's auto-increment table into
-     * the package's UUID-keyed `auth_permissions` table.
+     * Permissions migrate from Spatie's auto-increment table into the package's
+     * UUID-keyed `auth_permissions` table.
      *
      * @return void
      */
@@ -126,9 +126,8 @@ final class SpatieMigrationTest extends TestCase
     }
 
     /**
-     * `model_has_roles` maps into `auth_authorizable_roles` with the
-     * morph columns preserved and the role FK rewritten to the
-     * corresponding UUID.
+     * `model_has_roles` maps into `auth_authorizable_roles` with the morph
+     * columns preserved and the role FK rewritten to the corresponding UUID.
      *
      * @return void
      */
@@ -150,9 +149,9 @@ final class SpatieMigrationTest extends TestCase
     }
 
     /**
-     * `model_has_permissions` maps into `auth_authorizable_permissions`
-     * with the morph columns preserved and the permission FK
-     * rewritten to the corresponding UUID.
+     * `model_has_permissions` maps into `auth_authorizable_permissions` with
+     * the morph columns preserved and the permission FK rewritten to the
+     * corresponding UUID.
      *
      * @return void
      */
@@ -174,9 +173,8 @@ final class SpatieMigrationTest extends TestCase
     }
 
     /**
-     * `role_has_permissions` maps into `auth_role_permissions` with
-     * both FK columns rewritten to UUIDs that match the migrated
-     * role/permission rows.
+     * `role_has_permissions` maps into `auth_role_permissions` with both FK
+     * columns rewritten to UUIDs that match the migrated role/permission rows.
      *
      * @return void
      */
@@ -205,8 +203,8 @@ final class SpatieMigrationTest extends TestCase
     }
 
     /**
-     * `--dry-run` reports counts in the summary table without
-     * writing any rows to the target tables.
+     * `--dry-run` reports counts in the summary table without writing any rows
+     * to the target tables.
      *
      * @return void
      */
@@ -227,12 +225,13 @@ final class SpatieMigrationTest extends TestCase
     }
 
     /**
-     * Point the package at prefixed table names so the target tables
-     * do not collide with Spatie's source tables.
+     * Point the package at prefixed table names so the target tables do not
+     * collide with Spatie's source tables.
      *
      * @param  mixed  $app
      * @return void
      */
+    #[\Override]
     protected function defineEnvironment(mixed $app): void
     {
         parent::defineEnvironment($app);
@@ -256,6 +255,17 @@ final class SpatieMigrationTest extends TestCase
      */
     private function createSpatieTables(): void
     {
+        $this->createSpatieAuthorityTables();
+        $this->createSpatiePivotTables();
+    }
+
+    /**
+     * Create the Spatie role and permission master tables.
+     *
+     * @return void
+     */
+    private function createSpatieAuthorityTables(): void
+    {
         Schema::create('roles', static function (Blueprint $table): void {
             $table->increments('id');
             $table->string('name');
@@ -269,7 +279,15 @@ final class SpatieMigrationTest extends TestCase
             $table->string('guard_name');
             $table->timestamps();
         });
+    }
 
+    /**
+     * Create the Spatie pivot tables (role / model junctions).
+     *
+     * @return void
+     */
+    private function createSpatiePivotTables(): void
+    {
         Schema::create('role_has_permissions', static function (Blueprint $table): void {
             $table->unsignedInteger('permission_id');
             $table->unsignedInteger('role_id');

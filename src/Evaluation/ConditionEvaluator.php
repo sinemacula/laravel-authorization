@@ -151,11 +151,11 @@ final class ConditionEvaluator
      * third-party collector) is unavailable. The intentional
      * swallow covers three operating modes:
      *
-     * - **Pure-PHP contexts** (benchmarks, standalone evaluator
+     * - Pure-PHP contexts (benchmarks, standalone evaluator
      *   use) where Laravel's `logger()` helper may not be bound.
-     * - **Container-less test runs** that construct the evaluator
+     * - Container-less test runs that construct the evaluator
      *   directly without a facade root.
-     * - **Production outages** where the configured logging
+     * - Production outages where the configured logging
      *   driver fails — rare but real; no reason to cascade into
      *   an authorization failure.
      *

@@ -13,9 +13,8 @@ use SineMacula\Laravel\Authorization\Resolvers\AuthGuardPrincipalResolver;
 use Tests\TestCase;
 
 /**
- * Feature coverage for `AuthGuardPrincipalResolver` — the shipped
- * adapter that reads the current principal out of Laravel's
- * standard auth factory.
+ * Feature coverage for `AuthGuardPrincipalResolver` — the shipped adapter that
+ * reads the current principal out of Laravel's standard auth factory.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,6 +31,7 @@ final class AuthGuardPrincipalResolverTest extends TestCase
      *
      * @return void
      */
+    #[\Override]
     protected function tearDown(): void
     {
         \Mockery::close();
@@ -40,8 +40,8 @@ final class AuthGuardPrincipalResolverTest extends TestCase
     }
 
     /**
-     * When the configured guard has a user, the resolver hands
-     * it back unchanged.
+     * When the configured guard has a user, the resolver hands it back
+     * unchanged.
      *
      * @return void
      */
@@ -60,9 +60,8 @@ final class AuthGuardPrincipalResolverTest extends TestCase
     }
 
     /**
-     * When the guard reports no user, the resolver returns null
-     * so the authorization engine falls through to implicit
-     * deny.
+     * When the guard reports no user, the resolver returns null so the
+     * authorization engine falls through to implicit deny.
      *
      * @return void
      */
@@ -80,8 +79,8 @@ final class AuthGuardPrincipalResolverTest extends TestCase
     }
 
     /**
-     * An explicit guard override (for multi-guard deployments
-     * pinning authorization to a specific guard) is honoured.
+     * An explicit guard override (for multi-guard deployments pinning
+     * authorization to a specific guard) is honoured.
      *
      * @return void
      */
@@ -100,8 +99,8 @@ final class AuthGuardPrincipalResolverTest extends TestCase
     }
 
     /**
-     * Wiring the resolver through the config binds it as the
-     * shipped `PrincipalResolver` implementation.
+     * Wiring the resolver through the config binds it as the shipped
+     * `PrincipalResolver` implementation.
      *
      * @return void
      */

@@ -4,10 +4,10 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events\Identity;
 
-use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
- * Dispatched when a policy is attached to an authorizable identity.
+ * Dispatched when a role is assigned to an authorizable identity.
  *
  * Part of the SemVer-stable event API; breaking changes require a
  * major version bump.
@@ -17,21 +17,21 @@ use SineMacula\Laravel\Authorization\Models\Policy;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class IdentityPolicyAttached
+final readonly class RoleAssigned implements IdentityEvent
 {
     /**
      * Create a new event instance.
      *
      * @param  object  $authorizable
-     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      */
     public function __construct(
 
-        /** Authorizable identity that the policy was attached to. */
+        /** Authorizable identity that received the role assignment. */
         public object $authorizable,
 
-        /** Policy row that was attached to the identity. */
-        public Policy $policy,
+        /** Role that was assigned to the identity. */
+        public Role $role,
 
     ) {}
 }

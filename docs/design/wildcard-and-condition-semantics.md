@@ -48,7 +48,7 @@ The `*:*` pattern is the canonical super-admin wildcard -- it satisfies every `h
 
 Wildcard matching applies at the RBAC fallback step (step 3 of the four-step evaluator). When no policy matches, the
 manager checks `$principal->hasPermission($action)`. A principal holding `posts:*` satisfies an RBAC check for
-`posts:create`, yielding `RBAC_ALLOW`. An explicit deny from a policy statement still wins -- wildcard RBAC grants do
+`posts:create`, yielding `RbacAllow`. An explicit deny from a policy statement still wins -- wildcard RBAC grants do
 not override policy-layer denials.
 
 ## Condition Operators

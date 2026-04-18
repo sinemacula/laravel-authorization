@@ -18,10 +18,9 @@ use Tests\TestCase;
  * Performance budget for the Blade helpers.
  *
  * Every `@role` and `@can` block in a view compiles to a call on
- * `BladeHelpers::hasRole()` / `hasPermission()`. A single page
- * renders one call per permission-gated block; the budget bounds
- * the per-call overhead on a realistic page weight (50 role
- * directives).
+ * `BladeHelpers::hasRole()` / `hasPermission()`. A single page renders one call
+ * per permission-gated block; the budget bounds the per-call overhead on a
+ * realistic page weight (50 role directives).
  *
  * Observed reference-machine timings:
  *
@@ -39,8 +38,8 @@ use Tests\TestCase;
 final class BladeHelpersBudgetTest extends TestCase
 {
     /**
-     * 50 `@role` directive calls must complete in under 100ms on
-     * the reference machine (~15μs per call observed).
+     * 50 `@role` directive calls must complete in under 100ms on the reference
+     * machine (~15μs per call observed).
      *
      * @return void
      */
@@ -73,9 +72,9 @@ final class BladeHelpersBudgetTest extends TestCase
     }
 
     /**
-     * 50 `@can`-style directive calls against a role-inherited
-     * permission must complete in under 200ms — permission checks
-     * pay the heavier `hasPermission()` lookup.
+     * 50 `@can`-style directive calls against a role-inherited permission must
+     * complete in under 200ms — permission checks pay the heavier
+     * `hasPermission()` lookup.
      *
      * @return void
      */
@@ -115,8 +114,8 @@ final class BladeHelpersBudgetTest extends TestCase
     }
 
     /**
-     * Bind a principal resolver that returns the supplied
-     * principal — mirrors the helper used by the feature suite.
+     * Bind a principal resolver that returns the supplied principal — mirrors
+     * the helper used by the feature suite.
      *
      * @param  object  $principal
      * @return void
@@ -124,9 +123,28 @@ final class BladeHelpersBudgetTest extends TestCase
     private function actAs(object $principal): void
     {
         $resolver = new class ($principal) implements PrincipalResolver {
-            public function __construct(private readonly object $principal) {}
+            /**
+             * Create a new resolver wrapping a fixed principal.
+             *
+             * @param  object  $principal
+             * @return void
+             */
+            public function __construct(
 
-            public function resolve(): ?object // @phpstan-ignore return.unusedType
+                /** The principal returned by every resolution call. */
+                private readonly object $principal,
+
+            ) {}
+
+            /**
+             * Resolve the current principal.
+             *
+             * @return object|null
+             *
+             * @phpstan-ignore-next-line return.unusedType
+             */
+            #[\Override]
+            public function resolve(): ?object
             {
                 return $this->principal;
             }

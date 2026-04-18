@@ -26,18 +26,10 @@ final readonly class ResolutionCacheContext
      */
     public function __construct(
 
-        /**
-         * Upper TTL bound derived from the nearest upcoming temporal
-         * grant expiry. Null means no temporal-grant constraint —
-         * the configured TTL applies as-is.
-         */
+        /** Upper TTL bound derived from the nearest upcoming grant expiry; null means unconstrained. */
         public ?int $maxTtl = null,
 
-        /**
-         * Role IDs the cached entry depends on — used as cache tags
-         * on tag-capable stores so a role-permission mutation can
-         * flush every principal carrying the affected role.
-         */
+        /** Role IDs this entry depends on; tagged on capable stores for role-scoped invalidation. */
         public array $roleIds = [],
 
     ) {}

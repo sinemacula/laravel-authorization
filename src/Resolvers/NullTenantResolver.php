@@ -26,6 +26,7 @@ final class NullTenantResolver implements TenantResolver
      *
      * @return object|null
      */
+    #[\Override]
     public function resolve(): ?object
     {
         return null;

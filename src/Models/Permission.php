@@ -50,11 +50,7 @@ class Permission extends Model
 {
     use HasSystemProtection, HasUuids, ValidatesAuthorizationName;
 
-    /**
-     * The attributes that are mass assignable.
-     *
-     * @var list<string>
-     */
+    /** @var list<string> Attributes that are mass assignable. */
     protected $fillable = [
         'name',
         'guard_name',
@@ -65,11 +61,7 @@ class Permission extends Model
         'tenant_id',
     ];
 
-    /**
-     * The attribute casts.
-     *
-     * @var array<string, string>
-     */
+    /** @var array<string, string> Attribute cast map. */
     protected $casts = [
         'is_system' => 'boolean',
     ];
@@ -172,7 +164,11 @@ class Permission extends Model
     /**
      * Roles that carry this permission.
      *
+     * @formatter:off
+     *
      * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany<\SineMacula\Laravel\Authorization\Models\Role, $this>
+     *
+     * @formatter:on
      */
     public function roles(): BelongsToMany
     {
@@ -198,7 +194,7 @@ class Permission extends Model
      * `HasPermissions::resolvePermission()` and
      * `Role::resolvePermission()` — a single owner for the
      * guard-agnostic disjunction so evolution of the matching
-     * rules happens in one place (see issue #55). Consumers
+     * rules happens in one place. Consumers
      * calling `$class::resolveByName(...)` where `$class` is
      * read from `authorization.models.permission` get correct
      * late-static-binding against their swapped model.

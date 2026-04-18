@@ -22,22 +22,14 @@ class GrantRoleCommand extends Command
 {
     use ResolvesIdentity;
 
-    /**
-     * The console command signature.
-     *
-     * @var string
-     */
+    /** @var string The console command signature. */
     protected $signature = <<<'EOD'
         authorization:grant
                                     {identity : Identity in morphType:key format (e.g. user:123)}
                                     {role : Role name to assign}
         EOD;
 
-    /**
-     * The console command description.
-     *
-     * @var string
-     */
+    /** @var string The console command description. */
     protected $description = 'Assign a role to an authorizable identity';
 
     /**

@@ -39,33 +39,26 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
 #[Bench\OutputTimeUnit('microseconds')]
 final class ResolutionCacheBench
 {
-    /** Cache instance used for the memo-tier subjects (no persistent store). */
-    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
-    private ResolutionCache $memoOnly;
+    /** @var \SineMacula\Laravel\Authorization\Cache\ResolutionCache cache instance used for the memo-tier subjects (no persistent store). */
+    private ResolutionCache $memoOnly; // @phpstan-ignore property.uninitialized, missingType.callable
 
-    /** Cache instance used for the persistent-tier subjects (array-store-backed). */
-    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
-    private ResolutionCache $persisted;
+    /** @var \SineMacula\Laravel\Authorization\Cache\ResolutionCache cache instance used for the persistent-tier subjects (array-store-backed). */
+    private ResolutionCache $persisted; // @phpstan-ignore property.uninitialized, missingType.callable
 
-    /** Cache instance used for the `forget()` subject — reprimed between reps via `setUpForget()`. */
-    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
-    private ResolutionCache $forgetTarget;
+    /** @var \SineMacula\Laravel\Authorization\Cache\ResolutionCache cache instance used for the `forget()` subject — reprimed between reps via `setUpForget()`. */
+    private ResolutionCache $forgetTarget; // @phpstan-ignore property.uninitialized, missingType.callable
 
-    /** Principal stand-in — primitive object keyed by a stable hash. */
-    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
-    private object $principal;
+    /** @var object principal stand-in — primitive object keyed by a stable hash. */
+    private object $principal; // @phpstan-ignore property.uninitialized, missingType.callable
 
-    /** Resolved role list primed into the cache before memo / persistent reads. */
-    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
-    private \Closure $roleResolver;
+    /** @var \Closure resolved role list primed into the cache before memo / persistent reads. */
+    private \Closure $roleResolver; // @phpstan-ignore property.uninitialized, missingType.callable
 
-    /** Resolved permission list primed into the cache before memo reads. */
-    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
-    private \Closure $permissionResolver;
+    /** @var \Closure resolved permission list primed into the cache before memo reads. */
+    private \Closure $permissionResolver; // @phpstan-ignore property.uninitialized, missingType.callable
 
-    /** Policy list primed into the persistent tier before policy reads. */
-    /** @phpstan-ignore-next-line property.uninitialized, missingType.callable */
-    private \Closure $policyResolver;
+    /** @var \Closure policy list primed into the persistent tier before policy reads. */
+    private \Closure $policyResolver; // @phpstan-ignore property.uninitialized, missingType.callable
 
     /**
      * Bench setUp — prime every subject's fixtures so revolutions
@@ -76,13 +69,24 @@ final class ResolutionCacheBench
     public function setUp(): void
     {
         $this->principal = new class {
+            /** @var string Stable principal identifier for the cache key. */
             public string $id = 'bench-principal';
 
+            /**
+             * Return the identity key.
+             *
+             * @return string
+             */
             public function getKey(): string
             {
                 return $this->id;
             }
 
+            /**
+             * Return the morph class name.
+             *
+             * @return string
+             */
             public function getMorphClass(): string
             {
                 return 'bench_identity';
@@ -108,8 +112,8 @@ final class ResolutionCacheBench
         // flush the memo so every revolution exercises the
         // persistent-tier read path.
         $arrayStore      = new ArrayStore;
-        $repo            = new CacheRepository($arrayStore);
-        $this->persisted = new ResolutionCache(store: $repo, ttl: 0, prefix: 'bench-persisted');
+        $repository      = new CacheRepository($arrayStore);
+        $this->persisted = new ResolutionCache(store: $repository, ttl: 0, prefix: 'bench-persisted');
 
         $this->persisted->rememberRoles($this->principal, $this->roleResolver);
         $this->persisted->rememberPermissions($this->principal, $this->permissionResolver);
@@ -199,8 +203,8 @@ final class ResolutionCacheBench
     private function newForgetTarget(): ResolutionCache
     {
         $arrayStore = new ArrayStore;
-        $repo       = new CacheRepository($arrayStore);
-        $cache      = new ResolutionCache(store: $repo, ttl: 0, prefix: 'bench-forget');
+        $repository = new CacheRepository($arrayStore);
+        $cache      = new ResolutionCache(store: $repository, ttl: 0, prefix: 'bench-forget');
 
         $context = new ResolutionCacheContext(roleIds: ['role-1']);
 

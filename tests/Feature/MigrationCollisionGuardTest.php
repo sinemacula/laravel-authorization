@@ -12,10 +12,10 @@ use SineMacula\Laravel\Authorization\Database\MigrationCollisionGuard;
 use Tests\TestCase;
 
 /**
- * Coverage for the shipped migration collision guard. Published
- * migrations invoke the guard before creating their table so a
- * matrix run against a persistent database cannot silently
- * collide with an unrelated table of the same name.
+ * Coverage for the shipped migration collision guard. Published migrations
+ * invoke the guard before creating their table so a matrix run against a
+ * persistent database cannot silently collide with an unrelated table of the
+ * same name.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,8 +29,8 @@ use Tests\TestCase;
 final class MigrationCollisionGuardTest extends TestCase
 {
     /**
-     * When the table already exists, the guard raises the typed
-     * collision exception and the migration aborts.
+     * When the table already exists, the guard raises the typed collision
+     * exception and the migration aborts.
      *
      * @return void
      */

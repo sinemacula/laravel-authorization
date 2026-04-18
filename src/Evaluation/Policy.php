@@ -17,7 +17,7 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
  */
 final readonly class Policy
 {
-    /** Current policy-document schema version. */
+    /** @var int Current policy-document schema version. */
     public const int CURRENT_VERSION = 1;
 
     /**
@@ -29,13 +29,13 @@ final readonly class Policy
      */
     public function __construct(
 
-        /** Human-readable policy name used in evaluation traces and audit logs. */
+        /** Human-readable policy name used in traces and audit logs. */
         public string $name,
 
         /** Ordered list of statements that make up the policy. */
         public array $statements,
 
-        /** Document schema version; defaults to the current version constant. */
+        /** Document schema version; defaults to the current constant. */
         public int $version = self::CURRENT_VERSION,
 
     ) {}

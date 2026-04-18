@@ -33,17 +33,16 @@ final class CachingPolicyResolver implements PolicyResolver
         /** Wrapped resolver that actually gathers policies on a cold miss. */
         private readonly PolicyResolver $inner,
 
-        /** Shared cache holding memoised and optionally persisted gathering results. */
+        /** Shared cache holding memoised and optionally persisted results. */
         private readonly ResolutionCache $cache,
 
     ) {}
 
     /**
-     * @inheritDoc
-     *
      * @param  object  $principal
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
      */
+    #[\Override]
     public function policiesFor(object $principal): array
     {
         return $this->cache->rememberPolicies(

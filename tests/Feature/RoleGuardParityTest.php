@@ -25,12 +25,11 @@ use Tests\TestCase;
 /**
  * Feature coverage for the role ↔ permission guard-parity rule.
  *
- * Two concrete guards must match; null on either side is the
- * guard-agnostic sentinel and is compatible with every guard. The
- * check lives on the `RolePermission` pivot's `saving` hook, so
- * every attachment path goes through it — the typed API
- * (`$role->givePermission(...)` / `syncPermissions`) and direct
- * relation use (`$role->permissions()->attach(...)` / `sync(...)`).
+ * Two concrete guards must match; null on either side is the guard-agnostic
+ * sentinel and is compatible with every guard. The check lives on the
+ * `RolePermission` pivot's `saving` hook, so every attachment path goes through
+ * it — the typed API (`$role->givePermission(...)` / `syncPermissions`) and
+ * direct relation use (`$role->permissions()->attach(...)` / `sync(...)`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -69,8 +68,7 @@ final class RoleGuardParityTest extends TestCase
     }
 
     /**
-     * Two concrete but different guards are rejected via the typed
-     * Role API.
+     * Two concrete but different guards are rejected via the typed Role API.
      *
      * @return void
      */
@@ -85,8 +83,8 @@ final class RoleGuardParityTest extends TestCase
     }
 
     /**
-     * Cross-guard attachment is rejected on the raw relation too
-     * — the pivot's `saving` hook catches bypass paths.
+     * Cross-guard attachment is rejected on the raw relation too — the pivot's
+     * `saving` hook catches bypass paths.
      *
      * @return void
      */
@@ -116,8 +114,8 @@ final class RoleGuardParityTest extends TestCase
     }
 
     /**
-     * A guard-agnostic permission attaches to a guard-specific
-     * role — null on either side is the wildcard.
+     * A guard-agnostic permission attaches to a guard-specific role — null on
+     * either side is the wildcard.
      *
      * @return void
      */
@@ -162,9 +160,8 @@ final class RoleGuardParityTest extends TestCase
     }
 
     /**
-     * The typed exception carries both names and both guards so
-     * audit consumers can report the offending pair without
-     * re-querying.
+     * The typed exception carries both names and both guards so audit consumers
+     * can report the offending pair without re-querying.
      *
      * @return void
      */

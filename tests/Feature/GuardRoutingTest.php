@@ -28,13 +28,11 @@ use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
 use Tests\TestCase;
 
 /**
- * Feature coverage for the `getAuthorizationGuard()` duck-typed
- * hook.
+ * Feature coverage for the `getAuthorizationGuard()` duck-typed hook.
  *
- * Identity models can declare the method to route their
- * name-based role / permission lookups to a specific guard —
- * typical for multi-guard deployments where a user
- * authenticated under `api` should resolve against `api`-guard
+ * Identity models can declare the method to route their name-based role /
+ * permission lookups to a specific guard — typical for multi-guard deployments
+ * where a user authenticated under `api` should resolve against `api`-guard
  * rows instead of the package's default guard.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -63,6 +61,7 @@ final class GuardRoutingTest extends TestCase
      *
      * @return void
      */
+    #[\Override]
     protected function tearDown(): void
     {
         Schema::dropIfExists('api_guarded_users');
@@ -71,9 +70,8 @@ final class GuardRoutingTest extends TestCase
     }
 
     /**
-     * An identity declaring `getAuthorizationGuard()` routes its
-     * role lookups to the declared guard, not the package
-     * default.
+     * An identity declaring `getAuthorizationGuard()` routes its role lookups
+     * to the declared guard, not the package default.
      *
      * @return void
      */
@@ -93,9 +91,9 @@ final class GuardRoutingTest extends TestCase
     }
 
     /**
-     * When the only matching role is scoped to a different guard,
-     * a non-default-guard identity still fails the lookup — it
-     * does not fall back to the package default.
+     * When the only matching role is scoped to a different guard, a
+     * non-default-guard identity still fails the lookup — it does not fall back
+     * to the package default.
      *
      * @return void
      */
@@ -135,9 +133,8 @@ final class GuardRoutingTest extends TestCase
     }
 
     /**
-     * A guard-scoped permission attached through the api guard is
-     * inaccessible to the default-guard lookup path even when the
-     * names match.
+     * A guard-scoped permission attached through the api guard is inaccessible
+     * to the default-guard lookup path even when the names match.
      *
      * @return void
      */
@@ -169,10 +166,9 @@ final class GuardRoutingTest extends TestCase
     }
 
     /**
-     * A role's own `guard_name` drives the permission lookup
-     * inside `Role::givePermission()` — a web-scoped role
-     * resolves permissions under the web guard, an api-scoped
-     * role under api.
+     * A role's own `guard_name` drives the permission lookup inside
+     * `Role::givePermission()` — a web-scoped role resolves permissions under
+     * the web guard, an api-scoped role under api.
      *
      * @return void
      */
@@ -196,8 +192,8 @@ final class GuardRoutingTest extends TestCase
     }
 
     /**
-     * A default-guard identity without the hook continues to use
-     * the configured default guard — the behaviour is additive.
+     * A default-guard identity without the hook continues to use the configured
+     * default guard — the behaviour is additive.
      *
      * @return void
      */
@@ -217,11 +213,12 @@ final class GuardRoutingTest extends TestCase
     }
 
     /**
-     * Define a separate table for the api-guard stub so the two
-     * identity shapes coexist alongside the default-guard stub.
+     * Define a separate table for the api-guard stub so the two identity shapes
+     * coexist alongside the default-guard stub.
      *
      * @return void
      */
+    #[\Override]
     protected function defineDatabaseMigrations(): void
     {
         parent::defineDatabaseMigrations();
@@ -234,8 +231,8 @@ final class GuardRoutingTest extends TestCase
 }
 
 /**
- * Test stub — identity declaring `api` as its authorization
- * guard via the duck-typed hook.
+ * Test stub — identity declaring `api` as its authorization guard via the
+ * duck-typed hook.
  *
  * @internal
  */
@@ -269,8 +266,8 @@ class ApiGuardedUser extends Model implements AuthorizableIdentity
 }
 
 /**
- * Test stub — identity that does not declare the hook, so the
- * trait falls back to `config('authorization.defaults.guard')`.
+ * Test stub — identity that does not declare the hook, so the trait falls back
+ * to `config('authorization.defaults.guard')`.
  *
  * @internal
  */

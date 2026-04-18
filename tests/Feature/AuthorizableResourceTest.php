@@ -21,8 +21,8 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Feature tests for the `AuthorizableResource` contract integration
- * with the Gate translation layer.
+ * Feature tests for the `AuthorizableResource` contract integration with the
+ * Gate translation layer.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -39,11 +39,12 @@ use Tests\TestCase;
 final class AuthorizableResourceTest extends TestCase
 {
     /**
-     * Boot the provider with the demo permission enum so the Gate is
-     * wired for each test.
+     * Boot the provider with the demo permission enum so the Gate is wired for
+     * each test.
      *
      * @return void
      */
+    #[\Override]
     protected function setUp(): void
     {
         parent::setUp();
@@ -90,8 +91,8 @@ final class AuthorizableResourceTest extends TestCase
     }
 
     /**
-     * `AuthorizableResource` takes precedence over `__toString` and
-     * Eloquent model stringification.
+     * `AuthorizableResource` takes precedence over `__toString` and Eloquent
+     * model stringification.
      *
      * @return void
      */
@@ -134,8 +135,7 @@ final class AuthorizableResourceTest extends TestCase
     }
 
     /**
-     * A non-matching `AuthorizableResource` identifier correctly
-     * denies access.
+     * A non-matching `AuthorizableResource` identifier correctly denies access.
      *
      * @return void
      */
@@ -177,14 +177,27 @@ final class AuthorizableResourceTest extends TestCase
     {
         $resolver = new class ($user) implements PrincipalResolver {
             /**
+             * Create a new resolver wrapping a fixed user.
+             *
              * @param  object  $user
+             * @return void
              */
-            public function __construct(private readonly object $user) {}
+            public function __construct(
+
+                /** The user returned by every resolution call. */
+                private readonly object $user,
+
+            ) {}
 
             /**
+             * Resolve the current principal.
+             *
              * @return object|null
+             *
+             * @phpstan-ignore-next-line return.unusedType
              */
-            public function resolve(): ?object // @phpstan-ignore return.unusedType
+            #[\Override]
+            public function resolve(): ?object
             {
                 return $this->user;
             }

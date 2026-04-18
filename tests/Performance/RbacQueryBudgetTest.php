@@ -20,12 +20,11 @@ use Tests\TestCase;
 /**
  * Performance budget for RBAC lookup N+1 safety.
  *
- * Within a single request the authorization pipeline must resolve
- * roles, permissions, and policies at most once per principal.
- * Subsequent `can()` invocations on the same principal are expected
- * to hit the memoisation tier of `ResolutionCache` and emit zero
- * additional database queries — regression coverage for §12.2 of
- * the spec.
+ * Within a single request the authorization pipeline must resolve roles,
+ * permissions, and policies at most once per principal. Subsequent `can()`
+ * invocations on the same principal are expected to hit the memoisation tier of
+ * `ResolutionCache` and emit zero additional database queries — regression
+ * coverage for §12.2 of the spec.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -38,13 +37,7 @@ use Tests\TestCase;
 #[CoversClass(ResolutionCache::class)]
 final class RbacQueryBudgetTest extends TestCase
 {
-    /**
-     * Permission fixture — five names attached to the seeded role
-     * and reused across every assertion so string literals do not
-     * duplicate.
-     *
-     * @var list<string>
-     */
+    /** @var list<string> Permission fixture reused across every assertion. */
     private const array PERMISSION_NAMES = [
         'posts:create',
         'posts:read',
@@ -54,13 +47,14 @@ final class RbacQueryBudgetTest extends TestCase
     ];
 
     /**
-     * Wire the resolution cache to the array store so both the
-     * memoisation and persistent tiers are live — the persistent
-     * tier is the only layer that can survive a scoped clone of
-     * the manager, so a full N+1 assertion must exercise both.
+     * Wire the resolution cache to the array store so both the memoisation and
+     * persistent tiers are live — the persistent tier is the only layer that
+     * can survive a scoped clone of the manager, so a full N+1 assertion must
+     * exercise both.
      *
      * @return void
      */
+    #[\Override]
     protected function setUp(): void
     {
         parent::setUp();
@@ -81,33 +75,17 @@ final class RbacQueryBudgetTest extends TestCase
     }
 
     /**
-     * A user carrying a role with five permissions must not emit a
-     * database query on any `can()` beyond the first. The initial
-     * resolution loads roles, role permissions, direct permissions,
-     * and attached policies — every subsequent `can()` for the same
-     * principal during the same request is served from cache.
+     * A user carrying a role with five permissions must not emit a database
+     * query on any `can()` beyond the first. The initial resolution loads
+     * roles, role permissions, direct permissions, and attached policies —
+     * every subsequent `can()` for the same principal during the same request
+     * is served from cache.
      *
      * @return void
      */
     public function testRepeatedCanEmitsNoAdditionalQueriesAfterFirstResolution(): void
     {
-        $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'editor',
-            'guard_name' => 'web',
-        ]);
-
-        foreach (self::PERMISSION_NAMES as $name) {
-            $permission = Permission::create([
-                'id'         => (string) Str::uuid(),
-                'name'       => $name,
-                'guard_name' => 'web',
-            ]);
-            $role->permissions()->attach($permission->getKey());
-        }
-
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
-        $user->assignRole('editor');
+        $user = $this->makeEditorWithFivePermissions();
 
         $app = $this->app;
         self::assertNotNull($app, 'Testbench application must be booted by setUp().');
@@ -154,5 +132,34 @@ final class RbacQueryBudgetTest extends TestCase
             $followupQueries,
             'Subsequent can() calls must not hit the database — RBAC resolution cache missed.',
         );
+    }
+
+    /**
+     * Seed the `editor` role with five attached permissions and return a
+     * `StubIdentity` assigned to that role.
+     *
+     * @return \Tests\Feature\Stubs\StubIdentity
+     */
+    private function makeEditorWithFivePermissions(): StubIdentity
+    {
+        $role = Role::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => 'editor',
+            'guard_name' => 'web',
+        ]);
+
+        foreach (self::PERMISSION_NAMES as $name) {
+            $permission = Permission::create([
+                'id'         => (string) Str::uuid(),
+                'name'       => $name,
+                'guard_name' => 'web',
+            ]);
+            $role->permissions()->attach($permission->getKey());
+        }
+
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user->assignRole('editor');
+
+        return $user;
     }
 }
