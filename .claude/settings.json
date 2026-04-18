@@ -1,0 +1,17 @@
+{
+    "enabledPlugins": {
+        "php-lsp@claude-plugins-official": true,
+        "github@claude-plugins-official": true,
+        "code-simplifier@claude-plugins-official": true
+    },
+    "permissions": {
+        "allow": [
+            "Bash(git fetch *)",
+            "Bash(qlty check *)",
+            "Bash(gh search *)",
+            "Bash(composer check *)",
+            "Bash(composer show *)",
+            "mcp__plugin_github_github__pull_request_read"
+        ]
+    }
+}
