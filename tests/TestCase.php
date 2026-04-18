@@ -8,7 +8,9 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
+use function Orchestra\Testbench\load_migration_paths;
 use Orchestra\Testbench\TestCase as OrchestraTestCase;
+
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 
 /**
@@ -96,17 +98,21 @@ abstract class TestCase extends OrchestraTestCase
     }
 
     /**
-     * Register the package migration path so `migrate:fresh` picks it up.
+     * Register the package migration path on the migrator so `migrate:fresh`
+     * picks it up.
      *
-     * Under `RefreshDatabase` this only registers the path on the first test;
-     * subsequent tests skip the re-registration and reuse the cached schema.
+     * Uses `load_migration_paths` directly instead of `loadMigrationsFrom` so
+     * Testbench never caches a per-test `MigrateProcessor` — which under
+     * `RefreshDatabase` would otherwise run `migrate:rollback` in teardown and
+     * fight the transactional rollback (fatal on Postgres once a test raises
+     * an exception, silently corrupting state on MySQL).
      *
      * @return void
      */
     #[\Override]
     protected function defineDatabaseMigrations(): void
     {
-        $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
+        load_migration_paths($this->app, __DIR__ . '/../database/migrations');
     }
 
     /**

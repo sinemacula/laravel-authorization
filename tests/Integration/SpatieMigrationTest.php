@@ -255,6 +255,10 @@ final class SpatieMigrationTest extends TestCase
      */
     private function createSpatieTables(): void
     {
+        foreach (['model_has_permissions', 'model_has_roles', 'role_has_permissions', 'permissions', 'roles'] as $table) {
+            Schema::dropIfExists($table);
+        }
+
         $this->createSpatieAuthorityTables();
         $this->createSpatiePivotTables();
     }
