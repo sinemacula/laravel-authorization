@@ -219,9 +219,9 @@ final class GuardRoutingTest extends TestCase
      * @return void
      */
     #[\Override]
-    protected function defineDatabaseMigrations(): void
+    protected function defineDatabaseMigrationsAfterDatabaseRefreshed(): void
     {
-        parent::defineDatabaseMigrations();
+        parent::defineDatabaseMigrationsAfterDatabaseRefreshed();
 
         Schema::create('api_guarded_users', static function ($table): void {
             $table->string('id')->primary();
