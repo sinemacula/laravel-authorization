@@ -39,11 +39,13 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     #[\Override]
     protected function setUp(): void
     {
-        parent::setUp();
+        // This suite overrides `authorization.tables.*` to use the `auth_`
+        // prefix (see defineEnvironment), so the migrated schema differs
+        // from the shared default. Flip the RefreshDatabase migration flag
+        // back to false to force `migrate:fresh` under this suite's config.
+        \Illuminate\Foundation\Testing\RefreshDatabaseState::$migrated = false;
 
-        foreach (['model_has_permissions', 'model_has_roles', 'role_has_permissions', 'permissions', 'roles'] as $table) {
-            Schema::dropIfExists($table);
-        }
+        parent::setUp();
 
         $this->createSpatieAuthorityTables();
         $this->createSpatiePivotTables();
