@@ -30,7 +30,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
  */
 final class PermissionObserver
 {
-    /** @var \WeakMap<\SineMacula\Laravel\Authorization\Models\Permission, array<string, mixed>>|null Pre-update snapshots bridging `updating` and `updated`; static so it survives per-event observer resolution. */
+    /** @var \WeakMap<\SineMacula\Laravel\Authorization\Models\Permission, array<string, mixed>>|null Pre-update snapshots keyed by model. */
     private static ?\WeakMap $snapshots = null;
 
     /**
