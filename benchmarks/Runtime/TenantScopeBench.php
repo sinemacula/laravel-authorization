@@ -5,7 +5,7 @@ declare(strict_types = 1);
 namespace Benchmarks\Runtime;
 
 use Benchmarks\Support\BenchmarkCase;
-use Benchmarks\Support\BenchTenantResolver;
+use Benchmarks\Support\BenchmarkTenantResolver;
 use Illuminate\Support\Str;
 use PhpBench\Attributes as Bench;
 use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
@@ -21,8 +21,8 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  * pays the resolver cost twice. The bench carves the call
  * surface into two production shapes:
  *
- * - **Warm apply** — memoised tenant; shortcut read.
- * - **Cold apply** — memo flushed each rev; resolver runs.
+ * - Warm apply — memoised tenant; shortcut read.
+ * - Cold apply — memo flushed each rev; resolver runs.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -52,7 +52,7 @@ final class TenantScopeBench extends BenchmarkCase
     {
         $app = $this->boot();
 
-        $app->bind(TenantResolver::class, static fn (): TenantResolver => new BenchTenantResolver);
+        $app->bind(TenantResolver::class, static fn (): TenantResolver => new BenchmarkTenantResolver);
 
         Role::query()->delete();
 

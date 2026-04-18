@@ -19,10 +19,10 @@ use SineMacula\Laravel\Authorization\Models\Role;
  * query count. The bench carves the call surface into the three
  * shapes production traffic actually hits:
  *
- * - **Ancestors on a 5-deep chain** — realistic engineering-tier /
+ * - Ancestors on a 5-deep chain — realistic engineering-tier /
  *   platform-tier / tenant-tier hierarchy.
- * - **Ancestors on a 10-deep chain** — budget reference shape.
- * - **Descendants on a 20-wide subtree** — bulk RBAC rollout
+ * - Ancestors on a 10-deep chain — budget reference shape.
+ * - Descendants on a 20-wide subtree — bulk RBAC rollout
  *   patterns (break a tenant's role into per-team children).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -118,6 +118,7 @@ final class RoleHierarchyBench extends BenchmarkCase
         $parent = null;
 
         for ($i = 0; $i < $depth; $i++) {
+
             $role = Role::create([
                 'id'         => (string) Str::uuid(),
                 'name'       => "{$namePrefix}-level-{$i}",
