@@ -78,19 +78,6 @@ final class GuardRoutingTest extends TestCase
     }
 
     /**
-     * Clean up the api-guard stub table after each test.
-     *
-     * @return void
-     */
-    #[\Override]
-    protected function tearDown(): void
-    {
-        Schema::dropIfExists('api_guarded_users');
-
-        parent::tearDown();
-    }
-
-    /**
      * An identity declaring `getAuthorizationGuard()` routes its role lookups
      * to the declared guard, not the package default.
      *
