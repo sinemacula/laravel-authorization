@@ -122,14 +122,14 @@ jobs:
 
             -   name: Setup MySQL
                 if: matrix.database.driver == 'mysql'
-                uses: sinemacula/.github/.github/actions/setup-mysql@v1.1.0
+                uses: sinemacula/.github/.github/actions/setup-mysql@v1.1.1
                 with:
                     db-password: ${{ matrix.database.password }}
                     db-name: laravel_authorization_test
 
             -   name: Setup PostgreSQL
                 if: matrix.database.driver == 'pgsql'
-                uses: sinemacula/.github/.github/actions/setup-postgres@v1.1.0
+                uses: sinemacula/.github/.github/actions/setup-postgres@v1.1.1
                 with:
                     db-password: ${{ matrix.database.password }}
                     db-name: laravel_authorization_test
