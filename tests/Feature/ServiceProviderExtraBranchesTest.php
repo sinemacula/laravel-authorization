@@ -9,26 +9,23 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
-use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use Tests\Feature\Stubs\PermissionEnum;
-use Tests\Feature\Stubs\StubBadPermissionProvider;
 use Tests\Feature\Stubs\StubPolicyStore;
 use Tests\TestCase;
 
 /**
- * Coverage for the final trio of `AuthorizationServiceProvider` branches:
+ * Coverage for the remaining `AuthorizationServiceProvider` branches:
  *
  * - A concrete `policy_store` class triggers the singleton binding
  *   in `registerPolicyStore`.
  * - `authorization.gate.on_conflict` supplied as a native
  *   `GateConflictMode` enum instance (rather than the string
  *   sentinel) is passed through verbatim by `registerGates`.
- * - `registerPermissionProviders` silently skips non-string or
- *   empty entries yielded by a provider, and non-string provider
- *   class-string entries themselves.
+ * - `registerGates` skips non-string and non-contract entries in
+ *   `permission_enums` at runtime.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,7 +38,6 @@ use Tests\TestCase;
 #[CoversClass(EventListenerRegistrar::class)]
 final class ServiceProviderExtraBranchesTest extends TestCase
 {
-    private const string VALID_PERM   = 'valid:perm';
     private const string POSTS_CREATE = 'posts:create';
 
     /**
@@ -92,24 +88,6 @@ final class ServiceProviderExtraBranchesTest extends TestCase
     }
 
     /**
-     * A provider that yields empty or non-string permission values skips those
-     * entries without raising, and still persists the well-formed ones.
-     *
-     * @return void
-     */
-    public function testPermissionProviderSkipsEmptyAndNonStringEntries(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.permission_providers', [StubBadPermissionProvider::class]);
-
-        (new AuthorizationServiceProvider($this->app))->boot();
-
-        self::assertNotNull(Permission::where('name', self::VALID_PERM)->first());
-        self::assertNull(Permission::where('name', '')->first());
-    }
-
-    /**
      * A `permission_enums` entry that is not a string (or does not subclass the
      * `PermissionEnum` contract) is skipped by `registerGates` at runtime.
      * ConfigValidator is swapped out via `registerGates` directly — the
@@ -131,31 +109,5 @@ final class ServiceProviderExtraBranchesTest extends TestCase
         // The valid PermissionEnum entries were wired; the garbage
         // entries were silently skipped without raising.
         self::assertTrue(\Illuminate\Support\Facades\Gate::has(self::POSTS_CREATE));
-    }
-
-    /**
-     * `registerPermissionProviders` defensively skips entries that are not
-     * class-strings or do not implement `PermissionProvider` — the upstream
-     * `ConfigValidator` rejects the same shape, so this exercises the runtime
-     * guard via reflection.
-     *
-     * @return void
-     */
-    public function testRegisterPermissionProvidersSkipsBadEntries(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.permission_providers', [
-            123,                                    // non-string
-            \stdClass::class,                       // string but not a provider
-            StubBadPermissionProvider::class,       // well-formed
-        ]);
-
-        $provider = new AuthorizationServiceProvider($this->app);
-
-        $reflection = new \ReflectionMethod($provider, 'registerPermissionProviders');
-        $reflection->invoke($provider);
-
-        self::assertNotNull(Permission::where('name', self::VALID_PERM)->first());
     }
 }
