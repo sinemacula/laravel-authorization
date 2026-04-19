@@ -1,5 +1,13 @@
 <?php
 
+declare(strict_types = 1);
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
+use SineMacula\Laravel\Authorization\Database\MigrationCollisionGuard;
+
 /**
  * Create the `roles` table.
  *
@@ -12,14 +20,6 @@
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-
-declare(strict_types = 1);
-
-use Illuminate\Database\Migrations\Migration;
-use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
-use SineMacula\Laravel\Authorization\Database\MigrationCollisionGuard;
 
 return new class extends Migration {
     /**
