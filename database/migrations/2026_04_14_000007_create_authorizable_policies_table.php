@@ -28,7 +28,7 @@ return new class extends Migration {
         /** @var string $policiesTable */
         $policiesTable = config('authorization.tables.policies', 'policies');
 
-        MigrationCollisionGuard::ensureNotExists($table);
+        (new MigrationCollisionGuard(Schema::getConnection()->getSchemaBuilder()))->ensureNotExists($table);
 
         Schema::create($table, static function (Blueprint $table) use ($policiesTable): void {
 

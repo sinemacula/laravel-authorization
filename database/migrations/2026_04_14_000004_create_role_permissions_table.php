@@ -31,7 +31,7 @@ return new class extends Migration {
         /** @var string $permissionsTable */
         $permissionsTable = config('authorization.tables.permissions', 'permissions');
 
-        MigrationCollisionGuard::ensureNotExists($table);
+        (new MigrationCollisionGuard(Schema::getConnection()->getSchemaBuilder()))->ensureNotExists($table);
 
         Schema::create($table, static function (Blueprint $table) use ($rolesTable, $permissionsTable): void {
             $table->uuid('role_id');
