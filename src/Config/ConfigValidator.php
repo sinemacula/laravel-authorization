@@ -78,6 +78,12 @@ final class ConfigValidator
             if (!\is_subclass_of($class, PermissionEnum::class)) {
                 throw new InvalidAuthorizationConfigException("authorization.permission_enums.{$index}", "class '{$class}' does not implement " . PermissionEnum::class . '.');
             }
+
+            $reflection = new \ReflectionEnum($class);
+
+            if (!$reflection->isBacked() || (string) $reflection->getBackingType() !== 'string') {
+                throw new InvalidAuthorizationConfigException("authorization.permission_enums.{$index}", "enum '{$class}' must be a backed string enum.");
+            }
         }
     }
 

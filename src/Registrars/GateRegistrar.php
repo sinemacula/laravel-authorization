@@ -95,7 +95,8 @@ final class GateRegistrar
      */
     private function registerEnumGate(PermissionEnum $case, GateConflictMode $onConflict): void
     {
-        $permission = $case->toString();
+        $permission = $case->value;
+        \assert(\is_string($permission));
 
         if (Gate::has($permission)) {
             // Exhaustive match over GateConflictMode: Throw short-circuits,

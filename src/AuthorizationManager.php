@@ -216,7 +216,8 @@ class AuthorizationManager
             $className = $enumClass;
 
             foreach ($className::cases() as $case) {
-                $action               = $case->toString();
+                $action = $case->value;
+                \assert(\is_string($action));
                 $permissions[$action] = $this->can($action, null, $context);
             }
         }

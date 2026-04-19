@@ -26,14 +26,4 @@ enum FixturePermission: string implements PermissionEnum
     case VIEW_APPLICATIONS = 'applications:view';
 
     case DELETE_APPLICATIONS = 'applications:delete';
-
-    /**
-     * Return the permission string used by the authorization engine.
-     *
-     * @return string
-     */
-    public function toString(): string
-    {
-        return $this->value;
-    }
 }

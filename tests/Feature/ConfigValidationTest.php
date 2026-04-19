@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
+use Tests\Feature\Stubs\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\PermissionEnum;
 use Tests\TestCase;
 
@@ -130,6 +131,30 @@ final class ConfigValidationTest extends TestCase
         $this->expectException(InvalidAuthorizationConfigException::class);
 
         ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+    }
+
+    /**
+     * An int-backed enum implementing `PermissionEnum` is rejected — the
+     * interface allows any backed enum but the validator requires the string
+     * backing because the case value is the canonical permission name.
+     *
+     * @return void
+     */
+    public function testIntBackedPermissionEnumIsRejected(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config->set('authorization.permission_enums', [IntBackedPermissionEnum::class]);
+
+        try {
+            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            self::assertSame('authorization.permission_enums.0', $exception->getConfigKey());
+            $reason = $exception->getReason();
+            self::assertStringContainsString(IntBackedPermissionEnum::class, $reason);
+            self::assertStringContainsString('backed string enum', $reason);
+        }
     }
 
     /**
