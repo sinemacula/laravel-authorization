@@ -14,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPermissionProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Observers\PermissionObserver;
+use SineMacula\Laravel\Authorization\Scopes\ExcludesDeprecatedScope;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use SineMacula\Laravel\Authorization\Traits\HasSystemProtection;
@@ -47,6 +48,7 @@ use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
  */
 #[ObservedBy(PermissionObserver::class)]
 #[ScopedBy(TenantScope::class)]
+#[ScopedBy(ExcludesDeprecatedScope::class)]
 class Permission extends Model
 {
     use HasSystemProtection, HasUuids, ValidatesAuthorizationName;
@@ -158,6 +160,23 @@ class Permission extends Model
         // unsafe call.
         // @phpstan-ignore staticMethod.dynamicCall
         return $query->whereNull($this->getTable() . '.tenant_type');
+    }
+
+    /**
+     * Return a builder with deprecated permissions included.
+     *
+     * Deprecated rows are hidden by the `ExcludesDeprecatedScope`
+     * global scope so gate evaluation and the default API surface
+     * never honour them. Admin flows that need the full catalogue
+     * — console commands, audit reports, sync diffs — call this
+     * helper to disable the scope for a single query without
+     * touching the other global scopes applied to the model.
+     *
+     * @return \Illuminate\Database\Eloquent\Builder<static>
+     */
+    public static function withDeprecated(): Builder
+    {
+        return static::query()->withoutGlobalScope(ExcludesDeprecatedScope::class);
     }
 
     // ------------------------------------------------------------------
