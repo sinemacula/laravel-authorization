@@ -199,9 +199,7 @@ relocation only.
 `src/Models/Permission.php`, `config/authorization.php`, `src/Console/`,
 `database/migrations/`.
 
-**Problem**
-
-Two sources of truth for the permission catalogue today: `authorization.permission_enums`
+**Problem:** two sources of truth for the permission catalogue today: `authorization.permission_enums`
 drives Laravel Gates but never touches the DB; `authorization.permission_providers`
 runs `firstOrCreate` at boot for every provider-declared string. Consumers who want
 both Gate support and queryable DB rows must declare every permission in two places.
@@ -209,9 +207,7 @@ Boot-time `firstOrCreate` also issues redundant DB writes on every request in
 non-cached configurations, and there is no mechanism to remove permissions that no
 longer exist in code.
 
-**Design**
-
-Enum is the single source of truth. DB rows are a read-only projection produced by a
+**Design:** enum is the single source of truth. DB rows are a read-only projection produced by a
 deploy-time sync command. Roles, identities, and grants remain runtime-mutable via
 the normal Eloquent surface; permission rows themselves are only mutated by sync.
 
@@ -282,7 +278,7 @@ No new columns for `description` or `category` — both already exist
 
 Signature:
 
-```
+```text
 authorization:sync
     [--dry-run]
     [--format=table|json]
@@ -342,7 +338,7 @@ Tenant-specific permissions, if any consumer creates them, are out of scope.
 
 Follow-up command, not tied to sync cadence:
 
-```
+```text
 authorization:prune-deprecated
     [--before=<ISO-8601>]   # only prune rows deprecated before this timestamp
     [--dry-run]
