@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Console\GrantRoleCommand;
 use SineMacula\Laravel\Authorization\Console\ListPermissionsCommand;
 use SineMacula\Laravel\Authorization\Console\ListRolesCommand;
 use SineMacula\Laravel\Authorization\Console\MigrateSpatieCommand;
+use SineMacula\Laravel\Authorization\Console\PrunePermissionsCommand;
 use SineMacula\Laravel\Authorization\Console\RevokeRoleCommand;
 use SineMacula\Laravel\Authorization\Console\SyncPermissionsCommand;
 use SineMacula\Laravel\Authorization\Console\WhyCanCommand;
@@ -130,6 +131,7 @@ class AuthorizationServiceProvider extends ServiceProvider
                 WhyCanCommand::class,
                 MigrateSpatieCommand::class,
                 SyncPermissionsCommand::class,
+                PrunePermissionsCommand::class,
             ]);
         }
     }
