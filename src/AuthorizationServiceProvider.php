@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Console\ListPermissionsCommand;
 use SineMacula\Laravel\Authorization\Console\ListRolesCommand;
 use SineMacula\Laravel\Authorization\Console\MigrateSpatieCommand;
 use SineMacula\Laravel\Authorization\Console\RevokeRoleCommand;
+use SineMacula\Laravel\Authorization\Console\SyncPermissionsCommand;
 use SineMacula\Laravel\Authorization\Console\WhyCanCommand;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
@@ -128,6 +129,7 @@ class AuthorizationServiceProvider extends ServiceProvider
                 RevokeRoleCommand::class,
                 WhyCanCommand::class,
                 MigrateSpatieCommand::class,
+                SyncPermissionsCommand::class,
             ]);
         }
     }
