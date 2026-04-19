@@ -147,9 +147,9 @@ final class RolePermissionApiTest extends TestCase
     public function testSyncPermissionsReplacesSet(): void
     {
         $role = $this->makeRole();
-        Permission::create(['id' => (string) Str::uuid(), 'name' => 'a:do', 'guard_name' => 'web']);
-        Permission::create(['id' => (string) Str::uuid(), 'name' => 'b:do', 'guard_name' => 'web']);
-        Permission::create(['id' => (string) Str::uuid(), 'name' => 'c:do', 'guard_name' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'a:do', 'guard' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'b:do', 'guard' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'c:do', 'guard' => 'web']);
 
         $role->syncPermissions(['a:do', 'b:do']);
         self::assertSame(['a:do', 'b:do'], $this->sortedNames($role));
@@ -166,8 +166,8 @@ final class RolePermissionApiTest extends TestCase
     public function testGetPermissionsReturnsNameList(): void
     {
         $role = $this->makeRole();
-        Permission::create(['id' => (string) Str::uuid(), 'name' => 'a:do', 'guard_name' => 'web']);
-        Permission::create(['id' => (string) Str::uuid(), 'name' => 'b:do', 'guard_name' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'a:do', 'guard' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'b:do', 'guard' => 'web']);
 
         $role->syncPermissions(['a:do', 'b:do']);
 
@@ -197,9 +197,9 @@ final class RolePermissionApiTest extends TestCase
     {
         $role = $this->makeRole();
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'platform:ping',
-            'guard_name' => null,
+            'id'    => (string) Str::uuid(),
+            'name'  => 'platform:ping',
+            'guard' => null,
         ]);
 
         $role->givePermission('platform:ping');
@@ -233,9 +233,9 @@ final class RolePermissionApiTest extends TestCase
     private function makeRole(): Role
     {
         return Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::ROLE_NAME,
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => self::ROLE_NAME,
+            'guard' => 'web',
         ]);
     }
 
@@ -247,9 +247,9 @@ final class RolePermissionApiTest extends TestCase
     private function makePermission(): Permission
     {
         return Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::PERMISSION_NAME,
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => self::PERMISSION_NAME,
+            'guard' => 'web',
         ]);
     }
 

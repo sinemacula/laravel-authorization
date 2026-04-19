@@ -44,7 +44,7 @@ class ListRolesCommand extends Command
         $guard = $this->option('guard');
 
         if ($guard !== null && $guard !== '') {
-            $query->where('guard_name', $guard);
+            $query->where('guard', $guard);
         }
 
         /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
@@ -66,7 +66,7 @@ class ListRolesCommand extends Command
                 return [
                     $role->id,
                     $role->name,
-                    $role->guard_name ?? '(any)',
+                    $role->guard ?? '(any)',
                     $role->is_system ? 'Yes' : 'No',
                     (string) $count,
                 ];

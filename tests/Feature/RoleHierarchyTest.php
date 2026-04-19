@@ -373,10 +373,10 @@ final class RoleHierarchyTest extends TestCase
     private function makeRole(string $name, ?string $parentId = null): Role
     {
         return Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => $name,
-            'guard_name' => 'web',
-            'parent_id'  => $parentId,
+            'id'        => (string) Str::uuid(),
+            'name'      => $name,
+            'guard'     => 'web',
+            'parent_id' => $parentId,
         ]);
     }
 
@@ -389,9 +389,9 @@ final class RoleHierarchyTest extends TestCase
     private function makePermission(string $name): Permission
     {
         return Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => $name,
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => $name,
+            'guard' => 'web',
         ]);
     }
 }

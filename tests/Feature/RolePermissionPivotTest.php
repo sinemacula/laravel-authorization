@@ -330,9 +330,9 @@ final class RolePermissionPivotTest extends TestCase
     private function makeRole(?string $guard, string $name = 'editor'): Role
     {
         return Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => $name,
-            'guard_name' => $guard,
+            'id'    => (string) Str::uuid(),
+            'name'  => $name,
+            'guard' => $guard,
         ]);
     }
 
@@ -346,9 +346,9 @@ final class RolePermissionPivotTest extends TestCase
     private function makePermission(?string $guard, string $name = 'posts:create'): Permission
     {
         return Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => $name,
-            'guard_name' => $guard,
+            'id'    => (string) Str::uuid(),
+            'name'  => $name,
+            'guard' => $guard,
         ]);
     }
 

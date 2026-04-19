@@ -81,9 +81,9 @@ final class SyncEventsTest extends TestCase
      */
     public function testSyncRolesDispatchesEventsPerDelta(): void
     {
-        Role::create(['id' => (string) Str::uuid(), 'name' => 'a', 'guard_name' => 'web']);
-        Role::create(['id' => (string) Str::uuid(), 'name' => 'b', 'guard_name' => 'web']);
-        Role::create(['id' => (string) Str::uuid(), 'name' => 'c', 'guard_name' => 'web']);
+        Role::create(['id' => (string) Str::uuid(), 'name' => 'a', 'guard' => 'web']);
+        Role::create(['id' => (string) Str::uuid(), 'name' => 'b', 'guard' => 'web']);
+        Role::create(['id' => (string) Str::uuid(), 'name' => 'c', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole('a');
@@ -116,8 +116,8 @@ final class SyncEventsTest extends TestCase
      */
     public function testSyncRolesIsSilentWhenSetIsUnchanged(): void
     {
-        Role::create(['id' => (string) Str::uuid(), 'name' => 'a', 'guard_name' => 'web']);
-        Role::create(['id' => (string) Str::uuid(), 'name' => 'b', 'guard_name' => 'web']);
+        Role::create(['id' => (string) Str::uuid(), 'name' => 'a', 'guard' => 'web']);
+        Role::create(['id' => (string) Str::uuid(), 'name' => 'b', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->syncRoles(['a', 'b']);
@@ -138,9 +138,9 @@ final class SyncEventsTest extends TestCase
      */
     public function testSyncPermissionsDispatchesEventsPerDelta(): void
     {
-        Permission::create(['id' => (string) Str::uuid(), 'name' => 'a:do', 'guard_name' => 'web']);
-        Permission::create(['id' => (string) Str::uuid(), 'name' => 'b:do', 'guard_name' => 'web']);
-        Permission::create(['id' => (string) Str::uuid(), 'name' => 'c:do', 'guard_name' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'a:do', 'guard' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'b:do', 'guard' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'c:do', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->givePermission('a:do');
@@ -209,14 +209,14 @@ final class SyncEventsTest extends TestCase
     public function testRoleSyncPermissionsDispatchesEventsPerDelta(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'editor',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'editor',
+            'guard' => 'web',
         ]);
 
-        Permission::create(['id' => (string) Str::uuid(), 'name' => 'a:do', 'guard_name' => 'web']);
-        Permission::create(['id' => (string) Str::uuid(), 'name' => 'b:do', 'guard_name' => 'web']);
-        Permission::create(['id' => (string) Str::uuid(), 'name' => 'c:do', 'guard_name' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'a:do', 'guard' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'b:do', 'guard' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'c:do', 'guard' => 'web']);
 
         $role->givePermission('a:do');
 
@@ -248,13 +248,13 @@ final class SyncEventsTest extends TestCase
     public function testRoleSyncPermissionsIsSilentWhenSetIsUnchanged(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'editor',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'editor',
+            'guard' => 'web',
         ]);
 
-        Permission::create(['id' => (string) Str::uuid(), 'name' => 'a:do', 'guard_name' => 'web']);
-        Permission::create(['id' => (string) Str::uuid(), 'name' => 'b:do', 'guard_name' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'a:do', 'guard' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'b:do', 'guard' => 'web']);
 
         $role->syncPermissions(['a:do', 'b:do']);
 

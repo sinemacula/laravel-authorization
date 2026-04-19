@@ -196,7 +196,7 @@ class MigrateSpatieCommand extends Command
                 DB::table($targetTable)->insert([
                     'id'         => $newId,
                     'name'       => $roleRow['name'],
-                    'guard_name' => $roleRow['guard_name'] ?? null,
+                    'guard'      => $roleRow['guard_name'] ?? null,
                     'created_at' => $roleRow['created_at'] ?? now(),
                     'updated_at' => $roleRow['updated_at'] ?? now(),
                 ]);
@@ -236,7 +236,7 @@ class MigrateSpatieCommand extends Command
                 DB::table($targetTable)->insert([
                     'id'         => $newId,
                     'name'       => $permissionRow['name'],
-                    'guard_name' => $permissionRow['guard_name'] ?? null,
+                    'guard'      => $permissionRow['guard_name'] ?? null,
                     'created_at' => $permissionRow['created_at'] ?? now(),
                     'updated_at' => $permissionRow['updated_at'] ?? now(),
                 ]);

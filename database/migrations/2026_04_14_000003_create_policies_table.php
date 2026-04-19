@@ -31,6 +31,13 @@ return new class extends Migration {
             $table->uuid('id')->primary();
             $table->string('name')->unique();
             $table->string('description')->nullable();
+
+            // Platform-protection marker. Policies flagged system refuse delete
+            // / rename unless the model-layer `forceSystem()` escape hatch is
+            // invoked, so a platform-shipped `break-glass` policy cannot be
+            // casually removed by a caller with raw Eloquent access.
+            $table->boolean('is_system')->default(false);
+
             $table->json('document');
             $table->timestamps();
         });

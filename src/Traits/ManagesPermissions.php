@@ -265,11 +265,11 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
     /**
      * Resolve a permission identifier to a model instance.
      *
-     * Role rows carry their own `guard_name`; use it as the lookup
-     * scope so a web-scoped role resolves permissions against the
-     * web guard and an api-scoped role against the api guard. Falls
-     * back to the package default when the role itself is
-     * guard-agnostic (null `guard_name`). Delegates the query to
+     * Role rows carry their own `guard`; use it as the lookup scope
+     * so a web-scoped role resolves permissions against the web
+     * guard and an api-scoped role against the api guard. Falls back
+     * to the package default when the role itself is guard-agnostic
+     * (null `guard`). Delegates the query to
      * `Permission::resolveByName()` so both sides share one
      * implementation.
      *
@@ -287,7 +287,7 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
         $class = config('authorization.models.permission', Permission::class);
 
-        return $class::resolveByName($permission, $this->guard_name);
+        return $class::resolveByName($permission, $this->guard);
     }
 
     /**

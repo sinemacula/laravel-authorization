@@ -33,8 +33,8 @@ final class WhyCanCommandTest extends TestCase
      */
     public function testReportsAllowedViaRbac(): void
     {
-        $role       = Role::create(['id' => 'b0f398ae-5148-47f4-87f6-de35c0472093', 'name' => 'editor', 'guard_name' => 'web']);
-        $permission = Permission::create(['id' => '030ab20c-62a1-4c84-87e2-9f77cdc856c0', 'name' => 'posts:edit', 'guard_name' => 'web']);
+        $role       = Role::create(['id' => 'b0f398ae-5148-47f4-87f6-de35c0472093', 'name' => 'editor', 'guard' => 'web']);
+        $permission = Permission::create(['id' => '030ab20c-62a1-4c84-87e2-9f77cdc856c0', 'name' => 'posts:edit', 'guard' => 'web']);
         $role->permissions()->attach($permission->getKey());
 
         $user = StubIdentity::create(['id' => '9db25f66-208f-4f49-858f-7434e5982961']);
@@ -78,8 +78,8 @@ final class WhyCanCommandTest extends TestCase
      */
     public function testReportsDeniedFromExplicitDenyPolicy(): void
     {
-        $role       = Role::create(['id' => 'cc63f23a-abaf-4fe7-8244-dff37bb878a6', 'name' => 'admin', 'guard_name' => 'web']);
-        $permission = Permission::create(['id' => 'ac3459db-f8a4-410a-80c6-1c2412a8f324', 'name' => 'posts:delete', 'guard_name' => 'web']);
+        $role       = Role::create(['id' => 'cc63f23a-abaf-4fe7-8244-dff37bb878a6', 'name' => 'admin', 'guard' => 'web']);
+        $permission = Permission::create(['id' => 'ac3459db-f8a4-410a-80c6-1c2412a8f324', 'name' => 'posts:delete', 'guard' => 'web']);
         $role->permissions()->attach($permission->getKey());
 
         $policy = Policy::create([

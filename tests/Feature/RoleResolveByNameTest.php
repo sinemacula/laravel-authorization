@@ -56,15 +56,15 @@ final class RoleResolveByNameTest extends TestCase
     public function testResolveByNameFavoursGuardSpecificRow(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'admin',
-            'guard_name' => null,
+            'id'    => (string) Str::uuid(),
+            'name'  => 'admin',
+            'guard' => null,
         ]);
 
         $specific = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'admin',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'admin',
+            'guard' => 'web',
         ]);
 
         $resolved = Role::resolveByName('admin', 'web');
@@ -81,9 +81,9 @@ final class RoleResolveByNameTest extends TestCase
     public function testResolveByNameFallsBackToGuardAgnostic(): void
     {
         $agnostic = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'viewer',
-            'guard_name' => null,
+            'id'    => (string) Str::uuid(),
+            'name'  => 'viewer',
+            'guard' => null,
         ]);
 
         $resolved = Role::resolveByName('viewer', 'web');
@@ -99,9 +99,9 @@ final class RoleResolveByNameTest extends TestCase
     public function testResolveByNameWithNullGuardUsesDefault(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'editor',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'editor',
+            'guard' => 'web',
         ]);
 
         $resolved = Role::resolveByName('editor');

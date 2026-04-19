@@ -44,7 +44,7 @@ class ListPermissionsCommand extends Command
         $guard = $this->option('guard');
 
         if ($guard !== null && $guard !== '') {
-            $query->where('guard_name', $guard);
+            $query->where('guard', $guard);
         }
 
         /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission> $permissions */
@@ -66,7 +66,7 @@ class ListPermissionsCommand extends Command
                 return [
                     $permission->id,
                     $permission->name,
-                    $permission->guard_name ?? '(any)',
+                    $permission->guard ?? '(any)',
                     $permission->is_system ? 'Yes' : 'No',
                     (string) $count,
                 ];

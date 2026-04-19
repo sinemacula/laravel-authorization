@@ -47,10 +47,10 @@ final class PermissionCategoryTest extends TestCase
     public function testPermissionCategoryPersists(): void
     {
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'posts:create',
-            'guard_name' => 'web',
-            'category'   => 'Content Management',
+            'id'       => (string) Str::uuid(),
+            'name'     => 'posts:create',
+            'guard'    => 'web',
+            'category' => 'Content Management',
         ]);
 
         $reloaded = Permission::query()->whereKey($permission->getKey())->first();
@@ -67,9 +67,9 @@ final class PermissionCategoryTest extends TestCase
     public function testPermissionCategoryDefaultsToNull(): void
     {
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'posts:delete',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'posts:delete',
+            'guard' => 'web',
         ]);
 
         $reloaded = Permission::query()->whereKey($permission->getKey())->first();

@@ -92,10 +92,10 @@ final class RoleHierarchyBudgetTest extends TestCase
 
         for ($i = 0; $i < $depth; $i++) {
             $role = Role::create([
-                'id'         => (string) Str::uuid(),
-                'name'       => "budget-chain-{$i}",
-                'guard_name' => 'web',
-                'parent_id'  => $parent?->getKey(),
+                'id'        => (string) Str::uuid(),
+                'name'      => "budget-chain-{$i}",
+                'guard'     => 'web',
+                'parent_id' => $parent?->getKey(),
             ]);
 
             $parent = $role;

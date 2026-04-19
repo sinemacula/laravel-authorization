@@ -39,7 +39,7 @@ final class AuthorizationAssertionsTest extends TestCase
      */
     public function testAssertCanPassesWhenAllowed(): void
     {
-        Permission::create(['id' => 'c2d9b0b4-d6db-4c09-8e1c-3cc9a9afff14', 'name' => 'docs:view', 'guard_name' => 'web']);
+        Permission::create(['id' => 'c2d9b0b4-d6db-4c09-8e1c-3cc9a9afff14', 'name' => 'docs:view', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => 'c04bbc1e-a3f1-4a00-8a37-5b6ca2de6a88']);
         $user->givePermission('docs:view');
@@ -81,7 +81,7 @@ final class AuthorizationAssertionsTest extends TestCase
      */
     public function testAssertCannotFailsWhenAllowed(): void
     {
-        Permission::create(['id' => 'bf869580-a8d2-4a40-87c7-de6a9d559418', 'name' => 'docs:delete', 'guard_name' => 'web']);
+        Permission::create(['id' => 'bf869580-a8d2-4a40-87c7-de6a9d559418', 'name' => 'docs:delete', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => '34f13826-645d-4917-81b2-44e93dbf1863']);
         $user->givePermission('docs:delete');
@@ -99,7 +99,7 @@ final class AuthorizationAssertionsTest extends TestCase
      */
     public function testAssertHasRolePassesWhenAssigned(): void
     {
-        Role::create(['id' => 'db35d033-4ec2-49d6-86f2-2e35abb79258', 'name' => 'editor', 'guard_name' => 'web']);
+        Role::create(['id' => 'db35d033-4ec2-49d6-86f2-2e35abb79258', 'name' => 'editor', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => '273e3845-88e8-4f96-8c2c-1da012769254']);
         $user->assignRole('editor');
@@ -129,7 +129,7 @@ final class AuthorizationAssertionsTest extends TestCase
      */
     public function testAssertHasPermissionPassesWhenHeld(): void
     {
-        Permission::create(['id' => '6d4b70d0-3fed-4b56-8f2e-ee0d7dd8c9cc', 'name' => 'docs:edit', 'guard_name' => 'web']);
+        Permission::create(['id' => '6d4b70d0-3fed-4b56-8f2e-ee0d7dd8c9cc', 'name' => 'docs:edit', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => '6160c26b-9f8d-437b-8e39-bc3fcef72076']);
         $user->givePermission('docs:edit');
@@ -160,7 +160,7 @@ final class AuthorizationAssertionsTest extends TestCase
      */
     public function testActingAsIdentitySwapsResolver(): void
     {
-        Permission::create(['id' => 'f663ff0d-9a15-49bd-8234-d30ac5b91f73', 'name' => 'docs:publish', 'guard_name' => 'web']);
+        Permission::create(['id' => 'f663ff0d-9a15-49bd-8234-d30ac5b91f73', 'name' => 'docs:publish', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => '5f5924a2-a361-4d9a-8ea6-f24ecbc25de1']);
         $user->givePermission('docs:publish');

@@ -508,7 +508,7 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
 
         $row = DB::table('auth_roles')->where('name', 'null-guard')->first();
         self::assertNotNull($row);
-        self::assertSame('web', $row->guard_name);
+        self::assertSame('web', $row->guard);
     }
 
     /**

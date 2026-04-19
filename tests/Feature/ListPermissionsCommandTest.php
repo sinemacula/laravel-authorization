@@ -32,16 +32,16 @@ final class ListPermissionsCommandTest extends TestCase
     public function testListsAllPermissions(): void
     {
         $permission = Permission::create([
-            'id'         => 'ce531769-59b0-4882-8032-8e1bec3f6be3',
-            'name'       => 'posts:create',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => 'ce531769-59b0-4882-8032-8e1bec3f6be3',
+            'name'      => 'posts:create',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         $role = Role::create([
-            'id'         => '2298f05e-8e84-4d89-8853-0c77a714b221',
-            'name'       => 'editor',
-            'guard_name' => 'web',
+            'id'    => '2298f05e-8e84-4d89-8853-0c77a714b221',
+            'name'  => 'editor',
+            'guard' => 'web',
         ]);
 
         $role->permissions()->attach($permission->getKey());
@@ -62,8 +62,8 @@ final class ListPermissionsCommandTest extends TestCase
      */
     public function testFiltersByGuard(): void
     {
-        Permission::create(['id' => '0bbc4051-26a7-46ba-84bb-1c83d2269a7e', 'name' => 'web:do', 'guard_name' => 'web']);
-        Permission::create(['id' => '5843b7ec-50c9-45cd-8c4b-6032a53b343b', 'name' => 'api:do', 'guard_name' => 'api']);
+        Permission::create(['id' => '0bbc4051-26a7-46ba-84bb-1c83d2269a7e', 'name' => 'web:do', 'guard' => 'web']);
+        Permission::create(['id' => '5843b7ec-50c9-45cd-8c4b-6032a53b343b', 'name' => 'api:do', 'guard' => 'api']);
 
         $exitCode = Artisan::call('authorization:list-permissions', ['--guard' => 'api']);
         $output   = Artisan::output();
@@ -97,14 +97,14 @@ final class ListPermissionsCommandTest extends TestCase
     public function testTableOutputIncludesAllColumns(): void
     {
         $permission = Permission::create([
-            'id'         => 'd1d1d1d1-0000-0000-0000-000000000001',
-            'name'       => 'col:perm',
-            'guard_name' => 'web',
-            'is_system'  => false,
+            'id'        => 'd1d1d1d1-0000-0000-0000-000000000001',
+            'name'      => 'col:perm',
+            'guard'     => 'web',
+            'is_system' => false,
         ]);
 
-        $r1 = Role::create(['id' => 'd2d2d2d2-0000-0000-0000-000000000001', 'name' => 'col-r1', 'guard_name' => 'web']);
-        $r2 = Role::create(['id' => 'd3d3d3d3-0000-0000-0000-000000000001', 'name' => 'col-r2', 'guard_name' => 'web']);
+        $r1 = Role::create(['id' => 'd2d2d2d2-0000-0000-0000-000000000001', 'name' => 'col-r1', 'guard' => 'web']);
+        $r2 = Role::create(['id' => 'd3d3d3d3-0000-0000-0000-000000000001', 'name' => 'col-r2', 'guard' => 'web']);
         $r1->permissions()->attach($permission->getKey());
         $r2->permissions()->attach($permission->getKey());
 
@@ -125,16 +125,16 @@ final class ListPermissionsCommandTest extends TestCase
     }
 
     /**
-     * A permission with null guard_name renders "(any)".
+     * A permission with null guard renders "(any)".
      *
      * @return void
      */
     public function testNullGuardRendersAny(): void
     {
         Permission::create([
-            'id'         => 'd4d4d4d4-0000-0000-0000-000000000001',
-            'name'       => 'null-guard-perm',
-            'guard_name' => null,
+            'id'    => 'd4d4d4d4-0000-0000-0000-000000000001',
+            'name'  => 'null-guard-perm',
+            'guard' => null,
         ]);
 
         $exitCode = Artisan::call('authorization:list-permissions');
@@ -152,7 +152,7 @@ final class ListPermissionsCommandTest extends TestCase
      */
     public function testReturnsSuccessExitCode(): void
     {
-        Permission::create(['id' => 'd5d5d5d5-0000-0000-0000-000000000001', 'name' => 'exit:perm', 'guard_name' => 'web']);
+        Permission::create(['id' => 'd5d5d5d5-0000-0000-0000-000000000001', 'name' => 'exit:perm', 'guard' => 'web']);
 
         $exitCode = Artisan::call('authorization:list-permissions');
 

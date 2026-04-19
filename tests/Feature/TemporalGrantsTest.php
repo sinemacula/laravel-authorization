@@ -72,9 +72,9 @@ final class TemporalGrantsTest extends TestCase
     public function testFutureExpiryIsPresentThenFiltered(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'oncall',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'oncall',
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -97,9 +97,9 @@ final class TemporalGrantsTest extends TestCase
     public function testPermissionExpiryIsFilteredFromRelation(): void
     {
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'emergency:publish',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'emergency:publish',
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -149,9 +149,9 @@ final class TemporalGrantsTest extends TestCase
     public function testForeverGrantIsTheDefaultBehaviour(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'staff',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'staff',
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -176,9 +176,9 @@ final class TemporalGrantsTest extends TestCase
     public function testPivotExpiresAtIsCastToCarbon(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'oncall',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'oncall',
+            'guard' => 'web',
         ]);
 
         $user    = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -204,9 +204,9 @@ final class TemporalGrantsTest extends TestCase
     public function testPastDatedGrantIsImmediatelyInvisible(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'shadowed',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'shadowed',
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -227,14 +227,14 @@ final class TemporalGrantsTest extends TestCase
     public function testForeverAndTemporalGrantsCoexist(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'staff',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'staff',
+            'guard' => 'web',
         ]);
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'oncall',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'oncall',
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -279,9 +279,9 @@ final class TemporalGrantsTest extends TestCase
         (new AuthorizationServiceProvider($this->app))->register();
 
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'oncall',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'oncall',
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);

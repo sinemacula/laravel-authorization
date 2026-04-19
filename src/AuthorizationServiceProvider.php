@@ -331,8 +331,8 @@ class AuthorizationServiceProvider extends ServiceProvider
      *
      * Providers are instantiated through the container so they can
      * inject dependencies. Each permission string is persisted via
-     * `firstOrCreate` keyed on `(name, guard_name)` so the method
-     * is idempotent across boots.
+     * `firstOrCreate` keyed on `(name, guard)` so the method is
+     * idempotent across boots.
      *
      * @return void
      */
@@ -373,7 +373,7 @@ class AuthorizationServiceProvider extends ServiceProvider
                 }
 
                 $permissionModel::firstOrCreate(
-                    ['name' => $permission, 'guard_name' => $guard],
+                    ['name' => $permission, 'guard' => $guard],
                 );
             }
         }

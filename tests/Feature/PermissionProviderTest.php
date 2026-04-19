@@ -46,12 +46,12 @@ final class PermissionProviderTest extends TestCase
         (new AuthorizationServiceProvider($this->app))->boot();
 
         self::assertNotNull(
-            Permission::where('name', 'media:upload')->where('guard_name', 'web')->first(),
+            Permission::where('name', 'media:upload')->where('guard', 'web')->first(),
             'Expected media:upload permission to exist in the database.',
         );
 
         self::assertNotNull(
-            Permission::where('name', 'media:delete')->where('guard_name', 'web')->first(),
+            Permission::where('name', 'media:delete')->where('guard', 'web')->first(),
             'Expected media:delete permission to exist in the database.',
         );
     }
@@ -73,7 +73,7 @@ final class PermissionProviderTest extends TestCase
 
         self::assertSame(
             1,
-            Permission::where('name', 'media:upload')->where('guard_name', 'web')->count(), // @phpstan-ignore staticMethod.dynamicCall
+            Permission::where('name', 'media:upload')->where('guard', 'web')->count(), // @phpstan-ignore staticMethod.dynamicCall
         );
     }
 
@@ -90,7 +90,7 @@ final class PermissionProviderTest extends TestCase
 
         (new AuthorizationServiceProvider($this->app))->boot();
 
-        $permission = Permission::where('name', 'billing:view')->whereNull('guard_name')->first(); // @phpstan-ignore staticMethod.dynamicCall
+        $permission = Permission::where('name', 'billing:view')->whereNull('guard')->first(); // @phpstan-ignore staticMethod.dynamicCall
 
         self::assertNotNull($permission, 'Expected billing:view guard-agnostic permission to exist.');
     }

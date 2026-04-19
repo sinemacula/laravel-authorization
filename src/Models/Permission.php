@@ -23,7 +23,7 @@ use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
  * Eloquent model for permission rows.
  *
  * Permissions are atomic action strings that can be granted directly
- * to an identity or inherited via a role. The `guard_name` column is
+ * to an identity or inherited via a role. The `guard` column is
  * nullable: a null value marks the permission as guard-agnostic
  * (applies to every guard), a concrete string scopes it to a single
  * guard. The `is_system` flag marks platform-shipped permissions as
@@ -34,9 +34,10 @@ use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
  *
  * @property string $id
  * @property string $name
- * @property string|null $guard_name
+ * @property string|null $guard
  * @property string|null $description
  * @property string|null $category
+ * @property \Carbon\CarbonImmutable|null $deprecated_at
  * @property bool $is_system
  * @property string|null $tenant_type
  * @property string|null $tenant_id
@@ -53,9 +54,10 @@ class Permission extends Model
     /** @var list<string> Attributes that are mass assignable. */
     protected $fillable = [
         'name',
-        'guard_name',
+        'guard',
         'description',
         'category',
+        'deprecated_at',
         'is_system',
         'tenant_type',
         'tenant_id',
@@ -63,7 +65,8 @@ class Permission extends Model
 
     /** @var array<string, string> Attribute cast map. */
     protected $casts = [
-        'is_system' => 'boolean',
+        'is_system'     => 'boolean',
+        'deprecated_at' => 'datetime',
     ];
 
     /**

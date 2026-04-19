@@ -15,14 +15,14 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Feature coverage for the nullable `guard_name` semantics.
+ * Feature coverage for the nullable `guard` semantics.
  *
- * A null `guard_name` marks a role or permission as guard-agnostic — the row
+ * A null `guard` marks a role or permission as guard-agnostic — the row
  * applies to every guard. String lookups (`assignRole`, `givePermission`,
  * `hasRole`, `hasPermission`) resolve against the configured default guard
  * first and fall back to the guard-agnostic row when no guard-specific match
  * exists. The uniqueness invariant for the null-guard slot is enforced by a
- * functional unique index on `(name, COALESCE(guard_name, ''))` at the data
+ * functional unique index on `(name, COALESCE(guard, ''))` at the data
  * layer.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -49,16 +49,16 @@ final class GuardAgnosticLookupTest extends TestCase
     private const string PRECEDENCE_PERMISSION = 'posts:edit';
 
     /**
-     * A role with a null `guard_name` resolves via string name on any guard.
+     * A role with a null `guard` resolves via string name on any guard.
      *
      * @return void
      */
     public function testGuardAgnosticRoleResolvesByStringName(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::ROLE_NAME,
-            'guard_name' => null,
+            'id'    => (string) Str::uuid(),
+            'name'  => self::ROLE_NAME,
+            'guard' => null,
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -69,7 +69,7 @@ final class GuardAgnosticLookupTest extends TestCase
     }
 
     /**
-     * A permission with a null `guard_name` resolves via string name on any
+     * A permission with a null `guard` resolves via string name on any
      * guard.
      *
      * @return void
@@ -77,9 +77,9 @@ final class GuardAgnosticLookupTest extends TestCase
     public function testGuardAgnosticPermissionResolvesByStringName(): void
     {
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::PERMISSION_NAME,
-            'guard_name' => null,
+            'id'    => (string) Str::uuid(),
+            'name'  => self::PERMISSION_NAME,
+            'guard' => null,
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -98,14 +98,14 @@ final class GuardAgnosticLookupTest extends TestCase
     public function testGuardSpecificRoleOutranksGuardAgnosticRole(): void
     {
         $agnostic = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::PRECEDENCE_ROLE,
-            'guard_name' => null,
+            'id'    => (string) Str::uuid(),
+            'name'  => self::PRECEDENCE_ROLE,
+            'guard' => null,
         ]);
         $specific = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::PRECEDENCE_ROLE,
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => self::PRECEDENCE_ROLE,
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -128,14 +128,14 @@ final class GuardAgnosticLookupTest extends TestCase
     public function testGuardSpecificPermissionOutranksGuardAgnosticPermission(): void
     {
         $agnostic = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::PRECEDENCE_PERMISSION,
-            'guard_name' => null,
+            'id'    => (string) Str::uuid(),
+            'name'  => self::PRECEDENCE_PERMISSION,
+            'guard' => null,
         ]);
         $specific = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::PRECEDENCE_PERMISSION,
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => self::PRECEDENCE_PERMISSION,
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -157,17 +157,17 @@ final class GuardAgnosticLookupTest extends TestCase
     public function testDuplicateGuardAgnosticRoleIsRejected(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::ROLE_NAME,
-            'guard_name' => null,
+            'id'    => (string) Str::uuid(),
+            'name'  => self::ROLE_NAME,
+            'guard' => null,
         ]);
 
         $this->expectException(QueryException::class);
 
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::ROLE_NAME,
-            'guard_name' => null,
+            'id'    => (string) Str::uuid(),
+            'name'  => self::ROLE_NAME,
+            'guard' => null,
         ]);
     }
 
@@ -180,17 +180,17 @@ final class GuardAgnosticLookupTest extends TestCase
     public function testDuplicateGuardAgnosticPermissionIsRejected(): void
     {
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::PERMISSION_NAME,
-            'guard_name' => null,
+            'id'    => (string) Str::uuid(),
+            'name'  => self::PERMISSION_NAME,
+            'guard' => null,
         ]);
 
         $this->expectException(QueryException::class);
 
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::PERMISSION_NAME,
-            'guard_name' => null,
+            'id'    => (string) Str::uuid(),
+            'name'  => self::PERMISSION_NAME,
+            'guard' => null,
         ]);
     }
 
@@ -203,15 +203,15 @@ final class GuardAgnosticLookupTest extends TestCase
     public function testGuardSpecificAndGuardAgnosticMayCoexist(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::PRECEDENCE_ROLE,
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => self::PRECEDENCE_ROLE,
+            'guard' => 'web',
         ]);
 
         $agnostic = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::PRECEDENCE_ROLE,
-            'guard_name' => null,
+            'id'    => (string) Str::uuid(),
+            'name'  => self::PRECEDENCE_ROLE,
+            'guard' => null,
         ]);
 
         self::assertSame(2, Role::query()->where('name', self::PRECEDENCE_ROLE)->count()); // @phpstan-ignore staticMethod.dynamicCall
@@ -227,19 +227,19 @@ final class GuardAgnosticLookupTest extends TestCase
     public function testUpdatingToGuardAgnosticCollisionIsRejected(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::PRECEDENCE_ROLE,
-            'guard_name' => null,
+            'id'    => (string) Str::uuid(),
+            'name'  => self::PRECEDENCE_ROLE,
+            'guard' => null,
         ]);
         $specific = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::PRECEDENCE_ROLE,
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => self::PRECEDENCE_ROLE,
+            'guard' => 'web',
         ]);
 
         $this->expectException(QueryException::class);
 
-        $specific->guard_name = null;
+        $specific->guard = null;
         $specific->save();
     }
 
@@ -252,9 +252,9 @@ final class GuardAgnosticLookupTest extends TestCase
     public function testResavingExistingGuardAgnosticRowIsAllowed(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::ROLE_NAME,
-            'guard_name' => null,
+            'id'    => (string) Str::uuid(),
+            'name'  => self::ROLE_NAME,
+            'guard' => null,
         ]);
 
         $role->description = 'platform admin role';

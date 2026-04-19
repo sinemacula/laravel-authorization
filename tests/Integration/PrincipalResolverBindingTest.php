@@ -154,15 +154,15 @@ final class PrincipalResolverBindingTest extends TestCase
     private function makeIdentityWithPermission(string $permission, ?string $id = null): StubIdentity
     {
         $role = Role::create([
-            'id'         => 'role-' . \md5($permission),
-            'name'       => 'role-' . $permission,
-            'guard_name' => 'web',
+            'id'    => 'role-' . \md5($permission),
+            'name'  => 'role-' . $permission,
+            'guard' => 'web',
         ]);
 
         $permissionModel = Permission::create([
-            'id'         => 'perm-' . \md5($permission),
-            'name'       => $permission,
-            'guard_name' => 'web',
+            'id'    => 'perm-' . \md5($permission),
+            'name'  => $permission,
+            'guard' => 'web',
         ]);
 
         $role->permissions()->attach($permissionModel->getKey());

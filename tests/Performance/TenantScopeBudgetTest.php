@@ -58,7 +58,7 @@ final class TenantScopeBudgetTest extends TestCase
         $role = Role::create([
             'id'          => (string) Str::uuid(),
             'name'        => 'memo-budget',
-            'guard_name'  => 'web',
+            'guard'       => 'web',
             'tenant_type' => 'bench_tenant',
             'tenant_id'   => 'bench-tenant',
         ]);
@@ -93,7 +93,7 @@ final class TenantScopeBudgetTest extends TestCase
         $role = Role::create([
             'id'          => (string) Str::uuid(),
             'name'        => 'warm-apply-budget',
-            'guard_name'  => 'web',
+            'guard'       => 'web',
             'tenant_type' => 'bench_tenant',
             'tenant_id'   => 'bench-tenant',
         ]);

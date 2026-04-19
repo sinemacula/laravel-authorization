@@ -68,8 +68,8 @@ class RolePermission extends Pivot
         $role       = $this->resolveRoleParent($roleId);
         $permission = $this->resolvePermissionParent($permissionId);
 
-        $roleGuard       = $role->guard_name;
-        $permissionGuard = $permission->guard_name;
+        $roleGuard       = $role->guard;
+        $permissionGuard = $permission->guard;
 
         if ($roleGuard === null || $permissionGuard === null) {
             return;

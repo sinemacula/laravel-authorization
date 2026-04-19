@@ -69,17 +69,17 @@ final class MiddlewareBench extends BenchmarkCase
         BenchmarkIdentity::query()->delete();
 
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => BenchmarkFixtures::roleName(),
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => BenchmarkFixtures::roleName(),
+            'guard' => 'web',
         ]);
 
         foreach (BenchmarkFixtures::permissionNames() as $name) {
 
             $permission = Permission::create([
-                'id'         => (string) Str::uuid(),
-                'name'       => $name,
-                'guard_name' => 'web',
+                'id'    => (string) Str::uuid(),
+                'name'  => $name,
+                'guard' => 'web',
             ]);
             $role->permissions()->attach($permission->getKey());
         }

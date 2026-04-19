@@ -65,15 +65,15 @@ final class RoleModelEdgeCasesTest extends TestCase
     public function testGivePermissionEvictsLoadedRelation(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'editor-evict',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'editor-evict',
+            'guard' => 'web',
         ]);
 
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'posts:create',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'posts:create',
+            'guard' => 'web',
         ]);
 
         // Pre-load the relation so the eviction branch of
@@ -95,15 +95,15 @@ final class RoleModelEdgeCasesTest extends TestCase
     public function testSyncPermissionsEvictsLoadedRelation(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'editor-sync-evict',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'editor-sync-evict',
+            'guard' => 'web',
         ]);
 
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'posts:create',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'posts:create',
+            'guard' => 'web',
         ]);
 
         $role->load('permissions');
@@ -125,16 +125,16 @@ final class RoleModelEdgeCasesTest extends TestCase
     public function testAncestorsStopsAtOrphanedParent(): void
     {
         $parent = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'orphan-parent',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'orphan-parent',
+            'guard' => 'web',
         ]);
 
         $child = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'orphan-child',
-            'guard_name' => 'web',
-            'parent_id'  => $parent->getKey(),
+            'id'        => (string) Str::uuid(),
+            'name'      => 'orphan-child',
+            'guard'     => 'web',
+            'parent_id' => $parent->getKey(),
         ]);
 
         // Simulate a detached parent row without running through the
@@ -160,9 +160,9 @@ final class RoleModelEdgeCasesTest extends TestCase
     public function testResolvePermissionByIdThrowsOnMissingRow(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'editor-missing-perm',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'editor-missing-perm',
+            'guard' => 'web',
         ]);
 
         $reflection = new \ReflectionMethod($role, 'resolvePermissionById');

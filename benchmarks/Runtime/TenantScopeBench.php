@@ -59,7 +59,7 @@ final class TenantScopeBench extends BenchmarkCase
         $this->role = Role::create([
             'id'          => (string) Str::uuid(),
             'name'        => 'tenant-scope-bench',
-            'guard_name'  => 'web',
+            'guard'       => 'web',
             'tenant_type' => 'bench_tenant',
             'tenant_id'   => 'bench-tenant',
         ]);
