@@ -24,8 +24,10 @@ return new class extends Migration {
     {
         /** @var string $table */
         $table = config('authorization.tables.role_permissions', 'role_permissions');
+
         /** @var string $rolesTable */
         $rolesTable = config('authorization.tables.roles', 'roles');
+
         /** @var string $permissionsTable */
         $permissionsTable = config('authorization.tables.permissions', 'permissions');
 
@@ -34,9 +36,7 @@ return new class extends Migration {
         Schema::create($table, static function (Blueprint $table) use ($rolesTable, $permissionsTable): void {
             $table->uuid('role_id');
             $table->uuid('permission_id');
-
             $table->primary(['role_id', 'permission_id']);
-
             $table->foreign('role_id')->references('id')->on($rolesTable)->cascadeOnDelete();
             $table->foreign('permission_id')->references('id')->on($permissionsTable)->cascadeOnDelete();
         });

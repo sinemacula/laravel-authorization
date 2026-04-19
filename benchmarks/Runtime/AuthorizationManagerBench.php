@@ -50,6 +50,8 @@ final class AuthorizationManagerBench extends BenchmarkCase
      * container-bound manager.
      *
      * @return void
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
      */
     public function setUp(): void
     {
@@ -65,6 +67,19 @@ final class AuthorizationManagerBench extends BenchmarkCase
 
         $this->manager = $manager;
         $this->user    = $user;
+    }
+
+    /**
+     * Benchmark: RBAC allow via role-inherited permission.
+     *
+     * @return void
+     */
+    #[Bench\BeforeMethods('setUp')]
+    #[Bench\Iterations(3)]
+    #[Bench\Revs(100)]
+    public function benchRbacAllow(): void
+    {
+        $this->getManager()->for($this->getUser())->can('posts:create');
     }
 
     /**
@@ -91,19 +106,6 @@ final class AuthorizationManagerBench extends BenchmarkCase
         \assert($this->user !== null, 'setUp() must populate $user before a subject method runs.');
 
         return $this->user;
-    }
-
-    /**
-     * Benchmark: RBAC allow via role-inherited permission.
-     *
-     * @return void
-     */
-    #[Bench\BeforeMethods('setUp')]
-    #[Bench\Iterations(3)]
-    #[Bench\Revs(100)]
-    public function benchRbacAllow(): void
-    {
-        $this->getManager()->for($this->getUser())->can('posts:create');
     }
 
     /**
@@ -190,8 +192,7 @@ final class AuthorizationManagerBench extends BenchmarkCase
     }
 
     /**
-     * Attach the allow-and-deny benchmark policy to the given
-     * principal.
+     * Attach the allow-and-deny benchmark policy to the given principal.
      *
      * @param  \Benchmarks\Support\BenchmarkIdentity  $user
      * @return void

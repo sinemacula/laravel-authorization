@@ -11,10 +11,9 @@ use SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator;
 /**
  * PHPBench micro-benchmark for `ContextInterpolator::interpolate()`.
  *
- * The interpolator runs once per resource pattern and once per
- * condition operand on every matching statement, so parse-time
- * overhead compounds with statement count. The bench tracks three
- * shapes:
+ * The interpolator runs once per resource pattern and once per condition
+ * operand on every matching statement, so parse-time overhead compounds with
+ * statement count. The bench tracks three shapes:
  *
  * - a no-token string (common path — most action patterns are plain);
  * - a 10-token realistic pattern mixing principal / resource / context;

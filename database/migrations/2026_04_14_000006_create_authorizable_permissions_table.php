@@ -24,22 +24,28 @@ return new class extends Migration {
     {
         /** @var string $table */
         $table = config('authorization.tables.authorizable_permissions', 'authorizable_permissions');
+
         /** @var string $permissionsTable */
         $permissionsTable = config('authorization.tables.permissions', 'permissions');
 
         MigrationCollisionGuard::ensureNotExists($table);
 
         Schema::create($table, static function (Blueprint $table) use ($permissionsTable): void {
+
             $table->uuid('permission_id');
             $table->string('authorizable_type');
             $table->string('authorizable_id');
 
-            // Optional expiry for temporal grants — null means
-            // "forever". Rows whose `expires_at` is in the past
-            // are filtered out of the relation on read.
+            // Optional expiry for temporal grants — null means "forever". Rows
+            // whose `expires_at` is in the past are filtered out of the
+            // relation on read.
             $table->timestamp('expires_at')->nullable();
 
-            $table->unique(['permission_id', 'authorizable_type', 'authorizable_id'], 'authorizable_permissions_unique');
+            $table->unique([
+                'permission_id',
+                'authorizable_type',
+                'authorizable_id',
+            ], 'authorizable_permissions_unique');
             $table->index(['authorizable_type', 'authorizable_id'], 'authorizable_permissions_morph_index');
             $table->index('expires_at', 'authorizable_permissions_expires_at_index');
 

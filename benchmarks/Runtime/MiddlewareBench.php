@@ -23,14 +23,13 @@ use SineMacula\Laravel\Authorization\Models\Role;
  * PHPBench micro-benchmark for `RequireRole::handle()` and
  * `RequirePermission::handle()`.
  *
- * Every route decorated with `role:` or `permission:` routes a
- * request through one of these middleware before the controller
- * runs. The bench measures the admit path (the optimistic case
- * that never throws) for both middlewares — this covers principal
- * resolution through the facade, contract checks, needle expansion,
- * and the per-needle `matches()` dispatch. A reject path is
- * deliberately not benched: throwing is the uncommon case and
- * exception construction dominates any regression signal.
+ * Every route decorated with `role:` or `permission:` routes a request through
+ * one of these middleware before the controller runs. The bench measures the
+ * admit path (the optimistic case that never throws) for both middlewares —
+ * this covers principal resolution through the facade, contract checks, needle
+ * expansion, and the per-needle `matches()` dispatch. A reject path is
+ * deliberately not benched: throwing is the uncommon case and exception
+ * construction dominates any regression signal.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -55,9 +54,9 @@ final class MiddlewareBench extends BenchmarkCase
     private Request $request; // @phpstan-ignore property.uninitialized
 
     /**
-     * Bench setUp — boot the Laravel application, seed a role
-     * that carries the fixture permissions, and bind a principal
-     * resolver that returns the seeded identity.
+     * Bench setUp — boot the Laravel application, seed a role that carries the
+     * fixture permissions, and bind a principal resolver that returns the
+     * seeded identity.
      *
      * @return void
      */
@@ -100,10 +99,11 @@ final class MiddlewareBench extends BenchmarkCase
     }
 
     /**
-     * Benchmark: `RequireRole::handle()` — admit path, single
-     * needle match.
+     * Benchmark: `RequireRole::handle()` — admit path, single needle match.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
      */
     #[Bench\BeforeMethods('setUp')]
     #[Bench\Iterations(3)]
@@ -114,10 +114,12 @@ final class MiddlewareBench extends BenchmarkCase
     }
 
     /**
-     * Benchmark: `RequirePermission::handle()` — admit path,
-     * single needle match via role-inherited permission.
+     * Benchmark: `RequirePermission::handle()` — admit path, single needle
+     * match via role-inherited permission.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
      */
     #[Bench\BeforeMethods('setUp')]
     #[Bench\Iterations(3)]

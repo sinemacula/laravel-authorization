@@ -29,9 +29,8 @@ return new class extends Migration {
         $table = config('authorization.tables.permissions', 'permissions');
 
         Schema::table($table, static function (Blueprint $table): void {
-            // Optional grouping key for admin UIs. Nullable so
-            // categorisation is opt-in and existing rows are
-            // unaffected.
+            // Optional grouping key for admin UIs. Nullable so categorisation
+            // is opt-in and existing rows are unaffected.
             $table->string('category')->nullable()->after('description');
         });
     }

@@ -13,20 +13,19 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
  *
  * Every action / permission comparison in the package flows through
  * `fnmatch($pattern, $asked, FNM_NOESCAPE)` — statement matching,
- * `Role::hasPermission()`, and every `posts:*` style enum lookup.
- * The bench carves the call surface into four shapes so drift in
- * any single pattern class shows up under its own subject:
+ * `Role::hasPermission()`, and every `posts:*` style enum lookup. The bench
+ * carves the call surface into four shapes so drift in any single pattern class
+ * shows up under its own subject:
  *
  * - shallow prefix match        (`posts:*` vs `posts:create`);
  * - literal exact match         (`posts:create` vs `posts:create`);
  * - deep multi-segment match    (10-segment pattern with trailing `*`);
  * - miss on a non-matching set  (100 patterns, none match).
  *
- * The bench exercises the public `Statement::matches()` entry point
- * so the measured surface matches the production hot path exactly —
- * the raw `fnmatch()` call is not the only work a statement match
- * does, and benching it in isolation would hide any overhead drift
- * in the surrounding loop.
+ * The bench exercises the public `Statement::matches()` entry point so the
+ * measured surface matches the production hot path exactly — the raw
+ * `fnmatch()` call is not the only work a statement match does, and benching it
+ * in isolation would hide any overhead drift in the surrounding loop.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -54,27 +53,26 @@ final class WildcardMatchBench
     private Statement $miss; // @phpstan-ignore property.uninitialized, missingType.callable
 
     /**
-     * Bench setUp — materialise the four statement fixtures once
-     * per iteration so revolution cost measures only the
-     * `matches()` loop.
+     * Bench setUp — materialise the four statement fixtures once per iteration
+     * so revolution cost measures only the `matches()` loop.
      *
      * @return void
      */
     public function setUp(): void
     {
         $this->shallow = new Statement(
-            effect: PolicyEffect::ALLOW,
+            effect : PolicyEffect::ALLOW,
             actions: ['posts:*'],
         );
 
         $this->literal = new Statement(
-            effect: PolicyEffect::ALLOW,
+            effect : PolicyEffect::ALLOW,
             actions: [self::ASKED_ACTION],
         );
 
         // 10-segment deep glob — matches a `a:b:c:...:j` action.
         $this->deep = new Statement(
-            effect: PolicyEffect::ALLOW,
+            effect : PolicyEffect::ALLOW,
             actions: ['a:b:c:d:e:f:g:h:i:*'],
         );
 
@@ -85,7 +83,7 @@ final class WildcardMatchBench
         }
 
         $this->miss = new Statement(
-            effect: PolicyEffect::ALLOW,
+            effect : PolicyEffect::ALLOW,
             actions: $patterns,
         );
     }
@@ -130,8 +128,7 @@ final class WildcardMatchBench
     }
 
     /**
-     * Benchmark: 100-pattern miss — worst-case walk of a wide
-     * action list.
+     * Benchmark: 100-pattern miss — worst-case walk of a wide action list.
      *
      * @return void
      */

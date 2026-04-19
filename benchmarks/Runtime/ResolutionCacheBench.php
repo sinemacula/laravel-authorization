@@ -14,9 +14,9 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
 /**
  * PHPBench micro-benchmark for `ResolutionCache`.
  *
- * The cache sits on every `can()` and `hasPermission()` evaluation
- * in the request. Four subjects cover the shapes that production
- * traffic actually hits:
+ * The cache sits on every `can()` and `hasPermission()` evaluation in the
+ * request. Four subjects cover the shapes that production traffic actually
+ * hits:
  *
  * - `rememberRoles()` memo-tier hit after prime;
  * - `rememberPermissions()` memo-tier hit after prime;
@@ -24,10 +24,10 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
  * - `forget()` on a tag-capable store — the listener path that
  *   fires on `IdentityRoleAssigned` and friends.
  *
- * The bench constructs the cache directly (no Laravel boot) and
- * uses the array store as a stand-in for a tag-capable production
- * store; this is the same driver the resolution-cache test tier
- * exercises, so behaviour and capability flag match production.
+ * The bench constructs the cache directly (no Laravel boot) and uses the array
+ * store as a stand-in for a tag-capable production store; this is the same
+ * driver the resolution-cache test tier exercises, so behaviour and capability
+ * flag match production.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -61,8 +61,8 @@ final class ResolutionCacheBench
     private \Closure $policyResolver; // @phpstan-ignore property.uninitialized, missingType.callable
 
     /**
-     * Bench setUp — prime every subject's fixtures so revolutions
-     * measure the target path (memo hit, store read, forget).
+     * Bench setUp — prime every subject's fixtures so revolutions measure the
+     * target path (memo hit, store read, forget).
      *
      * @return void
      */
@@ -101,16 +101,15 @@ final class ResolutionCacheBench
         $this->permissionResolver = static fn (): array => $permissions;
         $this->policyResolver     = static fn (): array => $policies;
 
-        // Memo-only cache — the `store` parameter is null so reads
-        // never drop past the memo tier.
+        // Memo-only cache — the `store` parameter is null so reads never drop
+        // past the memo tier.
         $this->memoOnly = new ResolutionCache(store: null, ttl: 0, prefix: 'bench-memo');
         $this->memoOnly->rememberRoles($this->principal, $this->roleResolver);
         $this->memoOnly->rememberPermissions($this->principal, $this->permissionResolver);
 
-        // Persistent-tier cache — array store stands in for a
-        // tag-capable production store. Prime the entries, then
-        // flush the memo so every revolution exercises the
-        // persistent-tier read path.
+        // Persistent-tier cache — array store stands in for a tag-capable
+        // production store. Prime the entries, then flush the memo so every
+        // revolution exercises the persistent-tier read path.
         $arrayStore      = new ArrayStore;
         $repository      = new CacheRepository($arrayStore);
         $this->persisted = new ResolutionCache(store: $repository, ttl: 0, prefix: 'bench-persisted');
@@ -124,9 +123,8 @@ final class ResolutionCacheBench
     }
 
     /**
-     * Per-revolution setUp for the forget subject — a fresh cache +
-     * prime so each rep flushes a populated store instead of an
-     * already-empty one.
+     * Per-revolution setUp for the forget subject — a fresh cache + prime so
+     * each rep flushes a populated store instead of an already-empty one.
      *
      * @return void
      */
@@ -137,8 +135,8 @@ final class ResolutionCacheBench
     }
 
     /**
-     * Benchmark: memo-tier hit on `rememberRoles()` — the in-memory
-     * lookup every second `can()` on the same principal pays.
+     * Benchmark: memo-tier hit on `rememberRoles()` — the in-memory lookup
+     * every second `can()` on the same principal pays.
      *
      * @return void
      */
@@ -164,8 +162,8 @@ final class ResolutionCacheBench
     }
 
     /**
-     * Benchmark: persistent-tier hit on `rememberPolicies()` —
-     * memo miss + array-store read + `Policy::fromArray()` rehydration.
+     * Benchmark: persistent-tier hit on `rememberPolicies()` — memo miss +
+     * array-store read + `Policy::fromArray()` rehydration.
      *
      * @return void
      */
@@ -174,16 +172,15 @@ final class ResolutionCacheBench
     #[Bench\Revs(2000)]
     public function benchRememberPoliciesPersistentHit(): void
     {
-        // Flush the memo each rev so the read drops to the store —
-        // otherwise the memo shortcut masks the persistent-tier cost.
+        // Flush the memo each rev so the read drops to the store — otherwise
+        // the memo shortcut masks the persistent-tier cost.
         $this->persisted->flush();
         $this->persisted->rememberPolicies($this->principal, $this->policyResolver);
     }
 
     /**
-     * Benchmark: tag-based invalidation via `forget()`. Each rev
-     * flushes the memo + tag-group for the principal through the
-     * shared array store.
+     * Benchmark: tag-based invalidation via `forget()`. Each rev flushes the
+     * memo + tag-group for the principal through the shared array store.
      *
      * @return void
      */

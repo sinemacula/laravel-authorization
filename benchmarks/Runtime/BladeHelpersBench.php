@@ -103,8 +103,8 @@ final class BladeHelpersBench extends BenchmarkCase
     }
 
     /**
-     * Benchmark: `BladeHelpers::hasPermission()` — positive match
-     * via role-inherited permission.
+     * Benchmark: `BladeHelpers::hasPermission()` — positive match via
+     * role-inherited permission.
      *
      * @return void
      */
@@ -117,8 +117,8 @@ final class BladeHelpersBench extends BenchmarkCase
     }
 
     /**
-     * Benchmark: `BladeHelpers::hasAllRoles()` — conjunction path
-     * with a single role (exits on first miss / match).
+     * Benchmark: `BladeHelpers::hasAllRoles()` — conjunction path with a single
+     * role (exits on first miss / match).
      *
      * @return void
      */
@@ -131,8 +131,8 @@ final class BladeHelpersBench extends BenchmarkCase
     }
 
     /**
-     * Benchmark: `BladeHelpers::hasAllPermissions()` — conjunction
-     * path across every seeded permission.
+     * Benchmark: `BladeHelpers::hasAllPermissions()` — conjunction path across
+     * every seeded permission.
      *
      * @return void
      */

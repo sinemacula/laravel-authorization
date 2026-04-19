@@ -9,15 +9,15 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy;
 /**
  * Static fixture factory shared across every benchmark class.
  *
- * Keeps the shape of fixtures consistent so cross-benchmark
- * comparisons (PolicyParse vs PolicyEvaluator vs Manager) measure the
- * same document profile and any drift between them reflects genuine
- * hot-path change — not accidental fixture skew.
+ * Keeps the shape of fixtures consistent so cross-benchmark comparisons
+ * (PolicyParse vs PolicyEvaluator vs Manager) measure the same document profile
+ * and any drift between them reflects genuine hot-path change — not accidental
+ * fixture skew.
  *
- * The factories here deliberately return primitive arrays (for the
- * parse path) or fully hydrated `Policy` value objects (for the
- * evaluate path). No database, no container, no Eloquent — each
- * bench that needs those wires them up in its own base class.
+ * The factories here deliberately return primitive arrays (for the parse path)
+ * or fully hydrated `Policy` value objects (for the evaluate path). No
+ * database, no container, no Eloquent — each bench that needs those wires them
+ * up in its own base class.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,10 +29,20 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy;
 final class BenchmarkFixtures
 {
     /**
-     * Build a realistic policy document array — 20 statements, each
-     * with 5 actions, 3 resources, and 2 conditions. Matches the
-     * parse-budget performance test so both surfaces measure the
-     * same document weight.
+     * Hydrate the benchmark policy document into a `Policy` value object.
+     * Useful for benches that exercise the evaluator, not the parser.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Policy
+     */
+    public static function policy(): Policy
+    {
+        return Policy::fromArray(self::policyDocument());
+    }
+
+    /**
+     * Build a realistic policy document array — 20 statements, each with 5
+     * actions, 3 resources, and 2 conditions. Matches the parse-budget
+     * performance test so both surfaces measure the same document weight.
      *
      * @return array<string, mixed>
      */
@@ -70,20 +80,7 @@ final class BenchmarkFixtures
     }
 
     /**
-     * Hydrate the benchmark policy document into a `Policy` value
-     * object. Useful for benches that exercise the evaluator, not
-     * the parser.
-     *
-     * @return \SineMacula\Laravel\Authorization\Evaluation\Policy
-     */
-    public static function policy(): Policy
-    {
-        return Policy::fromArray(self::policyDocument());
-    }
-
-    /**
-     * A small list of permission names used by the RBAC and manager
-     * benches.
+     * A small list of permission names used by the RBAC and manager benches.
      *
      * @return array<int, string>
      */
@@ -110,11 +107,11 @@ final class BenchmarkFixtures
     }
 
     /**
-     * A realistic interpolation context — matches the shape callers
-     * pass through `can()`: a principal stand-in under `user`,
-     * request metadata, and a tenant scalar. Paired with the
-     * `interpolationPattern()` fixture so the 10-token parse path
-     * hits plain keys, dot-notation keys, and resource namespaces.
+     * A realistic interpolation context — matches the shape callers pass
+     * through `can()`: a principal stand-in under `user`, request metadata, and
+     * a tenant scalar. Paired with the `interpolationPattern()` fixture so the
+     * 10-token parse path hits plain keys, dot-notation keys, and resource
+     * namespaces.
      *
      * @return array<string, mixed>
      */
@@ -135,9 +132,21 @@ final class BenchmarkFixtures
     }
 
     /**
-     * A 10-token interpolation pattern blending principal,
-     * resource, and dot-notation context lookups. Used by the
-     * `ContextInterpolator` benchmark.
+     * A 20-token interpolation pattern — doubles the 10-token fixture so the
+     * performance-budget test has a higher-weight measurement to run against
+     * without drifting from the bench fixture shape.
+     *
+     * @return string
+     */
+    public static function interpolationPatternWide(): string
+    {
+        return self::interpolationPattern() . ':' . self::interpolationPattern();
+    }
+
+    /**
+     * A 10-token interpolation pattern blending principal, resource, and
+     * dot-notation context lookups. Used by the `ContextInterpolator`
+     * benchmark.
      *
      * @return string
      */
@@ -149,24 +158,11 @@ final class BenchmarkFixtures
     }
 
     /**
-     * A 20-token interpolation pattern — doubles the 10-token
-     * fixture so the performance-budget test has a higher-weight
-     * measurement to run against without drifting from the bench
-     * fixture shape.
-     *
-     * @return string
-     */
-    public static function interpolationPatternWide(): string
-    {
-        return self::interpolationPattern() . ':' . self::interpolationPattern();
-    }
-
-    /**
      * Full 18-operator condition map covering every branch in
-     * `Statement::evaluateOperator()` — string ops, numeric ops,
-     * temporal ops, set ops, boolean, CIDR, and null checks. Used
-     * by the condition-evaluation bench and its matching budget
-     * test so both surfaces measure the same operator chain.
+     * `Statement::evaluateOperator()` — string ops, numeric ops, temporal ops,
+     * set ops, boolean, CIDR, and null checks. Used by the condition-evaluation
+     * bench and its matching budget test so both surfaces measure the same
+     * operator chain.
      *
      * @return array<string, mixed>
      */
@@ -195,8 +191,8 @@ final class BenchmarkFixtures
     }
 
     /**
-     * Context matching the 18-operator `conditionChain()` fixture —
-     * every key resolves to a value that makes its operator pass.
+     * Context matching the 18-operator `conditionChain()` fixture — every key
+     * resolves to a value that makes its operator pass.
      *
      * @return array<string, mixed>
      */

@@ -14,16 +14,15 @@ use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 /**
  * Lightweight base class for benches that need a booted Laravel.
  *
- * Spins up a Testbench-backed application with the authorization
- * service provider registered, an in-memory SQLite connection, and
- * the shipped package migrations + stub identity table applied. Each
- * bench subclass calls `boot()` from its `@BeforeMethods` hook so the
- * container is ready before the first revolution.
+ * Spins up a Testbench-backed application with the authorization service
+ * provider registered, an in-memory SQLite connection, and the shipped package
+ * migrations + stub identity table applied. Each bench subclass calls `boot()`
+ * from its `@BeforeMethods` hook so the container is ready before the first
+ * revolution.
  *
- * The class is deliberately not a PHPUnit base — benchmarks and tests
- * share nothing beyond a Testbench-powered Application, and pulling
- * in the PHPUnit hierarchy here would couple bench runs to the test
- * suite's lifecycle hooks.
+ * The class is deliberately not a PHPUnit base — benchmarks and tests share
+ * nothing beyond a Testbench-powered Application, and pulling in the PHPUnit
+ * hierarchy here would couple bench runs to the test suite's lifecycle hooks.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,12 +35,11 @@ abstract class BenchmarkCase
     protected ?Application $app = null;
 
     /**
-     * Boot a minimal Testbench application and run the package
-     * migrations so benches have a working Eloquent schema.
+     * Boot a minimal Testbench application and run the package migrations so
+     * benches have a working Eloquent schema.
      *
-     * Idempotent: a previously booted app is returned as-is. This
-     * lets `@BeforeMethods` be cheap when PHPBench rebuilds fixtures
-     * per revolution.
+     * Idempotent: a previously booted app is returned as-is. This lets
+     * `@BeforeMethods` be cheap when PHPBench rebuilds fixtures per revolution.
      *
      * @return \Illuminate\Foundation\Application
      */
@@ -53,9 +51,9 @@ abstract class BenchmarkCase
 
         /** @var \Illuminate\Foundation\Application $app */
         $app = TestbenchApplication::create(
-            basePath: null,
+            basePath         : null,
             resolvingCallback: null,
-            options: [
+            options          : [
                 'load_environment_variables' => false,
                 'extra'                      => [
                     'providers' => [AuthorizationServiceProvider::class],
@@ -76,6 +74,8 @@ abstract class BenchmarkCase
      *
      * @param  \Illuminate\Foundation\Application  $app
      * @return void
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
      */
     private function configureDatabase(Application $app): void
     {
@@ -90,10 +90,12 @@ abstract class BenchmarkCase
     }
 
     /**
-     * Run the package migrations plus a small stub-identity table
-     * used by benches that need a persistable principal.
+     * Run the package migrations plus a small stub-identity table used by
+     * benches that need a persistable principal.
      *
      * @return void
+     *
+     * @SuppressWarnings("php:S4833")
      */
     private function runMigrations(): void
     {
@@ -108,11 +110,11 @@ abstract class BenchmarkCase
 
         foreach ($files as $file) {
 
-            // Laravel migrations are anonymous-class returning files
-            // that expose no class symbol for `use` — dynamic include
-            // is the idiomatic Laravel loader and matches the shape
-            // of `Illuminate\Database\Migrations\Migrator::resolve()`.
-            $migration = include_once $file; // NOSONAR
+            // Laravel migrations are anonymous-class returning files that
+            // expose no class symbol for `use` — dynamic include is the
+            // idiomatic Laravel loader and matches the shape of
+            // `Illuminate\Database\Migrations\Migrator::resolve()`.
+            $migration = include_once $file;
 
             if (\is_object($migration) && \method_exists($migration, 'up')) {
                 $migration->up();

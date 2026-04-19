@@ -12,8 +12,8 @@ use SineMacula\Laravel\Authorization\Traits\HasAuthorization;
  * Eloquent identity used by database-backed benchmarks.
  *
  * Mirrors the shape of the test-suite `StubIdentity` but lives in the
- * `Benchmarks` namespace so the bench runner never touches the test
- * autoload tree.
+ * `Benchmarks` namespace so the bench runner never touches the test autoload
+ * tree.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

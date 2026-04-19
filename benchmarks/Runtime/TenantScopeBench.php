@@ -15,10 +15,9 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 /**
  * PHPBench micro-benchmark for `TenantScope::apply()`.
  *
- * The global scope fires on every Eloquent query against
- * `Role` / `Permission`. The scope memoises its resolver output
- * keyed by container `spl_object_id`, so a warm request never
- * pays the resolver cost twice. The bench carves the call
+ * The global scope fires on every Eloquent query against `Role` / `Permission`.
+ * The scope memoises its resolver output keyed by container `spl_object_id`, so
+ * a warm request never pays the resolver cost twice. The bench carves the call
  * surface into two production shapes:
  *
  * - Warm apply — memoised tenant; shortcut read.
@@ -41,12 +40,13 @@ final class TenantScopeBench extends BenchmarkCase
     private Role $role; // @phpstan-ignore property.uninitialized
 
     /**
-     * Bench setUp — boot a Laravel application, bind a tenant
-     * resolver that returns a stable `AuthorizableTenant`
-     * implementation, and seed a role row so the builder the
-     * scope applies against has something to query.
+     * Bench setUp — boot a Laravel application, bind a tenant resolver that
+     * returns a stable `AuthorizableTenant` implementation, and seed a role row
+     * so the builder the scope applies against has something to query.
      *
      * @return void
+     *
+     * @throws \ReflectionException
      */
     public function setUp(): void
     {
@@ -66,8 +66,8 @@ final class TenantScopeBench extends BenchmarkCase
 
         $this->scope = new TenantScope;
 
-        // Prime the memo so the warm-apply subject observes the
-        // memoised fast path from its very first revolution.
+        // Prime the memo so the warm-apply subject observes the memoised fast
+        // path from its very first revolution.
         $this->scope->apply(Role::query(), $this->role);
     }
 
@@ -85,9 +85,9 @@ final class TenantScopeBench extends BenchmarkCase
     }
 
     /**
-     * Benchmark: cold apply — memo flushed each rev so the
-     * resolver runs every time. Measures the worst-case per-query
-     * cost under a hot reload or mid-request tenant pivot.
+     * Benchmark: cold apply — memo flushed each rev so the resolver runs every
+     * time. Measures the worst-case per-query cost under a hot reload or
+     * mid-request tenant pivot.
      *
      * @return void
      */

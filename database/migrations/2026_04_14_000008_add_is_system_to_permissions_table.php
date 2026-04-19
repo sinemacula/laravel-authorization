@@ -31,9 +31,9 @@ return new class extends Migration {
         $table = config('authorization.tables.permissions', 'permissions');
 
         Schema::table($table, static function (Blueprint $table): void {
-            // Platform-protection marker. Permissions flagged
-            // system refuse delete / rename unless the model-layer
-            // `forceSystem()` escape hatch is invoked.
+            // Platform-protection marker. Permissions flagged system refuse
+            // delete / rename unless the model-layer `forceSystem()` escape
+            // hatch is invoked.
             $table->boolean('is_system')->default(false)->after('description');
         });
     }

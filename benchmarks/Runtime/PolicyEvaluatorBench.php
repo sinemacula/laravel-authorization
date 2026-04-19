@@ -11,9 +11,8 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 /**
  * PHPBench micro-benchmark for the IAM 4-step evaluator.
  *
- * Exercises the three most common decision paths: implicit deny on an
- * empty policy, explicit allow, and explicit deny overriding a prior
- * allow.
+ * Exercises the three most common decision paths: implicit deny on an empty
+ * policy, explicit allow, and explicit deny overriding a prior allow.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

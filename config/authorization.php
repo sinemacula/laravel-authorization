@@ -2,7 +2,11 @@
 
 declare(strict_types = 1);
 
+use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
+use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
 
 return [
 
@@ -19,9 +23,9 @@ return [
     */
 
     'models' => [
-        'role'       => \SineMacula\Laravel\Authorization\Models\Role::class,
-        'permission' => \SineMacula\Laravel\Authorization\Models\Permission::class,
-        'policy'     => \SineMacula\Laravel\Authorization\Models\Policy::class,
+        'role'       => Role::class,
+        'permission' => Permission::class,
+        'policy'     => Policy::class,
     ],
 
     /*
@@ -52,9 +56,9 @@ return [
     |
     | Column names used on the shipped pivot tables. Consumers who swap the
     | pivot table schema (renamed FKs, legacy column names, bespoke naming
-    | conventions) can override each side here. The `RolePermission` pivot
-    | reads these when Laravel has not already supplied the relation's pivot
-    | keys (e.g. direct instantiation paths); otherwise the pivot prefers the
+    | conventions) can override each side here. The `RolePermission` pivot reads
+    | these when Laravel has not already supplied the relation's pivot keys
+    | (e.g. direct instantiation paths); otherwise the pivot prefers the
     | relation-supplied keys so a consumer who overrides a relation definition
     | still gets the invariant enforced.
     |
@@ -145,12 +149,12 @@ return [
     | Gate conflict policy
     |---------------------------------------------------------------------------
     |
-    | Decides what happens when auto-wiring a permission that already has a
-    | Gate of the same name. The opinionated enterprise default is `throw` —
-    | a duplicate Gate registration is almost always a bug, and failing boot
-    | is catchable and loud. `log` preserves the existing Gate and emits a
-    | warning (opt-in for consumers with deliberate collision patterns);
-    | `overwrite` silently replaces it.
+    | Decides what happens when auto-wiring a permission that already has a Gate
+    | of the same name. The opinionated enterprise default is `throw` — a
+    | duplicate Gate registration is almost always a bug, and failing boot is
+    | catchable and loud. `log` preserves the existing Gate and emits a warning
+    | (opt-in for consumers with deliberate collision patterns); `overwrite`
+    | silently replaces it.
     |
     */
 
@@ -179,7 +183,8 @@ return [
     | Bridges the engine to whatever concept of "current principal" the
     | application uses. The shipped default returns null, making the package
     | anonymous-safe and zero-dependency. The `sinemacula/laravel-iam`
-    | umbrella binds a resolver that delegates to `sinemacula/laravel-authentication`.
+    | umbrella binds a resolver that delegates to
+    | `sinemacula/laravel-authentication`.
     |
     */
 
@@ -190,15 +195,15 @@ return [
     | Tenant resolver
     |---------------------------------------------------------------------------
     |
-    | Bridges the engine to whatever concept of "current tenant" the
-    | application uses. The shipped default returns null, disabling tenant
-    | scoping entirely — all roles and permissions are visible regardless
-    | of ownership. Applications wire their own resolver through this key
-    | or by binding the contract directly.
+    | Bridges the engine to whatever concept of "current tenant" the application
+    | uses. The shipped default returns null, disabling tenant scoping entirely
+    | — all roles and permissions are visible regardless of ownership.
+    | Applications wire their own resolver through this key or by binding the
+    | contract directly.
     |
     */
 
-    'tenant_resolver' => \SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver::class,
+    'tenant_resolver' => NullTenantResolver::class,
 
     /*
     |---------------------------------------------------------------------------
@@ -206,12 +211,12 @@ return [
     |---------------------------------------------------------------------------
     |
     | Two-tier cache for principal roles, permissions, and policies. The
-    | in-memory tier is always on and memoises results per-request. The
-    | optional persistent tier kicks in when `store` is set to one of the
-    | configured cache connections — results are written there with the
-    | supplied TTL (0 = forever) under a namespaced key prefix, and the
-    | shipped `InvalidateResolutionCache` listener drops entries when the
-    | package's events fire.
+    | in-memory tier is always on and memoises results per-request. The optional
+    | persistent tier kicks in when `store` is set to one of the configured
+    | cache connections — results are written there with the supplied TTL
+    | (0 = forever) under a namespaced key prefix, and the shipped
+    | `InvalidateResolutionCache` listener drops entries when the package's
+    | events fire.
     |
     */
 
@@ -244,11 +249,11 @@ return [
     | Role rank / seniority
     |---------------------------------------------------------------------------
     |
-    | Controls whether rank-based seniority checks are active. When enabled
-    | (the default), `canActOn()` on an authorizable identity compares the
-    | actor's highest-ranked role (lowest numeric `rank` value) against the
-    | target's. When disabled, `canActOn()` always returns true — consumers
-    | who do not need rank-based authority can skip the feature entirely.
+    | Controls whether rank-based seniority checks are active. When enabled (the
+    | default), `canActOn()` on an authorizable identity compares the actor's
+    | highest-ranked role (lowest numeric `rank` value) against the target's.
+    | When disabled, `canActOn()` always returns true — consumers who do not
+    | need rank-based authority can skip the feature entirely.
     |
     | Roles with a null `rank` are unranked and exempt from rank checks
     | regardless of this toggle.
