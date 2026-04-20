@@ -35,54 +35,98 @@ final readonly class PermissionDiffBuilder
      */
     public function build(array $tuples, array $rows, int $roleReferencesCount): PermissionDiff
     {
+        $rowsByKey = $this->indexRows($rows);
+        $matched   = $this->partitionTuples($tuples, $rowsByKey);
+        $orphans   = $this->partitionOrphans($rowsByKey, $matched['matchedKeys']);
+
+        return new PermissionDiff(
+            add: $this->sortTuples($matched['add']),
+            update: $this->sortPairs($matched['update']),
+            reinstate: $this->sortPairs($matched['reinstate']),
+            retire: $this->sortRows($orphans['retire']),
+            protected: $this->sortRows($orphans['protected']),
+            unchanged: $this->sortRows($matched['unchanged']),
+            roleReferencesCount: $roleReferencesCount,
+        );
+    }
+
+    /**
+     * Index the supplied rows by their composite `(name, guard)` key.
+     *
+     * @param  list<\SineMacula\Laravel\Authorization\Models\Permission>  $rows
+     * @return array<string, \SineMacula\Laravel\Authorization\Models\Permission>
+     */
+    private function indexRows(array $rows): array
+    {
         $rowsByKey = [];
 
         foreach ($rows as $row) {
             $rowsByKey[$this->rowKey($row)] = $row;
         }
 
-        /** @var list<\SineMacula\Laravel\Authorization\Console\Support\PermissionTuple> $add */
-        $add = [];
+        return $rowsByKey;
+    }
 
-        /** @var list<array{row: \SineMacula\Laravel\Authorization\Models\Permission, tuple: \SineMacula\Laravel\Authorization\Console\Support\PermissionTuple}> $update */
-        $update = [];
-
-        /** @var list<array{row: \SineMacula\Laravel\Authorization\Models\Permission, tuple: \SineMacula\Laravel\Authorization\Console\Support\PermissionTuple}> $reinstate */
-        $reinstate = [];
-
-        /** @var list<\SineMacula\Laravel\Authorization\Models\Permission> $unchanged */
-        $unchanged = [];
-
+    /**
+     * Classify every tuple into one of four buckets and report the
+     * keys that were matched against a DB row.
+     *
+     * @param  list<\SineMacula\Laravel\Authorization\Console\Support\PermissionTuple>  $tuples
+     * @param  array<string, \SineMacula\Laravel\Authorization\Models\Permission>  $rowsByKey
+     * @return array{
+     *     add: list<\SineMacula\Laravel\Authorization\Console\Support\PermissionTuple>,
+     *     update: list<array{row: \SineMacula\Laravel\Authorization\Models\Permission, tuple: \SineMacula\Laravel\Authorization\Console\Support\PermissionTuple}>,
+     *     reinstate: list<array{row: \SineMacula\Laravel\Authorization\Models\Permission, tuple: \SineMacula\Laravel\Authorization\Console\Support\PermissionTuple}>,
+     *     unchanged: list<\SineMacula\Laravel\Authorization\Models\Permission>,
+     *     matchedKeys: array<string, true>
+     * }
+     */
+    private function partitionTuples(array $tuples, array $rowsByKey): array
+    {
+        $add         = [];
+        $update      = [];
+        $reinstate   = [];
+        $unchanged   = [];
         $matchedKeys = [];
 
         foreach ($tuples as $tuple) {
             $key = $this->tupleKey($tuple);
+            $row = $rowsByKey[$key] ?? null;
 
-            if (!isset($rowsByKey[$key])) {
+            if ($row === null) {
                 $add[] = $tuple;
                 continue;
             }
 
-            $row               = $rowsByKey[$key];
             $matchedKeys[$key] = true;
 
-            if ($row->deprecated_at !== null) {
-                $reinstate[] = ['row' => $row, 'tuple' => $tuple];
-                continue;
-            }
-
-            if ($this->metadataDrifts($row, $tuple)) {
-                $update[] = ['row' => $row, 'tuple' => $tuple];
-                continue;
-            }
-
-            $unchanged[] = $row;
+            match (true) {
+                $row->deprecated_at !== null        => $reinstate[] = ['row' => $row, 'tuple' => $tuple],
+                $this->metadataDrifts($row, $tuple) => $update[]    = ['row' => $row, 'tuple' => $tuple],
+                default                             => $unchanged[] = $row,
+            };
         }
 
-        /** @var list<\SineMacula\Laravel\Authorization\Models\Permission> $retire */
-        $retire = [];
+        return [
+            'add'         => $add,
+            'update'      => $update,
+            'reinstate'   => $reinstate,
+            'unchanged'   => $unchanged,
+            'matchedKeys' => $matchedKeys,
+        ];
+    }
 
-        /** @var list<\SineMacula\Laravel\Authorization\Models\Permission> $protectedRows */
+    /**
+     * Split the rows that no tuple matched into retire candidates and
+     * system-protected candidates.
+     *
+     * @param  array<string, \SineMacula\Laravel\Authorization\Models\Permission>  $rowsByKey
+     * @param  array<string, true>  $matchedKeys
+     * @return array{retire: list<\SineMacula\Laravel\Authorization\Models\Permission>, protected: list<\SineMacula\Laravel\Authorization\Models\Permission>}
+     */
+    private function partitionOrphans(array $rowsByKey, array $matchedKeys): array
+    {
+        $retire        = [];
         $protectedRows = [];
 
         foreach ($rowsByKey as $key => $row) {
@@ -98,15 +142,7 @@ final readonly class PermissionDiffBuilder
             $retire[] = $row;
         }
 
-        return new PermissionDiff(
-            add: $this->sortTuples($add),
-            update: $this->sortPairs($update),
-            reinstate: $this->sortPairs($reinstate),
-            retire: $this->sortRows($retire),
-            protected: $this->sortRows($protectedRows),
-            unchanged: $this->sortRows($unchanged),
-            roleReferencesCount: $roleReferencesCount,
-        );
+        return ['retire' => $retire, 'protected' => $protectedRows];
     }
 
     /**
