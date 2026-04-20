@@ -278,12 +278,8 @@ class AuthorizationManager
      * @param  array<string, mixed>  $context
      * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult
      */
-    private function evaluateFor(
-        ?object $principal,
-        string $action,
-        ?string $resource,
-        array $context,
-    ): EvaluationResult {
+    private function evaluateFor(?object $principal, string $action, ?string $resource, array $context): EvaluationResult
+    {
         if ($principal === null) {
             return EvaluationResult::implicitlyDenied();
         }

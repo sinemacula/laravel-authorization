@@ -101,13 +101,8 @@ final readonly class Statement
      * @param  array<string, mixed>  $context
      * @return bool
      */
-    public function matches(
-        string $action,
-        ?string $resource = null,
-        ?ContextInterpolator $interpolator = null,
-        ?object $principal = null,
-        array $context = [],
-    ): bool {
+    public function matches(string $action, ?string $resource = null, ?ContextInterpolator $interpolator = null, ?object $principal = null, array $context = []): bool
+    {
         if (!$this->matchesAction($action)) {
             return false;
         }
@@ -128,12 +123,8 @@ final readonly class Statement
      * @param  string|null  $resource
      * @return bool
      */
-    public function evaluateConditions(
-        array $context,
-        ?ContextInterpolator $interpolator = null,
-        ?object $principal = null,
-        ?string $resource = null,
-    ): bool {
+    public function evaluateConditions(array $context, ?ContextInterpolator $interpolator = null, ?object $principal = null, ?string $resource = null): bool
+    {
         foreach ($this->conditions as $key => $expected) {
             if (!$this->evaluateConditionEntry($key, $expected, $context, $interpolator, $principal, $resource)) {
                 return false;
@@ -316,12 +307,8 @@ final readonly class Statement
      * @param  array<string, mixed>  $context
      * @return bool
      */
-    private function matchesResource(
-        string $resource,
-        ?ContextInterpolator $interpolator = null,
-        ?object $principal = null,
-        array $context = [],
-    ): bool {
+    private function matchesResource(string $resource, ?ContextInterpolator $interpolator = null, ?object $principal = null, array $context = []): bool
+    {
         foreach ($this->resources as $pattern) {
             $resolved = $interpolator !== null
                 ? $interpolator->interpolate($pattern, $principal, $resource, $context)
@@ -349,13 +336,8 @@ final readonly class Statement
      * @param  array<string, mixed>  $context
      * @return mixed
      */
-    private static function interpolateOperands(
-        mixed $expected,
-        ContextInterpolator $interpolator,
-        ?object $principal,
-        ?string $resource,
-        array $context,
-    ): mixed {
+    private static function interpolateOperands(mixed $expected, ContextInterpolator $interpolator, ?object $principal, ?string $resource, array $context): mixed
+    {
         if (is_string($expected)) {
             return $interpolator->interpolate($expected, $principal, $resource, $context);
         }

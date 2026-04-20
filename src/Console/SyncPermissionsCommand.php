@@ -80,9 +80,16 @@ class SyncPermissionsCommand extends Command
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionCache  $cache
      */
     public function __construct(
+
+        /** Walker that flattens configured enums into `(name, guard)` tuples. */
         private readonly PermissionEnumWalker $walker,
+
+        /** Diff builder that compares the walked tuples against the database. */
         private readonly PermissionDiffBuilder $builder,
+
+        /** Resolution cache flushed when the sync mutates the catalogue. */
         private readonly ResolutionCache $cache,
+
     ) {
         parent::__construct();
     }

@@ -34,7 +34,10 @@ final readonly class PermissionEnumWalker
      * @param  \SineMacula\Laravel\Authorization\Support\PermissionMetadataReader  $reader
      */
     public function __construct(
+
+        /** Metadata reader used to hydrate each case's description, category, and guards. */
         private PermissionMetadataReader $reader,
+
     ) {}
 
     /**

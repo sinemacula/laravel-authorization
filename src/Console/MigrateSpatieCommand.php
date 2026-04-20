@@ -241,12 +241,8 @@ class MigrateSpatieCommand extends Command
      * @param  array<string, int>  $counts
      * @return void
      */
-    private function migrateRolePermissions(
-        array $roleIdMap,
-        array $permissionIdMap,
-        bool $dryRun,
-        array &$counts,
-    ): void {
+    private function migrateRolePermissions(array $roleIdMap, array $permissionIdMap, bool $dryRun, array &$counts): void
+    {
         /** @var string $targetTable */
         $targetTable = config('authorization.tables.role_permissions', 'role_permissions');
 
@@ -328,14 +324,8 @@ class MigrateSpatieCommand extends Command
      * @param  array<string, int>  $counts
      * @return void
      */
-    private function migrateModelHasRelation(
-        string $sourceTable,
-        string $idColumn,
-        string $targetKey,
-        array $idMap,
-        bool $dryRun,
-        array &$counts,
-    ): void {
+    private function migrateModelHasRelation(string $sourceTable, string $idColumn, string $targetKey, array $idMap, bool $dryRun, array &$counts): void
+    {
         /** @var string $targetTable */
         $targetTable = config('authorization.tables.' . $targetKey, $targetKey);
 

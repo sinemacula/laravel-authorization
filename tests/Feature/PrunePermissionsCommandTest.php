@@ -701,11 +701,8 @@ final class PrunePermissionsCommandTest extends TestCase
      * @param  \Carbon\CarbonImmutable|null  $deprecatedAt
      * @return \SineMacula\Laravel\Authorization\Models\Permission
      */
-    private function createDeprecatedPermission(
-        string $name,
-        ?string $guard = null,
-        ?CarbonImmutable $deprecatedAt = null,
-    ): Permission {
+    private function createDeprecatedPermission(string $name, ?string $guard = null, ?CarbonImmutable $deprecatedAt = null): Permission
+    {
         return Permission::create([
             'id'            => (string) Str::uuid(),
             'name'          => $name,

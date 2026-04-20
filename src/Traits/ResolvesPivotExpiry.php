@@ -91,10 +91,8 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      * @param  int  $nowTimestamp
      * @return int|null
      */
-    private static function authorizationSecondsUntilPivotExpiry(
-        \Illuminate\Database\Eloquent\Model $model,
-        int $nowTimestamp,
-    ): ?int {
+    private static function authorizationSecondsUntilPivotExpiry(\Illuminate\Database\Eloquent\Model $model, int $nowTimestamp): ?int
+    {
         // Pivots on relation-bound models arrive as either a concrete
         // `Pivot` instance or, in mutation-kill fixtures, a plain
         // `stdClass` with a scalar `expires_at`. The tests in
@@ -185,12 +183,8 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      * @param  string  $targetId
      * @return array{exists: bool, expires_at: \DateTimeInterface|null}
      */
-    private static function authorizationReadGrantPivot(
-        \Illuminate\Database\Eloquent\Model $identity,
-        string $table,
-        array $columns,
-        string $targetId,
-    ): array {
+    private static function authorizationReadGrantPivot(\Illuminate\Database\Eloquent\Model $identity, string $table, array $columns, string $targetId): array
+    {
         $row = DB::table($table)
             ->where($columns['authorizable_type'], $identity->getMorphClass())
             ->where($columns['authorizable_id'], (string) $identity->getKey())
@@ -222,11 +216,8 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      * @param  string  $defaultTarget
      * @return array{authorizable_type: string, authorizable_id: string, target: string, expires_at: string}
      */
-    private static function authorizationResolveGrantPivotColumns(
-        string $pivot,
-        string $targetKey,
-        string $defaultTarget,
-    ): array {
+    private static function authorizationResolveGrantPivotColumns(string $pivot, string $targetKey, string $defaultTarget): array
+    {
         $prefix = 'authorization.pivots.' . $pivot . '.';
 
         /** @var string $type */

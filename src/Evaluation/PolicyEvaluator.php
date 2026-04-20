@@ -33,13 +33,8 @@ final class PolicyEvaluator
      * @param  object|null  $principal
      * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult
      */
-    public function evaluate(
-        array $policies,
-        string $action,
-        ?string $resource = null,
-        array $context = [],
-        ?object $principal = null,
-    ): EvaluationResult {
+    public function evaluate(array $policies, string $action, ?string $resource = null, array $context = [], ?object $principal = null): EvaluationResult
+    {
         $interpolator = $this->interpolator();
 
         // @formatter:off
@@ -89,14 +84,8 @@ final class PolicyEvaluator
      * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator  $interpolator
      * @return string
      */
-    private function classifyStatement(
-        Statement $statement,
-        string $action,
-        ?string $resource,
-        array $context,
-        ?object $principal,
-        ContextInterpolator $interpolator,
-    ): string {
+    private function classifyStatement(Statement $statement, string $action, ?string $resource, array $context, ?object $principal, ContextInterpolator $interpolator): string
+    {
         if (!$statement->matches($action, $resource, $interpolator, $principal, $context)) {
             return 'action/resource did not match';
         }

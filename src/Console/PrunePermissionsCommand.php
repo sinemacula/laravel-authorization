@@ -67,7 +67,10 @@ class PrunePermissionsCommand extends Command
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionCache  $cache
      */
     public function __construct(
+
+        /** Resolution cache flushed when pruning mutates the permission catalogue. */
         private readonly ResolutionCache $cache,
+
     ) {
         parent::__construct();
     }

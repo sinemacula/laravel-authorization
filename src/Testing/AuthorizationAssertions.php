@@ -138,7 +138,12 @@ trait AuthorizationAssertions
             /**
              * @param  object  $principal
              */
-            public function __construct(private readonly object $principal) {}
+            public function __construct(
+
+                /** Principal returned by `resolve()` for the duration of the test. */
+                private readonly object $principal,
+
+            ) {}
 
             /**
              * @return object|null
