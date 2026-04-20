@@ -48,6 +48,7 @@ All code must pass static analysis before submission:
 composer check                            # PHPStan level 8, PHP-CS-Fixer, CodeSniffer
 composer check -- --all --no-cache --fix  # With auto-fix
 composer format                           # Format code
+composer smells                           # Advisory smells (duplication, complexity)
 ```
 
 ### Testing

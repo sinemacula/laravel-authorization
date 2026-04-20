@@ -243,6 +243,7 @@ parity surface (Blade directive aliases, default guard, column names) is covered
 composer test
 composer test:coverage
 composer check
+composer smells
 ```
 
 ## Changelog

@@ -8,9 +8,11 @@
         "allow": [
             "Bash(git fetch *)",
             "Bash(qlty check *)",
+            "Bash(qlty smells *)",
             "Bash(gh search *)",
             "Bash(composer check *)",
             "Bash(composer show *)",
+            "Bash(composer smells *)",
             "mcp__plugin_github_github__pull_request_read"
         ]
     }
