@@ -122,7 +122,7 @@ class TenantScope implements Scope
     private function resolveTenant(): ?object
     {
         $container   = Container::getInstance();
-        $containerId = \spl_object_id($container);
+        $containerId = spl_object_id($container);
 
         if ($this->resolvedTenantMemo !== null && $this->resolvedTenantMemo['container_id'] === $containerId) {
             return $this->resolvedTenantMemo['tenant'];

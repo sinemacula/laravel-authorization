@@ -60,7 +60,7 @@ final class PermissionObserver
     {
         $snapshot = [];
 
-        foreach (\array_keys($permission->getDirty()) as $key) {
+        foreach (array_keys($permission->getDirty()) as $key) {
             $snapshot[$key] = $permission->getOriginal($key);
         }
 

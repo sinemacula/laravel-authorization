@@ -262,8 +262,8 @@ final class RolePermissionApiTest extends TestCase
     private function sortedNames(Role $role): array
     {
         $names = $role->fresh()?->getPermissions() ?? [];
-        \sort($names);
+        sort($names);
 
-        return \array_values($names); // @phpstan-ignore arrayValues.list
+        return array_values($names); // @phpstan-ignore arrayValues.list
     }
 }

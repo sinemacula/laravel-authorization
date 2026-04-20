@@ -47,11 +47,11 @@ final class RoleHierarchyBudgetTest extends TestCase
     {
         $leaf = self::buildChain(10);
 
-        $start = \microtime(true);
+        $start = microtime(true);
 
         $leaf->ancestors();
 
-        $elapsed = \microtime(true) - $start;
+        $elapsed = microtime(true) - $start;
 
         self::assertLessThan(
             0.05,
@@ -101,7 +101,7 @@ final class RoleHierarchyBudgetTest extends TestCase
             $parent = $role;
         }
 
-        \assert($parent !== null);
+        assert($parent !== null);
 
         return $parent;
     }

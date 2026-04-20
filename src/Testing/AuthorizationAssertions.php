@@ -47,7 +47,7 @@ trait AuthorizationAssertions
 
         self::assertTrue(
             $result->allowed,
-            \sprintf(
+            sprintf(
                 "Failed asserting that the principal can perform '%s'%s.\nEvaluation trace:\n%s",
                 $action,
                 $resource !== null ? " on resource '{$resource}'" : '',
@@ -74,7 +74,7 @@ trait AuthorizationAssertions
 
         self::assertFalse(
             $result->allowed,
-            \sprintf(
+            sprintf(
                 "Failed asserting that the principal cannot perform '%s'%s.\nEvaluation trace:\n%s",
                 $action,
                 $resource !== null ? " on resource '{$resource}'" : '',
@@ -94,10 +94,10 @@ trait AuthorizationAssertions
     {
         self::assertTrue(
             $principal->hasRole($role),
-            \sprintf(
+            sprintf(
                 'Failed asserting that the principal has role \'%s\'. Assigned roles: [%s].',
                 $role,
-                \implode(', ', $principal->getRoles()),
+                implode(', ', $principal->getRoles()),
             ),
         );
     }
@@ -114,10 +114,10 @@ trait AuthorizationAssertions
     {
         self::assertTrue(
             $principal->hasPermission($permission),
-            \sprintf(
+            sprintf(
                 'Failed asserting that the principal has permission \'%s\'. Held permissions: [%s].',
                 $permission,
-                \implode(', ', $principal->getPermissions()),
+                implode(', ', $principal->getPermissions()),
             ),
         );
     }
@@ -184,7 +184,7 @@ trait AuthorizationAssertions
     private function resolveTestingContainer(): \Illuminate\Container\Container
     {
         /** @var array<string, mixed> $vars */
-        $vars = \get_object_vars($this);
+        $vars = get_object_vars($this);
         $app  = $vars['app'] ?? null;
 
         if ($app instanceof \Illuminate\Container\Container) {

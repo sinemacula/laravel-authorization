@@ -31,7 +31,7 @@ class AuthorizationMiddlewareMisconfiguredException extends \LogicException
      */
     public function __construct(string $contract, string $middleware)
     {
-        $short = \substr($contract, \strrpos($contract, '\\') !== false ? \strrpos($contract, '\\') + 1 : 0);
+        $short = substr($contract, strrpos($contract, '\\') !== false ? strrpos($contract, '\\') + 1 : 0);
 
         parent::__construct(
             "Middleware {$middleware} requires the authenticated identity to implement {$short}; "

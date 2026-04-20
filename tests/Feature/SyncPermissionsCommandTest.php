@@ -495,7 +495,7 @@ final class SyncPermissionsCommandTest extends TestCase
         $output = Artisan::output();
 
         /** @var array<string, mixed>|null $payload */
-        $payload = \json_decode($output, associative: true);
+        $payload = json_decode($output, associative: true);
 
         self::assertIsArray($payload);
         self::assertArrayHasKey('dryRun', $payload);
@@ -632,7 +632,7 @@ final class SyncPermissionsCommandTest extends TestCase
         self::assertSame(0, $exitCode);
 
         /** @var array<string, mixed>|null $payload */
-        $payload = \json_decode($output, associative: true);
+        $payload = json_decode($output, associative: true);
         self::assertIsArray($payload);
 
         /** @var array<string, int> $summary */
@@ -708,7 +708,7 @@ final class SyncPermissionsCommandTest extends TestCase
         $output = Artisan::output();
 
         /** @var array<string, mixed>|null $payload */
-        $payload = \json_decode($output, associative: true);
+        $payload = json_decode($output, associative: true);
         self::assertIsArray($payload);
 
         /** @var array<string, int> $summary */
@@ -773,7 +773,7 @@ final class SyncPermissionsCommandTest extends TestCase
         $output = Artisan::output();
 
         /** @var array<string, mixed>|null $payload */
-        $payload = \json_decode($output, associative: true);
+        $payload = json_decode($output, associative: true);
         self::assertIsArray($payload);
 
         /** @var array<string, int> $summary */
@@ -986,7 +986,7 @@ final class SyncPermissionsCommandTest extends TestCase
         $output = Artisan::output();
 
         /** @var array<string, mixed>|null $payload */
-        $payload = \json_decode($output, associative: true);
+        $payload = json_decode($output, associative: true);
 
         self::assertIsArray($payload);
         /** @var array<string, mixed> $changes */
@@ -1042,7 +1042,7 @@ final class SyncPermissionsCommandTest extends TestCase
         $output = Artisan::output();
 
         /** @var array<string, mixed>|null $payload */
-        $payload = \json_decode($output, associative: true);
+        $payload = json_decode($output, associative: true);
 
         self::assertIsArray($payload);
 
@@ -1064,8 +1064,8 @@ final class SyncPermissionsCommandTest extends TestCase
             self::assertSame('posts:view', $entry['name']);
         }
 
-        $updateGuards = \array_column($update, 'guard');
-        \sort($updateGuards);
+        $updateGuards = array_column($update, 'guard');
+        sort($updateGuards);
         self::assertSame(['api', 'web'], $updateGuards);
 
         self::assertCount(1, $reinstate);

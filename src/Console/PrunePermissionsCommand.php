@@ -81,9 +81,9 @@ class PrunePermissionsCommand extends Command
     {
         /** @var array<string, mixed>|bool|float|int|string|null $rawFormat */
         $rawFormat = $this->option('format');
-        $format    = \is_string($rawFormat) ? $rawFormat : '';
+        $format    = is_string($rawFormat) ? $rawFormat : '';
 
-        if (!\in_array($format, [self::FORMAT_TABLE, self::FORMAT_JSON], true)) {
+        if (!in_array($format, [self::FORMAT_TABLE, self::FORMAT_JSON], true)) {
             $this->error("Invalid --format '{$format}'. Expected 'table' or 'json'.");
 
             return self::EXIT_FATAL;
@@ -123,7 +123,7 @@ class PrunePermissionsCommand extends Command
         /** @var array<string, mixed>|bool|float|int|string|null $raw */
         $raw = $this->option('before');
 
-        if (!\is_string($raw) || $raw === '') {
+        if (!is_string($raw) || $raw === '') {
             return null;
         }
 
@@ -308,10 +308,10 @@ class PrunePermissionsCommand extends Command
                 'identityCount' => $totals['identityCount'],
                 'deleted'       => $dryRun ? 0 : $totals['considered'],
             ],
-            'candidates' => \array_map(fn (array $entry): array => $this->describeEntry($entry), $report),
+            'candidates' => array_map(fn (array $entry): array => $this->describeEntry($entry), $report),
         ];
 
-        $this->line((string) \json_encode($payload, \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES));
+        $this->line((string) json_encode($payload, \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES));
     }
 
     /**
@@ -333,7 +333,7 @@ class PrunePermissionsCommand extends Command
         }
 
         return [
-            'considered'    => \count($report),
+            'considered'    => count($report),
             'roleCount'     => $roleCount,
             'identityCount' => $identityCount,
         ];

@@ -41,8 +41,8 @@ trait ValidatesAuthorizationName // @phpstan-ignore trait.unused
      */
     public function setNameAttribute(mixed $value): void
     {
-        if (!\is_string($value) || $value === '' || \preg_match(self::NAME_PATTERN, $value) !== 1) {
-            throw new InvalidAuthorizationNameException($this->getAuthorizationNameKind(), \is_string($value) ? $value : '');
+        if (!is_string($value) || $value === '' || preg_match(self::NAME_PATTERN, $value) !== 1) {
+            throw new InvalidAuthorizationNameException($this->getAuthorizationNameKind(), is_string($value) ? $value : '');
         }
 
         $this->attributes['name'] = $value;

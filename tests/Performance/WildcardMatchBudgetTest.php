@@ -43,13 +43,13 @@ final class WildcardMatchBudgetTest extends TestCase
             actions: ['posts:*'],
         );
 
-        $start = \microtime(true);
+        $start = microtime(true);
 
         for ($i = 0; $i < 100; $i++) {
             $statement->matches('posts:create');
         }
 
-        $elapsed = \microtime(true) - $start;
+        $elapsed = microtime(true) - $start;
 
         self::assertLessThan(
             0.005,
@@ -73,13 +73,13 @@ final class WildcardMatchBudgetTest extends TestCase
             actions: ['a:b:c:d:e:f:g:h:i:*'],
         );
 
-        $start = \microtime(true);
+        $start = microtime(true);
 
         for ($i = 0; $i < 100; $i++) {
             $statement->matches('a:b:c:d:e:f:g:h:i:j');
         }
 
-        $elapsed = \microtime(true) - $start;
+        $elapsed = microtime(true) - $start;
 
         self::assertLessThan(
             0.01,

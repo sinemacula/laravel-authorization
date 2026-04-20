@@ -98,7 +98,7 @@ final class RevokeRoleCommandTest extends TestCase
         $output = Artisan::output();
 
         self::assertSame(1, $exitCode);
-        self::assertNotEmpty(\trim($output), 'Error message must be printed on failure.');
+        self::assertNotEmpty(trim($output), 'Error message must be printed on failure.');
     }
 
     /**

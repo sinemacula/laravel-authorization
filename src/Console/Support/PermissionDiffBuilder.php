@@ -207,7 +207,7 @@ final readonly class PermissionDiffBuilder
      */
     private function sortTuples(array $tuples): array
     {
-        \usort($tuples, fn (PermissionTuple $a, PermissionTuple $b): int => $this->compareKeys(
+        usort($tuples, fn (PermissionTuple $a, PermissionTuple $b): int => $this->compareKeys(
             $a->name,
             $a->guard,
             $b->name,
@@ -225,7 +225,7 @@ final readonly class PermissionDiffBuilder
      */
     private function sortRows(array $rows): array
     {
-        \usort($rows, fn (Permission $a, Permission $b): int => $this->compareKeys(
+        usort($rows, fn (Permission $a, Permission $b): int => $this->compareKeys(
             $a->name,
             $a->guard,
             $b->name,
@@ -244,7 +244,7 @@ final readonly class PermissionDiffBuilder
      */
     private function sortPairs(array $pairs): array
     {
-        \usort($pairs, fn (array $a, array $b): int => $this->compareKeys(
+        usort($pairs, fn (array $a, array $b): int => $this->compareKeys(
             $a['tuple']->name,
             $a['tuple']->guard,
             $b['tuple']->name,
@@ -268,7 +268,7 @@ final readonly class PermissionDiffBuilder
      */
     private function compareKeys(string $leftName, ?string $leftGuard, string $rightName, ?string $rightGuard): int
     {
-        $nameComparison = \strcmp($leftName, $rightName);
+        $nameComparison = strcmp($leftName, $rightName);
 
         return $nameComparison !== 0
             ? $nameComparison
@@ -293,6 +293,6 @@ final readonly class PermissionDiffBuilder
             return -1;
         }
 
-        return $rightGuard === null ? 1 : \strcmp($leftGuard, $rightGuard);
+        return $rightGuard === null ? 1 : strcmp($leftGuard, $rightGuard);
     }
 }

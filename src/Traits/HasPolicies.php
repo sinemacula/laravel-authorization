@@ -187,7 +187,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
             $resolved[(string) $policy->getKey()] = $policy;
         }
 
-        $ids    = \array_keys($resolved);
+        $ids    = array_keys($resolved);
         $result = $this->policies()->sync($ids);
 
         if (isset($this->relations['policies'])) {
@@ -275,7 +275,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
     {
         // @codeCoverageIgnoreStart
         // Defensive: the Laravel `logger()` helper is always present under a booted framework, so this fallback is reachable only from non-Laravel embeddings.
-        if (!\function_exists('logger')) {
+        if (!function_exists('logger')) {
             return;
         }
         // @codeCoverageIgnoreEnd

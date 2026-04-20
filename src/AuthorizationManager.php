@@ -195,14 +195,14 @@ class AuthorizationManager
     public function effectivePermissions(array $context = []): array
     {
         /** @var array<int, mixed> $enums */
-        $enums = \function_exists('config')
+        $enums = function_exists('config')
             ? (array) config('authorization.permission_enums', [])
             : []; // @codeCoverageIgnore
 
         $permissions = [];
 
         foreach ($enums as $enumClass) {
-            if (!\is_string($enumClass) || !\is_subclass_of($enumClass, PermissionEnum::class)) {
+            if (!is_string($enumClass) || !is_subclass_of($enumClass, PermissionEnum::class)) {
                 continue;
             }
 
@@ -211,7 +211,7 @@ class AuthorizationManager
 
             foreach ($className::cases() as $case) {
                 $action = $case->value;
-                \assert(\is_string($action));
+                assert(is_string($action));
                 $permissions[$action] = $this->can($action, null, $context);
             }
         }
@@ -245,7 +245,7 @@ class AuthorizationManager
     public function withPolicies(array $policies): static
     {
         $scoped                 = clone $this;
-        $scoped->policyOverride = \array_values($policies);
+        $scoped->policyOverride = array_values($policies);
 
         return $scoped;
     }

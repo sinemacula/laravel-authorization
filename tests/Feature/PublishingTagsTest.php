@@ -52,14 +52,14 @@ final class PublishingTagsTest extends TestCase
 
         self::assertNotEmpty($paths, 'Expected the authorization-config tag to register publishable paths.');
 
-        $expectedSource = \realpath(__DIR__ . '/../../config/authorization.php');
+        $expectedSource = realpath(__DIR__ . '/../../config/authorization.php');
 
         self::assertIsString($expectedSource);
         self::assertFileExists($expectedSource);
 
-        $sources = \array_map(
-            static fn (string $path): string => (string) \realpath($path),
-            \array_keys($paths),
+        $sources = array_map(
+            static fn (string $path): string => (string) realpath($path),
+            array_keys($paths),
         );
 
         self::assertContains(
@@ -94,14 +94,14 @@ final class PublishingTagsTest extends TestCase
 
         self::assertNotEmpty($paths, 'Expected the authorization-migrations tag to register publishable paths.');
 
-        $expectedSource = \realpath(__DIR__ . '/../../database/migrations');
+        $expectedSource = realpath(__DIR__ . '/../../database/migrations');
 
         self::assertIsString($expectedSource);
         self::assertDirectoryExists($expectedSource);
 
-        $sources = \array_map(
-            static fn (string $path): string => (string) \realpath($path),
-            \array_keys($paths),
+        $sources = array_map(
+            static fn (string $path): string => (string) realpath($path),
+            array_keys($paths),
         );
 
         self::assertContains(

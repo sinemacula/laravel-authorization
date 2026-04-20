@@ -345,8 +345,8 @@ final class TemporalGrantsTest extends TestCase
     private function sortedRoleNames(?StubIdentity $user): array
     {
         $names = $user?->getRoles() ?? [];
-        \sort($names);
+        sort($names);
 
-        return \array_values($names); // @phpstan-ignore arrayValues.list
+        return array_values($names); // @phpstan-ignore arrayValues.list
     }
 }

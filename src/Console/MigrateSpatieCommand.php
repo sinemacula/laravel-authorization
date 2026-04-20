@@ -104,10 +104,10 @@ class MigrateSpatieCommand extends Command
         $this->info('Migration summary:');
         $this->table(
             ['Target Table', 'Rows'],
-            \array_map(
+            array_map(
                 static fn (string $table, int $count): array => [$table, (string) $count],
-                \array_keys($counts),
-                \array_values($counts),
+                array_keys($counts),
+                array_values($counts),
             ),
         );
 
@@ -212,7 +212,7 @@ class MigrateSpatieCommand extends Command
         foreach ($rows as $row) {
             /** @var array{id: int|string, name: string, guard_name: string|null, created_at: string|null, updated_at: string|null} $entity */
             $entity = (array) $row;
-            $newId  = \is_int($entity['id']) ? (string) Str::orderedUuid() : $entity['id'];
+            $newId  = is_int($entity['id']) ? (string) Str::orderedUuid() : $entity['id'];
 
             $idMap[$entity['id']] = $newId;
 

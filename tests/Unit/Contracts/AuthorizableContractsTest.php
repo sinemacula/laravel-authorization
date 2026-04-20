@@ -38,7 +38,7 @@ final class AuthorizableContractsTest extends TestCase
      */
     public function testCompositeExtendsEveryNarrowContract(): void
     {
-        $parents = \class_implements(AuthorizableIdentity::class);
+        $parents = class_implements(AuthorizableIdentity::class);
 
         self::assertNotFalse($parents);
         self::assertArrayHasKey(SupportsRoles::class, $parents);
@@ -55,9 +55,9 @@ final class AuthorizableContractsTest extends TestCase
      */
     public function testNarrowContractsExposeOnlyTheirSliceOfTheSurface(): void
     {
-        $roles       = \array_map(static fn ($m): string => $m->getName(), (new \ReflectionClass(SupportsRoles::class))->getMethods());
-        $permissions = \array_map(static fn ($m): string => $m->getName(), (new \ReflectionClass(SupportsPermissions::class))->getMethods());
-        $policies    = \array_map(static fn ($m): string => $m->getName(), (new \ReflectionClass(SupportsPolicies::class))->getMethods());
+        $roles       = array_map(static fn ($m): string => $m->getName(), (new \ReflectionClass(SupportsRoles::class))->getMethods());
+        $permissions = array_map(static fn ($m): string => $m->getName(), (new \ReflectionClass(SupportsPermissions::class))->getMethods());
+        $policies    = array_map(static fn ($m): string => $m->getName(), (new \ReflectionClass(SupportsPolicies::class))->getMethods());
 
         self::assertSame(
             ['assignRole', 'revokeRole', 'syncRoles', 'hasRole', 'getRoles'],

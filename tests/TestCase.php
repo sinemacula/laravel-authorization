@@ -49,9 +49,9 @@ abstract class TestCase extends OrchestraTestCase
         if (!self::$viewCacheCleared) {
             $views = __DIR__ . '/../vendor/orchestra/testbench-core/laravel/storage/framework/views';
 
-            if (\is_dir($views)) {
-                foreach (\glob($views . '/*.php') ?: [] as $file) {
-                    @\unlink($file);
+            if (is_dir($views)) {
+                foreach (glob($views . '/*.php') ?: [] as $file) {
+                    @unlink($file);
                 }
             }
 

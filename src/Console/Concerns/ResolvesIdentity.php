@@ -36,9 +36,9 @@ trait ResolvesIdentity
      */
     protected function resolveIdentity(string $identity): (AuthorizableIdentity&Model)|null
     {
-        $parts = \explode(':', $identity, 2);
+        $parts = explode(':', $identity, 2);
 
-        if (\count($parts) !== 2 || $parts[0] === '' || $parts[1] === '') {
+        if (count($parts) !== 2 || $parts[0] === '' || $parts[1] === '') {
             $this->error('Identity must be in the format {morphType}:{key} (e.g. user:123).');
 
             return null;
@@ -48,13 +48,13 @@ trait ResolvesIdentity
 
         $class = Relation::getMorphedModel($morphType) ?? $morphType;
 
-        if (!\class_exists($class)) {
+        if (!class_exists($class)) {
             $this->error("Cannot resolve morph type '{$morphType}' to a class.");
 
             return null;
         }
 
-        if (!\is_subclass_of($class, Model::class)) {
+        if (!is_subclass_of($class, Model::class)) {
             $this->error("Resolved class '{$class}' is not an Eloquent model.");
 
             return null;

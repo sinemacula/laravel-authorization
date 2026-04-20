@@ -78,7 +78,7 @@ final class PolicyModelTest extends TestCase
      */
     public function testAcceptsJsonStringDocument(): void
     {
-        $json = \json_encode([
+        $json = json_encode([
             'statements' => [['effect' => 'allow', 'actions' => ['posts:read']]],
         ]);
         self::assertIsString($json);

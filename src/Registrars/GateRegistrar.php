@@ -51,7 +51,7 @@ final class GateRegistrar
         $onConflict = $this->resolveConflictMode();
 
         foreach ($enums as $enumClass) {
-            if (!\is_string($enumClass) || !\is_subclass_of($enumClass, PermissionEnum::class)) {
+            if (!is_string($enumClass) || !is_subclass_of($enumClass, PermissionEnum::class)) {
                 continue;
             }
 
@@ -77,7 +77,7 @@ final class GateRegistrar
 
         return match (true) {
             $rawMode instanceof GateConflictMode => $rawMode,
-            \is_string($rawMode)                 => GateConflictMode::tryFrom($rawMode) ?? GateConflictMode::THROW,
+            is_string($rawMode)                  => GateConflictMode::tryFrom($rawMode) ?? GateConflictMode::THROW,
             default                              => GateConflictMode::THROW,
         };
     }
@@ -95,7 +95,7 @@ final class GateRegistrar
     private function registerEnumGate(PermissionEnum $case, GateConflictMode $onConflict): void
     {
         $permission = $case->value;
-        \assert(\is_string($permission));
+        assert(is_string($permission));
 
         if (Gate::has($permission)) {
             // Exhaustive match over GateConflictMode: Throw short-circuits,
@@ -148,16 +148,16 @@ final class GateRegistrar
         $context  = [];
 
         foreach ($arguments as $key => $value) {
-            if (\is_string($key)) {
+            if (is_string($key)) {
                 $context[$key] = $value;
 
                 continue;
             }
 
             if ($key === 0) {
-                if (\is_array($value) && !\array_is_list($value)) {
+                if (is_array($value) && !array_is_list($value)) {
                     /** @var array<string, mixed> $value */
-                    $context = \array_merge($context, $value);
+                    $context = array_merge($context, $value);
                 } else {
                     $resource = self::stringifyGateResource($value);
                 }
@@ -165,9 +165,9 @@ final class GateRegistrar
                 continue;
             }
 
-            if (\is_array($value) && !\array_is_list($value)) {
+            if (is_array($value) && !array_is_list($value)) {
                 /** @var array<string, mixed> $value */
-                $context = \array_merge($context, $value);
+                $context = array_merge($context, $value);
             }
         }
 
@@ -187,14 +187,14 @@ final class GateRegistrar
         if ($value instanceof Model) {
             $key = $value->getKey();
 
-            return \is_scalar($key) ? $value->getMorphClass() . ':' . (string) $key : null;
+            return is_scalar($key) ? $value->getMorphClass() . ':' . (string) $key : null;
         }
 
         return match (true) {
-            \is_string($value)                                         => $value,
-            $value instanceof AuthorizableResource                     => $value->toResourceIdentifier(),
-            \is_object($value) && \method_exists($value, '__toString') => (string) $value,
-            default                                                    => null,
+            is_string($value)                                        => $value,
+            $value instanceof AuthorizableResource                   => $value->toResourceIdentifier(),
+            is_object($value) && method_exists($value, '__toString') => (string) $value,
+            default                                                  => null,
         };
     }
 

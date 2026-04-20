@@ -68,7 +68,7 @@ final class RoleHierarchyTest extends TestCase
         $child->givePermission('posts:create');
 
         $permissions = $child->fresh()->getPermissions(); // @phpstan-ignore method.nonObject
-        \sort($permissions);
+        sort($permissions);
 
         self::assertSame(['posts:create', 'posts:delete'], $permissions);
     }
@@ -93,7 +93,7 @@ final class RoleHierarchyTest extends TestCase
         $leaf->givePermission('posts:view');
 
         $permissions = $leaf->fresh()->getPermissions(); // @phpstan-ignore method.nonObject
-        \sort($permissions);
+        sort($permissions);
 
         self::assertSame(['posts:create', 'posts:edit', 'posts:view'], $permissions);
     }
@@ -170,7 +170,7 @@ final class RoleHierarchyTest extends TestCase
 
         // Verify inheritance first.
         $child = $child->fresh(); // @phpstan-ignore assign.propertyType
-        self::assertTrue(\in_array('posts:delete', $child->getPermissions(), true)); // @phpstan-ignore method.nonObject
+        self::assertTrue(in_array('posts:delete', $child->getPermissions(), true)); // @phpstan-ignore method.nonObject
 
         // Remove parent.
         $child->parent_id = null; // @phpstan-ignore property.nonObject

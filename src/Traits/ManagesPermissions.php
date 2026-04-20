@@ -158,7 +158,7 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
             $resolved[$model->id] = $model;
         }
 
-        $ids    = \array_keys($resolved);
+        $ids    = array_keys($resolved);
         $result = $this->permissions()->sync($ids);
 
         if (isset($this->relations['permissions'])) {
@@ -194,7 +194,7 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
         $asked = $permission instanceof Permission ? $permission->name : $permission;
 
         foreach ($this->getPermissions() as $held) {
-            if (\fnmatch($held, $asked, \FNM_NOESCAPE)) {
+            if (fnmatch($held, $asked, \FNM_NOESCAPE)) {
                 return true;
             }
         }
@@ -244,7 +244,7 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
             }
         }
 
-        return \array_values(\array_unique($names));
+        return array_values(array_unique($names));
     }
 
     /**

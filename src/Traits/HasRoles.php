@@ -169,7 +169,7 @@ trait HasRoles // @phpstan-ignore trait.unused
             $resolved[(string) $model->getKey()] = $model;
         }
 
-        $ids    = \array_keys($resolved);
+        $ids    = array_keys($resolved);
         $result = $this->roles()->sync($ids);
 
         if (isset($this->relations['roles'])) {
@@ -277,7 +277,7 @@ trait HasRoles // @phpstan-ignore trait.unused
 
         $actorRank = $this instanceof SupportsRoles ? $this->highestRank() : null;
 
-        if ($actorRank === null || !($target instanceof SupportsRoles) || !\method_exists($target, 'roles')) {
+        if ($actorRank === null || !($target instanceof SupportsRoles) || !method_exists($target, 'roles')) {
             return false;
         }
 
@@ -374,7 +374,7 @@ trait HasRoles // @phpstan-ignore trait.unused
 
         $names = $roles->map(static fn (Role $role): string => $role->name)->all();
 
-        return \array_values($names);
+        return array_values($names);
     }
 
     /**

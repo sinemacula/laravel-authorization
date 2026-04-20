@@ -71,7 +71,7 @@ final class PolicyModelEdgeCasesTest extends TestCase
         DB::table('policies')->insert([
             'id'         => '55ca4f44-7257-4d16-8870-8e1c550b3f88',
             'name'       => 'corrupted',
-            'document'   => \json_encode(['statements' => [['effect' => 'bogus', 'actions' => ['x']]]]),
+            'document'   => json_encode(['statements' => [['effect' => 'bogus', 'actions' => ['x']]]]),
             'created_at' => now(),
             'updated_at' => now(),
         ]);

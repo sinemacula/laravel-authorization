@@ -37,7 +37,7 @@ class InvalidPermissionAttributeException extends \LogicException
         private readonly string $reason,
 
     ) {
-        parent::__construct(\sprintf(
+        parent::__construct(sprintf(
             'Invalid #[Permission] attribute on %s::%s: %s',
             $enumClass,
             $caseName,

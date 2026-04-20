@@ -126,7 +126,7 @@ final class RoleHierarchyBench extends BenchmarkCase
             $parent = $role;
         }
 
-        \assert($parent !== null);
+        assert($parent !== null);
 
         return $parent;
     }

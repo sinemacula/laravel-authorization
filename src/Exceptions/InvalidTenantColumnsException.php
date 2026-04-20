@@ -29,7 +29,7 @@ class InvalidTenantColumnsException extends \LogicException
      */
     public function __construct(string $modelKind, string $missingColumn)
     {
-        parent::__construct(\sprintf(
+        parent::__construct(sprintf(
             'Cannot save %s with inconsistent tenant columns — \'%s\' is required when the other tenant column is set. '
             . 'Both columns must be null (global row) or both must be non-null (tenant-owned row).',
             $modelKind,

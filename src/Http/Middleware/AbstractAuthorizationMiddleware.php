@@ -98,8 +98,8 @@ abstract class AbstractAuthorizationMiddleware
         $needles = [];
 
         foreach ($arguments as $argument) {
-            foreach (\explode('|', $argument) as $candidate) {
-                $candidate = \trim($candidate);
+            foreach (explode('|', $argument) as $candidate) {
+                $candidate = trim($candidate);
 
                 if ($candidate !== '') {
                     $needles[] = $candidate;

@@ -47,13 +47,13 @@ final class ConditionEvaluationBudgetTest extends TestCase
         );
         $context = self::buildContext();
 
-        $start = \microtime(true);
+        $start = microtime(true);
 
         for ($i = 0; $i < 1000; $i++) {
             $statement->evaluateConditions($context);
         }
 
-        $elapsed = \microtime(true) - $start;
+        $elapsed = microtime(true) - $start;
 
         self::assertLessThan(
             0.5,

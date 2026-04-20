@@ -338,7 +338,7 @@ final class PrunePermissionsCommandTest extends TestCase
         $output = Artisan::output();
 
         /** @var array<string, mixed>|null $payload */
-        $payload = \json_decode($output, associative: true);
+        $payload = json_decode($output, associative: true);
 
         self::assertIsArray($payload);
         self::assertArrayHasKey('dryRun', $payload);
@@ -416,7 +416,7 @@ final class PrunePermissionsCommandTest extends TestCase
         $output = Artisan::output();
 
         /** @var array<string, mixed>|null $payload */
-        $payload = \json_decode($output, associative: true);
+        $payload = json_decode($output, associative: true);
         self::assertIsArray($payload);
 
         /** @var list<array{deprecatedAt: string|null}> $candidates */
@@ -537,7 +537,7 @@ final class PrunePermissionsCommandTest extends TestCase
         $output = Artisan::output();
 
         /** @var array<string, mixed>|null $payload */
-        $payload = \json_decode($output, associative: true);
+        $payload = json_decode($output, associative: true);
         self::assertIsArray($payload);
 
         /** @var array<string, int> $summary */

@@ -104,7 +104,7 @@ final class EventListenerRegistrar
     {
         $event = 'Laravel\Octane\Events\RequestTerminated';
 
-        if (!\class_exists($event) || !$this->app->bound(Dispatcher::class)) {
+        if (!class_exists($event) || !$this->app->bound(Dispatcher::class)) {
             return;
         }
 

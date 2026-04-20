@@ -49,26 +49,26 @@ final readonly class Policy
      */
     public static function fromArray(array $data): self
     {
-        if (!isset($data['name']) || !\is_string($data['name']) || $data['name'] === '') {
+        if (!isset($data['name']) || !is_string($data['name']) || $data['name'] === '') {
             throw new \InvalidArgumentException('Policy document requires a non-empty name.');
         }
 
-        if (!isset($data['statements']) || !\is_array($data['statements'])) {
+        if (!isset($data['statements']) || !is_array($data['statements'])) {
             throw new \InvalidArgumentException('Policy document requires a list of statements.');
         }
 
         $version = self::CURRENT_VERSION;
 
         if (isset($data['version'])) {
-            if (!\is_int($data['version']) || $data['version'] < 1) {
+            if (!is_int($data['version']) || $data['version'] < 1) {
                 throw new \InvalidArgumentException('Policy document version must be a positive integer.');
             }
 
             $version = $data['version'];
         }
 
-        $statements = \array_values(\array_map(static function (mixed $statement): Statement {
-            if (!\is_array($statement)) {
+        $statements = array_values(array_map(static function (mixed $statement): Statement {
+            if (!is_array($statement)) {
                 throw new \InvalidArgumentException('Policy statements must be associative arrays.');
             }
 
@@ -92,7 +92,7 @@ final readonly class Policy
         return [
             'version'    => $this->version,
             'name'       => $this->name,
-            'statements' => \array_map(
+            'statements' => array_map(
                 static fn (Statement $statement): array => $statement->toArray(),
                 $this->statements,
             ),

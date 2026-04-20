@@ -29,7 +29,7 @@ trait HasContainerInstance
      */
     public static function instance(): ?static
     {
-        if (!\function_exists('app')) {
+        if (!function_exists('app')) {
             return null; // @codeCoverageIgnore
         }
 

@@ -119,7 +119,7 @@ trait HasRoleHierarchy // @phpstan-ignore trait.unused
 
         while ($queue !== []) {
             /** @var \SineMacula\Laravel\Authorization\Models\Role $node */
-            $node = \array_shift($queue);
+            $node = array_shift($queue);
 
             /** @var string $nodeId */
             $nodeId = $node->getKey();

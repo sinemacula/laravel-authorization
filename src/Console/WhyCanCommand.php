@@ -69,7 +69,7 @@ class WhyCanCommand extends Command
             $this->line('  Trace:');
 
             foreach ($result->trace as $entry) {
-                $this->line(\sprintf(
+                $this->line(sprintf(
                     '    [%s] %s#%d — %s',
                     $entry['decision']->value,
                     $entry['policy'],

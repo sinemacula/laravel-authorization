@@ -57,13 +57,13 @@ final class ContextInterpolatorBudgetTest extends TestCase
         // across a measurable window and gives the budget comfortable
         // headroom vs. observed ~52μs per call on the reference
         // machine (≈52ms total).
-        $start = \microtime(true);
+        $start = microtime(true);
 
         for ($i = 0; $i < 1000; $i++) {
             $interpolator->interpolate($pattern, $principal, 'posts:42', $context);
         }
 
-        $elapsed = \microtime(true) - $start;
+        $elapsed = microtime(true) - $start;
 
         self::assertLessThan(
             0.5,

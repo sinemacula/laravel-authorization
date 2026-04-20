@@ -184,13 +184,13 @@ class RolePermission extends Pivot
         // is instantiated outside a relation — PHPStan trusts the
         // docblocked string return; runtime does not. Guard it.
         // @phpstan-ignore function.alreadyNarrowedType
-        if (\is_string($key) && $key !== '') {
+        if (is_string($key) && $key !== '') {
             return $key;
         }
 
         $column = config('authorization.pivots.role_permissions.role_column', 'role_id');
 
-        \assert(\is_string($column));
+        assert(is_string($column));
 
         return $column;
     }
@@ -211,13 +211,13 @@ class RolePermission extends Pivot
         // See `resolveRoleColumn()` — same upstream-trait null
         // hazard on direct instantiation paths.
         // @phpstan-ignore function.alreadyNarrowedType
-        if (\is_string($key) && $key !== '') {
+        if (is_string($key) && $key !== '') {
             return $key;
         }
 
         $column = config('authorization.pivots.role_permissions.permission_column', 'permission_id');
 
-        \assert(\is_string($column));
+        assert(is_string($column));
 
         return $column;
     }

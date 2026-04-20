@@ -108,7 +108,7 @@ final class RbacQueryBudgetTest extends TestCase
         $primingQueries = DB::getQueryLog();
         self::assertLessThanOrEqual(
             6,
-            \count($primingQueries),
+            count($primingQueries),
             'Initial RBAC resolution exceeded the 6-query priming budget.',
         );
 

@@ -20,7 +20,7 @@ declare(strict_types = 1);
 
 namespace Laravel\Octane\Events;
 
-if (!\class_exists(RequestTerminated::class, false)) {
+if (!class_exists(RequestTerminated::class, false)) {
     /**
      * @internal
      */

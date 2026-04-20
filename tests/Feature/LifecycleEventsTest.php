@@ -148,7 +148,7 @@ final class LifecycleEventsTest extends TestCase
         Event::assertDispatched(
             RoleUpdated::class,
             static fn (RoleUpdated $event): bool => $event->role->is($role)
-                && \array_key_exists('description', $event->changes['before'])
+                && array_key_exists('description', $event->changes['before'])
                 && $event->changes['before']['description']          === null
                 && ($event->changes['after']['description'] ?? null) === self::EDITOR_ROLE_DESCRIPTION,
         );
@@ -249,7 +249,7 @@ final class LifecycleEventsTest extends TestCase
         Event::assertDispatched(
             PermissionUpdated::class,
             static fn (PermissionUpdated $event): bool => $event->permission->is($permission)
-                && \array_key_exists('description', $event->changes['before'])
+                && array_key_exists('description', $event->changes['before'])
                 && $event->changes['before']['description']          === null
                 && ($event->changes['after']['description'] ?? null) === 'Create posts',
         );
@@ -355,7 +355,7 @@ final class LifecycleEventsTest extends TestCase
         Event::assertDispatched(
             PolicyUpdated::class,
             static fn (PolicyUpdated $event): bool => $event->policy->is($policy)
-                && \array_key_exists('description', $event->changes['before'])
+                && array_key_exists('description', $event->changes['before'])
                 && $event->changes['before']['description']          === null
                 && ($event->changes['after']['description'] ?? null) === 'Initial policy',
         );

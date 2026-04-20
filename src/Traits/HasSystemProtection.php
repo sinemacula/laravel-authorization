@@ -129,7 +129,7 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
         $dirty = $this->getDirty();
 
         foreach ($this->systemProtectedFields() as $field) {
-            if (\array_key_exists($field, $dirty)) {
+            if (array_key_exists($field, $dirty)) {
                 return self::systemProtectedOperationLabel($field);
             }
         }

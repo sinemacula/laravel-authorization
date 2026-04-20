@@ -118,13 +118,13 @@ final class ResolutionCacheTest extends TestCase
 
         /** @var \Illuminate\Contracts\Cache\Repository $store */
         $store = Cache::store('array');
-        $keys  = \array_filter(
-            \array_keys((array) $this->extractPrivate($store->getStore(), 'storage') ?? []), // @phpstan-ignore nullCoalesce.expr
+        $keys  = array_filter(
+            array_keys((array) $this->extractPrivate($store->getStore(), 'storage') ?? []), // @phpstan-ignore nullCoalesce.expr
             // Laravel's tagged array entries are stored under a
             // `<hash>:<original-key>` shape; the suffix match keeps
             // the assertion faithful to the prefix-scoped entry
             // without coupling to the opaque tag hash.
-            static fn (mixed $key): bool => \is_string($key) && \str_contains($key, 'authorization-test:permissions:'),
+            static fn (mixed $key): bool => is_string($key) && str_contains($key, 'authorization-test:permissions:'),
         );
 
         self::assertNotEmpty($keys, 'Persistent cache entry should exist under the configured prefix.');
@@ -276,7 +276,7 @@ final class ResolutionCacheTest extends TestCase
 
         // @phpstan-ignore-next-line nullCoalesce.expr, nullsafe.neverNull non-null post-persist)
         $permissions = $user->fresh()?->getPermissions() ?? [];
-        \sort($permissions);
+        sort($permissions);
 
         self::assertSame(['posts:create', 'posts:read'], $permissions);
     }
@@ -308,7 +308,7 @@ final class ResolutionCacheTest extends TestCase
         // that the listener does not touch it.
         $cache->rememberPermissions($principal, static fn (): array => ['stale:entry']);
 
-        $keysBefore = \array_keys((array) $this->extractPrivate($driver, 'storage') ?? []); // @phpstan-ignore nullCoalesce.expr
+        $keysBefore = array_keys((array) $this->extractPrivate($driver, 'storage') ?? []); // @phpstan-ignore nullCoalesce.expr
         self::assertNotEmpty($keysBefore, 'Persistent write should populate the non-tag store.');
 
         $role       = Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard' => 'web']);
@@ -319,7 +319,7 @@ final class ResolutionCacheTest extends TestCase
         // non-tag branch leaves them to expire on TTL.
         self::assertSame(
             $keysBefore,
-            \array_keys((array) $this->extractPrivate($driver, 'storage') ?? []), // @phpstan-ignore nullCoalesce.expr
+            array_keys((array) $this->extractPrivate($driver, 'storage') ?? []), // @phpstan-ignore nullCoalesce.expr
             'Non-tag store must keep persistent entries after a role-pivot mutation.',
         );
 
@@ -353,7 +353,7 @@ final class ResolutionCacheTest extends TestCase
         $user->syncRoles(['a', 'b']);
 
         $first = $user->fresh()?->getRoles() ?? [];
-        \sort($first);
+        sort($first);
         self::assertSame(['a', 'b'], $first);
 
         $user->syncRoles(['c']);
@@ -417,9 +417,9 @@ final class ResolutionCacheTest extends TestCase
 
         /** @var \Illuminate\Contracts\Cache\Repository $store */
         $store = Cache::store('array');
-        $keys  = \array_filter(
-            \array_keys((array) $this->extractPrivate($store->getStore(), 'storage') ?? []), // @phpstan-ignore nullCoalesce.expr
-            static fn (mixed $key): bool => \is_string($key) && \str_contains($key, 'service-account:' . $principalId),
+        $keys  = array_filter(
+            array_keys((array) $this->extractPrivate($store->getStore(), 'storage') ?? []), // @phpstan-ignore nullCoalesce.expr
+            static fn (mixed $key): bool => is_string($key) && str_contains($key, 'service-account:' . $principalId),
         );
 
         self::assertNotEmpty($keys, 'Persistent cache entry should key on the duck-typed morph class and key.');
@@ -464,13 +464,13 @@ final class ResolutionCacheTest extends TestCase
         // cache key is discoverable, then corrupt it.
         $cache->rememberPolicies($principal, static fn (): array => []);
 
-        $keys = \array_filter(
-            \array_keys((array) $this->extractPrivate($driver, 'storage') ?? []), // @phpstan-ignore nullCoalesce.expr
-            static fn (mixed $key): bool => \is_string($key) && \str_starts_with($key, 'authorization-test:policies:'),
+        $keys = array_filter(
+            array_keys((array) $this->extractPrivate($driver, 'storage') ?? []), // @phpstan-ignore nullCoalesce.expr
+            static fn (mixed $key): bool => is_string($key) && str_starts_with($key, 'authorization-test:policies:'),
         );
 
         self::assertNotEmpty($keys);
-        $policyKey = (string) \array_values($keys)[0]; // @phpstan-ignore cast.useless
+        $policyKey = (string) array_values($keys)[0]; // @phpstan-ignore cast.useless
 
         // Seed a malformed payload — a list of non-array entries
         // will fail the `Policy::fromArray` contract.
@@ -728,7 +728,7 @@ final class ResolutionCacheTest extends TestCase
 
         $cache->rememberRoles($principal, static fn (): array => ['r']);
 
-        $hash       = \spl_object_hash($principal);
+        $hash       = spl_object_hash($principal);
         $expectedId = "obj:{$hash}";
         $key        = "spl:roles:empty-morph:{$expectedId}";
 
@@ -1064,7 +1064,7 @@ final class ResolutionCacheTest extends TestCase
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'nk');
 
         $principal = new \stdClass;
-        $hash      = \spl_object_hash($principal);
+        $hash      = spl_object_hash($principal);
 
         $cache->rememberRoles($principal, static fn (): array => ['r']);
 

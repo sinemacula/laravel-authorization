@@ -91,7 +91,7 @@ final class AuthorizationManagerBench extends BenchmarkCase
      */
     public function getManager(): AuthorizationManager
     {
-        \assert($this->manager !== null, 'setUp() must populate $manager before a subject method runs.');
+        assert($this->manager !== null, 'setUp() must populate $manager before a subject method runs.');
 
         return $this->manager;
     }
@@ -103,7 +103,7 @@ final class AuthorizationManagerBench extends BenchmarkCase
      */
     public function getUser(): BenchmarkIdentity
     {
-        \assert($this->user !== null, 'setUp() must populate $user before a subject method runs.');
+        assert($this->user !== null, 'setUp() must populate $user before a subject method runs.');
 
         return $this->user;
     }

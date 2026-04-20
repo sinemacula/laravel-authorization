@@ -70,9 +70,9 @@ final class GateConflictModeTest extends TestCase
         self::assertTrue(Gate::forUser((object) [])->allows(self::CONFLICTING_PERMISSION));
 
         $spy->shouldHaveReceived('warning')->withArgs(
-            static fn (mixed $message): bool => \is_string($message)
-                && \str_contains($message, self::CONFLICTING_PERMISSION)
-                && \str_contains($message, 'already registered'),
+            static fn (mixed $message): bool => is_string($message)
+                && str_contains($message, self::CONFLICTING_PERMISSION)
+                && str_contains($message, 'already registered'),
         )->once();
     }
 

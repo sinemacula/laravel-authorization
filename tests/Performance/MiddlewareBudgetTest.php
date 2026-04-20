@@ -56,13 +56,13 @@ final class MiddlewareBudgetTest extends TestCase
         $request    = Request::create('/budget', 'GET');
         $next       = static fn (): Response => new Response('ok', 200);
 
-        $start = \microtime(true);
+        $start = microtime(true);
 
         for ($i = 0; $i < 500; $i++) {
             $middleware->handle($request, $next, 'admin');
         }
 
-        $elapsed = \microtime(true) - $start;
+        $elapsed = microtime(true) - $start;
 
         self::assertLessThan(
             0.25,
@@ -96,13 +96,13 @@ final class MiddlewareBudgetTest extends TestCase
         $request    = Request::create('/budget', 'GET');
         $next       = static fn (): Response => new Response('ok', 200);
 
-        $start = \microtime(true);
+        $start = microtime(true);
 
         for ($i = 0; $i < 500; $i++) {
             $middleware->handle($request, $next, 'posts:edit');
         }
 
-        $elapsed = \microtime(true) - $start;
+        $elapsed = microtime(true) - $start;
 
         self::assertLessThan(
             0.5,

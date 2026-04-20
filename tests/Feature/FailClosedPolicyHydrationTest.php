@@ -67,7 +67,7 @@ final class FailClosedPolicyHydrationTest extends TestCase
         DB::table('policies')->insert([
             'id'         => $badId,
             'name'       => 'bad',
-            'document'   => \json_encode(['not' => 'valid-policy-shape']),
+            'document'   => json_encode(['not' => 'valid-policy-shape']),
             'created_at' => now(),
             'updated_at' => now(),
         ]);
@@ -108,7 +108,7 @@ final class FailClosedPolicyHydrationTest extends TestCase
         DB::table('policies')->insert([
             'id'         => $badId,
             'name'       => 'corrupted',
-            'document'   => \json_encode(['malformed' => true]),
+            'document'   => json_encode(['malformed' => true]),
             'created_at' => now(),
             'updated_at' => now(),
         ]);

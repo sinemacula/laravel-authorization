@@ -43,7 +43,7 @@ final class PolicyObserver
     {
         $snapshot = [];
 
-        foreach (\array_keys($policy->getDirty()) as $key) {
+        foreach (array_keys($policy->getDirty()) as $key) {
             $snapshot[$key] = $policy->getOriginal($key);
         }
 

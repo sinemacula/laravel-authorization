@@ -96,9 +96,9 @@ class SyncPermissionsCommand extends Command
     {
         /** @var array<string, mixed>|bool|float|int|string|null $rawFormat */
         $rawFormat = $this->option('format');
-        $format    = \is_string($rawFormat) ? $rawFormat : '';
+        $format    = is_string($rawFormat) ? $rawFormat : '';
 
-        if (!\in_array($format, [self::FORMAT_TABLE, self::FORMAT_JSON], true)) {
+        if (!in_array($format, [self::FORMAT_TABLE, self::FORMAT_JSON], true)) {
             $this->error("Invalid --format '{$format}'. Expected 'table' or 'json'.");
 
             return self::EXIT_FATAL;
@@ -145,11 +145,11 @@ class SyncPermissionsCommand extends Command
         $classes = [];
 
         foreach ($raw as $candidate) {
-            if (!\is_string($candidate) || $candidate === '') {
+            if (!is_string($candidate) || $candidate === '') {
                 continue;
             }
 
-            if (!\is_subclass_of($candidate, PermissionEnum::class)) {
+            if (!is_subclass_of($candidate, PermissionEnum::class)) {
                 continue;
             }
 
@@ -181,7 +181,7 @@ class SyncPermissionsCommand extends Command
             ->get()
             ->all();
 
-        return \array_values($rows);
+        return array_values($rows);
     }
 
     /**
@@ -382,12 +382,12 @@ class SyncPermissionsCommand extends Command
         $this->table(
             ['Bucket', 'Count'],
             [
-                ['Added', (string) \count($diff->add)],
-                ['Updated', (string) \count($diff->update)],
-                ['Reinstated', (string) \count($diff->reinstate)],
-                ['Retired', (string) \count($diff->retire)],
-                ['Protected', (string) \count($diff->protected)],
-                ['Unchanged', (string) \count($diff->unchanged)],
+                ['Added', (string) count($diff->add)],
+                ['Updated', (string) count($diff->update)],
+                ['Reinstated', (string) count($diff->reinstate)],
+                ['Retired', (string) count($diff->retire)],
+                ['Protected', (string) count($diff->protected)],
+                ['Unchanged', (string) count($diff->unchanged)],
                 ['Role references on retired', (string) $diff->roleReferencesCount],
             ],
         );
@@ -445,24 +445,24 @@ class SyncPermissionsCommand extends Command
         $payload = [
             'dryRun'  => $dryRun,
             'summary' => [
-                'add'            => \count($diff->add),
-                'update'         => \count($diff->update),
-                'reinstate'      => \count($diff->reinstate),
-                'retire'         => \count($diff->retire),
-                'protected'      => \count($diff->protected),
-                'unchanged'      => \count($diff->unchanged),
+                'add'            => count($diff->add),
+                'update'         => count($diff->update),
+                'reinstate'      => count($diff->reinstate),
+                'retire'         => count($diff->retire),
+                'protected'      => count($diff->protected),
+                'unchanged'      => count($diff->unchanged),
                 'roleReferences' => $diff->roleReferencesCount,
             ],
             'changes' => [
-                'add'       => \array_map(fn (PermissionTuple $t): array => $this->describeTuple($t, 'add'), $diff->add),
-                'update'    => \array_map(fn (array $p): array => $this->describeTuple($p['tuple'], 'update'), $diff->update),
-                'reinstate' => \array_map(fn (array $p): array => $this->describeTuple($p['tuple'], 'reinstate'), $diff->reinstate),
-                'retire'    => \array_map(fn (Permission $r): array => $this->describeRow($r, 'retire'), $diff->retire),
-                'protected' => \array_map(fn (Permission $r): array => $this->describeRow($r, 'protected'), $diff->protected),
+                'add'       => array_map(fn (PermissionTuple $t): array => $this->describeTuple($t, 'add'), $diff->add),
+                'update'    => array_map(fn (array $p): array => $this->describeTuple($p['tuple'], 'update'), $diff->update),
+                'reinstate' => array_map(fn (array $p): array => $this->describeTuple($p['tuple'], 'reinstate'), $diff->reinstate),
+                'retire'    => array_map(fn (Permission $r): array => $this->describeRow($r, 'retire'), $diff->retire),
+                'protected' => array_map(fn (Permission $r): array => $this->describeRow($r, 'protected'), $diff->protected),
             ],
         ];
 
-        $this->line((string) \json_encode($payload, \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES));
+        $this->line((string) json_encode($payload, \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES));
     }
 
     /**
@@ -540,10 +540,10 @@ class SyncPermissionsCommand extends Command
             return self::SUCCESS;
         }
 
-        $driftCount = \count($diff->add)
-            + \count($diff->update)
-            + \count($diff->reinstate)
-            + \count($diff->retire);
+        $driftCount = count($diff->add)
+            + count($diff->update)
+            + count($diff->reinstate)
+            + count($diff->retire);
 
         return $driftCount > 0 ? self::EXIT_DRIFT : self::SUCCESS;
     }

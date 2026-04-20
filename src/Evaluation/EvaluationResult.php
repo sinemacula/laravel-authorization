@@ -121,7 +121,7 @@ final readonly class EvaluationResult
     public function explain(): string
     {
         $verdict = $this->allowed ? 'ALLOW' : 'DENY';
-        $summary = \sprintf('%s — %s.', $verdict, $this->reason->label());
+        $summary = sprintf('%s — %s.', $verdict, $this->reason->label());
 
         if ($this->trace === []) {
             return $summary;
@@ -130,7 +130,7 @@ final readonly class EvaluationResult
         $lines = [$summary, 'Trace:'];
 
         foreach ($this->trace as $entry) {
-            $lines[] = \sprintf(
+            $lines[] = sprintf(
                 '  [%s] %s#%d — %s',
                 $entry['decision']->value,
                 $entry['policy'],
@@ -139,6 +139,6 @@ final readonly class EvaluationResult
             );
         }
 
-        return \implode("\n", $lines);
+        return implode("\n", $lines);
     }
 }

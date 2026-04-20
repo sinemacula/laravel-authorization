@@ -69,9 +69,9 @@ final class PolymorphicIdentityTest extends TestCase
             ->pluck('authorizable_type')
             ->all();
 
-        \sort($types);
+        sort($types);
 
         // @phpstan-ignore-next-line return.type, arrayValues.list
-        return \array_values($types);
+        return array_values($types);
     }
 }

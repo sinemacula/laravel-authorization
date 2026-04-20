@@ -343,8 +343,8 @@ final class PermissionDiffBuilderTest extends TestCase
         );
 
         self::assertSame([$addTuple], $diff->add);
-        self::assertSame([$updateRow], \array_column($diff->update, 'row'));
-        self::assertSame([$reinstateRow], \array_column($diff->reinstate, 'row'));
+        self::assertSame([$updateRow], array_column($diff->update, 'row'));
+        self::assertSame([$reinstateRow], array_column($diff->reinstate, 'row'));
         self::assertSame([$retireRow], $diff->retire);
         self::assertSame([$protectedRow], $diff->protected);
         self::assertSame([$unchangedRow], $diff->unchanged);
@@ -409,11 +409,11 @@ final class PermissionDiffBuilderTest extends TestCase
         self::assertCount(4, $diff->update);
         self::assertSame(
             [$rowANull, $rowAApi, $rowAWeb, $rowZ],
-            \array_column($diff->update, 'row'),
+            array_column($diff->update, 'row'),
         );
         self::assertSame(
             [$tupleANull, $tupleAApi, $tupleAWeb, $tupleZ],
-            \array_column($diff->update, 'tuple'),
+            array_column($diff->update, 'tuple'),
         );
     }
 

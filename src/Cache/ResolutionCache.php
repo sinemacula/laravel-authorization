@@ -61,7 +61,7 @@ final class ResolutionCache
         $context ??= new ResolutionCacheContext;
         $key = $this->key('policies', $principal);
 
-        if (\array_key_exists($key, $this->memo)) {
+        if (array_key_exists($key, $this->memo)) {
             /** @var array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy> */
             return $this->memo[$key];
         }
@@ -77,7 +77,7 @@ final class ResolutionCache
         $this->memo[$key] = $policies;
 
         if ($this->store !== null) {
-            $documents = \array_map(static fn (Policy $policy): array => $policy->toArray(), $policies);
+            $documents = array_map(static fn (Policy $policy): array => $policy->toArray(), $policies);
             $this->putInStore($key, $documents, $principal, $context->roleIds, $context->maxTtl);
         }
 
@@ -193,8 +193,8 @@ final class ResolutionCache
         }
 
         /** @var mixed $raw */
-        $raw = \method_exists($role, 'getKey') ? $role->getKey() : null;
-        $id  = (\is_string($raw) || \is_int($raw)) ? (string) $raw : '';
+        $raw = method_exists($role, 'getKey') ? $role->getKey() : null;
+        $id  = (is_string($raw) || is_int($raw)) ? (string) $raw : '';
 
         if ($id === '') {
             return;
@@ -247,20 +247,20 @@ final class ResolutionCache
         $type = $principal::class;
         $id   = null;
 
-        if (\method_exists($principal, 'getMorphClass')) {
+        if (method_exists($principal, 'getMorphClass')) {
             /** @var mixed $morph */
             $morph = $principal->getMorphClass();
 
-            if (\is_string($morph) && $morph !== '') {
+            if (is_string($morph) && $morph !== '') {
                 $type = $morph;
             }
         }
 
-        if (\method_exists($principal, 'getKey')) {
+        if (method_exists($principal, 'getKey')) {
             /** @var mixed $raw */
             $raw = $principal->getKey();
 
-            if (\is_string($raw) || \is_int($raw)) {
+            if (is_string($raw) || is_int($raw)) {
                 $candidate = (string) $raw;
 
                 if ($candidate !== '') {
@@ -270,7 +270,7 @@ final class ResolutionCache
         }
 
         if ($id === null) {
-            $id = 'obj:' . \spl_object_hash($principal);
+            $id = 'obj:' . spl_object_hash($principal);
         }
 
         return "{$type}:{$id}";
@@ -297,7 +297,7 @@ final class ResolutionCache
             /** @var mixed $raw */
             $raw = $this->readFromStore($key, $principal, $roleIds);
 
-            if (!\is_array($raw)) {
+            if (!is_array($raw)) {
                 return null;
             }
 
@@ -305,7 +305,7 @@ final class ResolutionCache
 
             foreach ($raw as $document) {
 
-                if (!\is_array($document)) {
+                if (!is_array($document)) {
                     throw new \UnexpectedValueException('Cached policy entry is not an array document.');
                 }
 
@@ -384,7 +384,7 @@ final class ResolutionCache
 
         $driver = $this->store->getStore();
 
-        return $this->taggable = \method_exists($driver, 'tags');
+        return $this->taggable = method_exists($driver, 'tags');
     }
 
     /**
@@ -407,7 +407,7 @@ final class ResolutionCache
             $tags[] = "{$this->prefix}:role:{$id}";
         }
 
-        return \array_values(\array_unique($tags));
+        return array_values(array_unique($tags));
     }
 
     /**
@@ -476,7 +476,7 @@ final class ResolutionCache
         // Defensive: the Laravel `logger()` helper is always present under a
         // booted framework, so this fallback is reachable only from non-Laravel
         // embeddings.
-        if (!\function_exists('logger')) {
+        if (!function_exists('logger')) {
             return;
         }
         // @codeCoverageIgnoreEnd
@@ -572,7 +572,7 @@ final class ResolutionCache
         // invalidates itself before the grant actually elapses — avoids a race
         // where the cache returns a role one millisecond before the DB filter
         // would drop it.
-        return [false, \min($base, $maxTtl) - 1];
+        return [false, min($base, $maxTtl) - 1];
     }
 
     /**
@@ -589,7 +589,7 @@ final class ResolutionCache
     {
         $key = $this->key($kind, $principal);
 
-        if (\array_key_exists($key, $this->memo)) {
+        if (array_key_exists($key, $this->memo)) {
             /** @var array<int, string> */
             return $this->memo[$key];
         }
@@ -600,8 +600,8 @@ final class ResolutionCache
                 /** @var mixed $raw */
                 $raw = $this->readFromStore($key, $principal, $roleIds);
 
-                if (\is_array($raw)) {
-                    return $this->memo[$key] = \array_values(\array_filter($raw, 'is_string'));
+                if (is_array($raw)) {
+                    return $this->memo[$key] = array_values(array_filter($raw, 'is_string'));
                 }
             } catch (\Throwable $exception) {
                 // Corrupt persistent-cache entry — forget the key, log, and

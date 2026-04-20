@@ -56,13 +56,13 @@ final class BladeHelpersBudgetTest extends TestCase
 
         $this->actAs($user);
 
-        $start = \microtime(true);
+        $start = microtime(true);
 
         for ($i = 0; $i < 50; $i++) {
             BladeHelpers::hasRole('admin');
         }
 
-        $elapsed = \microtime(true) - $start;
+        $elapsed = microtime(true) - $start;
 
         self::assertLessThan(
             0.1,
@@ -98,13 +98,13 @@ final class BladeHelpersBudgetTest extends TestCase
 
         $this->actAs($user);
 
-        $start = \microtime(true);
+        $start = microtime(true);
 
         for ($i = 0; $i < 50; $i++) {
             BladeHelpers::hasPermission('posts:edit');
         }
 
-        $elapsed = \microtime(true) - $start;
+        $elapsed = microtime(true) - $start;
 
         self::assertLessThan(
             0.2,

@@ -56,13 +56,13 @@ final class ResolutionCacheBudgetTest extends TestCase
         // Prime the memo so the measured calls all hit the memo tier.
         $cache->rememberPermissions($principal, $resolver);
 
-        $start = \microtime(true);
+        $start = microtime(true);
 
         for ($i = 0; $i < 10000; $i++) {
             $cache->rememberPermissions($principal, $resolver);
         }
 
-        $elapsed = \microtime(true) - $start;
+        $elapsed = microtime(true) - $start;
 
         self::assertLessThan(
             0.1,

@@ -524,6 +524,6 @@ final class BladeDirectivesTest extends TestCase
      */
     private function render(string $template): string
     {
-        return \trim(Blade::render($template));
+        return trim(Blade::render($template));
     }
 }

@@ -162,7 +162,7 @@ final readonly class Statement
         ?object $principal = null,
         ?string $resource = null,
     ): bool {
-        if (!\is_string($key) || !\array_key_exists($key, $context)) {
+        if (!is_string($key) || !array_key_exists($key, $context)) {
             return false;
         }
 
@@ -183,7 +183,7 @@ final readonly class Statement
      */
     private static function resolveEffect(array $data): PolicyEffect
     {
-        if (!isset($data['effect']) || !\is_string($data['effect'])) {
+        if (!isset($data['effect']) || !is_string($data['effect'])) {
             throw new \InvalidArgumentException('Policy statement requires a string effect.');
         }
 
@@ -201,7 +201,7 @@ final readonly class Statement
      */
     private static function resolveActions(array $data): array
     {
-        if (!isset($data['actions']) || !\is_array($data['actions']) || $data['actions'] === []) {
+        if (!isset($data['actions']) || !is_array($data['actions']) || $data['actions'] === []) {
             throw new \InvalidArgumentException('Policy statement requires at least one action.');
         }
 
@@ -218,11 +218,11 @@ final readonly class Statement
      */
     private static function resolveResources(array $data): array
     {
-        if (!\array_key_exists('resources', $data)) {
+        if (!array_key_exists('resources', $data)) {
             return ['*'];
         }
 
-        if (!\is_array($data['resources'])) {
+        if (!is_array($data['resources'])) {
             throw new \InvalidArgumentException('Policy statement resources must be an array of strings.');
         }
 
@@ -241,18 +241,18 @@ final readonly class Statement
      */
     private static function resolveConditions(array $data): array
     {
-        if (!\array_key_exists('conditions', $data)) {
+        if (!array_key_exists('conditions', $data)) {
             return [];
         }
 
-        if (!\is_array($data['conditions'])) {
+        if (!is_array($data['conditions'])) {
             throw new \InvalidArgumentException('Policy statement conditions must be an associative array.');
         }
 
         $conditions = [];
 
         foreach ($data['conditions'] as $key => $value) {
-            if (!\is_string($key)) {
+            if (!is_string($key)) {
                 throw new \InvalidArgumentException('Policy statement conditions must use string keys.');
             }
 
@@ -273,8 +273,8 @@ final readonly class Statement
      */
     private static function normaliseStringList(array $values, string $fieldName): array
     {
-        return \array_values(\array_map(static function (mixed $value) use ($fieldName): string {
-            if (!\is_string($value)) {
+        return array_values(array_map(static function (mixed $value) use ($fieldName): string {
+            if (!is_string($value)) {
                 throw new \InvalidArgumentException("Policy statement {$fieldName} must be strings.");
             }
 
@@ -296,7 +296,7 @@ final readonly class Statement
     private function matchesAction(string $action): bool
     {
         foreach ($this->actions as $pattern) {
-            if (\fnmatch($pattern, $action, \FNM_NOESCAPE)) {
+            if (fnmatch($pattern, $action, \FNM_NOESCAPE)) {
                 return true;
             }
         }
@@ -327,7 +327,7 @@ final readonly class Statement
                 ? $interpolator->interpolate($pattern, $principal, $resource, $context)
                 : $pattern;
 
-            if (\fnmatch($resolved, $resource, \FNM_NOESCAPE)) {
+            if (fnmatch($resolved, $resource, \FNM_NOESCAPE)) {
                 return true;
             }
         }
@@ -356,15 +356,15 @@ final readonly class Statement
         ?string $resource,
         array $context,
     ): mixed {
-        if (\is_string($expected)) {
+        if (is_string($expected)) {
             return $interpolator->interpolate($expected, $principal, $resource, $context);
         }
 
-        if (\is_array($expected)) {
+        if (is_array($expected)) {
             $interpolated = [];
 
             foreach ($expected as $key => $value) {
-                $interpolated[$key] = \is_string($value)
+                $interpolated[$key] = is_string($value)
                     ? $interpolator->interpolate($value, $principal, $resource, $context)
                     : $value;
             }
@@ -384,12 +384,12 @@ final readonly class Statement
      */
     private function evaluateCondition(mixed $expected, mixed $actual): bool
     {
-        if (!\is_array($expected)) {
+        if (!is_array($expected)) {
             return $expected === $actual;
         }
 
         foreach ($expected as $operator => $operand) {
-            if (!\is_string($operator) || !self::evaluateOperator($operator, $operand, $actual)) {
+            if (!is_string($operator) || !self::evaluateOperator($operator, $operand, $actual)) {
                 return false;
             }
         }
@@ -410,8 +410,8 @@ final readonly class Statement
         return match ($operator) {
             'eq'     => $actual === $operand,
             'neq'    => $actual !== $operand,
-            'in'     => \is_array($operand) && \in_array($actual, $operand, true),
-            'not_in' => \is_array($operand) && !\in_array($actual, $operand, true),
+            'in'     => is_array($operand) && in_array($actual, $operand, true),
+            'not_in' => is_array($operand) && !in_array($actual, $operand, true),
             'cidr',
             'starts_with',
             'ends_with',
@@ -442,15 +442,15 @@ final readonly class Statement
      */
     private static function evaluateStringOperator(string $operator, mixed $operand, mixed $actual): bool
     {
-        if (!\is_string($actual) || !\is_string($operand)) {
+        if (!is_string($actual) || !is_string($operand)) {
             return false;
         }
 
         return match ($operator) {
             'cidr'        => ConditionEvaluator::matchesCidr($actual, $operand),
-            'starts_with' => \str_starts_with($actual, $operand),
-            'ends_with'   => \str_ends_with($actual, $operand),
-            'string_like' => \fnmatch($operand, $actual, \FNM_NOESCAPE),
+            'starts_with' => str_starts_with($actual, $operand),
+            'ends_with'   => str_ends_with($actual, $operand),
+            'string_like' => fnmatch($operand, $actual, \FNM_NOESCAPE),
             default       => false,
         };
     }

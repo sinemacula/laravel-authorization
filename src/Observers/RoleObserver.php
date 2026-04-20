@@ -63,7 +63,7 @@ final class RoleObserver
     {
         $snapshot = [];
 
-        foreach (\array_keys($role->getDirty()) as $key) {
+        foreach (array_keys($role->getDirty()) as $key) {
             $snapshot[$key] = $role->getOriginal($key);
         }
 

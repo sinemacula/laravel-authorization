@@ -562,7 +562,7 @@ final class AuthorizationManagerTest extends TestCase
         $principal = \Mockery::mock(AuthorizableIdentity::class);
 
         $principal->shouldReceive('hasPermission')
-            ->andReturnUsing(static fn (mixed $permission): bool => \in_array($permission, $permissions, true));
+            ->andReturnUsing(static fn (mixed $permission): bool => in_array($permission, $permissions, true));
 
         $principal->shouldReceive('getPolicies')
             ->andReturn($policies);

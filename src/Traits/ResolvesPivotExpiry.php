@@ -39,7 +39,7 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
             /** @var mixed $key */
             $key = $model->getKey();
 
-            if (\is_string($key) || \is_int($key)) {
+            if (is_string($key) || is_int($key)) {
                 $stringKey = (string) $key;
 
                 if ($stringKey !== '') {
@@ -48,7 +48,7 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
             }
         }
 
-        return \array_values(\array_unique($ids));
+        return array_values(array_unique($ids));
     }
 
     /**
@@ -136,7 +136,7 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
     {
         return match (true) {
             $raw instanceof \DateTimeInterface => Carbon::instance(Carbon::parse($raw)),
-            \is_string($raw) && $raw !== ''    => Carbon::parse($raw),
+            is_string($raw) && $raw !== ''     => Carbon::parse($raw),
             default                            => null,
         };
     }
@@ -159,7 +159,7 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
             return $left;
         }
 
-        return \min($left, $right);
+        return min($left, $right);
     }
 
     /**
@@ -260,7 +260,7 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
             return $value;
         }
 
-        if (\is_string($value) && $value !== '') {
+        if (is_string($value) && $value !== '') {
             return Carbon::parse($value);
         }
 
@@ -312,6 +312,6 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
 
         $value = $reflection->getMethod('getAuthorizationGuard')->invoke($identity);
 
-        return \is_string($value) ? $value : null;
+        return is_string($value) ? $value : null;
     }
 }

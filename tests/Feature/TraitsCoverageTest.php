@@ -111,8 +111,8 @@ final class TraitsCoverageTest extends TestCase
      */
     private static function sorted(array $values): array
     {
-        \sort($values);
+        sort($values);
 
-        return \array_values($values); // @phpstan-ignore arrayValues.list
+        return array_values($values); // @phpstan-ignore arrayValues.list
     }
 }

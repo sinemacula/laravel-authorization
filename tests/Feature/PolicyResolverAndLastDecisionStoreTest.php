@@ -115,7 +115,7 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
         $resolver = new DefaultPolicyResolver(store: $store);
 
         $policies = $resolver->policiesFor($user->fresh());
-        $names    = \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $policies);
+        $names    = array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $policies);
 
         self::assertCount(2, $policies);
         self::assertContains('store-side', $names);

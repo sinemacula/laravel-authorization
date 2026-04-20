@@ -44,10 +44,10 @@ final class ContextInterpolator
      */
     public function interpolate(string $pattern, ?object $principal, ?string $resource, array $context): string
     {
-        $result = \preg_replace_callback(self::TOKEN_PATTERN, fn (array $matches): string => $this->resolveToken($matches[1], $principal, $resource, $context), $pattern);
+        $result = preg_replace_callback(self::TOKEN_PATTERN, fn (array $matches): string => $this->resolveToken($matches[1], $principal, $resource, $context), $pattern);
 
         // Unescape literal \${ sequences
-        return \str_replace('\${', '${', $result ?? $pattern);
+        return str_replace('\${', '${', $result ?? $pattern);
     }
 
     /**
@@ -61,9 +61,9 @@ final class ContextInterpolator
      */
     private function resolveToken(string $token, ?object $principal, ?string $resource, array $context): string
     {
-        $dotPos    = \strpos($token, '.');
-        $namespace = $dotPos === false ? $token : \substr($token, 0, $dotPos);
-        $key       = $dotPos === false ? '' : \substr($token, $dotPos + 1);
+        $dotPos    = strpos($token, '.');
+        $namespace = $dotPos === false ? $token : substr($token, 0, $dotPos);
+        $key       = $dotPos === false ? '' : substr($token, $dotPos + 1);
 
         $value = match ($namespace) {
             'principal' => $this->resolvePrincipal($principal, $key),
@@ -102,18 +102,18 @@ final class ContextInterpolator
         $value = null;
 
         // Eloquent models: use getAttribute for transparent accessor support
-        if (\method_exists($principal, 'getAttribute')) {
+        if (method_exists($principal, 'getAttribute')) {
             /** @var mixed $value */
             $value = $principal->getAttribute($key);
-        } elseif (\property_exists($principal, $key)) {
+        } elseif (property_exists($principal, $key)) {
             // Plain objects: property access
             /** @var array<string, mixed> $vars */
-            $vars = \get_object_vars($principal);
+            $vars = get_object_vars($principal);
             /** @var mixed $value */
             $value = $vars[$key] ?? null;
         }
 
-        return \is_scalar($value) ? $value : null;
+        return is_scalar($value) ? $value : null;
     }
 
     /**
@@ -127,7 +127,7 @@ final class ContextInterpolator
      */
     private function resolvePrincipalType(object $principal): string
     {
-        if (\method_exists($principal, 'getMorphClass')) {
+        if (method_exists($principal, 'getMorphClass')) {
             return $principal->getMorphClass();
         }
 
@@ -150,7 +150,7 @@ final class ContextInterpolator
         /** @var mixed $value */
         $value = Arr::get($context, $key);
 
-        return \is_scalar($value) ? $value : null;
+        return is_scalar($value) ? $value : null;
     }
 
     /**
@@ -170,11 +170,11 @@ final class ContextInterpolator
             return null;
         }
 
-        $colonPos = \strpos($resource, ':');
+        $colonPos = strpos($resource, ':');
 
         return match ($key) {
-            'id'    => $colonPos === false ? $resource : \substr($resource, $colonPos + 1),
-            'type'  => $colonPos === false ? $resource : \substr($resource, 0, $colonPos),
+            'id'    => $colonPos === false ? $resource : substr($resource, $colonPos + 1),
+            'type'  => $colonPos === false ? $resource : substr($resource, 0, $colonPos),
             default => null,
         };
     }
@@ -187,7 +187,7 @@ final class ContextInterpolator
      */
     private static function logUnresolved(string $token): void
     {
-        if (\function_exists('logger')) {
+        if (function_exists('logger')) {
             try {
                 // @phpstan-ignore-next-line function.notFound
                 logger()->debug("Unresolved interpolation token '\${$token}' — resolved to empty string.");

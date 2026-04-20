@@ -44,13 +44,13 @@ final class PolicyParseBudgetTest extends TestCase
     {
         $document = self::buildRealisticDocument();
 
-        $start = \microtime(true);
+        $start = microtime(true);
 
         for ($i = 0; $i < 1000; $i++) {
             Policy::fromArray($document);
         }
 
-        $elapsed = \microtime(true) - $start;
+        $elapsed = microtime(true) - $start;
 
         self::assertLessThan(
             1.0,

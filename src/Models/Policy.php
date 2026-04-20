@@ -89,7 +89,7 @@ class Policy extends Model
             throw new InvalidPolicyDocumentException(policyName: $this->resolveName(), reason: $exception->getMessage(), previous: $exception);
         }
 
-        $encoded = \json_encode($document);
+        $encoded = json_encode($document);
 
         // @codeCoverageIgnoreStart
         // Defensive: the preceding `EvaluationPolicy::fromArray` round-trip
@@ -167,15 +167,15 @@ class Policy extends Model
      */
     private function normaliseDocument(mixed $value): array
     {
-        if (\is_array($value)) {
+        if (is_array($value)) {
             /** @var array<string, mixed> $value */
             return $value;
         }
 
-        if (\is_string($value) && $value !== '') {
-            $decoded = \json_decode($value, true);
+        if (is_string($value) && $value !== '') {
+            $decoded = json_decode($value, true);
 
-            if (\is_array($decoded)) {
+            if (is_array($decoded)) {
                 /** @var array<string, mixed> $decoded */
                 return $decoded;
             }
@@ -193,7 +193,7 @@ class Policy extends Model
     {
         $name = $this->name ?? ($this->attributes['name'] ?? null);
 
-        return \is_string($name) && $name !== '' ? $name : self::UNNAMED_PLACEHOLDER;
+        return is_string($name) && $name !== '' ? $name : self::UNNAMED_PLACEHOLDER;
     }
 
     /**
@@ -204,10 +204,10 @@ class Policy extends Model
      */
     private function withName(array $document): array
     {
-        if (!isset($document['name']) || !\is_string($document['name']) || $document['name'] === '') {
+        if (!isset($document['name']) || !is_string($document['name']) || $document['name'] === '') {
             $name = $this->name ?? ($this->attributes['name'] ?? null);
 
-            if (\is_string($name) && $name !== '') {
+            if (is_string($name) && $name !== '') {
                 $document['name'] = $name;
             }
         }

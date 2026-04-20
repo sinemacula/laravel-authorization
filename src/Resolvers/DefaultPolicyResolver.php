@@ -57,9 +57,9 @@ final class DefaultPolicyResolver implements PolicyResolver
         }
 
         if ($principal instanceof AuthorizableIdentity) {
-            $policies = \array_merge($policies, $principal->getPolicies());
+            $policies = array_merge($policies, $principal->getPolicies());
         }
 
-        return \array_values($policies);
+        return array_values($policies);
     }
 }

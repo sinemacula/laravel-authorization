@@ -84,7 +84,7 @@ final class UncoveredBranchesTest extends TestCase
         $user->syncRoles(['a', 'b']);
 
         $names = $user->roles->map(static fn (Role $r): string => $r->name)->all();
-        \sort($names);
+        sort($names);
         self::assertSame(['a', 'b'], $names);
     }
 
@@ -122,7 +122,7 @@ final class UncoveredBranchesTest extends TestCase
         $user->syncPermissions(['a:do', 'b:do']);
 
         $names = $user->permissions->map(static fn (Permission $p): string => $p->name)->all();
-        \sort($names);
+        sort($names);
         self::assertSame(['a:do', 'b:do'], $names);
     }
 
@@ -342,7 +342,7 @@ final class UncoveredBranchesTest extends TestCase
         // seeded value for a mixed-type list. The filter branch
         // in `rememberStringList` drops the non-string items and
         // returns only the strings.
-        $key = \array_key_first($driver->storage); // @phpstan-ignore property.notFound
+        $key = array_key_first($driver->storage); // @phpstan-ignore property.notFound
         static::assertIsString($key);
         $driver->storage[$key] = ['valid:perm', 42, null, 'another:perm']; // @phpstan-ignore property.notFound
 
@@ -718,7 +718,7 @@ final class UncoveredBranchesTest extends TestCase
         // fallback path inside `logMalformedPolicy`.
         \Illuminate\Support\Facades\DB::table((string) config('authorization.tables.policies', 'policies')) // @phpstan-ignore cast.string
             ->where('id', $policyId)
-            ->update(['document' => \json_encode(['version' => 'not-an-int'])]);
+            ->update(['document' => json_encode(['version' => 'not-an-int'])]);
 
         $results = $user->fresh()?->getPolicies() ?? [];
         static::assertSame([], $results);
@@ -801,7 +801,7 @@ final class UncoveredBranchesTest extends TestCase
         // so `EvaluationPolicy::fromArray()` raises.
         \Illuminate\Support\Facades\DB::table((string) config('authorization.tables.policies', 'policies')) // @phpstan-ignore cast.string
             ->where('id', $policy->getKey())
-            ->update(['document' => \json_encode(['version' => 'not-an-int'])]);
+            ->update(['document' => json_encode(['version' => 'not-an-int'])]);
 
         $results = $user->fresh()?->getPolicies() ?? [];
         static::assertSame([], $results);
@@ -829,7 +829,7 @@ final class UncoveredBranchesTest extends TestCase
         // raises and the logger branch fires. A non-array element
         // inside the stored list trips `Policy::fromArray()`.
         $cache->rememberPolicies($principal, static fn (): array => []);
-        $key                   = (string) \array_key_first($driver->storage); // @phpstan-ignore property.notFound
+        $key                   = (string) array_key_first($driver->storage); // @phpstan-ignore property.notFound
         $driver->storage[$key] = ['not-an-array']; // @phpstan-ignore property.notFound
 
         $fresh         = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
@@ -979,7 +979,7 @@ final class UncoveredBranchesTest extends TestCase
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         $cache->rememberPolicies($principal, static fn (): array => []);
-        $key                   = (string) \array_key_first($driver->storage); // @phpstan-ignore property.notFound
+        $key                   = (string) array_key_first($driver->storage); // @phpstan-ignore property.notFound
         $driver->storage[$key] = ['still-not-an-array']; // @phpstan-ignore property.notFound
 
         $fresh = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');

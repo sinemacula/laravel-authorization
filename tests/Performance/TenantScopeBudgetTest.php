@@ -103,13 +103,13 @@ final class TenantScopeBudgetTest extends TestCase
         // Prime the memo so every measured call is a warm apply.
         $scope->apply(Role::query(), $role);
 
-        $start = \microtime(true);
+        $start = microtime(true);
 
         for ($i = 0; $i < 1000; $i++) {
             $scope->apply(Role::query(), $role);
         }
 
-        $elapsed = \microtime(true) - $start;
+        $elapsed = microtime(true) - $start;
 
         self::assertLessThan(
             0.25,

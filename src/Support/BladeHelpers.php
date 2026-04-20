@@ -148,12 +148,12 @@ final class BladeHelpers
      */
     private static function flatten(array|string $value): array
     {
-        $items = \is_array($value) ? $value : [$value];
+        $items = is_array($value) ? $value : [$value];
 
         $flattened = [];
 
         foreach ($items as $item) {
-            $trimmed = \trim($item);
+            $trimmed = trim($item);
 
             if ($trimmed !== '') {
                 $flattened[] = $trimmed;

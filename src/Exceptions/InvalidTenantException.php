@@ -33,7 +33,7 @@ class InvalidTenantException extends \LogicException
      */
     public function __construct(object $tenant)
     {
-        parent::__construct(\sprintf(
+        parent::__construct(sprintf(
             'Tenant must be an Eloquent Model or implement %s. Got %s.',
             \SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant::class,
             $tenant::class,

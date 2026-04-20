@@ -29,15 +29,15 @@ final class ConditionEvaluator
      */
     public static function matchesCidr(string $ip, string $cidr): bool
     {
-        if (!\str_contains($cidr, '/')) {
+        if (!str_contains($cidr, '/')) {
             return $ip === $cidr;
         }
 
-        [$subnet, $bits] = \explode('/', $cidr, 2);
+        [$subnet, $bits] = explode('/', $cidr, 2);
 
         $bitsInt    = self::parseCidrBits($bits);
-        $ipLong     = \ip2long($ip);
-        $subnetLong = \ip2long($subnet);
+        $ipLong     = ip2long($ip);
+        $subnetLong = ip2long($subnet);
 
         if ($bitsInt === null || $ipLong === false || $subnetLong === false) {
             return false;
@@ -81,7 +81,7 @@ final class ConditionEvaluator
      */
     public static function matchesBetween(mixed $actual, mixed $operand): bool
     {
-        if (!\is_array($operand) || !\array_key_exists(0, $operand) || !\array_key_exists(1, $operand)) {
+        if (!is_array($operand) || !array_key_exists(0, $operand) || !array_key_exists(1, $operand)) {
             return false;
         }
 
@@ -109,7 +109,7 @@ final class ConditionEvaluator
      */
     public static function compareNumeric(mixed $actual, mixed $operand, string $comparator): bool
     {
-        if (!\is_numeric($actual) || !\is_numeric($operand)) {
+        if (!is_numeric($actual) || !is_numeric($operand)) {
             return false;
         }
 
@@ -167,7 +167,7 @@ final class ConditionEvaluator
      */
     public static function logUnknownOperator(string $operator): bool
     {
-        if (\function_exists('logger')) {
+        if (function_exists('logger')) {
             try {
                 // @phpstan-ignore-next-line function.notFound
                 logger()->debug("Unknown authorization condition operator '{$operator}' — evaluated to false.");
@@ -187,7 +187,7 @@ final class ConditionEvaluator
      */
     private static function parseCidrBits(string $bits): ?int
     {
-        if ($bits === '' || !\ctype_digit($bits)) {
+        if ($bits === '' || !ctype_digit($bits)) {
             return null;
         }
 
@@ -205,11 +205,11 @@ final class ConditionEvaluator
      */
     private static function toTimestamp(mixed $value): ?int
     {
-        if (\is_int($value)) {
+        if (is_int($value)) {
             return $value;
         }
 
-        if (!\is_string($value) || $value === '') {
+        if (!is_string($value) || $value === '') {
             return null;
         }
 
@@ -227,7 +227,7 @@ final class ConditionEvaluator
     private static function parseDateString(string $value): false|int
     {
         try {
-            return \strtotime($value);
+            return strtotime($value);
             // @codeCoverageIgnoreStart
             // Defensive: `strtotime()` returns false on PHP 8+ rather than raising, retained for forward-compatibility with ext-date engine changes.
         } catch (\Throwable) {

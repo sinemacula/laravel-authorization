@@ -100,13 +100,13 @@ abstract class BenchmarkCase
     private function runMigrations(): void
     {
         $migrationsPath = __DIR__ . '/../../database/migrations';
-        $files          = \glob($migrationsPath . '/*.php');
+        $files          = glob($migrationsPath . '/*.php');
 
         if ($files === false) {
             return;
         }
 
-        \sort($files);
+        sort($files);
 
         foreach ($files as $file) {
 
@@ -116,7 +116,7 @@ abstract class BenchmarkCase
             // `Illuminate\Database\Migrations\Migrator::resolve()`.
             $migration = include_once $file;
 
-            if (\is_object($migration) && \method_exists($migration, 'up')) {
+            if (is_object($migration) && method_exists($migration, 'up')) {
                 $migration->up();
             }
         }

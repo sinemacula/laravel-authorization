@@ -65,13 +65,13 @@ final class AuthGuardPrincipalResolver implements PrincipalResolver
      */
     private static function defaultGuard(): string
     {
-        if (!\function_exists('config')) {
+        if (!function_exists('config')) {
             return 'web'; // @codeCoverageIgnore
         }
 
         /** @var string|null $guard */
         $guard = config('authorization.defaults.guard');
 
-        return \is_string($guard) && $guard !== '' ? $guard : 'web';
+        return is_string($guard) && $guard !== '' ? $guard : 'web';
     }
 }
