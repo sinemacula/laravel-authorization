@@ -156,7 +156,6 @@ class SyncPermissionsCommand extends Command
                 continue;
             }
 
-            // @var class-string<\SineMacula\Laravel\Authorization\Contracts\PermissionEnum> $candidate
             $classes[] = $candidate;
         }
 
