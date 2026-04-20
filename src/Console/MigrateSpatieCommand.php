@@ -174,35 +174,7 @@ class MigrateSpatieCommand extends Command
      */
     private function migrateRoles(bool $dryRun, array &$counts): array
     {
-        /** @var string $targetTable */
-        $targetTable = config('authorization.tables.roles', 'roles');
-
-        /** @var array<int|string, string> $idMap */
-        $idMap = [];
-
-        $rows = DB::table('roles')->get();
-
-        foreach ($rows as $row) {
-            /** @var array{id: int|string, name: string, guard_name: string|null, created_at: string|null, updated_at: string|null} $roleRow */
-            $roleRow = (array) $row;
-            $newId   = \is_int($roleRow['id']) ? (string) Str::orderedUuid() : $roleRow['id'];
-
-            $idMap[$roleRow['id']] = $newId;
-
-            if (!$dryRun) {
-                DB::table($targetTable)->insert([
-                    'id'         => $newId,
-                    'name'       => $roleRow['name'],
-                    'guard'      => $roleRow['guard_name'] ?? null,
-                    'created_at' => $roleRow['created_at'] ?? now(),
-                    'updated_at' => $roleRow['updated_at'] ?? now(),
-                ]);
-            }
-
-            $counts['roles']++;
-        }
-
-        return $idMap;
+        return $this->migrateNamedEntity('roles', $dryRun, $counts);
     }
 
     /**
@@ -214,32 +186,49 @@ class MigrateSpatieCommand extends Command
      */
     private function migratePermissions(bool $dryRun, array &$counts): array
     {
+        return $this->migrateNamedEntity('permissions', $dryRun, $counts);
+    }
+
+    /**
+     * Copy a Spatie-shaped "named entity" table (roles or
+     * permissions) to the target table, producing a source-to-target
+     * id map. The `$table` value names the Spatie source table, the
+     * `authorization.tables.{table}` config key, and the
+     * counts-array key.
+     *
+     * @param  string  $table
+     * @param  bool  $dryRun
+     * @param  array<string, int>  $counts
+     * @return array<int|string, string>
+     */
+    private function migrateNamedEntity(string $table, bool $dryRun, array &$counts): array
+    {
         /** @var string $targetTable */
-        $targetTable = config('authorization.tables.permissions', 'permissions');
+        $targetTable = config('authorization.tables.' . $table, $table);
 
         /** @var array<int|string, string> $idMap */
         $idMap = [];
 
-        $rows = DB::table('permissions')->get();
+        $rows = DB::table($table)->get();
 
         foreach ($rows as $row) {
-            /** @var array{id: int|string, name: string, guard_name: string|null, created_at: string|null, updated_at: string|null} $permissionRow */
-            $permissionRow = (array) $row;
-            $newId         = \is_int($permissionRow['id']) ? (string) Str::orderedUuid() : $permissionRow['id'];
+            /** @var array{id: int|string, name: string, guard_name: string|null, created_at: string|null, updated_at: string|null} $entity */
+            $entity = (array) $row;
+            $newId  = \is_int($entity['id']) ? (string) Str::orderedUuid() : $entity['id'];
 
-            $idMap[$permissionRow['id']] = $newId;
+            $idMap[$entity['id']] = $newId;
 
             if (!$dryRun) {
                 DB::table($targetTable)->insert([
                     'id'         => $newId,
-                    'name'       => $permissionRow['name'],
-                    'guard'      => $permissionRow['guard_name'] ?? null,
-                    'created_at' => $permissionRow['created_at'] ?? now(),
-                    'updated_at' => $permissionRow['updated_at'] ?? now(),
+                    'name'       => $entity['name'],
+                    'guard'      => $entity['guard_name'] ?? null,
+                    'created_at' => $entity['created_at'] ?? now(),
+                    'updated_at' => $entity['updated_at'] ?? now(),
                 ]);
             }
 
-            $counts['permissions']++;
+            $counts[$table]++;
         }
 
         return $idMap;
@@ -296,30 +285,14 @@ class MigrateSpatieCommand extends Command
      */
     private function migrateModelHasRoles(array $roleIdMap, bool $dryRun, array &$counts): void
     {
-        /** @var string $targetTable */
-        $targetTable = config('authorization.tables.authorizable_roles', 'authorizable_roles');
-
-        $rows = DB::table('model_has_roles')->get();
-
-        foreach ($rows as $row) {
-            /** @var array{role_id: int|string, model_type: string, model_id: int|string} $modelRoleRow */
-            $modelRoleRow = (array) $row;
-            $mappedRoleId = $roleIdMap[$modelRoleRow['role_id']] ?? null;
-
-            if ($mappedRoleId === null) {
-                continue;
-            }
-
-            if (!$dryRun) {
-                DB::table($targetTable)->insert([
-                    'authorizable_type' => $modelRoleRow['model_type'],
-                    'authorizable_id'   => (string) $modelRoleRow['model_id'],
-                    'role_id'           => $mappedRoleId,
-                ]);
-            }
-
-            $counts['authorizable_roles']++;
-        }
+        $this->migrateModelHasRelation(
+            'model_has_roles',
+            'role_id',
+            'authorizable_roles',
+            $roleIdMap,
+            $dryRun,
+            $counts,
+        );
     }
 
     /**
@@ -332,29 +305,66 @@ class MigrateSpatieCommand extends Command
      */
     private function migrateModelHasPermissions(array $permissionIdMap, bool $dryRun, array &$counts): void
     {
-        /** @var string $targetTable */
-        $targetTable = config('authorization.tables.authorizable_permissions', 'authorizable_permissions');
+        $this->migrateModelHasRelation(
+            'model_has_permissions',
+            'permission_id',
+            'authorizable_permissions',
+            $permissionIdMap,
+            $dryRun,
+            $counts,
+        );
+    }
 
-        $rows = DB::table('model_has_permissions')->get();
+    /**
+     * Copy a Spatie-shaped `model_has_*` pivot to the target
+     * `authorizable_*` pivot, translating the foreign id via the
+     * supplied id map. The source and target id columns share the
+     * same name (`role_id` / `permission_id`), and the `$targetKey`
+     * doubles as both the config-key suffix and the counts-array
+     * key.
+     *
+     * @param  string  $sourceTable
+     * @param  string  $idColumn
+     * @param  string  $targetKey
+     * @param  array<int|string, string>  $idMap
+     * @param  bool  $dryRun
+     * @param  array<string, int>  $counts
+     * @return void
+     */
+    private function migrateModelHasRelation(
+        string $sourceTable,
+        string $idColumn,
+        string $targetKey,
+        array $idMap,
+        bool $dryRun,
+        array &$counts,
+    ): void {
+        /** @var string $targetTable */
+        $targetTable = config('authorization.tables.' . $targetKey, $targetKey);
+
+        $rows = DB::table($sourceTable)->get();
 
         foreach ($rows as $row) {
-            /** @var array{permission_id: int|string, model_type: string, model_id: int|string} $modelPermissionRow */
-            $modelPermissionRow = (array) $row;
-            $mappedPermissionId = $permissionIdMap[$modelPermissionRow['permission_id']] ?? null;
+            /** @var array{model_type: string, model_id: int|string, role_id?: int|string, permission_id?: int|string} $pivot */
+            $pivot = (array) $row;
 
-            if ($mappedPermissionId === null) {
+            /** @var int|string $sourceId */
+            $sourceId = $pivot[$idColumn];
+            $mappedId = $idMap[$sourceId] ?? null;
+
+            if ($mappedId === null) {
                 continue;
             }
 
             if (!$dryRun) {
                 DB::table($targetTable)->insert([
-                    'authorizable_type' => $modelPermissionRow['model_type'],
-                    'authorizable_id'   => (string) $modelPermissionRow['model_id'],
-                    'permission_id'     => $mappedPermissionId,
+                    'authorizable_type' => $pivot['model_type'],
+                    'authorizable_id'   => (string) $pivot['model_id'],
+                    $idColumn           => $mappedId,
                 ]);
             }
 
-            $counts['authorizable_permissions']++;
+            $counts[$targetKey]++;
         }
     }
 }

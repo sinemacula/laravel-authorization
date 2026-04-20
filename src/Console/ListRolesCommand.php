@@ -4,7 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Console;
 
-use Illuminate\Console\Command;
+use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
@@ -17,7 +17,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-class ListRolesCommand extends Command
+final class ListRolesCommand extends AbstractListCatalogueCommand
 {
     /** @var string The console command signature. */
     protected $signature = 'authorization:list-roles {--guard= : Filter roles by guard name}';
@@ -26,50 +26,69 @@ class ListRolesCommand extends Command
     protected $description = 'List all authorization roles';
 
     /**
-     * Execute the console command.
+     * Resolve the configured role model class.
      *
-     * @return int
+     * @return class-string<\Illuminate\Database\Eloquent\Model>
      */
-    public function handle(): int
+    #[\Override]
+    protected function modelClass(): string
     {
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
-        $class = config('authorization.models.role', Role::class);
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> */
+        return config('authorization.models.role', Role::class);
+    }
 
-        $query = $class::query()->withCount('permissions');
+    /**
+     * Relation to include via `withCount`.
+     *
+     * @return string
+     */
+    #[\Override]
+    protected function countRelation(): string
+    {
+        return 'permissions';
+    }
 
-        /** @var string|null $guard */
-        $guard = $this->option('guard');
+    /**
+     * Message rendered when no roles match the query.
+     *
+     * @return string
+     */
+    #[\Override]
+    protected function emptyMessage(): string
+    {
+        return 'No roles found.';
+    }
 
-        if ($guard !== null && $guard !== '') {
-            $query->where('guard', $guard);
-        }
+    /**
+     * Table header row.
+     *
+     * @return list<string>
+     */
+    #[\Override]
+    protected function headers(): array
+    {
+        return ['ID', 'Name', 'Guard', 'System', 'Permissions'];
+    }
 
-        /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
-        // @phpstan-ignore staticMethod.dynamicCall
-        $roles = $query->orderBy('name')->get();
+    /**
+     * Map a role row to the table columns.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model  $row
+     * @return list<string>
+     */
+    #[\Override]
+    protected function mapRow(Model $row): array
+    {
+        /** @var \SineMacula\Laravel\Authorization\Models\Role $row */
+        /** @var int $count */
+        $count = $row->getAttribute('permissions_count');
 
-        if ($roles->isEmpty()) {
-            $this->info('No roles found.');
-
-            return self::SUCCESS;
-        }
-
-        $this->table(
-            ['ID', 'Name', 'Guard', 'System', 'Permissions'],
-            $roles->map(static function (Role $role): array {
-                /** @var int $count */
-                $count = $role->getAttribute('permissions_count');
-
-                return [
-                    $role->id,
-                    $role->name,
-                    $role->guard ?? '(any)',
-                    $role->is_system ? 'Yes' : 'No',
-                    (string) $count,
-                ];
-            })->all(),
-        );
-
-        return self::SUCCESS;
+        return [
+            $row->id,
+            $row->name,
+            $row->guard ?? '(any)',
+            $row->is_system ? 'Yes' : 'No',
+            (string) $count,
+        ];
     }
 }
