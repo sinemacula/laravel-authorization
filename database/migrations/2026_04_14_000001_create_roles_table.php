@@ -11,11 +11,10 @@ use SineMacula\Laravel\Authorization\Database\MigrationCollisionGuard;
 /**
  * Create the `roles` table.
  *
- * Roles are named buckets of permissions shared across authorizable
- * identities. The `guard` column is nullable: a null value marks the
- * role as guard-agnostic (applies to every guard), a concrete string
- * scopes the role to a single guard and mirrors Spatie's
- * `laravel-permission` convention for migrating consumers.
+ * Roles are named buckets of permissions shared across authorizable identities.
+ * The `guard` column is nullable: a null value marks the role as guard-agnostic
+ * (applies to every guard), a concrete string scopes the role to a single guard
+ * and mirrors Spatie's `laravel-permission` convention for migrating consumers.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -11,11 +11,10 @@ use SineMacula\Laravel\Authorization\Database\MigrationCollisionGuard;
 /**
  * Create the `permissions` table.
  *
- * Permissions are atomic action strings that can be granted directly
- * to an identity or inherited via a role. The `guard` column is
- * nullable: a null value marks the permission as guard-agnostic
- * (applies to every guard), a concrete string scopes it to a single
- * guard.
+ * Permissions are atomic action strings that can be granted directly to an
+ * identity or inherited via a role. The `guard` column is nullable: a null
+ * value marks the permission as guard-agnostic (applies to every guard), a
+ * concrete string scopes it to a single guard.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
