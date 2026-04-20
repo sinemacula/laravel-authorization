@@ -54,7 +54,7 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testAssignRoleClearsLoadedRolesRelationCache(): void
     {
-        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard_name' => 'web']);
+        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         // Prime the relation cache.
@@ -75,8 +75,8 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testSyncRolesClearsLoadedRolesRelationCache(): void
     {
-        Role::create(['id' => (string) Str::uuid(), 'name' => 'a', 'guard_name' => 'web']);
-        Role::create(['id' => (string) Str::uuid(), 'name' => 'b', 'guard_name' => 'web']);
+        Role::create(['id' => (string) Str::uuid(), 'name' => 'a', 'guard' => 'web']);
+        Role::create(['id' => (string) Str::uuid(), 'name' => 'b', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->load('roles');
@@ -95,7 +95,7 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testGivePermissionClearsLoadedPermissionsRelationCache(): void
     {
-        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard_name' => 'web']);
+        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard' => 'web']);
         $user       = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         $user->load('permissions');
@@ -113,8 +113,8 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testSyncPermissionsClearsLoadedPermissionsRelationCache(): void
     {
-        Permission::create(['id' => (string) Str::uuid(), 'name' => 'a:do', 'guard_name' => 'web']);
-        Permission::create(['id' => (string) Str::uuid(), 'name' => 'b:do', 'guard_name' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'a:do', 'guard' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'b:do', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->load('permissions');
@@ -183,7 +183,7 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testGetRolesFallsBackToComputeWhenCacheUnbound(): void
     {
-        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'viewer', 'guard_name' => 'web']);
+        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'viewer', 'guard' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole($role);
 
@@ -204,7 +204,7 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testGetPermissionsFallsBackToComputeWhenCacheUnbound(): void
     {
-        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:read', 'guard_name' => 'web']);
+        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:read', 'guard' => 'web']);
         $user       = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->givePermission($permission);
 
@@ -224,7 +224,7 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testCanActOnReturnsFalseWhenTargetLacksRolesMethod(): void
     {
-        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'admin', 'guard_name' => 'web', 'rank' => 0]);
+        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'admin', 'guard' => 'web', 'rank' => 0]);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole($role);
 
@@ -397,7 +397,7 @@ final class UncoveredBranchesTest extends TestCase
         $store  = new \Illuminate\Cache\Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
 
-        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'ghost', 'guard_name' => 'web']);
+        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'ghost', 'guard' => 'web']);
 
         // Expect no exception raised when the underlying driver
         // lacks `tags()` — the method exits at the early guard.
@@ -545,7 +545,7 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testCoerceExpiresAtHandlesStringValue(): void
     {
-        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'temp', 'guard_name' => 'web']);
+        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'temp', 'guard' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole($role, \Carbon\Carbon::now()->addHour());
 

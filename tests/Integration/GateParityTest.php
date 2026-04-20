@@ -81,8 +81,8 @@ final class GateParityTest extends TestCase
     {
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        $role       = Role::create(['id' => (string) Str::uuid(), 'name' => 'writer', 'guard_name' => 'web']);
-        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => PermissionEnum::PostsCreate->value, 'guard_name' => 'web']);
+        $role       = Role::create(['id' => (string) Str::uuid(), 'name' => 'writer', 'guard' => 'web']);
+        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => PermissionEnum::PostsCreate->value, 'guard' => 'web']);
         $role->permissions()->attach($permission->getKey());
         $user->assignRole($role);
 
@@ -112,8 +112,8 @@ final class GateParityTest extends TestCase
     {
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        $role       = Role::create(['id' => (string) Str::uuid(), 'name' => 'contributor', 'guard_name' => 'web']);
-        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => PermissionEnum::PostsDelete->value, 'guard_name' => 'web']);
+        $role       = Role::create(['id' => (string) Str::uuid(), 'name' => 'contributor', 'guard' => 'web']);
+        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => PermissionEnum::PostsDelete->value, 'guard' => 'web']);
         $role->permissions()->attach($permission->getKey());
         $user->assignRole($role);
 

@@ -143,16 +143,16 @@ final class RbacQueryBudgetTest extends TestCase
     private function makeEditorWithFivePermissions(): StubIdentity
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'editor',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'editor',
+            'guard' => 'web',
         ]);
 
         foreach (self::PERMISSION_NAMES as $name) {
             $permission = Permission::create([
-                'id'         => (string) Str::uuid(),
-                'name'       => $name,
-                'guard_name' => 'web',
+                'id'    => (string) Str::uuid(),
+                'name'  => $name,
+                'guard' => 'web',
             ]);
             $role->permissions()->attach($permission->getKey());
         }

@@ -1,18 +1,18 @@
 <?php
 
-/**
- * Create the `authorizable_roles` polymorphic pivot table.
- *
- * @author      Ben Carey <bdmc@sinemacula.co.uk>
- * @copyright   2026 Sine Macula Limited
- */
-
 declare(strict_types = 1);
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use SineMacula\Laravel\Authorization\Database\MigrationCollisionGuard;
+
+/**
+ * Create the `authorizable_roles` polymorphic pivot table.
+ *
+ * @author      Ben Carey <bdmc@sinemacula.co.uk>
+ * @copyright   2026 Sine Macula Limited
+ */
 
 return new class extends Migration {
     /**
@@ -28,7 +28,7 @@ return new class extends Migration {
         /** @var string $rolesTable */
         $rolesTable = config('authorization.tables.roles', 'roles');
 
-        MigrationCollisionGuard::ensureNotExists($table);
+        (new MigrationCollisionGuard(Schema::getConnection()->getSchemaBuilder()))->ensureNotExists($table);
 
         Schema::create($table, static function (Blueprint $table) use ($rolesTable): void {
 

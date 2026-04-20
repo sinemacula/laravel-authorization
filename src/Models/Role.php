@@ -28,7 +28,7 @@ use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
  *
  * @property string $id
  * @property string $name
- * @property string|null $guard_name
+ * @property string|null $guard
  * @property string|null $description
  * @property bool $is_system
  * @property string|null $parent_id
@@ -48,7 +48,7 @@ class Role extends Model
     /** @var list<string> Attributes that are mass assignable. */
     protected $fillable = [
         'name',
-        'guard_name',
+        'guard',
         'description',
         'is_system',
         'parent_id',

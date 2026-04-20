@@ -14,9 +14,9 @@ use SineMacula\Laravel\Authorization\Models\Role;
  * PHPBench micro-benchmark for `Role::resolveByName()`.
  *
  * Exercises the two precedence branches the guard-scoped lookup supports: a
- * guard-specific row (`guard_name = 'web'`) and a guard-agnostic row
- * (`guard_name = null`). Together they cover the disjunction the hot path has
- * to evaluate on every RBAC check.
+ * guard-specific row (`guard = 'web'`) and a guard-agnostic row
+ * (`guard = null`). Together they cover the disjunction the hot path has to
+ * evaluate on every RBAC check.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,15 +41,15 @@ final class RoleLookupBench extends BenchmarkCase
         Role::query()->delete();
 
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => BenchmarkFixtures::roleName(),
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => BenchmarkFixtures::roleName(),
+            'guard' => 'web',
         ]);
 
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => BenchmarkFixtures::roleName() . '-agnostic',
-            'guard_name' => null,
+            'id'    => (string) Str::uuid(),
+            'name'  => BenchmarkFixtures::roleName() . '-agnostic',
+            'guard' => null,
         ]);
     }
 

@@ -112,47 +112,6 @@ final class ExceptionMessageKillersTest extends TestCase
     }
 
     /**
-     * `permission_providers` with a scalar payload yields the typed message
-     * naming the config key and the debug type.
-     *
-     * @return void
-     */
-    public function testPermissionProvidersScalarMessageShape(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.permission_providers', 42);
-
-        try {
-            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
-            self::fail('Expected InvalidAuthorizationConfigException.');
-        } catch (InvalidAuthorizationConfigException $exception) {
-            self::assertStringContainsString('authorization.permission_providers', $exception->getMessage());
-            self::assertStringContainsString('expected an array of class names, got int.', $exception->getMessage());
-        }
-    }
-
-    /**
-     * An unknown `permission_providers` class yields the correctly quoted
-     * message.
-     *
-     * @return void
-     */
-    public function testPermissionProvidersUnknownClassMessageShape(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.permission_providers', ['App\NoSuch\ProviderX']);
-
-        try {
-            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
-            self::fail('Expected InvalidAuthorizationConfigException.');
-        } catch (InvalidAuthorizationConfigException $exception) {
-            self::assertStringContainsString('class \'App\NoSuch\ProviderX\' does not exist.', $exception->getMessage());
-        }
-    }
-
-    /**
      * `cache.store` non-string message names the offending type.
      *
      * @return void

@@ -191,9 +191,9 @@ final class RoleGuardParityTest extends TestCase
     private function role(?string $guard, string $name = 'editor'): Role
     {
         return Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => $name,
-            'guard_name' => $guard,
+            'id'    => (string) Str::uuid(),
+            'name'  => $name,
+            'guard' => $guard,
         ]);
     }
 
@@ -207,9 +207,9 @@ final class RoleGuardParityTest extends TestCase
     private function permission(?string $guard, string $name = 'posts:create'): Permission
     {
         return Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => $name,
-            'guard_name' => $guard,
+            'id'    => (string) Str::uuid(),
+            'name'  => $name,
+            'guard' => $guard,
         ]);
     }
 }

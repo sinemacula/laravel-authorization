@@ -34,7 +34,7 @@ final class GrantRoleCommandTest extends TestCase
     {
         Relation::morphMap(['stub_identity' => StubIdentity::class]);
 
-        Role::create(['id' => '42008342-6351-490d-8a02-9615371eeb8d', 'name' => 'editor', 'guard_name' => 'web']);
+        Role::create(['id' => '42008342-6351-490d-8a02-9615371eeb8d', 'name' => 'editor', 'guard' => 'web']);
         $user = StubIdentity::create(['id' => 'af0f3486-876c-46ac-85fe-a5b7335b394a']);
 
         $exitCode = Artisan::call('authorization:grant', [
@@ -61,7 +61,7 @@ final class GrantRoleCommandTest extends TestCase
      */
     public function testGrantsRoleViaClassName(): void
     {
-        Role::create(['id' => 'cbe9505c-00d8-4985-89ed-9bae2eb5e5b4', 'name' => 'admin', 'guard_name' => 'web']);
+        Role::create(['id' => 'cbe9505c-00d8-4985-89ed-9bae2eb5e5b4', 'name' => 'admin', 'guard' => 'web']);
         StubIdentity::create(['id' => 'abca5c3d-111a-4cdb-8a40-0916dbac1d93']);
 
         $exitCode = Artisan::call('authorization:grant', [
@@ -166,7 +166,7 @@ final class GrantRoleCommandTest extends TestCase
      */
     public function testSuccessMessageIncludesRoleAndIdentity(): void
     {
-        Role::create(['id' => 'a2a2a2a2-0000-0000-0000-000000000001', 'name' => 'msg-role', 'guard_name' => 'web']);
+        Role::create(['id' => 'a2a2a2a2-0000-0000-0000-000000000001', 'name' => 'msg-role', 'guard' => 'web']);
         StubIdentity::create(['id' => 'a3a3a3a3-0000-0000-0000-000000000001']);
 
         $identity = StubIdentity::class . ':a3a3a3a3-0000-0000-0000-000000000001';
@@ -244,9 +244,9 @@ final class GrantRoleCommandTest extends TestCase
         // Use the Role model which IS an Eloquent model but does
         // NOT implement AuthorizableIdentity.
         $role = Role::create([
-            'id'         => 'a4a4a4a4-0000-0000-0000-000000000001',
-            'name'       => 'check',
-            'guard_name' => 'web',
+            'id'    => 'a4a4a4a4-0000-0000-0000-000000000001',
+            'name'  => 'check',
+            'guard' => 'web',
         ]);
 
         $exitCode = Artisan::call('authorization:grant', [

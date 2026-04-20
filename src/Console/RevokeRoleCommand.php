@@ -4,8 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Console;
 
-use Illuminate\Console\Command;
-use SineMacula\Laravel\Authorization\Console\Concerns\ResolvesIdentity;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 
 /**
  * Revoke a role from an authorizable identity.
@@ -18,49 +17,37 @@ use SineMacula\Laravel\Authorization\Console\Concerns\ResolvesIdentity;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-class RevokeRoleCommand extends Command
+final class RevokeRoleCommand extends AbstractRoleAssignmentCommand
 {
-    use ResolvesIdentity;
-
     /** @var string The console command signature. */
-    protected $signature = <<<'EOD'
-        authorization:revoke
-                                    {identity : Identity in morphType:key format (e.g. user:123)}
-                                    {role : Role name to revoke}
-        EOD;
+    protected $signature = 'authorization:revoke {identity : Identity in morphType:key format (e.g. user:123)} {role : Role name to revoke}';
 
     /** @var string The console command description. */
     protected $description = 'Revoke a role from an authorizable identity';
 
     /**
-     * Execute the console command.
+     * Revoke the role from the resolved identity.
      *
-     * @return int
+     * @param  \SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity  $model
+     * @param  string  $roleName
+     * @return void
      */
-    public function handle(): int
+    #[\Override]
+    protected function mutate(AuthorizableIdentity $model, string $roleName): void
     {
-        /** @var string $identityArg */
-        $identityArg = $this->argument('identity');
+        $model->revokeRole($roleName);
+    }
 
-        /** @var string $roleName */
-        $roleName = $this->argument('role');
-
-        $model = $this->resolveIdentity($identityArg);
-
-        if ($model === null) {
-            return self::FAILURE;
-        }
-
-        try {
-            $model->revokeRole($roleName);
-        } catch (\Throwable $e) {
-            $this->error($e->getMessage());
-
-            return self::FAILURE;
-        }
-
-        $this->info("Role '{$roleName}' revoked from {$identityArg}.");
-
-        return self::SUCCESS;
+    /**
+     * Build the revoke success message.
+     *
+     * @param  string  $roleName
+     * @param  string  $identityArg
+     * @return string
+     */
+    #[\Override]
+    protected function successMessage(string $roleName, string $identityArg): string
+    {
+        return "Role '{$roleName}' revoked from {$identityArg}.";
     }
 }

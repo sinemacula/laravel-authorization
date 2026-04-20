@@ -13,9 +13,10 @@ use SineMacula\Laravel\Authorization\Console\GrantRoleCommand;
 use SineMacula\Laravel\Authorization\Console\ListPermissionsCommand;
 use SineMacula\Laravel\Authorization\Console\ListRolesCommand;
 use SineMacula\Laravel\Authorization\Console\MigrateSpatieCommand;
+use SineMacula\Laravel\Authorization\Console\PrunePermissionsCommand;
 use SineMacula\Laravel\Authorization\Console\RevokeRoleCommand;
+use SineMacula\Laravel\Authorization\Console\SyncPermissionsCommand;
 use SineMacula\Laravel\Authorization\Console\WhyCanCommand;
-use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
@@ -24,7 +25,6 @@ use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
-use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
@@ -89,8 +89,6 @@ class AuthorizationServiceProvider extends ServiceProvider
 
         (new GateRegistrar($this->app))->register();
 
-        $this->registerPermissionProviders();
-
         (new EventListenerRegistrar($this->app))->register();
 
         $this->registerRouteMiddleware();
@@ -132,6 +130,8 @@ class AuthorizationServiceProvider extends ServiceProvider
                 RevokeRoleCommand::class,
                 WhyCanCommand::class,
                 MigrateSpatieCommand::class,
+                SyncPermissionsCommand::class,
+                PrunePermissionsCommand::class,
             ]);
         }
     }
@@ -323,59 +323,5 @@ class AuthorizationServiceProvider extends ServiceProvider
             [__DIR__ . '/../database/migrations' => database_path('migrations')],
             'authorization-migrations',
         );
-    }
-
-    /**
-     * Walk every configured permission provider and create
-     * `Permission` rows for each string the provider declares.
-     *
-     * Providers are instantiated through the container so they can
-     * inject dependencies. Each permission string is persisted via
-     * `firstOrCreate` keyed on `(name, guard_name)` so the method
-     * is idempotent across boots.
-     *
-     * @return void
-     */
-    protected function registerPermissionProviders(): void
-    {
-        /** @var array<int, mixed> $providers */
-        $providers = $this->app['config']->get('authorization.permission_providers', []);
-
-        if ($providers === []) {
-            return;
-        }
-
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $permissionModel */
-        $permissionModel = $this->app['config']->get('authorization.models.permission', Permission::class);
-
-        foreach ($providers as $providerClass) {
-            if (!\is_string($providerClass) || !\is_subclass_of($providerClass, PermissionProvider::class)) {
-                continue;
-            }
-
-            /** @var \SineMacula\Laravel\Authorization\Contracts\PermissionProvider $provider */
-            $provider = $this->app->make($providerClass);
-
-            $guard = $provider->guard();
-
-            foreach ($provider->permissions() as $permission) {
-                // Defensive guard against providers whose runtime return
-                // violates the `array<int, string>` contract. The tests in
-                // `ServiceProviderExtraBranchesTest` pin both the empty-
-                // string skip and the non-string skip as mutation kills;
-                // PHPStan narrows `$permission` to `string` from the
-                // contract and flags `is_string()` as redundant. The
-                // guard is load-bearing in the face of non-conforming
-                // provider implementations.
-                // @phpstan-ignore function.alreadyNarrowedType
-                if (!\is_string($permission) || $permission === '') {
-                    continue;
-                }
-
-                $permissionModel::firstOrCreate(
-                    ['name' => $permission, 'guard_name' => $guard],
-                );
-            }
-        }
     }
 }

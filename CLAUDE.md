@@ -27,6 +27,7 @@ composer install                          # Install dependencies
 composer check                            # Static analysis via qlty (PHPStan 8, PHP-CS-Fixer, CodeSniffer)
 composer check -- --all --no-cache --fix  # Full check with auto-fix
 composer format                           # Format code via qlty
+composer smells                           # Advisory smells (duplication, complexity) via qlty
 
 # Testing
 composer test                             # All suites in parallel (Paratest)

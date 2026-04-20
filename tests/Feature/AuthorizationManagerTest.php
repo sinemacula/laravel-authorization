@@ -69,7 +69,7 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testDirectPermissionGrantsAllow(): void
     {
-        Permission::create(['id' => '7a5c8f67-eba9-492b-8a42-a49ec654b516', 'name' => 'posts:create', 'guard_name' => 'web']);
+        Permission::create(['id' => '7a5c8f67-eba9-492b-8a42-a49ec654b516', 'name' => 'posts:create', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => '1705066a-b10d-4f4a-8aba-73758a3a381a']);
         $user->givePermission('posts:create');
@@ -86,8 +86,8 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testRoleInheritedPermissionGrantsAllow(): void
     {
-        $role       = Role::create(['id' => '73b70528-9653-431a-8837-48847b3ee826', 'name' => 'editor', 'guard_name' => 'web']);
-        $permission = Permission::create(['id' => 'de7fb420-9d52-4329-8c2e-eb88b1cdc77c', 'name' => 'posts:update', 'guard_name' => 'web']);
+        $role       = Role::create(['id' => '73b70528-9653-431a-8837-48847b3ee826', 'name' => 'editor', 'guard' => 'web']);
+        $permission = Permission::create(['id' => 'de7fb420-9d52-4329-8c2e-eb88b1cdc77c', 'name' => 'posts:update', 'guard' => 'web']);
         $role->permissions()->attach($permission->getKey());
 
         $user = StubIdentity::create(['id' => '3acbd94d-7c5c-475b-82a3-791fa9c24234']);
@@ -104,8 +104,8 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testExplicitDenyOverridesRoleAllow(): void
     {
-        $role       = Role::create(['id' => '5596d2e7-ed0e-4a25-8b13-556e36de93e9', 'name' => 'admin', 'guard_name' => 'web']);
-        $permission = Permission::create(['id' => 'cad09583-86ca-42b3-89fc-9dde9a3020b6', 'name' => 'posts:delete', 'guard_name' => 'web']);
+        $role       = Role::create(['id' => '5596d2e7-ed0e-4a25-8b13-556e36de93e9', 'name' => 'admin', 'guard' => 'web']);
+        $permission = Permission::create(['id' => 'cad09583-86ca-42b3-89fc-9dde9a3020b6', 'name' => 'posts:delete', 'guard' => 'web']);
         $role->permissions()->attach($permission->getKey());
 
         $policy = Policy::create([
@@ -133,8 +133,8 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testRemovingDenyFlipsDecision(): void
     {
-        $role       = Role::create(['id' => '892c12f1-70f5-4a5d-83c0-946bfd611a71', 'name' => 'admin', 'guard_name' => 'web']);
-        $permission = Permission::create(['id' => '6d4ddc84-e926-4fa9-819b-716c3a423654', 'name' => 'posts:delete', 'guard_name' => 'web']);
+        $role       = Role::create(['id' => '892c12f1-70f5-4a5d-83c0-946bfd611a71', 'name' => 'admin', 'guard' => 'web']);
+        $permission = Permission::create(['id' => '6d4ddc84-e926-4fa9-819b-716c3a423654', 'name' => 'posts:delete', 'guard' => 'web']);
         $role->permissions()->attach($permission->getKey());
 
         $policy = Policy::create([
@@ -166,7 +166,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         Event::fake();
 
-        Role::create(['id' => '9e294583-8b87-4fea-86ba-15de1a2f73ed', 'name' => 'writer', 'guard_name' => 'web']);
+        Role::create(['id' => '9e294583-8b87-4fea-86ba-15de1a2f73ed', 'name' => 'writer', 'guard' => 'web']);
         $user = StubIdentity::create(['id' => 'd53f6d56-30fd-417c-8edc-450a2096f822']);
 
         $user->assignRole('writer');
@@ -211,9 +211,9 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testSyncRolesReplacesSet(): void
     {
-        Role::create(['id' => '1ea0f4c9-a06c-4c53-86a7-4807d569a51c', 'name' => 'a', 'guard_name' => 'web']);
-        Role::create(['id' => 'b4a0f6f6-1195-48e2-8020-eb84a104928b', 'name' => 'b', 'guard_name' => 'web']);
-        Role::create(['id' => '4948f001-2d70-46c7-8b17-687e7a55479d', 'name' => 'c', 'guard_name' => 'web']);
+        Role::create(['id' => '1ea0f4c9-a06c-4c53-86a7-4807d569a51c', 'name' => 'a', 'guard' => 'web']);
+        Role::create(['id' => 'b4a0f6f6-1195-48e2-8020-eb84a104928b', 'name' => 'b', 'guard' => 'web']);
+        Role::create(['id' => '4948f001-2d70-46c7-8b17-687e7a55479d', 'name' => 'c', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => '1bf39684-eb97-4b99-8898-2971c1e19c35']);
         $user->syncRoles(['a', 'b']);
@@ -255,7 +255,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         Event::fake();
 
-        Permission::create(['id' => '7b2cc2e2-1f29-4467-8a74-844bedaac2d2', 'name' => 'ev:do', 'guard_name' => 'web']);
+        Permission::create(['id' => '7b2cc2e2-1f29-4467-8a74-844bedaac2d2', 'name' => 'ev:do', 'guard' => 'web']);
         $user = StubIdentity::create(['id' => '6df993ba-ca47-4224-8ecf-1742ca42e42d']);
 
         $user->givePermission('ev:do');
@@ -279,7 +279,7 @@ final class AuthorizationManagerTest extends TestCase
 
         (new \SineMacula\Laravel\Authorization\AuthorizationServiceProvider($this->app))->boot();
 
-        Permission::create(['id' => '70be15aa-1ce5-4c1f-87a5-1c8e91a02587', 'name' => 'posts:create', 'guard_name' => 'web']);
+        Permission::create(['id' => '70be15aa-1ce5-4c1f-87a5-1c8e91a02587', 'name' => 'posts:create', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => 'd004aa1d-ff0c-4776-8a4c-d975b6c671a1']);
         $user->givePermission('posts:create');
@@ -335,8 +335,8 @@ final class AuthorizationManagerTest extends TestCase
      */
     public function testSpatieAliasesMirrorCanonical(): void
     {
-        Permission::create(['id' => 'aefe96cf-321f-4555-8ab0-0abd787416d8', 'name' => 'spatie:do', 'guard_name' => 'web']);
-        Role::create(['id' => 'e50e9f4f-2d91-41ec-8466-4af39743951b', 'name' => 'spatie-role', 'guard_name' => 'web']);
+        Permission::create(['id' => 'aefe96cf-321f-4555-8ab0-0abd787416d8', 'name' => 'spatie:do', 'guard' => 'web']);
+        Role::create(['id' => 'e50e9f4f-2d91-41ec-8466-4af39743951b', 'name' => 'spatie-role', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => 'ee7ee7dc-2f40-46b6-8cc2-d7e13e2a8825']);
 

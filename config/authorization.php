@@ -129,23 +129,6 @@ return [
 
     /*
     |---------------------------------------------------------------------------
-    | Permission providers
-    |---------------------------------------------------------------------------
-    |
-    | Class-strings implementing `PermissionProvider`. Each provider contributes
-    | a list of permission strings and a guard scope. At boot the service
-    | provider walks every entry and creates `Permission` rows via
-    | `firstOrCreate`, so modular packages can ship their own permission sets
-    | without the host application editing a central enum.
-    |
-    */
-
-    'permission_providers' => [
-        // \App\Authorization\BlogPermissionProvider::class,
-    ],
-
-    /*
-    |---------------------------------------------------------------------------
     | Gate conflict policy
     |---------------------------------------------------------------------------
     |

@@ -436,7 +436,7 @@ final class MutationKillersTest extends TestCase
         $cache     = new ResolutionCache(store: \Illuminate\Support\Facades\Cache::store('array'), prefix: 'authorization-test');
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'r1', 'guard_name' => 'web']);
+        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'r1', 'guard' => 'web']);
 
         // Prime the cache so the tag namespace has something to flush.
         $cache->rememberPermissions(
@@ -477,7 +477,7 @@ final class MutationKillersTest extends TestCase
             [\SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged::class],
         );
 
-        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'idem', 'guard_name' => 'web']);
+        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'idem', 'guard' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         // Anchor Carbon so the computed expiry is deterministic and
@@ -510,7 +510,7 @@ final class MutationKillersTest extends TestCase
             [\SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged::class],
         );
 
-        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'moving', 'guard_name' => 'web']);
+        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'moving', 'guard' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         // Anchor Carbon so the two expiries are computed against a
@@ -542,7 +542,7 @@ final class MutationKillersTest extends TestCase
             [\SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged::class],
         );
 
-        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'p:m', 'guard_name' => 'web']);
+        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'p:m', 'guard' => 'web']);
         $user       = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         // Anchor Carbon so the two expiries are computed against a
@@ -945,7 +945,7 @@ final class MutationKillersTest extends TestCase
         $this->app->make(\SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore::class)->forget(); // @phpstan-ignore method.nonObject
 
         // Deny path — authorize() throws, lastDecision captures the result.
-        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'la', 'guard_name' => 'web']);
+        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'la', 'guard' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         try {
@@ -958,7 +958,7 @@ final class MutationKillersTest extends TestCase
         }
 
         // Allow path — authorize() returns, lastDecision captures allow.
-        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'allow:me', 'guard_name' => 'web']);
+        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'allow:me', 'guard' => 'web']);
         $role->givePermission($permission);
         $user->assignRole($role);
 

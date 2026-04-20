@@ -42,6 +42,7 @@ final class MigrationCollisionGuardTest extends TestCase
 
         $this->expectException(MigrationCollisionException::class);
 
-        MigrationCollisionGuard::ensureNotExists('collision_guard_probe');
+        (new MigrationCollisionGuard(Schema::getConnection()->getSchemaBuilder()))
+            ->ensureNotExists('collision_guard_probe');
     }
 }

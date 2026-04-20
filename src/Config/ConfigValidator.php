@@ -6,7 +6,6 @@ namespace SineMacula\Laravel\Authorization\Config;
 
 use Illuminate\Contracts\Container\Container;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
-use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
@@ -45,7 +44,6 @@ final class ConfigValidator
     public static function validate(array $config, Container $container): void
     {
         self::validatePermissionEnums($config['permission_enums'] ?? []);
-        self::validatePermissionProviders($config['permission_providers'] ?? []);
         self::validateGateOnConflict($config['gate']['on_conflict'] ?? null);
         self::validatePrincipalResolver($config['principal_resolver'] ?? null);
         self::validateTenantResolver($config['tenant_resolver'] ?? null);
@@ -80,37 +78,11 @@ final class ConfigValidator
             if (!\is_subclass_of($class, PermissionEnum::class)) {
                 throw new InvalidAuthorizationConfigException("authorization.permission_enums.{$index}", "class '{$class}' does not implement " . PermissionEnum::class . '.');
             }
-        }
-    }
 
-    /**
-     * Validate that every entry in `permission_providers` resolves
-     * to a class implementing the `PermissionProvider` contract.
-     *
-     * @param  mixed  $value
-     * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
-     */
-    private static function validatePermissionProviders(mixed $value): void
-    {
-        if (!\is_array($value)) {
-            throw new InvalidAuthorizationConfigException('authorization.permission_providers', 'expected an array of class names, got ' . \get_debug_type($value) . '.');
-        }
+            $reflection = new \ReflectionEnum($class);
 
-        foreach ($value as $index => $class) {
-            if (!\is_string($class) || $class === '') {
-                throw new InvalidAuthorizationConfigException("authorization.permission_providers.{$index}", 'entry must be a non-empty class-string.');
-            }
-
-            if (!\class_exists($class)) {
-                throw new InvalidAuthorizationConfigException("authorization.permission_providers.{$index}", "class '{$class}' does not exist.");
-            }
-
-            if (!\is_subclass_of($class, PermissionProvider::class)) {
-                $reason = "class '{$class}' does not implement " . PermissionProvider::class . '.';
-
-                throw new InvalidAuthorizationConfigException("authorization.permission_providers.{$index}", $reason);
+            if (!$reflection->isBacked() || (string) $reflection->getBackingType() !== 'string') {
+                throw new InvalidAuthorizationConfigException("authorization.permission_enums.{$index}", "enum '{$class}' must be a backed string enum.");
             }
         }
     }

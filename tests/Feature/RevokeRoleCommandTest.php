@@ -31,7 +31,7 @@ final class RevokeRoleCommandTest extends TestCase
      */
     public function testRevokesRoleFromIdentity(): void
     {
-        Role::create(['id' => 'c7916105-9686-4752-8e5f-2370eb494a02', 'name' => 'editor', 'guard_name' => 'web']);
+        Role::create(['id' => 'c7916105-9686-4752-8e5f-2370eb494a02', 'name' => 'editor', 'guard' => 'web']);
         $user = StubIdentity::create(['id' => '0e4acbbb-88e6-47d4-8ed1-93b6f54a4a44']);
         $user->assignRole('editor');
 
@@ -109,7 +109,7 @@ final class RevokeRoleCommandTest extends TestCase
      */
     public function testSuccessMessageIncludesRoleAndIdentity(): void
     {
-        Role::create(['id' => 'b2b2b2b2-0000-0000-0000-000000000001', 'name' => 'rev-role', 'guard_name' => 'web']);
+        Role::create(['id' => 'b2b2b2b2-0000-0000-0000-000000000001', 'name' => 'rev-role', 'guard' => 'web']);
         $user = StubIdentity::create(['id' => 'b3b3b3b3-0000-0000-0000-000000000001']);
         $user->assignRole('rev-role');
 

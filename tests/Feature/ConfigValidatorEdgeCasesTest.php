@@ -48,41 +48,6 @@ final class ConfigValidatorEdgeCasesTest extends TestCase
     }
 
     /**
-     * `permission_providers` must be an array — a scalar is rejected with a
-     * typed exception.
-     *
-     * @return void
-     */
-    public function testPermissionProvidersMustBeArray(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.permission_providers', 'nope');
-
-        $this->expectException(InvalidAuthorizationConfigException::class);
-        $this->expectExceptionMessageMatches('/expected an array of class names/');
-
-        ConfigValidator::validate((array) $config->get('authorization'), $this->app);
-    }
-
-    /**
-     * `permission_providers` entries must be non-empty class-strings.
-     *
-     * @return void
-     */
-    public function testPermissionProviderEntryMustBeNonEmptyString(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.permission_providers', ['']);
-
-        $this->expectException(InvalidAuthorizationConfigException::class);
-        $this->expectExceptionMessageMatches('/non-empty class-string/');
-
-        ConfigValidator::validate((array) $config->get('authorization'), $this->app);
-    }
-
-    /**
      * `cache.store` must be a string — an integer is rejected by the typed
      * validator before the cache manager is consulted.
      *

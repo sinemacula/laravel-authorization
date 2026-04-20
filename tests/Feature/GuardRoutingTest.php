@@ -86,9 +86,9 @@ final class GuardRoutingTest extends TestCase
     public function testAuthorizationGuardHookRoutesRoleLookups(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'admin',
-            'guard_name' => 'api',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'admin',
+            'guard' => 'api',
         ]);
 
         $user = ApiGuardedUser::create(['id' => (string) Str::uuid()]);
@@ -108,9 +108,9 @@ final class GuardRoutingTest extends TestCase
     public function testAuthorizationGuardHookIsolatesLookupsByGuard(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'admin',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'admin',
+            'guard' => 'web',
         ]);
 
         $user = ApiGuardedUser::create(['id' => (string) Str::uuid()]);
@@ -128,9 +128,9 @@ final class GuardRoutingTest extends TestCase
     public function testAuthorizationGuardHookRoutesPermissionLookups(): void
     {
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'posts:create',
-            'guard_name' => 'api',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'posts:create',
+            'guard' => 'api',
         ]);
 
         $user = ApiGuardedUser::create(['id' => (string) Str::uuid()]);
@@ -149,9 +149,9 @@ final class GuardRoutingTest extends TestCase
     public function testDefaultGuardLookupDoesNotReachApiGuardPermission(): void
     {
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'api:only',
-            'guard_name' => 'api',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'api:only',
+            'guard' => 'api',
         ]);
 
         $user = ApiGuardedUser::create(['id' => (string) Str::uuid()]);
@@ -165,16 +165,16 @@ final class GuardRoutingTest extends TestCase
         // is permitted and the web-guard lookup resolves it
         // without leaking into the api-guard row.
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'api:only',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'api:only',
+            'guard' => 'web',
         ]);
 
         self::assertTrue(true, 'Two same-name permissions scoped to different guards coexist.');
     }
 
     /**
-     * A role's own `guard_name` drives the permission lookup inside
+     * A role's own `guard` drives the permission lookup inside
      * `Role::givePermission()` — a web-scoped role resolves permissions under
      * the web guard, an api-scoped role under api.
      *
@@ -183,15 +183,15 @@ final class GuardRoutingTest extends TestCase
     public function testRolePermissionLookupUsesRolesOwnGuard(): void
     {
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'shared',
-            'guard_name' => 'api',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'shared',
+            'guard' => 'api',
         ]);
 
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'api-editor',
-            'guard_name' => 'api',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'api-editor',
+            'guard' => 'api',
         ]);
 
         $role->givePermission('shared');
@@ -208,9 +208,9 @@ final class GuardRoutingTest extends TestCase
     public function testAbsenceOfHookFallsBackToConfigDefault(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'default-bound',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'default-bound',
+            'guard' => 'web',
         ]);
 
         $user = DefaultGuardUser::create(['id' => (string) Str::uuid()]);

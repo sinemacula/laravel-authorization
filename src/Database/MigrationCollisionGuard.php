@@ -4,7 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Database;
 
-use Illuminate\Support\Facades\Schema;
+use Illuminate\Database\Schema\Builder;
 
 /**
  * Idempotency guard for shipped migrations.
@@ -16,8 +16,20 @@ use Illuminate\Support\Facades\Schema;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final class MigrationCollisionGuard
+final readonly class MigrationCollisionGuard
 {
+    /**
+     * Create a new collision guard instance.
+     *
+     * @param  \Illuminate\Database\Schema\Builder  $schema
+     */
+    public function __construct(
+
+        /** Schema builder used to probe the database for an existing table. */
+        private Builder $schema,
+
+    ) {}
+
     /**
      * Raise a dedicated collision exception when a table of the
      * supplied name already exists.
@@ -27,9 +39,9 @@ final class MigrationCollisionGuard
      *
      * @throws \SineMacula\Laravel\Authorization\Database\MigrationCollisionException
      */
-    public static function ensureNotExists(string $table): void
+    public function ensureNotExists(string $table): void
     {
-        if (Schema::hasTable($table)) {
+        if ($this->schema->hasTable($table)) {
             throw new MigrationCollisionException($table);
         }
     }

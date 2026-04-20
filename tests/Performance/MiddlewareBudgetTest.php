@@ -83,9 +83,9 @@ final class MiddlewareBudgetTest extends TestCase
         $role = $this->seedRole();
 
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'posts:edit',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'posts:edit',
+            'guard' => 'web',
         ]);
         $role->permissions()->attach($permission->getKey());
 
@@ -119,9 +119,9 @@ final class MiddlewareBudgetTest extends TestCase
     private function seedRole(): Role
     {
         return Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'admin',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'admin',
+            'guard' => 'web',
         ]);
     }
 

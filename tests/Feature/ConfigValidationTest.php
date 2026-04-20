@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
+use Tests\Feature\Stubs\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\PermissionEnum;
 use Tests\TestCase;
 
@@ -130,6 +131,30 @@ final class ConfigValidationTest extends TestCase
         $this->expectException(InvalidAuthorizationConfigException::class);
 
         ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+    }
+
+    /**
+     * An int-backed enum implementing `PermissionEnum` is rejected — the
+     * interface allows any backed enum but the validator requires the string
+     * backing because the case value is the canonical permission name.
+     *
+     * @return void
+     */
+    public function testIntBackedPermissionEnumIsRejected(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config->set('authorization.permission_enums', [IntBackedPermissionEnum::class]);
+
+        try {
+            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
+            self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            self::assertSame('authorization.permission_enums.0', $exception->getConfigKey());
+            $reason = $exception->getReason();
+            self::assertStringContainsString(IntBackedPermissionEnum::class, $reason);
+            self::assertStringContainsString('backed string enum', $reason);
+        }
     }
 
     /**
@@ -345,30 +370,6 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * `permission_providers` wrong-contract rejection message includes both the
-     * class name and the contract name. Kills Concat and ConcatOperandRemoval
-     * mutants on line 111.
-     *
-     * @return void
-     */
-    public function testPermissionProviderWrongContractMessageShape(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.permission_providers', [\stdClass::class]);
-
-        try {
-            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
-            self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
-        } catch (InvalidAuthorizationConfigException $exception) {
-            $reason = $exception->getReason();
-            self::assertStringContainsString(\stdClass::class, $reason);
-            self::assertStringContainsString('does not implement', $reason);
-            self::assertStringContainsString('PermissionProvider', $reason);
-        }
-    }
-
-    /**
      * `gate.on_conflict` rejection message includes the value description and
      * the accepted sentinel list. Kills Concat and ConcatOperandRemoval mutants
      * on line 139.
@@ -524,28 +525,6 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * `permission_providers` non-array is rejected with a type description.
-     * Kills Concat mutants on the permission_providers non-array branch.
-     *
-     * @return void
-     */
-    public function testPermissionProvidersNonArrayRejectionMessageShape(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.permission_providers', 'not-an-array');
-
-        try {
-            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
-            self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
-        } catch (InvalidAuthorizationConfigException $exception) {
-            $reason = $exception->getReason();
-            self::assertStringContainsString('expected an array', $reason);
-            self::assertStringContainsString('string', $reason);
-        }
-    }
-
-    /**
      * `permission_enums` non-array is rejected with a type description.
      *
      * @return void
@@ -564,44 +543,6 @@ final class ConfigValidationTest extends TestCase
             self::assertStringContainsString('expected an array', $reason);
             self::assertStringContainsString('string', $reason);
         }
-    }
-
-    /**
-     * `permission_providers` entry that is a missing class. Kills Concat
-     * mutants on the "does not exist" branch for providers.
-     *
-     * @return void
-     */
-    public function testPermissionProviderMissingClassMessageShape(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.permission_providers', ['App\Missing\Provider']);
-
-        try {
-            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
-            self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
-        } catch (InvalidAuthorizationConfigException $exception) {
-            $reason = $exception->getReason();
-            self::assertStringContainsString('App\Missing\Provider', $reason);
-            self::assertStringContainsString('does not exist', $reason);
-        }
-    }
-
-    /**
-     * `permission_providers` malformed entry (non-string / empty).
-     *
-     * @return void
-     */
-    public function testPermissionProviderMalformedEntryIsRejected(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.permission_providers', ['']);
-
-        $this->expectException(InvalidAuthorizationConfigException::class);
-
-        ConfigValidator::validate((array) $config->get('authorization'), $this->app);
     }
 
     /**

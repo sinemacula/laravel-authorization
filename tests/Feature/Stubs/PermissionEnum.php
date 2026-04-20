@@ -18,14 +18,4 @@ enum PermissionEnum: string implements PermissionEnumContract
 {
     case PostsCreate = 'posts:create';
     case PostsDelete = 'posts:delete';
-
-    /**
-     * Return the permission string.
-     *
-     * @return string
-     */
-    public function toString(): string
-    {
-        return $this->value;
-    }
 }

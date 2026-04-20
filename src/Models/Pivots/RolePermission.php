@@ -25,9 +25,6 @@ use SineMacula\Laravel\Authorization\Models\Role;
  */
 class RolePermission extends Pivot
 {
-    /** @var bool Pivot tables do not auto-increment (composite PK). */
-    public $incrementing = false;
-
     /**
      * Boot the pivot and register the guard-parity hook.
      *
@@ -68,8 +65,8 @@ class RolePermission extends Pivot
         $role       = $this->resolveRoleParent($roleId);
         $permission = $this->resolvePermissionParent($permissionId);
 
-        $roleGuard       = $role->guard_name;
-        $permissionGuard = $permission->guard_name;
+        $roleGuard       = $role->guard;
+        $permissionGuard = $permission->guard;
 
         if ($roleGuard === null || $permissionGuard === null) {
             return;

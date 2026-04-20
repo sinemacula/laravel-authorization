@@ -42,6 +42,8 @@ abstract class BenchmarkCase
      * `@BeforeMethods` be cheap when PHPBench rebuilds fixtures per revolution.
      *
      * @return \Illuminate\Foundation\Application
+     *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
      */
     protected function boot(): Application
     {
@@ -51,9 +53,7 @@ abstract class BenchmarkCase
 
         /** @var \Illuminate\Foundation\Application $app */
         $app = TestbenchApplication::create(
-            basePath         : null,
-            resolvingCallback: null,
-            options          : [
+            options: [
                 'load_environment_variables' => false,
                 'extra'                      => [
                     'providers' => [AuthorizationServiceProvider::class],

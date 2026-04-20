@@ -4,8 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Console;
 
-use Illuminate\Console\Command;
-use SineMacula\Laravel\Authorization\Console\Concerns\ResolvesIdentity;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 
 /**
  * Assign a role to an authorizable identity.
@@ -18,49 +17,37 @@ use SineMacula\Laravel\Authorization\Console\Concerns\ResolvesIdentity;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-class GrantRoleCommand extends Command
+final class GrantRoleCommand extends AbstractRoleAssignmentCommand
 {
-    use ResolvesIdentity;
-
     /** @var string The console command signature. */
-    protected $signature = <<<'EOD'
-        authorization:grant
-                                    {identity : Identity in morphType:key format (e.g. user:123)}
-                                    {role : Role name to assign}
-        EOD;
+    protected $signature = 'authorization:grant {identity : Identity in morphType:key format (e.g. user:123)} {role : Role name to assign}';
 
     /** @var string The console command description. */
     protected $description = 'Assign a role to an authorizable identity';
 
     /**
-     * Execute the console command.
+     * Assign the role to the resolved identity.
      *
-     * @return int
+     * @param  \SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity  $model
+     * @param  string  $roleName
+     * @return void
      */
-    public function handle(): int
+    #[\Override]
+    protected function mutate(AuthorizableIdentity $model, string $roleName): void
     {
-        /** @var string $identityArg */
-        $identityArg = $this->argument('identity');
+        $model->assignRole($roleName);
+    }
 
-        /** @var string $roleName */
-        $roleName = $this->argument('role');
-
-        $model = $this->resolveIdentity($identityArg);
-
-        if ($model === null) {
-            return self::FAILURE;
-        }
-
-        try {
-            $model->assignRole($roleName);
-        } catch (\Throwable $e) {
-            $this->error($e->getMessage());
-
-            return self::FAILURE;
-        }
-
-        $this->info("Role '{$roleName}' granted to {$identityArg}.");
-
-        return self::SUCCESS;
+    /**
+     * Build the grant success message.
+     *
+     * @param  string  $roleName
+     * @param  string  $identityArg
+     * @return string
+     */
+    #[\Override]
+    protected function successMessage(string $roleName, string $identityArg): string
+    {
+        return "Role '{$roleName}' granted to {$identityArg}.";
     }
 }

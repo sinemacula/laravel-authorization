@@ -55,15 +55,15 @@ final class PermissionModelRelationsTest extends TestCase
     public function testRolesRelationReturnsAttachedRoles(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'editor',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'editor',
+            'guard' => 'web',
         ]);
 
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'posts:create',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'posts:create',
+            'guard' => 'web',
         ]);
 
         $role->givePermission($permission);

@@ -99,9 +99,9 @@ final class RouteMiddlewareTest extends TestCase
     public function testRoleMiddlewareDeniesWhenRoleMissing(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'editor',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'editor',
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -121,9 +121,9 @@ final class RouteMiddlewareTest extends TestCase
     public function testRoleMiddlewareAdmitsWhenRolePresent(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'admin',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'admin',
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -150,14 +150,14 @@ final class RouteMiddlewareTest extends TestCase
     public function testRoleMiddlewareHonoursCommaSeparatedOrSemantics(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'admin',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'admin',
+            'guard' => 'web',
         ]);
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'editor',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'editor',
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -185,14 +185,14 @@ final class RouteMiddlewareTest extends TestCase
     public function testRoleMiddlewareHonoursPipeSeparatedOrSemantics(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'admin',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'admin',
+            'guard' => 'web',
         ]);
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'oncall',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'oncall',
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -219,9 +219,9 @@ final class RouteMiddlewareTest extends TestCase
     public function testRoleMiddlewareExpandsMixedSeparators(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'captain',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'captain',
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -280,9 +280,9 @@ final class RouteMiddlewareTest extends TestCase
     public function testPermissionMiddlewareDeniesWhenPermissionMissing(): void
     {
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::PERMISSION,
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => self::PERMISSION,
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -302,9 +302,9 @@ final class RouteMiddlewareTest extends TestCase
     public function testPermissionMiddlewareAdmitsDirectGrant(): void
     {
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::PERMISSION,
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => self::PERMISSION,
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -331,14 +331,14 @@ final class RouteMiddlewareTest extends TestCase
     public function testPermissionMiddlewareAdmitsRoleInheritedGrant(): void
     {
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'posts:publish',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'posts:publish',
+            'guard' => 'web',
         ]);
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'publisher',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'publisher',
+            'guard' => 'web',
         ]);
         $role->permissions()->attach($permission->getKey());
 
@@ -366,14 +366,14 @@ final class RouteMiddlewareTest extends TestCase
     public function testPermissionMiddlewareHonoursPipeSeparatedOrSemantics(): void
     {
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::PERMISSION,
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => self::PERMISSION,
+            'guard' => 'web',
         ]);
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'posts:delete',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'posts:delete',
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -439,9 +439,9 @@ final class RouteMiddlewareTest extends TestCase
     public function testMiddlewareResolvesPrincipalThroughResolverNotRequestUser(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'admin',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'admin',
+            'guard' => 'web',
         ]);
 
         $resolverUser = StubIdentity::create(['id' => (string) Str::uuid()]);
