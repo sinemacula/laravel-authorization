@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace Benchmarks\Support;
 
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Table;
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Traits\HasAuthorization;
@@ -22,22 +24,9 @@ use SineMacula\Laravel\Authorization\Traits\HasAuthorization;
  *
  * @SuppressWarnings("php:S1192")
  */
+#[Fillable('id', 'name')]
+#[Table(name: 'bench_identities', keyType: 'string', incrementing: false)]
 class BenchmarkIdentity extends Model implements AuthorizableIdentity
 {
     use HasAuthorization;
-
-    /** @var bool */
-    public $incrementing = false;
-
-    /** @var string */
-    protected $primaryKey = 'id';
-
-    /** @var string */
-    protected $keyType = 'string';
-
-    /** @var list<string> */
-    protected $fillable = ['id', 'name'];
-
-    /** @var string|null */
-    protected $table = 'bench_identities';
 }
