@@ -4,7 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Models;
 
-use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Attributes\ScopedBy;
 use Illuminate\Database\Eloquent\Builder;
@@ -40,12 +39,23 @@ use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-#[Fillable('name', 'guard', 'description', 'is_system', 'parent_id', 'rank', 'tenant_type', 'tenant_id')]
 #[ObservedBy(RoleObserver::class)]
 #[ScopedBy(TenantScope::class)]
 class Role extends Model
 {
     use HasRoleHierarchy, HasSystemProtection, HasUuids, ManagesPermissions, ValidatesAuthorizationName;
+
+    /** @var list<string> Attributes that are mass assignable. */
+    protected $fillable = [
+        'name',
+        'guard',
+        'description',
+        'is_system',
+        'parent_id',
+        'rank',
+        'tenant_type',
+        'tenant_id',
+    ];
 
     /** @var array<string, string> Attribute cast map. */
     protected $casts = [

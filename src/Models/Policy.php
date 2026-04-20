@@ -4,7 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Models;
 
-use Illuminate\Database\Eloquent\Attributes\Fillable;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
@@ -36,7 +35,6 @@ use SineMacula\Laravel\Authorization\Traits\HasSystemProtection;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-#[Fillable('name', 'description', 'document', 'is_system')]
 #[ObservedBy(PolicyObserver::class)]
 class Policy extends Model
 {
@@ -44,6 +42,14 @@ class Policy extends Model
 
     /** @var string Placeholder used when exception context lacks a policy name. */
     private const string UNNAMED_PLACEHOLDER = '[unnamed]';
+
+    /** @var list<string> Attributes that are mass assignable. */
+    protected $fillable = [
+        'name',
+        'description',
+        'document',
+        'is_system',
+    ];
 
     /** @var array<string, string> Attribute cast map. */
     protected $casts = [
