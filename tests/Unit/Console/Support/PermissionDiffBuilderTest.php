@@ -356,23 +356,154 @@ final class PermissionDiffBuilderTest extends TestCase
 
     /**
      * Every bucket is sorted by `(name, guard)` ascending with null
-     * guards sorted first within a given name.
+     * guards sorted first within a given name, and concrete guards
+     * sort between themselves by `strcmp` — `api` ahead of `web`.
      *
      * @return void
      */
     public function testBucketsAreSortedByNameGuardWithNullFirst(): void
     {
         $tupleZ     = new PermissionTuple('z:alpha', 'web', null, null);
-        $tupleA     = new PermissionTuple('a:alpha', 'web', null, null);
+        $tupleAWeb  = new PermissionTuple('a:alpha', 'web', null, null);
+        $tupleAApi  = new PermissionTuple('a:alpha', 'api', null, null);
         $tupleANull = new PermissionTuple('a:alpha', null, null, null);
 
         $diff = (new PermissionDiffBuilder)->build(
-            tuples: [$tupleZ, $tupleA, $tupleANull],
+            tuples: [$tupleZ, $tupleAWeb, $tupleAApi, $tupleANull],
             rows: [],
             roleReferencesCount: 0,
         );
 
-        self::assertSame([$tupleANull, $tupleA, $tupleZ], $diff->add);
+        // Null first, then concrete guards alphabetically (api < web),
+        // then z:* after a:*. Exercises every compareGuards branch:
+        // equal (never hit here, no duplicates), null-left, null-right,
+        // and two concrete guards falling through to strcmp.
+        self::assertSame([$tupleANull, $tupleAApi, $tupleAWeb, $tupleZ], $diff->add);
+    }
+
+    /**
+     * `sortPairs` actually sorts the pair lists — an update bucket
+     * with multiple entries comes back ordered by the tuple's
+     * `(name, guard)` even when the input was shuffled. Guards null
+     * sort first within a given name; concrete guards sort by
+     * `strcmp`.
+     *
+     * @return void
+     */
+    public function testUpdatePairsAreSortedByTupleNameAndGuard(): void
+    {
+        $rowZ     = $this->makeRow(name: 'z:edit', guard: 'web', description: 'old', category: 'Z');
+        $rowAWeb  = $this->makeRow(name: 'a:edit', guard: 'web', description: 'old', category: 'A');
+        $rowAApi  = $this->makeRow(name: 'a:edit', guard: 'api', description: 'old', category: 'A');
+        $rowANull = $this->makeRow(name: 'a:edit', guard: null, description: 'old', category: 'A');
+
+        $tupleZ     = new PermissionTuple('z:edit', 'web', 'new', 'Z');
+        $tupleAWeb  = new PermissionTuple('a:edit', 'web', 'new', 'A');
+        $tupleAApi  = new PermissionTuple('a:edit', 'api', 'new', 'A');
+        $tupleANull = new PermissionTuple('a:edit', null, 'new', 'A');
+
+        // Intentionally scrambled input order so the sort is actually
+        // exercised rather than preserving ingestion order.
+        $diff = (new PermissionDiffBuilder)->build(
+            tuples: [$tupleZ, $tupleAApi, $tupleANull, $tupleAWeb],
+            rows: [$rowZ, $rowAApi, $rowANull, $rowAWeb],
+            roleReferencesCount: 0,
+        );
+
+        self::assertCount(4, $diff->update);
+        self::assertSame(
+            [$rowANull, $rowAApi, $rowAWeb, $rowZ],
+            \array_column($diff->update, 'row'),
+        );
+        self::assertSame(
+            [$tupleANull, $tupleAApi, $tupleAWeb, $tupleZ],
+            \array_column($diff->update, 'tuple'),
+        );
+    }
+
+    /**
+     * Composite keys must embed a non-printable `\0` separator
+     * between `name` and `guard`; otherwise `('posts:view', null)`
+     * would collide with `('posts', ':view')` via naive string
+     * concatenation. A row whose `(name, guard)` differs from the
+     * tuple only at the separator boundary must NOT match the tuple:
+     * the tuple belongs in `add`, the row belongs in `retire`.
+     *
+     * @return void
+     */
+    public function testCompositeKeyDoesNotCollideAcrossNameGuardBoundary(): void
+    {
+        // Row and tuple would concatenate to the same `posts:view`
+        // string without the null-byte separator, but must compose
+        // to distinct match keys under the real separator.
+        $row   = $this->makeRow(name: 'posts:view', guard: null);
+        $tuple = new PermissionTuple(name: 'posts', guard: ':view', description: 'one', category: 'A');
+
+        $diff = (new PermissionDiffBuilder)->build(
+            tuples: [$tuple],
+            rows: [$row],
+            roleReferencesCount: 0,
+        );
+
+        self::assertSame([$tuple], $diff->add);
+        self::assertSame([$row], $diff->retire);
+        self::assertSame([], $diff->unchanged);
+        self::assertSame([], $diff->update);
+    }
+
+    /**
+     * A retire row surfaces when it follows a system (protected) row
+     * in the input order — the per-row loop must `continue` past a
+     * protected row rather than `break` out of the partition pass.
+     *
+     * @return void
+     */
+    public function testRetireRowAfterProtectedRowStillLandsInRetire(): void
+    {
+        $systemRow = $this->makeRow(name: 'a:system', guard: 'web', isSystem: true);
+        $retireRow = $this->makeRow(name: 'b:retire', guard: 'web');
+
+        $diff = (new PermissionDiffBuilder)->build(
+            tuples: [],
+            rows: [$systemRow, $retireRow],
+            roleReferencesCount: 0,
+        );
+
+        self::assertSame([$systemRow], $diff->protected);
+        self::assertSame([$retireRow], $diff->retire);
+    }
+
+    /**
+     * A matched (unchanged) row followed by an unmatched non-system
+     * row surfaces only the latter in `retire` — proves the matched
+     * bookkeeping (`$matchedKeys[$key] = true`) is in lockstep with
+     * the second pass, so the matched row is not re-partitioned as
+     * retire.
+     *
+     * @return void
+     */
+    public function testMatchedRowIsNeverRePartitionedAsRetire(): void
+    {
+        $matchedRow = $this->makeRow(
+            name: 'a:read',
+            guard: 'web',
+            description: 'Read A',
+            category: 'A',
+        );
+        $retireRow = $this->makeRow(name: 'b:retire', guard: 'web');
+
+        $tuple = new PermissionTuple('a:read', 'web', 'Read A', 'A');
+
+        $diff = (new PermissionDiffBuilder)->build(
+            tuples: [$tuple],
+            rows: [$matchedRow, $retireRow],
+            roleReferencesCount: 0,
+        );
+
+        self::assertSame([$matchedRow], $diff->unchanged);
+        self::assertSame([$retireRow], $diff->retire);
+        self::assertSame([], $diff->protected);
+        self::assertNotContains($matchedRow, $diff->retire);
     }
 
     /**

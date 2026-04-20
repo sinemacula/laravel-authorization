@@ -37,7 +37,8 @@ return new class extends Migration {
             $table->string('authorizable_id');
 
             // Optional expiry for temporal grants — null means "forever". Rows
-            // whose `expires_at` is in the past are filtered out of the relation on read.
+            // whose `expires_at` is in the past are filtered out of the
+            // relation on read.
             $table->timestamp('expires_at')->nullable();
 
             $table->unique(['policy_id', 'authorizable_type', 'authorizable_id'], 'authorizable_policies_unique');
