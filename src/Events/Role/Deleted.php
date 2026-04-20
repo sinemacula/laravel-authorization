@@ -9,12 +9,11 @@ use SineMacula\Laravel\Authorization\Models\Role;
 /**
  * Dispatched after a role row is deleted.
  *
- * Carries the final snapshot of the row so audit consumers can
- * persist the deleted entity's last-known state before the source
- * row disappears.
+ * Carries the final snapshot of the row so audit consumers can persist the
+ * deleted entity's last-known state before the source row disappears.
  *
- * Part of the SemVer-stable event API; breaking changes require a
- * major version bump.
+ * Part of the SemVer-stable event API; breaking changes require a major version
+ * bump.
  *
  * @api
  *

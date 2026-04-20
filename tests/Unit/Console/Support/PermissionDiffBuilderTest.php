@@ -17,10 +17,9 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 /**
  * Unit tests for the pure-function permission diff engine.
  *
- * Each test constructs `PermissionTuple` expectations alongside
- * in-memory `Permission` rows (no DB writes) and asserts bucket
- * assignment. Bucket ordering is also exercised so downstream sync
- * output stays deterministic.
+ * Each test constructs `PermissionTuple` expectations alongside in-memory
+ * `Permission` rows (no DB writes) and asserts bucket assignment. Bucket
+ * ordering is also exercised so downstream sync output stays deterministic.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,8 +36,8 @@ final class PermissionDiffBuilderTest extends TestCase
     /**
      * Bind a minimal Laravel container with a `config` binding so the
      * `Permission` model constructor — which reads
-     * `authorization.tables.permissions` — resolves without booting
-     * the full framework.
+     * `authorization.tables.permissions` — resolves without booting the full
+     * framework.
      *
      * @return void
      */
@@ -56,8 +55,8 @@ final class PermissionDiffBuilderTest extends TestCase
     }
 
     /**
-     * Reset the static container reference after each test so doubles
-     * do not leak between suites.
+     * Reset the static container reference after each test so doubles do not
+     * leak between suites.
      *
      * @return void
      */
@@ -94,8 +93,8 @@ final class PermissionDiffBuilderTest extends TestCase
     }
 
     /**
-     * A tuple matching a row with identical metadata and no
-     * deprecation lands in `unchanged`.
+     * A tuple matching a row with identical metadata and no deprecation lands
+     * in `unchanged`.
      *
      * @return void
      */
@@ -124,8 +123,8 @@ final class PermissionDiffBuilderTest extends TestCase
     }
 
     /**
-     * A tuple whose description differs from its matching row lands
-     * in `update`.
+     * A tuple whose description differs from its matching row lands in
+     * `update`.
      *
      * @return void
      */
@@ -154,8 +153,7 @@ final class PermissionDiffBuilderTest extends TestCase
     }
 
     /**
-     * A tuple whose category differs from its matching row lands in
-     * `update`.
+     * A tuple whose category differs from its matching row lands in `update`.
      *
      * @return void
      */
@@ -183,9 +181,9 @@ final class PermissionDiffBuilderTest extends TestCase
     }
 
     /**
-     * A tuple matching a deprecated row lands in `reinstate`
-     * regardless of whether metadata drifts — reinstating always
-     * refreshes the metadata alongside clearing `deprecated_at`.
+     * A tuple matching a deprecated row lands in `reinstate` regardless of
+     * whether metadata drifts — reinstating always refreshes the metadata
+     * alongside clearing `deprecated_at`.
      *
      * @return void
      */
@@ -216,9 +214,9 @@ final class PermissionDiffBuilderTest extends TestCase
     }
 
     /**
-     * A deprecated row with drifted metadata still lands in
-     * `reinstate` only — never in `update` — so the caller applies
-     * clear-and-refresh semantics once.
+     * A deprecated row with drifted metadata still lands in `reinstate` only —
+     * never in `update` — so the caller applies clear-and-refresh semantics
+     * once.
      *
      * @return void
      */
@@ -246,8 +244,7 @@ final class PermissionDiffBuilderTest extends TestCase
     }
 
     /**
-     * A row with no matching tuple and `is_system = false` lands in
-     * `retire`.
+     * A row with no matching tuple and `is_system = false` lands in `retire`.
      *
      * @return void
      */
@@ -262,8 +259,8 @@ final class PermissionDiffBuilderTest extends TestCase
     }
 
     /**
-     * A row with no matching tuple and `is_system = true` lands in
-     * `protected` — sync reports these but never retires them.
+     * A row with no matching tuple and `is_system = true` lands in `protected`
+     * — sync reports these but never retires them.
      *
      * @return void
      */
@@ -278,8 +275,8 @@ final class PermissionDiffBuilderTest extends TestCase
     }
 
     /**
-     * A null guard on the tuple matches a null guard on the row —
-     * and matches an empty-string guard too (normalisation).
+     * A null guard on the tuple matches a null guard on the row — and matches
+     * an empty-string guard too (normalisation).
      *
      * @return void
      */
@@ -355,9 +352,9 @@ final class PermissionDiffBuilderTest extends TestCase
     }
 
     /**
-     * Every bucket is sorted by `(name, guard)` ascending with null
-     * guards sorted first within a given name, and concrete guards
-     * sort between themselves by `strcmp` — `api` ahead of `web`.
+     * Every bucket is sorted by `(name, guard)` ascending with null guards
+     * sorted first within a given name, and concrete guards sort between
+     * themselves by `strcmp` — `api` ahead of `web`.
      *
      * @return void
      */
@@ -382,11 +379,10 @@ final class PermissionDiffBuilderTest extends TestCase
     }
 
     /**
-     * `sortPairs` actually sorts the pair lists — an update bucket
-     * with multiple entries comes back ordered by the tuple's
-     * `(name, guard)` even when the input was shuffled. Guards null
-     * sort first within a given name; concrete guards sort by
-     * `strcmp`.
+     * `sortPairs` actually sorts the pair lists — an update bucket with
+     * multiple entries comes back ordered by the tuple's `(name, guard)` even
+     * when the input was shuffled. Guards null sort first within a given name;
+     * concrete guards sort by `strcmp`.
      *
      * @return void
      */
@@ -422,12 +418,11 @@ final class PermissionDiffBuilderTest extends TestCase
     }
 
     /**
-     * Composite keys must embed a non-printable `\0` separator
-     * between `name` and `guard`; otherwise `('posts:view', null)`
-     * would collide with `('posts', ':view')` via naive string
-     * concatenation. A row whose `(name, guard)` differs from the
-     * tuple only at the separator boundary must NOT match the tuple:
-     * the tuple belongs in `add`, the row belongs in `retire`.
+     * Composite keys must embed a non-printable `\0` separator between `name`
+     * and `guard`; otherwise `('posts:view', null)` would collide with
+     * `('posts', ':view')` via naive string concatenation. A row whose `(name,
+     * guard)` differs from the tuple only at the separator boundary must NOT
+     * match the tuple: the tuple belongs in `add`, the row belongs in `retire`.
      *
      * @return void
      */
@@ -452,9 +447,9 @@ final class PermissionDiffBuilderTest extends TestCase
     }
 
     /**
-     * A retire row surfaces when it follows a system (protected) row
-     * in the input order — the per-row loop must `continue` past a
-     * protected row rather than `break` out of the partition pass.
+     * A retire row surfaces when it follows a system (protected) row in the
+     * input order — the per-row loop must `continue` past a protected row
+     * rather than `break` out of the partition pass.
      *
      * @return void
      */
@@ -474,11 +469,10 @@ final class PermissionDiffBuilderTest extends TestCase
     }
 
     /**
-     * A matched (unchanged) row followed by an unmatched non-system
-     * row surfaces only the latter in `retire` — proves the matched
-     * bookkeeping (`$matchedKeys[$key] = true`) is in lockstep with
-     * the second pass, so the matched row is not re-partitioned as
-     * retire.
+     * A matched (unchanged) row followed by an unmatched non-system row
+     * surfaces only the latter in `retire` — proves the matched bookkeeping
+     * (`$matchedKeys[$key] = true`) is in lockstep with the second pass, so the
+     * matched row is not re-partitioned as retire.
      *
      * @return void
      */
@@ -507,11 +501,11 @@ final class PermissionDiffBuilderTest extends TestCase
     }
 
     /**
-     * Two tuples sharing an identical `(name, guard)` pair — as would
-     * arise if separate enum classes declared the same backing value
-     * under the same guard — both land in `add`. The sort comparator
-     * hits the equal-guards branch in `compareGuards()` and returns a
-     * stable zero so neither tuple is dropped.
+     * Two tuples sharing an identical `(name, guard)` pair — as would arise if
+     * separate enum classes declared the same backing value under the same
+     * guard — both land in `add`. The sort comparator hits the equal-guards
+     * branch in `compareGuards()` and returns a stable zero so neither tuple is
+     * dropped.
      *
      * @return void
      */
@@ -528,9 +522,9 @@ final class PermissionDiffBuilderTest extends TestCase
     }
 
     /**
-     * The `retire` bucket is sorted deterministically — namespace
-     * `b` sorts ahead of `z`, and within a name, null guards sort
-     * ahead of concrete guards.
+     * The `retire` bucket is sorted deterministically — namespace `b` sorts
+     * ahead of `z`, and within a name, null guards sort ahead of concrete
+     * guards.
      *
      * @return void
      */
@@ -550,13 +544,12 @@ final class PermissionDiffBuilderTest extends TestCase
     }
 
     /**
-     * Hydrate a `Permission` model without writing to the database
-     * and without triggering any Eloquent cast that would otherwise
-     * require a bound connection resolver. `setRawAttributes` stores
-     * the raw payload verbatim; the diff engine reads the cast
-     * `deprecated_at` value and the boolean `is_system` flag, and
-     * both are supplied in their cast-friendly native form here
-     * (`CarbonImmutable` and `bool`).
+     * Hydrate a `Permission` model without writing to the database and without
+     * triggering any Eloquent cast that would otherwise require a bound
+     * connection resolver. `setRawAttributes` stores the raw payload verbatim;
+     * the diff engine reads the cast `deprecated_at` value and the boolean
+     * `is_system` flag, and both are supplied in their cast-friendly native
+     * form here (`CarbonImmutable` and `bool`).
      *
      * @param  string  $name
      * @param  string|null  $guard

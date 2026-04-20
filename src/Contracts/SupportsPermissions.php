@@ -7,12 +7,12 @@ namespace SineMacula\Laravel\Authorization\Contracts;
 use SineMacula\Laravel\Authorization\Models\Permission as PermissionModel;
 
 /**
- * Narrow contract for identities that carry direct permission
- * grants and resolve permissions (direct + role-inherited).
+ * Narrow contract for identities that carry direct permission grants and
+ * resolve permissions (direct + role-inherited).
  *
- * Split from the composite `AuthorizableIdentity` so a
- * pure-RBAC consumer that only wires permissions can typehint on
- * the minimum surface they actually implement.
+ * Split from the composite `AuthorizableIdentity` so a pure-RBAC consumer that
+ * only wires permissions can typehint on the minimum surface they actually
+ * implement.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -44,8 +44,8 @@ interface SupportsPermissions
     public function syncPermissions(array $permissions): static;
 
     /**
-     * Determine whether this identity has the given permission either
-     * directly or through any assigned role.
+     * Determine whether this identity has the given permission either directly
+     * or through any assigned role.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return bool
@@ -53,8 +53,8 @@ interface SupportsPermissions
     public function hasPermission(PermissionModel|string $permission): bool;
 
     /**
-     * Return the names of every permission the identity holds,
-     * either directly or through its assigned roles.
+     * Return the names of every permission the identity holds, either directly
+     * or through its assigned roles.
      *
      * @return array<int, string>
      */

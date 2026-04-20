@@ -9,10 +9,9 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 /**
  * Assign a role to an authorizable identity.
  *
- * Accepts the identity as `{morphType}:{key}` (e.g. `user:123`)
- * and the role by name. Resolves the morph alias via the Eloquent
- * morph map, validates the `AuthorizableIdentity` contract, and
- * delegates to `assignRole()`.
+ * Accepts the identity as `{morphType}:{key}` (e.g. `user:123`) and the role by
+ * name. Resolves the morph alias via the Eloquent morph map, validates the
+ * `AuthorizableIdentity` contract, and delegates to `assignRole()`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

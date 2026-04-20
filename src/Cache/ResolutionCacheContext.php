@@ -7,11 +7,11 @@ namespace SineMacula\Laravel\Authorization\Cache;
 /**
  * Context carried alongside a cache-remember call.
  *
- * Bundles the optional cache-metadata parameters that the
- * `remember*` methods on `ResolutionCache` need beyond the core
- * `(principal, resolver)` pair. Adding future knobs (per-call
- * tag prefix, cache-driver override, hit-only flag) extends this
- * object instead of widening every remember-method signature.
+ * Bundles the optional cache-metadata parameters that the `remember*` methods
+ * on `ResolutionCache` need beyond the core `(principal, resolver)` pair.
+ * Adding future knobs (per-call tag prefix, cache-driver override, hit-only
+ * flag) extends this object instead of widening every remember-method
+ * signature.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -14,12 +14,11 @@ use Tests\TestCase;
  * Feature tests covering the two `ResolvesIdentity` error paths that are not
  * exercised by the happy-path command suites:
  *
- * - A morph alias resolves to a real, loadable class that is not an
- *   Eloquent `Model` (the `is_subclass_of($class, Model::class)`
- *   guard).
- * - A morph alias resolves to an Eloquent model whose instance does
- *   not implement `AuthorizableIdentity` (the final safety net before
- *   the trait returns the model).
+ * - A morph alias resolves to a real, loadable class that is not an Eloquent
+ *   `Model` (the `is_subclass_of($class, Model::class)` guard).
+ * - A morph alias resolves to an Eloquent model whose instance does not
+ *   implement `AuthorizableIdentity` (the final safety net before the trait
+ *   returns the model).
  *
  * Both branches emit a console error and return `null`, which the consuming
  * commands translate to `FAILURE`.

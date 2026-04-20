@@ -24,8 +24,8 @@ use Tests\Unit\Support\Stubs\FixturePermission;
 final class PermissionMetadataReaderTest extends TestCase
 {
     /**
-     * A case with no `#[Permission]` attribute yields a default
-     * (all-null) instance.
+     * A case with no `#[Permission]` attribute yields a default (all-null)
+     * instance.
      *
      * @return void
      */
@@ -43,8 +43,8 @@ final class PermissionMetadataReaderTest extends TestCase
     }
 
     /**
-     * A case with a populated `#[Permission]` attribute yields the
-     * attribute instance verbatim.
+     * A case with a populated `#[Permission]` attribute yields the attribute
+     * instance verbatim.
      *
      * @return void
      */

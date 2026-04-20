@@ -23,14 +23,14 @@ use Tests\TestCase;
  * Coverage for the two `translateGateArguments` / `stringifyGateResource`
  * branches the primary forwarding tests do not reach:
  *
- * - A list-shaped `$arguments` whose leading entry is itself an
- *   associative array. Gate consumers who build arguments
- *   programmatically — e.g. `Gate::allows('x', [$context])` — land
- *   here because the outer list is expanded into the variadic but
- *   the inner assoc array is retained at numeric index 0.
- * - A non-string, non-object leading entry (integer, list-array)
- *   that `stringifyGateResource` must coerce to a null resource so
- *   the Gate call still evaluates against the principal's RBAC.
+ * - A list-shaped `$arguments` whose leading entry is itself an associative
+ *   array. Gate consumers who build arguments programmatically — e.g.
+ *   `Gate::allows('x', [$context])` — land here because the outer list is
+ *   expanded into the variadic but the inner assoc array is retained at numeric
+ *   index 0.
+ * - A non-string, non-object leading entry (integer, list-array) that
+ *   `stringifyGateResource` must coerce to a null resource so the Gate call
+ *   still evaluates against the principal's RBAC.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -10,18 +10,18 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionAttributeExcept
 use SineMacula\Laravel\Authorization\Support\PermissionMetadataReader;
 
 /**
- * Expands `PermissionEnum` classes into the flat list of
- * `PermissionTuple` entries the diff engine consumes.
+ * Expands `PermissionEnum` classes into the flat list of `PermissionTuple`
+ * entries the diff engine consumes.
  *
- * The walker is the only side of the sync pipeline that reflects over
- * enum cases. It reads the `#[Permission]` attribute via the shared
- * `PermissionMetadataReader`, rejects the explicit-empty-guards
- * configuration with a typed exception, and expands multi-guard
- * attributes into one tuple per guard.
+ * The walker is the only side of the sync pipeline that reflects over enum
+ * cases. It reads the `#[Permission]` attribute via the shared
+ * `PermissionMetadataReader`, rejects the explicit-empty-guards configuration
+ * with a typed exception, and expands multi-guard attributes into one tuple per
+ * guard.
  *
- * Input ordering is preserved across both the enum list and the
- * cases within each enum; the diff engine sorts the final buckets so
- * the walker does not need deterministic output of its own.
+ * Input ordering is preserved across both the enum list and the cases within
+ * each enum; the diff engine sorts the final buckets so the walker does not
+ * need deterministic output of its own.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -38,8 +38,8 @@ final readonly class PermissionEnumWalker
     ) {}
 
     /**
-     * Walk every case in every supplied enum class and produce the
-     * expected `(name, guard)` tuple list.
+     * Walk every case in every supplied enum class and produce the expected
+     * `(name, guard)` tuple list.
      *
      * @param  list<class-string<\SineMacula\Laravel\Authorization\Contracts\PermissionEnum>>  $enumClasses
      * @return list<\SineMacula\Laravel\Authorization\Console\Support\PermissionTuple>
@@ -60,8 +60,8 @@ final readonly class PermissionEnumWalker
     }
 
     /**
-     * Walk a single enum class and yield one tuple per
-     * `(case, guard)` combination.
+     * Walk a single enum class and yield one tuple per `(case, guard)`
+     * combination.
      *
      * @param  class-string<\SineMacula\Laravel\Authorization\Contracts\PermissionEnum>  $enumClass
      * @return list<\SineMacula\Laravel\Authorization\Console\Support\PermissionTuple>
@@ -83,8 +83,8 @@ final readonly class PermissionEnumWalker
     }
 
     /**
-     * Expand a single case into one tuple per guard, validating the
-     * attribute shape first.
+     * Expand a single case into one tuple per guard, validating the attribute
+     * shape first.
      *
      * @param  class-string<\SineMacula\Laravel\Authorization\Contracts\PermissionEnum>  $enumClass
      * @param  \ReflectionEnumUnitCase  $case
@@ -118,9 +118,8 @@ final readonly class PermissionEnumWalker
     }
 
     /**
-     * Reject the explicit `guards: []` configuration — the empty
-     * array is never a meaningful expansion target and almost
-     * certainly a mistake.
+     * Reject the explicit `guards: []` configuration — the empty array is never
+     * a meaningful expansion target and almost certainly a mistake.
      *
      * @param  class-string<\SineMacula\Laravel\Authorization\Contracts\PermissionEnum>  $enumClass
      * @param  string  $caseName

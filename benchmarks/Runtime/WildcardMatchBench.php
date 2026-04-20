@@ -17,10 +17,10 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
  * carves the call surface into four shapes so drift in any single pattern class
  * shows up under its own subject:
  *
- * - shallow prefix match        (`posts:*` vs `posts:create`);
- * - literal exact match         (`posts:create` vs `posts:create`);
- * - deep multi-segment match    (10-segment pattern with trailing `*`);
- * - miss on a non-matching set  (100 patterns, none match).
+ * - shallow prefix match (`posts:*` vs `posts:create`);
+ * - literal exact match (`posts:create` vs `posts:create`);
+ * - deep multi-segment match (10-segment pattern with trailing `*`);
+ * - miss on a non-matching set (100 patterns, none match).
  *
  * The bench exercises the public `Statement::matches()` entry point so the
  * measured surface matches the production hot path exactly — the raw

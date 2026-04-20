@@ -15,19 +15,17 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 /**
  * Global query scope for row-level multi-tenant filtering.
  *
- * When a `TenantResolver` returns a non-null tenant, this scope
- * restricts queries to rows that are either global (null tenant
- * columns) or owned by the resolved tenant. When the resolver
- * returns null (no tenant context), no filtering is applied and
- * all rows remain visible — preserving backward-compatible
- * platform-level behaviour.
+ * When a `TenantResolver` returns a non-null tenant, this scope restricts
+ * queries to rows that are either global (null tenant columns) or owned by the
+ * resolved tenant. When the resolver returns null (no tenant context), no
+ * filtering is applied and all rows remain visible — preserving
+ * backward-compatible platform-level behaviour.
  *
- * The scope memoises the resolver result on the instance so a
- * single Eloquent request-pattern (the `effectivePermissions()`
- * enum sweep, relation walks, cache-miss paths) pays the
- * resolver cost once rather than once per query. Call
- * `flushResolvedTenant()` at the request boundary under Octane
- * to clear the memo.
+ * The scope memoises the resolver result on the instance so a single Eloquent
+ * request-pattern (the `effectivePermissions()` enum sweep, relation walks,
+ * cache-miss paths) pays the resolver cost once rather than once per query.
+ * Call `flushResolvedTenant()` at the request boundary under Octane to clear
+ * the memo.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -77,13 +75,12 @@ class TenantScope implements Scope
     }
 
     /**
-     * Extract the `(tenant_type, tenant_id)` pair from an arbitrary
-     * tenant object, refusing anything that cannot supply a stable
-     * pair without a `spl_object_hash`-style fallback.
+     * Extract the `(tenant_type, tenant_id)` pair from an arbitrary tenant
+     * object, refusing anything that cannot supply a stable pair without a
+     * `spl_object_hash`-style fallback.
      *
-     * Shared by the global scope and the `scopeForTenant` local
-     * scope on `Role` / `Permission` so the acceptance rules have a
-     * single owner.
+     * Shared by the global scope and the `scopeForTenant` local scope on `Role`
+     * / `Permission` so the acceptance rules have a single owner.
      *
      * @param  object  $tenant
      * @return array{0: string, 1: string}
@@ -103,9 +100,9 @@ class TenantScope implements Scope
     }
 
     /**
-     * Flush the memoised tenant resolver result. Exposed for tests
-     * and for consumers that pivot the current tenant mid-request
-     * (for example an admin console that switches context).
+     * Flush the memoised tenant resolver result. Exposed for tests and for
+     * consumers that pivot the current tenant mid-request (for example an admin
+     * console that switches context).
      *
      * @return void
      */
@@ -115,10 +112,10 @@ class TenantScope implements Scope
     }
 
     /**
-     * Resolve the current tenant, memoising the result for the
-     * lifetime of the current container instance. Long-lived
-     * processes that rebuild the container per request (Octane)
-     * observe a new container ID on the next call and re-resolve.
+     * Resolve the current tenant, memoising the result for the lifetime of the
+     * current container instance. Long-lived processes that rebuild the
+     * container per request (Octane) observe a new container ID on the next
+     * call and re-resolve.
      *
      * @return object|null
      */

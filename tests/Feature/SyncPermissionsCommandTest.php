@@ -33,10 +33,9 @@ use Tests\TestCase;
 /**
  * Feature tests for the `authorization:sync` Artisan command.
  *
- * Drives the full command surface through `Artisan::call` so the
- * tests track the public contract a consumer would observe: exit
- * codes, stdout shape, emitted events, and the resulting permission
- * rows.
+ * Drives the full command surface through `Artisan::call` so the tests track
+ * the public contract a consumer would observe: exit codes, stdout shape,
+ * emitted events, and the resulting permission rows.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -56,9 +55,8 @@ use Tests\TestCase;
 final class SyncPermissionsCommandTest extends TestCase
 {
     /**
-     * A fresh sync against an empty DB inserts one row per
-     * `(name, guard)` tuple and emits one `Permission\Created`
-     * event per insert.
+     * A fresh sync against an empty DB inserts one row per `(name, guard)`
+     * tuple and emits one `Permission\Created` event per insert.
      *
      * @return void
      */
@@ -129,8 +127,8 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
-     * Re-running sync against the same enum state is idempotent —
-     * zero writes, zero events, all tuples report as `unchanged`.
+     * Re-running sync against the same enum state is idempotent — zero writes,
+     * zero events, all tuples report as `unchanged`.
      *
      * @return void
      */
@@ -176,8 +174,8 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
-     * Adding a case between sync passes inserts exactly one row
-     * and emits exactly one `Permission\Created`.
+     * Adding a case between sync passes inserts exactly one row and emits
+     * exactly one `Permission\Created`.
      *
      * @return void
      */
@@ -207,8 +205,8 @@ final class SyncPermissionsCommandTest extends TestCase
 
     /**
      * Removing a case between sync passes soft-retires the row —
-     * `deprecated_at` is stamped, the row survives, and exactly
-     * one `Permission\Deprecated` event fires (no `Deleted`).
+     * `deprecated_at` is stamped, the row survives, and exactly one
+     * `Permission\Deprecated` event fires (no `Deleted`).
      *
      * @return void
      */
@@ -243,8 +241,8 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
-     * Re-adding a previously retired case clears `deprecated_at`
-     * and emits a single `Permission\Reinstated` event.
+     * Re-adding a previously retired case clears `deprecated_at` and emits a
+     * single `Permission\Reinstated` event.
      *
      * @return void
      */
@@ -290,9 +288,8 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
-     * Metadata drift (description / category changes) refreshes the
-     * row and emits exactly one `Permission\Updated` per drifted
-     * row.
+     * Metadata drift (description / category changes) refreshes the row and
+     * emits exactly one `Permission\Updated` per drifted row.
      *
      * @return void
      */
@@ -335,9 +332,8 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
-     * System-flagged rows with no matching tuple surface in the
-     * `protected` bucket and are left untouched. No lifecycle events
-     * fire for them.
+     * System-flagged rows with no matching tuple surface in the `protected`
+     * bucket and are left untouched. No lifecycle events fire for them.
      *
      * @return void
      */
@@ -387,9 +383,8 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
-     * `--force-delete` hard-deletes retired rows and emits
-     * `Permission\Deleted` instead of `Permission\Deprecated`. A
-     * subsequent run reports nothing.
+     * `--force-delete` hard-deletes retired rows and emits `Permission\Deleted`
+     * instead of `Permission\Deprecated`. A subsequent run reports nothing.
      *
      * @return void
      */
@@ -422,8 +417,8 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
-     * `--dry-run` with drift reports the diff, exits 1, writes
-     * nothing, and dispatches no lifecycle events.
+     * `--dry-run` with drift reports the diff, exits 1, writes nothing, and
+     * dispatches no lifecycle events.
      *
      * @return void
      */
@@ -453,8 +448,7 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
-     * `--dry-run` against an already-synced state reports no drift
-     * and exits 0.
+     * `--dry-run` against an already-synced state reports no drift and exits 0.
      *
      * @return void
      */
@@ -482,12 +476,11 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
-     * `--format=json` emits parseable JSON carrying the
-     * `summary`, `changes`, and `dryRun` keys. The `changes.add`
-     * bucket is populated with one describe-tuple object per enum
-     * tuple carrying the exact `name`, `guard`, and `action` keys —
-     * catches mutations that strip describe fields or unwrap the
-     * `array_map` wrapper.
+     * `--format=json` emits parseable JSON carrying the `summary`, `changes`,
+     * and `dryRun` keys. The `changes.add` bucket is populated with one
+     * describe-tuple object per enum tuple carrying the exact `name`, `guard`,
+     * and `action` keys — catches mutations that strip describe fields or
+     * unwrap the `array_map` wrapper.
      *
      * @return void
      */
@@ -556,8 +549,8 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
-     * An unknown `--format` is refused with a clear error and the
-     * fatal exit code 2.
+     * An unknown `--format` is refused with a clear error and the fatal exit
+     * code 2.
      *
      * @return void
      */
@@ -572,8 +565,8 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
-     * An empty `permission_enums` config is a clean no-op — exit 0
-     * and no rows created.
+     * An empty `permission_enums` config is a clean no-op — exit 0 and no rows
+     * created.
      *
      * @return void
      */
@@ -591,9 +584,9 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
-     * An invalid `#[Permission]` attribute — explicit empty
-     * `guards: []` — surfaces as the fatal exit code 2 with a
-     * message naming the enum class and case.
+     * An invalid `#[Permission]` attribute — explicit empty `guards: []` —
+     * surfaces as the fatal exit code 2 with a message naming the enum class
+     * and case.
      *
      * @return void
      */
@@ -610,9 +603,9 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
-     * A retire bucket carrying a role-permission pivot reports the
-     * pivot count in the summary and leaves the pivot intact — the
-     * prune command's job, not sync's.
+     * A retire bucket carrying a role-permission pivot reports the pivot count
+     * in the summary and leaves the pivot intact — the prune command's job, not
+     * sync's.
      *
      * @return void
      */
@@ -668,15 +661,14 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
-     * The internal `compositeKey` helper must distinguish rows
-     * whose `name` differs only at the `(name, guard)` boundary
-     * from tuples that would collide under naïve string
-     * concatenation. A row named `posts:view-web` with guard null
-     * must NOT match a tuple with name `posts:view` and guard `web`
-     * for candidate-filter purposes: removing the row from the enum
-     * and attaching a role pivot to it must surface the pivot on
-     * the `roleReferences` count even when the tuple key has the
-     * same concatenated characters.
+     * The internal `compositeKey` helper must distinguish rows whose `name`
+     * differs only at the `(name, guard)` boundary from tuples that would
+     * collide under naïve string concatenation. A row named `posts:view-web`
+     * with guard null must NOT match a tuple with name `posts:view` and guard
+     * `web` for candidate-filter purposes: removing the row from the enum and
+     * attaching a role pivot to it must surface the pivot on the
+     * `roleReferences` count even when the tuple key has the same concatenated
+     * characters.
      *
      * @return void
      */
@@ -728,11 +720,11 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
-     * `countRoleReferences` must skip matched rows and system rows
-     * even when they are interleaved with non-system retire
-     * candidates. Breaking the `continue` into a `break` would drop
-     * every candidate that appears after the first matched or system
-     * row; empty-loop mutants would drop every candidate outright.
+     * `countRoleReferences` must skip matched rows and system rows even when
+     * they are interleaved with non-system retire candidates. Breaking the
+     * `continue` into a `break` would drop every candidate that appears after
+     * the first matched or system row; empty-loop mutants would drop every
+     * candidate outright.
      *
      * @return void
      */
@@ -797,14 +789,13 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
-     * `--dry-run` drift detection sums every mutating bucket. A run
-     * with retire-only drift must still exit `EXIT_DRIFT`; a run
-     * with reinstate-only drift must also exit `EXIT_DRIFT`; a run
-     * with only `protected` and `unchanged` populated must exit
-     * zero. An update-only drift and an add-only drift are also
-     * covered so every summand in `count(add) + count(update) +
-     * count(reinstate) + count(retire)` contributes to a passing
-     * test — catches the `Plus → Minus` mutations one arm at a time.
+     * `--dry-run` drift detection sums every mutating bucket. A run with
+     * retire-only drift must still exit `EXIT_DRIFT`; a run with reinstate-only
+     * drift must also exit `EXIT_DRIFT`; a run with only `protected` and
+     * `unchanged` populated must exit zero. An update-only drift and an
+     * add-only drift are also covered so every summand in `count(add) +
+     * count(update) + count(reinstate) + count(retire)` contributes to a
+     * passing test — catches the `Plus → Minus` mutations one arm at a time.
      *
      * @return void
      */
@@ -865,11 +856,10 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
-     * A live sync flushes the resolution cache after applying the
-     * diff; a dry run leaves the memo intact. The observable
-     * consequence is that a subsequent `rememberRoles` call invokes
-     * its resolver post-sync (fresh read) but not post-dry-run
-     * (memoised value returned).
+     * A live sync flushes the resolution cache after applying the diff; a dry
+     * run leaves the memo intact. The observable consequence is that a
+     * subsequent `rememberRoles` call invokes its resolver post-sync (fresh
+     * read) but not post-dry-run (memoised value returned).
      *
      * @return void
      */
@@ -914,14 +904,14 @@ final class SyncPermissionsCommandTest extends TestCase
 
     /**
      * Non-string and non-`PermissionEnum` entries in
-     * `authorization.permission_enums` are silently skipped by the
-     * command's defensive filter. Only the valid subclass contributes
-     * rows, and the run exits cleanly.
+     * `authorization.permission_enums` are silently skipped by the command's
+     * defensive filter. Only the valid subclass contributes rows, and the run
+     * exits cleanly.
      *
-     * Two valid enum classes are configured alongside the invalid
-     * entries so every valid class in the list contributes rows —
-     * catches the `ArrayOneItem` mutation that would truncate the
-     * filtered class list to the first entry only.
+     * Two valid enum classes are configured alongside the invalid entries so
+     * every valid class in the list contributes rows — catches the
+     * `ArrayOneItem` mutation that would truncate the filtered class list to
+     * the first entry only.
      *
      * @return void
      */
@@ -963,9 +953,9 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
-     * `--format=json` populates the `retire`, `protected`, and
-     * `unchanged` bucket arrays with per-row objects carrying the
-     * `name`, `guard`, and `action` keys.
+     * `--format=json` populates the `retire`, `protected`, and `unchanged`
+     * bucket arrays with per-row objects carrying the `name`, `guard`, and
+     * `action` keys.
      *
      * @return void
      */
@@ -1020,12 +1010,11 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
-     * `--format=json` populates the `update` and `reinstate` bucket
-     * arrays with per-tuple describe objects carrying the exact
-     * `name`, `guard`, and `action` keys — kills the
-     * `UnwrapArrayMap` mutations that replace `array_map(describe)`
-     * with the raw bucket payload (which carries row/tuple shapes,
-     * not the describe-shape the JSON contract documents).
+     * `--format=json` populates the `update` and `reinstate` bucket arrays with
+     * per-tuple describe objects carrying the exact `name`, `guard`, and
+     * `action` keys — kills the `UnwrapArrayMap` mutations that replace
+     * `array_map(describe)` with the raw bucket payload (which carries
+     * row/tuple shapes, not the describe-shape the JSON contract documents).
      *
      * @return void
      */

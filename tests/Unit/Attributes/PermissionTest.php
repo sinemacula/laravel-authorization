@@ -96,8 +96,8 @@ final class PermissionTest extends TestCase
     }
 
     /**
-     * The attribute targets class constants (enum cases are class constants
-     * in PHP's reflection model).
+     * The attribute targets class constants (enum cases are class constants in
+     * PHP's reflection model).
      *
      * @return void
      */

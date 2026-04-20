@@ -31,19 +31,16 @@ use Tests\TestCase;
 /**
  * Feature coverage for the wildcard-permission bundle.
  *
- * - `HasPermissions::hasPermission()` and `Role::hasPermission()`
- *   treat held names as `fnmatch` patterns: a held `posts:*`
- *   satisfies an asked `posts:create`, a held `*:*` satisfies
- *   anything (the super-admin bypass). The reverse direction does
- *   not match.
- * - `Statement::matchesAction()` / `matchesResource()` compare
- *   patterns with `FNM_NOESCAPE`, so backslash-bearing resource
- *   identifiers (fully-qualified morph classes without an alias)
- *   match literally.
- * - `ValidatesAuthorizationName` rejects role and permission names
- *   that contain glob metacharacters or whitespace before the row
- *   hits the database, so `fnmatch` cannot be tricked by a
- *   malformed value.
+ * - `HasPermissions::hasPermission()` and `Role::hasPermission()` treat held
+ *   names as `fnmatch` patterns: a held `posts:*` satisfies an asked
+ *   `posts:create`, a held `*:*` satisfies anything (the super-admin bypass).
+ *   The reverse direction does not match.
+ * - `Statement::matchesAction()` / `matchesResource()` compare patterns with
+ *   `FNM_NOESCAPE`, so backslash-bearing resource identifiers (fully-qualified
+ *   morph classes without an alias) match literally.
+ * - `ValidatesAuthorizationName` rejects role and permission names that contain
+ *   glob metacharacters or whitespace before the row hits the database, so
+ *   `fnmatch` cannot be tricked by a malformed value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

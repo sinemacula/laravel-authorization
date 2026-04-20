@@ -10,13 +10,13 @@ use SineMacula\Laravel\Authorization\Models\Role;
 /**
  * Dispatched when a permission is detached from a role.
  *
- * Distinct from `IdentityPermissionRevoked`, which fires when a
- * direct permission grant is removed from an authorizable identity.
- * Audit consumers use the event class to distinguish role-catalogue
- * mutations from identity-level revocations.
+ * Distinct from `IdentityPermissionRevoked`, which fires when a direct
+ * permission grant is removed from an authorizable identity. Audit consumers
+ * use the event class to distinguish role-catalogue mutations from
+ * identity-level revocations.
  *
- * Part of the SemVer-stable event API; breaking changes require a
- * major version bump.
+ * Part of the SemVer-stable event API; breaking changes require a major version
+ * bump.
  *
  * @api
  *

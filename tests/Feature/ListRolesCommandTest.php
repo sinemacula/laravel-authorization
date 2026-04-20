@@ -124,8 +124,7 @@ final class ListRolesCommandTest extends TestCase
     }
 
     /**
-     * A role with null guard renders "(any)". Pins the null-coalesce on
-     * guard.
+     * A role with null guard renders "(any)". Pins the null-coalesce on guard.
      *
      * @return void
      */

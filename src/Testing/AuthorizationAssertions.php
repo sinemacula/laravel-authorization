@@ -13,13 +13,12 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 /**
  * PHPUnit assertion trait for consumer test suites.
  *
- * Provides convenience assertions that delegate to the authorization
- * manager's evaluation surface. The assertion methods require the
- * using class to extend `PHPUnit\Framework\TestCase`, which supplies
- * the `assertTrue` / `assertFalse` static entry points. The
- * `actingAsIdentity` helper intentionally does not depend on the
- * TestCase base — it can be composed into any consumer utility and
- * falls back to the global `app()` helper when `$this->app` is not
+ * Provides convenience assertions that delegate to the authorization manager's
+ * evaluation surface. The assertion methods require the using class to extend
+ * `PHPUnit\Framework\TestCase`, which supplies the `assertTrue` / `assertFalse`
+ * static entry points. The `actingAsIdentity` helper intentionally does not
+ * depend on the TestCase base — it can be composed into any consumer utility
+ * and falls back to the global `app()` helper when `$this->app` is not
  * available.
  *
  * @method static void assertTrue(bool $condition, string $message = '')
@@ -33,8 +32,8 @@ trait AuthorizationAssertions
     /**
      * Assert that the principal is allowed to perform the action.
      *
-     * On failure, the evaluation trace is included in the message so
-     * the developer can immediately see why the check was denied.
+     * On failure, the evaluation trace is included in the message so the
+     * developer can immediately see why the check was denied.
      *
      * @param  object  $principal
      * @param  string  $action
@@ -60,8 +59,8 @@ trait AuthorizationAssertions
     /**
      * Assert that the principal is denied the action.
      *
-     * On failure, the evaluation trace is included in the message so
-     * the developer can see why the check was unexpectedly allowed.
+     * On failure, the evaluation trace is included in the message so the
+     * developer can see why the check was unexpectedly allowed.
      *
      * @param  object  $principal
      * @param  string  $action
@@ -124,12 +123,11 @@ trait AuthorizationAssertions
     }
 
     /**
-     * Swap the principal resolver for the duration of the test so
-     * that `Authorization::can(...)` (without `for()`) uses the
-     * supplied principal.
+     * Swap the principal resolver for the duration of the test so that
+     * `Authorization::can(...)` (without `for()`) uses the supplied principal.
      *
-     * Works with both Orchestra Testbench (`$this->app`) and bare
-     * Laravel (`app()`).
+     * Works with both Orchestra Testbench (`$this->app`) and bare Laravel
+     * (`app()`).
      *
      * @param  object  $principal
      * @return void
@@ -170,16 +168,16 @@ trait AuthorizationAssertions
     }
 
     /**
-     * Resolve the Laravel container to bind the test's principal
-     * resolver into. Prefers the `$app` property when the consuming
-     * class declares one (Laravel/Testbench `TestCase`), falling
-     * back to the global container singleton for bare consumers.
+     * Resolve the Laravel container to bind the test's principal resolver into.
+     * Prefers the `$app` property when the consuming class declares one
+     * (Laravel/Testbench `TestCase`), falling back to the global container
+     * singleton for bare consumers.
      *
-     * `get_object_vars($this)` reads the using class's own properties
-     * without a static `$this->app` access — the direct access would
-     * be flagged by PHPStan as either always-true or always-false
-     * depending on the concrete using class, and reflection was
-     * flagged by radarlint as an accessibility bypass.
+     * `get_object_vars($this)` reads the using class's own properties without a
+     * static `$this->app` access — the direct access would be flagged by
+     * PHPStan as either always-true or always-false depending on the concrete
+     * using class, and reflection was flagged by radarlint as an accessibility
+     * bypass.
      *
      * @return \Illuminate\Container\Container
      */

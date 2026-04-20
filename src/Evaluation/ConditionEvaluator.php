@@ -5,12 +5,12 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
 /**
- * Internal helper responsible for evaluating the condition operators
- * supported by the policy statement.
+ * Internal helper responsible for evaluating the condition operators supported
+ * by the policy statement.
  *
- * The helper keeps the statement class within its complexity budget by
- * lifting the CIDR, time and unknown-operator fallbacks into small,
- * single-purpose static methods. It is not part of the public API.
+ * The helper keeps the statement class within its complexity budget by lifting
+ * the CIDR, time and unknown-operator fallbacks into small, single-purpose
+ * static methods. It is not part of the public API.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -20,8 +20,8 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
 final class ConditionEvaluator
 {
     /**
-     * Determine whether the supplied IPv4 address falls within the
-     * supplied CIDR range.
+     * Determine whether the supplied IPv4 address falls within the supplied
+     * CIDR range.
      *
      * @param  string  $ip
      * @param  string  $cidr
@@ -99,8 +99,8 @@ final class ConditionEvaluator
     /**
      * Compare two values numerically using the supplied comparator.
      *
-     * Both sides must be numeric (pass `is_numeric`); if either side
-     * is non-numeric the condition fails gracefully (returns false).
+     * Both sides must be numeric (pass `is_numeric`); if either side is
+     * non-numeric the condition fails gracefully (returns false).
      *
      * @param  mixed  $actual
      * @param  mixed  $operand
@@ -128,9 +128,9 @@ final class ConditionEvaluator
     /**
      * Evaluate the `bool` operator by coercing both sides to boolean.
      *
-     * Truthy coercion: `true`, `'true'`, `'1'`, `1` resolve to true.
-     * Everything else resolves to false. Both sides are coerced before
-     * comparison so the operator is symmetric.
+     * Truthy coercion: `true`, `'true'`, `'1'`, `1` resolve to true. Everything
+     * else resolves to false. Both sides are coerced before comparison so the
+     * operator is symmetric.
      *
      * @param  mixed  $actual
      * @param  mixed  $operand
@@ -144,25 +144,23 @@ final class ConditionEvaluator
     /**
      * Log an unknown-operator warning and return false.
      *
-     * The logger call is wrapped in a try/catch by design: the
-     * condition evaluator sits on the authorization hot path and
-     * must not abort a `can()` check because an observability
-     * back-end (a Laravel log facade root, a logging driver, a
-     * third-party collector) is unavailable. The intentional
+     * The logger call is wrapped in a try/catch by design: the condition
+     * evaluator sits on the authorization hot path and must not abort a `can()`
+     * check because an observability back-end (a Laravel log facade root, a
+     * logging driver, a third-party collector) is unavailable. The intentional
      * swallow covers three operating modes:
      *
-     * - Pure-PHP contexts (benchmarks, standalone evaluator
-     *   use) where Laravel's `logger()` helper may not be bound.
-     * - Container-less test runs that construct the evaluator
-     *   directly without a facade root.
-     * - Production outages where the configured logging
-     *   driver fails — rare but real; no reason to cascade into
-     *   an authorization failure.
+     * - Pure-PHP contexts (benchmarks, standalone evaluator use) where
+     *   Laravel's `logger()` helper may not be bound.
+     * - Container-less test runs that construct the evaluator directly without
+     *   a facade root.
+     * - Production outages where the configured logging driver fails — rare but
+     *   real; no reason to cascade into an authorization failure.
      *
-     * Consumers who want unknown-operator events as hard signals
-     * should subscribe to the `DecisionEvaluated` event and
-     * inspect the trace — every skipped statement is recorded
-     * there with a `'conditions not satisfied'` reason.
+     * Consumers who want unknown-operator events as hard signals should
+     * subscribe to the `DecisionEvaluated` event and inspect the trace — every
+     * skipped statement is recorded there with a `'conditions not satisfied'`
+     * reason.
      *
      * @param  string  $operator
      * @return bool
@@ -199,8 +197,8 @@ final class ConditionEvaluator
     }
 
     /**
-     * Coerce a scalar value into a UNIX timestamp, returning null when
-     * the value cannot be parsed.
+     * Coerce a scalar value into a UNIX timestamp, returning null when the
+     * value cannot be parsed.
      *
      * @param  mixed  $value
      * @return int|null
@@ -241,8 +239,7 @@ final class ConditionEvaluator
     /**
      * Coerce a mixed value to a boolean.
      *
-     * Truthy: `true`, `'true'`, `'1'`, `1`.
-     * Everything else: false.
+     * Truthy: `true`, `'true'`, `'1'`, `1`. Everything else: false.
      *
      * @param  mixed  $value
      * @return bool

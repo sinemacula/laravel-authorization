@@ -137,8 +137,8 @@ final class SystemPermissionProtectionTest extends TestCase
     }
 
     /**
-     * Non-rename updates — description, guard swap — pass without needing
-     * the escape hatch.
+     * Non-rename updates — description, guard swap — pass without needing the
+     * escape hatch.
      *
      * @return void
      */

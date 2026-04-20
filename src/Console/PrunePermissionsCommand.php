@@ -15,29 +15,28 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 /**
  * Detach pivots and hard-delete deprecated permission rows.
  *
- * Follow-up to `authorization:sync`, run on the operator's own
- * cadence once they are comfortable that the soft-retired rows
- * (`deprecated_at IS NOT NULL`) are no longer needed. The command
- * loads every deprecated, non-system, global row matching the
- * optional `--before` timestamp filter, detaches its role and
- * identity pivot attachments, and calls `delete()` on the Eloquent
- * model so the observer's `Permission\Deleted` event fires.
+ * Follow-up to `authorization:sync`, run on the operator's own cadence once
+ * they are comfortable that the soft-retired rows (`deprecated_at IS NOT NULL`)
+ * are no longer needed. The command loads every deprecated, non-system, global
+ * row matching the optional `--before` timestamp filter, detaches its role and
+ * identity pivot attachments, and calls `delete()` on the Eloquent model so the
+ * observer's `Permission\Deleted` event fires.
  *
  * Flags:
  *
- * - `--before=<ISO-8601>` — only prune rows whose `deprecated_at`
- *   is at or before the supplied instant. Any valid ISO-8601
- *   string is accepted; parsing is delegated to `CarbonImmutable`.
- * - `--dry-run` — compute the candidate set and report without
- *   touching the database. Always exits zero, including when the
- *   set is empty — prune is advisory, not a drift check.
- * - `--format=table|json` — stdout renderer, mirroring the sync
- *   command. JSON output carries a `dryRun` flag so pipelines can
- *   branch on the mutating vs reporting mode.
+ * - `--before=<ISO-8601>` — only prune rows whose `deprecated_at` is at or
+ *   before the supplied instant. Any valid ISO-8601 string is accepted; parsing
+ *   is delegated to `CarbonImmutable`.
+ * - `--dry-run` — compute the candidate set and report without touching the
+ *   database. Always exits zero, including when the set is empty — prune is
+ *   advisory, not a drift check.
+ * - `--format=table|json` — stdout renderer, mirroring the sync command. JSON
+ *   output carries a `dryRun` flag so pipelines can branch on the mutating vs
+ *   reporting mode.
  *
- * `is_system = true` rows are never touched — the filter on the
- * candidate query is the single source of truth for that
- * protection; the per-row apply path does not re-check it.
+ * `is_system = true` rows are never touched — the filter on the candidate query
+ * is the single source of truth for that protection; the per-row apply path
+ * does not re-check it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -111,11 +110,11 @@ class PrunePermissionsCommand extends Command
     }
 
     /**
-     * Resolve the optional `--before` option into a `CarbonImmutable`,
-     * or return `null` when omitted. On an unparseable value the
-     * method emits the error and returns `false` so the caller exits
-     * fatal — the explicit sentinel keeps the signature honest for
-     * PHPStan without a throw/catch dance in `handle()`.
+     * Resolve the optional `--before` option into a `CarbonImmutable`, or
+     * return `null` when omitted. On an unparseable value the method emits the
+     * error and returns `false` so the caller exits fatal — the explicit
+     * sentinel keeps the signature honest for PHPStan without a throw/catch
+     * dance in `handle()`.
      *
      * @return \Carbon\CarbonImmutable|false|null
      */
@@ -138,12 +137,11 @@ class PrunePermissionsCommand extends Command
     }
 
     /**
-     * Load every candidate permission row — deprecated, non-system,
-     * global (tenant-null), optionally filtered by `--before`. The
-     * tenant scope is explicitly dropped so a tenant-resolved test
-     * context does not hide global rows; the `ExcludesDeprecatedScope`
-     * is dropped via `withDeprecated()` so deprecated rows actually
-     * surface.
+     * Load every candidate permission row — deprecated, non-system, global
+     * (tenant-null), optionally filtered by `--before`. The tenant scope is
+     * explicitly dropped so a tenant-resolved test context does not hide global
+     * rows; the `ExcludesDeprecatedScope` is dropped via `withDeprecated()` so
+     * deprecated rows actually surface.
      *
      * @param  \Carbon\CarbonImmutable|null  $before
      * @return \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission>
@@ -166,10 +164,10 @@ class PrunePermissionsCommand extends Command
     }
 
     /**
-     * Walk the candidate rows once and attach their per-row pivot
-     * counts so the renderer and the apply phase share a single view
-     * of the prune set. Counting up-front also makes the dry-run
-     * summary accurate without a second query per row.
+     * Walk the candidate rows once and attach their per-row pivot counts so the
+     * renderer and the apply phase share a single view of the prune set.
+     * Counting up-front also makes the dry-run summary accurate without a
+     * second query per row.
      *
      * @param  \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission>  $candidates
      * @return list<array{row: \SineMacula\Laravel\Authorization\Models\Permission, roleCount: int, identityCount: int}>
@@ -196,13 +194,12 @@ class PrunePermissionsCommand extends Command
     }
 
     /**
-     * Detach pivots and delete each candidate inside a single
-     * transaction so a mid-apply failure leaves the DB consistent.
-     * The role pivot is detached via the Eloquent relation; the
-     * identity pivot has no inverse relation on `Permission`, so
-     * attached rows are cleared through a raw `DB::table()` delete
-     * against the configured pivot table. `$row->delete()` drives
-     * the observer-fired `Permission\Deleted` event.
+     * Detach pivots and delete each candidate inside a single transaction so a
+     * mid-apply failure leaves the DB consistent. The role pivot is detached
+     * via the Eloquent relation; the identity pivot has no inverse relation on
+     * `Permission`, so attached rows are cleared through a raw `DB::table()`
+     * delete against the configured pivot table. `$row->delete()` drives the
+     * observer-fired `Permission\Deleted` event.
      *
      * @param  \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission>  $candidates
      * @return void
@@ -246,8 +243,8 @@ class PrunePermissionsCommand extends Command
     }
 
     /**
-     * Render the prune set as an action/count summary plus a per-row
-     * detail listing when there are any candidates.
+     * Render the prune set as an action/count summary plus a per-row detail
+     * listing when there are any candidates.
      *
      * @param  list<array{row: \SineMacula\Laravel\Authorization\Models\Permission, roleCount: int, identityCount: int}>  $report
      * @param  bool  $dryRun
@@ -291,10 +288,9 @@ class PrunePermissionsCommand extends Command
     }
 
     /**
-     * Render the prune set as pretty-printed JSON — matches the sync
-     * command's payload shape (top-level `dryRun` + `summary` +
-     * per-row detail) so downstream tooling can consume both outputs
-     * through a shared parser.
+     * Render the prune set as pretty-printed JSON — matches the sync command's
+     * payload shape (top-level `dryRun` + `summary` + per-row detail) so
+     * downstream tooling can consume both outputs through a shared parser.
      *
      * @param  list<array{row: \SineMacula\Laravel\Authorization\Models\Permission, roleCount: int, identityCount: int}>  $report
      * @param  bool  $dryRun
@@ -319,9 +315,9 @@ class PrunePermissionsCommand extends Command
     }
 
     /**
-     * Collapse the per-row report into the summary counts used by
-     * both renderers — kept private so the two formats stay in
-     * lock-step without sharing an intermediate DTO with any caller.
+     * Collapse the per-row report into the summary counts used by both
+     * renderers — kept private so the two formats stay in lock-step without
+     * sharing an intermediate DTO with any caller.
      *
      * @param  list<array{row: \SineMacula\Laravel\Authorization\Models\Permission, roleCount: int, identityCount: int}>  $report
      * @return array{considered: int, roleCount: int, identityCount: int}
@@ -361,8 +357,8 @@ class PrunePermissionsCommand extends Command
     }
 
     /**
-     * Render a guard slot for the table output, substituting a
-     * human-readable sentinel for the guard-agnostic null.
+     * Render a guard slot for the table output, substituting a human-readable
+     * sentinel for the guard-agnostic null.
      *
      * @param  string|null  $guard
      * @return string
@@ -373,9 +369,9 @@ class PrunePermissionsCommand extends Command
     }
 
     /**
-     * Render a `deprecated_at` timestamp for the table output — ISO
-     * 8601 so operators can paste the value straight back into
-     * `--before` on the next run.
+     * Render a `deprecated_at` timestamp for the table output — ISO 8601 so
+     * operators can paste the value straight back into `--before` on the next
+     * run.
      *
      * @param  \Carbon\CarbonInterface|null  $timestamp
      * @return string

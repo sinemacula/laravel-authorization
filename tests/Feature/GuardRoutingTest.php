@@ -59,8 +59,8 @@ final class GuardRoutingTest extends TestCase
     /**
      * Ensure the api-guard stub table exists whenever this suite runs. Needs to
      * work regardless of whether `migrate:fresh` already ran in this process,
-     * so it's keyed off `Schema::hasTable` rather than the
-     * `DatabaseRefreshed` hook.
+     * so it's keyed off `Schema::hasTable` rather than the `DatabaseRefreshed`
+     * hook.
      *
      * @return void
      */

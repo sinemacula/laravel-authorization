@@ -21,10 +21,10 @@ use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
 use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
 
 /**
- * Eloquent model for role rows — named buckets of permissions shared
- * across authorizable identities. Behaviour is composed from
- * `HasRoleHierarchy`, `ManagesPermissions`, `HasSystemProtection`, and
- * the `RoleObserver` wired via `#[ObservedBy]`.
+ * Eloquent model for role rows — named buckets of permissions shared across
+ * authorizable identities. Behaviour is composed from `HasRoleHierarchy`,
+ * `ManagesPermissions`, `HasSystemProtection`, and the `RoleObserver` wired via
+ * `#[ObservedBy]`.
  *
  * @property string $id
  * @property string $name
@@ -78,15 +78,14 @@ class Role extends Model
     }
 
     /**
-     * Resolve a role by name under the supplied guard, favouring
-     * guard-specific rows over guard-agnostic rows.
+     * Resolve a role by name under the supplied guard, favouring guard-specific
+     * rows over guard-agnostic rows.
      *
      * Centralises the guard-precedence query shared by
-     * `HasRoles::resolveRole()` and any direct static caller — a
-     * single owner for the guard-agnostic disjunction so evolution
-     * of the matching rules happens in one place. Consumers calling
-     * `$class::resolveByName(...)` where
-     * `$class` is read from `authorization.models.role` get correct
+     * `HasRoles::resolveRole()` and any direct static caller — a single owner
+     * for the guard-agnostic disjunction so evolution of the matching rules
+     * happens in one place. Consumers calling `$class::resolveByName(...)`
+     * where `$class` is read from `authorization.models.role` get correct
      * late-static-binding against their swapped model.
      *
      * @param  string  $name
@@ -127,8 +126,7 @@ class Role extends Model
     }
 
     /**
-     * Determine whether this role is global (not owned by any
-     * tenant).
+     * Determine whether this role is global (not owned by any tenant).
      *
      * @return bool
      */
@@ -150,10 +148,9 @@ class Role extends Model
     /**
      * Scope the query to rows owned by the given tenant.
      *
-     * Delegates morph-pair extraction to
-     * `TenantScope::extractTenantPair()` so the global scope and
-     * this local scope share a single owner for the acceptance
-     * rules — refuses any tenant that is neither a Model nor an
+     * Delegates morph-pair extraction to `TenantScope::extractTenantPair()` so
+     * the global scope and this local scope share a single owner for the
+     * acceptance rules — refuses any tenant that is neither a Model nor an
      * `AuthorizableTenant` implementer with a typed exception.
      *
      * @param  \Illuminate\Database\Eloquent\Builder<static>  $query
@@ -171,8 +168,7 @@ class Role extends Model
     }
 
     /**
-     * Scope the query to global rows only (tenant columns are
-     * null).
+     * Scope the query to global rows only (tenant columns are null).
      *
      * @param  \Illuminate\Database\Eloquent\Builder<static>  $query
      * @return \Illuminate\Database\Eloquent\Builder<static>
@@ -190,8 +186,7 @@ class Role extends Model
     }
 
     /**
-     * Human-readable label used in a name-validation exception
-     * message.
+     * Human-readable label used in a name-validation exception message.
      *
      * @return string
      */
@@ -202,8 +197,8 @@ class Role extends Model
 
     /**
      * Return the attribute names whose dirty state triggers the
-     * system-protection guard on `updating`. For roles, only `name`
-     * changes are protected.
+     * system-protection guard on `updating`. For roles, only `name` changes are
+     * protected.
      *
      * @return list<string>
      */
@@ -213,8 +208,8 @@ class Role extends Model
     }
 
     /**
-     * Construct the per-model exception raised when a protected
-     * mutation on a system role is refused.
+     * Construct the per-model exception raised when a protected mutation on a
+     * system role is refused.
      *
      * @param  string  $operation
      * @return \Throwable

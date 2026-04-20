@@ -15,9 +15,9 @@ use SineMacula\Laravel\Authorization\Exceptions\GateConflictException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 
 /**
- * Walk every configured permission enum and register a matching Laravel
- * Gate. With no enums configured the registrar is a no-op and the Gate
- * surface stays silent; the `Authorization` facade continues to work.
+ * Walk every configured permission enum and register a matching Laravel Gate.
+ * With no enums configured the registrar is a no-op and the Gate surface stays
+ * silent; the `Authorization` facade continues to work.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,8 +37,7 @@ final class GateRegistrar
     ) {}
 
     /**
-     * Walk every configured permission enum and register a Gate per
-     * case.
+     * Walk every configured permission enum and register a Gate per case.
      *
      * @return void
      *
@@ -66,8 +65,8 @@ final class GateRegistrar
     }
 
     /**
-     * Resolve the configured gate-conflict mode, defaulting to
-     * `THROW` when the raw value is missing or malformed.
+     * Resolve the configured gate-conflict mode, defaulting to `THROW` when the
+     * raw value is missing or malformed.
      *
      * @return \SineMacula\Laravel\Authorization\Enums\GateConflictMode
      */
@@ -84,8 +83,8 @@ final class GateRegistrar
     }
 
     /**
-     * Register a single Gate for the supplied enum case, honouring
-     * the configured conflict mode.
+     * Register a single Gate for the supplied enum case, honouring the
+     * configured conflict mode.
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\PermissionEnum  $case
      * @param  \SineMacula\Laravel\Authorization\Enums\GateConflictMode  $onConflict
@@ -132,9 +131,9 @@ final class GateRegistrar
 
     /**
      * Translate the arguments Laravel hands to a Gate callback into the
-     * `(resource, context)` pair the authorization manager accepts.
-     * Positional entries map to the resource identifier; string keys and
-     * string-keyed arrays merge into the context map.
+     * `(resource, context)` pair the authorization manager accepts. Positional
+     * entries map to the resource identifier; string keys and string-keyed
+     * arrays merge into the context map.
      *
      * @param  array<int|string, mixed>  $arguments
      * @return array{0: string|null, 1: array<string, mixed>}
@@ -176,9 +175,9 @@ final class GateRegistrar
     }
 
     /**
-     * Coerce a Gate-callback argument into a resource identifier
-     * string. Returns null when the value is not a resource the
-     * evaluator can reason about.
+     * Coerce a Gate-callback argument into a resource identifier string.
+     * Returns null when the value is not a resource the evaluator can reason
+     * about.
      *
      * @param  mixed  $value
      * @return string|null

@@ -8,8 +8,8 @@ use SineMacula\Laravel\Authorization\Attributes\Permission as PermissionMeta;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
 
 /**
- * Secondary fixture enum used to assert that the walker aggregates
- * cases across multiple enum classes.
+ * Secondary fixture enum used to assert that the walker aggregates cases across
+ * multiple enum classes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

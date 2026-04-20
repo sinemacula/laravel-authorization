@@ -7,18 +7,17 @@ namespace SineMacula\Laravel\Authorization\Console\Support;
 use SineMacula\Laravel\Authorization\Models\Permission;
 
 /**
- * Pure diff engine that reconciles enum-derived permission tuples
- * against the current global permission rows.
+ * Pure diff engine that reconciles enum-derived permission tuples against the
+ * current global permission rows.
  *
- * The builder performs no IO: the caller loads the rows (already
- * filtered to `tenant_id IS NULL`, deprecated rows included) and
- * supplies a pre-computed pivot count for reporting. The return
- * value is a structured `PermissionDiff` partitioning every input
- * into exactly one of six buckets.
+ * The builder performs no IO: the caller loads the rows (already filtered to
+ * `tenant_id IS NULL`, deprecated rows included) and supplies a pre-computed
+ * pivot count for reporting. The return value is a structured `PermissionDiff`
+ * partitioning every input into exactly one of six buckets.
  *
- * Matching is keyed on `(name, guard)` with `null` and empty-string
- * guards treated as equivalent. Bucket assignment follows the
- * algorithm documented in SPEC §4.
+ * Matching is keyed on `(name, guard)` with `null` and empty-string guards
+ * treated as equivalent. Bucket assignment follows the algorithm documented in
+ * SPEC §4.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -68,8 +67,8 @@ final readonly class PermissionDiffBuilder
     }
 
     /**
-     * Classify every tuple into one of four buckets and report the
-     * keys that were matched against a DB row.
+     * Classify every tuple into one of four buckets and report the keys that
+     * were matched against a DB row.
      *
      * @param  list<\SineMacula\Laravel\Authorization\Console\Support\PermissionTuple>  $tuples
      * @param  array<string, \SineMacula\Laravel\Authorization\Models\Permission>  $rowsByKey
@@ -146,8 +145,8 @@ final readonly class PermissionDiffBuilder
     }
 
     /**
-     * Build the match key for a tuple, normalising guard so empty
-     * strings collapse to null.
+     * Build the match key for a tuple, normalising guard so empty strings
+     * collapse to null.
      *
      * @param  \SineMacula\Laravel\Authorization\Console\Support\PermissionTuple  $tuple
      * @return string
@@ -158,8 +157,8 @@ final readonly class PermissionDiffBuilder
     }
 
     /**
-     * Build the match key for a row, normalising guard so empty
-     * strings collapse to null.
+     * Build the match key for a row, normalising guard so empty strings
+     * collapse to null.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission  $row
      * @return string
@@ -186,10 +185,9 @@ final readonly class PermissionDiffBuilder
     /**
      * Determine whether the row's metadata differs from the tuple.
      *
-     * Only `description` and `category` participate in drift
-     * detection — other columns are either structural (`name`,
-     * `guard`, `is_system`, tenant columns) or derived
-     * (`deprecated_at`, timestamps).
+     * Only `description` and `category` participate in drift detection — other
+     * columns are either structural (`name`, `guard`, `is_system`, tenant
+     * columns) or derived (`deprecated_at`, timestamps).
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission  $row
      * @param  \SineMacula\Laravel\Authorization\Console\Support\PermissionTuple  $tuple
@@ -202,8 +200,7 @@ final readonly class PermissionDiffBuilder
     }
 
     /**
-     * Sort a tuple list by `(name, guard)` ascending, null guards
-     * first.
+     * Sort a tuple list by `(name, guard)` ascending, null guards first.
      *
      * @param  list<\SineMacula\Laravel\Authorization\Console\Support\PermissionTuple>  $tuples
      * @return list<\SineMacula\Laravel\Authorization\Console\Support\PermissionTuple>
@@ -221,8 +218,7 @@ final readonly class PermissionDiffBuilder
     }
 
     /**
-     * Sort a row list by `(name, guard)` ascending, null guards
-     * first.
+     * Sort a row list by `(name, guard)` ascending, null guards first.
      *
      * @param  list<\SineMacula\Laravel\Authorization\Models\Permission>  $rows
      * @return list<\SineMacula\Laravel\Authorization\Models\Permission>
@@ -240,9 +236,8 @@ final readonly class PermissionDiffBuilder
     }
 
     /**
-     * Sort a row/tuple pair list by the tuple's `(name, guard)` —
-     * the tuple key and row key agree because the pair is only
-     * emitted when both match.
+     * Sort a row/tuple pair list by the tuple's `(name, guard)` — the tuple key
+     * and row key agree because the pair is only emitted when both match.
      *
      * @param  list<array{row: \SineMacula\Laravel\Authorization\Models\Permission, tuple: \SineMacula\Laravel\Authorization\Console\Support\PermissionTuple}>  $pairs
      * @return list<array{row: \SineMacula\Laravel\Authorization\Models\Permission, tuple: \SineMacula\Laravel\Authorization\Console\Support\PermissionTuple}>
@@ -260,10 +255,10 @@ final readonly class PermissionDiffBuilder
     }
 
     /**
-     * Three-way compare two `(name, guard)` pairs. Name comparison
-     * is straightforward strcmp; guard comparison treats null as
-     * sorting before any concrete string so guard-agnostic rows
-     * surface first within a given name.
+     * Three-way compare two `(name, guard)` pairs. Name comparison is
+     * straightforward strcmp; guard comparison treats null as sorting before
+     * any concrete string so guard-agnostic rows surface first within a given
+     * name.
      *
      * @param  string  $leftName
      * @param  string|null  $leftGuard
@@ -281,9 +276,8 @@ final readonly class PermissionDiffBuilder
     }
 
     /**
-     * Three-way compare two guard slots. A null guard sorts before
-     * any concrete string so guard-agnostic rows surface first
-     * within a given name.
+     * Three-way compare two guard slots. A null guard sorts before any concrete
+     * string so guard-agnostic rows surface first within a given name.
      *
      * @param  string|null  $leftGuard
      * @param  string|null  $rightGuard

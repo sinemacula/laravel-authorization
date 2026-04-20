@@ -9,14 +9,13 @@ use SineMacula\Laravel\Authorization\Models\Role;
 /**
  * Dispatched after a new role row is persisted.
  *
- * Part of the role-catalogue lifecycle trio (`Created`,
- * `Updated`, `Deleted`) consumed by audit-log sinks
- * responsible for reconstructing the "who created which role
- * when" trail required by SOC 2 / ISO 27001 change-management
+ * Part of the role-catalogue lifecycle trio (`Created`, `Updated`, `Deleted`)
+ * consumed by audit-log sinks responsible for reconstructing the "who created
+ * which role when" trail required by SOC 2 / ISO 27001 change-management
  * controls.
  *
- * Part of the SemVer-stable event API; breaking changes require a
- * major version bump.
+ * Part of the SemVer-stable event API; breaking changes require a major version
+ * bump.
  *
  * @api
  *

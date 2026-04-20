@@ -12,10 +12,10 @@ use SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked as RolePermis
 /**
  * Event listener that keeps the resolution cache coherent.
  *
- * Principal-scoped identity events drop only that authorizable's cached
- * lookups via `ResolutionCache::forget()`. Role-pivot events flush every
- * entry tagged with the affected role on tag-capable stores (Redis,
- * Memcached, array) and fall back to an in-memory flush elsewhere.
+ * Principal-scoped identity events drop only that authorizable's cached lookups
+ * via `ResolutionCache::forget()`. Role-pivot events flush every entry tagged
+ * with the affected role on tag-capable stores (Redis, Memcached, array) and
+ * fall back to an in-memory flush elsewhere.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -35,8 +35,7 @@ final class InvalidateResolutionCache
     ) {}
 
     /**
-     * Drop the cached entries belonging to the authorizable on
-     * the event.
+     * Drop the cached entries belonging to the authorizable on the event.
      *
      * @param  \SineMacula\Laravel\Authorization\Events\Identity\IdentityEvent  $event
      * @return void
@@ -52,12 +51,11 @@ final class InvalidateResolutionCache
     /**
      * Invalidate cached entries affected by a role-pivot mutation.
      *
-     * On a tag-capable store, `forgetRoleTags()` flushes every
-     * principal entry tagged with the role — the precise
-     * inverse of the role-pivot change and no collateral damage
-     * to unrelated cache entries. The in-memory memo is always
-     * flushed so the same request observes the mutation even
-     * before any tag flush propagates.
+     * On a tag-capable store, `forgetRoleTags()` flushes every principal entry
+     * tagged with the role — the precise inverse of the role-pivot change and
+     * no collateral damage to unrelated cache entries. The in-memory memo is
+     * always flushed so the same request observes the mutation even before any
+     * tag flush propagates.
      *
      * @formatter:off
      *

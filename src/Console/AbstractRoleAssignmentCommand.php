@@ -9,11 +9,10 @@ use SineMacula\Laravel\Authorization\Console\Concerns\ResolvesIdentity;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 
 /**
- * Shared scaffolding for `authorization:grant` and
- * `authorization:revoke`. Both commands share an identical argument
- * shape, identity-resolution step, try/catch wrap, and success
- * message pattern; the concrete subclass supplies only the mutating
- * model call and the success verb.
+ * Shared scaffolding for `authorization:grant` and `authorization:revoke`. Both
+ * commands share an identical argument shape, identity-resolution step,
+ * try/catch wrap, and success message pattern; the concrete subclass supplies
+ * only the mutating model call and the success verb.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

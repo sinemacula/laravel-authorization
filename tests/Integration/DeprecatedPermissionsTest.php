@@ -20,13 +20,11 @@ use Tests\TestCase;
  * Integration coverage asserting that gate evaluation honours the
  * `ExcludesDeprecatedScope` global scope on `Permission`.
  *
- * A permission that has been retired by stamping its `deprecated_at`
- * timestamp must drop out of the evaluator's RBAC branch even when
- * the underlying row and pivot are still present — the scope filters
- * it out of every model-layer query the manager traverses. Admin
- * flows that need the full catalogue reach in via
- * `Permission::withDeprecated()` without disturbing the default
- * surface.
+ * A permission that has been retired by stamping its `deprecated_at` timestamp
+ * must drop out of the evaluator's RBAC branch even when the underlying row and
+ * pivot are still present — the scope filters it out of every model-layer query
+ * the manager traverses. Admin flows that need the full catalogue reach in via
+ * `Permission::withDeprecated()` without disturbing the default surface.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,9 +39,9 @@ use Tests\TestCase;
 final class DeprecatedPermissionsTest extends TestCase
 {
     /**
-     * A role-inherited permission resolves to allow while live, then
-     * denies the moment it is deprecated — the scope filters the row
-     * out of the model-layer query the RBAC branch traverses.
+     * A role-inherited permission resolves to allow while live, then denies the
+     * moment it is deprecated — the scope filters the row out of the
+     * model-layer query the RBAC branch traverses.
      *
      * @return void
      */

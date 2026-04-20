@@ -10,9 +10,9 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 /**
  * Authorization facade.
  *
- * Static proxy to the container-bound authorization manager. Every
- * call is forwarded to a fresh manager scope so `for()` /
- * `withPolicies()` chains do not leak between requests.
+ * Static proxy to the container-bound authorization manager. Every call is
+ * forwarded to a fresh manager scope so `for()` / `withPolicies()` chains do
+ * not leak between requests.
  *
  * @formatter:off
  *

@@ -8,13 +8,13 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 
 /**
  * Dispatched after a permission row is soft-retired by sync — the
- * `deprecated_at` column is stamped but the row, and any role pivots
- * attached to it, survive.
+ * `deprecated_at` column is stamped but the row, and any role pivots attached
+ * to it, survive.
  *
  * Paired with `Reinstated` across the deprecation lifecycle.
  *
- * Part of the SemVer-stable event API; breaking changes require a
- * major version bump.
+ * Part of the SemVer-stable event API; breaking changes require a major version
+ * bump.
  *
  * @api
  *

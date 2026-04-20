@@ -8,8 +8,8 @@ use SineMacula\Laravel\Authorization\Attributes\Permission as PermissionMeta;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
 
 /**
- * Fixture enum carrying a single-guard attribute — exercises
- * single-element guard expansion.
+ * Fixture enum carrying a single-guard attribute — exercises single-element
+ * guard expansion.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

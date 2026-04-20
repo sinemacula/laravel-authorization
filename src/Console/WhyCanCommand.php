@@ -9,12 +9,11 @@ use SineMacula\Laravel\Authorization\Console\Concerns\ResolvesIdentity;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 
 /**
- * Explain the evaluation trace for an identity, action, and optional
- * resource.
+ * Explain the evaluation trace for an identity, action, and optional resource.
  *
- * Runs the full four-step evaluation (explicit deny, allow, RBAC,
- * implicit deny) and prints the verdict, reason, and ordered trace
- * so operators can diagnose authorization decisions from the CLI.
+ * Runs the full four-step evaluation (explicit deny, allow, RBAC, implicit
+ * deny) and prints the verdict, reason, and ordered trace so operators can
+ * diagnose authorization decisions from the CLI.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

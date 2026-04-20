@@ -11,21 +11,18 @@ use SineMacula\Laravel\Authorization\Support\BladeHelpers;
 /**
  * Register Blade directives for role and permission checks.
  *
- * `Blade::if('role', …)` auto-generates the paired
- * `@role / @unlessrole / @elserole / @endrole` quartet; the same
- * pattern covers `@permission`, `@anyrole`, `@allroles`,
- * `@anypermission`, and `@allpermissions`. Spatie-style aliases
- * (`@hasrole`, `@hasanyrole`, `@hasallroles`, `@haspermission`,
- * `@hasanypermission`, `@hasallpermissions`) are registered in
- * parallel so consumers migrating from Spatie can move their views
- * verbatim.
+ * `Blade::if('role', …)` auto-generates the paired `@role / @unlessrole
+ * / @elserole / @endrole` quartet; the same pattern covers `@permission`,
+ * `@anyrole`, `@allroles`, `@anypermission`, and `@allpermissions`.
+ * Spatie-style aliases (`@hasrole`, `@hasanyrole`, `@hasallroles`,
+ * `@haspermission`, `@hasanypermission`, `@hasallpermissions`) are registered
+ * in parallel so consumers migrating from Spatie can move their views verbatim.
  *
  * Spatie closes its unless-variants with `@endunless<name>`, whereas
- * `Blade::if` closes its auto-generated variant with `@end<name>`.
- * Every canonical and compat name gets a matching
- * `@endunless<name>` alias that emits the same `endif;`, so both
- * idioms compile cleanly regardless of which closing spelling the
- * consumer reaches for.
+ * `Blade::if` closes its auto-generated variant with `@end<name>`. Every
+ * canonical and compat name gets a matching `@endunless<name>` alias that emits
+ * the same `endif;`, so both idioms compile cleanly regardless of which closing
+ * spelling the consumer reaches for.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -47,9 +44,9 @@ final class BladeDirectiveRegistrar
     /**
      * Register every role / permission Blade directive.
      *
-     * The directives are registered only when the `blade.compiler`
-     * binding is present, so console-only applications that do not
-     * resolve the view layer never pay the registration cost.
+     * The directives are registered only when the `blade.compiler` binding is
+     * present, so console-only applications that do not resolve the view layer
+     * never pay the registration cost.
      *
      * @return void
      */

@@ -10,9 +10,9 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 /**
  * List all permissions in a tabular format.
  *
- * Outputs every permission row with its ID, name, guard, system
- * flag, and attached role count. An optional `--guard` filter
- * restricts the listing to a single guard name.
+ * Outputs every permission row with its ID, name, guard, system flag, and
+ * attached role count. An optional `--guard` filter restricts the listing to a
+ * single guard name.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

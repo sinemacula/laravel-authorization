@@ -5,14 +5,13 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Exceptions;
 
 /**
- * Thrown when a system-flagged permission would be deleted or
- * renamed without the explicit `forceSystem()` escape hatch.
+ * Thrown when a system-flagged permission would be deleted or renamed without
+ * the explicit `forceSystem()` escape hatch.
  *
- * Protects platform-shipped permissions (e.g. `*:*`,
- * `system:audit`) from accidental removal by a caller with raw
- * Eloquent access. The exception carries the permission's current
- * name so audit and error reporting can identify the offending
- * target.
+ * Protects platform-shipped permissions (e.g. `*:*`, `system:audit`) from
+ * accidental removal by a caller with raw Eloquent access. The exception
+ * carries the permission's current name so audit and error reporting can
+ * identify the offending target.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

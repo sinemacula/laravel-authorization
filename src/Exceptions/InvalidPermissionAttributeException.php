@@ -5,14 +5,13 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Exceptions;
 
 /**
- * Thrown when a `#[Permission]` attribute carries an invalid
- * configuration that cannot be expanded into a meaningful set of
- * `(name, guard)` tuples.
+ * Thrown when a `#[Permission]` attribute carries an invalid configuration that
+ * cannot be expanded into a meaningful set of `(name, guard)` tuples.
  *
- * The only invalid shape the walker currently rejects is an explicit
- * empty `guards: []` array: `null` means guard-agnostic and any
- * non-empty list expands per guard, but an explicit empty list is
- * ambiguous and almost certainly a mistake.
+ * The only invalid shape the walker currently rejects is an explicit empty
+ * `guards: []` array: `null` means guard-agnostic and any non-empty list
+ * expands per guard, but an explicit empty list is ambiguous and almost
+ * certainly a mistake.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -67,8 +66,7 @@ class InvalidPermissionAttributeException extends \LogicException
     }
 
     /**
-     * Return the human-readable reason the attribute failed
-     * validation.
+     * Return the human-readable reason the attribute failed validation.
      *
      * @return string
      */

@@ -11,16 +11,15 @@ use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 /**
  * Default policy resolver.
  *
- * Unions the policies returned by an optional external `PolicyStore`
- * with the policies attached to the principal itself when it is an
- * `AuthorizableIdentity`. A principal that implements neither
- * contract yields an empty policy list — the evaluator then falls
- * through to implicit deny unless an RBAC grant satisfies the
- * check.
+ * Unions the policies returned by an optional external `PolicyStore` with the
+ * policies attached to the principal itself when it is an
+ * `AuthorizableIdentity`. A principal that implements neither contract yields
+ * an empty policy list — the evaluator then falls through to implicit deny
+ * unless an RBAC grant satisfies the check.
  *
- * The resolver is intentionally stateless so consumers can decorate
- * it with cache, tenant-scoping, or role-hierarchy expanders without
- * inheriting any internal state.
+ * The resolver is intentionally stateless so consumers can decorate it with
+ * cache, tenant-scoping, or role-hierarchy expanders without inheriting any
+ * internal state.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,9 +41,8 @@ final class DefaultPolicyResolver implements PolicyResolver
     /**
      * Return every policy applicable to the supplied principal.
      *
-     * Unions the optional `PolicyStore`'s contribution with the
-     * principal's own attached policies when the principal is an
-     * `AuthorizableIdentity`.
+     * Unions the optional `PolicyStore`'s contribution with the principal's own
+     * attached policies when the principal is an `AuthorizableIdentity`.
      *
      * @param  object  $principal
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>

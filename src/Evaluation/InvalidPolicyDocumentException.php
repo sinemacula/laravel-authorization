@@ -5,8 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
 /**
- * Thrown when a persisted policy document cannot be parsed into a
- * valid policy value object.
+ * Thrown when a persisted policy document cannot be parsed into a valid policy
+ * value object.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

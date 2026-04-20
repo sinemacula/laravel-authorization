@@ -14,11 +14,11 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
  * handle when an interpolator is supplied:
  *
  * - A plain string operand is interpolated directly.
- * - An array operand with a non-string value passes the non-string
- *   through unchanged (integers, booleans, and null operands that
- *   consumers occasionally use for `null` identity checks).
- * - A non-string, non-array operand (scalar, object, null) is
- *   returned verbatim.
+ * - An array operand with a non-string value passes the non-string through
+ *   unchanged (integers, booleans, and null operands that consumers
+ *   occasionally use for `null` identity checks).
+ * - A non-string, non-array operand (scalar, object, null) is returned
+ *   verbatim.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

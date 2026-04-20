@@ -5,8 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Database;
 
 /**
- * Thrown when a shipped migration detects that one of the
- * authorization tables already exists on the target database.
+ * Thrown when a shipped migration detects that one of the authorization tables
+ * already exists on the target database.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

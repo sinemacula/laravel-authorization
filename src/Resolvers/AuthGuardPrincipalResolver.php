@@ -8,21 +8,18 @@ use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 
 /**
- * Principal resolver that reads from Laravel's standard auth
- * factory.
+ * Principal resolver that reads from Laravel's standard auth factory.
  *
- * The shipped default is `NullPrincipalResolver` (anonymous-safe,
- * zero auth coupling). Consumers wiring the package onto a
- * standard Laravel auth stack point
- * `authorization.principal_resolver` at this class to let the
+ * The shipped default is `NullPrincipalResolver` (anonymous-safe, zero auth
+ * coupling). Consumers wiring the package onto a standard Laravel auth stack
+ * point `authorization.principal_resolver` at this class to let the
  * authorization engine resolve "the current principal" from
- * `Auth::guard($name)->user()` — the four-line boilerplate every
- * app would otherwise write.
+ * `Auth::guard($name)->user()` — the four-line boilerplate every app would
+ * otherwise write.
  *
- * The guard name defaults to `authorization.defaults.guard` and
- * can be overridden at construction for multi-guard deployments
- * that want to pin the authorization resolution to a specific
- * guard.
+ * The guard name defaults to `authorization.defaults.guard` and can be
+ * overridden at construction for multi-guard deployments that want to pin the
+ * authorization resolution to a specific guard.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -61,8 +58,8 @@ final class AuthGuardPrincipalResolver implements PrincipalResolver
     }
 
     /**
-     * Resolve the configured default guard, falling back to
-     * `'web'` when config is unavailable.
+     * Resolve the configured default guard, falling back to `'web'` when config
+     * is unavailable.
      *
      * @return string
      */

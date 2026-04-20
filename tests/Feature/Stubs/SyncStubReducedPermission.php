@@ -8,8 +8,8 @@ use SineMacula\Laravel\Authorization\Attributes\Permission as PermissionMeta;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum as PermissionEnumContract;
 
 /**
- * Sync fixture missing the `POSTS_DELETE` case — exercises the
- * `retire` bucket when a case is removed between sync passes.
+ * Sync fixture missing the `POSTS_DELETE` case — exercises the `retire` bucket
+ * when a case is removed between sync passes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

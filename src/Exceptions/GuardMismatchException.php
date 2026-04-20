@@ -5,14 +5,14 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Exceptions;
 
 /**
- * Thrown when a role-to-permission attachment would pair two rows
- * scoped to different guards.
+ * Thrown when a role-to-permission attachment would pair two rows scoped to
+ * different guards.
  *
- * Guard-agnostic rows (null `guard`) are compatible with every
- * guard, so they never trigger the mismatch. Two concrete guards
- * must be equal. The check runs from the pivot model's `saving`
- * hook so direct relation use (`$role->permissions()->attach(...)`,
- * `sync(...)`) is caught alongside the typed Role API.
+ * Guard-agnostic rows (null `guard`) are compatible with every guard, so they
+ * never trigger the mismatch. Two concrete guards must be equal. The check runs
+ * from the pivot model's `saving` hook so direct relation use
+ * (`$role->permissions()->attach(...)`, `sync(...)`) is caught alongside the
+ * typed Role API.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

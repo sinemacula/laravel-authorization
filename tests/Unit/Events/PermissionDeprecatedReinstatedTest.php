@@ -11,12 +11,12 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use Tests\TestCase;
 
 /**
- * Unit tests for the two permission lifecycle events introduced
- * alongside the sync command.
+ * Unit tests for the two permission lifecycle events introduced alongside the
+ * sync command.
  *
  * Both events are promoted-parameter readonly value objects on the
- * SemVer-stable event API; each test pins the constructor-to-property
- * contract that audit listeners bind against.
+ * SemVer-stable event API; each test pins the constructor-to-property contract
+ * that audit listeners bind against.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -30,8 +30,7 @@ use Tests\TestCase;
 final class PermissionDeprecatedReinstatedTest extends TestCase
 {
     /**
-     * `PermissionDeprecated` exposes the promoted `permission`
-     * property.
+     * `PermissionDeprecated` exposes the promoted `permission` property.
      *
      * @return void
      */
@@ -45,8 +44,7 @@ final class PermissionDeprecatedReinstatedTest extends TestCase
     }
 
     /**
-     * `PermissionReinstated` exposes the promoted `permission`
-     * property.
+     * `PermissionReinstated` exposes the promoted `permission` property.
      *
      * @return void
      */

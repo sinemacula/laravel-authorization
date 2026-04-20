@@ -8,9 +8,8 @@ use SineMacula\Laravel\Authorization\Attributes\Permission as PermissionMeta;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum as PermissionEnumContract;
 
 /**
- * Sync fixture carrying the base cases plus a single additional
- * case — exercises the `add` bucket when the enum catalogue grows
- * between sync passes.
+ * Sync fixture carrying the base cases plus a single additional case —
+ * exercises the `add` bucket when the enum catalogue grows between sync passes.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

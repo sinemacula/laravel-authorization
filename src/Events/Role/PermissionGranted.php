@@ -10,13 +10,12 @@ use SineMacula\Laravel\Authorization\Models\Role;
 /**
  * Dispatched when a permission is attached to a role.
  *
- * Distinct from `Identity\PermissionGranted`, which fires when a
- * permission is attached directly to an authorizable identity. Audit
- * consumers use the event class to distinguish role-catalogue
- * mutations from identity-level grants.
+ * Distinct from `Identity\PermissionGranted`, which fires when a permission is
+ * attached directly to an authorizable identity. Audit consumers use the event
+ * class to distinguish role-catalogue mutations from identity-level grants.
  *
- * Part of the SemVer-stable event API; breaking changes require a
- * major version bump.
+ * Part of the SemVer-stable event API; breaking changes require a major version
+ * bump.
  *
  * @api
  *

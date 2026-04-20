@@ -19,11 +19,11 @@ use Tests\TestCase;
 /**
  * Coverage for the remaining `AuthorizationServiceProvider` branches:
  *
- * - A concrete `policy_store` class triggers the singleton binding
- *   in `registerPolicyStore`.
- * - `authorization.gate.on_conflict` supplied as a native
- *   `GateConflictMode` enum instance (rather than the string
- *   sentinel) is passed through verbatim by `registerGates`.
+ * - A concrete `policy_store` class triggers the singleton binding in
+ *   `registerPolicyStore`.
+ * - `authorization.gate.on_conflict` supplied as a native `GateConflictMode`
+ *   enum instance (rather than the string sentinel) is passed through verbatim
+ *   by `registerGates`.
  * - `registerGates` skips non-string and non-contract entries in
  *   `permission_enums` at runtime.
  *

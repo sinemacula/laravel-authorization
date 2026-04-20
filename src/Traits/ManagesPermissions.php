@@ -15,16 +15,15 @@ use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
 /**
  * Role-side permission management API.
  *
- * Owns the `Role → Permission` relation and every give / revoke / has
- * / sync / get helper consumers call against a Role. Extracted from
- * `Role` so the model keeps to schema, relations, and lifecycle.
+ * Owns the `Role → Permission` relation and every give / revoke / has / sync /
+ * get helper consumers call against a Role. Extracted from `Role` so the model
+ * keeps to schema, relations, and lifecycle.
  *
- * Fires `RolePermissionGranted` on every attachment and
- * `RolePermissionRevoked` on every detachment so the cache
- * invalidation listener keeps the resolution cache coherent and
- * audit consumers receive the same per-row signal regardless of the
- * entry point (`givePermission`, `revokePermission`,
- * `syncPermissions`, or a raw `$role->permissions()->attach()`).
+ * Fires `RolePermissionGranted` on every attachment and `RolePermissionRevoked`
+ * on every detachment so the cache invalidation listener keeps the resolution
+ * cache coherent and audit consumers receive the same per-row signal regardless
+ * of the entry point (`givePermission`, `revokePermission`, `syncPermissions`,
+ * or a raw `$role->permissions()->attach()`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,10 +35,9 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
     /**
      * Permissions attached to this role.
      *
-     * The relation is bound to the `RolePermission` pivot so every
-     * attachment path — the typed Role API, a direct
-     * `$role->permissions()->attach(...)`, or a raw
-     * `sync(...)` — runs through the pivot's `saving` hook and the
+     * The relation is bound to the `RolePermission` pivot so every attachment
+     * path — the typed Role API, a direct `$role->permissions()->attach(...)`,
+     * or a raw `sync(...)` — runs through the pivot's `saving` hook and the
      * guard-parity invariant it enforces.
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
@@ -140,11 +138,10 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
     /**
      * Replace this role's permission set with the supplied list.
      *
-     * Each net attachment fires `RolePermissionGranted` and each net
-     * detachment fires `RolePermissionRevoked`, so audit consumers
-     * receive the same per-row signal they would for
-     * `givePermission()` / `revokePermission()` calls and the cache
-     * invalidation listener wired to those events keeps the
+     * Each net attachment fires `RolePermissionGranted` and each net detachment
+     * fires `RolePermissionRevoked`, so audit consumers receive the same
+     * per-row signal they would for `givePermission()` / `revokePermission()`
+     * calls and the cache invalidation listener wired to those events keeps the
      * resolution cache coherent.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Permission|string>  $permissions
@@ -182,13 +179,12 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
     /**
      * Determine whether this role carries the given permission.
      *
-     * A held permission name is treated as an `fnmatch` pattern
-     * against the asked name — so a role that holds `posts:*`
-     * satisfies `hasPermission('posts:create')`, and a role that
-     * holds `*:*` satisfies every check. The reverse direction does
-     * not match: holding `posts:create` does not satisfy an asked
-     * `posts:*`. Backslashes are compared literally via
-     * `FNM_NOESCAPE`.
+     * A held permission name is treated as an `fnmatch` pattern against the
+     * asked name — so a role that holds `posts:*` satisfies
+     * `hasPermission('posts:create')`, and a role that holds `*:*` satisfies
+     * every check. The reverse direction does not match: holding `posts:create`
+     * does not satisfy an asked `posts:*`. Backslashes are compared literally
+     * via `FNM_NOESCAPE`.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return bool
@@ -220,11 +216,10 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
     /**
      * Return the names of every permission this role holds.
      *
-     * When `authorization.hierarchy.enabled` is true (the default),
-     * this includes the deduplicated union of the role's own direct
-     * permissions and all permissions inherited from ancestor roles.
-     * When hierarchy is disabled, only directly attached permissions
-     * are returned.
+     * When `authorization.hierarchy.enabled` is true (the default), this
+     * includes the deduplicated union of the role's own direct permissions and
+     * all permissions inherited from ancestor roles. When hierarchy is
+     * disabled, only directly attached permissions are returned.
      *
      * @return array<int, string>
      */
@@ -265,12 +260,11 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
     /**
      * Resolve a permission identifier to a model instance.
      *
-     * Role rows carry their own `guard`; use it as the lookup scope
-     * so a web-scoped role resolves permissions against the web
-     * guard and an api-scoped role against the api guard. Falls back
-     * to the package default when the role itself is guard-agnostic
-     * (null `guard`). Delegates the query to
-     * `Permission::resolveByName()` so both sides share one
+     * Role rows carry their own `guard`; use it as the lookup scope so a
+     * web-scoped role resolves permissions against the web guard and an
+     * api-scoped role against the api guard. Falls back to the package default
+     * when the role itself is guard-agnostic (null `guard`). Delegates the
+     * query to `Permission::resolveByName()` so both sides share one
      * implementation.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
@@ -291,9 +285,9 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
     }
 
     /**
-     * Resolve a permission model by primary key, used by
-     * `syncPermissions()` when the sync delta surfaces an ID that
-     * was not part of the caller's input set (the detachment list).
+     * Resolve a permission model by primary key, used by `syncPermissions()`
+     * when the sync delta surfaces an ID that was not part of the caller's
+     * input set (the detachment list).
      *
      * @param  string  $id
      * @return \SineMacula\Laravel\Authorization\Models\Permission

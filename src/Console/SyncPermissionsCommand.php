@@ -21,32 +21,30 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 
 /**
- * Project the permission enum catalogue into the `permissions`
- * table.
+ * Project the permission enum catalogue into the `permissions` table.
  *
- * Walks every class in `authorization.permission_enums`, expands each
- * case into one `(name, guard)` tuple per configured guard, and
- * reconciles the resulting set against the current global rows via
- * the pure `PermissionDiffBuilder`. The six diff buckets (add,
- * update, reinstate, retire, protected, unchanged) drive the apply
- * phase: inserts, metadata updates, `deprecated_at` clears,
- * `deprecated_at` stamps (or hard deletes under `--force-delete`),
- * and no-ops respectively.
+ * Walks every class in `authorization.permission_enums`, expands each case into
+ * one `(name, guard)` tuple per configured guard, and reconciles the resulting
+ * set against the current global rows via the pure `PermissionDiffBuilder`. The
+ * six diff buckets (add, update, reinstate, retire, protected, unchanged) drive
+ * the apply phase: inserts, metadata updates, `deprecated_at` clears,
+ * `deprecated_at` stamps (or hard deletes under `--force-delete`), and no-ops
+ * respectively.
  *
  * Flags:
  *
- * - `--dry-run` — compute and report the diff without writing. Exits
- *   with code 1 when drift exists (`add`/`update`/`reinstate`/`retire`
- *   non-empty); `protected` and `unchanged` are not drift.
- * - `--format=table|json` — swap the stdout renderer. JSON output
- *   includes a top-level `dryRun` flag so pipelines can branch.
+ * - `--dry-run` — compute and report the diff without writing. Exits with code
+ *   1 when drift exists (`add`/`update`/`reinstate`/`retire` non-empty);
+ *   `protected` and `unchanged` are not drift.
+ * - `--format=table|json` — swap the stdout renderer. JSON output includes a
+ *   top-level `dryRun` flag so pipelines can branch.
  * - `--force-delete` — hard-delete retired rows instead of stamping
- *   `deprecated_at`. `is_system` rows still surface in the
- *   `protected` bucket and are never touched.
+ *   `deprecated_at`. `is_system` rows still surface in the `protected` bucket
+ *   and are never touched.
  *
- * Role-permission pivots are never detached by sync; the `retire`
- * count and the pre-computed pivot reference count are reported so
- * the operator can decide when to prune.
+ * Role-permission pivots are never detached by sync; the `retire` count and the
+ * pre-computed pivot reference count are reported so the operator can decide
+ * when to prune.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -132,11 +130,10 @@ class SyncPermissionsCommand extends Command
     }
 
     /**
-     * Load the configured permission enum class list, filtering out
-     * anything that failed to materialise as a valid backed string
-     * enum. The `ConfigValidator` already ran at boot; this filter
-     * exists so a command-time config swap does not blow up the
-     * walker with a typeerror.
+     * Load the configured permission enum class list, filtering out anything
+     * that failed to materialise as a valid backed string enum. The
+     * `ConfigValidator` already ran at boot; this filter exists so a
+     * command-time config swap does not blow up the walker with a typeerror.
      *
      * @return list<class-string<\SineMacula\Laravel\Authorization\Contracts\PermissionEnum>>
      */
@@ -163,15 +160,15 @@ class SyncPermissionsCommand extends Command
     }
 
     /**
-     * Load every global (`tenant_id IS NULL`) permission row,
-     * including deprecated ones. Deprecated rows must participate in
-     * the diff so the reinstate bucket can match them — with the
-     * default scope applied they would look like "not in DB" and
-     * collide on the unique index when add fired.
+     * Load every global (`tenant_id IS NULL`) permission row, including
+     * deprecated ones. Deprecated rows must participate in the diff so the
+     * reinstate bucket can match them — with the default scope applied they
+     * would look like "not in DB" and collide on the unique index when add
+     * fired.
      *
-     * The tenant scope is explicitly dropped: a tenant-resolved test
-     * context would otherwise scope to the current tenant and hide
-     * global rows, producing phantom adds.
+     * The tenant scope is explicitly dropped: a tenant-resolved test context
+     * would otherwise scope to the current tenant and hide global rows,
+     * producing phantom adds.
      *
      * @return list<\SineMacula\Laravel\Authorization\Models\Permission>
      */
@@ -188,15 +185,15 @@ class SyncPermissionsCommand extends Command
     }
 
     /**
-     * Count role-permission pivot rows referencing any row that
-     * would land in the retire bucket. Runs once before the diff
-     * builder so the builder can surface the count on its own
-     * `PermissionDiff` without re-walking the rows.
+     * Count role-permission pivot rows referencing any row that would land in
+     * the retire bucket. Runs once before the diff builder so the builder can
+     * surface the count on its own `PermissionDiff` without re-walking the
+     * rows.
      *
-     * Replicates the retire-candidate predicate the diff builder
-     * applies internally — any row whose `(name, guard)` is not in
-     * the tuple set and that is not `is_system` — to keep the count
-     * in sync with the bucket the operator eventually sees.
+     * Replicates the retire-candidate predicate the diff builder applies
+     * internally — any row whose `(name, guard)` is not in the tuple set and
+     * that is not `is_system` — to keep the count in sync with the bucket the
+     * operator eventually sees.
      *
      * @param  list<\SineMacula\Laravel\Authorization\Console\Support\PermissionTuple>  $tuples
      * @param  list<\SineMacula\Laravel\Authorization\Models\Permission>  $rows
@@ -239,9 +236,9 @@ class SyncPermissionsCommand extends Command
     }
 
     /**
-     * Apply the computed diff — inserts, updates, reinstates, and
-     * retires — inside a single transaction so a mid-apply failure
-     * leaves the DB in a consistent state.
+     * Apply the computed diff — inserts, updates, reinstates, and retires —
+     * inside a single transaction so a mid-apply failure leaves the DB in a
+     * consistent state.
      *
      * @param  \SineMacula\Laravel\Authorization\Console\Support\PermissionDiff  $diff
      * @param  bool  $forceDelete
@@ -269,8 +266,8 @@ class SyncPermissionsCommand extends Command
     }
 
     /**
-     * Insert a fresh permission row for an unmatched tuple. The
-     * observer fires `Permission\Created` automatically on save.
+     * Insert a fresh permission row for an unmatched tuple. The observer fires
+     * `Permission\Created` automatically on save.
      *
      * @param  \SineMacula\Laravel\Authorization\Console\Support\PermissionTuple  $tuple
      * @return void
@@ -289,9 +286,9 @@ class SyncPermissionsCommand extends Command
     }
 
     /**
-     * Refresh metadata on a matched row whose description or
-     * category drifted from its tuple. The observer fires
-     * `Permission\Updated` automatically on save.
+     * Refresh metadata on a matched row whose description or category drifted
+     * from its tuple. The observer fires `Permission\Updated` automatically on
+     * save.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission  $row
      * @param  \SineMacula\Laravel\Authorization\Console\Support\PermissionTuple  $tuple
@@ -305,11 +302,11 @@ class SyncPermissionsCommand extends Command
     }
 
     /**
-     * Clear `deprecated_at` and refresh metadata on a previously
-     * retired row that re-appeared in the enum catalogue. Dispatches
+     * Clear `deprecated_at` and refresh metadata on a previously retired row
+     * that re-appeared in the enum catalogue. Dispatches
      * `Permission\Reinstated` in addition to the observer's
-     * `Permission\Updated` so audit consumers can distinguish
-     * lifecycle transitions from ordinary metadata drift.
+     * `Permission\Updated` so audit consumers can distinguish lifecycle
+     * transitions from ordinary metadata drift.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission  $row
      * @param  \SineMacula\Laravel\Authorization\Console\Support\PermissionTuple  $tuple
@@ -326,11 +323,10 @@ class SyncPermissionsCommand extends Command
     }
 
     /**
-     * Retire a row the enum no longer contains. Default behaviour
-     * stamps `deprecated_at` and dispatches `Permission\Deprecated`
-     * on top of the observer's `Permission\Updated`;
-     * `--force-delete` hard-deletes the row and relies on the
-     * observer's `Permission\Deleted`.
+     * Retire a row the enum no longer contains. Default behaviour stamps
+     * `deprecated_at` and dispatches `Permission\Deprecated` on top of the
+     * observer's `Permission\Updated`; `--force-delete` hard-deletes the row
+     * and relies on the observer's `Permission\Deleted`.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission  $row
      * @param  bool  $forceDelete
@@ -370,8 +366,8 @@ class SyncPermissionsCommand extends Command
     }
 
     /**
-     * Render the diff as a pair of tables — a summary with one row
-     * per bucket plus a detail listing when any bucket is non-empty.
+     * Render the diff as a pair of tables — a summary with one row per bucket
+     * plus a detail listing when any bucket is non-empty.
      *
      * @param  \SineMacula\Laravel\Authorization\Console\Support\PermissionDiff  $diff
      * @param  bool  $dryRun
@@ -437,8 +433,8 @@ class SyncPermissionsCommand extends Command
     }
 
     /**
-     * Render the diff as pretty-printed JSON with a `dryRun` flag so
-     * pipelines can branch on the mutating vs reporting mode.
+     * Render the diff as pretty-printed JSON with a `dryRun` flag so pipelines
+     * can branch on the mutating vs reporting mode.
      *
      * @param  \SineMacula\Laravel\Authorization\Console\Support\PermissionDiff  $diff
      * @param  bool  $dryRun
@@ -502,8 +498,8 @@ class SyncPermissionsCommand extends Command
     }
 
     /**
-     * Render a guard slot for the table output, substituting a
-     * human-readable sentinel for the guard-agnostic null.
+     * Render a guard slot for the table output, substituting a human-readable
+     * sentinel for the guard-agnostic null.
      *
      * @param  string|null  $guard
      * @return string
@@ -514,9 +510,9 @@ class SyncPermissionsCommand extends Command
     }
 
     /**
-     * Compose a match key equivalent to the one the diff builder
-     * uses internally so the pre-diff retire-candidate lookup agrees
-     * with the bucket assignment.
+     * Compose a match key equivalent to the one the diff builder uses
+     * internally so the pre-diff retire-candidate lookup agrees with the bucket
+     * assignment.
      *
      * @param  string  $name
      * @param  string|null  $guard
@@ -530,10 +526,9 @@ class SyncPermissionsCommand extends Command
     }
 
     /**
-     * Translate the diff and the run mode into an exit code per the
-     * spec — zero for a clean run (or a dry-run with no drift),
-     * `EXIT_DRIFT` for a dry-run that surfaced any mutating bucket,
-     * zero again for a successful live run.
+     * Translate the diff and the run mode into an exit code per the spec — zero
+     * for a clean run (or a dry-run with no drift), `EXIT_DRIFT` for a dry-run
+     * that surfaced any mutating bucket, zero again for a successful live run.
      *
      * @param  \SineMacula\Laravel\Authorization\Console\Support\PermissionDiff  $diff
      * @param  bool  $dryRun

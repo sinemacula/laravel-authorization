@@ -9,12 +9,11 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 /**
  * Dispatched after a new permission row is persisted.
  *
- * Part of the permission-catalogue lifecycle trio
- * (`PermissionCreated`, `PermissionUpdated`, `PermissionDeleted`)
- * consumed by audit-log sinks.
+ * Part of the permission-catalogue lifecycle trio (`PermissionCreated`,
+ * `PermissionUpdated`, `PermissionDeleted`) consumed by audit-log sinks.
  *
- * Part of the SemVer-stable event API; breaking changes require a
- * major version bump.
+ * Part of the SemVer-stable event API; breaking changes require a major version
+ * bump.
  *
  * @api
  *

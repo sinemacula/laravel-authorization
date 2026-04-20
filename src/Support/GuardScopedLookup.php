@@ -10,11 +10,11 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * Shared guard-precedence query builder.
  *
- * Both `Role::resolveByName()` and `Permission::resolveByName()`
- * need an identical query that finds a row by `(name, guard)` with
- * guard-specific rows outranking guard-agnostic rows. This helper
- * owns the single copy of that logic so the two models delegate here
- * instead of carrying duplicated private methods.
+ * Both `Role::resolveByName()` and `Permission::resolveByName()` need an
+ * identical query that finds a row by `(name, guard)` with guard-specific rows
+ * outranking guard-agnostic rows. This helper owns the single copy of that
+ * logic so the two models delegate here instead of carrying duplicated private
+ * methods.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -22,20 +22,17 @@ use Illuminate\Database\Eloquent\Model;
 final class GuardScopedLookup
 {
     /**
-     * Find a row by `(name, guard)` for the supplied model class,
-     * preferring guard-specific rows over guard-agnostic ones. The
-     * lookup is the shared half of `Role::resolveByName()` /
-     * `Permission::resolveByName()`. The return is typed as
-     * `Model|null`; callers validate the concrete class with
-     * `instanceof` before using the result. Larastan cannot flow a
-     * `TModel` template through
-     * `new $class->newQuery()->first()` (the Builder generic is
-     * inferred as `Model` once the receiver is a dynamic
-     * class-string), so a generic return shape would produce false
-     * `return.type` errors at callsites. The two
-     * `staticMethod.dynamicCall` suppressions on `orderByRaw()` and
-     * `orWhereNull()` cover Laravel's `@method static` annotations
-     * on `Illuminate\Database\Eloquent\Builder`; the dispatch is
+     * Find a row by `(name, guard)` for the supplied model class, preferring
+     * guard-specific rows over guard-agnostic ones. The lookup is the shared
+     * half of `Role::resolveByName()` / `Permission::resolveByName()`. The
+     * return is typed as `Model|null`; callers validate the concrete class with
+     * `instanceof` before using the result. Larastan cannot flow a `TModel`
+     * template through `new $class->newQuery()->first()` (the Builder generic
+     * is inferred as `Model` once the receiver is a dynamic class-string), so a
+     * generic return shape would produce false `return.type` errors at
+     * callsites. The two `staticMethod.dynamicCall` suppressions on
+     * `orderByRaw()` and `orWhereNull()` cover Laravel's `@method static`
+     * annotations on `Illuminate\Database\Eloquent\Builder`; the dispatch is
      * runtime-dynamic on a Builder instance, not static.
      *
      * @param  class-string<\Illuminate\Database\Eloquent\Model>  $class

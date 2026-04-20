@@ -5,17 +5,16 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Console\Support;
 
 /**
- * Expected permission tuple derived from a `PermissionEnum` case and
- * its `#[Permission]` attribute.
+ * Expected permission tuple derived from a `PermissionEnum` case and its
+ * `#[Permission]` attribute.
  *
- * One tuple represents one target `(name, guard)` row in the
- * permissions table. A case with `guards: ['web', 'api']` expands into
- * two tuples; a case with `guards: null` yields a single tuple with
- * `guard = null` (guard-agnostic).
+ * One tuple represents one target `(name, guard)` row in the permissions table.
+ * A case with `guards: ['web', 'api']` expands into two tuples; a case with
+ * `guards: null` yields a single tuple with `guard = null` (guard-agnostic).
  *
- * The tuple is immutable and is the unit the diff engine keys its
- * matching on — equality against a DB row is `(name, guard)` only;
- * metadata drift is handled downstream.
+ * The tuple is immutable and is the unit the diff engine keys its matching on —
+ * equality against a DB row is `(name, guard)` only; metadata drift is handled
+ * downstream.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

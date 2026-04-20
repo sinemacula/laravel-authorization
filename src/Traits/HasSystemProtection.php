@@ -5,10 +5,9 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Traits;
 
 /**
- * Shared `is_system` row-protection hooks for the primitive
- * authorization models. Consumers declare the protected-field list
- * and per-model exception factory; `forceSystem()` provides a
- * per-instance, single-use bypass.
+ * Shared `is_system` row-protection hooks for the primitive authorization
+ * models. Consumers declare the protected-field list and per-model exception
+ * factory; `forceSystem()` provides a per-instance, single-use bypass.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -22,8 +21,8 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
 
     /**
      * Unlock the next protected mutation on this instance. The bypass is
-     * per-instance, single-use, in-memory, and consumed by the guard
-     * clause on the next protected operation.
+     * per-instance, single-use, in-memory, and consumed by the guard clause on
+     * the next protected operation.
      *
      * @return static
      */
@@ -36,18 +35,18 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
 
     /**
      * Return the attribute names whose dirty state triggers the
-     * system-protection guard on `updating`. `Role` and `Permission`
-     * return `['name']`; `Policy` returns `['name', 'document']`.
+     * system-protection guard on `updating`. `Role` and `Permission` return
+     * `['name']`; `Policy` returns `['name', 'document']`.
      *
      * @return list<string>
      */
     abstract protected function systemProtectedFields(): array;
 
     /**
-     * Construct the per-model exception raised when a protected mutation
-     * is refused. The operation label (e.g. `'delete'`, `'rename'`,
-     * `'document-rewrite'`) is carried on the exception alongside the
-     * row's canonical name.
+     * Construct the per-model exception raised when a protected mutation is
+     * refused. The operation label (e.g. `'delete'`, `'rename'`,
+     * `'document-rewrite'`) is carried on the exception alongside the row's
+     * canonical name.
      *
      * @param  string  $operation
      * @return \Throwable
@@ -55,9 +54,9 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
     abstract protected function systemProtectionException(string $operation): \Throwable;
 
     /**
-     * Register the `deleting` / `updating` / `saved` hooks that enforce
-     * the system-row protection invariant. The `updating` hook names the
-     * operation after the first protected attribute found in `getDirty()`.
+     * Register the `deleting` / `updating` / `saved` hooks that enforce the
+     * system-row protection invariant. The `updating` hook names the operation
+     * after the first protected attribute found in `getDirty()`.
      *
      * @return void
      */
@@ -114,9 +113,9 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
 
     /**
      * Return the operation label for the pending update when a protected
-     * attribute is dirty on a system row, or null otherwise. Labels:
-     * `'rename'` for `name`, `'document-rewrite'` for `document`,
-     * `'modify'` for anything else.
+     * attribute is dirty on a system row, or null otherwise. Labels: `'rename'`
+     * for `name`, `'document-rewrite'` for `document`, `'modify'` for anything
+     * else.
      *
      * @return string|null
      */

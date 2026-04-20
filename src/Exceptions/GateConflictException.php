@@ -5,9 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Exceptions;
 
 /**
- * Thrown at boot when a permission enum case would overwrite an
- * existing Gate and the `authorization.gate.on_conflict` config entry
- * is set to `throw`.
+ * Thrown at boot when a permission enum case would overwrite an existing Gate
+ * and the `authorization.gate.on_conflict` config entry is set to `throw`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

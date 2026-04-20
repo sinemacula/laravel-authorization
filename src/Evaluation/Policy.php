@@ -7,10 +7,9 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
 /**
  * Immutable policy value object.
  *
- * Represents a named collection of statements that travel together
- * through the evaluator. Policy documents are versioned so future
- * schema changes can be detected without a database migration; v1
- * documents default to `version = 1`.
+ * Represents a named collection of statements that travel together through the
+ * evaluator. Policy documents are versioned so future schema changes can be
+ * detected without a database migration; v1 documents default to `version = 1`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

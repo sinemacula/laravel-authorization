@@ -7,11 +7,10 @@ namespace SineMacula\Laravel\Authorization\Events\Identity;
 use SineMacula\Laravel\Authorization\Models\Permission;
 
 /**
- * Dispatched when a permission is granted directly to an authorizable
- * identity.
+ * Dispatched when a permission is granted directly to an authorizable identity.
  *
- * Part of the SemVer-stable event API; breaking changes require a
- * major version bump.
+ * Part of the SemVer-stable event API; breaking changes require a major version
+ * bump.
  *
  * @api
  *

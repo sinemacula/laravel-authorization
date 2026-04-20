@@ -8,14 +8,13 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 
 /**
  * Dispatched after a previously-deprecated permission row has its
- * `deprecated_at` column cleared by sync — the row is live again and
- * any surviving role pivots immediately participate in authorization
- * decisions.
+ * `deprecated_at` column cleared by sync — the row is live again and any
+ * surviving role pivots immediately participate in authorization decisions.
  *
  * Paired with `Deprecated` across the deprecation lifecycle.
  *
- * Part of the SemVer-stable event API; breaking changes require a
- * major version bump.
+ * Part of the SemVer-stable event API; breaking changes require a major version
+ * bump.
  *
  * @api
  *

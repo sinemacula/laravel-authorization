@@ -13,19 +13,16 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 /**
  * Row-lifecycle observer for the `Policy` model.
  *
- * Translates Eloquent's native `updating` / `created` / `updated` /
- * `deleted` events into the package's typed CRUD events.
- * System-protection hooks (`deleting`, `updating` guard, `saved`
- * bypass reset) live in
- * `HasSystemProtection::bootHasSystemProtection()` and run
- * independently of this observer.
+ * Translates Eloquent's native `updating` / `created` / `updated` / `deleted`
+ * events into the package's typed CRUD events. System-protection hooks
+ * (`deleting`, `updating` guard, `saved` bypass reset) live in
+ * `HasSystemProtection::bootHasSystemProtection()` and run independently of
+ * this observer.
  *
- * Policies are not tenant-scoped — there is no `saving` hook or
- * tenant-columns invariant. Unlike `Role` and `Permission`, a policy
- * row applies globally.
+ * Policies are not tenant-scoped — there is no `saving` hook or tenant-columns
+ * invariant. Unlike `Role` and `Permission`, a policy row applies globally.
  *
- * Registered via `#[ObservedBy(PolicyObserver::class)]` on the
- * `Policy` model.
+ * Registered via `#[ObservedBy(PolicyObserver::class)]` on the `Policy` model.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,8 +33,8 @@ final class PolicyObserver
     private static ?\WeakMap $snapshots = null;
 
     /**
-     * Capture the pre-update attribute snapshot so the paired
-     * `updated` hook can emit a complete before/after diff.
+     * Capture the pre-update attribute snapshot so the paired `updated` hook
+     * can emit a complete before/after diff.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return void
@@ -65,8 +62,8 @@ final class PolicyObserver
     }
 
     /**
-     * Emit the typed `PolicyUpdated` event with the before/after
-     * diff captured in the paired `updating` hook.
+     * Emit the typed `PolicyUpdated` event with the before/after diff captured
+     * in the paired `updating` hook.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return void

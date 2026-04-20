@@ -9,8 +9,8 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 /**
  * Dispatched when a policy is detached from an authorizable identity.
  *
- * Part of the SemVer-stable event API; breaking changes require a
- * major version bump.
+ * Part of the SemVer-stable event API; breaking changes require a major version
+ * bump.
  *
  * @api
  *

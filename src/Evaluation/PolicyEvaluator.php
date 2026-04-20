@@ -10,11 +10,10 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision;
 /**
  * AWS IAM-style policy evaluator.
  *
- * The evaluator walks every statement from every supplied policy in
- * order, building up a trace as it goes. Behaviour mirrors AWS IAM's
- * four-step decision order — implicit deny → explicit deny → allow →
- * implicit deny — so an explicit deny always wins, regardless of how
- * many allows preceded it.
+ * The evaluator walks every statement from every supplied policy in order,
+ * building up a trace as it goes. Behaviour mirrors AWS IAM's four-step
+ * decision order — implicit deny → explicit deny → allow → implicit deny — so
+ * an explicit deny always wins, regardless of how many allows preceded it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -25,8 +24,7 @@ final class PolicyEvaluator
     private ?ContextInterpolator $interpolator = null;
 
     /**
-     * Evaluate the supplied policies against the action, resource and
-     * context.
+     * Evaluate the supplied policies against the action, resource and context.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
      * @param  string  $action
@@ -80,8 +78,8 @@ final class PolicyEvaluator
     }
 
     /**
-     * Classify a statement against the evaluation inputs into one of
-     * the four trace reasons used by `evaluate()`.
+     * Classify a statement against the evaluation inputs into one of the four
+     * trace reasons used by `evaluate()`.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
      * @param  string  $action

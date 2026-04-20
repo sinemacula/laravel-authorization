@@ -5,8 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Exceptions;
 
 /**
- * Thrown when a permission assignment or revocation targets a
- * permission that does not exist.
+ * Thrown when a permission assignment or revocation targets a permission that
+ * does not exist.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

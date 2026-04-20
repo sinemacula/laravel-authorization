@@ -18,13 +18,11 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use Tests\TestCase;
 
 /**
- * Feature tests for the `authorization:prune-deprecated` Artisan
- * command.
+ * Feature tests for the `authorization:prune-deprecated` Artisan command.
  *
- * Drives the full command surface through `Artisan::call` so the
- * tests track the public contract: exit codes, stdout shape,
- * emitted lifecycle events, pivot detachment, and survival of
- * active and system-protected rows.
+ * Drives the full command surface through `Artisan::call` so the tests track
+ * the public contract: exit codes, stdout shape, emitted lifecycle events,
+ * pivot detachment, and survival of active and system-protected rows.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,8 +35,8 @@ use Tests\TestCase;
 final class PrunePermissionsCommandTest extends TestCase
 {
     /**
-     * A run against an empty candidate set is a clean no-op — exit 0
-     * and zero counts across the summary.
+     * A run against an empty candidate set is a clean no-op — exit 0 and zero
+     * counts across the summary.
      *
      * @return void
      */
@@ -70,8 +68,8 @@ final class PrunePermissionsCommandTest extends TestCase
     }
 
     /**
-     * A deprecated row with no attached pivots is deleted and the
-     * observer's `Permission\Deleted` event fires exactly once.
+     * A deprecated row with no attached pivots is deleted and the observer's
+     * `Permission\Deleted` event fires exactly once.
      *
      * @return void
      */
@@ -91,11 +89,11 @@ final class PrunePermissionsCommandTest extends TestCase
     }
 
     /**
-     * A deprecated row with identity-permission pivots has its
-     * identity pivots deleted when prune runs — the
-     * `DB::table($identityPivot)->where(...)->delete()` call is the
-     * only vehicle for that cleanup, and `MethodCallRemoval` on it
-     * leaves orphaned pivot rows pointing at a deleted permission.
+     * A deprecated row with identity-permission pivots has its identity pivots
+     * deleted when prune runs — the
+     * `DB::table($identityPivot)->where(...)->delete()` call is the only
+     * vehicle for that cleanup, and `MethodCallRemoval` on it leaves orphaned
+     * pivot rows pointing at a deleted permission.
      *
      * @return void
      */
@@ -132,9 +130,8 @@ final class PrunePermissionsCommandTest extends TestCase
     }
 
     /**
-     * A deprecated row with role-permission pivots has its pivots
-     * detached and the row deleted. The pivot table is empty for the
-     * row afterwards.
+     * A deprecated row with role-permission pivots has its pivots detached and
+     * the row deleted. The pivot table is empty for the row afterwards.
      *
      * @return void
      */
@@ -182,8 +179,8 @@ final class PrunePermissionsCommandTest extends TestCase
     }
 
     /**
-     * `--dry-run` reports the candidate set, touches nothing, and
-     * dispatches no `Permission\Deleted` events.
+     * `--dry-run` reports the candidate set, touches nothing, and dispatches no
+     * `Permission\Deleted` events.
      *
      * @return void
      */
@@ -205,9 +202,9 @@ final class PrunePermissionsCommandTest extends TestCase
     }
 
     /**
-     * `is_system = true` rows are never candidates — even when
-     * `deprecated_at` is set, the candidate filter excludes them,
-     * they do not surface in the output, and they survive the run.
+     * `is_system = true` rows are never candidates — even when `deprecated_at`
+     * is set, the candidate filter excludes them, they do not surface in the
+     * output, and they survive the run.
      *
      * @return void
      */
@@ -237,9 +234,9 @@ final class PrunePermissionsCommandTest extends TestCase
     }
 
     /**
-     * `--before=<date>` filters the candidate set to rows whose
-     * `deprecated_at` is at or before the supplied instant. Rows
-     * deprecated after the cutoff survive.
+     * `--before=<date>` filters the candidate set to rows whose `deprecated_at`
+     * is at or before the supplied instant. Rows deprecated after the cutoff
+     * survive.
      *
      * @return void
      */
@@ -274,9 +271,9 @@ final class PrunePermissionsCommandTest extends TestCase
     }
 
     /**
-     * An unparseable `--before` value exits fatal (`2`) and the
-     * offending value appears in the error message so operators can
-     * diagnose their typo without re-reading the config.
+     * An unparseable `--before` value exits fatal (`2`) and the offending value
+     * appears in the error message so operators can diagnose their typo without
+     * re-reading the config.
      *
      * @return void
      */
@@ -292,13 +289,12 @@ final class PrunePermissionsCommandTest extends TestCase
     }
 
     /**
-     * An empty `--before` value is treated as "no filter" and the
-     * run exits cleanly — catches the `LogicalOr → LogicalAnd`
-     * mutation on the `!is_string($raw) || $raw === ''` guard (the
-     * mutated code would fall through to `CarbonImmutable::parse('')`
-     * which throws and the run would exit fatal) and the
-     * `ReturnRemoval` that would drop the `return null` on the
-     * same branch.
+     * An empty `--before` value is treated as "no filter" and the run exits
+     * cleanly — catches the `LogicalOr → LogicalAnd` mutation on the
+     * `!is_string($raw) || $raw === ''` guard (the mutated code would fall
+     * through to `CarbonImmutable::parse('')` which throws and the run would
+     * exit fatal) and the `ReturnRemoval` that would drop the `return null` on
+     * the same branch.
      *
      * @return void
      */
@@ -321,12 +317,12 @@ final class PrunePermissionsCommandTest extends TestCase
     }
 
     /**
-     * `--format=json` emits a parseable payload carrying the
-     * `summary`, `candidates`, and `dryRun` keys — matching the sync
-     * command's JSON shape philosophy. Every candidate entry exposes
-     * its own `name`, `guard`, `deprecatedAt`, `roleCount`, and
-     * `identityCount` — catches mutations that strip describe-keys
-     * or unwrap the `array_map` that builds the per-row payload.
+     * `--format=json` emits a parseable payload carrying the `summary`,
+     * `candidates`, and `dryRun` keys — matching the sync command's JSON shape
+     * philosophy. Every candidate entry exposes its own `name`, `guard`,
+     * `deprecatedAt`, `roleCount`, and `identityCount` — catches mutations that
+     * strip describe-keys or unwrap the `array_map` that builds the per-row
+     * payload.
      *
      * @return void
      */
@@ -391,11 +387,11 @@ final class PrunePermissionsCommandTest extends TestCase
     }
 
     /**
-     * A deprecated row without a `deprecated_at` somehow surfacing
-     * (e.g. via a DB-side manual edit) serialises as `null` in the
-     * JSON payload — the null-safe accessor in `describeEntry` must
-     * not throw. Catches the `NullSafeMethodCall` mutation that
-     * would drop the `?` from `$row->deprecated_at?->toIso8601String()`.
+     * A deprecated row without a `deprecated_at` somehow surfacing (e.g. via a
+     * DB-side manual edit) serialises as `null` in the JSON payload — the
+     * null-safe accessor in `describeEntry` must not throw. Catches the
+     * `NullSafeMethodCall` mutation that would drop the `?` from
+     * `$row->deprecated_at?->toIso8601String()`.
      *
      * @return void
      */
@@ -431,9 +427,9 @@ final class PrunePermissionsCommandTest extends TestCase
     }
 
     /**
-     * An unknown `--format` is refused with a clear error and the
-     * fatal exit code 2 — mirrors the sync command's contract so
-     * pipeline parsers can share a single failure handler.
+     * An unknown `--format` is refused with a clear error and the fatal exit
+     * code 2 — mirrors the sync command's contract so pipeline parsers can
+     * share a single failure handler.
      *
      * @return void
      */
@@ -447,9 +443,9 @@ final class PrunePermissionsCommandTest extends TestCase
     }
 
     /**
-     * A live (non-deprecated) permission is never touched — the
-     * `deprecated_at IS NOT NULL` predicate in the candidate query
-     * guarantees prune cannot accidentally reap active rows.
+     * A live (non-deprecated) permission is never touched — the `deprecated_at
+     * IS NOT NULL` predicate in the candidate query guarantees prune cannot
+     * accidentally reap active rows.
      *
      * @return void
      */
@@ -471,11 +467,11 @@ final class PrunePermissionsCommandTest extends TestCase
     }
 
     /**
-     * The summary totals accumulate the per-row pivot counts across
-     * every candidate — two deprecated rows with two role pivots each
-     * tally to `roleCount = 4` (not `2`, which is the single-row
-     * `=`-assignment mutation, and not any negative value from the
-     * `-=` mutation). Catches every `tally()` mutation in one shot.
+     * The summary totals accumulate the per-row pivot counts across every
+     * candidate — two deprecated rows with two role pivots each tally to
+     * `roleCount = 4` (not `2`, which is the single-row `=`-assignment
+     * mutation, and not any negative value from the `-=` mutation). Catches
+     * every `tally()` mutation in one shot.
      *
      * @return void
      */
@@ -574,11 +570,10 @@ final class PrunePermissionsCommandTest extends TestCase
     }
 
     /**
-     * A live prune run flushes the resolution cache after applying;
-     * a dry run leaves the memo intact. Catches the `MethodCallRemoval`
-     * mutation on `$this->cache->flush()` via an observable
-     * side-effect (the memoised resolver output drops on a live run
-     * and is preserved on a dry run).
+     * A live prune run flushes the resolution cache after applying; a dry run
+     * leaves the memo intact. Catches the `MethodCallRemoval` mutation on
+     * `$this->cache->flush()` via an observable side-effect (the memoised
+     * resolver output drops on a live run and is preserved on a dry run).
      *
      * @return void
      */
@@ -620,12 +615,11 @@ final class PrunePermissionsCommandTest extends TestCase
     /**
      * `--dry-run` leaves the row intact on disk, preserves its pivot
      * attachments, reports `deleted = 0` in the summary, and emits no
-     * `Permission\Deleted` event. The detail table renders the row
-     * with its name, guard, ISO-8601 deprecation timestamp, and both
-     * pivot counts. Catches the detail-row `ArrayItemRemoval`,
-     * `CastString` on the count columns, the `(dryRun ? 0 : ...)`
-     * ternary mutations on the `Rows deleted` line, and the
-     * `renderGuard()` coalesce-reorder that swaps concrete guards
+     * `Permission\Deleted` event. The detail table renders the row with its
+     * name, guard, ISO-8601 deprecation timestamp, and both pivot counts.
+     * Catches the detail-row `ArrayItemRemoval`, `CastString` on the count
+     * columns, the `(dryRun ? 0 : ...)` ternary mutations on the `Rows deleted`
+     * line, and the `renderGuard()` coalesce-reorder that swaps concrete guards
      * for the `(any)` sentinel.
      *
      * @return void
@@ -676,10 +670,10 @@ final class PrunePermissionsCommandTest extends TestCase
     }
 
     /**
-     * The detail table renders `(any)` in place of a null guard —
-     * catches the `renderGuard` coalesce-reorder mutation that would
-     * always emit `(any)` and also catches the ArrayItemRemoval that
-     * would drop the name column from the detail row.
+     * The detail table renders `(any)` in place of a null guard — catches the
+     * `renderGuard` coalesce-reorder mutation that would always emit `(any)`
+     * and also catches the ArrayItemRemoval that would drop the name column
+     * from the detail row.
      *
      * @return void
      */
@@ -698,9 +692,9 @@ final class PrunePermissionsCommandTest extends TestCase
     }
 
     /**
-     * Create a deprecated global permission row for the pruning
-     * fixtures — centralises the `deprecated_at` stamping so the
-     * tests stay focused on the behaviour under test.
+     * Create a deprecated global permission row for the pruning fixtures —
+     * centralises the `deprecated_at` stamping so the tests stay focused on the
+     * behaviour under test.
      *
      * @param  string  $name
      * @param  string|null  $guard

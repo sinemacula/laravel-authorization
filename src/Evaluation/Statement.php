@@ -9,15 +9,15 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 /**
  * Immutable policy statement.
  *
- * A statement binds an effect (allow or deny) to one or more action
- * and resource patterns and an optional condition map. The evaluator
- * walks every statement in order, asking each one whether it applies
- * to the inbound `(action, resource, context)` tuple.
+ * A statement binds an effect (allow or deny) to one or more action and
+ * resource patterns and an optional condition map. The evaluator walks every
+ * statement in order, asking each one whether it applies to the inbound
+ * `(action, resource, context)` tuple.
  *
- * Conditions are expressed as a map of context keys to an operator
- * map, for example `['tenant' => ['eq' => 'org-1']]`. Missing context
- * keys cause the condition to fail without throwing, and unknown
- * operators short-circuit to false while emitting a debug log line.
+ * Conditions are expressed as a map of context keys to an operator map, for
+ * example `['tenant' => ['eq' => 'org-1']]`. Missing context keys cause the
+ * condition to fail without throwing, and unknown operators short-circuit to
+ * false while emitting a debug log line.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -87,13 +87,12 @@ final readonly class Statement
     }
 
     /**
-     * Determine whether the statement applies to the supplied action
-     * and optional resource.
+     * Determine whether the statement applies to the supplied action and
+     * optional resource.
      *
-     * When an interpolator is provided, resource patterns are
-     * interpolated before fnmatch comparison, allowing `${...}`
-     * tokens in persisted policy documents to resolve at evaluation
-     * time.
+     * When an interpolator is provided, resource patterns are interpolated
+     * before fnmatch comparison, allowing `${...}` tokens in persisted policy
+     * documents to resolve at evaluation time.
      *
      * @param  string  $action
      * @param  string|null  $resource
@@ -119,9 +118,9 @@ final readonly class Statement
     /**
      * Evaluate every condition against the supplied context.
      *
-     * When an interpolator is provided, string operands within the
-     * condition map are interpolated before operator evaluation,
-     * allowing `${...}` tokens in persisted policy documents.
+     * When an interpolator is provided, string operands within the condition
+     * map are interpolated before operator evaluation, allowing `${...}` tokens
+     * in persisted policy documents.
      *
      * @param  array<string, mixed>  $context
      * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null  $interpolator
@@ -286,10 +285,10 @@ final readonly class Statement
     /**
      * Determine whether the action matches any configured pattern.
      *
-     * Patterns use `fnmatch` with `FNM_NOESCAPE` so backslashes are
-     * compared literally — fully-qualified class names appearing in
-     * action or resource strings (`App\Models\Post:42`) stay intact
-     * instead of being consumed as shell-glob escape sequences.
+     * Patterns use `fnmatch` with `FNM_NOESCAPE` so backslashes are compared
+     * literally — fully-qualified class names appearing in action or resource
+     * strings (`App\Models\Post:42`) stay intact instead of being consumed as
+     * shell-glob escape sequences.
      *
      * @param  string  $action
      * @return bool
@@ -308,8 +307,8 @@ final readonly class Statement
     /**
      * Determine whether the resource matches any configured pattern.
      *
-     * When an interpolator is supplied, each resource pattern is
-     * interpolated before the fnmatch comparison.
+     * When an interpolator is supplied, each resource pattern is interpolated
+     * before the fnmatch comparison.
      *
      * @param  string  $resource
      * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null  $interpolator
@@ -339,9 +338,9 @@ final readonly class Statement
     /**
      * Recursively interpolate string operands within a condition payload.
      *
-     * If the payload is a plain string, it is interpolated directly.
-     * If it is an array (operator map), every string value within the
-     * array is interpolated. Non-string values pass through unchanged.
+     * If the payload is a plain string, it is interpolated directly. If it is
+     * an array (operator map), every string value within the array is
+     * interpolated. Non-string values pass through unchanged.
      *
      * @param  mixed  $expected
      * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator  $interpolator
@@ -433,8 +432,8 @@ final readonly class Statement
 
     /**
      * Evaluate the string-predicate operators (`cidr`, `starts_with`,
-     * `ends_with`, `string_like`) — all of which require both sides
-     * to be strings before dispatching to their concrete predicate.
+     * `ends_with`, `string_like`) — all of which require both sides to be
+     * strings before dispatching to their concrete predicate.
      *
      * @param  string  $operator
      * @param  mixed  $operand

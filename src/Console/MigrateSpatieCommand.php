@@ -10,15 +10,14 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 /**
- * Migrate data from Spatie's `laravel-permission` tables into this
- * package's schema.
+ * Migrate data from Spatie's `laravel-permission` tables into this package's
+ * schema.
  *
  * Reads Spatie's default table names (`roles`, `permissions`,
- * `model_has_roles`, `model_has_permissions`, `role_has_permissions`)
- * and copies rows into this package's tables, mapping column names
- * and generating UUIDs when Spatie used auto-increment IDs.
- * Everything runs inside a transaction; the `--dry-run` flag
- * reports counts without writing.
+ * `model_has_roles`, `model_has_permissions`, `role_has_permissions`) and
+ * copies rows into this package's tables, mapping column names and generating
+ * UUIDs when Spatie used auto-increment IDs. Everything runs inside a
+ * transaction; the `--dry-run` flag reports counts without writing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -92,8 +91,8 @@ class MigrateSpatieCommand extends Command
     }
 
     /**
-     * Render the post-migration summary table and the dry-run
-     * reminder when applicable.
+     * Render the post-migration summary table and the dry-run reminder when
+     * applicable.
      *
      * @param  array<string, int>  $counts
      * @param  bool  $dryRun
@@ -190,11 +189,10 @@ class MigrateSpatieCommand extends Command
     }
 
     /**
-     * Copy a Spatie-shaped "named entity" table (roles or
-     * permissions) to the target table, producing a source-to-target
-     * id map. The `$table` value names the Spatie source table, the
-     * `authorization.tables.{table}` config key, and the
-     * counts-array key.
+     * Copy a Spatie-shaped "named entity" table (roles or permissions) to the
+     * target table, producing a source-to-target id map. The `$table` value
+     * names the Spatie source table, the `authorization.tables.{table}` config
+     * key, and the counts-array key.
      *
      * @param  string  $table
      * @param  bool  $dryRun
@@ -316,12 +314,11 @@ class MigrateSpatieCommand extends Command
     }
 
     /**
-     * Copy a Spatie-shaped `model_has_*` pivot to the target
-     * `authorizable_*` pivot, translating the foreign id via the
-     * supplied id map. The source and target id columns share the
-     * same name (`role_id` / `permission_id`), and the `$targetKey`
-     * doubles as both the config-key suffix and the counts-array
-     * key.
+     * Copy a Spatie-shaped `model_has_*` pivot to the target `authorizable_*`
+     * pivot, translating the foreign id via the supplied id map. The source and
+     * target id columns share the same name (`role_id` / `permission_id`), and
+     * the `$targetKey` doubles as both the config-key suffix and the
+     * counts-array key.
      *
      * @param  string  $sourceTable
      * @param  string  $idColumn

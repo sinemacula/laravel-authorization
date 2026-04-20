@@ -102,8 +102,8 @@ abstract class TestCase extends OrchestraTestCase
      * Uses `load_migration_paths` directly instead of `loadMigrationsFrom` so
      * Testbench never caches a per-test `MigrateProcessor` — which under
      * `RefreshDatabase` would otherwise run `migrate:rollback` in teardown and
-     * fight the transactional rollback (fatal on Postgres once a test raises
-     * an exception, silently corrupting state on MySQL).
+     * fight the transactional rollback (fatal on Postgres once a test raises an
+     * exception, silently corrupting state on MySQL).
      *
      * @return void
      */

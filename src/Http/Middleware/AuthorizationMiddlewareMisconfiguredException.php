@@ -7,16 +7,15 @@ namespace SineMacula\Laravel\Authorization\Http\Middleware;
 use LogicException;
 
 /**
- * Raised when an authorization middleware is applied to a route
- * whose authenticated identity does not implement the capability
- * contract the middleware probes.
+ * Raised when an authorization middleware is applied to a route whose
+ * authenticated identity does not implement the capability contract the
+ * middleware probes.
  *
- * Extends `LogicException` deliberately: the situation is a
- * programmer bug (middleware wired onto the wrong route, or a user
- * model that forgot to compose the matching trait), not a
- * legitimate authorization deny. Laravel's default exception
- * handler renders unhandled logic exceptions as HTTP 500, which is
- * the correct signal for security-audit consumers and monitoring
+ * Extends `LogicException` deliberately: the situation is a programmer bug
+ * (middleware wired onto the wrong route, or a user model that forgot to
+ * compose the matching trait), not a legitimate authorization deny. Laravel's
+ * default exception handler renders unhandled logic exceptions as HTTP 500,
+ * which is the correct signal for security-audit consumers and monitoring
  * dashboards — distinct from the HTTP 403 raised for a real deny.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

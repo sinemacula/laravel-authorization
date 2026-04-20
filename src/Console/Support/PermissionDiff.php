@@ -7,17 +7,17 @@ namespace SineMacula\Laravel\Authorization\Console\Support;
 use SineMacula\Laravel\Authorization\Models\Permission;
 
 /**
- * Result of comparing enum-derived permission tuples against the
- * current DB projection.
+ * Result of comparing enum-derived permission tuples against the current DB
+ * projection.
  *
- * The diff is a plain, immutable data bag. Every bucket is a list; the
- * `update` and `reinstate` buckets pair the existing row with the
- * tuple that describes its desired post-sync shape so the caller can
- * apply the change without re-walking the enum.
+ * The diff is a plain, immutable data bag. Every bucket is a list; the `update`
+ * and `reinstate` buckets pair the existing row with the tuple that describes
+ * its desired post-sync shape so the caller can apply the change without
+ * re-walking the enum.
  *
- * `protected` rows are reported for visibility but are never mutated
- * by sync; `unchanged` rows are surfaced so `--dry-run` can claim zero
- * drift against a full count.
+ * `protected` rows are reported for visibility but are never mutated by sync;
+ * `unchanged` rows are surfaced so `--dry-run` can claim zero drift against a
+ * full count.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -16,15 +16,13 @@ use SineMacula\Laravel\Authorization\Traits\HasSystemProtection;
 /**
  * Eloquent model for policy rows.
  *
- * The `document` column persists the full statement body as JSON.
- * Reads round-trip the column through the evaluation policy's
- * `fromArray()` factory; a failing round-trip raises an invalid
- * policy document exception rather than leaving the consumer with a
- * partial object. The `is_system` flag marks platform-shipped
- * policies as delete-protected: deletion or a rename of an
- * `is_system = true` row raises `SystemPolicyProtectedException`
- * unless `forceSystem()` is invoked to unlock the next operation on
- * the instance.
+ * The `document` column persists the full statement body as JSON. Reads
+ * round-trip the column through the evaluation policy's `fromArray()` factory;
+ * a failing round-trip raises an invalid policy document exception rather than
+ * leaving the consumer with a partial object. The `is_system` flag marks
+ * platform-shipped policies as delete-protected: deletion or a rename of an
+ * `is_system = true` row raises `SystemPolicyProtectedException` unless
+ * `forceSystem()` is invoked to unlock the next operation on the instance.
  *
  * @property string $id
  * @property string $name
@@ -72,8 +70,8 @@ class Policy extends Model
     }
 
     /**
-     * Set the document attribute, validating it round-trips through
-     * the evaluation policy factory.
+     * Set the document attribute, validating it round-trips through the
+     * evaluation policy factory.
      *
      * @param  mixed  $value
      * @return void
@@ -128,10 +126,10 @@ class Policy extends Model
 
     /**
      * Return the attribute names whose dirty state triggers the
-     * system-protection guard on `updating`. For policies, both
-     * `name` and `document` changes are protected — the document
-     * carries the authorization payload and its mutation is the
-     * security-relevant edit on the Policy table.
+     * system-protection guard on `updating`. For policies, both `name` and
+     * `document` changes are protected — the document carries the authorization
+     * payload and its mutation is the security-relevant edit on the Policy
+     * table.
      *
      * @return list<string>
      */
@@ -141,8 +139,8 @@ class Policy extends Model
     }
 
     /**
-     * Construct the per-model exception raised when a protected
-     * mutation on a system policy is refused.
+     * Construct the per-model exception raised when a protected mutation on a
+     * system policy is refused.
      *
      * @param  string  $operation
      * @return \Throwable

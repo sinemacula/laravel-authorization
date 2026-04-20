@@ -21,8 +21,8 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
  * - `rememberRoles()` memo-tier hit after prime;
  * - `rememberPermissions()` memo-tier hit after prime;
  * - `rememberPolicies()` persistent-tier hit (memo miss → store read);
- * - `forget()` on a tag-capable store — the listener path that
- *   fires on `IdentityRoleAssigned` and friends.
+ * - `forget()` on a tag-capable store — the listener path that fires on
+ *   `IdentityRoleAssigned` and friends.
  *
  * The bench constructs the cache directly (no Laravel boot) and uses the array
  * store as a stand-in for a tag-capable production store; this is the same

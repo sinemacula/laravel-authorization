@@ -23,15 +23,13 @@ use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
 /**
  * Eloquent model for permission rows.
  *
- * Permissions are atomic action strings that can be granted directly
- * to an identity or inherited via a role. The `guard` column is
- * nullable: a null value marks the permission as guard-agnostic
- * (applies to every guard), a concrete string scopes it to a single
- * guard. The `is_system` flag marks platform-shipped permissions as
- * delete-protected: deletion or a rename of an `is_system = true`
- * row raises `SystemPermissionProtectedException` unless
- * `forceSystem()` is invoked to unlock the next operation on the
- * instance.
+ * Permissions are atomic action strings that can be granted directly to an
+ * identity or inherited via a role. The `guard` column is nullable: a null
+ * value marks the permission as guard-agnostic (applies to every guard), a
+ * concrete string scopes it to a single guard. The `is_system` flag marks
+ * platform-shipped permissions as delete-protected: deletion or a rename of an
+ * `is_system = true` row raises `SystemPermissionProtectedException` unless
+ * `forceSystem()` is invoked to unlock the next operation on the instance.
  *
  * @property string $id
  * @property string $name
@@ -124,10 +122,9 @@ class Permission extends Model
     /**
      * Scope the query to rows owned by the given tenant.
      *
-     * Delegates morph-pair extraction to
-     * `TenantScope::extractTenantPair()` so the global scope and
-     * this local scope share a single owner for the acceptance
-     * rules — refuses any tenant that is neither a Model nor an
+     * Delegates morph-pair extraction to `TenantScope::extractTenantPair()` so
+     * the global scope and this local scope share a single owner for the
+     * acceptance rules — refuses any tenant that is neither a Model nor an
      * `AuthorizableTenant` implementer with a typed exception.
      *
      * @param  \Illuminate\Database\Eloquent\Builder<static>  $query
@@ -165,12 +162,11 @@ class Permission extends Model
     /**
      * Return a builder with deprecated permissions included.
      *
-     * Deprecated rows are hidden by the `ExcludesDeprecatedScope`
-     * global scope so gate evaluation and the default API surface
-     * never honour them. Admin flows that need the full catalogue
-     * — console commands, audit reports, sync diffs — call this
-     * helper to disable the scope for a single query without
-     * touching the other global scopes applied to the model.
+     * Deprecated rows are hidden by the `ExcludesDeprecatedScope` global scope
+     * so gate evaluation and the default API surface never honour them. Admin
+     * flows that need the full catalogue — console commands, audit reports,
+     * sync diffs — call this helper to disable the scope for a single query
+     * without touching the other global scopes applied to the model.
      *
      * @return \Illuminate\Database\Eloquent\Builder<static>
      */
@@ -209,17 +205,16 @@ class Permission extends Model
     }
 
     /**
-     * Resolve a permission by name under the supplied guard,
-     * favouring guard-specific rows over guard-agnostic rows.
+     * Resolve a permission by name under the supplied guard, favouring
+     * guard-specific rows over guard-agnostic rows.
      *
      * Centralises the guard-precedence query shared by
-     * `HasPermissions::resolvePermission()` and
-     * `Role::resolvePermission()` — a single owner for the
-     * guard-agnostic disjunction so evolution of the matching
-     * rules happens in one place. Consumers
-     * calling `$class::resolveByName(...)` where `$class` is
-     * read from `authorization.models.permission` get correct
-     * late-static-binding against their swapped model.
+     * `HasPermissions::resolvePermission()` and `Role::resolvePermission()` — a
+     * single owner for the guard-agnostic disjunction so evolution of the
+     * matching rules happens in one place. Consumers calling
+     * `$class::resolveByName(...)` where `$class` is read from
+     * `authorization.models.permission` get correct late-static-binding against
+     * their swapped model.
      *
      * @param  string  $name
      * @param  string|null  $guard
@@ -247,8 +242,7 @@ class Permission extends Model
     }
 
     /**
-     * Human-readable label used in a name-validation exception
-     * message.
+     * Human-readable label used in a name-validation exception message.
      *
      * @return string
      */
@@ -259,8 +253,8 @@ class Permission extends Model
 
     /**
      * Return the attribute names whose dirty state triggers the
-     * system-protection guard on `updating`. For permissions,
-     * only `name` changes are protected.
+     * system-protection guard on `updating`. For permissions, only `name`
+     * changes are protected.
      *
      * @return list<string>
      */
@@ -270,8 +264,8 @@ class Permission extends Model
     }
 
     /**
-     * Construct the per-model exception raised when a protected
-     * mutation on a system permission is refused.
+     * Construct the per-model exception raised when a protected mutation on a
+     * system permission is refused.
      *
      * @param  string  $operation
      * @return \Throwable

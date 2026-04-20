@@ -8,9 +8,9 @@ use SineMacula\Laravel\Authorization\Attributes\Permission as PermissionMeta;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum as PermissionEnumContract;
 
 /**
- * Secondary sync fixture with cases disjoint from `SyncStubPermission`
- * so multiple enum classes can be configured alongside each other
- * without colliding on the `(name, guard)` unique index.
+ * Secondary sync fixture with cases disjoint from `SyncStubPermission` so
+ * multiple enum classes can be configured alongside each other without
+ * colliding on the `(name, guard)` unique index.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

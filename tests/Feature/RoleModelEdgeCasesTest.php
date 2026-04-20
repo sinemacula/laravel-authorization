@@ -27,15 +27,14 @@ use Tests\TestCase;
  * exercise:
  *
  * - `givePermission()` and `syncPermissions()` clear the eager-loaded
- *   `permissions` relation when mutation occurs, so subsequent
- *   reads re-hydrate from the pivot. The clear branch only fires
- *   when the caller has in fact loaded the relation — the
- *   RBAC-heavy suites all mutate before loading, so the branch
- *   stays cold.
- * - `resolvePermissionById()` raises `UnknownPermissionException`
- *   when the sync delta surfaces a detached ID whose row has been
- *   deleted. This race can only happen under a concurrent DELETE
- *   between the sync call and the event-dispatch loop.
+ *   `permissions` relation when mutation occurs, so subsequent reads re-hydrate
+ *   from the pivot. The clear branch only fires when the caller has in fact
+ *   loaded the relation — the RBAC-heavy suites all mutate before loading, so
+ *   the branch stays cold.
+ * - `resolvePermissionById()` raises `UnknownPermissionException` when the sync
+ *   delta surfaces a detached ID whose row has been deleted. This race can only
+ *   happen under a concurrent DELETE between the sync call and the
+ *   event-dispatch loop.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -5,12 +5,12 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Exceptions;
 
 /**
- * Thrown when a proposed parent assignment would create a cycle
- * in the role hierarchy.
+ * Thrown when a proposed parent assignment would create a cycle in the role
+ * hierarchy.
  *
- * Cycles are detected on write (the `saving` hook) and on read
- * (the `ancestors()` walk). The exception carries both role names
- * so audit and error reporting can identify the offending pair.
+ * Cycles are detected on write (the `saving` hook) and on read (the
+ * `ancestors()` walk). The exception carries both role names so audit and error
+ * reporting can identify the offending pair.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

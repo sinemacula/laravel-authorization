@@ -9,10 +9,9 @@ use Illuminate\Database\Eloquent\Model;
 
 /**
  * Shared scaffolding for `authorization:list-roles` and
- * `authorization:list-permissions`. Both commands select a
- * config-resolved model, apply a `--guard` filter, include the
- * companion relation count, and render the result as a table with
- * an empty-set fallback.
+ * `authorization:list-permissions`. Both commands select a config-resolved
+ * model, apply a `--guard` filter, include the companion relation count, and
+ * render the result as a table with an empty-set fallback.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

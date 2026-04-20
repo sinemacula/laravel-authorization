@@ -7,11 +7,10 @@ namespace SineMacula\Laravel\Authorization\Evaluation\Enums;
 /**
  * Decision-reason codes for the policy evaluator.
  *
- * Every evaluation result carries one of these cases, indicating
- * which branch of the four-step decision order produced the
- * outcome. Backed by strings so serialised audit-log entries
- * remain human-readable while call-site comparisons gain
- * exhaustive `match` coverage at PHPStan level 8.
+ * Every evaluation result carries one of these cases, indicating which branch
+ * of the four-step decision order produced the outcome. Backed by strings so
+ * serialised audit-log entries remain human-readable while call-site
+ * comparisons gain exhaustive `match` coverage at PHPStan level 8.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

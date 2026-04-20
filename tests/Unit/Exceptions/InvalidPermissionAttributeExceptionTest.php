@@ -11,11 +11,10 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionAttributeExcept
 /**
  * Unit tests for `InvalidPermissionAttributeException`.
  *
- * The exception is raised by the permission enum walker when a
- * `#[Permission]` attribute carries an invalid configuration. The
- * constructor formats a stable message and exposes the enum class,
- * case name, and validation reason through typed accessors consumed
- * by the sync command's error renderer.
+ * The exception is raised by the permission enum walker when a `#[Permission]`
+ * attribute carries an invalid configuration. The constructor formats a stable
+ * message and exposes the enum class, case name, and validation reason through
+ * typed accessors consumed by the sync command's error renderer.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -28,9 +27,8 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionAttributeExcept
 final class InvalidPermissionAttributeExceptionTest extends TestCase
 {
     /**
-     * The constructor formats a stable message that names the enum
-     * class and case, and exposes each constructor argument through a
-     * dedicated accessor.
+     * The constructor formats a stable message that names the enum class and
+     * case, and exposes each constructor argument through a dedicated accessor.
      *
      * @return void
      */

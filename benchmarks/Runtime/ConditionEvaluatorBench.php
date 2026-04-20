@@ -18,10 +18,10 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
  * surface into four natural classes so drift in any single arm shows up under
  * its own subject:
  *
- * - string ops     — `eq`, `neq`, `starts_with`, `ends_with`, `string_like`;
- * - numeric ops    — `gt`, `gte`, `lt`, `lte`;
- * - temporal ops   — `before`, `after`, `between`;
- * - set ops        — `in`, `not_in`, `bool`, `null`, `not_null`, `cidr`.
+ * - string ops — `eq`, `neq`, `starts_with`, `ends_with`, `string_like`;
+ * - numeric ops — `gt`, `gte`, `lt`, `lte`;
+ * - temporal ops — `before`, `after`, `between`;
+ * - set ops — `in`, `not_in`, `bool`, `null`, `not_null`, `cidr`.
  *
  * A fifth subject runs the full 18-operator chain so the matching budget test
  * has a direct comparator.

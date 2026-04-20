@@ -17,13 +17,12 @@ use Tests\TestCase;
 /**
  * Feature coverage for the nullable `guard` semantics.
  *
- * A null `guard` marks a role or permission as guard-agnostic — the row
- * applies to every guard. String lookups (`assignRole`, `givePermission`,
- * `hasRole`, `hasPermission`) resolve against the configured default guard
- * first and fall back to the guard-agnostic row when no guard-specific match
- * exists. The uniqueness invariant for the null-guard slot is enforced by a
- * functional unique index on `(name, COALESCE(guard, ''))` at the data
- * layer.
+ * A null `guard` marks a role or permission as guard-agnostic — the row applies
+ * to every guard. String lookups (`assignRole`, `givePermission`, `hasRole`,
+ * `hasPermission`) resolve against the configured default guard first and fall
+ * back to the guard-agnostic row when no guard-specific match exists. The
+ * uniqueness invariant for the null-guard slot is enforced by a functional
+ * unique index on `(name, COALESCE(guard, ''))` at the data layer.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -69,8 +68,7 @@ final class GuardAgnosticLookupTest extends TestCase
     }
 
     /**
-     * A permission with a null `guard` resolves via string name on any
-     * guard.
+     * A permission with a null `guard` resolves via string name on any guard.
      *
      * @return void
      */

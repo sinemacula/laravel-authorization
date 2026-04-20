@@ -20,9 +20,9 @@ use Tests\Unit\Console\Support\Stubs\SingleGuardPermission;
 /**
  * Unit tests for the permission enum walker.
  *
- * Each test exercises a specific attribute shape against a dedicated
- * fixture enum so the cases do not interfere and the failure output
- * names the scenario directly.
+ * Each test exercises a specific attribute shape against a dedicated fixture
+ * enum so the cases do not interfere and the failure output names the scenario
+ * directly.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,8 +37,8 @@ use Tests\Unit\Console\Support\Stubs\SingleGuardPermission;
 final class PermissionEnumWalkerTest extends TestCase
 {
     /**
-     * A case with no `#[Permission]` attribute yields a single
-     * guard-agnostic tuple and all-null metadata.
+     * A case with no `#[Permission]` attribute yields a single guard-agnostic
+     * tuple and all-null metadata.
      *
      * @return void
      */
@@ -56,9 +56,8 @@ final class PermissionEnumWalkerTest extends TestCase
     }
 
     /**
-     * A case with description and category but no `guards` argument
-     * yields a single guard-agnostic tuple carrying the populated
-     * metadata.
+     * A case with description and category but no `guards` argument yields a
+     * single guard-agnostic tuple carrying the populated metadata.
      *
      * @return void
      */
@@ -76,8 +75,8 @@ final class PermissionEnumWalkerTest extends TestCase
     }
 
     /**
-     * A single-guard attribute expands to one tuple carrying the
-     * supplied guard.
+     * A single-guard attribute expands to one tuple carrying the supplied
+     * guard.
      *
      * @return void
      */
@@ -95,8 +94,8 @@ final class PermissionEnumWalkerTest extends TestCase
     }
 
     /**
-     * A multi-guard attribute expands to one tuple per guard, each
-     * carrying the same metadata.
+     * A multi-guard attribute expands to one tuple per guard, each carrying the
+     * same metadata.
      *
      * @return void
      */
@@ -117,8 +116,8 @@ final class PermissionEnumWalkerTest extends TestCase
 
     /**
      * An explicit `guards: []` configuration raises
-     * `InvalidPermissionAttributeException` naming both the enum
-     * class and the offending case.
+     * `InvalidPermissionAttributeException` naming both the enum class and the
+     * offending case.
      *
      * @return void
      */
@@ -138,8 +137,8 @@ final class PermissionEnumWalkerTest extends TestCase
     }
 
     /**
-     * Multiple enums passed to a single walk aggregate their tuples
-     * in the input order of the enum list.
+     * Multiple enums passed to a single walk aggregate their tuples in the
+     * input order of the enum list.
      *
      * @return void
      */

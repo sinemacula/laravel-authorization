@@ -7,18 +7,17 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
 use SineMacula\Laravel\Authorization\Enums\OrphanSide;
 
 /**
- * Thrown when a `RolePermission` pivot save references a role or
- * permission row that cannot be resolved.
+ * Thrown when a `RolePermission` pivot save references a role or permission row
+ * that cannot be resolved.
  *
- * The pivot's guard-parity hook has to read both parents'
- * `guard` columns. If the caller attaches a pivot whose
- * `role_id` or `permission_id` points at a missing row (deleted
- * under the request, cross-tenant leak, stale ID cache), the
- * save surfaces this typed failure rather than silently passing
- * the guard check and deferring to the DB's FK constraint —
- * which is absent on SQLite by default and on any environment
- * running with `foreign_key_checks = OFF`. Callers get the
- * semantic reason ("orphaned parent") instead of a raw FK error.
+ * The pivot's guard-parity hook has to read both parents' `guard` columns. If
+ * the caller attaches a pivot whose `role_id` or `permission_id` points at a
+ * missing row (deleted under the request, cross-tenant leak, stale ID cache),
+ * the save surfaces this typed failure rather than silently passing the guard
+ * check and deferring to the DB's FK constraint — which is absent on SQLite by
+ * default and on any environment running with `foreign_key_checks = OFF`.
+ * Callers get the semantic reason ("orphaned parent") instead of a raw FK
+ * error.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

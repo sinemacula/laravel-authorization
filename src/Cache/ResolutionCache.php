@@ -208,7 +208,7 @@ final class ResolutionCache
     }
 
     /**
-     * Report whether the configured store exposes a `tags()`  method. Exposed
+     * Report whether the configured store exposes a `tags()` method. Exposed
      * for the listener to pick between the tag-based role invalidation path and
      * the in-memory fallback without probing the store itself.
      *
@@ -235,8 +235,8 @@ final class ResolutionCache
      * Derive the principal portion of the cache key.
      *
      * Eloquent models use their canonical `getMorphClass()` + `getKey()`
-     * pairing. Non-Eloquent principals are duck-typed on those same
-     * accessors; principals exposing neither fall back to a per-request
+     * pairing. Non-Eloquent principals are duck-typed on those same accessors;
+     * principals exposing neither fall back to a per-request
      * `spl_object_hash()`, in which case only the in-memory memo applies.
      *
      * @param  object  $principal

@@ -36,20 +36,20 @@ use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
 /**
  * Service provider for the authorization package.
  *
- * Orchestrates the package's container bindings, config validation,
- * publishing, command registration, and boot-time wiring. Delegates
- * the bulkier responsibilities to dedicated registrars:
+ * Orchestrates the package's container bindings, config validation, publishing,
+ * command registration, and boot-time wiring. Delegates the bulkier
+ * responsibilities to dedicated registrars:
  *
- * - `GateRegistrar` — walks every configured permission enum and
- *   registers a matching Laravel Gate.
- * - `BladeDirectiveRegistrar` — wires the `@role` / `@permission`
- *   directive quartet and Spatie-compat aliases.
- * - `EventListenerRegistrar` — wires the resolution-cache
- *   invalidator and the Octane request-boundary reset.
+ * - `GateRegistrar` — walks every configured permission enum and registers a
+ *   matching Laravel Gate.
+ * - `BladeDirectiveRegistrar` — wires the `@role` / `@permission` directive
+ *   quartet and Spatie-compat aliases.
+ * - `EventListenerRegistrar` — wires the resolution-cache invalidator and the
+ *   Octane request-boundary reset.
  *
- * Row-lifecycle behaviour for `Role` / `Permission` / `Policy` is
- * attached via the `#[ObservedBy]` attribute on each model; the
- * service provider does not touch model booting.
+ * Row-lifecycle behaviour for `Role` / `Permission` / `Policy` is attached via
+ * the `#[ObservedBy]` attribute on each model; the service provider does not
+ * touch model booting.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -97,10 +97,9 @@ class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Fail fast on a malformed `authorization` config. Runs before
-     * any binding is resolved so a typo surfaces as a clear typed
-     * exception rather than a deep stack trace from the first
-     * `can()` call in production.
+     * Fail fast on a malformed `authorization` config. Runs before any binding
+     * is resolved so a typo surfaces as a clear typed exception rather than a
+     * deep stack trace from the first `can()` call in production.
      *
      * @return void
      *
@@ -115,8 +114,8 @@ class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Register the package's Artisan commands when the application
-     * is running in the console.
+     * Register the package's Artisan commands when the application is running
+     * in the console.
      *
      * @return void
      */
@@ -178,10 +177,9 @@ class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Bind the resolution cache that memoises policy, permission,
-     * and role lookups per-principal. Always on for in-memory
-     * memoisation; consults `authorization.cache.store` for
-     * optional cross-request persistence.
+     * Bind the resolution cache that memoises policy, permission, and role
+     * lookups per-principal. Always on for in-memory memoisation; consults
+     * `authorization.cache.store` for optional cross-request persistence.
      *
      * @return void
      */
@@ -208,11 +206,10 @@ class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Bind the policy resolver — the internal policy-gathering seam
-     * the manager consults on every evaluation. The default
-     * implementation unions an optional `PolicyStore` with the
-     * principal's own attached policies; the caching decorator
-     * wraps it so the `ResolutionCache` memoises the result.
+     * Bind the policy resolver — the internal policy-gathering seam the manager
+     * consults on every evaluation. The default implementation unions an
+     * optional `PolicyStore` with the principal's own attached policies; the
+     * caching decorator wraps it so the `ResolutionCache` memoises the result.
      *
      * @return void
      */
@@ -231,8 +228,8 @@ class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Bind the single-slot store that holds the most recent
-     * evaluation result across every scoped clone of the manager.
+     * Bind the single-slot store that holds the most recent evaluation result
+     * across every scoped clone of the manager.
      *
      * @return void
      */
@@ -270,14 +267,12 @@ class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Register the `role` and `permission` route-middleware
-     * aliases.
+     * Register the `role` and `permission` route-middleware aliases.
      *
-     * The aliases only light up when the `router` binding is
-     * available (Laravel's default HTTP kernel), so console-only
-     * applications that do not resolve the router never pay the
-     * registration cost. Existing aliases on the same keys are
-     * respected — a consumer that has already wired their own
+     * The aliases only light up when the `router` binding is available
+     * (Laravel's default HTTP kernel), so console-only applications that do not
+     * resolve the router never pay the registration cost. Existing aliases on
+     * the same keys are respected — a consumer that has already wired their own
      * `role` or `permission` middleware keeps theirs untouched.
      *
      * @return void

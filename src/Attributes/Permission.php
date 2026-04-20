@@ -7,18 +7,17 @@ namespace SineMacula\Laravel\Authorization\Attributes;
 /**
  * Per-case permission metadata attribute.
  *
- * Applied to `PermissionEnum` cases to carry the metadata the
- * package syncs to the `permissions` table: a human-readable
- * description, a category for admin-UI grouping, and the guards the
- * permission applies to.
+ * Applied to `PermissionEnum` cases to carry the metadata the package syncs to
+ * the `permissions` table: a human-readable description, a category for
+ * admin-UI grouping, and the guards the permission applies to.
  *
- * `guards: null` or omitted yields a single guard-agnostic permission
- * row (`guard = null`). Supplying `['web', 'api']` produces one row
- * per guard. An empty array is invalid and raises a typed exception
- * when the sync command walks the attribute.
+ * `guards: null` or omitted yields a single guard-agnostic permission row
+ * (`guard = null`). Supplying `['web', 'api']` produces one row per guard. An
+ * empty array is invalid and raises a typed exception when the sync command
+ * walks the attribute.
  *
- * Consumers alias the import because `Models\Permission` shares the
- * unqualified name:
+ * Consumers alias the import because `Models\Permission` shares the unqualified
+ * name:
  *
  * ```php
  * use SineMacula\Laravel\Authorization\Attributes\Permission as PermissionMeta;

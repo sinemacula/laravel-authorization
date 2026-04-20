@@ -14,10 +14,9 @@ use Tests\TestCase;
  * Feature coverage for the `ExcludesDeprecatedScope` global scope on
  * `Permission`.
  *
- * The default query surface hides deprecated rows; both the
- * `withDeprecated()` helper and the raw `withoutGlobalScope()`
- * escape hatch surface them again without affecting any other
- * scope applied to the model.
+ * The default query surface hides deprecated rows; both the `withDeprecated()`
+ * helper and the raw `withoutGlobalScope()` escape hatch surface them again
+ * without affecting any other scope applied to the model.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,8 +30,7 @@ use Tests\TestCase;
 final class ExcludesDeprecatedScopeTest extends TestCase
 {
     /**
-     * The default query surface omits any row with a non-null
-     * `deprecated_at`.
+     * The default query surface omits any row with a non-null `deprecated_at`.
      *
      * @return void
      */
@@ -57,8 +55,8 @@ final class ExcludesDeprecatedScopeTest extends TestCase
     }
 
     /**
-     * `Permission::withDeprecated()` surfaces deprecated rows
-     * alongside live ones.
+     * `Permission::withDeprecated()` surfaces deprecated rows alongside live
+     * ones.
      *
      * @return void
      */
@@ -83,8 +81,8 @@ final class ExcludesDeprecatedScopeTest extends TestCase
     }
 
     /**
-     * Calling `withoutGlobalScope` directly with the scope class
-     * produces the same escape hatch as `withDeprecated()`.
+     * Calling `withoutGlobalScope` directly with the scope class produces the
+     * same escape hatch as `withDeprecated()`.
      *
      * @return void
      */

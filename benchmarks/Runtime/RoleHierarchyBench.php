@@ -17,11 +17,11 @@ use SineMacula\Laravel\Authorization\Models\Role;
  * and breadth both compound with query count. The bench carves the call surface
  * into the three shapes production traffic actually hits:
  *
- * - Ancestors on a 5-deep chain — realistic engineering-tier / platform-tier
- *   / tenant-tier hierarchy.
+ * - Ancestors on a 5-deep chain — realistic engineering-tier / platform-tier /
+ *   tenant-tier hierarchy.
  * - Ancestors on a 10-deep chain — budget reference shape.
- * - Descendants on a 20-wide subtree — bulk RBAC rollout
- *   patterns (break a tenant's role into per-team children).
+ * - Descendants on a 20-wide subtree — bulk RBAC rollout patterns (break a
+ *   tenant's role into per-team children).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

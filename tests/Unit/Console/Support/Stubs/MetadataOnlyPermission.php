@@ -8,8 +8,8 @@ use SineMacula\Laravel\Authorization\Attributes\Permission as PermissionMeta;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
 
 /**
- * Fixture enum with populated description and category and no
- * `guards` argument — exercises the guard-agnostic expansion.
+ * Fixture enum with populated description and category and no `guards` argument
+ * — exercises the guard-agnostic expansion.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

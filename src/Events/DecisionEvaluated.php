@@ -7,19 +7,18 @@ namespace SineMacula\Laravel\Authorization\Events;
 use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
 
 /**
- * Dispatched every time the authorization manager completes an
- * evaluation — `can()`, `authorize()`, `evaluate()`, every path.
+ * Dispatched every time the authorization manager completes an evaluation —
+ * `can()`, `authorize()`, `evaluate()`, every path.
  *
- * Carries the principal, action, resource, context, and the full
- * evaluation result — including the reproducible trace — so audit
- * listeners can persist the decision verbatim. Listeners that want
- * a denial-only view filter on `$event->result->allowed === false`;
- * the separate `AuthorizationFailed` event covers the narrower
- * hard-denial signal that fires only when `authorize()` is about
- * to throw.
+ * Carries the principal, action, resource, context, and the full evaluation
+ * result — including the reproducible trace — so audit listeners can persist
+ * the decision verbatim. Listeners that want a denial-only view filter on
+ * `$event->result->allowed === false`; the separate `AuthorizationFailed` event
+ * covers the narrower hard-denial signal that fires only when `authorize()` is
+ * about to throw.
  *
- * Part of the SemVer-stable event API; breaking changes require a
- * major version bump.
+ * Part of the SemVer-stable event API; breaking changes require a major version
+ * bump.
  *
  * @api
  *
