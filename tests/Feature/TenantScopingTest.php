@@ -211,8 +211,8 @@ class TenantScopingTest extends TestCase
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
-        // Create a global role and a tenant-owned role with the
-        // same name but different guard to avoid the unique constraint.
+        // Create a global role and a tenant-owned role with the same name but
+        // different guard to avoid the unique constraint.
         Role::create(['name' => 'editor', 'guard' => null]);
         Role::create([
             'name'        => 'editor',
@@ -671,9 +671,9 @@ class TenantScopingTest extends TestCase
         $app = $this->app;
         $app->instance(TenantResolver::class, $spy);
 
-        // Flush any memo the scope captured before the spy was
-        // bound — previous tests may have resolved the null
-        // tenant against the NullTenantResolver default.
+        // Flush any memo the scope captured before the spy was bound — previous
+        // tests may have resolved the null tenant against the
+        // NullTenantResolver default.
         $this->flushTenantScopeMemos();
 
         // Issue multiple queries against both scoped models — each
@@ -685,9 +685,9 @@ class TenantScopingTest extends TestCase
         Permission::all();
         Permission::query()->where('name', 'perm-a')->get();
 
-        // One call per scope instance (Role + Permission each hold
-        // their own global scope registration). That is O(models),
-        // not O(queries) — the regression guard.
+        // One call per scope instance (Role + Permission each hold their own
+        // global scope registration). That is O(models), not O(queries) — the
+        // regression guard.
         static::assertLessThanOrEqual(2, $spy->calls);
         static::assertGreaterThan(0, $spy->calls);
     }

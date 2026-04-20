@@ -187,9 +187,9 @@ final class WildcardPermissionTest extends TestCase
      */
     public function testStatementMatchesBackslashBearingResourceLiterally(): void
     {
-        // Keep an empty morph map so a Statement's resource pattern
-        // is compared against a raw FQN-like string. Any prior test
-        // that registered an alias has been torn down.
+        // Keep an empty morph map so a Statement's resource pattern is compared
+        // against a raw FQN-like string. Any prior test that registered an
+        // alias has been torn down.
         Relation::morphMap([], false);
 
         $statement = Statement::fromArray([

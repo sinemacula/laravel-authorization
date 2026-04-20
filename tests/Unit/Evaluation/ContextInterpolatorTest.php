@@ -457,8 +457,8 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testTokenWithoutDotUsesFullTokenAsNamespace(): void
     {
-        // 'context' alone with no dot → namespace='context', key=''
-        // Empty key on context → null → empty string
+        // 'context' alone with no dot → namespace='context', key='' Empty key
+        // on context → null → empty string
         $interpolated = $this->interpolator->interpolate(
             '${context}',
             null,
@@ -468,8 +468,8 @@ final class ContextInterpolatorTest extends TestCase
 
         self::assertSame('', $interpolated);
 
-        // 'principal' alone with no dot → namespace='principal', key=''
-        // Empty key on principal → null → empty string
+        // 'principal' alone with no dot → namespace='principal', key='' Empty
+        // key on principal → null → empty string
         $interpolated = $this->interpolator->interpolate(
             '${principal}',
             new \stdClass,

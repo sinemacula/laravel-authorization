@@ -378,8 +378,8 @@ final class MutationKillersTest extends TestCase
         };
 
         // Default constructor ttl is 0 (forever). `new ResolutionCache()`
-        // without explicit ttl resolves to the forever branch. Pins
-        // the default parameter value against IncrementInteger mutation.
+        // without explicit ttl resolves to the forever branch. Pins the default
+        // parameter value against IncrementInteger mutation.
         $defaultCache = new ResolutionCache(store: null);
         $defaultRef   = new \ReflectionMethod($defaultCache, 'resolveTtl');
         self::assertSame([true, 0], $defaultRef->invoke($defaultCache, null));
@@ -480,8 +480,8 @@ final class MutationKillersTest extends TestCase
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'idem', 'guard' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        // Anchor Carbon so the computed expiry is deterministic and
-        // identical across both calls — avoids wall-clock drift.
+        // Anchor Carbon so the computed expiry is deterministic and identical
+        // across both calls — avoids wall-clock drift.
         \Illuminate\Support\Carbon::setTestNow('2026-01-01 00:00:00');
 
         try {
@@ -513,8 +513,8 @@ final class MutationKillersTest extends TestCase
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'moving', 'guard' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        // Anchor Carbon so the two expiries are computed against a
-        // fixed instant — keeps the +1h vs +2h delta deterministic.
+        // Anchor Carbon so the two expiries are computed against a fixed
+        // instant — keeps the +1h vs +2h delta deterministic.
         \Illuminate\Support\Carbon::setTestNow('2026-01-01 00:00:00');
 
         try {
@@ -545,8 +545,8 @@ final class MutationKillersTest extends TestCase
         $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'p:m', 'guard' => 'web']);
         $user       = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        // Anchor Carbon so the two expiries are computed against a
-        // fixed instant — keeps the +1h vs +2h delta deterministic.
+        // Anchor Carbon so the two expiries are computed against a fixed
+        // instant — keeps the +1h vs +2h delta deterministic.
         \Illuminate\Support\Carbon::setTestNow('2026-01-01 00:00:00');
 
         try {
@@ -647,8 +647,8 @@ final class MutationKillersTest extends TestCase
         $store  = new \Illuminate\Cache\Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'km-test');
 
-        // A principal exposing getMorphClass + getKey should key
-        // as `<prefix>:<kind>:<morph>:<id>`.
+        // A principal exposing getMorphClass + getKey should key as
+        // `<prefix>:<kind>:<morph>:<id>`.
         $principal = new class {
             /**
              * @return string
@@ -995,8 +995,8 @@ final class MutationKillersTest extends TestCase
         // Clones are distinct objects — pins CloneRemoval.
         self::assertNotSame($manager, $scoped);
 
-        // The scoped clone evaluates through the supplied policies
-        // and yields allow; the base does not.
+        // The scoped clone evaluates through the supplied policies and yields
+        // allow; the base does not.
         $scopedPrincipal = StubIdentity::create(['id' => (string) Str::uuid()]);
         self::assertTrue($scoped->for($scopedPrincipal)->can('probe:clone'));
         self::assertFalse($manager->for($scopedPrincipal)->can('probe:clone'));
@@ -1021,8 +1021,8 @@ final class MutationKillersTest extends TestCase
         ]);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        // Anchor Carbon so the two expiries are computed against a
-        // fixed instant — keeps the +1h vs +2h delta deterministic.
+        // Anchor Carbon so the two expiries are computed against a fixed
+        // instant — keeps the +1h vs +2h delta deterministic.
         \Illuminate\Support\Carbon::setTestNow('2026-01-01 00:00:00');
 
         try {

@@ -63,9 +63,9 @@ final class GateParityTest extends TestCase
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
-        // The default is `throw`; the provider's previous boot has
-        // already defined the Gate under a fresh app, so re-booting
-        // with `overwrite` avoids a spurious conflict in this test.
+        // The default is `throw`; the provider's previous boot has already
+        // defined the Gate under a fresh app, so re-booting with `overwrite`
+        // avoids a spurious conflict in this test.
         $config->set('authorization.gate.on_conflict', 'overwrite');
 
         (new AuthorizationServiceProvider($this->app))->boot();
@@ -156,10 +156,10 @@ final class GateParityTest extends TestCase
             ],
         ]));
 
-        // Matching resource + context: both surfaces allow. Gate's
-        // tail spread forwards the resource and context map to the
-        // closure, which `translateGateArguments()` re-assembles
-        // into the manager's `(resource, context)` pair.
+        // Matching resource + context: both surfaces allow. Gate's tail spread
+        // forwards the resource and context map to the closure, which
+        // `translateGateArguments()` re-assembles into the manager's
+        // `(resource, context)` pair.
         $gateAllow   = Gate::forUser($user)->allows(PermissionEnum::PostsCreate->value, [self::MATCHING_RESOURCE, ['tenant' => 'org-1']]);
         $facadeAllow = Authorization::for($user)->can(PermissionEnum::PostsCreate->value, self::MATCHING_RESOURCE, ['tenant' => 'org-1']);
 

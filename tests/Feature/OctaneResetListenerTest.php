@@ -43,13 +43,12 @@ final class OctaneResetListenerTest extends TestCase
      */
     public function testOctaneRequestTerminatedEventResetsTheStore(): void
     {
-        // Re-boot the provider now that the stubbed Octane event
-        // class is guaranteed to exist in this process. Testbench
-        // boots the package's service provider during its own
-        // setUp(), which can race the test file's namespace
-        // declaration on a parallel runner. Booting again here is
-        // idempotent for every other surface and guarantees the
-        // listener is wired against the in-process FQN.
+        // Re-boot the provider now that the stubbed Octane event class is
+        // guaranteed to exist in this process. Testbench boots the package's
+        // service provider during its own setUp(), which can race the test
+        // file's namespace declaration on a parallel runner. Booting again here
+        // is idempotent for every other surface and guarantees the listener is
+        // wired against the in-process FQN.
         (new AuthorizationServiceProvider($this->app))->boot();
 
         /** @var \Illuminate\Events\Dispatcher $dispatcher */

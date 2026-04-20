@@ -50,20 +50,19 @@ final class PrunePermissionsCommandTest extends TestCase
         self::assertSame(0, $exitCode);
         Event::assertNotDispatched(PermissionDeleted::class);
 
-        // Summary table renders with the `Action`/`Count` header and
-        // every row carries its label + exact `0` count. Catches
-        // ArrayItemRemoval on the header, on each summary row, and
-        // the `CastString` redundant cast that would otherwise let
-        // a non-string count sneak through.
+        // Summary table renders with the `Action`/`Count` header and every row
+        // carries its label + exact `0` count. Catches ArrayItemRemoval on the
+        // header, on each summary row, and the `CastString` redundant cast that
+        // would otherwise let a non-string count sneak through.
         self::assertStringContainsString('Action', $output);
         self::assertStringContainsString('Count', $output);
         self::assertMatchesRegularExpression('/Deprecated rows considered\s*\|\s*0\b/', $output);
         self::assertMatchesRegularExpression('/Role pivots detached\s*\|\s*0\b/', $output);
         self::assertMatchesRegularExpression('/Identity pivots detached\s*\|\s*0\b/', $output);
         self::assertMatchesRegularExpression('/Rows deleted\s*\|\s*0\b/', $output);
-        // No candidates → no detail table — catches the
-        // `ReturnRemoval` mutation that would let the render fall
-        // through to an empty detail table.
+        // No candidates → no detail table — catches the `ReturnRemoval`
+        // mutation that would let the render fall through to an empty detail
+        // table.
         self::assertStringNotContainsString('Deprecated at', $output);
     }
 
@@ -354,11 +353,10 @@ final class PrunePermissionsCommandTest extends TestCase
         // `deleted` is 0 under dry-run even though `considered` is 1.
         self::assertSame(0, $summary['deleted']);
 
-        // Pretty-printed JSON keeps structure on multiple lines with
-        // four-space indentation. `JSON_PRETTY_PRINT &
-        // JSON_UNESCAPED_SLASHES` (the `BitwiseOr → BitAnd`
-        // mutation) evaluates to zero, which produces minified
-        // single-line JSON without leading whitespace.
+        // Pretty-printed JSON keeps structure on multiple lines with four-space
+        // indentation. `JSON_PRETTY_PRINT & JSON_UNESCAPED_SLASHES` (the
+        // `BitwiseOr → BitAnd` mutation) evaluates to zero, which produces
+        // minified single-line JSON without leading whitespace.
         self::assertStringContainsString("{\n    \"dryRun\"", $output);
 
         /** @var list<array{name: string, guard: string|null, deprecatedAt: string|null, roleCount: int, identityCount: int}> $candidates */
@@ -377,10 +375,9 @@ final class PrunePermissionsCommandTest extends TestCase
         self::assertSame('posts:delete', $candidate['name']);
         self::assertSame('web', $candidate['guard']);
         self::assertIsString($candidate['deprecatedAt']);
-        // The ISO string must round-trip to the supplied instant —
-        // kills the `NullSafeMethodCall → call` mutation (which
-        // would error on a null timestamp) while validating the
-        // happy-path encoding.
+        // The ISO string must round-trip to the supplied instant — kills the
+        // `NullSafeMethodCall → call` mutation (which would error on a null
+        // timestamp) while validating the happy-path encoding.
         self::assertSame($deprecatedAt->toIso8601String(), $candidate['deprecatedAt']);
         self::assertSame(0, $candidate['roleCount']);
         self::assertSame(0, $candidate['identityCount']);
@@ -397,15 +394,13 @@ final class PrunePermissionsCommandTest extends TestCase
      */
     public function testJsonFormatSerialisesDeprecatedAtAsIsoStringPreservingNull(): void
     {
-        // Seed a row with deprecated_at present, then null the column
-        // directly — a candidate pass needs `deprecated_at IS NOT
-        // NULL`, so we have to null the column AFTER the row qualifies
-        // through a separate raw-update path would not hit the
-        // describe code. Instead, use the renderer path through a
-        // deprecated row where the timestamp is explicitly null is
-        // unreachable by the candidate query — so assert the
-        // happy-path encoding is an ISO string matching the stamped
-        // value.
+        // Seed a row with deprecated_at present, then null the column directly
+        // — a candidate pass needs `deprecated_at IS NOT NULL`, so we have to
+        // null the column AFTER the row qualifies through a separate raw-update
+        // path would not hit the describe code. Instead, use the renderer path
+        // through a deprecated row where the timestamp is explicitly null is
+        // unreachable by the candidate query — so assert the happy-path
+        // encoding is an ISO string matching the stamped value.
         $stamp = CarbonImmutable::parse('2026-04-01T08:30:00Z');
         $this->createDeprecatedPermission('posts:delete', 'web', $stamp);
 
@@ -507,9 +502,9 @@ final class PrunePermissionsCommandTest extends TestCase
         /** @var string $identityPivot */
         $identityPivot = config('authorization.tables.authorizable_permissions', 'authorizable_permissions');
 
-        // Identity pivots — three for row one, one for row two — so
-        // the two counts stay distinct and a swap between roleCount
-        // and identityCount assignments is detectable.
+        // Identity pivots — three for row one, one for row two — so the two
+        // counts stay distinct and a swap between roleCount and identityCount
+        // assignments is detectable.
         $identityAttachments = [
             ['App\Models\User', (string) Str::uuid(), $permissionOne->getKey()],
             ['App\Models\User', (string) Str::uuid(), $permissionOne->getKey()],
@@ -560,9 +555,9 @@ final class PrunePermissionsCommandTest extends TestCase
             $byName[$candidate['name']] = $candidate;
         }
 
-        // Per-row counts are reported independently — swap between
-        // the two entries proves `describeCandidates()` runs the
-        // COUNT query per-row rather than caching a single value.
+        // Per-row counts are reported independently — swap between the two
+        // entries proves `describeCandidates()` runs the COUNT query per-row
+        // rather than caching a single value.
         self::assertSame(2, $byName['posts:delete']['roleCount']);
         self::assertSame(3, $byName['posts:delete']['identityCount']);
         self::assertSame(2, $byName['posts:edit']['roleCount']);
@@ -657,8 +652,8 @@ final class PrunePermissionsCommandTest extends TestCase
         self::assertMatchesRegularExpression('/Role pivots detached\s*\|\s*1\b/', $output);
         self::assertMatchesRegularExpression('/Rows deleted\s*\|\s*0\b/', $output);
 
-        // Detail table header plus body — name, guard, timestamp,
-        // role count, identity count are all present.
+        // Detail table header plus body — name, guard, timestamp, role count,
+        // identity count are all present.
         self::assertStringContainsString('Name', $output);
         self::assertStringContainsString('Guard', $output);
         self::assertStringContainsString('Deprecated at', $output);

@@ -160,10 +160,9 @@ final class GuardRoutingTest extends TestCase
         $user->givePermission('api:only');
         self::assertTrue($user->fresh()?->hasPermission('api:only'));
 
-        // The permission never matches under the default guard,
-        // so creating a web-guard permission with the same name
-        // is permitted and the web-guard lookup resolves it
-        // without leaking into the api-guard row.
+        // The permission never matches under the default guard, so creating a
+        // web-guard permission with the same name is permitted and the
+        // web-guard lookup resolves it without leaking into the api-guard row.
         Permission::create([
             'id'    => (string) Str::uuid(),
             'name'  => 'api:only',

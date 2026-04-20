@@ -111,8 +111,8 @@ final class AuthorizableResourceTest extends TestCase
             ],
         ]));
 
-        // Object implements both AuthorizableResource and __toString —
-        // the contract method should win.
+        // Object implements both AuthorizableResource and __toString — the
+        // contract method should win.
         $resource = new class implements AuthorizableResource {
             /**
              * @return string

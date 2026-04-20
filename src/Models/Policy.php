@@ -147,10 +147,10 @@ class Policy extends Model
      */
     protected function systemProtectionException(string $operation): \Throwable
     {
-        // Use the ORIGINAL name — on a rename, `getAttribute('name')`
-        // already reflects the mutated value. Audit consumers want
-        // "which policy was targeted" (the canonical persisted
-        // name), not "what the attempted rename would produce."
+        // Use the ORIGINAL name — on a rename, `getAttribute('name')` already
+        // reflects the mutated value. Audit consumers want "which policy was
+        // targeted" (the canonical persisted name), not "what the attempted
+        // rename would produce."
         /** @var string $policyName */
         $policyName = $this->getOriginal('name', $this->getAttribute('name'));
 

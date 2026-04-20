@@ -40,9 +40,9 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     protected function setUp(): void
     {
         // This suite overrides `authorization.tables.*` to use the `auth_`
-        // prefix (see defineEnvironment), so the migrated schema differs
-        // from the shared default. Flip the RefreshDatabase migration flag
-        // back to false to force `migrate:fresh` under this suite's config.
+        // prefix (see defineEnvironment), so the migrated schema differs from
+        // the shared default. Flip the RefreshDatabase migration flag back to
+        // false to force `migrate:fresh` under this suite's config.
         \Illuminate\Foundation\Testing\RefreshDatabaseState::$migrated = false;
 
         parent::setUp();
@@ -119,10 +119,10 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
             ['id' => 2, 'name' => 'b:do', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
         ]);
 
-        // Unmappable rows interleaved before and after mappable
-        // rows — a `break` mutation would stop processing after
-        // the first unmappable row and miss the later mappable
-        // one, distinguishing it from the real `continue`.
+        // Unmappable rows interleaved before and after mappable rows — a
+        // `break` mutation would stop processing after the first unmappable row
+        // and miss the later mappable one, distinguishing it from the real
+        // `continue`.
         DB::table('role_has_permissions')->insert([
             ['permission_id' => 999, 'role_id' => 1],    // unmappable permission
             ['permission_id' => 1, 'role_id' => 1],      // mappable
@@ -148,8 +148,8 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
             ['id' => 2, 'name' => 'editor', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
         ]);
 
-        // Unmappable row before a mappable one so a `break`
-        // mutation would skip the mappable row.
+        // Unmappable row before a mappable one so a `break` mutation would skip
+        // the mappable row.
         DB::table('model_has_roles')->insert([
             ['role_id' => 999, 'model_type' => 'App\User', 'model_id' => 7],
             ['role_id' => 1, 'model_type' => 'App\User', 'model_id' => 8],
@@ -173,8 +173,8 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
             ['id' => 2, 'name' => 'b:do', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
         ]);
 
-        // Unmappable row before a mappable one so a `break`
-        // mutation would skip the mappable row.
+        // Unmappable row before a mappable one so a `break` mutation would skip
+        // the mappable row.
         DB::table('model_has_permissions')->insert([
             ['permission_id' => 999, 'model_type' => 'App\User', 'model_id' => 7],
             ['permission_id' => 1, 'model_type' => 'App\User', 'model_id' => 8],
@@ -200,10 +200,9 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
 
         self::assertSame(0, $exitCode);
 
-        // The migration summary table is rendered with each row
-        // `[table, count]`. An initial value other than 0 would
-        // surface as a non-zero count for the otherwise-empty
-        // source schema.
+        // The migration summary table is rendered with each row `[table,
+        // count]`. An initial value other than 0 would surface as a non-zero
+        // count for the otherwise-empty source schema.
         self::assertStringContainsString('Migration summary', $output);
         self::assertMatchesRegularExpression('/roles\s+\|\s+0\s+/', $output);
         self::assertMatchesRegularExpression('/permissions\s+\|\s+0\s+/', $output);

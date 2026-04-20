@@ -93,15 +93,14 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      */
     private static function authorizationSecondsUntilPivotExpiry(\Illuminate\Database\Eloquent\Model $model, int $nowTimestamp): ?int
     {
-        // Pivots on relation-bound models arrive as either a concrete
-        // `Pivot` instance or, in mutation-kill fixtures, a plain
-        // `stdClass` with a scalar `expires_at`. The tests in
-        // `MutationKillersTest` intentionally pass non-Model pivots
-        // to exercise the scalar-expires_at path, so the access is
-        // kept as direct property read with a null-coalesce rather
-        // than `getAttribute()` (which requires an Eloquent model).
-        // PHPStan cannot see the dynamically-assigned `pivot`
-        // relation attribute on `Model` and flags it as missing.
+        // Pivots on relation-bound models arrive as either a concrete `Pivot`
+        // instance or, in mutation-kill fixtures, a plain `stdClass` with a
+        // scalar `expires_at`. The tests in `MutationKillersTest` intentionally
+        // pass non-Model pivots to exercise the scalar-expires_at path, so the
+        // access is kept as direct property read with a null-coalesce rather
+        // than `getAttribute()` (which requires an Eloquent model). PHPStan
+        // cannot see the dynamically-assigned `pivot` relation attribute on
+        // `Model` and flags it as missing.
         /** @phpstan-ignore-next-line property.notFound */
         $pivot = $model->pivot ?? null;
 

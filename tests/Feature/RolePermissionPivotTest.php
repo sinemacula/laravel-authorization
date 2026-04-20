@@ -104,9 +104,9 @@ final class RolePermissionPivotTest extends TestCase
             'permission_id' => null,
         ]);
 
-        // `saving` should pass without touching the DB. The save
-        // itself still fails (missing PK columns) so we intercept
-        // the hook directly by invoking an insert attempt.
+        // `saving` should pass without touching the DB. The save itself still
+        // fails (missing PK columns) so we intercept the hook directly by
+        // invoking an insert attempt.
         $raised = false;
 
         try {
@@ -114,9 +114,8 @@ final class RolePermissionPivotTest extends TestCase
         } catch (GuardMismatchException|OrphanedRolePermissionException) {
             $raised = true;
         } catch (\Throwable) {
-            // DB-layer failure is expected and acceptable — the
-            // assertion is only that neither of our typed guards
-            // fired on null identifiers.
+            // DB-layer failure is expected and acceptable — the assertion is
+            // only that neither of our typed guards fired on null identifiers.
         }
 
         self::assertFalse($raised, 'Null identifiers must not trigger a typed pivot guard.');

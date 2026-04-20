@@ -41,9 +41,9 @@ final class MigrateSpatieCommandTest extends TestCase
     protected function setUp(): void
     {
         // This suite overrides `authorization.tables.*` to use the `auth_`
-        // prefix (see defineEnvironment), so the migrated schema differs
-        // from the shared default. Flip the RefreshDatabase migration flag
-        // back to false to force `migrate:fresh` under this suite's config.
+        // prefix (see defineEnvironment), so the migrated schema differs from
+        // the shared default. Flip the RefreshDatabase migration flag back to
+        // false to force `migrate:fresh` under this suite's config.
         \Illuminate\Foundation\Testing\RefreshDatabaseState::$migrated = false;
 
         parent::setUp();

@@ -74,13 +74,12 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
             }
         });
 
-        // Clear the bypass flag after every completed save so it
-        // cannot hop across an intervening non-protected mutation
-        // (e.g. a description update) and silently unlock the
-        // next protected change. `saved` fires after `updating`
-        // has had a chance to consume the flag for a legitimate
-        // protected mutation, so this reset is strictly
-        // idempotent on that path.
+        // Clear the bypass flag after every completed save so it cannot hop
+        // across an intervening non-protected mutation (e.g. a description
+        // update) and silently unlock the next protected change. `saved` fires
+        // after `updating` has had a chance to consume the flag for a
+        // legitimate protected mutation, so this reset is strictly idempotent
+        // on that path.
         static::saved(static function (self $model): void {
             $model->systemProtectionBypassed = false;
         });

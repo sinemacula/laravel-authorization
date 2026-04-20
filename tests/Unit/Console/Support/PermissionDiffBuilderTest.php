@@ -371,10 +371,10 @@ final class PermissionDiffBuilderTest extends TestCase
             roleReferencesCount: 0,
         );
 
-        // Null first, then concrete guards alphabetically (api < web),
-        // then z:* after a:*. Exercises every compareGuards branch:
-        // equal (never hit here, no duplicates), null-left, null-right,
-        // and two concrete guards falling through to strcmp.
+        // Null first, then concrete guards alphabetically (api < web), then z:*
+        // after a:*. Exercises every compareGuards branch: equal (never hit
+        // here, no duplicates), null-left, null-right, and two concrete guards
+        // falling through to strcmp.
         self::assertSame([$tupleANull, $tupleAApi, $tupleAWeb, $tupleZ], $diff->add);
     }
 
@@ -398,8 +398,8 @@ final class PermissionDiffBuilderTest extends TestCase
         $tupleAApi  = new PermissionTuple('a:edit', 'api', 'new', 'A');
         $tupleANull = new PermissionTuple('a:edit', null, 'new', 'A');
 
-        // Intentionally scrambled input order so the sort is actually
-        // exercised rather than preserving ingestion order.
+        // Intentionally scrambled input order so the sort is actually exercised
+        // rather than preserving ingestion order.
         $diff = (new PermissionDiffBuilder)->build(
             tuples: [$tupleZ, $tupleAApi, $tupleANull, $tupleAWeb],
             rows: [$rowZ, $rowAApi, $rowANull, $rowAWeb],
@@ -428,9 +428,9 @@ final class PermissionDiffBuilderTest extends TestCase
      */
     public function testCompositeKeyDoesNotCollideAcrossNameGuardBoundary(): void
     {
-        // Row and tuple would concatenate to the same `posts:view`
-        // string without the null-byte separator, but must compose
-        // to distinct match keys under the real separator.
+        // Row and tuple would concatenate to the same `posts:view` string
+        // without the null-byte separator, but must compose to distinct match
+        // keys under the real separator.
         $row   = $this->makeRow(name: 'posts:view', guard: null);
         $tuple = new PermissionTuple(name: 'posts', guard: ':view', description: 'one', category: 'A');
 

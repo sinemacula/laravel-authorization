@@ -86,10 +86,10 @@ final class ResolutionCacheBudgetTest extends TestCase
         $arrayStore      = new ArrayStore;
         $cacheRepository = new CacheRepository($arrayStore);
 
-        // ttl = 0 (forever) but maxTtl = 30s → entry must store
-        // with a 29s lifetime, not forever. A separate cache
-        // instance reads through the same store so the memo tier
-        // cannot mask a missing persistent-tier write.
+        // ttl = 0 (forever) but maxTtl = 30s → entry must store with a 29s
+        // lifetime, not forever. A separate cache instance reads through the
+        // same store so the memo tier cannot mask a missing persistent-tier
+        // write.
         $writer    = new ResolutionCache(store: $cacheRepository, ttl: 0, prefix: 'budget');
         $reader    = new ResolutionCache(store: $cacheRepository, ttl: 0, prefix: 'budget');
         $principal = self::principal();

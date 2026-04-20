@@ -46,8 +46,8 @@ return new class extends Migration {
 
             // Lifecycle marker for permissions retired by a sync pass. Null
             // means "live"; a concrete timestamp means "retired" — the
-            // gate-evaluation hot path filters rows with
-            // `WHERE deprecated_at IS NULL`, so the column is indexed.
+            // gate-evaluation hot path filters rows with `WHERE deprecated_at
+            // IS NULL`, so the column is indexed.
             $table->timestamp('deprecated_at')->nullable()->index();
 
             // Platform-protection marker. Permissions flagged system refuse

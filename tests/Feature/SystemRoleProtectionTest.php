@@ -203,14 +203,14 @@ final class SystemRoleProtectionTest extends TestCase
             'is_system' => true,
         ]);
 
-        // Arm the bypass, then perform an unrelated save that
-        // would not consume the flag under the old behaviour.
+        // Arm the bypass, then perform an unrelated save that would not consume
+        // the flag under the old behaviour.
         $role->forceSystem();
         $role->description = 'Updated description.';
         $role->save();
 
-        // The bypass must be gone: a rename without a fresh
-        // `forceSystem()` call must be refused.
+        // The bypass must be gone: a rename without a fresh `forceSystem()`
+        // call must be refused.
         $this->expectException(SystemRoleProtectedException::class);
 
         $role->name = 'renamed-without-bypass';

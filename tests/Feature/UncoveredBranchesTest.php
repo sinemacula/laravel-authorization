@@ -332,16 +332,14 @@ final class UncoveredBranchesTest extends TestCase
 
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        // Prime the persistent tier via the cache so the written
-        // key precisely matches the cache's internal key shape.
-        // A fresh instance then bypasses the memo and re-reads the
-        // corrupted payload from the store.
+        // Prime the persistent tier via the cache so the written key precisely
+        // matches the cache's internal key shape. A fresh instance then
+        // bypasses the memo and re-reads the corrupted payload from the store.
         $cache->rememberPermissions($principal, static fn (): array => ['seed']);
 
-        // Corrupt the stored entry in-place — swap the single
-        // seeded value for a mixed-type list. The filter branch
-        // in `rememberStringList` drops the non-string items and
-        // returns only the strings.
+        // Corrupt the stored entry in-place — swap the single seeded value for
+        // a mixed-type list. The filter branch in `rememberStringList` drops
+        // the non-string items and returns only the strings.
         $key = array_key_first($driver->storage); // @phpstan-ignore property.notFound
         static::assertIsString($key);
         $driver->storage[$key] = ['valid:perm', 42, null, 'another:perm']; // @phpstan-ignore property.notFound
@@ -378,8 +376,8 @@ final class UncoveredBranchesTest extends TestCase
             }
         };
 
-        // Method returns void; the assertion is that no exception
-        // is raised and no tag-flush occurs.
+        // Method returns void; the assertion is that no exception is raised and
+        // no tag-flush occurs.
         $cache->forgetRoleTags($role);
 
         static::assertTrue(true);
@@ -399,8 +397,8 @@ final class UncoveredBranchesTest extends TestCase
 
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'ghost', 'guard' => 'web']);
 
-        // Expect no exception raised when the underlying driver
-        // lacks `tags()` — the method exits at the early guard.
+        // Expect no exception raised when the underlying driver lacks `tags()`
+        // — the method exits at the early guard.
         $cache->forgetRoleTags($role);
 
         static::assertTrue(true);
@@ -444,8 +442,8 @@ final class UncoveredBranchesTest extends TestCase
 
         $cache->rememberPermissions($principal, static fn (): array => ['z:do']);
 
-        // Same object returns the memoised value without invoking
-        // the resolver again.
+        // Same object returns the memoised value without invoking the resolver
+        // again.
         $cachedEntries = $cache->rememberPermissions($principal, static fn (): array => \PHPUnit\Framework\Assert::fail('memoised'));
 
         static::assertSame(['z:do'], $cachedEntries);
@@ -467,8 +465,8 @@ final class UncoveredBranchesTest extends TestCase
 
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        // Route an empty-ID entry through the remember flow — the
-        // tags builder drops it silently, so the write succeeds.
+        // Route an empty-ID entry through the remember flow — the tags builder
+        // drops it silently, so the write succeeds.
         $cache->rememberPermissions(
             $principal,
             static fn (): array => ['t:do'],
@@ -562,11 +560,11 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testCoerceExpiresAtReturnsNullForEmptyString(): void
     {
-        // Direct invocation through a helper class that composes
-        // the trait — the public behaviour routes through
+        // Direct invocation through a helper class that composes the trait —
+        // the public behaviour routes through
         // `authorizationNearestPivotExpirySeconds` which calls
-        // `authorizationCoerceExpiresAt`. We invoke via reflection
-        // on a freshly-instantiated test-only composer.
+        // `authorizationCoerceExpiresAt`. We invoke via reflection on a
+        // freshly-instantiated test-only composer.
         /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
@@ -694,9 +692,9 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testLogMalformedPolicyFallsBackWhenAuthorizationChannelFails(): void
     {
-        // Rebind the logger to one whose `channel('authorization')`
-        // raises so the malformed-policy logger takes the
-        // default-channel fallback branch.
+        // Rebind the logger to one whose `channel('authorization')` raises so
+        // the malformed-policy logger takes the default-channel fallback
+        // branch.
         $fakeLog = new \Tests\Feature\Stubs\ChannelThrowingLogger;
         $this->app->instance('log', $fakeLog); // @phpstan-ignore method.nonObject
 
@@ -723,15 +721,14 @@ final class UncoveredBranchesTest extends TestCase
         $results = $user->fresh()?->getPolicies() ?? [];
         static::assertSame([], $results);
 
-        // Confirm the fallback branch ran — `channel()` raised
-        // and the default logger's `warning()` was used.
+        // Confirm the fallback branch ran — `channel()` raised and the default
+        // logger's `warning()` was used.
         static::assertGreaterThanOrEqual(1, $fakeLog->channelCalls, 'channel() should be attempted');
         static::assertGreaterThanOrEqual(1, $fakeLog->warningCalls, 'warning() should land on the default logger');
 
-        // Pin the exact warning content so the concat and context
-        // array inside `logMalformedPolicy` stay honest against
-        // ConcatOperandRemoval / ArrayItemRemoval / CastString
-        // mutations.
+        // Pin the exact warning content so the concat and context array inside
+        // `logMalformedPolicy` stay honest against ConcatOperandRemoval /
+        // ArrayItemRemoval / CastString mutations.
         static::assertNotNull($fakeLog->lastMessage);
         static::assertStringStartsWith("Authorization: skipping malformed policy '{$policyId}' — ", $fakeLog->lastMessage);
 
@@ -839,8 +836,8 @@ final class UncoveredBranchesTest extends TestCase
         static::assertGreaterThanOrEqual(1, $fakeLog->channelCalls, 'channel() should be attempted');
         static::assertGreaterThanOrEqual(1, $fakeLog->warningCalls, 'warning() should land on the default logger');
 
-        // Pin the logged content — `cache_key` and `reason` must
-        // land in the context with the exact key the cache emitted.
+        // Pin the logged content — `cache_key` and `reason` must land in the
+        // context with the exact key the cache emitted.
         static::assertNotNull($fakeLog->lastMessage);
         static::assertStringStartsWith("Authorization: discarding corrupt resolution-cache entry '{$key}' — ", $fakeLog->lastMessage);
 

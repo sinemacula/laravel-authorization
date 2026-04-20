@@ -52,9 +52,9 @@ final class ServiceProviderExtraBranchesTest extends TestCase
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.policy_store', StubPolicyStore::class);
 
-        // Re-run the register phase so the binding is picked up; the
-        // parent test boot skipped the binding because the default
-        // config sets `policy_store` to null.
+        // Re-run the register phase so the binding is picked up; the parent
+        // test boot skipped the binding because the default config sets
+        // `policy_store` to null.
         (new AuthorizationServiceProvider($this->app))->register();
 
         self::assertTrue($this->app->bound(PolicyStore::class)); // @phpstan-ignore method.nonObject
@@ -75,15 +75,15 @@ final class ServiceProviderExtraBranchesTest extends TestCase
         $config->set('authorization.gate.on_conflict', GateConflictMode::OVERWRITE);
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
-        // Pre-bind an existing gate so overwrite mode is the path we
-        // observe behaviourally. If the provider coerced the enum to
-        // the default (THROW), this call would raise.
+        // Pre-bind an existing gate so overwrite mode is the path we observe
+        // behaviourally. If the provider coerced the enum to the default
+        // (THROW), this call would raise.
         \Illuminate\Support\Facades\Gate::define(self::POSTS_CREATE, static fn (): bool => true);
 
         (new AuthorizationServiceProvider($this->app))->boot();
 
-        // The overwrite path ran — the Gate now resolves via the
-        // authorization manager rather than the preseeded closure.
+        // The overwrite path ran — the Gate now resolves via the authorization
+        // manager rather than the preseeded closure.
         self::assertFalse(\Illuminate\Support\Facades\Gate::allows(self::POSTS_CREATE));
     }
 
@@ -106,8 +106,8 @@ final class ServiceProviderExtraBranchesTest extends TestCase
 
         (new \SineMacula\Laravel\Authorization\Registrars\GateRegistrar($this->app))->register();
 
-        // The valid PermissionEnum entries were wired; the garbage
-        // entries were silently skipped without raising.
+        // The valid PermissionEnum entries were wired; the garbage entries were
+        // silently skipped without raising.
         self::assertTrue(\Illuminate\Support\Facades\Gate::has(self::POSTS_CREATE));
     }
 }

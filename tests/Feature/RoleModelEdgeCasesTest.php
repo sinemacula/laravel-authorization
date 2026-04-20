@@ -75,8 +75,8 @@ final class RoleModelEdgeCasesTest extends TestCase
             'guard' => 'web',
         ]);
 
-        // Pre-load the relation so the eviction branch of
-        // givePermission() fires.
+        // Pre-load the relation so the eviction branch of givePermission()
+        // fires.
         $role->load('permissions');
         self::assertTrue($role->relationLoaded('permissions'));
 
@@ -136,8 +136,8 @@ final class RoleModelEdgeCasesTest extends TestCase
             'parent_id' => $parent->getKey(),
         ]);
 
-        // Simulate a detached parent row without running through the
-        // model's delete pipeline (which would nullify children).
+        // Simulate a detached parent row without running through the model's
+        // delete pipeline (which would nullify children).
         DB::table('roles')->where('id', $parent->getKey())->delete();
 
         $ancestors = $child->fresh()?->ancestors();

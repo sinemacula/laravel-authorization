@@ -266,9 +266,8 @@ final class TemporalGrantsTest extends TestCase
      */
     public function testCachedRolesExpireWithTemporalGrantWithoutManualForget(): void
     {
-        // Wire a persistent array-backed cache so the entry
-        // survives a memo reset and the TTL bound is the only
-        // thing governing visibility.
+        // Wire a persistent array-backed cache so the entry survives a memo
+        // reset and the TTL bound is the only thing governing visibility.
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make('config'); // @phpstan-ignore method.nonObject
         $config->set('authorization.cache.store', 'array');
@@ -289,23 +288,22 @@ final class TemporalGrantsTest extends TestCase
         Carbon::setTestNow('2026-07-01 12:00:00');
         $user->assignRole('oncall', expiresAt: Carbon::parse('2026-07-01 12:05:00'));
 
-        // Prime the persistent entry at t=12:00, bounded to
-        // ~299s (5 minutes minus the shave).
+        // Prime the persistent entry at t=12:00, bounded to ~299s (5 minutes
+        // minus the shave).
         self::assertSame(['oncall'], $user->fresh()?->getRoles());
 
-        // Walk past the expiry — the TTL bound means the stored
-        // entry has elapsed even though no mutation event fired.
+        // Walk past the expiry — the TTL bound means the stored entry has
+        // elapsed even though no mutation event fired.
         Carbon::setTestNow('2026-07-01 12:10:00');
 
-        // A fresh principal instance drops the in-memory memo so
-        // the persistent tier is the sole source — its entry is
-        // now expired and the resolver observes the DB-filtered
-        // empty set.
+        // A fresh principal instance drops the in-memory memo so the persistent
+        // tier is the sole source — its entry is now expired and the resolver
+        // observes the DB-filtered empty set.
         $fresh = $user->fresh();
         self::assertNotNull($fresh);
 
-        // Wipe the singleton's in-memory memo that was primed at
-        // t=12:00 — the persistent tier is the one under test.
+        // Wipe the singleton's in-memory memo that was primed at t=12:00 — the
+        // persistent tier is the one under test.
         $this->app->forgetInstance(ResolutionCache::class); // @phpstan-ignore method.nonObject
         (new AuthorizationServiceProvider($this->app))->register();
 

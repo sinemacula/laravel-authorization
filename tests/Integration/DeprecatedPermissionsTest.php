@@ -71,11 +71,10 @@ final class DeprecatedPermissionsTest extends TestCase
         $permission->deprecated_at = CarbonImmutable::now();
         $permission->save();
 
-        // Drop the Eloquent relation memo and the resolution-cache
-        // memo so the next `can()` re-queries through the global
-        // scope — the sync command that stamps `deprecated_at` in
-        // production emits the cache-invalidation events that do
-        // the same thing.
+        // Drop the Eloquent relation memo and the resolution-cache memo so the
+        // next `can()` re-queries through the global scope — the sync command
+        // that stamps `deprecated_at` in production emits the
+        // cache-invalidation events that do the same thing.
         $identity->unsetRelations();
         $this->app->make(ResolutionCache::class)->forget($identity); // @phpstan-ignore method.nonObject
 

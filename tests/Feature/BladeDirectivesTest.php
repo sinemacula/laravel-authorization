@@ -56,12 +56,11 @@ final class BladeDirectivesTest extends TestCase
 
         $this->actAs($user);
 
-        // Keep whitespace either side of each directive: Blade's
-        // statement regex is `\B@…`, which requires a non-word
-        // boundary before the `@`; a literal token like `yes@endrole`
-        // leaves the closing directive unmatched and produces a PHP
-        // parse error. The render helper trims the output so the
-        // leading/trailing whitespace does not mask the content.
+        // Keep whitespace either side of each directive: Blade's statement
+        // regex is `\B@…`, which requires a non-word boundary before the `@`; a
+        // literal token like `yes@endrole` leaves the closing directive
+        // unmatched and produces a PHP parse error. The render helper trims the
+        // output so the leading/trailing whitespace does not mask the content.
         $output = $this->render('@role(\'admin\') yes @endrole');
 
         self::assertSame('yes', $output);
