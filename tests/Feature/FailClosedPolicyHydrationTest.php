@@ -18,10 +18,9 @@ use Tests\TestCase;
  * Feature coverage for the fail-closed hydration path.
  *
  * `HasPolicies::getPolicies()` must not bubble a single malformed row out to
- * the request: the spec mandates deny-biased behaviour — the bad row is
- * dropped, the remaining policies continue to evaluate, and an `ALLOW`
- * statement from a broken document can never win because the row was never
- * hydrated.
+ * the request: the resolver is deny-biased — the bad row is dropped, the
+ * remaining policies continue to evaluate, and an `ALLOW` statement from a
+ * broken document can never win because the row was never hydrated.
  *
  * The test uses `DB::table()` to bypass the Eloquent mutator and persist a
  * malformed document directly — the mutator's validation path is the write-side

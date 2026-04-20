@@ -217,10 +217,10 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * Return the evaluation-ready policies attached to this identity.
      *
      * A single malformed row must not short-circuit the entire evaluation —
-     * §12.3 mandates "fail closed (denied)" rather than "fail loud (500)". Each
-     * hydration runs inside its own try/catch: the offending row is logged
-     * through the `authorization` channel (or Laravel's default if the channel
-     * is unconfigured) and skipped. An excluded `ALLOW` cannot win, so the net
+     * the path fails closed (denied) rather than loud (500). Each hydration
+     * runs inside its own try/catch: the offending row is logged through the
+     * `authorization` channel (or Laravel's default if the channel is
+     * unconfigured) and skipped. An excluded `ALLOW` cannot win, so the net
      * decision stays deny-biased.
      *
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>

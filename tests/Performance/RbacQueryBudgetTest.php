@@ -22,9 +22,8 @@ use Tests\TestCase;
  *
  * Within a single request the authorization pipeline must resolve roles,
  * permissions, and policies at most once per principal. Subsequent `can()`
- * invocations on the same principal are expected to hit the memoisation tier of
- * `ResolutionCache` and emit zero additional database queries — regression
- * coverage for §12.2 of the spec.
+ * invocations on the same principal are expected to hit the memoisation tier
+ * of `ResolutionCache` and emit zero additional database queries.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

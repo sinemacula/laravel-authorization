@@ -533,9 +533,9 @@ class SyncPermissionsCommand extends Command
     }
 
     /**
-     * Translate the diff and the run mode into an exit code per the spec — zero
-     * for a clean run (or a dry-run with no drift), `EXIT_DRIFT` for a dry-run
-     * that surfaced any mutating bucket, zero again for a successful live run.
+     * Translate the diff and the run mode into an exit code — zero for a clean
+     * run (or a dry-run with no drift), `EXIT_DRIFT` for a dry-run that
+     * surfaced any mutating bucket, zero again for a successful live run.
      *
      * @param  \SineMacula\Laravel\Authorization\Console\Support\PermissionDiff  $diff
      * @param  bool  $dryRun
