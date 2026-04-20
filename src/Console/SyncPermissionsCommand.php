@@ -68,9 +68,9 @@ class SyncPermissionsCommand extends Command
     /** @var string The console command signature. */
     protected $signature = <<<'EOD'
         authorization:sync
-                                    {--dry-run : Compute and report the diff without writing to the database}
-                                    {--format=table : Output format; one of `table` or `json`}
-                                    {--force-delete : Hard-delete retired rows instead of stamping deprecated_at}
+            {--dry-run : Compute and report the diff without writing to the database}
+            {--format=table : Output format; one of `table` or `json`}
+            {--force-delete : Hard-delete retired rows instead of stamping deprecated_at}
         EOD;
 
     /** @var string The console command description. */

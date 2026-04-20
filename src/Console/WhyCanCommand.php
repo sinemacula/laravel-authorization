@@ -26,9 +26,9 @@ class WhyCanCommand extends Command
     /** @var string The console command signature. */
     protected $signature = <<<'EOD'
         authorization:why-can
-                                    {identity : Identity in morphType:key format (e.g. user:123)}
-                                    {action : The action to evaluate}
-                                    {resource? : Optional resource identifier}
+            {identity : Identity in morphType:key format (e.g. user:123)}
+            {action : The action to evaluate}
+            {resource? : Optional resource identifier}
         EOD;
 
     /** @var string The console command description. */

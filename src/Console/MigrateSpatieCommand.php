@@ -35,10 +35,7 @@ class MigrateSpatieCommand extends Command
     ];
 
     /** @var string The console command signature. */
-    protected $signature = <<<'EOD'
-        authorization:migrate-spatie
-                                    {--dry-run : Report counts without writing}
-        EOD;
+    protected $signature = 'authorization:migrate-spatie {--dry-run : Report counts without writing}';
 
     /** @var string The console command description. */
     protected $description = 'Migrate data from Spatie laravel-permission tables into this package';

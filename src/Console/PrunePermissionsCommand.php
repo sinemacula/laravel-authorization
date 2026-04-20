@@ -56,9 +56,9 @@ class PrunePermissionsCommand extends Command
     /** @var string The console command signature. */
     protected $signature = <<<'EOD'
         authorization:prune-deprecated
-                                    {--before= : ISO-8601 timestamp; prune only rows deprecated at or before this instant}
-                                    {--dry-run : Compute and report the prune set without touching the database}
-                                    {--format=table : Output format; one of `table` or `json`}
+            {--before= : ISO-8601 timestamp; prune only rows deprecated at or before this instant}
+            {--dry-run : Compute and report the prune set without touching the database}
+            {--format=table : Output format; one of `table` or `json`}
         EOD;
 
     /** @var string The console command description. */

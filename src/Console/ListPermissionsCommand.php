@@ -20,10 +20,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 class ListPermissionsCommand extends Command
 {
     /** @var string The console command signature. */
-    protected $signature = <<<'EOD'
-        authorization:list-permissions
-                                    {--guard= : Filter permissions by guard name}
-        EOD;
+    protected $signature = 'authorization:list-permissions {--guard= : Filter permissions by guard name}';
 
     /** @var string The console command description. */
     protected $description = 'List all authorization permissions';
@@ -60,6 +57,7 @@ class ListPermissionsCommand extends Command
         $this->table(
             ['ID', 'Name', 'Guard', 'System', 'Roles'],
             $permissions->map(static function (Permission $permission): array {
+
                 /** @var int $count */
                 $count = $permission->getAttribute('roles_count');
 

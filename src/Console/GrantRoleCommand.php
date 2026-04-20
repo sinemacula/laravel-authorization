@@ -25,8 +25,8 @@ class GrantRoleCommand extends Command
     /** @var string The console command signature. */
     protected $signature = <<<'EOD'
         authorization:grant
-                                    {identity : Identity in morphType:key format (e.g. user:123)}
-                                    {role : Role name to assign}
+            {identity : Identity in morphType:key format (e.g. user:123)}
+            {role : Role name to assign}
         EOD;
 
     /** @var string The console command description. */

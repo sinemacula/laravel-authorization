@@ -20,10 +20,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 class ListRolesCommand extends Command
 {
     /** @var string The console command signature. */
-    protected $signature = <<<'EOD'
-        authorization:list-roles
-                                    {--guard= : Filter roles by guard name}
-        EOD;
+    protected $signature = 'authorization:list-roles {--guard= : Filter roles by guard name}';
 
     /** @var string The console command description. */
     protected $description = 'List all authorization roles';

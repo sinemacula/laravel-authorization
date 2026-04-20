@@ -25,8 +25,8 @@ class RevokeRoleCommand extends Command
     /** @var string The console command signature. */
     protected $signature = <<<'EOD'
         authorization:revoke
-                                    {identity : Identity in morphType:key format (e.g. user:123)}
-                                    {role : Role name to revoke}
+            {identity : Identity in morphType:key format (e.g. user:123)}
+            {role : Role name to revoke}
         EOD;
 
     /** @var string The console command description. */
