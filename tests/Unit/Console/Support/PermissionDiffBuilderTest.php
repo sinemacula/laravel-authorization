@@ -376,6 +376,27 @@ final class PermissionDiffBuilderTest extends TestCase
     }
 
     /**
+     * Two tuples sharing an identical `(name, guard)` pair — as would
+     * arise if separate enum classes declared the same backing value
+     * under the same guard — both land in `add`. The sort comparator
+     * hits the equal-guards branch in `compareGuards()` and returns a
+     * stable zero so neither tuple is dropped.
+     *
+     * @return void
+     */
+    public function testEqualTuplesShareBucketWithoutDeduplication(): void
+    {
+        $first  = new PermissionTuple('posts:create', 'web', 'Create posts', 'Content');
+        $second = new PermissionTuple('posts:create', 'web', 'Create posts', 'Content');
+
+        $diff = (new PermissionDiffBuilder)->build([$first, $second], [], 0);
+
+        self::assertCount(2, $diff->add);
+        self::assertContains($first, $diff->add);
+        self::assertContains($second, $diff->add);
+    }
+
+    /**
      * The `retire` bucket is sorted deterministically — namespace
      * `b` sorts ahead of `z`, and within a name, null guards sort
      * ahead of concrete guards.

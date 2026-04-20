@@ -538,6 +538,99 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
+     * Non-string and non-`PermissionEnum` entries in
+     * `authorization.permission_enums` are silently skipped by the
+     * command's defensive filter. Only the valid subclass contributes
+     * rows, and the run exits cleanly.
+     *
+     * @return void
+     */
+    public function testInvalidEnumEntriesAreSilentlySkipped(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config->set('authorization.permission_enums', [
+            123,
+            'NonexistentClass',
+            \stdClass::class,
+            SyncStubPermission::class,
+        ]);
+
+        Event::fake([PermissionCreated::class]);
+
+        $exitCode = Artisan::call('authorization:sync');
+
+        self::assertSame(0, $exitCode);
+        Event::assertDispatchedTimes(PermissionCreated::class, 3);
+
+        /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission> $rows */
+        // @phpstan-ignore staticMethod.dynamicCall, staticMethod.dynamicCall
+        $rows = Permission::withDeprecated()->orderBy('name')->orderBy('guard')->get();
+
+        self::assertCount(3, $rows);
+        self::assertSame(
+            ['posts:delete', 'posts:view', 'posts:view'],
+            $rows->pluck('name')->all(),
+        );
+    }
+
+    /**
+     * `--format=json` populates the `retire`, `protected`, and
+     * `unchanged` bucket arrays with per-row objects carrying the
+     * `name`, `guard`, and `action` keys.
+     *
+     * @return void
+     */
+    public function testJsonFormatDescribesRetireProtectedAndUnchangedBuckets(): void
+    {
+        // Seed the DB with the base enum state — three enum-backed
+        // rows — then layer a system-flagged orphan for the
+        // `protected` bucket on top.
+        $this->configureEnums([SyncStubPermission::class]);
+        Artisan::call('authorization:sync');
+
+        Permission::create([
+            'id'        => (string) Str::uuid(),
+            'name'      => 'platform:admin',
+            'guard'     => 'web',
+            'is_system' => true,
+        ]);
+
+        // Swap in the reduced enum so `posts:delete` drops out and
+        // lands in the `retire` bucket while both `posts:view` rows
+        // stay `unchanged`.
+        $this->configureEnums([SyncStubReducedPermission::class]);
+
+        Artisan::call('authorization:sync', [
+            '--dry-run' => true,
+            '--format'  => 'json',
+        ]);
+        $output = Artisan::output();
+
+        /** @var array<string, mixed>|null $payload */
+        $payload = \json_decode($output, associative: true);
+
+        self::assertIsArray($payload);
+        /** @var array<string, mixed> $changes */
+        $changes = $payload['changes']; // @phpstan-ignore offsetAccess.nonOffsetAccessible
+
+        /** @var list<array<string, string|null>> $retire */
+        $retire = $changes['retire']; // @phpstan-ignore offsetAccess.nonOffsetAccessible
+        /** @var list<array<string, string|null>> $protectedBucket */
+        $protectedBucket = $changes['protected']; // @phpstan-ignore offsetAccess.nonOffsetAccessible
+
+        self::assertCount(1, $retire);
+        self::assertSame('posts:delete', $retire[0]['name']);
+        self::assertArrayHasKey('guard', $retire[0]);
+        self::assertSame('retire', $retire[0]['action']);
+
+        self::assertCount(1, $protectedBucket);
+        self::assertSame('platform:admin', $protectedBucket[0]['name']);
+        self::assertSame('web', $protectedBucket[0]['guard']);
+        self::assertSame('protected', $protectedBucket[0]['action']);
+    }
+
+    /**
      * Apply the given enum class list to `authorization.permission_enums`.
      *
      * @param  list<class-string>  $enums
