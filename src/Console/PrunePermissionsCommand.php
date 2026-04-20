@@ -54,12 +54,10 @@ class PrunePermissionsCommand extends Command
     private const string FORMAT_TABLE = 'table';
 
     /** @var string The console command signature. */
-    protected $signature = <<<'EOD'
-        authorization:prune-deprecated
-            {--before= : ISO-8601 timestamp; prune only rows deprecated at or before this instant}
-            {--dry-run : Compute and report the prune set without touching the database}
-            {--format=table : Output format; one of `table` or `json`}
-        EOD;
+    protected $signature = 'authorization:prune-deprecated '
+        . '{--before= : ISO-8601 timestamp; prune only rows deprecated at or before this instant} '
+        . '{--dry-run : Compute and report the prune set without touching the database} '
+        . '{--format=table : Output format; one of `table` or `json`}';
 
     /** @var string The console command description. */
     protected $description = 'Detach pivots and hard-delete deprecated permission rows';

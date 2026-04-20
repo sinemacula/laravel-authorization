@@ -20,11 +20,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 final class GrantRoleCommand extends AbstractRoleAssignmentCommand
 {
     /** @var string The console command signature. */
-    protected $signature = <<<'EOD'
-        authorization:grant
-            {identity : Identity in morphType:key format (e.g. user:123)}
-            {role : Role name to assign}
-        EOD;
+    protected $signature = 'authorization:grant {identity : Identity in morphType:key format (e.g. user:123)} {role : Role name to assign}';
 
     /** @var string The console command description. */
     protected $description = 'Assign a role to an authorizable identity';

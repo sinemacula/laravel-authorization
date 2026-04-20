@@ -20,11 +20,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 final class RevokeRoleCommand extends AbstractRoleAssignmentCommand
 {
     /** @var string The console command signature. */
-    protected $signature = <<<'EOD'
-        authorization:revoke
-            {identity : Identity in morphType:key format (e.g. user:123)}
-            {role : Role name to revoke}
-        EOD;
+    protected $signature = 'authorization:revoke {identity : Identity in morphType:key format (e.g. user:123)} {role : Role name to revoke}';
 
     /** @var string The console command description. */
     protected $description = 'Revoke a role from an authorizable identity';

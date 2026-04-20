@@ -66,12 +66,10 @@ class SyncPermissionsCommand extends Command
     private const string FORMAT_TABLE = 'table';
 
     /** @var string The console command signature. */
-    protected $signature = <<<'EOD'
-        authorization:sync
-            {--dry-run : Compute and report the diff without writing to the database}
-            {--format=table : Output format; one of `table` or `json`}
-            {--force-delete : Hard-delete retired rows instead of stamping deprecated_at}
-        EOD;
+    protected $signature = 'authorization:sync '
+        . '{--dry-run : Compute and report the diff without writing to the database} '
+        . '{--format=table : Output format; one of `table` or `json`} '
+        . '{--force-delete : Hard-delete retired rows instead of stamping deprecated_at}';
 
     /** @var string The console command description. */
     protected $description = 'Sync the permission catalogue from configured enums to the database';
