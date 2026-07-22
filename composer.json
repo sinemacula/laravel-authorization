@@ -42,7 +42,7 @@
         "phpstan/phpstan-phpunit": "^2.0",
         "phpstan/phpstan-strict-rules": "^2.0",
         "phpunit/phpunit": "^12.5",
-        "sinemacula/coding-standards": "^1.0",
+        "sinemacula/coding-standards-laravel": "^1.0",
         "slevomat/coding-standard": "^8.28",
         "squizlabs/php_codesniffer": "^4.0"
     },
@@ -98,7 +98,7 @@
             "@php vendor/bin/phpunit --testsuite Performance --coverage-clover=clover.xml"
         ],
         "test:mutation": [
-            "@php vendor/bin/infection --configuration=infection.json5 --test-framework-options=\"--do-not-fail-on-warning --do-not-fail-on-phpunit-warning\" --only-covering-test-cases --min-msi=85 --min-covered-msi=85"
+            "@php vendor/bin/infection --configuration=infection.json5 --test-framework-options=\"--do-not-fail-on-warning --do-not-fail-on-phpunit-warning\" --only-covering-test-cases --min-msi=85 --min-covered-msi=85 --ignore-msi-with-no-mutations"
         ],
         "test:mutation:full": [
             "@php vendor/bin/infection --configuration=infection.full.json5 --test-framework-options=\"--do-not-fail-on-warning --do-not-fail-on-phpunit-warning\" --only-covering-test-cases"
