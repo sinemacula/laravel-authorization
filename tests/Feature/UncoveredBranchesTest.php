@@ -4,21 +4,34 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
-use Illuminate\Support\Facades\Schema;
+use Carbon\Carbon;
+use Illuminate\Cache\Repository;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Assert;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
+use Psr\Log\AbstractLogger;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
+use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
+use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
+use SineMacula\Laravel\Authorization\Concerns\HasRoles;
+use SineMacula\Laravel\Authorization\Concerns\ResolvesPivotExpiry;
+use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
-use SineMacula\Laravel\Authorization\Traits\HasPermissions;
-use SineMacula\Laravel\Authorization\Traits\HasPolicies;
-use SineMacula\Laravel\Authorization\Traits\HasRoles;
-use SineMacula\Laravel\Authorization\Traits\ResolvesPivotExpiry;
+use Tests\Feature\Stubs\ChannelThrowingLogger;
+use Tests\Feature\Stubs\NonTaggableCacheStore;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\ThrowingGetCacheStore;
 use Tests\TestCase;
 
 /**
@@ -133,7 +146,7 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testAttachPolicyClearsLoadedPoliciesRelationCache(): void
     {
-        $policy = \SineMacula\Laravel\Authorization\Models\Policy::create([
+        $policy = Policy::create([
             'id'       => (string) Str::uuid(),
             'name'     => 'p1',
             'document' => ['statements' => [['effect' => 'allow', 'actions' => ['x']]]],
@@ -155,12 +168,12 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testSyncPoliciesClearsLoadedPoliciesRelationCache(): void
     {
-        $a = \SineMacula\Laravel\Authorization\Models\Policy::create([
+        $a = Policy::create([
             'id'       => (string) Str::uuid(),
             'name'     => 'a',
             'document' => ['statements' => [['effect' => 'allow', 'actions' => ['x']]]],
         ]);
-        $b = \SineMacula\Laravel\Authorization\Models\Policy::create([
+        $b = Policy::create([
             'id'       => (string) Str::uuid(),
             'name'     => 'b',
             'document' => ['statements' => [['effect' => 'allow', 'actions' => ['y']]]],
@@ -228,13 +241,15 @@ final class UncoveredBranchesTest extends TestCase
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole($role);
 
-        // A target that implements SupportsRoles but without a real `roles()` relation.
-        $target = new class implements \SineMacula\Laravel\Authorization\Contracts\SupportsRoles {
+        // A target that implements SupportsRoles but without a real `roles()`
+        // relation.
+        $target = new class implements SupportsRoles {
             /**
              * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
              * @return static
              */
-            public function assignRole(\SineMacula\Laravel\Authorization\Models\Role|string $role): static
+            #[\Override]
+            public function assignRole(Role|string $role): static
             {
                 return $this;
             }
@@ -243,16 +258,18 @@ final class UncoveredBranchesTest extends TestCase
              * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
              * @return static
              */
-            public function revokeRole(\SineMacula\Laravel\Authorization\Models\Role|string $role): static
+            #[\Override]
+            public function revokeRole(Role|string $role): static
             {
                 return $this;
             }
 
             /**
-             * @param  array  $roles
+             * @param  array<int, \SineMacula\Laravel\Authorization\Models\Role|string>  $roles
              * @return static
              */
-            public function syncRoles(array $roles): static // @phpstan-ignore missingType.iterableValue
+            #[\Override]
+            public function syncRoles(array $roles): static
             {
                 return $this;
             }
@@ -261,7 +278,8 @@ final class UncoveredBranchesTest extends TestCase
              * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
              * @return bool
              */
-            public function hasRole(\SineMacula\Laravel\Authorization\Models\Role|string $role): bool
+            #[\Override]
+            public function hasRole(Role|string $role): bool
             {
                 return false;
             }
@@ -269,6 +287,7 @@ final class UncoveredBranchesTest extends TestCase
             /**
              * @return array<int, string>
              */
+            #[\Override]
             public function getRoles(): array
             {
                 return [];
@@ -327,28 +346,26 @@ final class UncoveredBranchesTest extends TestCase
     public function testRememberStringListFiltersNonStringEntriesFromPersistentStore(): void
     {
         $driver = self::makeNonTaggableDriver();
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
 
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        // Prime the persistent tier via the cache so the written
-        // key precisely matches the cache's internal key shape.
-        // A fresh instance then bypasses the memo and re-reads the
-        // corrupted payload from the store.
+        // Prime the persistent tier via the cache so the written key precisely
+        // matches the cache's internal key shape. A fresh instance then
+        // bypasses the memo and re-reads the corrupted payload from the store.
         $cache->rememberPermissions($principal, static fn (): array => ['seed']);
 
-        // Corrupt the stored entry in-place — swap the single
-        // seeded value for a mixed-type list. The filter branch
-        // in `rememberStringList` drops the non-string items and
-        // returns only the strings.
+        // Corrupt the stored entry in-place — swap the single seeded value for
+        // a mixed-type list. The filter branch in `rememberStringList` drops
+        // the non-string items and returns only the strings.
         $key = \array_key_first($driver->storage); // @phpstan-ignore property.notFound
         static::assertIsString($key);
         $driver->storage[$key] = ['valid:perm', 42, null, 'another:perm']; // @phpstan-ignore property.notFound
 
         $fresh = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
 
-        $cachedEntries = $fresh->rememberPermissions($principal, static fn (): array => \PHPUnit\Framework\Assert::fail('Resolver should not be called on a store hit.'));
+        $cachedEntries = $fresh->rememberPermissions($principal, static fn (): array => Assert::fail('Resolver should not be called on a store hit.'));
 
         static::assertSame(['valid:perm', 'another:perm'], $cachedEntries);
     }
@@ -363,7 +380,7 @@ final class UncoveredBranchesTest extends TestCase
     public function testForgetRoleTagsIsNoopForRoleWithEmptyKey(): void
     {
         $cache = new ResolutionCache(
-            store: \Illuminate\Support\Facades\Cache::store('array'),
+            store: Cache::store('array'),
             ttl: 0,
             prefix: 'authorization-test',
         );
@@ -378,8 +395,8 @@ final class UncoveredBranchesTest extends TestCase
             }
         };
 
-        // Method returns void; the assertion is that no exception
-        // is raised and no tag-flush occurs.
+        // Method returns void; the assertion is that no exception is raised and
+        // no tag-flush occurs.
         $cache->forgetRoleTags($role);
 
         static::assertTrue(true);
@@ -394,13 +411,13 @@ final class UncoveredBranchesTest extends TestCase
     public function testForgetRoleTagsIsNoopOnNonTagStore(): void
     {
         $driver = self::makeNonTaggableDriver();
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
 
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'ghost', 'guard_name' => 'web']);
 
-        // Expect no exception raised when the underlying driver
-        // lacks `tags()` — the method exits at the early guard.
+        // Expect no exception raised when the underlying driver lacks `tags()`
+        // — the method exits at the early guard.
         $cache->forgetRoleTags($role);
 
         static::assertTrue(true);
@@ -415,7 +432,7 @@ final class UncoveredBranchesTest extends TestCase
     public function testForgetIteratesEverySlotOnNonTagStore(): void
     {
         $driver = self::makeNonTaggableDriver();
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
 
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -444,9 +461,9 @@ final class UncoveredBranchesTest extends TestCase
 
         $cache->rememberPermissions($principal, static fn (): array => ['z:do']);
 
-        // Same object returns the memoised value without invoking
-        // the resolver again.
-        $cachedEntries = $cache->rememberPermissions($principal, static fn (): array => \PHPUnit\Framework\Assert::fail('memoised'));
+        // Same object returns the memoised value without invoking the resolver
+        // again.
+        $cachedEntries = $cache->rememberPermissions($principal, static fn (): array => Assert::fail('memoised'));
 
         static::assertSame(['z:do'], $cachedEntries);
     }
@@ -460,19 +477,19 @@ final class UncoveredBranchesTest extends TestCase
     public function testTagsForSkipsEmptyRoleIds(): void
     {
         $cache = new ResolutionCache(
-            store: \Illuminate\Support\Facades\Cache::store('array'),
+            store: Cache::store('array'),
             ttl: 0,
             prefix: 'authorization-test',
         );
 
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        // Route an empty-ID entry through the remember flow — the
-        // tags builder drops it silently, so the write succeeds.
+        // Route an empty-ID entry through the remember flow — the tags builder
+        // drops it silently, so the write succeeds.
         $cache->rememberPermissions(
             $principal,
             static fn (): array => ['t:do'],
-            new \SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext(maxTtl: null, roleIds: ['', 'real-role-id']),
+            new ResolutionCacheContext(maxTtl: null, roleIds: ['', 'real-role-id']),
         );
 
         static::assertSame(['t:do'], $cache->rememberPermissions($principal, static fn (): array => []));
@@ -487,18 +504,18 @@ final class UncoveredBranchesTest extends TestCase
     public function testPutInStoreSkipsWhenTtlIsZeroOrLess(): void
     {
         $driver = self::makeNonTaggableDriver();
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
 
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        // `maxTtl = 1` with `min($base, 1) - 1 = 0` triggers the
-        // short-circuit. The resolver still runs and the return
-        // value is propagated, but nothing lands in the driver.
+        // `maxTtl = 1` with `min($base, 1) - 1 = 0` triggers the short-circuit.
+        // The resolver still runs and the return value is propagated, but
+        // nothing lands in the driver.
         $cache->rememberPermissions(
             $principal,
             static fn (): array => ['x:do'],
-            new \SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext(maxTtl: 1),
+            new ResolutionCacheContext(maxTtl: 1),
         );
 
         static::assertSame([], $driver->storage, 'Persistent tier must skip zero/negative TTL writes.'); // @phpstan-ignore property.notFound
@@ -513,8 +530,8 @@ final class UncoveredBranchesTest extends TestCase
     public function testBladeHelpersHasAllRolesReturnsFalseForNonRoleSupportingPrincipal(): void
     {
         $this->app->instance( // @phpstan-ignore method.nonObject
-            \SineMacula\Laravel\Authorization\Contracts\PrincipalResolver::class,
-            new class implements \SineMacula\Laravel\Authorization\Contracts\PrincipalResolver {
+            PrincipalResolver::class,
+            new class implements PrincipalResolver {
                 /**
                  * @return object|null
                  *
@@ -547,7 +564,7 @@ final class UncoveredBranchesTest extends TestCase
     {
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'temp', 'guard_name' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
-        $user->assignRole($role, \Carbon\Carbon::now()->addHour());
+        $user->assignRole($role, Carbon::now()->addHour());
 
         $names = $user->fresh()?->getRoles() ?? [];
 
@@ -562,11 +579,11 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testCoerceExpiresAtReturnsNullForEmptyString(): void
     {
-        // Direct invocation through a helper class that composes
-        // the trait — the public behaviour routes through
+        // Direct invocation through a helper class that composes the trait —
+        // the public behaviour routes through
         // `authorizationNearestPivotExpirySeconds` which calls
-        // `authorizationCoerceExpiresAt`. We invoke via reflection
-        // on a freshly-instantiated test-only composer.
+        // `authorizationCoerceExpiresAt`. We invoke via reflection on a
+        // freshly-instantiated test-only composer.
         /** @phpstan-ignore-next-line class.missingExtends */
         $probe = new class {
             use ResolvesPivotExpiry;
@@ -674,13 +691,13 @@ final class UncoveredBranchesTest extends TestCase
              * @param  \Illuminate\Database\Eloquent\Model  $model
              * @return int|null
              */
-            public function seconds(\Illuminate\Database\Eloquent\Model $model): ?int
+            public function seconds(Model $model): ?int
             {
                 return self::authorizationSecondsUntilPivotExpiry($model, 0);
             }
         };
 
-        $model = new class extends \Illuminate\Database\Eloquent\Model {};
+        $model = new class extends Model {};
 
         static::assertNull($probe->seconds($model));
     }
@@ -694,15 +711,15 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testLogMalformedPolicyFallsBackWhenAuthorizationChannelFails(): void
     {
-        // Rebind the logger to one whose `channel('authorization')`
-        // raises so the malformed-policy logger takes the
-        // default-channel fallback branch.
-        $fakeLog = new \Tests\Feature\Stubs\ChannelThrowingLogger;
+        // Rebind the logger to one whose `channel('authorization')` raises so
+        // the malformed-policy logger takes the default-channel fallback
+        // branch.
+        $fakeLog = new ChannelThrowingLogger;
         $this->app->instance('log', $fakeLog); // @phpstan-ignore method.nonObject
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        $policy = \SineMacula\Laravel\Authorization\Models\Policy::create([
+        $policy = Policy::create([
             'id'       => (string) Str::uuid(),
             'name'     => 'malformed-fallback',
             'document' => ['statements' => [['effect' => 'allow', 'actions' => ['x']]]],
@@ -711,27 +728,26 @@ final class UncoveredBranchesTest extends TestCase
 
         $policyId = (string) $policy->getKey(); // @phpstan-ignore cast.string
 
-        // Overwrite the stored document with a JSON-encoded array
-        // that lacks the required statements key — the Eloquent
-        // array cast yields a decoded value and `EvaluationPolicy::fromArray`
-        // then fails the schema validator, triggering the logger
-        // fallback path inside `logMalformedPolicy`.
-        \Illuminate\Support\Facades\DB::table((string) config('authorization.tables.policies', 'policies')) // @phpstan-ignore cast.string
+        // Overwrite the stored document with a JSON-encoded array that lacks
+        // the required statements key — the Eloquent array cast yields a
+        // decoded value and `EvaluationPolicy::fromArray` then fails the schema
+        // validator, triggering the logger fallback path inside
+        // `logMalformedPolicy`.
+        DB::table((string) config('authorization.tables.policies', 'policies')) // @phpstan-ignore cast.string
             ->where('id', $policyId)
             ->update(['document' => \json_encode(['version' => 'not-an-int'])]);
 
         $results = $user->fresh()?->getPolicies() ?? [];
         static::assertSame([], $results);
 
-        // Confirm the fallback branch ran — `channel()` raised
-        // and the default logger's `warning()` was used.
+        // Confirm the fallback branch ran — `channel()` raised and the default
+        // logger's `warning()` was used.
         static::assertGreaterThanOrEqual(1, $fakeLog->channelCalls, 'channel() should be attempted');
         static::assertGreaterThanOrEqual(1, $fakeLog->warningCalls, 'warning() should land on the default logger');
 
-        // Pin the exact warning content so the concat and context
-        // array inside `logMalformedPolicy` stay honest against
-        // ConcatOperandRemoval / ArrayItemRemoval / CastString
-        // mutations.
+        // Pin the exact warning content so the concat and context array inside
+        // `logMalformedPolicy` stay honest against ConcatOperandRemoval /
+        // ArrayItemRemoval / CastString mutations.
         static::assertNotNull($fakeLog->lastMessage);
         static::assertStringStartsWith("Authorization: skipping malformed policy '{$policyId}' — ", $fakeLog->lastMessage);
 
@@ -753,10 +769,10 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testLogMalformedPolicyTolerantOfLoggerWarningFailure(): void
     {
-        // Rebind the logger to one whose `warning()` raises. The
-        // method swallows the failure so hydration still succeeds.
+        // Rebind the logger to one whose `warning()` raises. The method
+        // swallows the failure so hydration still succeeds.
         // @phpstan-ignore-next-line method.nonObject
-        $this->app->instance('log', new class extends \Psr\Log\AbstractLogger {
+        $this->app->instance('log', new class extends AbstractLogger {
             // @phpstan-ignore method.nonObject
             /**
              * @param  string  $name
@@ -769,10 +785,13 @@ final class UncoveredBranchesTest extends TestCase
 
             /**
              * @param  string|\Stringable  $message
-             * @param  array  $context
+             * @param  array<mixed>  $context
              * @return void
+             *
+             * @throws \RuntimeException
              */
-            public function warning(string|\Stringable $message, array $context = []): void // @phpstan-ignore missingType.iterableValue
+            #[\Override]
+            public function warning(string|\Stringable $message, array $context = []): void
             {
                 throw new \RuntimeException('logger unavailable');
             }
@@ -780,26 +799,25 @@ final class UncoveredBranchesTest extends TestCase
             /**
              * @param  mixed  $level
              * @param  string|\Stringable  $message
-             * @param  array  $context
+             * @param  array<mixed>  $context
              * @return void
-             *
-             * @phpstan-ignore missingType.iterableValue
              */
+            #[\Override]
             public function log(mixed $level, string|\Stringable $message, array $context = []): void {}
         });
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        $policy = \SineMacula\Laravel\Authorization\Models\Policy::create([
+        $policy = Policy::create([
             'id'       => (string) Str::uuid(),
             'name'     => 'malformed-warn',
             'document' => ['statements' => [['effect' => 'allow', 'actions' => ['x']]]],
         ]);
         $user->attachPolicy($policy);
 
-        // Replace with a JSON payload lacking the `statements` key
-        // so `EvaluationPolicy::fromArray()` raises.
-        \Illuminate\Support\Facades\DB::table((string) config('authorization.tables.policies', 'policies')) // @phpstan-ignore cast.string
+        // Replace with a JSON payload lacking the `statements` key so
+        // `EvaluationPolicy::fromArray()` raises.
+        DB::table((string) config('authorization.tables.policies', 'policies')) // @phpstan-ignore cast.string
             ->where('id', $policy->getKey())
             ->update(['document' => \json_encode(['version' => 'not-an-int'])]);
 
@@ -816,18 +834,18 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testLogCorruptCacheEntryHandlesChannelMisconfiguration(): void
     {
-        $fakeLog = new \Tests\Feature\Stubs\ChannelThrowingLogger;
+        $fakeLog = new ChannelThrowingLogger;
         $this->app->instance('log', $fakeLog); // @phpstan-ignore method.nonObject
 
         $driver = self::makeNonTaggableDriver();
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
 
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        // Prime + corrupt the persistent entry so the read path
-        // raises and the logger branch fires. A non-array element
-        // inside the stored list trips `Policy::fromArray()`.
+        // Prime + corrupt the persistent entry so the read path raises and the
+        // logger branch fires. A non-array element inside the stored list trips
+        // `Policy::fromArray()`.
         $cache->rememberPolicies($principal, static fn (): array => []);
         $key                   = (string) \array_key_first($driver->storage); // @phpstan-ignore property.notFound
         $driver->storage[$key] = ['not-an-array']; // @phpstan-ignore property.notFound
@@ -839,8 +857,8 @@ final class UncoveredBranchesTest extends TestCase
         static::assertGreaterThanOrEqual(1, $fakeLog->channelCalls, 'channel() should be attempted');
         static::assertGreaterThanOrEqual(1, $fakeLog->warningCalls, 'warning() should land on the default logger');
 
-        // Pin the logged content — `cache_key` and `reason` must
-        // land in the context with the exact key the cache emitted.
+        // Pin the logged content — `cache_key` and `reason` must land in the
+        // context with the exact key the cache emitted.
         static::assertNotNull($fakeLog->lastMessage);
         static::assertStringStartsWith("Authorization: discarding corrupt resolution-cache entry '{$key}' — ", $fakeLog->lastMessage);
 
@@ -870,7 +888,7 @@ final class UncoveredBranchesTest extends TestCase
         );
 
         $first  = $cache->rememberPolicies($principal, static fn (): array => [$policy]);
-        $second = $cache->rememberPolicies($principal, static fn (): array => \PHPUnit\Framework\Assert::fail('memoised'));
+        $second = $cache->rememberPolicies($principal, static fn (): array => Assert::fail('memoised'));
 
         static::assertSame($first, $second);
     }
@@ -885,7 +903,7 @@ final class UncoveredBranchesTest extends TestCase
     public function testRememberPoliciesHydratesFromPersistentPayload(): void
     {
         $driver = self::makeNonTaggableDriver();
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
 
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -896,13 +914,12 @@ final class UncoveredBranchesTest extends TestCase
         );
         $cache->rememberPolicies($principal, static fn (): array => [$policy]);
 
-        // Fresh instance bypasses the memo and hydrates from the
-        // persistent tier — exercising the `Policy::fromArray`
-        // loop branch.
+        // Fresh instance bypasses the memo and hydrates from the persistent
+        // tier — exercising the `Policy::fromArray` loop branch.
         $fresh         = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
         $cachedEntries = $fresh->rememberPolicies(
             $principal,
-            static fn (): array => \PHPUnit\Framework\Assert::fail('Should hit the persistent store.'),
+            static fn (): array => Assert::fail('Should hit the persistent store.'),
         );
 
         static::assertCount(1, $cachedEntries);
@@ -917,9 +934,9 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testRememberStringListRecoversFromDriverGetFailure(): void
     {
-        $driver = new \Tests\Feature\Stubs\ThrowingGetCacheStore;
+        $driver = new ThrowingGetCacheStore;
 
-        $store = new \Illuminate\Cache\Repository($driver);
+        $store = new Repository($driver);
         $cache = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
 
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -940,7 +957,7 @@ final class UncoveredBranchesTest extends TestCase
     public function testLogCorruptCacheEntryTolerantOfLoggerWarningFailure(): void
     {
         // @phpstan-ignore-next-line method.nonObject
-        $this->app->instance('log', new class extends \Psr\Log\AbstractLogger {
+        $this->app->instance('log', new class extends AbstractLogger {
             // @phpstan-ignore method.nonObject
             /**
              * @param  string  $name
@@ -953,10 +970,13 @@ final class UncoveredBranchesTest extends TestCase
 
             /**
              * @param  string|\Stringable  $message
-             * @param  array  $context
+             * @param  array<mixed>  $context
              * @return void
+             *
+             * @throws \RuntimeException
              */
-            public function warning(string|\Stringable $message, array $context = []): void // @phpstan-ignore missingType.iterableValue
+            #[\Override]
+            public function warning(string|\Stringable $message, array $context = []): void
             {
                 throw new \RuntimeException('logger unavailable');
             }
@@ -964,16 +984,15 @@ final class UncoveredBranchesTest extends TestCase
             /**
              * @param  mixed  $level
              * @param  string|\Stringable  $message
-             * @param  array  $context
+             * @param  array<mixed>  $context
              * @return void
-             *
-             * @phpstan-ignore missingType.iterableValue
              */
+            #[\Override]
             public function log(mixed $level, string|\Stringable $message, array $context = []): void {}
         });
 
         $driver = self::makeNonTaggableDriver();
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
 
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -996,8 +1015,8 @@ final class UncoveredBranchesTest extends TestCase
      *
      * @return \Tests\Feature\Stubs\NonTaggableCacheStore
      */
-    private static function makeNonTaggableDriver(): \Tests\Feature\Stubs\NonTaggableCacheStore
+    private static function makeNonTaggableDriver(): NonTaggableCacheStore
     {
-        return new \Tests\Feature\Stubs\NonTaggableCacheStore;
+        return new NonTaggableCacheStore;
     }
 }

@@ -259,7 +259,7 @@ final class StatementTest extends TestCase
             'conditions' => ['tenant' => ['eq' => 'org-1']],
         ]);
 
-        self::assertFalse($statement->evaluateConditions([]));
+        self::assertFalse($statement->conditionsSatisfiedBy([]));
     }
 
     /**
@@ -275,8 +275,8 @@ final class StatementTest extends TestCase
             'conditions' => ['tenant' => 'org-1'],
         ]);
 
-        self::assertTrue($statement->evaluateConditions(['tenant' => 'org-1']));
-        self::assertFalse($statement->evaluateConditions(['tenant' => 'org-2']));
+        self::assertTrue($statement->conditionsSatisfiedBy(['tenant' => 'org-1']));
+        self::assertFalse($statement->conditionsSatisfiedBy(['tenant' => 'org-2']));
     }
 
     /**
@@ -292,7 +292,7 @@ final class StatementTest extends TestCase
             'conditions' => ['tenant' => ['unknown_op' => 'org-1']],
         ]);
 
-        self::assertFalse($statement->evaluateConditions(['tenant' => 'org-1']));
+        self::assertFalse($statement->conditionsSatisfiedBy(['tenant' => 'org-1']));
     }
 
     /**
@@ -327,7 +327,7 @@ final class StatementTest extends TestCase
             'conditions' => $conditions,
         ]);
 
-        self::assertSame($expected, $statement->evaluateConditions($context));
+        self::assertSame($expected, $statement->conditionsSatisfiedBy($context));
     }
 
     /**
@@ -440,13 +440,13 @@ final class StatementTest extends TestCase
 
         $interpolator = new ContextInterpolator;
 
-        self::assertTrue($statement->evaluateConditions(
+        self::assertTrue($statement->conditionsSatisfiedBy(
             ['owner_id' => '42'],
             $interpolator,
             $principal,
         ));
 
-        self::assertFalse($statement->evaluateConditions(
+        self::assertFalse($statement->conditionsSatisfiedBy(
             ['owner_id' => '99'],
             $interpolator,
             $principal,
@@ -516,11 +516,11 @@ final class StatementTest extends TestCase
     }
 
     // ------------------------------------------------------------------
-    // Mutation-kill: evaluateConditions foreach body
+    // Mutation-kill: conditionsSatisfiedBy foreach body
     // ------------------------------------------------------------------
 
     /**
-     * When a condition entry fails, evaluateConditions returns false. If the
+     * When a condition entry fails, conditionsSatisfiedBy returns false. If the
      * foreach were skipped (Foreach_ mutant on line 138), it would always
      * return true.
      *
@@ -534,11 +534,11 @@ final class StatementTest extends TestCase
             'conditions' => ['missing_key' => ['eq' => 'value']],
         ]);
 
-        self::assertFalse($statement->evaluateConditions([]));
+        self::assertFalse($statement->conditionsSatisfiedBy([]));
     }
 
     /**
-     * The `!` before evaluateConditionEntry matters — flipping it (LogicalNot
+     * The `!` before matchesConditionEntry matters — flipping it (LogicalNot
      * mutant on line 139) would invert the whole result.
      *
      * @return void
@@ -551,12 +551,12 @@ final class StatementTest extends TestCase
             'conditions' => ['a' => ['eq' => 1], 'b' => ['eq' => 2]],
         ]);
 
-        self::assertTrue($statement->evaluateConditions(['a' => 1, 'b' => 2]));
-        self::assertFalse($statement->evaluateConditions(['a' => 1, 'b' => 99]));
+        self::assertTrue($statement->conditionsSatisfiedBy(['a' => 1, 'b' => 2]));
+        self::assertFalse($statement->conditionsSatisfiedBy(['a' => 1, 'b' => 99]));
     }
 
     // ------------------------------------------------------------------
-    // Mutation-kill: evaluateConditionEntry boundary (line 166)
+    // Mutation-kill: matchesConditionEntry boundary (line 166)
     // ------------------------------------------------------------------
 
     /**
@@ -576,7 +576,7 @@ final class StatementTest extends TestCase
         );
 
         // The integer key '0' is not a string, so condition should fail
-        self::assertFalse($statement->evaluateConditions(['0' => 'val']));
+        self::assertFalse($statement->conditionsSatisfiedBy(['0' => 'val']));
     }
 
     /**
@@ -593,7 +593,7 @@ final class StatementTest extends TestCase
             conditions: ['key' => 'expected'],
         );
 
-        self::assertTrue($statement->evaluateConditions(['key' => 'expected']));
+        self::assertTrue($statement->conditionsSatisfiedBy(['key' => 'expected']));
     }
 
     /**
@@ -610,7 +610,7 @@ final class StatementTest extends TestCase
             conditions: ['missing' => 'expected'],
         );
 
-        self::assertFalse($statement->evaluateConditions(['other' => 'expected']));
+        self::assertFalse($statement->conditionsSatisfiedBy(['other' => 'expected']));
     }
 
     // ------------------------------------------------------------------
@@ -664,7 +664,7 @@ final class StatementTest extends TestCase
     }
 
     // ------------------------------------------------------------------
-    // Mutation-kill: evaluateCondition (lines 388-398)
+    // Mutation-kill: matchesCondition (lines 388-398)
     // ------------------------------------------------------------------
 
     /**
@@ -681,8 +681,8 @@ final class StatementTest extends TestCase
             'conditions' => ['key' => 'value'],
         ]);
 
-        self::assertTrue($statement->evaluateConditions(['key' => 'value']));
-        self::assertFalse($statement->evaluateConditions(['key' => 'other']));
+        self::assertTrue($statement->conditionsSatisfiedBy(['key' => 'value']));
+        self::assertFalse($statement->conditionsSatisfiedBy(['key' => 'other']));
     }
 
     /**
@@ -699,7 +699,7 @@ final class StatementTest extends TestCase
             conditions: ['key' => [0 => 'operand']],
         );
 
-        self::assertFalse($statement->evaluateConditions(['key' => 'operand']));
+        self::assertFalse($statement->conditionsSatisfiedBy(['key' => 'operand']));
     }
 
     /**
@@ -716,13 +716,13 @@ final class StatementTest extends TestCase
             'conditions' => ['age' => ['gte' => 18, 'lte' => 65]],
         ]);
 
-        self::assertTrue($statement->evaluateConditions(['age' => 30]));
-        self::assertFalse($statement->evaluateConditions(['age' => 10]));
-        self::assertFalse($statement->evaluateConditions(['age' => 70]));
+        self::assertTrue($statement->conditionsSatisfiedBy(['age' => 30]));
+        self::assertFalse($statement->conditionsSatisfiedBy(['age' => 10]));
+        self::assertFalse($statement->conditionsSatisfiedBy(['age' => 70]));
     }
 
     // ------------------------------------------------------------------
-    // Mutation-kill: evaluateOperator match arms (lines 411-430)
+    // Mutation-kill: matchesOperator match arms (lines 411-430)
     // ------------------------------------------------------------------
 
     /**
@@ -743,7 +743,7 @@ final class StatementTest extends TestCase
 
             self::assertSame(
                 $case['expect'],
-                $statement->evaluateConditions(['k' => $case['ctx']]),
+                $statement->conditionsSatisfiedBy(['k' => $case['ctx']]),
                 "Case {$i} failed",
             );
         }
@@ -764,9 +764,9 @@ final class StatementTest extends TestCase
         ]);
 
         // Actual value is in the list
-        self::assertTrue($statement->evaluateConditions(['role' => 'admin']));
+        self::assertTrue($statement->conditionsSatisfiedBy(['role' => 'admin']));
         // Actual value is NOT in the list
-        self::assertFalse($statement->evaluateConditions(['role' => 'guest']));
+        self::assertFalse($statement->conditionsSatisfiedBy(['role' => 'guest']));
     }
 
     /**
@@ -783,9 +783,9 @@ final class StatementTest extends TestCase
         ]);
 
         // Value NOT in the list → true
-        self::assertTrue($statement->evaluateConditions(['role' => 'guest']));
+        self::assertTrue($statement->conditionsSatisfiedBy(['role' => 'guest']));
         // Value IN the list → false
-        self::assertFalse($statement->evaluateConditions(['role' => 'admin']));
+        self::assertFalse($statement->conditionsSatisfiedBy(['role' => 'admin']));
     }
 
     /**
@@ -803,8 +803,8 @@ final class StatementTest extends TestCase
             'conditions' => ['ip' => ['cidr' => '10.0.0.0/8']],
         ]);
 
-        self::assertFalse($stmt->evaluateConditions(['ip' => 123]));
-        self::assertTrue($stmt->evaluateConditions(['ip' => '10.0.0.1']));
+        self::assertFalse($stmt->conditionsSatisfiedBy(['ip' => 123]));
+        self::assertTrue($stmt->conditionsSatisfiedBy(['ip' => '10.0.0.1']));
     }
 
     /**
@@ -822,9 +822,9 @@ final class StatementTest extends TestCase
             'conditions' => ['val' => ['starts_with' => 'pre']],
         ]);
 
-        self::assertTrue($stmt->evaluateConditions(['val' => 'prefix']));
-        self::assertFalse($stmt->evaluateConditions(['val' => 'suffix']));
-        self::assertFalse($stmt->evaluateConditions(['val' => 123]));
+        self::assertTrue($stmt->conditionsSatisfiedBy(['val' => 'prefix']));
+        self::assertFalse($stmt->conditionsSatisfiedBy(['val' => 'suffix']));
+        self::assertFalse($stmt->conditionsSatisfiedBy(['val' => 123]));
     }
 
     /**
@@ -841,9 +841,9 @@ final class StatementTest extends TestCase
             'conditions' => ['val' => ['ends_with' => 'fix']],
         ]);
 
-        self::assertTrue($stmt->evaluateConditions(['val' => 'suffix']));
-        self::assertFalse($stmt->evaluateConditions(['val' => 'hello']));
-        self::assertFalse($stmt->evaluateConditions(['val' => 123]));
+        self::assertTrue($stmt->conditionsSatisfiedBy(['val' => 'suffix']));
+        self::assertFalse($stmt->conditionsSatisfiedBy(['val' => 'hello']));
+        self::assertFalse($stmt->conditionsSatisfiedBy(['val' => 123]));
     }
 
     /**
@@ -860,9 +860,9 @@ final class StatementTest extends TestCase
             'conditions' => ['val' => ['string_like' => 'foo*']],
         ]);
 
-        self::assertTrue($stmt->evaluateConditions(['val' => 'foobar']));
-        self::assertFalse($stmt->evaluateConditions(['val' => 'bazbar']));
-        self::assertFalse($stmt->evaluateConditions(['val' => 42]));
+        self::assertTrue($stmt->conditionsSatisfiedBy(['val' => 'foobar']));
+        self::assertFalse($stmt->conditionsSatisfiedBy(['val' => 'bazbar']));
+        self::assertFalse($stmt->conditionsSatisfiedBy(['val' => 42]));
     }
 
     /**
@@ -880,10 +880,10 @@ final class StatementTest extends TestCase
             'conditions' => ['k' => ['null' => true]],
         ]);
 
-        self::assertTrue($stmtNull->evaluateConditions(['k' => null]));
-        self::assertFalse($stmtNull->evaluateConditions(['k' => 0]));
-        self::assertFalse($stmtNull->evaluateConditions(['k' => '']));
-        self::assertFalse($stmtNull->evaluateConditions(['k' => false]));
+        self::assertTrue($stmtNull->conditionsSatisfiedBy(['k' => null]));
+        self::assertFalse($stmtNull->conditionsSatisfiedBy(['k' => 0]));
+        self::assertFalse($stmtNull->conditionsSatisfiedBy(['k' => '']));
+        self::assertFalse($stmtNull->conditionsSatisfiedBy(['k' => false]));
 
         $stmtNotNull = Statement::fromArray([
             'effect'     => 'allow',
@@ -891,9 +891,9 @@ final class StatementTest extends TestCase
             'conditions' => ['k' => ['not_null' => true]],
         ]);
 
-        self::assertTrue($stmtNotNull->evaluateConditions(['k' => 'x']));
-        self::assertTrue($stmtNotNull->evaluateConditions(['k' => 0]));
-        self::assertFalse($stmtNotNull->evaluateConditions(['k' => null]));
+        self::assertTrue($stmtNotNull->conditionsSatisfiedBy(['k' => 'x']));
+        self::assertTrue($stmtNotNull->conditionsSatisfiedBy(['k' => 0]));
+        self::assertFalse($stmtNotNull->conditionsSatisfiedBy(['k' => null]));
     }
 
     /**
@@ -917,12 +917,12 @@ final class StatementTest extends TestCase
         ]);
 
         // eq: true when same, false when different
-        self::assertTrue($stmtEq->evaluateConditions(['k' => 'a']));
-        self::assertFalse($stmtEq->evaluateConditions(['k' => 'b']));
+        self::assertTrue($stmtEq->conditionsSatisfiedBy(['k' => 'a']));
+        self::assertFalse($stmtEq->conditionsSatisfiedBy(['k' => 'b']));
 
         // neq: opposite
-        self::assertFalse($stmtNeq->evaluateConditions(['k' => 'a']));
-        self::assertTrue($stmtNeq->evaluateConditions(['k' => 'b']));
+        self::assertFalse($stmtNeq->conditionsSatisfiedBy(['k' => 'a']));
+        self::assertTrue($stmtNeq->conditionsSatisfiedBy(['k' => 'b']));
     }
 
     // ------------------------------------------------------------------
@@ -959,14 +959,14 @@ final class StatementTest extends TestCase
         $interpolator = new ContextInterpolator;
 
         // '${principal.id}' interpolates to '42'
-        self::assertTrue($statement->evaluateConditions(
+        self::assertTrue($statement->conditionsSatisfiedBy(
             ['owner' => '42'],
             $interpolator,
             $principal,
         ));
 
         // '99' does not match '42'
-        self::assertFalse($statement->evaluateConditions(
+        self::assertFalse($statement->conditionsSatisfiedBy(
             ['owner' => '99'],
             $interpolator,
             $principal,
@@ -990,12 +990,12 @@ final class StatementTest extends TestCase
         $interpolator = new ContextInterpolator;
 
         // Integer condition should match by identity
-        self::assertTrue($statement->evaluateConditions(
+        self::assertTrue($statement->conditionsSatisfiedBy(
             ['age' => 25],
             $interpolator,
         ));
 
-        self::assertFalse($statement->evaluateConditions(
+        self::assertFalse($statement->conditionsSatisfiedBy(
             ['age' => 30],
             $interpolator,
         ));

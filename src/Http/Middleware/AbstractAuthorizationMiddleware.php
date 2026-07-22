@@ -10,11 +10,10 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 
 /**
- * Shared template method for the shipped authorization middleware.
- * Concrete subclasses supply the required capability contract, the
- * per-needle check, and the rejection message; everything else — the
- * principal lookup, anonymous/misconfig guards, and argument
- * flattening — lives here.
+ * Shared template method for the shipped authorization middleware. Concrete
+ * subclasses supply the required capability contract, the per-needle check, and
+ * the rejection message; everything else — the principal lookup,
+ * anonymous/misconfig guards, and argument flattening — lives here.
  *
  * @template TContract of object
  *
@@ -59,18 +58,17 @@ abstract class AbstractAuthorizationMiddleware
     }
 
     /**
-     * Return the fully-qualified class name of the narrow
-     * capability contract this middleware probes
-     * (`SupportsRoles` / `SupportsPermissions`).
+     * Return the fully-qualified class name of the narrow capability contract
+     * this middleware probes (`SupportsRoles` / `SupportsPermissions`).
      *
      * @return class-string<TContract>
      */
     abstract protected function requiredContract(): string;
 
     /**
-     * Test whether the supplied principal satisfies a single needle
-     * (role name, permission string, …). The principal arrives narrowed
-     * to the class-bound `TContract` by `handle()`'s instanceof guard.
+     * Test whether the supplied principal satisfies a single needle (role name,
+     * permission string, …). The principal arrives narrowed to the class-bound
+     * `TContract` by `handle()`'s instanceof guard.
      *
      * @param  TContract  $principal
      * @param  string  $needle
@@ -79,19 +77,18 @@ abstract class AbstractAuthorizationMiddleware
     abstract protected function matches(object $principal, string $needle): bool;
 
     /**
-     * Human-readable message attached to the `AccessDenied`
-     * response when no needle matches.
+     * Human-readable message attached to the `AccessDenied` response when no
+     * needle matches.
      *
      * @return string
      */
     abstract protected function rejectionMessage(): string;
 
     /**
-     * Flatten pipe-separated arguments so a single middleware
-     * declaration like `role:admin|editor` behaves identically to
-     * the native Laravel `role:admin,editor` form. Shared across
-     * every concrete subclass — the separator rules do not vary
-     * by capability.
+     * Flatten pipe-separated arguments so a single middleware declaration like
+     * `role:admin|editor` behaves identically to the native Laravel
+     * `role:admin,editor` form. Shared across every concrete subclass — the
+     * separator rules do not vary by capability.
      *
      * @param  array<int, string>  $arguments
      * @return array<int, string>
@@ -104,9 +101,11 @@ abstract class AbstractAuthorizationMiddleware
             foreach (\explode('|', $argument) as $candidate) {
                 $candidate = \trim($candidate);
 
-                if ($candidate !== '') {
-                    $needles[] = $candidate;
+                if ($candidate === '') {
+                    continue;
                 }
+
+                $needles[] = $candidate;
             }
         }
 

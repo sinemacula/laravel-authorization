@@ -21,6 +21,7 @@ final class StubNullGuardProvider implements PermissionProvider
      *
      * @return array<int, string>
      */
+    #[\Override]
     public function permissions(): array
     {
         return ['billing:view'];
@@ -31,6 +32,7 @@ final class StubNullGuardProvider implements PermissionProvider
      *
      * @return string|null
      */
+    #[\Override]
     public function guard(): ?string
     {
         return null;

@@ -4,7 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Stubs;
 
-use SineMacula\Laravel\Authorization\Testing\AuthorizationAssertions;
+use SineMacula\Laravel\Authorization\Testing\Concerns\AuthorizationAssertions;
 
 /**
  * Standalone consumer of `AuthorizationAssertions` that exposes the trait's

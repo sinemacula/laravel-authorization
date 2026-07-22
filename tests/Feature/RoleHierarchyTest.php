@@ -10,6 +10,8 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
+use SineMacula\Laravel\Authorization\Concerns\HasRoleHierarchy;
+use SineMacula\Laravel\Authorization\Concerns\ManagesPermissions;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
@@ -19,8 +21,6 @@ use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
-use SineMacula\Laravel\Authorization\Traits\HasRoleHierarchy;
-use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -299,8 +299,8 @@ final class RoleHierarchyTest extends TestCase
         $rootId  = (string) $root->getKey(); // @phpstan-ignore cast.string
         $childId = (string) $child->getKey(); // @phpstan-ignore cast.string
 
-        // Bypass the saving hook to inject a cycle: point root's
-        // parent at the child so `ancestors()` on child loops.
+        // Bypass the saving hook to inject a cycle: point root's parent at the
+        // child so `ancestors()` on child loops.
         $updated = DB::table('roles')->where('id', $rootId)->update(['parent_id' => $childId]);
         self::assertSame(1, $updated, 'Cycle-injection update should hit one row.');
 
@@ -309,9 +309,8 @@ final class RoleHierarchyTest extends TestCase
             self::fail('RoleHierarchyCycleException was not thrown.');
         } catch (RoleHierarchyCycleException $exception) {
             self::assertSame('editor', $exception->getRoleName());
-            // The proposed-parent is whatever the walk re-encounters
-            // as it closes the loop — it is the role's name, not
-            // its UUID.
+            // The proposed-parent is whatever the walk re-encounters as it
+            // closes the loop — it is the role's name, not its UUID.
             self::assertSame('admin', $exception->getProposedParentName());
             self::assertStringNotContainsString($rootId, $exception->getMessage());
             self::assertStringNotContainsString($childId, $exception->getMessage());
@@ -332,8 +331,8 @@ final class RoleHierarchyTest extends TestCase
         $root  = $this->makeRole('admin');
         $child = $this->makeRole('editor', parentId: $root->getKey());
 
-        // Inject a cycle bypassing the saving hook: point root's
-        // parent at its own child.
+        // Inject a cycle bypassing the saving hook: point root's parent at its
+        // own child.
         DB::table('roles')->where('id', (string) $root->getKey()) // @phpstan-ignore cast.string
             ->update(['parent_id' => (string) $child->getKey()]); // @phpstan-ignore cast.string
 
@@ -353,8 +352,8 @@ final class RoleHierarchyTest extends TestCase
         $root  = $this->makeRole('admin');
         $child = $this->makeRole('editor', parentId: $root->getKey());
 
-        // Inject a cycle: point root's parent at its own child so
-        // that walking the child's ancestor chain loops.
+        // Inject a cycle: point root's parent at its own child so that walking
+        // the child's ancestor chain loops.
         DB::table('roles')->where('id', (string) $root->getKey()) // @phpstan-ignore cast.string
             ->update(['parent_id' => (string) $child->getKey()]); // @phpstan-ignore cast.string
 

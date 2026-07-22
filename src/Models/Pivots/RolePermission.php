@@ -14,16 +14,16 @@ use SineMacula\Laravel\Authorization\Models\Role;
 /**
  * Custom pivot model for the `role_permissions` table.
  *
- * Owning the pivot lets the guard-parity invariant live on the
- * relationship layer rather than on either primary entity — a
- * direct `$role->permissions()->attach(...)` or `sync(...)` goes
- * through this model's `saving` hook because the parent relation
- * is wired with `using(RolePermission::class)`.
+ * Owning the pivot lets the guard-parity invariant live on the relationship
+ * layer rather than on either primary entity — a direct
+ * `$role->permissions()->attach(...)` or `sync(...)` goes through this model's
+ * `saving` hook because the parent relation is wired with
+ * `using(RolePermission::class)`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-class RolePermission extends Pivot
+final class RolePermission extends Pivot
 {
     /** @var bool Pivot tables do not auto-increment (composite PK). */
     public $incrementing = false;
@@ -33,23 +33,23 @@ class RolePermission extends Pivot
      *
      * @return void
      */
+    #[\Override]
     protected static function booted(): void
     {
-        static::saving(static function (self $pivot): void {
+        self::saving(static function (self $pivot): void {
             $pivot->ensureGuardParity();
         });
     }
 
     /**
-     * Reject a save when the role's and permission's guards are concrete
-     * and different. Guard-agnostic (`null`) rows pass. Parent models are
-     * resolved from the in-memory `pivotParent` / loaded relations where
-     * possible; a missing parent raises `OrphanedRolePermissionException`.
+     * Reject a save when the role's and permission's guards are concrete and
+     * different. Guard-agnostic (`null`) rows pass. Parent models are resolved
+     * from the in-memory `pivotParent` / loaded relations where possible; a
+     * missing parent raises `OrphanedRolePermissionException`.
      *
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\OrphanedRolePermissionException
      */
     private function ensureGuardParity(): void
     {
@@ -81,8 +81,8 @@ class RolePermission extends Pivot
     }
 
     /**
-     * Resolve the role-side parent model, preferring an in-memory
-     * instance over a fresh database lookup.
+     * Resolve the role-side parent model, preferring an in-memory instance over
+     * a fresh database lookup.
      *
      * @param  string  $roleId
      * @return \SineMacula\Laravel\Authorization\Models\Role
@@ -120,8 +120,8 @@ class RolePermission extends Pivot
     }
 
     /**
-     * Resolve the permission-side parent model, preferring an
-     * in-memory instance over a fresh database lookup.
+     * Resolve the permission-side parent model, preferring an in-memory
+     * instance over a fresh database lookup.
      *
      * @param  string  $permissionId
      * @return \SineMacula\Laravel\Authorization\Models\Permission
@@ -136,18 +136,17 @@ class RolePermission extends Pivot
         $parent = $this->pivotParent;
 
         // @codeCoverageIgnoreStart
-        // Defensive symmetry with resolveRoleParent(): pivotParent
-        // is only set by BelongsToMany traversal, and only Role's
-        // permissions() relation uses this pivot via `using()`.
-        // Reaching this branch requires a consumer-side
-        // `Permission::roles()` relation that opts into
-        // `->using(RolePermission::class)`, kept for forward
-        // symmetry when that override ships.
+        // Defensive symmetry with resolveRoleParent(): pivotParent is only set
+        // by BelongsToMany traversal, and only Role's permissions() relation
+        // uses this pivot via `using()`. Reaching this branch requires a
+        // consumer-side `Permission::roles()` relation that opts into
+        // `->using(RolePermission::class)`, kept for forward symmetry when that
+        // override ships.
         if ($parent instanceof $permissionClass && $parent->id === $permissionId) {
             return $parent;
         }
-        // @codeCoverageIgnoreEnd
 
+        // @codeCoverageIgnoreEnd
         if ($this->relationLoaded('permission')) {
             /** @var \SineMacula\Laravel\Authorization\Models\Permission|null $loaded */
             $loaded = $this->getRelation('permission');
@@ -170,13 +169,11 @@ class RolePermission extends Pivot
     /**
      * Resolve the pivot's role-side column name.
      *
-     * Laravel populates the pivot's foreign / related keys via
-     * `setPivotKeys()` when the row is instantiated through a
-     * `BelongsToMany` relation — that path is preferred so a
-     * consumer who renames the FK on the relation definition
-     * still gets the invariant enforced. Direct instantiation
-     * (no parent relation) falls back to config, which defaults
-     * to `role_id`.
+     * Laravel populates the pivot's foreign / related keys via `setPivotKeys()`
+     * when the row is instantiated through a `BelongsToMany` relation — that
+     * path is preferred so a consumer who renames the FK on the relation
+     * definition still gets the invariant enforced. Direct instantiation (no
+     * parent relation) falls back to config, which defaults to `role_id`.
      *
      * @return string
      */
@@ -184,10 +181,10 @@ class RolePermission extends Pivot
     {
         $key = $this->getForeignKey();
 
-        // The pivot's `$foreignKey` property is untyped on the
-        // upstream AsPivot trait and defaults to null when a pivot
-        // is instantiated outside a relation — PHPStan trusts the
-        // docblocked string return; runtime does not. Guard it.
+        // The pivot's `$foreignKey` property is untyped on the upstream AsPivot
+        // trait and defaults to null when a pivot is instantiated outside a
+        // relation — PHPStan trusts the docblocked string return; runtime does
+        // not. Guard it.
         // @phpstan-ignore function.alreadyNarrowedType
         if (\is_string($key) && $key !== '') {
             return $key;
@@ -203,10 +200,9 @@ class RolePermission extends Pivot
     /**
      * Resolve the pivot's permission-side column name.
      *
-     * Prefers the relation-supplied `relatedPivotKey` so a
-     * renamed FK on the relation definition still enforces the
-     * invariant. Falls back to config (default `permission_id`)
-     * on direct instantiation paths.
+     * Prefers the relation-supplied `relatedPivotKey` so a renamed FK on the
+     * relation definition still enforces the invariant. Falls back to config
+     * (default `permission_id`) on direct instantiation paths.
      *
      * @return string
      */
@@ -214,8 +210,8 @@ class RolePermission extends Pivot
     {
         $key = $this->getRelatedKey();
 
-        // See `resolveRoleColumn()` — same upstream-trait null
-        // hazard on direct instantiation paths.
+        // See `resolveRoleColumn()` — same upstream-trait null hazard on direct
+        // instantiation paths.
         // @phpstan-ignore function.alreadyNarrowedType
         if (\is_string($key) && $key !== '') {
             return $key;

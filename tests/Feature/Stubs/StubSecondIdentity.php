@@ -5,8 +5,8 @@ declare(strict_types = 1);
 namespace Tests\Feature\Stubs;
 
 use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Concerns\HasAuthorization;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
-use SineMacula\Laravel\Authorization\Traits\HasAuthorization;
 
 /**
  * Second stub model used to exercise polymorphic pivots with two distinct
@@ -19,7 +19,7 @@ use SineMacula\Laravel\Authorization\Traits\HasAuthorization;
  *
  * @SuppressWarnings("php:S1192")
  */
-class StubSecondIdentity extends Model implements AuthorizableIdentity
+final class StubSecondIdentity extends Model implements AuthorizableIdentity
 {
     use HasAuthorization;
 

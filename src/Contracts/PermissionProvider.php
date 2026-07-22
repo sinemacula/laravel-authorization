@@ -7,11 +7,11 @@ namespace SineMacula\Laravel\Authorization\Contracts;
 /**
  * Contract for modular permission registration.
  *
- * Packages and modules that ship their own permission sets implement
- * this contract and register their class in the
- * `authorization.permission_providers` config array. The service
- * provider walks each provider at boot, creating `Permission` rows
- * (via `firstOrCreate`) for every string the provider declares.
+ * Packages and modules that ship their own permission sets implement this
+ * contract and register their class in the `authorization.permission_providers`
+ * config array. The service provider walks each provider at boot, creating
+ * `Permission` rows (via `firstOrCreate`) for every string the provider
+ * declares.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

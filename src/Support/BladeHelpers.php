@@ -11,12 +11,11 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 /**
  * Runtime helpers that the shipped Blade directives compile into.
  *
- * The directives register thin callbacks that delegate here; every
- * check resolves the current principal through the wired
- * `PrincipalResolver` so the view layer stays consistent with
- * Gate / facade evaluation in the same request. Anonymous
- * principals — or principals that do not implement the matching
- * narrow contract — evaluate as `false`, keeping the view layer
+ * The directives register thin callbacks that delegate here; every check
+ * resolves the current principal through the wired `PrincipalResolver` so the
+ * view layer stays consistent with Gate / facade evaluation in the same
+ * request. Anonymous principals — or principals that do not implement the
+ * matching narrow contract — evaluate as `false`, keeping the view layer
  * fail-closed by default.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -25,13 +24,13 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 final class BladeHelpers
 {
     /**
-     * Return the currently resolved principal, or null when the
-     * manager cannot be constructed (tests that run without the
-     * service provider booted) or the resolver reports anonymous.
+     * Return the currently resolved principal, or null when the manager cannot
+     * be constructed (tests that run without the service provider booted) or
+     * the resolver reports anonymous.
      *
-     * Delegates to `AuthorizationManager::currentPrincipal()` so the
-     * Blade surface resolves the same principal as the facade, Gate,
-     * and middleware paths.
+     * Delegates to `AuthorizationManager::currentPrincipal()` so the Blade
+     * surface resolves the same principal as the facade, Gate, and middleware
+     * paths.
      *
      * @return object|null
      */
@@ -41,10 +40,9 @@ final class BladeHelpers
     }
 
     /**
-     * Whether the current principal holds at least one of the
-     * supplied roles. Accepts either a single role name or an
-     * array — the Blade directive passes the user-supplied
-     * expression straight through.
+     * Whether the current principal holds at least one of the supplied roles.
+     * Accepts either a single role name or an array — the Blade directive
+     * passes the user-supplied expression straight through.
      *
      * @param  array<int, string>|string  $roles
      * @return bool
@@ -92,8 +90,8 @@ final class BladeHelpers
     }
 
     /**
-     * Whether the current principal holds at least one of the
-     * supplied permissions.
+     * Whether the current principal holds at least one of the supplied
+     * permissions.
      *
      * @param  array<int, string>|string  $permissions
      * @return bool
@@ -141,9 +139,9 @@ final class BladeHelpers
     }
 
     /**
-     * Normalise a string-or-array argument into a flat list of
-     * non-empty strings. Empty inputs are dropped so an accidental
-     * `@role('')` never admits everyone.
+     * Normalise a string-or-array argument into a flat list of non-empty
+     * strings. Empty inputs are dropped so an accidental `@role('')` never
+     * admits everyone.
      *
      * @param  array<int, string>|string  $value
      * @return array<int, string>
@@ -157,9 +155,11 @@ final class BladeHelpers
         foreach ($items as $item) {
             $trimmed = \trim($item);
 
-            if ($trimmed !== '') {
-                $flattened[] = $trimmed;
+            if ($trimmed === '') {
+                continue;
             }
+
+            $flattened[] = $trimmed;
         }
 
         return $flattened;

@@ -44,7 +44,7 @@ use Tests\TestCase;
 #[CoversClass(InvalidTenantColumnsException::class)]
 #[CoversClass(ConfigValidator::class)]
 #[CoversClass(InvalidAuthorizationConfigException::class)]
-class TenantScopingTest extends TestCase
+final class TenantScopingTest extends TestCase
 {
     /**
      * When no tenant resolver is bound every role remains visible.
@@ -64,7 +64,7 @@ class TenantScopingTest extends TestCase
             'tenant_id' => (string) $tenantA->getKey(),
         ]);
 
-        static::assertCount(2, Role::all());
+        self::assertCount(2, Role::all());
     }
 
     /**
@@ -85,7 +85,7 @@ class TenantScopingTest extends TestCase
             'tenant_id' => (string) $tenantA->getKey(),
         ]);
 
-        static::assertCount(2, Permission::all());
+        self::assertCount(2, Permission::all());
     }
 
     /**
@@ -118,10 +118,10 @@ class TenantScopingTest extends TestCase
 
         $roles = Role::all();
 
-        static::assertCount(2, $roles);
-        static::assertTrue($roles->pluck('name')->contains('global-role'));
-        static::assertTrue($roles->pluck('name')->contains('role-a'));
-        static::assertFalse($roles->pluck('name')->contains('role-b'));
+        self::assertCount(2, $roles);
+        self::assertTrue($roles->pluck('name')->contains('global-role'));
+        self::assertTrue($roles->pluck('name')->contains('role-a'));
+        self::assertFalse($roles->pluck('name')->contains('role-b'));
     }
 
     /**
@@ -144,7 +144,7 @@ class TenantScopingTest extends TestCase
 
         $this->bindTenantResolver($tenantA);
 
-        static::assertCount(0, Role::all());
+        self::assertCount(0, Role::all());
     }
 
     /**
@@ -162,8 +162,8 @@ class TenantScopingTest extends TestCase
 
         $roles = Role::all();
 
-        static::assertCount(1, $roles);
-        static::assertSame('global-role', $roles->first()->name); // @phpstan-ignore property.nonObject
+        self::assertCount(1, $roles);
+        self::assertSame('global-role', $roles->first()->name); // @phpstan-ignore property.nonObject
     }
 
     /**
@@ -196,10 +196,10 @@ class TenantScopingTest extends TestCase
 
         $perms = Permission::all();
 
-        static::assertCount(2, $perms);
-        static::assertTrue($perms->pluck('name')->contains('global-perm'));
-        static::assertTrue($perms->pluck('name')->contains('perm-a'));
-        static::assertFalse($perms->pluck('name')->contains('perm-b'));
+        self::assertCount(2, $perms);
+        self::assertTrue($perms->pluck('name')->contains('global-perm'));
+        self::assertTrue($perms->pluck('name')->contains('perm-a'));
+        self::assertFalse($perms->pluck('name')->contains('perm-b'));
     }
 
     /**
@@ -211,8 +211,8 @@ class TenantScopingTest extends TestCase
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
-        // Create a global role and a tenant-owned role with the
-        // same name but different guard to avoid the unique constraint.
+        // Create a global role and a tenant-owned role with the same name but
+        // different guard to avoid the unique constraint.
         Role::create(['name' => 'editor', 'guard_name' => null]);
         Role::create([
             'name'        => 'editor',
@@ -226,8 +226,8 @@ class TenantScopingTest extends TestCase
 
         $resolved = Role::resolveByName('editor', 'web');
 
-        static::assertTrue($resolved->isTenantOwned());
-        static::assertSame((string) $tenantA->getKey(), $resolved->tenant_id); // @phpstan-ignore cast.string
+        self::assertTrue($resolved->isTenantOwned());
+        self::assertSame((string) $tenantA->getKey(), $resolved->tenant_id); // @phpstan-ignore cast.string
     }
 
     /**
@@ -252,8 +252,8 @@ class TenantScopingTest extends TestCase
 
         $resolved = Permission::resolveByName('posts:edit', 'web');
 
-        static::assertTrue($resolved->isTenantOwned());
-        static::assertSame((string) $tenantA->getKey(), $resolved->tenant_id); // @phpstan-ignore cast.string
+        self::assertTrue($resolved->isTenantOwned());
+        self::assertSame((string) $tenantA->getKey(), $resolved->tenant_id); // @phpstan-ignore cast.string
     }
 
     /**
@@ -272,14 +272,14 @@ class TenantScopingTest extends TestCase
             'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
-        static::assertSame($tenantA->getMorphClass(), $role->tenant_type);
-        static::assertSame((string) $tenantA->getKey(), $role->tenant_id); // @phpstan-ignore cast.string
+        self::assertSame($tenantA->getMorphClass(), $role->tenant_type);
+        self::assertSame((string) $tenantA->getKey(), $role->tenant_id); // @phpstan-ignore cast.string
 
         $fresh = Role::withoutGlobalScopes()->find($role->getKey());
 
-        static::assertNotNull($fresh);
-        static::assertSame($tenantA->getMorphClass(), $fresh->tenant_type); // @phpstan-ignore property.notFound
-        static::assertSame((string) $tenantA->getKey(), $fresh->tenant_id); // @phpstan-ignore cast.string, property.notFound
+        self::assertNotNull($fresh);
+        self::assertSame($tenantA->getMorphClass(), $fresh->tenant_type); // @phpstan-ignore property.notFound
+        self::assertSame((string) $tenantA->getKey(), $fresh->tenant_id); // @phpstan-ignore cast.string, property.notFound
     }
 
     /**
@@ -298,8 +298,8 @@ class TenantScopingTest extends TestCase
             'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
-        static::assertSame($tenantA->getMorphClass(), $permission->tenant_type);
-        static::assertSame((string) $tenantA->getKey(), $permission->tenant_id); // @phpstan-ignore cast.string
+        self::assertSame($tenantA->getMorphClass(), $permission->tenant_type);
+        self::assertSame((string) $tenantA->getKey(), $permission->tenant_id); // @phpstan-ignore cast.string
     }
 
     /**
@@ -311,8 +311,8 @@ class TenantScopingTest extends TestCase
     {
         $role = Role::create(['name' => 'global', 'guard_name' => 'web']);
 
-        static::assertTrue($role->isGlobal());
-        static::assertFalse($role->isTenantOwned());
+        self::assertTrue($role->isGlobal());
+        self::assertFalse($role->isTenantOwned());
     }
 
     /**
@@ -331,8 +331,8 @@ class TenantScopingTest extends TestCase
             'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
-        static::assertTrue($role->isTenantOwned());
-        static::assertFalse($role->isGlobal());
+        self::assertTrue($role->isTenantOwned());
+        self::assertFalse($role->isGlobal());
     }
 
     /**
@@ -344,8 +344,8 @@ class TenantScopingTest extends TestCase
     {
         $permission = Permission::create(['name' => 'global-perm', 'guard_name' => 'web']);
 
-        static::assertTrue($permission->isGlobal());
-        static::assertFalse($permission->isTenantOwned());
+        self::assertTrue($permission->isGlobal());
+        self::assertFalse($permission->isTenantOwned());
     }
 
     /**
@@ -364,8 +364,8 @@ class TenantScopingTest extends TestCase
             'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
         ]);
 
-        static::assertTrue($permission->isTenantOwned());
-        static::assertFalse($permission->isGlobal());
+        self::assertTrue($permission->isTenantOwned());
+        self::assertFalse($permission->isGlobal());
     }
 
     /**
@@ -396,8 +396,8 @@ class TenantScopingTest extends TestCase
 
         $roles = Role::forTenant($tenantA)->get();
 
-        static::assertCount(1, $roles);
-        static::assertSame('role-a', $roles->first()->name); // @phpstan-ignore property.nonObject
+        self::assertCount(1, $roles);
+        self::assertSame('role-a', $roles->first()->name); // @phpstan-ignore property.nonObject
     }
 
     /**
@@ -420,8 +420,8 @@ class TenantScopingTest extends TestCase
 
         $roles = Role::globalOnly()->get();
 
-        static::assertCount(1, $roles);
-        static::assertSame('global', $roles->first()->name); // @phpstan-ignore property.nonObject
+        self::assertCount(1, $roles);
+        self::assertSame('global', $roles->first()->name); // @phpstan-ignore property.nonObject
     }
 
     /**
@@ -452,8 +452,8 @@ class TenantScopingTest extends TestCase
 
         $perms = Permission::forTenant($tenantA)->get();
 
-        static::assertCount(1, $perms);
-        static::assertSame('perm-a', $perms->first()->name); // @phpstan-ignore property.nonObject
+        self::assertCount(1, $perms);
+        self::assertSame('perm-a', $perms->first()->name); // @phpstan-ignore property.nonObject
     }
 
     /**
@@ -476,8 +476,8 @@ class TenantScopingTest extends TestCase
 
         $perms = Permission::globalOnly()->get();
 
-        static::assertCount(1, $perms);
-        static::assertSame('global-perm', $perms->first()->name); // @phpstan-ignore property.nonObject
+        self::assertCount(1, $perms);
+        self::assertSame('global-perm', $perms->first()->name); // @phpstan-ignore property.nonObject
     }
 
     /**
@@ -510,8 +510,8 @@ class TenantScopingTest extends TestCase
 
         $this->bindTenantResolver($tenantA);
 
-        static::assertTrue($identity->hasRole('editor'));
-        static::assertTrue($identity->hasPermission('posts:edit'));
+        self::assertTrue($identity->hasRole('editor'));
+        self::assertTrue($identity->hasPermission('posts:edit'));
     }
 
     /**
@@ -532,8 +532,8 @@ class TenantScopingTest extends TestCase
 
         $resolved = $role->tenant;
 
-        static::assertNotNull($resolved);
-        static::assertSame('tenant-a', (string) $resolved->getKey()); // @phpstan-ignore cast.string
+        self::assertNotNull($resolved);
+        self::assertSame('tenant-a', (string) $resolved->getKey()); // @phpstan-ignore cast.string
     }
 
     /**
@@ -545,7 +545,7 @@ class TenantScopingTest extends TestCase
     {
         $role = Role::create(['name' => 'global', 'guard_name' => 'web']);
 
-        static::assertNull($role->tenant);
+        self::assertNull($role->tenant);
     }
 
     /**
@@ -566,8 +566,8 @@ class TenantScopingTest extends TestCase
 
         $resolved = $permission->tenant;
 
-        static::assertNotNull($resolved);
-        static::assertSame('tenant-a', (string) $resolved->getKey()); // @phpstan-ignore cast.string
+        self::assertNotNull($resolved);
+        self::assertSame('tenant-a', (string) $resolved->getKey()); // @phpstan-ignore cast.string
     }
 
     /**
@@ -579,13 +579,13 @@ class TenantScopingTest extends TestCase
     {
         $this->app['config']->set('authorization.tenant_resolver', 'NonExistent\Class'); // @phpstan-ignore offsetAccess.notFound, method.nonObject
 
-        $this->expectException(\SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException::class);
+        $this->expectException(InvalidAuthorizationConfigException::class);
         $this->expectExceptionMessageMatches('/tenant_resolver/');
 
         /** @var array<string, mixed> $config */
         $config = $this->app['config']->get('authorization', []); // @phpstan-ignore offsetAccess.notFound, method.nonObject
 
-        \SineMacula\Laravel\Authorization\Config\ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->app);
     }
 
     /**
@@ -600,9 +600,9 @@ class TenantScopingTest extends TestCase
         /** @var array<string, mixed> $config */
         $config = $this->app['config']->get('authorization', []); // @phpstan-ignore offsetAccess.notFound, method.nonObject
 
-        \SineMacula\Laravel\Authorization\Config\ConfigValidator::validate($config, $this->app);
+        ConfigValidator::validate($config, $this->app);
 
-        static::assertTrue(true);
+        self::assertTrue(true);
     }
 
     /**
@@ -650,7 +650,6 @@ class TenantScopingTest extends TestCase
 
                 /** The tenant returned by every resolution call. */
                 private readonly ?object $tenant,
-
             ) {}
 
             /**
@@ -671,14 +670,14 @@ class TenantScopingTest extends TestCase
         $app = $this->app;
         $app->instance(TenantResolver::class, $spy);
 
-        // Flush any memo the scope captured before the spy was
-        // bound — previous tests may have resolved the null
-        // tenant against the NullTenantResolver default.
+        // Flush any memo the scope captured before the spy was bound — previous
+        // tests may have resolved the null tenant against the
+        // NullTenantResolver default.
         $this->flushTenantScopeMemos();
 
-        // Issue multiple queries against both scoped models — each
-        // one invokes `TenantScope::apply`. Without memoisation the
-        // spy would record one call per query.
+        // Issue multiple queries against both scoped models — each one invokes
+        // `TenantScope::apply`. Without memoisation the spy would record one
+        // call per query.
         Role::all();
         Role::all();
         Role::query()->where('name', 'role-a')->get();
@@ -688,8 +687,8 @@ class TenantScopingTest extends TestCase
         // One call per scope instance (Role + Permission each hold
         // their own global scope registration). That is O(models),
         // not O(queries) — the regression guard.
-        static::assertLessThanOrEqual(2, $spy->calls);
-        static::assertGreaterThan(0, $spy->calls);
+        self::assertLessThanOrEqual(2, $spy->calls);
+        self::assertGreaterThan(0, $spy->calls);
     }
 
     /**
@@ -724,6 +723,7 @@ class TenantScopingTest extends TestCase
             /**
              * @return string
              */
+            #[\Override]
             public function getKey(): string
             {
                 return 'custom-tenant-42';
@@ -732,6 +732,7 @@ class TenantScopingTest extends TestCase
             /**
              * @return string
              */
+            #[\Override]
             public function getMorphClass(): string
             {
                 return 'App\Tenancy\CustomTenant';
@@ -751,9 +752,9 @@ class TenantScopingTest extends TestCase
 
         $roles = Role::all();
 
-        static::assertCount(2, $roles);
-        static::assertTrue($roles->pluck('name')->contains('custom-role'));
-        static::assertTrue($roles->pluck('name')->contains('global-role'));
+        self::assertCount(2, $roles);
+        self::assertTrue($roles->pluck('name')->contains('custom-role'));
+        self::assertTrue($roles->pluck('name')->contains('global-role'));
     }
 
     /**
@@ -837,7 +838,6 @@ class TenantScopingTest extends TestCase
 
                     /** The tenant returned by every resolution call. */
                     private readonly ?object $tenant,
-
                 ) {}
 
                 /**

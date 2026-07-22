@@ -7,10 +7,9 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
 /**
  * Immutable policy value object.
  *
- * Represents a named collection of statements that travel together
- * through the evaluator. Policy documents are versioned so future
- * schema changes can be detected without a database migration; v1
- * documents default to `version = 1`.
+ * Represents a named collection of statements that travel together through the
+ * evaluator. Policy documents are versioned so future schema changes can be
+ * detected without a database migration; v1 documents default to `version = 1`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,7 +36,6 @@ final readonly class Policy
 
         /** Document schema version; defaults to the current constant. */
         public int $version = self::CURRENT_VERSION,
-
     ) {}
 
     /**
@@ -58,15 +56,7 @@ final readonly class Policy
             throw new \InvalidArgumentException('Policy document requires a list of statements.');
         }
 
-        $version = self::CURRENT_VERSION;
-
-        if (isset($data['version'])) {
-            if (!\is_int($data['version']) || $data['version'] < 1) {
-                throw new \InvalidArgumentException('Policy document version must be a positive integer.');
-            }
-
-            $version = $data['version'];
-        }
+        $version = self::versionFrom($data);
 
         $statements = \array_values(\array_map(static function (mixed $statement): Statement {
             if (!\is_array($statement)) {
@@ -98,5 +88,27 @@ final readonly class Policy
                 $this->statements,
             ),
         ];
+    }
+
+    /**
+     * Extract and validate the document version, defaulting to the current
+     * version when absent.
+     *
+     * @param  array<string, mixed>  $data
+     * @return int
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function versionFrom(array $data): int
+    {
+        if (!isset($data['version'])) {
+            return self::CURRENT_VERSION;
+        }
+
+        if (!\is_int($data['version']) || $data['version'] < 1) {
+            throw new \InvalidArgumentException('Policy document version must be a positive integer.');
+        }
+
+        return $data['version'];
     }
 }

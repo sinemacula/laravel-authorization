@@ -22,6 +22,11 @@ namespace Laravel\Octane\Events;
 
 if (!\class_exists(RequestTerminated::class, false)) {
     /**
+     * Stand-in for the Octane request-terminated event when Octane is absent.
+     *
+     * @author      Ben Carey <bdmc@sinemacula.co.uk>
+     * @copyright   2026 Sine Macula Limited
+     *
      * @internal
      */
     final class RequestTerminated {}

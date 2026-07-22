@@ -53,10 +53,9 @@ final class ContextInterpolatorBudgetTest extends TestCase
             public string $name = 'alice';
         };
 
-        // Run 1,000 iterations — amortises microsecond-level jitter
-        // across a measurable window and gives the budget comfortable
-        // headroom vs. observed ~52μs per call on the reference
-        // machine (≈52ms total).
+        // Run 1,000 iterations — amortises microsecond-level jitter across a
+        // measurable window and gives the budget comfortable headroom vs.
+        // observed ~52μs per call on the reference machine (≈52ms total).
         $start = \microtime(true);
 
         for ($i = 0; $i < 1000; $i++) {

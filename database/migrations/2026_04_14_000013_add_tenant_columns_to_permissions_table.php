@@ -3,11 +3,10 @@
 /**
  * Add nullable polymorphic tenant columns to the `permissions` table.
  *
- * Introduces `tenant_type` and `tenant_id` to support row-level
- * multi-tenant permission ownership. When both columns are null the
- * permission is global (platform-level); a concrete value pair marks
- * the permission as tenant-owned, scoping it to a specific tenant
- * entity.
+ * Introduces `tenant_type` and `tenant_id` to support row-level multi-tenant
+ * permission ownership. When both columns are null the permission is global
+ * (platform-level); a concrete value pair marks the permission as tenant-owned,
+ * scoping it to a specific tenant entity.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

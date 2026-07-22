@@ -5,9 +5,14 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Facades\Gate;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
+use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
+use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
+use SineMacula\Laravel\Authorization\Concerns\HasRoles;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
@@ -25,9 +30,7 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
-use SineMacula\Laravel\Authorization\Traits\HasPermissions;
-use SineMacula\Laravel\Authorization\Traits\HasPolicies;
-use SineMacula\Laravel\Authorization\Traits\HasRoles;
+use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -275,9 +278,9 @@ final class AuthorizationManagerTest extends TestCase
     {
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make('config'); // @phpstan-ignore method.nonObject
-        $config->set('authorization.permission_enums', [\Tests\Feature\Stubs\PermissionEnum::class]);
+        $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
-        (new \SineMacula\Laravel\Authorization\AuthorizationServiceProvider($this->app))->boot();
+        (new AuthorizationServiceProvider($this->app))->boot();
 
         Permission::create(['id' => '70be15aa-1ce5-4c1f-87a5-1c8e91a02587', 'name' => 'posts:create', 'guard_name' => 'web']);
 
@@ -285,7 +288,7 @@ final class AuthorizationManagerTest extends TestCase
         $user->givePermission('posts:create');
 
         self::assertTrue(Authorization::for($user)->can('posts:create'));
-        self::assertTrue(\Illuminate\Support\Facades\Gate::forUser($user)->allows('posts:create'));
+        self::assertTrue(Gate::forUser($user)->allows('posts:create'));
     }
 
     /**

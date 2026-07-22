@@ -7,13 +7,12 @@ namespace SineMacula\Laravel\Authorization\Http\Middleware;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 
 /**
- * Route middleware that admits only identities holding one of the
- * supplied roles.
+ * Route middleware that admits only identities holding one of the supplied
+ * roles.
  *
- * Wired under the `role` alias by the service provider.
- * Arguments accept both Laravel-native comma separation
- * (`role:admin,editor`) and Spatie-style pipe separation
- * (`role:admin|editor`); both resolve to OR semantics. For AND
+ * Wired under the `role` alias by the service provider. Arguments accept both
+ * Laravel-native comma separation (`role:admin,editor`) and Spatie-style pipe
+ * separation (`role:admin|editor`); both resolve to OR semantics. For AND
  * across several roles, chain the middleware —
  * `->middleware(['role:admin', 'role:oncall'])`.
  *
@@ -22,11 +21,12 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-class RequireRole extends AbstractAuthorizationMiddleware
+final class RequireRole extends AbstractAuthorizationMiddleware
 {
     /**
      * @return class-string<\SineMacula\Laravel\Authorization\Contracts\SupportsRoles>
      */
+    #[\Override]
     protected function requiredContract(): string
     {
         return SupportsRoles::class;
@@ -37,6 +37,7 @@ class RequireRole extends AbstractAuthorizationMiddleware
      * @param  string  $needle
      * @return bool
      */
+    #[\Override]
     protected function matches(object $principal, string $needle): bool
     {
         return $principal->hasRole($needle);
@@ -45,6 +46,7 @@ class RequireRole extends AbstractAuthorizationMiddleware
     /**
      * @return string
      */
+    #[\Override]
     protected function rejectionMessage(): string
     {
         return 'Role required.';

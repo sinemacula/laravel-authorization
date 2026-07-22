@@ -5,13 +5,13 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
 /**
- * Thrown when a persisted policy document cannot be parsed into a
- * valid policy value object.
+ * Thrown when a persisted policy document cannot be parsed into a valid policy
+ * value object.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-class InvalidPolicyDocumentException extends \RuntimeException
+final class InvalidPolicyDocumentException extends \RuntimeException
 {
     /**
      * Create a new exception instance.
@@ -25,9 +25,11 @@ class InvalidPolicyDocumentException extends \RuntimeException
         /** Name of the policy whose document failed to parse. */
         private readonly string $policyName,
 
+        // Human-readable description of the parse failure.
         string $reason,
-        ?\Throwable $previous = null,
 
+        // Upstream failure that triggered this exception, when chained.
+        ?\Throwable $previous = null,
     ) {
         parent::__construct(
             "Invalid policy document '{$policyName}': {$reason}",

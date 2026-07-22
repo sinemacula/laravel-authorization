@@ -11,7 +11,6 @@ use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
-use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
@@ -97,7 +96,6 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
 
                 /** The policy returned for every principal. */
                 private readonly EvaluationPolicy $policy,
-
             ) {}
 
             /**
@@ -106,6 +104,7 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
              * @param  object  $principal
              * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
              */
+            #[\Override]
             public function policiesFor(object $principal): array
             {
                 return [$this->policy];
@@ -148,7 +147,6 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
 
                 /** The policy returned for every principal. */
                 private readonly EvaluationPolicy $policy,
-
             ) {}
 
             /**
@@ -157,6 +155,7 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
              * @param  object  $principal
              * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
              */
+            #[\Override]
             public function policiesFor(object $principal): array
             {
                 return [$this->policy];
@@ -295,7 +294,6 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
 
                 /** The user returned by every resolution call. */
                 private readonly object $user,
-
             ) {}
 
             /**

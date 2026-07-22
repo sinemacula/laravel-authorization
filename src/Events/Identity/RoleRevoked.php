@@ -4,13 +4,14 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events\Identity;
 
+use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
 use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
  * Dispatched when a role is revoked from an authorizable identity.
  *
- * Part of the SemVer-stable event API; breaking changes require a
- * major version bump.
+ * Part of the SemVer-stable event API; breaking changes require a major version
+ * bump.
  *
  * @api
  *
@@ -32,6 +33,5 @@ final readonly class RoleRevoked implements IdentityEvent
 
         /** Role that was revoked from the identity. */
         public Role $role,
-
     ) {}
 }

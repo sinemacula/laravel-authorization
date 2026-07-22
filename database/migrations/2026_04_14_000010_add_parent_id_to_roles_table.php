@@ -4,10 +4,10 @@
  * Add the `parent_id` column to the `roles` table.
  *
  * Introduces a self-referential foreign key that enables role hierarchy /
- * inheritance. A child role inherits all permissions from its ancestors
- * when `authorization.hierarchy.enabled` is true. Null `parent_id`
- * marks the role as a root (no parent). ON DELETE SET NULL promotes
- * children to root when a parent role is removed.
+ * inheritance. A child role inherits all permissions from its ancestors when
+ * `authorization.hierarchy.enabled` is true. Null `parent_id` marks the role as
+ * a root (no parent). ON DELETE SET NULL promotes children to root when a
+ * parent role is removed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,18 +36,19 @@ return new class extends Migration {
             $blueprint->index('parent_id', $table . '_parent_id_index');
         });
 
-        // Self-referential FK added in a separate statement so
-        // SQLite's table-rebuild logic (used for ALTER TABLE) does
-        // not trip over the column referencing itself during the
-        // same DDL batch that creates it.
-        if (DB::getDriverName() !== 'sqlite') {
-            Schema::table($table, static function (Blueprint $blueprint) use ($table): void {
-                $blueprint->foreign('parent_id')
-                    ->references('id')
-                    ->on($table)
-                    ->nullOnDelete();
-            });
+        // Self-referential FK added in a separate statement so SQLite's
+        // table-rebuild logic (used for ALTER TABLE) does not trip over the
+        // column referencing itself during the same DDL batch that creates it.
+        if (DB::getDriverName() === 'sqlite') {
+            return;
         }
+
+        Schema::table($table, static function (Blueprint $blueprint) use ($table): void {
+            $blueprint->foreign('parent_id')
+                ->references('id')
+                ->on($table)
+                ->nullOnDelete();
+        });
     }
 
     /**
