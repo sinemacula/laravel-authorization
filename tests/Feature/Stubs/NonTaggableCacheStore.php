@@ -125,13 +125,17 @@ final class NonTaggableCacheStore implements Store
     }
 
     /**
+     * The store contract only declares `touch()` from Laravel 13, so the
+     * override attribute is omitted to keep the stub loadable on Laravel 12.
+     *
      * @imperative
      *
      * @param  mixed  $key
      * @param  mixed  $ttl
      * @return bool
+     *
+     * @phpstan-ignore-next-line method.missingOverride
      */
-    #[\Override]
     public function touch(mixed $key, mixed $ttl): bool
     {
         return isset($this->storage[$key]); // @phpstan-ignore offsetAccess.invalidOffset
