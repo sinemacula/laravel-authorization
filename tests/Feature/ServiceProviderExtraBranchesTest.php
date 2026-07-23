@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Support\Facades\Gate;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
@@ -13,7 +14,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
-use Tests\Feature\Stubs\PermissionEnum;
+use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubBadPermissionProvider;
 use Tests\Feature\Stubs\StubPolicyStore;
 use Tests\TestCase;
@@ -21,14 +22,14 @@ use Tests\TestCase;
 /**
  * Coverage for the final trio of `AuthorizationServiceProvider` branches:
  *
- * - A concrete `policy_store` class triggers the singleton binding
- *   in `registerPolicyStore`.
- * - `authorization.gate.on_conflict` supplied as a native
- *   `GateConflictMode` enum instance (rather than the string
- *   sentinel) is passed through verbatim by `registerGates`.
- * - `registerPermissionProviders` silently skips non-string or
- *   empty entries yielded by a provider, and non-string provider
- *   class-string entries themselves.
+ * - A concrete `policy_store` class triggers the singleton binding in
+ *   `registerPolicyStore`.
+ * - `authorization.gate.on_conflict` supplied as a native `GateConflictMode`
+ *   enum instance (rather than the string sentinel) is passed through verbatim
+ *   by `registerGates`.
+ * - `registerPermissionProviders` silently skips non-string or empty entries
+ *   yielded by a provider, and non-string provider class-string entries
+ *   themselves.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,7 +42,10 @@ use Tests\TestCase;
 #[CoversClass(EventListenerRegistrar::class)]
 final class ServiceProviderExtraBranchesTest extends TestCase
 {
-    private const string VALID_PERM   = 'valid:perm';
+    /** @var string Well-formed permission name used by provider sync tests. */
+    private const string VALID_PERM = 'valid:perm';
+
+    /** @var string Permission name mirrored by the stub enum case. */
     private const string POSTS_CREATE = 'posts:create';
 
     /**
@@ -56,9 +60,9 @@ final class ServiceProviderExtraBranchesTest extends TestCase
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.policy_store', StubPolicyStore::class);
 
-        // Re-run the register phase so the binding is picked up; the
-        // parent test boot skipped the binding because the default
-        // config sets `policy_store` to null.
+        // Re-run the register phase so the binding is picked up; the parent
+        // test boot skipped the binding because the default config sets
+        // `policy_store` to null.
         (new AuthorizationServiceProvider($this->app))->register();
 
         self::assertTrue($this->app->bound(PolicyStore::class)); // @phpstan-ignore method.nonObject
@@ -79,16 +83,16 @@ final class ServiceProviderExtraBranchesTest extends TestCase
         $config->set('authorization.gate.on_conflict', GateConflictMode::OVERWRITE);
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
-        // Pre-bind an existing gate so overwrite mode is the path we
-        // observe behaviourally. If the provider coerced the enum to
-        // the default (THROW), this call would raise.
-        \Illuminate\Support\Facades\Gate::define(self::POSTS_CREATE, static fn (): bool => true);
+        // Pre-bind an existing gate so overwrite mode is the path we observe
+        // behaviourally. If the provider coerced the enum to the default
+        // (THROW), this call would raise.
+        Gate::define(self::POSTS_CREATE, static fn (): bool => true);
 
         (new AuthorizationServiceProvider($this->app))->boot();
 
-        // The overwrite path ran — the Gate now resolves via the
-        // authorization manager rather than the preseeded closure.
-        self::assertFalse(\Illuminate\Support\Facades\Gate::allows(self::POSTS_CREATE));
+        // The overwrite path ran — the Gate now resolves via the authorization
+        // manager rather than the preseeded closure.
+        self::assertFalse(Gate::allows(self::POSTS_CREATE));
     }
 
     /**
@@ -126,11 +130,11 @@ final class ServiceProviderExtraBranchesTest extends TestCase
         $config->set('authorization.permission_enums', [123, \stdClass::class, PermissionEnum::class]);
         $config->set('authorization.gate.on_conflict', 'overwrite');
 
-        (new \SineMacula\Laravel\Authorization\Registrars\GateRegistrar($this->app))->register();
+        (new GateRegistrar($this->app))->register();
 
-        // The valid PermissionEnum entries were wired; the garbage
-        // entries were silently skipped without raising.
-        self::assertTrue(\Illuminate\Support\Facades\Gate::has(self::POSTS_CREATE));
+        // The valid PermissionEnum entries were wired; the garbage entries were
+        // silently skipped without raising.
+        self::assertTrue(Gate::has(self::POSTS_CREATE));
     }
 
     /**

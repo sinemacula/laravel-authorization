@@ -17,7 +17,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
-use Tests\Feature\Stubs\PermissionEnum;
+use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -63,9 +63,9 @@ final class GateParityTest extends TestCase
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
-        // The default is `throw`; the provider's previous boot has
-        // already defined the Gate under a fresh app, so re-booting
-        // with `overwrite` avoids a spurious conflict in this test.
+        // The default is `throw`; the provider's previous boot has already
+        // defined the Gate under a fresh app, so re-booting with `overwrite`
+        // avoids a spurious conflict in this test.
         $config->set('authorization.gate.on_conflict', 'overwrite');
 
         (new AuthorizationServiceProvider($this->app))->boot();
@@ -82,11 +82,11 @@ final class GateParityTest extends TestCase
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         $role       = Role::create(['id' => (string) Str::uuid(), 'name' => 'writer', 'guard_name' => 'web']);
-        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => PermissionEnum::PostsCreate->value, 'guard_name' => 'web']);
+        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => PermissionEnum::POSTS_CREATE->value, 'guard_name' => 'web']);
         $role->permissions()->attach($permission->getKey());
         $user->assignRole($role);
 
-        self::assertGateParity($user, PermissionEnum::PostsCreate, expected: true);
+        self::assertGateParity($user, PermissionEnum::POSTS_CREATE, expected: true);
     }
 
     /**
@@ -99,7 +99,7 @@ final class GateParityTest extends TestCase
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         // User has no role, no permission, no policy.
-        self::assertGateParity($user, PermissionEnum::PostsDelete, expected: false);
+        self::assertGateParity($user, PermissionEnum::POSTS_DELETE, expected: false);
     }
 
     /**
@@ -113,7 +113,7 @@ final class GateParityTest extends TestCase
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         $role       = Role::create(['id' => (string) Str::uuid(), 'name' => 'contributor', 'guard_name' => 'web']);
-        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => PermissionEnum::PostsDelete->value, 'guard_name' => 'web']);
+        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => PermissionEnum::POSTS_DELETE->value, 'guard_name' => 'web']);
         $role->permissions()->attach($permission->getKey());
         $user->assignRole($role);
 
@@ -122,12 +122,12 @@ final class GateParityTest extends TestCase
             'name'     => 'block-delete',
             'document' => [
                 'statements' => [
-                    ['effect' => 'deny', 'actions' => [PermissionEnum::PostsDelete->value]],
+                    ['effect' => 'deny', 'actions' => [PermissionEnum::POSTS_DELETE->value]],
                 ],
             ],
         ]));
 
-        self::assertGateParity($user, PermissionEnum::PostsDelete, expected: false);
+        self::assertGateParity($user, PermissionEnum::POSTS_DELETE, expected: false);
     }
 
     /**
@@ -148,7 +148,7 @@ final class GateParityTest extends TestCase
                 'statements' => [
                     [
                         'effect'     => 'allow',
-                        'actions'    => [PermissionEnum::PostsCreate->value],
+                        'actions'    => [PermissionEnum::POSTS_CREATE->value],
                         'resources'  => [self::MATCHING_RESOURCE],
                         'conditions' => ['tenant' => ['eq' => 'org-1']],
                     ],
@@ -156,25 +156,25 @@ final class GateParityTest extends TestCase
             ],
         ]));
 
-        // Matching resource + context: both surfaces allow. Gate's
-        // tail spread forwards the resource and context map to the
-        // closure, which `translateGateArguments()` re-assembles
-        // into the manager's `(resource, context)` pair.
-        $gateAllow   = Gate::forUser($user)->allows(PermissionEnum::PostsCreate->value, [self::MATCHING_RESOURCE, ['tenant' => 'org-1']]);
-        $facadeAllow = Authorization::for($user)->can(PermissionEnum::PostsCreate->value, self::MATCHING_RESOURCE, ['tenant' => 'org-1']);
+        // Matching resource + context: both surfaces allow. Gate's tail spread
+        // forwards the resource and context map to the closure, which
+        // `translateGateArguments()` re-assembles into the manager's
+        // `(resource, context)` pair.
+        $gateAllow   = Gate::forUser($user)->allows(PermissionEnum::POSTS_CREATE->value, [self::MATCHING_RESOURCE, ['tenant' => 'org-1']]);
+        $facadeAllow = Authorization::for($user)->can(PermissionEnum::POSTS_CREATE->value, self::MATCHING_RESOURCE, ['tenant' => 'org-1']);
 
         self::assertTrue($facadeAllow, 'Facade should allow the tenant-scoped resource.');
         self::assertSame($facadeAllow, $gateAllow, 'Gate and facade must agree for the matching resource + context.');
 
         // Wrong resource: both surfaces deny.
-        $gateWrong   = Gate::forUser($user)->allows(PermissionEnum::PostsCreate->value, ['arn:post:99', ['tenant' => 'org-1']]);
-        $facadeWrong = Authorization::for($user)->can(PermissionEnum::PostsCreate->value, 'arn:post:99', ['tenant' => 'org-1']);
+        $gateWrong   = Gate::forUser($user)->allows(PermissionEnum::POSTS_CREATE->value, ['arn:post:99', ['tenant' => 'org-1']]);
+        $facadeWrong = Authorization::for($user)->can(PermissionEnum::POSTS_CREATE->value, 'arn:post:99', ['tenant' => 'org-1']);
         self::assertFalse($facadeWrong);
         self::assertSame($facadeWrong, $gateWrong);
 
         // Wrong tenant: both surfaces deny.
-        $gateTenant   = Gate::forUser($user)->allows(PermissionEnum::PostsCreate->value, [self::MATCHING_RESOURCE, ['tenant' => 'org-2']]);
-        $facadeTenant = Authorization::for($user)->can(PermissionEnum::PostsCreate->value, self::MATCHING_RESOURCE, ['tenant' => 'org-2']);
+        $gateTenant   = Gate::forUser($user)->allows(PermissionEnum::POSTS_CREATE->value, [self::MATCHING_RESOURCE, ['tenant' => 'org-2']]);
+        $facadeTenant = Authorization::for($user)->can(PermissionEnum::POSTS_CREATE->value, self::MATCHING_RESOURCE, ['tenant' => 'org-2']);
         self::assertFalse($facadeTenant);
         self::assertSame($facadeTenant, $gateTenant);
     }
@@ -184,7 +184,7 @@ final class GateParityTest extends TestCase
      * case.
      *
      * @param  \Tests\Feature\Stubs\StubIdentity  $user
-     * @param  \Tests\Feature\Stubs\PermissionEnum  $case
+     * @param  \Tests\Feature\Stubs\Enums\PermissionEnum  $case
      * @param  bool  $expected
      * @return void
      */

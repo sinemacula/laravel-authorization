@@ -7,10 +7,10 @@ namespace Tests\Feature;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
+use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPolicyProtectedException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
-use SineMacula\Laravel\Authorization\Traits\HasSystemProtection;
 use Tests\TestCase;
 
 /**

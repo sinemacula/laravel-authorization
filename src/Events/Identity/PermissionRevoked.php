@@ -4,14 +4,14 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events\Identity;
 
+use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
 use SineMacula\Laravel\Authorization\Models\Permission;
 
 /**
- * Dispatched when a direct permission is revoked from an authorizable
- * identity.
+ * Dispatched when a direct permission is revoked from an authorizable identity.
  *
- * Part of the SemVer-stable event API; breaking changes require a
- * major version bump.
+ * Part of the SemVer-stable event API; breaking changes require a major version
+ * bump.
  *
  * @api
  *
@@ -33,6 +33,5 @@ final readonly class PermissionRevoked implements IdentityEvent
 
         /** Permission that was revoked from the identity. */
         public Permission $permission,
-
     ) {}
 }

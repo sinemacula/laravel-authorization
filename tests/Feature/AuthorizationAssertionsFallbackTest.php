@@ -6,7 +6,7 @@ namespace Tests\Feature;
 
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
-use SineMacula\Laravel\Authorization\Testing\AuthorizationAssertions;
+use SineMacula\Laravel\Authorization\Testing\Concerns\AuthorizationAssertions;
 use Tests\Feature\Stubs\StandaloneAssertions;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
@@ -39,8 +39,8 @@ final class AuthorizationAssertionsFallbackTest extends TestCase
 
         $helper->swap($user);
 
-        // Container-level side-effect: the manager is rebuilt under
-        // the swapped principal.
+        // Container-level side-effect: the manager is rebuilt under the swapped
+        // principal.
         self::assertSame($user, $this->app->make(AuthorizationManager::class)->currentPrincipal()); // @phpstan-ignore method.nonObject
     }
 }

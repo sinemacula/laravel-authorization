@@ -4,7 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Unit\Exceptions\Stubs;
 
-use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
+use SineMacula\Laravel\Authorization\Concerns\ValidatesAuthorizationName;
 
 /**
  * Stub model that uses the base `ValidatesAuthorizationName` trait without

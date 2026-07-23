@@ -68,8 +68,8 @@ final class PublishingTagsTest extends TestCase
             'Expected the shipped config file to be registered under the authorization-config tag.',
         );
 
-        // Each source maps to an absolute target under the host
-        // application's config directory.
+        // Each source maps to an absolute target under the host application's
+        // config directory.
         foreach ($paths as $target) {
             self::assertIsString($target);
             self::assertStringEndsWith(
@@ -110,8 +110,7 @@ final class PublishingTagsTest extends TestCase
             'Expected the shipped migrations directory to be registered under the authorization-migrations tag.',
         );
 
-        // Every mapping targets a directory path ending in
-        // `migrations`.
+        // Every mapping targets a directory path ending in `migrations`.
         foreach ($paths as $target) {
             self::assertIsString($target);
             self::assertStringEndsWith('migrations', $target);

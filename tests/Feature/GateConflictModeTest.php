@@ -14,7 +14,7 @@ use SineMacula\Laravel\Authorization\Exceptions\GateConflictException;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
-use Tests\Feature\Stubs\PermissionEnum;
+use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\TestCase;
 
 /**
@@ -52,13 +52,13 @@ final class GateConflictModeTest extends TestCase
     public function testLogModePreservesExistingGateAndLogsWarning(): void
     {
         // Swap the global log manager with a Mockery spy so every
-        // `warning(...)` call the package routes through the `Log`
-        // facade is recorded without stubbing channel resolution.
+        // `warning(...)` call the package routes through the `Log` facade is
+        // recorded without stubbing channel resolution.
         $spy = \Mockery::spy(LoggerInterface::class);
         Log::swap($spy);
 
-        // Pre-register a sentinel Gate that always allows so the
-        // test can prove the package did NOT overwrite it.
+        // Pre-register a sentinel Gate that always allows so the test can prove
+        // the package did NOT overwrite it.
         Gate::define(self::CONFLICTING_PERMISSION, static fn (?object $user = null): bool => true);
 
         $this->configureGate('log');
@@ -106,9 +106,9 @@ final class GateConflictModeTest extends TestCase
      */
     public function testOverwriteModeReplacesExistingGate(): void
     {
-        // Sentinel closure that would return true if preserved. The
-        // package's closure routes through the null principal
-        // resolver, so the overwritten Gate must return false.
+        // Sentinel closure that would return true if preserved. The package's
+        // closure routes through the null principal resolver, so the
+        // overwritten Gate must return false.
         Gate::define(self::CONFLICTING_PERMISSION, static fn (): bool => true);
 
         $this->configureGate('overwrite');

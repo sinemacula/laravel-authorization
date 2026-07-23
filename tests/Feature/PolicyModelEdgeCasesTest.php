@@ -14,13 +14,13 @@ use Tests\TestCase;
 /**
  * Coverage for the `Policy` model's two edge-case branches:
  *
- * - `normaliseDocument()` rejects values that are neither an array
- *   nor a JSON-decodable non-empty string — an operator setting the
- *   raw attribute to an integer hits this.
- * - `toEvaluationPolicy()` wraps read-time failures in a typed
- *   exception when the persisted row was written through a raw
- *   insert that bypassed the mutator. Consumers invoking the
- *   method on a polluted row get a deterministic failure surface.
+ * - `normaliseDocument()` rejects values that are neither an array nor a
+ *   JSON-decodable non-empty string — an operator setting the raw attribute to
+ *   an integer hits this.
+ * - `toEvaluationPolicy()` wraps read-time failures in a typed exception when
+ *   the persisted row was written through a raw insert that bypassed the
+ *   mutator. Consumers invoking the method on a polluted row get a
+ *   deterministic failure surface.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -420,7 +420,8 @@ final class ContextInterpolatorTest extends TestCase
             ['a' => 'resolved'],
         );
 
-        // The `${context.a}` token resolves, the `\${literal}` unescapes to `${literal}`
+        // The context token resolves while the escaped token unescapes to a
+        // literal dollar-brace sequence untouched by interpolation.
         self::assertSame('resolved:${literal}', $interpolated);
     }
 
@@ -438,7 +439,7 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testResolveTokenSplitsNamespaceAndKeyCorrectly(): void
     {
-        // "context.tenant_id" should split to namespace="context", key="tenant_id"
+        // A dotted token should split into its namespace and key parts.
         $interpolated = $this->interpolator->interpolate(
             '${context.tenant_id}',
             null,
@@ -457,8 +458,8 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testTokenWithoutDotUsesFullTokenAsNamespace(): void
     {
-        // 'context' alone with no dot → namespace='context', key=''
-        // Empty key on context → null → empty string
+        // 'context' alone with no dot → namespace='context', key='' Empty key
+        // on context → null → empty string
         $interpolated = $this->interpolator->interpolate(
             '${context}',
             null,
@@ -468,8 +469,8 @@ final class ContextInterpolatorTest extends TestCase
 
         self::assertSame('', $interpolated);
 
-        // 'principal' alone with no dot → namespace='principal', key=''
-        // Empty key on principal → null → empty string
+        // 'principal' alone with no dot → namespace='principal', key='' Empty
+        // key on principal → null → empty string
         $interpolated = $this->interpolator->interpolate(
             '${principal}',
             new \stdClass,
@@ -516,7 +517,7 @@ final class ContextInterpolatorTest extends TestCase
         $interpolated = $this->interpolator->interpolate('${resource.id}', null, 'posts:42', []);
         self::assertSame('42', $interpolated);
 
-        // default (unknown) namespace
+        // An unknown namespace falls back to the empty default.
         $interpolated = $this->interpolator->interpolate('${unknown.key}', null, null, []);
         self::assertSame('', $interpolated);
     }
@@ -537,7 +538,8 @@ final class ContextInterpolatorTest extends TestCase
         $interpolated = $this->interpolator->interpolate('${principal.id}', null, null, []);
         self::assertSame('', $interpolated);
 
-        // Non-null principal but empty key → empty (bare `${principal}`)
+        // A non-null principal with an empty key resolves to empty, covering
+        // the bare principal token.
         $interpolated = $this->interpolator->interpolate('${principal}', new \stdClass, null, []);
         self::assertSame('', $interpolated);
 
@@ -676,7 +678,8 @@ final class ContextInterpolatorTest extends TestCase
         $interpolated = $this->interpolator->interpolate('${resource.id}', null, null, []);
         self::assertSame('', $interpolated);
 
-        // Non-null resource but empty key (bare `${resource}`)
+        // A non-null resource with an empty key resolves to empty, covering the
+        // bare resource token.
         $interpolated = $this->interpolator->interpolate('${resource}', null, 'posts:42', []);
         self::assertSame('', $interpolated);
     }

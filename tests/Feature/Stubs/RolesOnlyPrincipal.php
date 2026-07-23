@@ -27,6 +27,7 @@ final class RolesOnlyPrincipal implements SupportsRoles
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @return static
      */
+    #[\Override]
     public function assignRole(RoleModel|string $role): static
     {
         return $this;
@@ -38,6 +39,7 @@ final class RolesOnlyPrincipal implements SupportsRoles
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @return static
      */
+    #[\Override]
     public function revokeRole(RoleModel|string $role): static
     {
         return $this;
@@ -49,6 +51,7 @@ final class RolesOnlyPrincipal implements SupportsRoles
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Role|string>  $roles
      * @return static
      */
+    #[\Override]
     public function syncRoles(array $roles): static
     {
         return $this;
@@ -60,6 +63,7 @@ final class RolesOnlyPrincipal implements SupportsRoles
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @return bool
      */
+    #[\Override]
     public function hasRole(RoleModel|string $role): bool
     {
         return $role === 'editor';
@@ -70,6 +74,7 @@ final class RolesOnlyPrincipal implements SupportsRoles
      *
      * @return array<int, string>
      */
+    #[\Override]
     public function getRoles(): array
     {
         return ['editor'];

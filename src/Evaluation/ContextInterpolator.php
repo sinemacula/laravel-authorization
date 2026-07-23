@@ -16,17 +16,15 @@ use Illuminate\Support\Arr;
  *   otherwise falls back to property access. The pseudo-keys
  *   `principal.id` and `principal.type` resolve to the model key /
  *   class name respectively.
- * - `${context.*}` — the caller-supplied context array passed to
- *   `can()` / `evaluate()`. Supports dot-notation paths
- *   (e.g. `${context.request.ip}`).
- * - `${resource.*}` — derived from the resource string. `resource.id`
- *   returns the segment after the first `:`, and `resource.type`
- *   returns the segment before it. If no `:` is present, `resource.id`
- *   returns the full string and `resource.type` returns the full
- *   string.
+ * - `${context.*}` — the caller-supplied context array passed to `can()` /
+ *   `evaluate()`. Supports dot-notation paths (e.g. `${context.request.ip}`).
+ * - `${resource.*}` — derived from the resource string. `resource.id` returns
+ *   the segment after the first `:`, and `resource.type` returns the segment
+ *   before it. If no `:` is present, `resource.id` returns the full string and
+ *   `resource.type` returns the full string.
  *
- * Unknown keys resolve to the empty string and emit a debug-level log
- * line. The escape sequence `\${` passes through as a literal `${`.
+ * Unknown keys resolve to the empty string and emit a debug-level log line. The
+ * escape sequence `\${` passes through as a literal `${`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -160,9 +158,9 @@ final class ContextInterpolator
     /**
      * Resolve a key from the resource string representation.
      *
-     * `resource.id` returns the segment after the first `:`.
-     * `resource.type` returns the segment before the first `:`.
-     * If no `:` is present, both return the full string.
+     * `resource.id` returns the segment after the first `:`. `resource.type`
+     * returns the segment before the first `:`. If no `:` is present, both
+     * return the full string.
      *
      * @param  string|null  $resource
      * @param  string  $key
@@ -191,13 +189,15 @@ final class ContextInterpolator
      */
     private static function logUnresolved(string $token): void
     {
-        if (\function_exists('logger')) {
-            try {
-                // @phpstan-ignore-next-line function.notFound
-                logger()->debug("Unresolved interpolation token '\${$token}' — resolved to empty string.");
-            } catch (\Throwable) {
-                // Intentional: mirrors ConditionEvaluator::logUnknownOperator.
-            }
+        if (!\function_exists('logger')) {
+            return;
+        }
+
+        try {
+            // @phpstan-ignore-next-line function.notFound
+            logger()->debug("Unresolved interpolation token '\${$token}' — resolved to empty string.");
+        } catch (\Throwable) {
+            // Intentional: mirrors ConditionEvaluator::logUnknownOperator.
         }
     }
 }

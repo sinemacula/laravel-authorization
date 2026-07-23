@@ -5,13 +5,13 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Exceptions;
 
 /**
- * Thrown when a role assignment or revocation targets a role that
- * does not exist.
+ * Thrown when a role assignment or revocation targets a role that does not
+ * exist.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-class UnknownRoleException extends \RuntimeException
+final class UnknownRoleException extends \RuntimeException
 {
     /**
      * Create a new exception instance.
@@ -22,7 +22,6 @@ class UnknownRoleException extends \RuntimeException
 
         /** Role name that could not be resolved. */
         private readonly string $role,
-
     ) {
         parent::__construct("Unknown role '{$role}'.", 404);
     }

@@ -5,12 +5,12 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
 /**
- * Internal helper responsible for evaluating the condition operators
- * supported by the policy statement.
+ * Internal helper responsible for evaluating the condition operators supported
+ * by the policy statement.
  *
- * The helper keeps the statement class within its complexity budget by
- * lifting the CIDR, time and unknown-operator fallbacks into small,
- * single-purpose static methods. It is not part of the public API.
+ * The helper keeps the statement class within its complexity budget by lifting
+ * the CIDR, time and unknown-operator fallbacks into small, single-purpose
+ * static methods. It is not part of the public API.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -20,8 +20,8 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
 final class ConditionEvaluator
 {
     /**
-     * Determine whether the supplied IPv4 address falls within the
-     * supplied CIDR range.
+     * Determine whether the supplied IPv4 address falls within the supplied
+     * CIDR range.
      *
      * @param  string  $ip
      * @param  string  $cidr
@@ -56,7 +56,7 @@ final class ConditionEvaluator
      * @param  string  $comparator
      * @return bool
      */
-    public static function compareTimes(mixed $actual, mixed $operand, string $comparator): bool
+    public static function matchesTimeComparison(mixed $actual, mixed $operand, string $comparator): bool
     {
         $left  = self::toTimestamp($actual);
         $right = self::toTimestamp($operand);
@@ -99,15 +99,15 @@ final class ConditionEvaluator
     /**
      * Compare two values numerically using the supplied comparator.
      *
-     * Both sides must be numeric (pass `is_numeric`); if either side
-     * is non-numeric the condition fails gracefully (returns false).
+     * Both sides must be numeric (pass `is_numeric`); if either side is
+     * non-numeric the condition fails gracefully (returns false).
      *
      * @param  mixed  $actual
      * @param  mixed  $operand
      * @param  string  $comparator
      * @return bool
      */
-    public static function compareNumeric(mixed $actual, mixed $operand, string $comparator): bool
+    public static function matchesNumericComparison(mixed $actual, mixed $operand, string $comparator): bool
     {
         if (!\is_numeric($actual) || !\is_numeric($operand)) {
             return false;
@@ -128,9 +128,9 @@ final class ConditionEvaluator
     /**
      * Evaluate the `bool` operator by coercing both sides to boolean.
      *
-     * Truthy coercion: `true`, `'true'`, `'1'`, `1` resolve to true.
-     * Everything else resolves to false. Both sides are coerced before
-     * comparison so the operator is symmetric.
+     * Truthy coercion: `true`, `'true'`, `'1'`, `1` resolve to true. Everything
+     * else resolves to false. Both sides are coerced before comparison so the
+     * operator is symmetric.
      *
      * @param  mixed  $actual
      * @param  mixed  $operand
@@ -138,31 +138,31 @@ final class ConditionEvaluator
      */
     public static function matchesBool(mixed $actual, mixed $operand): bool
     {
-        return self::coerceBool($actual) === self::coerceBool($operand);
+        return self::isTruthy($actual) === self::isTruthy($operand);
     }
 
     /**
      * Log an unknown-operator warning and return false.
      *
-     * The logger call is wrapped in a try/catch by design: the
-     * condition evaluator sits on the authorization hot path and
-     * must not abort a `can()` check because an observability
-     * back-end (a Laravel log facade root, a logging driver, a
-     * third-party collector) is unavailable. The intentional
+     * The logger call is wrapped in a try/catch by design: the condition
+     * evaluator sits on the authorization hot path and must not abort a `can()`
+     * check because an observability back-end (a Laravel log facade root, a
+     * logging driver, a third-party collector) is unavailable. The intentional
      * swallow covers three operating modes:
      *
-     * - Pure-PHP contexts (benchmarks, standalone evaluator
-     *   use) where Laravel's `logger()` helper may not be bound.
-     * - Container-less test runs that construct the evaluator
-     *   directly without a facade root.
-     * - Production outages where the configured logging
-     *   driver fails — rare but real; no reason to cascade into
-     *   an authorization failure.
+     * - Pure-PHP contexts (benchmarks, standalone evaluator use) where
+     *   Laravel's `logger()` helper may not be bound.
+     * - Container-less test runs that construct the evaluator directly without
+     *   a facade root.
+     * - Production outages where the configured logging driver fails — rare but
+     *   real; no reason to cascade into an authorization failure.
      *
-     * Consumers who want unknown-operator events as hard signals
-     * should subscribe to the `DecisionEvaluated` event and
-     * inspect the trace — every skipped statement is recorded
-     * there with a `'conditions not satisfied'` reason.
+     * Consumers who want unknown-operator events as hard signals should
+     * subscribe to the `DecisionEvaluated` event and inspect the trace — every
+     * skipped statement is recorded there with a `'conditions not satisfied'`
+     * reason.
+     *
+     * @imperative
      *
      * @param  string  $operator
      * @return bool
@@ -199,8 +199,8 @@ final class ConditionEvaluator
     }
 
     /**
-     * Coerce a scalar value into a UNIX timestamp, returning null when
-     * the value cannot be parsed.
+     * Coerce a scalar value into a UNIX timestamp, returning null when the
+     * value cannot be parsed.
      *
      * @param  mixed  $value
      * @return int|null
@@ -231,7 +231,9 @@ final class ConditionEvaluator
         try {
             return \strtotime($value);
             // @codeCoverageIgnoreStart
-            // Defensive: `strtotime()` returns false on PHP 8+ rather than raising, retained for forward-compatibility with ext-date engine changes.
+            // Defensive: `strtotime()` returns false on PHP 8+ rather than
+            // raising, retained for forward-compatibility with ext-date engine
+            // changes.
         } catch (\Throwable) {
             return false;
         }
@@ -241,13 +243,12 @@ final class ConditionEvaluator
     /**
      * Coerce a mixed value to a boolean.
      *
-     * Truthy: `true`, `'true'`, `'1'`, `1`.
-     * Everything else: false.
+     * Truthy: `true`, `'true'`, `'1'`, `1`. Everything else: false.
      *
      * @param  mixed  $value
      * @return bool
      */
-    private static function coerceBool(mixed $value): bool
+    private static function isTruthy(mixed $value): bool
     {
         return $value === true || $value === 'true' || $value === '1' || $value === 1;
     }

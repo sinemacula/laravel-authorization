@@ -2,8 +2,9 @@
 
 declare(strict_types = 1);
 
-namespace SineMacula\Laravel\Authorization\Traits;
+namespace SineMacula\Laravel\Authorization\Concerns;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
@@ -22,9 +23,9 @@ use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePermissionPivot;
  * Provides the `givePermission`, `revokePermission`, `syncPermissions`,
  * `hasPermission`, and `getPermissions` helpers, plus Spatie aliases
  * (`givePermissionTo`, `revokePermissionTo`, `hasPermissionTo`,
- * `getPermissionNames`) for migrating consumers. The `hasPermission`
- * check consults both direct grants and role-inherited permissions,
- * so a consumer does not need to branch on assignment style.
+ * `getPermissionNames`) for migrating consumers. The `hasPermission` check
+ * consults both direct grants and role-inherited permissions, so a consumer
+ * does not need to branch on assignment style.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -40,10 +41,10 @@ trait HasPermissions // @phpstan-ignore trait.unused
     /**
      * Morph-to-many relation onto direct permissions.
      *
-     * Filters out pivot rows whose `expires_at` is in the past —
-     * temporal grants disappear from the relation automatically
-     * at expiry without requiring a sweeper run. The pivot's
-     * `expires_at` column is surfaced via `withPivot()`.
+     * Filters out pivot rows whose `expires_at` is in the past — temporal
+     * grants disappear from the relation automatically at expiry without
+     * requiring a sweeper run. The pivot's `expires_at` column is surfaced via
+     * `withPivot()`.
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
@@ -64,11 +65,10 @@ trait HasPermissions // @phpstan-ignore trait.unused
         /** @var string $pivot */
         $pivot = config('authorization.tables.authorizable_permissions', 'authorizable_permissions');
 
-        // The `where(...)` and inner `whereNull()/orWhere()` calls are
-        // resolved by PHPStan to static methods on Eloquent's Builder
-        // via Laravel's annotation soup — the underlying dispatch is
-        // instance-level. Same pattern, same justification, as
-        // `GuardScopedLookup`.
+        // The `where(...)` and inner `whereNull()/orWhere()` calls are resolved
+        // by PHPStan to static methods on Eloquent's Builder via Laravel's
+        // annotation soup — the underlying dispatch is instance-level. Same
+        // pattern, same justification, as `GuardScopedLookup`.
         // @phpstan-ignore staticMethod.dynamicCall
         return $this->morphToMany(
             related: $model,
@@ -79,7 +79,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
         )
             ->using(AuthorizablePermissionPivot::class)
             ->withPivot('expires_at')
-            ->where(static function (\Illuminate\Database\Eloquent\Builder $query) use ($pivot): void {
+            ->where(static function (Builder $query) use ($pivot): void {
                 // @phpstan-ignore staticMethod.dynamicCall
                 $query->whereNull($pivot . '.expires_at')
                     ->orWhere($pivot . '.expires_at', '>', Carbon::now());
@@ -89,11 +89,10 @@ trait HasPermissions // @phpstan-ignore trait.unused
     /**
      * Grant the given permission directly to this identity.
      *
-     * An optional `$expiresAt` makes the grant temporal — the
-     * attachment is filtered out of `$user->permissions` the
-     * moment the clock passes the supplied instant, without
-     * requiring a sweeper run. Passing null (the default) creates
-     * a forever grant.
+     * An optional `$expiresAt` makes the grant temporal — the attachment is
+     * filtered out of `$user->permissions` the moment the clock passes the
+     * supplied instant, without requiring a sweeper run. Passing null (the
+     * default) creates a forever grant.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @param  \DateTimeInterface|null  $expiresAt
@@ -120,7 +119,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
 
         Event::dispatch(new IdentityPermissionGranted($this, $model));
 
-        if ($prior['exists'] && !self::authorizationGrantExpiriesEqual($prior['expires_at'], $expiresAt)) {
+        if ($prior['exists'] && !self::areAuthorizationGrantExpiriesEqual($prior['expires_at'], $expiresAt)) {
             Event::dispatch(new IdentityPermissionExpiryChanged(
                 $this,
                 $model,
@@ -158,13 +157,12 @@ trait HasPermissions // @phpstan-ignore trait.unused
     /**
      * Replace this identity's direct permissions with the supplied set.
      *
-     * Each net attachment fires `IdentityPermissionGranted` and
-     * each net detachment fires `IdentityPermissionRevoked`, so
-     * audit consumers receive the same per-row signal they would
-     * for `givePermission()` / `revokePermission()` calls and the
-     * cache invalidation listener wired to those events keeps
-     * the resolution cache coherent without a separate forget
-     * call in this method.
+     * Each net attachment fires `IdentityPermissionGranted` and each net
+     * detachment fires `IdentityPermissionRevoked`, so audit consumers receive
+     * the same per-row signal they would for `givePermission()` /
+     * `revokePermission()` calls and the cache invalidation listener wired to
+     * those events keeps the resolution cache coherent without a separate
+     * forget call in this method.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Permission|string>  $permissions
      * @return static
@@ -199,16 +197,15 @@ trait HasPermissions // @phpstan-ignore trait.unused
     }
 
     /**
-     * Determine whether the identity holds the supplied permission via
-     * a direct grant or any role-inherited grant.
+     * Determine whether the identity holds the supplied permission via a direct
+     * grant or any role-inherited grant.
      *
-     * A held permission name is treated as an `fnmatch` pattern
-     * against the asked name — so an identity holding `posts:*`
-     * satisfies `hasPermission('posts:create')`, and an identity
-     * holding `*:*` satisfies every check (the super-admin path).
-     * The reverse direction does not match: holding `posts:create`
-     * does not satisfy an asked `posts:*`. Backslashes are compared
-     * literally via `FNM_NOESCAPE`.
+     * A held permission name is treated as an `fnmatch` pattern against the
+     * asked name — so an identity holding `posts:*` satisfies
+     * `hasPermission('posts:create')`, and an identity holding `*:*` satisfies
+     * every check (the super-admin path). The reverse direction does not match:
+     * holding `posts:create` does not satisfy an asked `posts:*`. Backslashes
+     * are compared literally via `FNM_NOESCAPE`.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return bool
@@ -229,13 +226,12 @@ trait HasPermissions // @phpstan-ignore trait.unused
     /**
      * Return the union of direct and role-inherited permission names.
      *
-     * The persistent-tier TTL is bounded by the nearest upcoming
-     * `expires_at` across both the identity's direct permission pivot
-     * and its role pivot, so temporal grants on either side invalidate
-     * the entry at the moment they lapse. The role IDs are tagged into
-     * the entry so a `RolePermissionGranted` / `RolePermissionRevoked`
-     * event flushes every principal carrying the mutated role on
-     * tag-capable stores.
+     * The persistent-tier TTL is bounded by the nearest upcoming `expires_at`
+     * across both the identity's direct permission pivot and its role pivot, so
+     * temporal grants on either side invalidate the entry at the moment they
+     * lapse. The role IDs are tagged into the entry so a
+     * `RolePermissionGranted` / `RolePermissionRevoked` event flushes every
+     * principal carrying the mutated role on tag-capable stores.
      *
      * @return array<int, string>
      */
@@ -314,12 +310,11 @@ trait HasPermissions // @phpstan-ignore trait.unused
     /**
      * Resolve a permission identifier to a model instance.
      *
-     * Honours `$this->getAuthorizationGuard()` when the identity
-     * model declares it — a user authenticated under a non-default
-     * guard routes its lookups against its own guard's rows instead
-     * of the package default. Delegates the actual query to
-     * `Permission::resolveByName()` so both identity-side and
-     * role-side lookups share one implementation.
+     * Honours `$this->getAuthorizationGuard()` when the identity model declares
+     * it — a user authenticated under a non-default guard routes its lookups
+     * against its own guard's rows instead of the package default. Delegates
+     * the actual query to `Permission::resolveByName()` so both identity-side
+     * and role-side lookups share one implementation.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return \SineMacula\Laravel\Authorization\Models\Permission
@@ -339,10 +334,9 @@ trait HasPermissions // @phpstan-ignore trait.unused
     }
 
     /**
-     * Resolve a permission model by primary key, used by
-     * `syncPermissions()` when the sync delta surfaces an ID
-     * that was not part of the caller's input set (the
-     * detachment list).
+     * Resolve a permission model by primary key, used by `syncPermissions()`
+     * when the sync delta surfaces an ID that was not part of the caller's
+     * input set (the detachment list).
      *
      * @param  string  $id
      * @return \SineMacula\Laravel\Authorization\Models\Permission
@@ -365,8 +359,8 @@ trait HasPermissions // @phpstan-ignore trait.unused
     }
 
     /**
-     * Compute the deduplicated permission-name list from the
-     * direct-grant relation and every role-inherited permission.
+     * Compute the deduplicated permission-name list from the direct-grant
+     * relation and every role-inherited permission.
      *
      * @return array<int, string>
      */

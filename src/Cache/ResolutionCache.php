@@ -5,14 +5,14 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Cache;
 
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
+use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
-use SineMacula\Laravel\Authorization\Traits\HasContainerInstance;
 
 /**
- * Two-tier cache (in-memory memo plus optional persistent store) for
- * principal resolution lookups — roles, permissions, and hydrated
- * policies. Invalidation is event-driven via listener calls to
- * `forget()` / `forgetRoleTags()` / `flush()`.
+ * Two-tier cache (in-memory memo plus optional persistent store) for principal
+ * resolution lookups — roles, permissions, and hydrated policies. Invalidation
+ * is event-driven via listener calls to `forget()` / `forgetRoleTags()` /
+ * `flush()`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -44,23 +44,19 @@ final class ResolutionCache
 
         /** Namespace prefix for every key written by this cache. */
         private readonly string $prefix = 'authorization',
-
     ) {}
 
     /**
-     * Return the cached list of policies for the principal, or
-     * invoke the resolver and cache its output.
+     * Return the cached list of policies for the principal, or invoke the
+     * resolver and cache its output.
      *
      * @param  object  $principal
      * @param  \Closure(): array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $resolver
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext|null  $context
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
      */
-    public function rememberPolicies(
-        object $principal,
-        \Closure $resolver,
-        ?ResolutionCacheContext $context = null,
-    ): array {
+    public function rememberPolicies(object $principal, \Closure $resolver, ?ResolutionCacheContext $context = null): array
+    {
         $context ??= new ResolutionCacheContext;
         $key = $this->key('policies', $principal);
 
@@ -88,27 +84,24 @@ final class ResolutionCache
     }
 
     /**
-     * Return the cached permission-name list for the principal, or
-     * invoke the resolver and cache its output.
+     * Return the cached permission-name list for the principal, or invoke the
+     * resolver and cache its output.
      *
      * @param  object  $principal
      * @param  \Closure(): array<int, string>  $resolver
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext|null  $context
      * @return array<int, string>
      */
-    public function rememberPermissions(
-        object $principal,
-        \Closure $resolver,
-        ?ResolutionCacheContext $context = null,
-    ): array {
+    public function rememberPermissions(object $principal, \Closure $resolver, ?ResolutionCacheContext $context = null): array
+    {
         $context ??= new ResolutionCacheContext;
 
         return $this->rememberStringList('permissions', $principal, $resolver, $context->maxTtl, $context->roleIds);
     }
 
     /**
-     * Return the cached role-name list for the principal, or
-     * invoke the resolver and cache its output.
+     * Return the cached role-name list for the principal, or invoke the
+     * resolver and cache its output.
      *
      * @param  object  $principal
      * @param  \Closure(): array<int, string>  $resolver
@@ -123,11 +116,10 @@ final class ResolutionCache
     }
 
     /**
-     * Drop every cached entry for the supplied principal — memo
-     * and persistent store alike. Listeners call this on
-     * principal-scoped mutations (`IdentityRoleAssigned`,
-     * `IdentityPermissionGranted`, `IdentityPolicyAttached`, and
-     * their inverses).
+     * Drop every cached entry for the supplied principal — memo and persistent
+     * store alike. Listeners call this on principal-scoped mutations
+     * (`IdentityRoleAssigned`, `IdentityPermissionGranted`,
+     * `IdentityPolicyAttached`, and their inverses).
      *
      * On a tag-capable store the principal tag flushes every slot
      * in one call; non-tagged stores fall back to per-slot
@@ -165,12 +157,11 @@ final class ResolutionCache
      * Drop every persistent entry tagged for the supplied role.
      *
      * On a tag-capable store this is the precise inverse of
-     * `RolePermissionGranted` / `RolePermissionRevoked` — every
-     * principal carrying the role has its cached entries flushed
-     * via the role tag. On a non-tag store the persistent tier
-     * cannot be targeted without a reverse index, so the method
-     * is a no-op there — the listener is expected to pair this
-     * call with `flush()` for the memo sweep.
+     * `RolePermissionGranted` / `RolePermissionRevoked` — every principal
+     * carrying the role has its cached entries flushed via the role tag. On a
+     * non-tag store the persistent tier cannot be targeted without a reverse
+     * index, so the method is a no-op there — the listener is expected to pair
+     * this call with `flush()` for the memo sweep.
      *
      * @param  object  $role
      * @return void
@@ -196,30 +187,27 @@ final class ResolutionCache
     }
 
     /**
-     * Drop every in-memory entry. Listeners call this on role
-     * pivot changes (`RolePermissionGranted` /
-     * `RolePermissionRevoked`) on non-tag stores, where the
-     * cache holds no reverse index from role to the identities
-     * carrying it. Tag-capable stores use `forgetRoleTags()`
-     * instead and leave the memo of other principals alone.
+     * Drop every in-memory entry. Listeners call this on role pivot changes
+     * (`RolePermissionGranted` / `RolePermissionRevoked`) on non-tag stores,
+     * where the cache holds no reverse index from role to the identities
+     * carrying it. Tag-capable stores use `forgetRoleTags()` instead and leave
+     * the memo of other principals alone.
      *
      * @return void
      */
     public function flush(): void
     {
         $this->memo = [];
-        // Persistent store is not cleared here because flushing the
-        // entire configured cache would wipe unrelated entries —
-        // the per-request memo reset is the practical safety net
-        // on non-tag stores; tag-capable stores use
-        // `forgetRoleTags()` for precise per-role invalidation.
+        // Persistent store is not cleared here because flushing the entire
+        // configured cache would wipe unrelated entries — the per-request memo
+        // reset is the practical safety net on non-tag stores; tag-capable
+        // stores use `forgetRoleTags()` for precise per-role invalidation.
     }
 
     /**
-     * Report whether the configured store exposes a `tags()`
-     * method. Exposed for the listener to pick between the
-     * tag-based role invalidation path and the in-memory fallback
-     * without probing the store itself.
+     * Report whether the configured store exposes a `tags()` method. Exposed
+     * for the listener to pick between the tag-based role invalidation path and
+     * the in-memory fallback without probing the store itself.
      *
      * @return bool
      */
@@ -229,9 +217,9 @@ final class ResolutionCache
     }
 
     /**
-     * Attempt to hydrate cached policies from the persistent store,
-     * returning null on miss or on a corrupt entry (which is
-     * forgotten and logged before falling through).
+     * Attempt to hydrate cached policies from the persistent store, returning
+     * null on miss or on a corrupt entry (which is forgotten and logged before
+     * falling through).
      *
      * @param  string  $key
      * @param  object  $principal
@@ -252,20 +240,11 @@ final class ResolutionCache
                 return null;
             }
 
-            $policies = [];
-
-            foreach ($raw as $document) {
-                if (!\is_array($document)) {
-                    throw new \UnexpectedValueException('Cached policy entry is not an array document.');
-                }
-
-                // @var array<string, mixed> $document
-                $policies[] = Policy::fromArray($document);
-            }
+            $policies = $this->hydrateCachedPolicies($raw);
         } catch (\Throwable $exception) {
-            // Corrupt persistent-cache entry — forget the key, log
-            // through the `authorization` channel, and let the
-            // caller fall through to the fresh-read path.
+            // Corrupt persistent-cache entry — forget the key, log through the
+            // `authorization` channel, and let the caller fall through to the
+            // fresh-read path.
             $this->forgetFromStore($key, $principal, $roleIds);
             $this->logCorruptCacheEntry($key, $exception);
 
@@ -276,8 +255,31 @@ final class ResolutionCache
     }
 
     /**
-     * Shared implementation for the role / permission cached
-     * string-list shape.
+     * Hydrate raw cached documents into evaluation policies, rejecting any
+     * entry that is not an array document.
+     *
+     * @param  array<mixed>  $raw
+     * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
+     *
+     * @throws \UnexpectedValueException
+     */
+    private function hydrateCachedPolicies(array $raw): array
+    {
+        $policies = [];
+
+        foreach ($raw as $document) {
+            if (!\is_array($document)) {
+                throw new \UnexpectedValueException('Cached policy entry is not an array document.');
+            }
+
+            $policies[] = Policy::fromArray($document);
+        }
+
+        return $policies;
+    }
+
+    /**
+     * Shared implementation for the role / permission cached string-list shape.
      *
      * @param  string  $kind
      * @param  object  $principal
@@ -286,13 +288,8 @@ final class ResolutionCache
      * @param  array<int, string>  $roleIds
      * @return array<int, string>
      */
-    private function rememberStringList(
-        string $kind,
-        object $principal,
-        \Closure $resolver,
-        ?int $maxTtl,
-        array $roleIds,
-    ): array {
+    private function rememberStringList(string $kind, object $principal, \Closure $resolver, ?int $maxTtl, array $roleIds): array
+    {
         $key = $this->key($kind, $principal);
 
         if (\array_key_exists($key, $this->memo)) {
@@ -309,8 +306,8 @@ final class ResolutionCache
                     return $this->memo[$key] = \array_values(\array_filter($raw, 'is_string'));
                 }
             } catch (\Throwable $exception) {
-                // Corrupt persistent-cache entry — forget the key,
-                // log, and fall through to the fresh-read path.
+                // Corrupt persistent-cache entry — forget the key, log, and
+                // fall through to the fresh-read path.
                 $this->forgetFromStore($key, $principal, $roleIds);
                 $this->logCorruptCacheEntry($key, $exception);
             }
@@ -336,71 +333,24 @@ final class ResolutionCache
      */
     private function key(string $kind, object $principal): string
     {
-        return "{$this->prefix}:{$kind}:" . $this->keyFor($principal);
+        return "{$this->prefix}:{$kind}:" . PrincipalCacheKey::for($principal);
     }
 
     /**
-     * Derive the principal portion of the cache key.
-     *
-     * Eloquent models use their canonical `getMorphClass()` + `getKey()`
-     * pairing. Non-Eloquent principals are duck-typed on those same
-     * accessors; principals exposing neither fall back to a per-request
-     * `spl_object_hash()`, in which case only the in-memory memo applies.
-     *
-     * @param  object  $principal
-     * @return string
-     */
-    private function keyFor(object $principal): string
-    {
-        $type = $principal::class;
-        $id   = null;
-
-        if (\method_exists($principal, 'getMorphClass')) {
-            /** @var mixed $morph */
-            $morph = $principal->getMorphClass();
-
-            if (\is_string($morph) && $morph !== '') {
-                $type = $morph;
-            }
-        }
-
-        if (\method_exists($principal, 'getKey')) {
-            /** @var mixed $raw */
-            $raw = $principal->getKey();
-
-            if (\is_string($raw) || \is_int($raw)) {
-                $candidate = (string) $raw;
-
-                if ($candidate !== '') {
-                    $id = $candidate;
-                }
-            }
-        }
-
-        if ($id === null) {
-            $id = 'obj:' . \spl_object_hash($principal);
-        }
-
-        return "{$type}:{$id}";
-    }
-
-    /**
-     * Build the principal-scoped tag — used to flush every slot
-     * for a single identity in one `tags()->flush()` call on
-     * tag-capable stores.
+     * Build the principal-scoped tag — used to flush every slot for a single
+     * identity in one `tags()->flush()` call on tag-capable stores.
      *
      * @param  object  $principal
      * @return string
      */
     private function principalTag(object $principal): string
     {
-        return "{$this->prefix}:principal:" . $this->keyFor($principal);
+        return "{$this->prefix}:principal:" . PrincipalCacheKey::for($principal);
     }
 
     /**
-     * Compose the tag set for a cache entry — always includes the
-     * package-wide tag and the principal tag, plus one tag per
-     * role ID the entry depends on.
+     * Compose the tag set for a cache entry — always includes the package-wide
+     * tag and the principal tag, plus one tag per role ID the entry depends on.
      *
      * @param  object  $principal
      * @param  array<int, string>  $roleIds
@@ -422,18 +372,15 @@ final class ResolutionCache
     }
 
     /**
-     * Probe (and cache) whether the configured store supports
-     * Laravel's `tags()` fan-out. Laravel's `CacheManager` wraps
-     * every driver in a `Repository` that exposes `tags()`
-     * unconditionally, so probing the Repository itself gives a
-     * false positive for File / Database drivers that throw
-     * `BadMethodCallException` on the call. The real capability
-     * marker is on the bare driver: `TaggableStore` descendants
-     * (Redis, Memcached, the array store) satisfy
-     * `method_exists($driver, 'tags')`, non-taggable drivers do
-     * not. Probing via `getStore()` keeps the check working for
-     * any future driver that opts in without a dedicated
-     * interface.
+     * Probe (and cache) whether the configured store supports Laravel's
+     * `tags()` fan-out. Laravel's `CacheManager` wraps every driver in a
+     * `Repository` that exposes `tags()` unconditionally, so probing the
+     * Repository itself gives a false positive for File / Database drivers that
+     * throw `BadMethodCallException` on the call. The real capability marker is
+     * on the bare driver: `TaggableStore` descendants (Redis, Memcached, the
+     * array store) satisfy `method_exists($driver, 'tags')`, non-taggable
+     * drivers do not. Probing via `getStore()` keeps the check working for any
+     * future driver that opts in without a dedicated interface.
      *
      * @return bool
      */
@@ -453,9 +400,9 @@ final class ResolutionCache
     }
 
     /**
-     * Read a key from the persistent store — routed through
-     * `tags()` on tag-capable stores so reads hit the same
-     * namespace that `putInStore()` wrote to.
+     * Read a key from the persistent store — routed through `tags()` on
+     * tag-capable stores so reads hit the same namespace that `putInStore()`
+     * wrote to.
      *
      * @param  string  $key
      * @param  object  $principal
@@ -465,12 +412,14 @@ final class ResolutionCache
     private function readFromStore(string $key, object $principal, array $roleIds): mixed
     {
         // @codeCoverageIgnoreStart
-        // Defensive: every caller already checks `$this->store !== null` before routing through here; the guard survives as a belt-and-braces for future call sites.
+        // Defensive: every caller already checks `$this->store !== null` before
+        // routing through here; the guard survives as a belt-and-braces for
+        // future call sites.
         if ($this->store === null) {
             return null;
         }
-        // @codeCoverageIgnoreEnd
 
+        // @codeCoverageIgnoreEnd
         if ($this->isTaggable()) {
             /** @var \Illuminate\Contracts\Cache\Repository $store */
             $store = $this->store;
@@ -483,9 +432,8 @@ final class ResolutionCache
     }
 
     /**
-     * Forget a corrupt key — mirrors `readFromStore()` so the
-     * tag-namespaced entry is removed when the store is
-     * tag-capable.
+     * Forget a corrupt key — mirrors `readFromStore()` so the tag-namespaced
+     * entry is removed when the store is tag-capable.
      *
      * @param  string  $key
      * @param  object  $principal
@@ -495,19 +443,20 @@ final class ResolutionCache
     private function forgetFromStore(string $key, object $principal, array $roleIds): void
     {
         // @codeCoverageIgnoreStart
-        // Defensive: every caller already checks `$this->store !== null` before routing through here.
+        // Defensive: every caller already checks `$this->store !== null` before
+        // routing through here.
         if ($this->store === null) {
             return;
         }
-        // @codeCoverageIgnoreEnd
 
+        // @codeCoverageIgnoreEnd
         // @codeCoverageIgnoreStart
         // The tag-capable branch fires only when the taggable driver's get()
         // itself raises — a corrupt-payload shape covered by a real
         // persistent-tier driver in production. The
-        // `Illuminate\Cache\Repository` public API does not let a test
-        // assemble an anonymous `TaggedCache` without duplicating large
-        // swathes of the framework.
+        // `Illuminate\Cache\Repository` public API does not let a test assemble
+        // an anonymous `TaggedCache` without duplicating large swathes of the
+        // framework.
         if ($this->isTaggable()) {
             /** @var \Illuminate\Contracts\Cache\Repository $store */
             $store = $this->store;
@@ -517,14 +466,13 @@ final class ResolutionCache
             return;
         }
         // @codeCoverageIgnoreEnd
-
         $this->store->forget($key);
     }
 
     /**
-     * Report a corrupt persistent-cache entry without raising — the
-     * caller has already forgotten the key and will recompute via
-     * the resolver, so the cache self-heals on the same request.
+     * Report a corrupt persistent-cache entry without raising — the caller has
+     * already forgotten the key and will recompute via the resolver, so the
+     * cache self-heals on the same request.
      *
      * @param  string  $key
      * @param  \Throwable  $exception
@@ -533,12 +481,14 @@ final class ResolutionCache
     private function logCorruptCacheEntry(string $key, \Throwable $exception): void
     {
         // @codeCoverageIgnoreStart
-        // Defensive: the Laravel `logger()` helper is always present under a booted framework, so this fallback is reachable only from non-Laravel embeddings.
+        // Defensive: the Laravel `logger()` helper is always present under a
+        // booted framework, so this fallback is reachable only from non-Laravel
+        // embeddings.
         if (!\function_exists('logger')) {
             return;
         }
-        // @codeCoverageIgnoreEnd
 
+        // @codeCoverageIgnoreEnd
         try {
             /** @var \Illuminate\Log\LogManager $logger */
             $logger  = logger();
@@ -563,9 +513,9 @@ final class ResolutionCache
     }
 
     /**
-     * Write a value to the configured store honouring the TTL
-     * setting and any temporal-grant upper bound, routing through
-     * `tags()` on tag-capable stores.
+     * Write a value to the configured store honouring the TTL setting and any
+     * temporal-grant upper bound, routing through `tags()` on tag-capable
+     * stores.
      *
      * @param  string  $key
      * @param  mixed  $value
@@ -577,12 +527,12 @@ final class ResolutionCache
     private function putInStore(string $key, mixed $value, object $principal, array $roleIds, ?int $maxTtl): void
     {
         // @codeCoverageIgnoreStart
-        // Defensive: every caller already checks `$this->store !== null` before routing through here.
+        // Defensive: every caller already checks `$this->store !== null` before
+        // routing through here.
         if ($this->store === null) {
             return;
         }
         // @codeCoverageIgnoreEnd
-
         [$useForever, $seconds] = $this->resolveTtl($maxTtl);
 
         if (!$useForever && $seconds <= 0) {
@@ -610,10 +560,9 @@ final class ResolutionCache
     /**
      * Compute the effective TTL for a put call.
      *
-     * Returns `[useForever, seconds]` — `useForever = true`
-     * short-circuits to `forever()`, otherwise the seconds value
-     * is the bounded lifetime (may be ≤ 0, in which case the
-     * caller skips the write).
+     * Returns `[useForever, seconds]` — `useForever = true` short-circuits to
+     * `forever()`, otherwise the seconds value is the bounded lifetime (may be
+     * ≤ 0, in which case the caller skips the write).
      *
      * @param  int|null  $maxTtl
      * @return array{0: bool, 1: int}
@@ -626,10 +575,9 @@ final class ResolutionCache
 
         $base = $this->ttl <= 0 ? \PHP_INT_MAX : $this->ttl;
 
-        // Bound by the nearest upcoming expiry, shaving a second
-        // so the entry invalidates itself before the grant
-        // actually elapses — avoids a race where the cache
-        // returns a role one millisecond before the DB filter
+        // Bound by the nearest upcoming expiry, shaving a second so the entry
+        // invalidates itself before the grant actually elapses — avoids a race
+        // where the cache returns a role one millisecond before the DB filter
         // would drop it.
         return [false, \min($base, $maxTtl) - 1];
     }

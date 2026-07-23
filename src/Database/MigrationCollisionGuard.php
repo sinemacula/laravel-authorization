@@ -9,9 +9,9 @@ use Illuminate\Support\Facades\Schema;
 /**
  * Idempotency guard for shipped migrations.
  *
- * Each published migration invokes the guard on `up()` so subsequent
- * matrix runs against a persistent database do not silently collide
- * with an unrelated table of the same name.
+ * Each published migration invokes the guard on `up()` so subsequent matrix
+ * runs against a persistent database do not silently collide with an unrelated
+ * table of the same name.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -19,8 +19,8 @@ use Illuminate\Support\Facades\Schema;
 final class MigrationCollisionGuard
 {
     /**
-     * Raise a dedicated collision exception when a table of the
-     * supplied name already exists.
+     * Raise a dedicated collision exception when a table of the supplied name
+     * already exists.
      *
      * @param  string  $table
      * @return void

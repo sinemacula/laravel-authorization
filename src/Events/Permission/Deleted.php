@@ -7,11 +7,11 @@ namespace SineMacula\Laravel\Authorization\Events\Permission;
 use SineMacula\Laravel\Authorization\Models\Permission;
 
 /**
- * Dispatched after a permission row is deleted. Carries the final
- * snapshot before the source row disappears.
+ * Dispatched after a permission row is deleted. Carries the final snapshot
+ * before the source row disappears.
  *
- * Part of the SemVer-stable event API; breaking changes require a
- * major version bump.
+ * Part of the SemVer-stable event API; breaking changes require a major version
+ * bump.
  *
  * @api
  *
@@ -29,6 +29,5 @@ final readonly class Deleted
 
         /** Permission row captured immediately after deletion. */
         public Permission $permission,
-
     ) {}
 }

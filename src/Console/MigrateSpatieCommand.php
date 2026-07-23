@@ -10,20 +10,19 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 
 /**
- * Migrate data from Spatie's `laravel-permission` tables into this
- * package's schema.
+ * Migrate data from Spatie's `laravel-permission` tables into this package's
+ * schema.
  *
  * Reads Spatie's default table names (`roles`, `permissions`,
- * `model_has_roles`, `model_has_permissions`, `role_has_permissions`)
- * and copies rows into this package's tables, mapping column names
- * and generating UUIDs when Spatie used auto-increment IDs.
- * Everything runs inside a transaction; the `--dry-run` flag
- * reports counts without writing.
+ * `model_has_roles`, `model_has_permissions`, `role_has_permissions`) and
+ * copies rows into this package's tables, mapping column names and generating
+ * UUIDs when Spatie used auto-increment IDs. Everything runs inside a
+ * transaction; the `--dry-run` flag reports counts without writing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-class MigrateSpatieCommand extends Command
+final class MigrateSpatieCommand extends Command
 {
     /** @var list<string> Spatie source table names. */
     private const array SPATIE_TABLES = [
@@ -95,8 +94,8 @@ class MigrateSpatieCommand extends Command
     }
 
     /**
-     * Render the post-migration summary table and the dry-run
-     * reminder when applicable.
+     * Render the post-migration summary table and the dry-run reminder when
+     * applicable.
      *
      * @param  array<string, int>  $counts
      * @param  bool  $dryRun
@@ -115,10 +114,12 @@ class MigrateSpatieCommand extends Command
             ),
         );
 
-        if ($dryRun) {
-            $this->line('');
-            $this->warn('No data was written (dry run). Re-run without --dry-run to apply.');
+        if (!$dryRun) {
+            return;
         }
+
+        $this->line('');
+        $this->warn('No data was written (dry run). Re-run without --dry-run to apply.');
     }
 
     /**
@@ -257,12 +258,8 @@ class MigrateSpatieCommand extends Command
      * @param  array<string, int>  $counts
      * @return void
      */
-    private function migrateRolePermissions(
-        array $roleIdMap,
-        array $permissionIdMap,
-        bool $dryRun,
-        array &$counts,
-    ): void {
+    private function migrateRolePermissions(array $roleIdMap, array $permissionIdMap, bool $dryRun, array &$counts): void
+    {
         /** @var string $targetTable */
         $targetTable = config('authorization.tables.role_permissions', 'role_permissions');
 

@@ -2,20 +2,20 @@
 
 declare(strict_types = 1);
 
-namespace SineMacula\Laravel\Authorization\Traits;
+namespace SineMacula\Laravel\Authorization\Concerns;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
 /**
- * Shared helpers used by the authorizable-identity traits to feed
- * the resolution-cache TTL-bound and role-tag invalidation paths.
+ * Shared helpers used by the authorizable-identity traits to feed the
+ * resolution-cache TTL-bound and role-tag invalidation paths.
  *
- * Extracted into a single trait so `HasAuthorization` (which
- * composes `HasRoles`, `HasPermissions`, and `HasPolicies`) does
- * not trigger a trait-method collision — PHP rejects duplicate
- * method names across composed traits even when the bodies are
- * byte-identical.
+ * Extracted into a single trait so `HasAuthorization` (which composes
+ * `HasRoles`, `HasPermissions`, and `HasPolicies`) does not trigger a
+ * trait-method collision — PHP rejects duplicate method names across composed
+ * traits even when the bodies are byte-identical.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -25,10 +25,9 @@ use Illuminate\Support\Facades\DB;
 trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
 {
     /**
-     * Gather the primary keys of the supplied models — feeds the
-     * role-tag list for tag-capable cache invalidation. Keys that
-     * are neither string nor int are silently skipped so a
-     * malformed model cannot corrupt the tag set.
+     * Gather the primary keys of the supplied models — feeds the role-tag list
+     * for tag-capable cache invalidation. Keys that are neither string nor int
+     * are silently skipped so a malformed model cannot corrupt the tag set.
      *
      * @param  iterable<int, \Illuminate\Database\Eloquent\Model>  $models
      * @return array<int, string>
@@ -41,25 +40,28 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
             /** @var mixed $key */
             $key = $model->getKey();
 
-            if (\is_string($key) || \is_int($key)) {
-                $stringKey = (string) $key;
-
-                if ($stringKey !== '') {
-                    $ids[] = $stringKey;
-                }
+            if (!\is_string($key) && !\is_int($key)) {
+                continue;
             }
+
+            $stringKey = (string) $key;
+
+            if ($stringKey === '') {
+                continue;
+            }
+
+            $ids[] = $stringKey;
         }
 
         return \array_values(\array_unique($ids));
     }
 
     /**
-     * Compute the seconds-until-nearest-expiry across the supplied
-     * relation's pivot rows. Returns null when no row carries an
-     * expiry (or when every expiry is already in the past), which
-     * tells the cache to honour its configured TTL verbatim. A
-     * concrete positive integer asks the cache to bound the entry
-     * lifetime by that window so it invalidates itself in step
+     * Compute the seconds-until-nearest-expiry across the supplied relation's
+     * pivot rows. Returns null when no row carries an expiry (or when every
+     * expiry is already in the past), which tells the cache to honour its
+     * configured TTL verbatim. A concrete positive integer asks the cache to
+     * bound the entry lifetime by that window so it invalidates itself in step
      * with the DB-level filter.
      *
      * @param  iterable<int, \Illuminate\Database\Eloquent\Model>  $related
@@ -77,36 +79,35 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
                 continue;
             }
 
-            if ($smallest === null || $seconds < $smallest) {
-                $smallest = $seconds;
+            if ($smallest !== null && $seconds >= $smallest) {
+                continue;
             }
+
+            $smallest = $seconds;
         }
 
         return $smallest;
     }
 
     /**
-     * Return the seconds until a single pivot row expires, or
-     * null when the row has no expiry or it is already in the
-     * past. Extracted to keep the scanning loop flat.
+     * Return the seconds until a single pivot row expires, or null when the row
+     * has no expiry or it is already in the past. Extracted to keep the
+     * scanning loop flat.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $model
      * @param  int  $nowTimestamp
      * @return int|null
      */
-    private static function authorizationSecondsUntilPivotExpiry(
-        \Illuminate\Database\Eloquent\Model $model,
-        int $nowTimestamp,
-    ): ?int {
-        // Pivots on relation-bound models arrive as either a concrete
-        // `Pivot` instance or, in mutation-kill fixtures, a plain
-        // `stdClass` with a scalar `expires_at`. The tests in
-        // `MutationKillersTest` intentionally pass non-Model pivots
-        // to exercise the scalar-expires_at path, so the access is
-        // kept as direct property read with a null-coalesce rather
-        // than `getAttribute()` (which requires an Eloquent model).
-        // PHPStan cannot see the dynamically-assigned `pivot`
-        // relation attribute on `Model` and flags it as missing.
+    private static function authorizationSecondsUntilPivotExpiry(Model $model, int $nowTimestamp): ?int
+    {
+        // Pivots on relation-bound models arrive as either a concrete `Pivot`
+        // instance or, in mutation-kill fixtures, a plain `stdClass` with a
+        // scalar `expires_at`. The tests in `MutationKillersTest` intentionally
+        // pass non-Model pivots to exercise the scalar-expires_at path, so the
+        // access is kept as direct property read with a null-coalesce rather
+        // than `getAttribute()` (which requires an Eloquent model). PHPStan
+        // cannot see the dynamically-assigned `pivot` relation attribute on
+        // `Model` and flags it as missing.
         /** @phpstan-ignore-next-line property.notFound */
         $pivot = $model->pivot ?? null;
 
@@ -130,8 +131,7 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
 
     /**
      * Coerce a raw pivot `expires_at` value (string, Carbon,
-     * `DateTimeInterface`, or null) into a `Carbon` instance or
-     * null.
+     * `DateTimeInterface`, or null) into a `Carbon` instance or null.
      *
      * @param  mixed  $raw
      * @return \Illuminate\Support\Carbon|null
@@ -146,8 +146,8 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
     }
 
     /**
-     * Return the smaller of two nullable seconds-until-expiry
-     * values, treating null as "no bound".
+     * Return the smaller of two nullable seconds-until-expiry values, treating
+     * null as "no bound".
      *
      * @param  int|null  $left
      * @param  int|null  $right
@@ -167,22 +167,21 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
     }
 
     /**
-     * Read the existing pivot row for the authorizable-to-grant
-     * triplet `(type, id, $targetId)` against the supplied pivot
-     * table and return its existence and `expires_at` value.
-     * Returns `['exists' => false, 'expires_at' => null]` when no
-     * row exists. The query bypasses any relation-level expiry
-     * filter so it observes both live and expired pivot rows —
-     * both are candidates for an expiry mutation by a re-call to
-     * the surface-specific grant method.
+     * Read the existing pivot row for the authorizable-to-grant triplet
+     * `(type, id, $targetId)` against the supplied pivot table and return its
+     * existence and `expires_at` value. Returns
+     * `['exists' => false, 'expires_at' => null]` when no row exists. The query
+     * bypasses any relation-level expiry filter so it observes both live and
+     * expired pivot rows — both are candidates for an expiry mutation by a
+     * re-call to the surface-specific grant method.
      *
      * Column names are supplied by the caller from the per-table
-     * `authorization.pivots.*` config block so a consumer who swaps a
-     * pivot column name (type / id / FK / expires_at) at the config seam
-     * sees the override honoured here as well.
+     * `authorization.pivots.*` config block so a consumer who swaps a pivot
+     * column name (type / id / FK / expires_at) at the config seam sees the
+     * override honoured here as well.
      *
-     * Shared by the three authorizable-identity traits so the
-     * expiry-change detection machinery lives in one place.
+     * Shared by the three authorizable-identity traits so the expiry-change
+     * detection machinery lives in one place.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $identity
      * @param  string  $table
@@ -190,12 +189,8 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      * @param  string  $targetId
      * @return array{exists: bool, expires_at: \DateTimeInterface|null}
      */
-    private static function authorizationReadGrantPivot(
-        \Illuminate\Database\Eloquent\Model $identity,
-        string $table,
-        array $columns,
-        string $targetId,
-    ): array {
+    private static function authorizationReadGrantPivot(Model $identity, string $table, array $columns, string $targetId): array
+    {
         $row = DB::table($table)
             ->where($columns['authorizable_type'], $identity->getMorphClass())
             ->where($columns['authorizable_id'], (string) $identity->getKey())
@@ -215,24 +210,20 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
     }
 
     /**
-     * Resolve the full column map for a pivot's `authorization.pivots.*`
-     * config sub-block. Returns the `authorizable_type`,
-     * `authorizable_id`, `target` (the FK column pointing at the
-     * related model), and `expires_at` column names. Consumers who
-     * leave the config untouched get the package defaults —
-     * `authorizable_type`, `authorizable_id`, `{entity}_id`, and
-     * `expires_at` respectively.
+     * Resolve the full column map for a pivot's `authorization.pivots.*` config
+     * sub-block. Returns the `authorizable_type`, `authorizable_id`, `target`
+     * (the FK column pointing at the related model), and `expires_at` column
+     * names. Consumers who leave the config untouched get the package defaults
+     * — `authorizable_type`, `authorizable_id`, `{entity}_id`, and `expires_at`
+     * respectively.
      *
      * @param  string  $pivot
      * @param  string  $targetKey
      * @param  string  $defaultTarget
      * @return array{authorizable_type: string, authorizable_id: string, target: string, expires_at: string}
      */
-    private static function authorizationResolveGrantPivotColumns(
-        string $pivot,
-        string $targetKey,
-        string $defaultTarget,
-    ): array {
+    private static function authorizationResolveGrantPivotColumns(string $pivot, string $targetKey, string $defaultTarget): array
+    {
         $prefix = 'authorization.pivots.' . $pivot . '.';
 
         /** @var string $type */
@@ -253,10 +244,9 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
     }
 
     /**
-     * Coerce a raw pivot `expires_at` value (string from a DB
-     * query, Carbon, `DateTimeInterface`, or null) into a
-     * `DateTimeInterface` or null. Shared by the three
-     * authorizable-identity traits.
+     * Coerce a raw pivot `expires_at` value (string from a DB query, Carbon,
+     * `DateTimeInterface`, or null) into a `DateTimeInterface` or null. Shared
+     * by the three authorizable-identity traits.
      *
      * @param  mixed  $value
      * @return \DateTimeInterface|null
@@ -286,7 +276,7 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      * @param  \DateTimeInterface|null  $right
      * @return bool
      */
-    private static function authorizationGrantExpiriesEqual(?\DateTimeInterface $left, ?\DateTimeInterface $right): bool
+    private static function areAuthorizationGrantExpiriesEqual(?\DateTimeInterface $left, ?\DateTimeInterface $right): bool
     {
         if ($left === null && $right === null) {
             return true;
@@ -300,13 +290,12 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
     }
 
     /**
-     * Resolve the optional `getAuthorizationGuard()` hook on the
-     * identity model. The hook is duck-typed — consumers opt in by
-     * declaring the method on their model, so the lookup is routed
-     * through reflection to keep PHPStan from narrowing the call on
-     * the specific using class (every concrete analysed class either
-     * always or never has the method, which would make a direct
-     * `method_exists` guard read as a constant condition).
+     * Resolve the optional `getAuthorizationGuard()` hook on the identity
+     * model. The hook is duck-typed — consumers opt in by declaring the method
+     * on their model, so the lookup is routed through reflection to keep
+     * PHPStan from narrowing the call on the specific using class (every
+     * concrete analysed class either always or never has the method, which
+     * would make a direct `method_exists` guard read as a constant condition).
      *
      * @param  object  $identity
      * @return string|null

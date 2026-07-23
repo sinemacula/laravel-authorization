@@ -9,11 +9,10 @@ use SineMacula\Laravel\Authorization\Models\Role as RoleModel;
 /**
  * Narrow contract for identities that carry roles.
  *
- * Split from the composite `AuthorizableIdentity` so a pure-RBAC
- * consumer that only uses role assignment can typehint on the
- * minimum surface they actually implement. The composite
- * contract extends this one so existing implementers stay
- * satisfied.
+ * Split from the composite `AuthorizableIdentity` so a pure-RBAC consumer that
+ * only uses role assignment can typehint on the minimum surface they actually
+ * implement. The composite contract extends this one so existing implementers
+ * stay satisfied.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

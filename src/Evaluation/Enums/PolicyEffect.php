@@ -7,10 +7,10 @@ namespace SineMacula\Laravel\Authorization\Evaluation\Enums;
 /**
  * Policy effect.
  *
- * Represents the two possible outcomes of a matching policy statement
- * under AWS IAM-style evaluation. A statement with the allow effect
- * contributes an allow decision; a statement with the deny effect
- * contributes an explicit deny and short-circuits the evaluator.
+ * Represents the two possible outcomes of a matching policy statement under AWS
+ * IAM-style evaluation. A statement with the allow effect contributes an allow
+ * decision; a statement with the deny effect contributes an explicit deny and
+ * short-circuits the evaluator.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

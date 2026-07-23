@@ -7,7 +7,6 @@ namespace Tests\Feature;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use Illuminate\Contracts\Auth\Guard;
-use Mockery;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardPrincipalResolver;
 use Tests\TestCase;

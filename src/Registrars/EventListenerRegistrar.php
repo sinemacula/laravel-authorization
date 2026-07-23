@@ -18,23 +18,21 @@ use SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked as RolePermis
 use SineMacula\Laravel\Authorization\Listeners\InvalidateResolutionCache;
 
 /**
- * Wire the package's event listeners onto the application
- * dispatcher.
+ * Wire the package's event listeners onto the application dispatcher.
  *
  * Owns two listener registrations:
  *
- * - The resolution-cache invalidator, fired on every mutation to a
- *   principal's cached lookups (role / permission / policy
- *   attach/detach/expiry, plus role-permission mutations that
- *   cascade to every principal carrying the role).
- * - An Octane request-boundary reset for the `LastDecisionStore`
- *   singleton. The store is a container singleton, so under Octane
- *   (or RoadRunner / Swoole / FrankenPHP) the slot survives across
- *   requests and would otherwise leak the previous request's
- *   decision into the next one's `lastDecision()` accessor. The
- *   listener is wired only when Octane's `RequestTerminated` event
- *   class is present — keeping the package free of a hard Octane
- *   dependency while auto-resetting when Octane is installed.
+ * - The resolution-cache invalidator, fired on every mutation to a principal's
+ *   cached lookups (role / permission / policy attach/detach/expiry, plus
+ *   role-permission mutations that cascade to every principal carrying the
+ *   role).
+ * - An Octane request-boundary reset for the `LastDecisionStore` singleton. The
+ *   store is a container singleton, so under Octane (or RoadRunner / Swoole /
+ *   FrankenPHP) the slot survives across requests and would otherwise leak the
+ *   previous request's decision into the next one's `lastDecision()` accessor.
+ *   The listener is wired only when Octane's `RequestTerminated` event class is
+ *   present — keeping the package free of a hard Octane dependency while
+ *   auto-resetting when Octane is installed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -50,7 +48,6 @@ final class EventListenerRegistrar
 
         /** Framework container consulted for dispatcher binding. */
         private readonly Application $app,
-
     ) {}
 
     /**
@@ -65,8 +62,8 @@ final class EventListenerRegistrar
     }
 
     /**
-     * Wire the invalidation listener to every event that mutates a
-     * principal's cached lookups.
+     * Wire the invalidation listener to every event that mutates a principal's
+     * cached lookups.
      *
      * @return void
      */
@@ -115,9 +112,11 @@ final class EventListenerRegistrar
         $app = $this->app;
 
         $dispatcher->listen($event, static function () use ($app): void {
-            if ($app->bound(LastDecisionStore::class)) {
-                $app->make(LastDecisionStore::class)->reset();
+            if (!$app->bound(LastDecisionStore::class)) {
+                return;
             }
+
+            $app->make(LastDecisionStore::class)->reset();
         });
     }
 }

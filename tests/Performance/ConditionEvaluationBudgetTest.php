@@ -11,7 +11,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 
 /**
- * Performance budget for `Statement::evaluateConditions()`.
+ * Performance budget for `Statement::conditionsSatisfiedBy()`.
  *
  * Conditions are the heaviest per-statement work the evaluator does. The full
  * 18-operator surface (string, numeric, temporal, set, boolean, null, CIDR) is
@@ -50,7 +50,7 @@ final class ConditionEvaluationBudgetTest extends TestCase
         $start = \microtime(true);
 
         for ($i = 0; $i < 1000; $i++) {
-            $statement->evaluateConditions($context);
+            $statement->conditionsSatisfiedBy($context);
         }
 
         $elapsed = \microtime(true) - $start;
@@ -58,13 +58,13 @@ final class ConditionEvaluationBudgetTest extends TestCase
         self::assertLessThan(
             0.5,
             $elapsed,
-            "Statement::evaluateConditions() budget exceeded ({$elapsed}s for 1,000 iterations of an 18-operator chain).",
+            "Statement::conditionsSatisfiedBy() budget exceeded ({$elapsed}s for 1,000 iterations of an 18-operator chain).",
         );
     }
 
     /**
      * Build the 18-operator condition chain — every branch in
-     * `Statement::evaluateOperator()` appears exactly once. Kept here rather
+     * `Statement::matchesOperator()` appears exactly once. Kept here rather
      * than in a shared helper so the performance suite has no runtime
      * dependency on the benchmark-support tree.
      *

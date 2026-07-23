@@ -5,8 +5,8 @@ declare(strict_types = 1);
 namespace Tests\Feature\Stubs;
 
 use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Concerns\HasAuthorization;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
-use SineMacula\Laravel\Authorization\Traits\HasAuthorization;
 
 /**
  * Minimal Eloquent model used by feature tests to verify role, permission, and
@@ -19,7 +19,7 @@ use SineMacula\Laravel\Authorization\Traits\HasAuthorization;
  *
  * @SuppressWarnings("php:S1192")
  */
-class StubIdentity extends Model implements AuthorizableIdentity
+final class StubIdentity extends Model implements AuthorizableIdentity
 {
     use HasAuthorization;
 

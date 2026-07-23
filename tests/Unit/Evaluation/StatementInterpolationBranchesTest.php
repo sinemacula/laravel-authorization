@@ -14,11 +14,11 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
  * handle when an interpolator is supplied:
  *
  * - A plain string operand is interpolated directly.
- * - An array operand with a non-string value passes the non-string
- *   through unchanged (integers, booleans, and null operands that
- *   consumers occasionally use for `null` identity checks).
- * - A non-string, non-array operand (scalar, object, null) is
- *   returned verbatim.
+ * - An array operand with a non-string value passes the non-string through
+ *   unchanged (integers, booleans, and null operands that consumers
+ *   occasionally use for `null` identity checks).
+ * - A non-string, non-array operand (scalar, object, null) is returned
+ *   verbatim.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -56,13 +56,13 @@ final class StatementInterpolationBranchesTest extends TestCase
             }
         };
 
-        self::assertTrue($statement->evaluateConditions(
+        self::assertTrue($statement->conditionsSatisfiedBy(
             ['tenant' => 'org-7'],
             new ContextInterpolator,
             $principal,
         ));
 
-        self::assertFalse($statement->evaluateConditions(
+        self::assertFalse($statement->conditionsSatisfiedBy(
             ['tenant' => 'org-9'],
             new ContextInterpolator,
             $principal,
@@ -84,7 +84,7 @@ final class StatementInterpolationBranchesTest extends TestCase
             'conditions' => ['flag' => ['eq' => true]],
         ]);
 
-        self::assertTrue($statement->evaluateConditions(
+        self::assertTrue($statement->conditionsSatisfiedBy(
             ['flag' => true],
             new ContextInterpolator,
             null,
@@ -106,13 +106,13 @@ final class StatementInterpolationBranchesTest extends TestCase
             'conditions' => ['flag' => true],
         ]);
 
-        self::assertTrue($statement->evaluateConditions(
+        self::assertTrue($statement->conditionsSatisfiedBy(
             ['flag' => true],
             new ContextInterpolator,
             null,
         ));
 
-        self::assertFalse($statement->evaluateConditions(
+        self::assertFalse($statement->conditionsSatisfiedBy(
             ['flag' => false],
             new ContextInterpolator,
             null,

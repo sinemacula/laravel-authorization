@@ -9,10 +9,10 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 /**
  * Immutable evaluation result.
  *
- * Captures the outcome of a single authorization check, including the
- * statement that decided the result (if any) and a reproducible trace
- * of every statement the evaluator considered. The trace is ordered,
- * serialisable, and safe to persist to an audit log.
+ * Captures the outcome of a single authorization check, including the statement
+ * that decided the result (if any) and a reproducible trace of every statement
+ * the evaluator considered. The trace is ordered, serialisable, and safe to
+ * persist to an audit log.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -46,7 +46,6 @@ final readonly class EvaluationResult
 
         /** Ordered, serialisable trace of every statement considered. */
         public array $trace = [],
-
     ) {}
 
     /**

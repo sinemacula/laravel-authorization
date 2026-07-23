@@ -11,10 +11,9 @@ use SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator;
 /**
  * PHPBench micro-benchmark for `ContextInterpolator::interpolate()`.
  *
- * The interpolator runs once per resource pattern and once per
- * condition operand on every matching statement, so parse-time
- * overhead compounds with statement count. The bench tracks three
- * shapes:
+ * The interpolator runs once per resource pattern and once per condition
+ * operand on every matching statement, so parse-time overhead compounds with
+ * statement count. The bench tracks three shapes:
  *
  * - a no-token string (common path — most action patterns are plain);
  * - a 10-token realistic pattern mixing principal / resource / context;
@@ -61,11 +60,20 @@ final class ContextInterpolatorBench
         $this->context      = BenchmarkFixtures::interpolationContext();
 
         $this->principal = new class {
-            /** @var string */
-            public string $id = 'user-42';
+            /**
+             * Create the stub principal with its interpolatable fields.
+             *
+             * @param  string  $id
+             * @param  string  $name
+             */
+            public function __construct(
 
-            /** @var string */
-            public string $name = 'alice';
+                /** @var string */
+                public readonly string $id = 'user-42',
+
+                /** @var string */
+                public readonly string $name = 'alice',
+            ) {}
         };
     }
 
