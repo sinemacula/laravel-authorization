@@ -4,14 +4,14 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events\Identity;
 
+use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
 use SineMacula\Laravel\Authorization\Models\Permission;
 
 /**
- * Dispatched when a permission is granted directly to an authorizable
- * identity.
+ * Dispatched when a permission is granted directly to an authorizable identity.
  *
- * Part of the SemVer-stable event API; breaking changes require a
- * major version bump.
+ * Part of the SemVer-stable event API; breaking changes require a major version
+ * bump.
  *
  * @api
  *
@@ -33,6 +33,5 @@ final readonly class PermissionGranted implements IdentityEvent
 
         /** Permission that was granted directly to the identity. */
         public Permission $permission,
-
     ) {}
 }

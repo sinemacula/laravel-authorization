@@ -6,6 +6,7 @@ namespace Tests\Integration;
 
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Foundation\Testing\RefreshDatabaseState;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -52,10 +53,10 @@ final class SpatieMigrationTest extends TestCase
     protected function setUp(): void
     {
         // This suite overrides `authorization.tables.*` to use the `auth_`
-        // prefix (see defineEnvironment), so the migrated schema differs
-        // from the shared default. Flip the RefreshDatabase migration flag
-        // back to false to force `migrate:fresh` under this suite's config.
-        \Illuminate\Foundation\Testing\RefreshDatabaseState::$migrated = false;
+        // prefix (see defineEnvironment), so the migrated schema differs from
+        // the shared default. Flip the RefreshDatabase migration flag back to
+        // false to force `migrate:fresh` under this suite's config.
+        RefreshDatabaseState::$migrated = false;
 
         parent::setUp();
 
@@ -81,7 +82,7 @@ final class SpatieMigrationTest extends TestCase
         // Flip the RefreshDatabase migration flag back to false so the next
         // test re-runs `migrate:fresh` under its own `authorization.tables.*`
         // config rather than inheriting this suite's `auth_`-prefixed schema.
-        \Illuminate\Foundation\Testing\RefreshDatabaseState::$migrated = false;
+        RefreshDatabaseState::$migrated = false;
     }
 
     /**

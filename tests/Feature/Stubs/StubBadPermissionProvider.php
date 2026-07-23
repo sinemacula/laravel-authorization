@@ -22,8 +22,11 @@ final class StubBadPermissionProvider implements PermissionProvider
      * Return a mix of empty, non-string, and well-formed permissions.
      *
      * @return array<int, mixed>
+     *
+     * @phpstan-ignore method.childReturnType
      */
-    public function permissions(): array // @phpstan-ignore method.childReturnType
+    #[\Override]
+    public function permissions(): array
     {
         return ['', 42, 'valid:perm'];
     }
@@ -32,8 +35,11 @@ final class StubBadPermissionProvider implements PermissionProvider
      * Return the guard name associated with this provider.
      *
      * @return string|null
+     *
+     * @phpstan-ignore return.unusedType
      */
-    public function guard(): ?string // @phpstan-ignore return.unusedType
+    #[\Override]
+    public function guard(): ?string
     {
         return 'web';
     }

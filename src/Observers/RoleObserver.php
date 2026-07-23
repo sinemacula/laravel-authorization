@@ -15,17 +15,17 @@ use SineMacula\Laravel\Authorization\Models\Role;
 /**
  * Row-lifecycle observer for the `Role` model.
  *
- * Translates Eloquent's native `saving` / `updating` / `created` /
- * `updated` / `deleted` events into the package's typed CRUD events,
- * enforces the tenant-columns both-or-neither invariant on save, and
- * guards against hierarchy cycles before a `parent_id` change is
- * persisted. System-protection hooks (`deleting`, `updating` guard,
- * `saved` bypass reset) live in
- * `HasSystemProtection::bootHasSystemProtection()` and run
- * independently of this observer.
+ * Translates Eloquent's native `saving` / `updating` / `created` / `updated` /
+ * `deleted` events into the package's typed CRUD events, enforces the
+ * tenant-columns both-or-neither invariant on save, and guards against
+ * hierarchy cycles before a `parent_id` change is persisted. System-protection
+ * hooks (`deleting`, `updating` guard, `saved` bypass reset) live in
+ * `HasSystemProtection::bootHasSystemProtection()` and run independently of
+ * this observer.
  *
- * Registered via `#[ObservedBy(RoleObserver::class)]` on the `Role`
- * model.
+ * Registered via `#[ObservedBy(RoleObserver::class)]` on the `Role` model.
+ *
+ * @managed-static
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,8 +36,8 @@ final class RoleObserver
     private static ?\WeakMap $snapshots = null;
 
     /**
-     * Enforce the tenant-columns invariant and the hierarchy
-     * cycle-detection guard before any persistence.
+     * Enforce the tenant-columns invariant and the hierarchy cycle-detection
+     * guard before any persistence.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return void
@@ -49,14 +49,16 @@ final class RoleObserver
     {
         $this->assertTenantColumnsInvariant($role);
 
-        if ($role->parent_id !== null) {
-            $this->assertNoHierarchyCycle($role);
+        if ($role->parent_id === null) {
+            return;
         }
+
+        $this->assertNoHierarchyCycle($role);
     }
 
     /**
-     * Capture the pre-update attribute snapshot so the paired
-     * `updated` hook can emit a complete before/after diff.
+     * Capture the pre-update attribute snapshot so the paired `updated` hook
+     * can emit a complete before/after diff.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return void
@@ -84,8 +86,8 @@ final class RoleObserver
     }
 
     /**
-     * Emit the typed `RoleUpdated` event with the before/after diff
-     * captured in the paired `updating` hook.
+     * Emit the typed `RoleUpdated` event with the before/after diff captured in
+     * the paired `updating` hook.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return void
@@ -125,13 +127,11 @@ final class RoleObserver
     }
 
     /**
-     * Enforce the both-or-neither tenant ownership invariant on
-     * save.
+     * Enforce the both-or-neither tenant ownership invariant on save.
      *
-     * A row with only one of `tenant_type` / `tenant_id` set would
-     * be invisible to the `TenantScope` global filter and to
-     * `scopeForTenant` / `scopeGlobalOnly`, silently orphaning the
-     * data. Fail loudly on save.
+     * A row with only one of `tenant_type` / `tenant_id` set would be invisible
+     * to the `TenantScope` global filter and to `scopeForTenant` /
+     * `scopeGlobalOnly`, silently orphaning the data. Fail loudly on save.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return void
@@ -149,8 +149,8 @@ final class RoleObserver
 
     /**
      * Guard the saving role against hierarchy cycles. Covers the
-     * self-referential case and the "proposed parent is already a
-     * descendant" case for existing rows whose `parent_id` changed.
+     * self-referential case and the "proposed parent is already a descendant"
+     * case for existing rows whose `parent_id` changed.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return void

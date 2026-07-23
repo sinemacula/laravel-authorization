@@ -5,14 +5,13 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Exceptions;
 
 /**
- * Thrown at boot when a permission enum case would overwrite an
- * existing Gate and the `authorization.gate.on_conflict` config entry
- * is set to `throw`.
+ * Thrown at boot when a permission enum case would overwrite an existing Gate
+ * and the `authorization.gate.on_conflict` config entry is set to `throw`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-class GateConflictException extends \RuntimeException
+final class GateConflictException extends \RuntimeException
 {
     /**
      * Create a new exception instance.
@@ -23,7 +22,6 @@ class GateConflictException extends \RuntimeException
 
         /** Permission whose Gate registration collided with an existing. */
         private readonly string $permission,
-
     ) {
         parent::__construct(
             "Gate '{$permission}' is already registered and authorization.gate.on_conflict is set to 'throw'.",

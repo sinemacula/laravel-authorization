@@ -11,15 +11,15 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
+use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
+use SineMacula\Laravel\Authorization\Concerns\HasRoles;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
-use SineMacula\Laravel\Authorization\Traits\HasPermissions;
-use SineMacula\Laravel\Authorization\Traits\HasPolicies;
-use SineMacula\Laravel\Authorization\Traits\HasRoles;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -266,9 +266,8 @@ final class TemporalGrantsTest extends TestCase
      */
     public function testCachedRolesExpireWithTemporalGrantWithoutManualForget(): void
     {
-        // Wire a persistent array-backed cache so the entry
-        // survives a memo reset and the TTL bound is the only
-        // thing governing visibility.
+        // Wire a persistent array-backed cache so the entry survives a memo
+        // reset and the TTL bound is the only thing governing visibility.
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make('config'); // @phpstan-ignore method.nonObject
         $config->set('authorization.cache.store', 'array');
@@ -289,18 +288,17 @@ final class TemporalGrantsTest extends TestCase
         Carbon::setTestNow('2026-07-01 12:00:00');
         $user->assignRole('oncall', expiresAt: Carbon::parse('2026-07-01 12:05:00'));
 
-        // Prime the persistent entry at t=12:00, bounded to
-        // ~299s (5 minutes minus the shave).
+        // Prime the persistent entry at t=12:00, bounded to ~299s (5 minutes
+        // minus the shave).
         self::assertSame(['oncall'], $user->fresh()?->getRoles());
 
-        // Walk past the expiry — the TTL bound means the stored
-        // entry has elapsed even though no mutation event fired.
+        // Walk past the expiry — the TTL bound means the stored entry has
+        // elapsed even though no mutation event fired.
         Carbon::setTestNow('2026-07-01 12:10:00');
 
-        // A fresh principal instance drops the in-memory memo so
-        // the persistent tier is the sole source — its entry is
-        // now expired and the resolver observes the DB-filtered
-        // empty set.
+        // A fresh principal instance drops the in-memory memo so the persistent
+        // tier is the sole source — its entry is now expired and the resolver
+        // observes the DB-filtered empty set.
         $fresh = $user->fresh();
         self::assertNotNull($fresh);
 
@@ -331,9 +329,13 @@ final class TemporalGrantsTest extends TestCase
     {
         Carbon::setTestNow(Carbon::parse($instant));
 
-        if ($this->app->bound(ResolutionCache::class)) { // @phpstan-ignore method.nonObject
-            $this->app->make(ResolutionCache::class)->forget($principal); // @phpstan-ignore method.nonObject
+        $app = $this->app;
+
+        if ($app === null || !$app->bound(ResolutionCache::class)) {
+            return;
         }
+
+        $app->make(ResolutionCache::class)->forget($principal);
     }
 
     /**

@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Foundation\Testing\RefreshDatabaseState;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -40,10 +41,10 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     protected function setUp(): void
     {
         // This suite overrides `authorization.tables.*` to use the `auth_`
-        // prefix (see defineEnvironment), so the migrated schema differs
-        // from the shared default. Flip the RefreshDatabase migration flag
-        // back to false to force `migrate:fresh` under this suite's config.
-        \Illuminate\Foundation\Testing\RefreshDatabaseState::$migrated = false;
+        // prefix (see defineEnvironment), so the migrated schema differs from
+        // the shared default. Flip the RefreshDatabase migration flag back to
+        // false to force `migrate:fresh` under this suite's config.
+        RefreshDatabaseState::$migrated = false;
 
         parent::setUp();
 
@@ -69,7 +70,7 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
         // Flip the RefreshDatabase migration flag back to false so the next
         // test re-runs `migrate:fresh` under its own `authorization.tables.*`
         // config rather than inheriting this suite's `auth_`-prefixed schema.
-        \Illuminate\Foundation\Testing\RefreshDatabaseState::$migrated = false;
+        RefreshDatabaseState::$migrated = false;
     }
 
     /**
@@ -119,10 +120,10 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
             ['id' => 2, 'name' => 'b:do', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
         ]);
 
-        // Unmappable rows interleaved before and after mappable
-        // rows — a `break` mutation would stop processing after
-        // the first unmappable row and miss the later mappable
-        // one, distinguishing it from the real `continue`.
+        // Unmappable rows interleaved before and after mappable rows — a
+        // `break` mutation would stop processing after the first unmappable row
+        // and miss the later mappable one, distinguishing it from the real
+        // `continue`.
         DB::table('role_has_permissions')->insert([
             ['permission_id' => 999, 'role_id' => 1],    // unmappable permission
             ['permission_id' => 1, 'role_id' => 1],      // mappable
@@ -148,8 +149,8 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
             ['id' => 2, 'name' => 'editor', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
         ]);
 
-        // Unmappable row before a mappable one so a `break`
-        // mutation would skip the mappable row.
+        // Unmappable row before a mappable one so a `break` mutation would skip
+        // the mappable row.
         DB::table('model_has_roles')->insert([
             ['role_id' => 999, 'model_type' => 'App\User', 'model_id' => 7],
             ['role_id' => 1, 'model_type' => 'App\User', 'model_id' => 8],
@@ -173,8 +174,8 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
             ['id' => 2, 'name' => 'b:do', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
         ]);
 
-        // Unmappable row before a mappable one so a `break`
-        // mutation would skip the mappable row.
+        // Unmappable row before a mappable one so a `break` mutation would skip
+        // the mappable row.
         DB::table('model_has_permissions')->insert([
             ['permission_id' => 999, 'model_type' => 'App\User', 'model_id' => 7],
             ['permission_id' => 1, 'model_type' => 'App\User', 'model_id' => 8],
@@ -201,9 +202,8 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
         self::assertSame(0, $exitCode);
 
         // The migration summary table is rendered with each row
-        // `[table, count]`. An initial value other than 0 would
-        // surface as a non-zero count for the otherwise-empty
-        // source schema.
+        // `[table, count]`. An initial value other than 0 would surface as a
+        // non-zero count for the otherwise-empty source schema.
         self::assertStringContainsString('Migration summary', $output);
         self::assertMatchesRegularExpression('/roles\s+\|\s+0\s+/', $output);
         self::assertMatchesRegularExpression('/permissions\s+\|\s+0\s+/', $output);
@@ -354,7 +354,7 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
         self::assertStringContainsString('model_has_permissions', $output);
 
         // Restore for teardown.
-        Schema::create('model_has_permissions', static function (\Illuminate\Database\Schema\Blueprint $table): void {
+        Schema::create('model_has_permissions', static function (Blueprint $table): void {
             $table->unsignedInteger('permission_id');
             $table->string('model_type');
             $table->unsignedBigInteger('model_id');

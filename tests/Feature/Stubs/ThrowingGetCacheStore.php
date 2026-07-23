@@ -39,6 +39,7 @@ final class ThrowingGetCacheStore implements Store
      *
      * @throws \RuntimeException
      */
+    #[\Override]
     public function get(mixed $key): mixed
     {
         $this->getCalls++;
@@ -49,18 +50,24 @@ final class ThrowingGetCacheStore implements Store
     /**
      * @param  array<int, string>  $keys
      * @return array<string, mixed>
+     *
+     * @phpstan-ignore method.childParameterType
      */
-    public function many(array $keys): array // @phpstan-ignore method.childParameterType
+    #[\Override]
+    public function many(array $keys): array
     {
         return [];
     }
 
     /**
+     * @imperative
+     *
      * @param  mixed  $key
      * @param  mixed  $value
      * @param  mixed  $seconds
      * @return bool
      */
+    #[\Override]
     public function put(mixed $key, mixed $value, mixed $seconds): bool
     {
         $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset
@@ -69,11 +76,16 @@ final class ThrowingGetCacheStore implements Store
     }
 
     /**
+     * @imperative
+     *
      * @param  array<string, mixed>  $values
      * @param  mixed  $seconds
      * @return bool
+     *
+     * @phpstan-ignore method.childParameterType
      */
-    public function putMany(array $values, mixed $seconds): bool // @phpstan-ignore method.childParameterType
+    #[\Override]
+    public function putMany(array $values, mixed $seconds): bool
     {
         return true;
     }
@@ -83,6 +95,7 @@ final class ThrowingGetCacheStore implements Store
      * @param  mixed  $value
      * @return bool|int
      */
+    #[\Override]
     public function increment(mixed $key, mixed $value = 1): bool|int
     {
         return false;
@@ -93,16 +106,20 @@ final class ThrowingGetCacheStore implements Store
      * @param  mixed  $value
      * @return bool|int
      */
+    #[\Override]
     public function decrement(mixed $key, mixed $value = 1): bool|int
     {
         return false;
     }
 
     /**
+     * @imperative
+     *
      * @param  mixed  $key
      * @param  mixed  $value
      * @return bool
      */
+    #[\Override]
     public function forever(mixed $key, mixed $value): bool
     {
         $this->storage[$key] = $value; // @phpstan-ignore offsetAccess.invalidOffset
@@ -111,9 +128,16 @@ final class ThrowingGetCacheStore implements Store
     }
 
     /**
+     * The store contract only declares `touch()` from Laravel 13, so the
+     * override attribute is omitted to keep the stub loadable on Laravel 12.
+     *
+     * @imperative
+     *
      * @param  mixed  $key
      * @param  mixed  $ttl
      * @return bool
+     *
+     * @phpstan-ignore-next-line method.missingOverride
      */
     public function touch(mixed $key, mixed $ttl): bool
     {
@@ -124,6 +148,7 @@ final class ThrowingGetCacheStore implements Store
      * @param  mixed  $key
      * @return bool
      */
+    #[\Override]
     public function forget(mixed $key): bool
     {
         $this->forgetCalls++;
@@ -135,6 +160,7 @@ final class ThrowingGetCacheStore implements Store
     /**
      * @return bool
      */
+    #[\Override]
     public function flush(): bool
     {
         $this->storage = [];
@@ -145,6 +171,7 @@ final class ThrowingGetCacheStore implements Store
     /**
      * @return string
      */
+    #[\Override]
     public function getPrefix(): string
     {
         return '';

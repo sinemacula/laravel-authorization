@@ -9,15 +9,15 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 /**
  * Immutable policy statement.
  *
- * A statement binds an effect (allow or deny) to one or more action
- * and resource patterns and an optional condition map. The evaluator
- * walks every statement in order, asking each one whether it applies
- * to the inbound `(action, resource, context)` tuple.
+ * A statement binds an effect (allow or deny) to one or more action and
+ * resource patterns and an optional condition map. The evaluator walks every
+ * statement in order, asking each one whether it applies to the inbound
+ * `(action, resource, context)` tuple.
  *
- * Conditions are expressed as a map of context keys to an operator
- * map, for example `['tenant' => ['eq' => 'org-1']]`. Missing context
- * keys cause the condition to fail without throwing, and unknown
- * operators short-circuit to false while emitting a debug log line.
+ * Conditions are expressed as a map of context keys to an operator map, for
+ * example `['tenant' => ['eq' => 'org-1']]`. Missing context keys cause the
+ * condition to fail without throwing, and unknown operators short-circuit to
+ * false while emitting a debug log line.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -45,7 +45,6 @@ final readonly class Statement
 
         /** Condition map keyed by context key; each value is an operator map. */
         public array $conditions = [],
-
     ) {}
 
     /**
@@ -87,13 +86,12 @@ final readonly class Statement
     }
 
     /**
-     * Determine whether the statement applies to the supplied action
-     * and optional resource.
+     * Determine whether the statement applies to the supplied action and
+     * optional resource.
      *
-     * When an interpolator is provided, resource patterns are
-     * interpolated before fnmatch comparison, allowing `${...}`
-     * tokens in persisted policy documents to resolve at evaluation
-     * time.
+     * When an interpolator is provided, resource patterns are interpolated
+     * before fnmatch comparison, allowing `${...}` tokens in persisted policy
+     * documents to resolve at evaluation time.
      *
      * @param  string  $action
      * @param  string|null  $resource
@@ -102,13 +100,8 @@ final readonly class Statement
      * @param  array<string, mixed>  $context
      * @return bool
      */
-    public function matches(
-        string $action,
-        ?string $resource = null,
-        ?ContextInterpolator $interpolator = null,
-        ?object $principal = null,
-        array $context = [],
-    ): bool {
+    public function matches(string $action, ?string $resource = null, ?ContextInterpolator $interpolator = null, ?object $principal = null, array $context = []): bool
+    {
         if (!$this->matchesAction($action)) {
             return false;
         }
@@ -119,9 +112,9 @@ final readonly class Statement
     /**
      * Evaluate every condition against the supplied context.
      *
-     * When an interpolator is provided, string operands within the
-     * condition map are interpolated before operator evaluation,
-     * allowing `${...}` tokens in persisted policy documents.
+     * When an interpolator is provided, string operands within the condition
+     * map are interpolated before operator evaluation, allowing `${...}` tokens
+     * in persisted policy documents.
      *
      * @param  array<string, mixed>  $context
      * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null  $interpolator
@@ -129,14 +122,10 @@ final readonly class Statement
      * @param  string|null  $resource
      * @return bool
      */
-    public function evaluateConditions(
-        array $context,
-        ?ContextInterpolator $interpolator = null,
-        ?object $principal = null,
-        ?string $resource = null,
-    ): bool {
+    public function conditionsSatisfiedBy(array $context, ?ContextInterpolator $interpolator = null, ?object $principal = null, ?string $resource = null): bool
+    {
         foreach ($this->conditions as $key => $expected) {
-            if (!$this->evaluateConditionEntry($key, $expected, $context, $interpolator, $principal, $resource)) {
+            if (!$this->matchesConditionEntry($key, $expected, $context, $interpolator, $principal, $resource)) {
                 return false;
             }
         }
@@ -155,7 +144,7 @@ final readonly class Statement
      * @param  string|null  $resource
      * @return bool
      */
-    private function evaluateConditionEntry(
+    private function matchesConditionEntry(
         int|string $key,
         mixed $expected,
         array $context,
@@ -171,7 +160,7 @@ final readonly class Statement
             ? self::interpolateOperands($expected, $interpolator, $principal, $resource, $context)
             : $expected;
 
-        return $this->evaluateCondition($interpolated, $context[$key]);
+        return $this->matchesCondition($interpolated, $context[$key]);
     }
 
     /**
@@ -286,10 +275,10 @@ final readonly class Statement
     /**
      * Determine whether the action matches any configured pattern.
      *
-     * Patterns use `fnmatch` with `FNM_NOESCAPE` so backslashes are
-     * compared literally — fully-qualified class names appearing in
-     * action or resource strings (`App\Models\Post:42`) stay intact
-     * instead of being consumed as shell-glob escape sequences.
+     * Patterns use `fnmatch` with `FNM_NOESCAPE` so backslashes are compared
+     * literally — fully-qualified class names appearing in action or resource
+     * strings (`App\Models\Post:42`) stay intact instead of being consumed as
+     * shell-glob escape sequences.
      *
      * @param  string  $action
      * @return bool
@@ -308,8 +297,8 @@ final readonly class Statement
     /**
      * Determine whether the resource matches any configured pattern.
      *
-     * When an interpolator is supplied, each resource pattern is
-     * interpolated before the fnmatch comparison.
+     * When an interpolator is supplied, each resource pattern is interpolated
+     * before the fnmatch comparison.
      *
      * @param  string  $resource
      * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null  $interpolator
@@ -317,12 +306,8 @@ final readonly class Statement
      * @param  array<string, mixed>  $context
      * @return bool
      */
-    private function matchesResource(
-        string $resource,
-        ?ContextInterpolator $interpolator = null,
-        ?object $principal = null,
-        array $context = [],
-    ): bool {
+    private function matchesResource(string $resource, ?ContextInterpolator $interpolator = null, ?object $principal = null, array $context = []): bool
+    {
         foreach ($this->resources as $pattern) {
             $resolved = $interpolator !== null
                 ? $interpolator->interpolate($pattern, $principal, $resource, $context)
@@ -339,9 +324,9 @@ final readonly class Statement
     /**
      * Recursively interpolate string operands within a condition payload.
      *
-     * If the payload is a plain string, it is interpolated directly.
-     * If it is an array (operator map), every string value within the
-     * array is interpolated. Non-string values pass through unchanged.
+     * If the payload is a plain string, it is interpolated directly. If it is
+     * an array (operator map), every string value within the array is
+     * interpolated. Non-string values pass through unchanged.
      *
      * @param  mixed  $expected
      * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator  $interpolator
@@ -350,13 +335,8 @@ final readonly class Statement
      * @param  array<string, mixed>  $context
      * @return mixed
      */
-    private static function interpolateOperands(
-        mixed $expected,
-        ContextInterpolator $interpolator,
-        ?object $principal,
-        ?string $resource,
-        array $context,
-    ): mixed {
+    private static function interpolateOperands(mixed $expected, ContextInterpolator $interpolator, ?object $principal, ?string $resource, array $context): mixed
+    {
         if (\is_string($expected)) {
             return $interpolator->interpolate($expected, $principal, $resource, $context);
         }
@@ -383,14 +363,14 @@ final readonly class Statement
      * @param  mixed  $actual
      * @return bool
      */
-    private function evaluateCondition(mixed $expected, mixed $actual): bool
+    private function matchesCondition(mixed $expected, mixed $actual): bool
     {
         if (!\is_array($expected)) {
             return $expected === $actual;
         }
 
         foreach ($expected as $operator => $operand) {
-            if (!\is_string($operator) || !self::evaluateOperator($operator, $operand, $actual)) {
+            if (!\is_string($operator) || !self::matchesOperator($operator, $operand, $actual)) {
                 return false;
             }
         }
@@ -406,42 +386,87 @@ final readonly class Statement
      * @param  mixed  $actual
      * @return bool
      */
-    private static function evaluateOperator(string $operator, mixed $operand, mixed $actual): bool
+    private static function matchesOperator(string $operator, mixed $operand, mixed $actual): bool
     {
         return match ($operator) {
-            'eq'     => $actual === $operand,
-            'neq'    => $actual !== $operand,
-            'in'     => \is_array($operand) && \in_array($actual, $operand, true),
-            'not_in' => \is_array($operand) && !\in_array($actual, $operand, true),
+            'eq',
+            'neq',
+            'in',
+            'not_in',
+            'null',
+            'not_null' => self::matchesEqualityOperator($operator, $operand, $actual),
             'cidr',
             'starts_with',
             'ends_with',
-            'string_like' => self::evaluateStringOperator($operator, $operand, $actual),
-            'before'      => ConditionEvaluator::compareTimes($actual, $operand, '<'),
-            'after'       => ConditionEvaluator::compareTimes($actual, $operand, '>'),
-            'between'     => ConditionEvaluator::matchesBetween($actual, $operand),
-            'null'        => $actual === null,
-            'not_null'    => $actual !== null,
-            'gt'          => ConditionEvaluator::compareNumeric($actual, $operand, '>'),
-            'gte'         => ConditionEvaluator::compareNumeric($actual, $operand, '>='),
-            'lt'          => ConditionEvaluator::compareNumeric($actual, $operand, '<'),
-            'lte'         => ConditionEvaluator::compareNumeric($actual, $operand, '<='),
-            'bool'        => ConditionEvaluator::matchesBool($actual, $operand),
-            default       => ConditionEvaluator::logUnknownOperator($operator),
+            'string_like' => self::matchesStringOperator($operator, $operand, $actual),
+            'before',
+            'after',
+            'between',
+            'gt',
+            'gte',
+            'lt',
+            'lte'   => self::matchesComparisonOperator($operator, $operand, $actual),
+            'bool'  => ConditionEvaluator::matchesBool($actual, $operand),
+            default => ConditionEvaluator::logUnknownOperator($operator),
         };
     }
 
     /**
-     * Evaluate the string-predicate operators (`cidr`, `starts_with`,
-     * `ends_with`, `string_like`) — all of which require both sides
-     * to be strings before dispatching to their concrete predicate.
+     * Evaluate the equality and membership operators (`eq`, `neq`, `in`,
+     * `not_in`, `null`, `not_null`) against the context value.
      *
      * @param  string  $operator
      * @param  mixed  $operand
      * @param  mixed  $actual
      * @return bool
      */
-    private static function evaluateStringOperator(string $operator, mixed $operand, mixed $actual): bool
+    private static function matchesEqualityOperator(string $operator, mixed $operand, mixed $actual): bool
+    {
+        return match ($operator) {
+            'eq'       => $actual === $operand,
+            'neq'      => $actual !== $operand,
+            'in'       => \is_array($operand) && \in_array($actual, $operand, true),
+            'not_in'   => \is_array($operand) && !\in_array($actual, $operand, true),
+            'null'     => $actual === null,
+            'not_null' => $actual !== null,
+            default    => false,
+        };
+    }
+
+    /**
+     * Evaluate the temporal and numeric comparison operators (`before`,
+     * `after`, `between`, `gt`, `gte`, `lt`, `lte`) against the context value.
+     *
+     * @param  string  $operator
+     * @param  mixed  $operand
+     * @param  mixed  $actual
+     * @return bool
+     */
+    private static function matchesComparisonOperator(string $operator, mixed $operand, mixed $actual): bool
+    {
+        return match ($operator) {
+            'before'  => ConditionEvaluator::matchesTimeComparison($actual, $operand, '<'),
+            'after'   => ConditionEvaluator::matchesTimeComparison($actual, $operand, '>'),
+            'between' => ConditionEvaluator::matchesBetween($actual, $operand),
+            'gt'      => ConditionEvaluator::matchesNumericComparison($actual, $operand, '>'),
+            'gte'     => ConditionEvaluator::matchesNumericComparison($actual, $operand, '>='),
+            'lt'      => ConditionEvaluator::matchesNumericComparison($actual, $operand, '<'),
+            'lte'     => ConditionEvaluator::matchesNumericComparison($actual, $operand, '<='),
+            default   => false,
+        };
+    }
+
+    /**
+     * Evaluate the string-predicate operators (`cidr`, `starts_with`,
+     * `ends_with`, `string_like`) — all of which require both sides to be
+     * strings before dispatching to their concrete predicate.
+     *
+     * @param  string  $operator
+     * @param  mixed  $operand
+     * @param  mixed  $actual
+     * @return bool
+     */
+    private static function matchesStringOperator(string $operator, mixed $operand, mixed $actual): bool
     {
         if (!\is_string($actual) || !\is_string($operand)) {
             return false;

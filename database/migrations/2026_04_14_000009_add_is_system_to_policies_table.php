@@ -3,11 +3,10 @@
 /**
  * Add the `is_system` column to the `policies` table.
  *
- * Mirrors the platform-protection marker that ships on the `roles`
- * table: a policy flagged system refuses delete / rename unless
- * the model-layer `forceSystem()` escape hatch is invoked, so a
- * platform-shipped `break-glass` policy cannot be casually removed
- * by a caller with raw Eloquent access.
+ * Mirrors the platform-protection marker that ships on the `roles` table: a
+ * policy flagged system refuses delete / rename unless the model-layer
+ * `forceSystem()` escape hatch is invoked, so a platform-shipped `break-glass`
+ * policy cannot be casually removed by a caller with raw Eloquent access.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,9 +30,9 @@ return new class extends Migration {
         $table = config('authorization.tables.policies', 'policies');
 
         Schema::table($table, static function (Blueprint $table): void {
-            // Platform-protection marker. Policies flagged system
-            // refuse delete / rename unless the model-layer
-            // `forceSystem()` escape hatch is invoked.
+            // Platform-protection marker. Policies flagged system refuse delete
+            // / rename unless the model-layer `forceSystem()` escape hatch is
+            // invoked.
             $table->boolean('is_system')->default(false)->after('description');
         });
     }

@@ -52,10 +52,11 @@ final class ChannelThrowingLogger extends AbstractLogger
 
     /**
      * @param  string|\Stringable  $message
-     * @param  array  $context
+     * @param  array<mixed>  $context
      * @return void
      */
-    public function warning(string|\Stringable $message, array $context = []): void // @phpstan-ignore missingType.iterableValue
+    #[\Override]
+    public function warning(string|\Stringable $message, array $context = []): void
     {
         $this->warningCalls++;
         $this->lastMessage = (string) $message;
@@ -65,9 +66,9 @@ final class ChannelThrowingLogger extends AbstractLogger
     /**
      * @param  mixed  $level
      * @param  string|\Stringable  $message
-     * @param  array  $context
+     * @param  array<mixed>  $context
      * @return void
      */
-    public function log(mixed $level, string|\Stringable $message, array $context = []): void // @phpstan-ignore missingType.iterableValue
-    {}
+    #[\Override]
+    public function log(mixed $level, string|\Stringable $message, array $context = []): void {}
 }

@@ -5,16 +5,13 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Facades;
 
 use Illuminate\Support\Facades\Facade;
-use SineMacula\Laravel\Authorization\AuthorizationManager;
 
 /**
  * Authorization facade.
  *
- * Static proxy to the container-bound authorization manager. Every
- * call is forwarded to a fresh manager scope so `for()` /
- * `withPolicies()` chains do not leak between requests.
- *
- * @formatter:off
+ * Static proxy to the container-bound authorization manager. Every call is
+ * forwarded to a fresh manager scope so `for()` / `withPolicies()` chains do
+ * not leak between requests.
  *
  * @method static bool can(string $action, string|null $resource = null, array<string, mixed> $context = [])
  * @method static void authorize(string $action, string|null $resource = null, array<string, mixed> $context = [])
@@ -27,20 +24,19 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
  * @method static array<string, bool> effectivePermissions(array<string, mixed> $context = [])
  * @method static object|null currentPrincipal()
  *
- * @formatter:on
- *
- * @see AuthorizationManager
- *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
+ *
+ * @see AuthorizationManager
  */
-class Authorization extends Facade
+final class Authorization extends Facade
 {
     /**
      * Return the container-binding key for the facade accessor.
      *
      * @return string
      */
+    #[\Override]
     protected static function getFacadeAccessor(): string
     {
         return 'authorization';

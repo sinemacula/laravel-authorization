@@ -17,7 +17,7 @@ use Illuminate\Database\Eloquent\Model;
  *
  * @SuppressWarnings("php:S1192")
  */
-class StubTenant extends Model
+final class StubTenant extends Model
 {
     /** @var bool Disable auto-incrementing — stubs use explicit IDs. */
     public $incrementing = false;

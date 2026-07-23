@@ -5,9 +5,9 @@ declare(strict_types = 1);
 namespace Tests\Unit;
 
 use Illuminate\Container\Container;
+use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\Facades\Facade;
-use Mockery;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
@@ -70,7 +70,7 @@ final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
 
         $this->invokePrivateOn(new EventListenerRegistrar($app), 'registerCacheInvalidationListeners');
 
-        self::assertFalse($app->bound(\Illuminate\Contracts\Events\Dispatcher::class));
+        self::assertFalse($app->bound(Dispatcher::class));
     }
 
     /**
@@ -87,7 +87,7 @@ final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
         // No exception and no listener wiring attempt.
         $this->invokePrivateOn(new EventListenerRegistrar($app), 'registerOctaneResetListener');
 
-        self::assertFalse($app->bound(\Illuminate\Contracts\Events\Dispatcher::class));
+        self::assertFalse($app->bound(Dispatcher::class));
     }
 
     /**

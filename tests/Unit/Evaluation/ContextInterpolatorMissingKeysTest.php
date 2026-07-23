@@ -37,7 +37,6 @@ final class ContextInterpolatorMissingKeysTest extends TestCase
         $interpolator = new ContextInterpolator;
         $principal    = new \stdClass;
         // No `id` property set.
-
         $interpolated = $interpolator->interpolate(
             'id:${principal.id}',
             $principal,

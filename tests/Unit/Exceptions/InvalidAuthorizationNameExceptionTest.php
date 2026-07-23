@@ -7,8 +7,8 @@ namespace Tests\Unit\Exceptions;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Concerns\ValidatesAuthorizationName;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameException;
-use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
 use Tests\Unit\Exceptions\Stubs\StubAuthorizationEntity;
 
 /**
@@ -29,6 +29,7 @@ use Tests\Unit\Exceptions\Stubs\StubAuthorizationEntity;
 #[CoversTrait(ValidatesAuthorizationName::class)]
 final class InvalidAuthorizationNameExceptionTest extends TestCase
 {
+    /** @var string Malformed name carrying the whitespace the validator rejects. */
     private const string HAS_SPACE = 'has space';
 
     /**

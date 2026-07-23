@@ -2,7 +2,11 @@
 
 declare(strict_types = 1);
 
+use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
+use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
 
 return [
 
@@ -19,9 +23,9 @@ return [
     */
 
     'models' => [
-        'role'       => \SineMacula\Laravel\Authorization\Models\Role::class,
-        'permission' => \SineMacula\Laravel\Authorization\Models\Permission::class,
-        'policy'     => \SineMacula\Laravel\Authorization\Models\Policy::class,
+        'role'       => Role::class,
+        'permission' => Permission::class,
+        'policy'     => Policy::class,
     ],
 
     /*
@@ -119,9 +123,7 @@ return [
     |
     */
 
-    'permission_enums' => [
-        // \App\Enums\Permission::class,
-    ],
+    'permission_enums' => [],
 
     /*
     |---------------------------------------------------------------------------
@@ -136,9 +138,7 @@ return [
     |
     */
 
-    'permission_providers' => [
-        // \App\Authorization\BlogPermissionProvider::class,
-    ],
+    'permission_providers' => [],
 
     /*
     |---------------------------------------------------------------------------
@@ -198,7 +198,7 @@ return [
     |
     */
 
-    'tenant_resolver' => \SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver::class,
+    'tenant_resolver' => NullTenantResolver::class,
 
     /*
     |---------------------------------------------------------------------------

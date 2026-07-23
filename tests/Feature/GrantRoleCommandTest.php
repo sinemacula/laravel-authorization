@@ -48,9 +48,9 @@ final class GrantRoleCommandTest extends TestCase
         $freshUser = $user->fresh();
         self::assertTrue($freshUser->hasRole('editor'));
 
-        // Reset the shared morph map — `morphMap([])` merges rather
-        // than replaces, so without the `false` second arg the
-        // `stub_identity` alias leaks into later tests in the run.
+        // Reset the shared morph map — `morphMap([])` merges rather than
+        // replaces, so without the `false` second arg the `stub_identity` alias
+        // leaks into later tests in the run.
         Relation::morphMap([], false);
     }
 
@@ -241,8 +241,8 @@ final class GrantRoleCommandTest extends TestCase
      */
     public function testFailsWhenModelNotAuthorizable(): void
     {
-        // Use the Role model which IS an Eloquent model but does
-        // NOT implement AuthorizableIdentity.
+        // Use the Role model which IS an Eloquent model but does NOT implement
+        // AuthorizableIdentity.
         $role = Role::create([
             'id'         => 'a4a4a4a4-0000-0000-0000-000000000001',
             'name'       => 'check',

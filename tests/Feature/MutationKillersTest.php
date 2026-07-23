@@ -4,18 +4,34 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Contracts\Config\Repository;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
+use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
+use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
+use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
+use SineMacula\Laravel\Authorization\Concerns\HasRoles;
+use SineMacula\Laravel\Authorization\Concerns\ResolvesPivotExpiry;
+use SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
+use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
+use SineMacula\Laravel\Authorization\Evaluation\Policy;
+use SineMacula\Laravel\Authorization\Evaluation\Statement;
+use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged;
+use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
-use SineMacula\Laravel\Authorization\Traits\HasPermissions;
-use SineMacula\Laravel\Authorization\Traits\HasPolicies;
-use SineMacula\Laravel\Authorization\Traits\HasRoles;
-use SineMacula\Laravel\Authorization\Traits\ResolvesPivotExpiry;
+use Tests\Feature\Stubs\NonTaggableCacheStore;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -37,9 +53,9 @@ use Tests\TestCase;
  * @SuppressWarnings("php:S1448")
  */
 #[CoversClass(ResolutionCache::class)]
-#[CoversClass(\SineMacula\Laravel\Authorization\Evaluation\Statement::class)]
-#[CoversClass(\SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::class)]
-#[CoversClass(\SineMacula\Laravel\Authorization\AuthorizationManager::class)]
+#[CoversClass(Statement::class)]
+#[CoversClass(ConditionEvaluator::class)]
+#[CoversClass(AuthorizationManager::class)]
 #[CoversTrait(HasRoles::class)]
 #[CoversTrait(HasPermissions::class)]
 #[CoversTrait(HasPolicies::class)]
@@ -108,6 +124,7 @@ final class MutationKillersTest extends TestCase
             /**
              * @return mixed
              */
+            #[\Override]
             public function getKey(): mixed
             {
                 return '';
@@ -118,6 +135,7 @@ final class MutationKillersTest extends TestCase
             /**
              * @return mixed
              */
+            #[\Override]
             public function getKey(): mixed
             {
                 return new \stdClass;
@@ -150,7 +168,7 @@ final class MutationKillersTest extends TestCase
             }
         };
 
-        $now = \Illuminate\Support\Carbon::now();
+        $now = Carbon::now();
 
         $mk = static function (int $seconds) use ($now): Model {
             $model             = new class extends Model {};
@@ -265,12 +283,12 @@ final class MutationKillersTest extends TestCase
         };
 
         $timestamp = $probe->coerce('2026-06-01 12:00:00');
-        self::assertInstanceOf(\Illuminate\Support\Carbon::class, $timestamp);
+        self::assertInstanceOf(Carbon::class, $timestamp);
         self::assertSame('2026-06-01 12:00:00', $timestamp->toDateTimeString());
 
         $source    = new \DateTimeImmutable('2025-01-01 00:00:00');
         $timestamp = $probe->coerce($source);
-        self::assertInstanceOf(\Illuminate\Support\Carbon::class, $timestamp);
+        self::assertInstanceOf(Carbon::class, $timestamp);
         self::assertSame('2025-01-01 00:00:00', $timestamp->toDateTimeString());
 
         self::assertNull($probe->coerce(null));
@@ -313,7 +331,7 @@ final class MutationKillersTest extends TestCase
             return $model;
         };
 
-        $now = \Illuminate\Support\Carbon::parse('2026-01-01 00:00:00')->getTimestamp();
+        $now = Carbon::parse('2026-01-01 00:00:00')->getTimestamp();
 
         // 30 seconds in the future.
         self::assertSame(30, $probe->seconds($mk('2026-01-01 00:00:30'), $now));
@@ -324,9 +342,9 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `authorizationGrantExpiriesEqual` compares two DateTimes by UTC timestamp
-     * and treats two nulls as equal. Pins every equality branch against
-     * mutation.
+     * `areAuthorizationGrantExpiriesEqual` compares two DateTimes by UTC
+     * timestamp and treats two nulls as equal. Pins every equality branch
+     * against mutation.
      *
      * @return void
      */
@@ -341,9 +359,9 @@ final class MutationKillersTest extends TestCase
              * @param  ?\DateTimeInterface  $r
              * @return bool
              */
-            public function equal(?\DateTimeInterface $l, ?\DateTimeInterface $r): bool
+            public function areEqual(?\DateTimeInterface $l, ?\DateTimeInterface $r): bool
             {
-                return self::authorizationGrantExpiriesEqual($l, $r);
+                return self::areAuthorizationGrantExpiriesEqual($l, $r);
             }
         };
 
@@ -351,11 +369,11 @@ final class MutationKillersTest extends TestCase
         $b = new \DateTimeImmutable('2026-06-01 12:00:00', new \DateTimeZone('UTC'));
         $c = new \DateTimeImmutable('2026-06-01 12:00:01', new \DateTimeZone('UTC'));
 
-        self::assertTrue($probe->equal(null, null));
-        self::assertFalse($probe->equal($a, null));
-        self::assertFalse($probe->equal(null, $a));
-        self::assertTrue($probe->equal($a, $b));
-        self::assertFalse($probe->equal($a, $c));
+        self::assertTrue($probe->areEqual(null, null));
+        self::assertFalse($probe->areEqual($a, null));
+        self::assertFalse($probe->areEqual(null, $a));
+        self::assertTrue($probe->areEqual($a, $b));
+        self::assertFalse($probe->areEqual($a, $c));
     }
 
     /**
@@ -378,8 +396,8 @@ final class MutationKillersTest extends TestCase
         };
 
         // Default constructor ttl is 0 (forever). `new ResolutionCache()`
-        // without explicit ttl resolves to the forever branch. Pins
-        // the default parameter value against IncrementInteger mutation.
+        // without explicit ttl resolves to the forever branch. Pins the default
+        // parameter value against IncrementInteger mutation.
         $defaultCache = new ResolutionCache(store: null);
         $defaultRef   = new \ReflectionMethod($defaultCache, 'resolveTtl');
         self::assertSame([true, 0], $defaultRef->invoke($defaultCache, null));
@@ -418,7 +436,7 @@ final class MutationKillersTest extends TestCase
         $cache = new ResolutionCache(store: null);
         self::assertFalse($cache->supportsTags());
 
-        $cache = new ResolutionCache(store: \Illuminate\Support\Facades\Cache::store('array'));
+        $cache = new ResolutionCache(store: Cache::store('array'));
         self::assertTrue($cache->supportsTags());
         // Second call exercises the memoised branch.
         self::assertTrue($cache->supportsTags());
@@ -433,7 +451,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testForgetRoleTagsFlushesTaggedStoreForNonEmptyKey(): void
     {
-        $cache     = new ResolutionCache(store: \Illuminate\Support\Facades\Cache::store('array'), prefix: 'authorization-test');
+        $cache     = new ResolutionCache(store: Cache::store('array'), prefix: 'authorization-test');
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'r1', 'guard_name' => 'web']);
@@ -448,7 +466,7 @@ final class MutationKillersTest extends TestCase
         // Flush the role's tag — subsequent read on fresh cache misses.
         $cache->forgetRoleTags($role);
 
-        $fresh     = new ResolutionCache(store: \Illuminate\Support\Facades\Cache::store('array'), prefix: 'authorization-test');
+        $fresh     = new ResolutionCache(store: Cache::store('array'), prefix: 'authorization-test');
         $calls     = 0;
         $collected = $fresh->rememberPermissions(
             $principal,
@@ -473,27 +491,27 @@ final class MutationKillersTest extends TestCase
      */
     public function testAssignRoleIsIdempotentWhenExpiryUnchanged(): void
     {
-        \Illuminate\Support\Facades\Event::fake(
-            [\SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged::class],
+        Event::fake(
+            [RoleExpiryChanged::class],
         );
 
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'idem', 'guard_name' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        // Anchor Carbon so the computed expiry is deterministic and
-        // identical across both calls — avoids wall-clock drift.
-        \Illuminate\Support\Carbon::setTestNow('2026-01-01 00:00:00');
+        // Anchor Carbon so the computed expiry is deterministic and identical
+        // across both calls — avoids wall-clock drift.
+        Carbon::setTestNow('2026-01-01 00:00:00');
 
         try {
-            $expires = \Illuminate\Support\Carbon::now()->addHour()->toDateTimeImmutable();
+            $expires = Carbon::now()->addHour()->toDateTimeImmutable();
             $user->assignRole($role, $expires);
             $user->assignRole($role, $expires);
         } finally {
-            \Illuminate\Support\Carbon::setTestNow();
+            Carbon::setTestNow();
         }
 
-        \Illuminate\Support\Facades\Event::assertNotDispatched(
-            \SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged::class,
+        Event::assertNotDispatched(
+            RoleExpiryChanged::class,
         );
     }
 
@@ -506,26 +524,26 @@ final class MutationKillersTest extends TestCase
      */
     public function testAssignRoleFiresExpiryChangedWhenWindowMoves(): void
     {
-        \Illuminate\Support\Facades\Event::fake(
-            [\SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged::class],
+        Event::fake(
+            [RoleExpiryChanged::class],
         );
 
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'moving', 'guard_name' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        // Anchor Carbon so the two expiries are computed against a
-        // fixed instant — keeps the +1h vs +2h delta deterministic.
-        \Illuminate\Support\Carbon::setTestNow('2026-01-01 00:00:00');
+        // Anchor Carbon so the two expiries are computed against a fixed
+        // instant — keeps the +1h vs +2h delta deterministic.
+        Carbon::setTestNow('2026-01-01 00:00:00');
 
         try {
-            $user->assignRole($role, \Illuminate\Support\Carbon::now()->addHour()->toDateTimeImmutable());
-            $user->assignRole($role, \Illuminate\Support\Carbon::now()->addHours(2)->toDateTimeImmutable());
+            $user->assignRole($role, Carbon::now()->addHour()->toDateTimeImmutable());
+            $user->assignRole($role, Carbon::now()->addHours(2)->toDateTimeImmutable());
         } finally {
-            \Illuminate\Support\Carbon::setTestNow();
+            Carbon::setTestNow();
         }
 
-        \Illuminate\Support\Facades\Event::assertDispatchedTimes(
-            \SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged::class,
+        Event::assertDispatchedTimes(
+            RoleExpiryChanged::class,
             1,
         );
     }
@@ -538,26 +556,26 @@ final class MutationKillersTest extends TestCase
      */
     public function testGivePermissionFiresExpiryChangedWhenWindowMoves(): void
     {
-        \Illuminate\Support\Facades\Event::fake(
-            [\SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged::class],
+        Event::fake(
+            [PermissionExpiryChanged::class],
         );
 
         $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'p:m', 'guard_name' => 'web']);
         $user       = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        // Anchor Carbon so the two expiries are computed against a
-        // fixed instant — keeps the +1h vs +2h delta deterministic.
-        \Illuminate\Support\Carbon::setTestNow('2026-01-01 00:00:00');
+        // Anchor Carbon so the two expiries are computed against a fixed
+        // instant — keeps the +1h vs +2h delta deterministic.
+        Carbon::setTestNow('2026-01-01 00:00:00');
 
         try {
-            $user->givePermission($permission, \Illuminate\Support\Carbon::now()->addHour()->toDateTimeImmutable());
-            $user->givePermission($permission, \Illuminate\Support\Carbon::now()->addHours(2)->toDateTimeImmutable());
+            $user->givePermission($permission, Carbon::now()->addHour()->toDateTimeImmutable());
+            $user->givePermission($permission, Carbon::now()->addHours(2)->toDateTimeImmutable());
         } finally {
-            \Illuminate\Support\Carbon::setTestNow();
+            Carbon::setTestNow();
         }
 
-        \Illuminate\Support\Facades\Event::assertDispatchedTimes(
-            \SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged::class,
+        Event::assertDispatchedTimes(
+            PermissionExpiryChanged::class,
             1,
         );
     }
@@ -573,7 +591,7 @@ final class MutationKillersTest extends TestCase
     public function testAuthorizationResolveGrantPivotColumnsHonoursPerPivotOverrides(): void
     {
         /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(\Illuminate\Contracts\Config\Repository::class); // @phpstan-ignore method.nonObject
+        $config = $this->app->make(Repository::class); // @phpstan-ignore method.nonObject
 
         $config->set('authorization.pivots.authorizable_roles.authorizable_type_column', 'custom_type');
         $config->set('authorization.pivots.authorizable_roles.authorizable_id_column', 'custom_id');
@@ -643,12 +661,12 @@ final class MutationKillersTest extends TestCase
      */
     public function testCacheKeyShapeIsPrefixKindMorphId(): void
     {
-        $driver = new \Tests\Feature\Stubs\NonTaggableCacheStore;
+        $driver = new NonTaggableCacheStore;
         $store  = new \Illuminate\Cache\Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'km-test');
 
-        // A principal exposing getMorphClass + getKey should key
-        // as `<prefix>:<kind>:<morph>:<id>`.
+        // A principal exposing getMorphClass + getKey should key as
+        // `<prefix>:<kind>:<morph>:<id>`.
         $principal = new class {
             /**
              * @return string
@@ -685,7 +703,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testCacheKeyShapeFallsBackToClassNameWhenMorphMissing(): void
     {
-        $driver = new \Tests\Feature\Stubs\NonTaggableCacheStore;
+        $driver = new NonTaggableCacheStore;
         $store  = new \Illuminate\Cache\Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'km');
 
@@ -716,7 +734,7 @@ final class MutationKillersTest extends TestCase
     {
         // Missing.
         $this->expectExceptionObjectShape(
-            static fn () => \SineMacula\Laravel\Authorization\Evaluation\Statement::fromArray([
+            static fn () => Statement::fromArray([
                 'actions' => ['x'],
             ]),
             \InvalidArgumentException::class,
@@ -725,7 +743,7 @@ final class MutationKillersTest extends TestCase
 
         // Present but non-string.
         $this->expectExceptionObjectShape(
-            static fn () => \SineMacula\Laravel\Authorization\Evaluation\Statement::fromArray([
+            static fn () => Statement::fromArray([
                 'effect'  => 42,
                 'actions' => ['x'],
             ]),
@@ -744,7 +762,7 @@ final class MutationKillersTest extends TestCase
     {
         // Missing.
         $this->expectExceptionObjectShape(
-            static fn () => \SineMacula\Laravel\Authorization\Evaluation\Statement::fromArray([
+            static fn () => Statement::fromArray([
                 'effect' => 'allow',
             ]),
             \InvalidArgumentException::class,
@@ -753,7 +771,7 @@ final class MutationKillersTest extends TestCase
 
         // Not array.
         $this->expectExceptionObjectShape(
-            static fn () => \SineMacula\Laravel\Authorization\Evaluation\Statement::fromArray([
+            static fn () => Statement::fromArray([
                 'effect'  => 'allow',
                 'actions' => 'x',
             ]),
@@ -763,7 +781,7 @@ final class MutationKillersTest extends TestCase
 
         // Empty array.
         $this->expectExceptionObjectShape(
-            static fn () => \SineMacula\Laravel\Authorization\Evaluation\Statement::fromArray([
+            static fn () => Statement::fromArray([
                 'effect'  => 'allow',
                 'actions' => [],
             ]),
@@ -781,7 +799,7 @@ final class MutationKillersTest extends TestCase
     public function testStatementUnknownEffectQuotesOffendingValue(): void
     {
         try {
-            \SineMacula\Laravel\Authorization\Evaluation\Statement::fromArray([
+            Statement::fromArray([
                 'effect'  => 'maybe',
                 'actions' => ['x'],
             ]);
@@ -799,7 +817,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testStatementDefaultResourcesWildcard(): void
     {
-        $statement = \SineMacula\Laravel\Authorization\Evaluation\Statement::fromArray([
+        $statement = Statement::fromArray([
             'effect'  => 'allow',
             'actions' => ['x'],
         ]);
@@ -808,22 +826,22 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `compareNumeric` returns false for non-numeric actual / operand inputs,
-     * and performs strict comparison for numeric.
+     * `matchesNumericComparison` returns false for non-numeric actual / operand
+     * inputs, and performs strict comparison for numeric values.
      *
      * @return void
      */
     public function testCompareNumericAcrossOperatorMatrix(): void
     {
-        self::assertFalse(\SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::compareNumeric('abc', 5, '>'));
-        self::assertFalse(\SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::compareNumeric(5, 'abc', '>'));
+        self::assertFalse(ConditionEvaluator::matchesNumericComparison('abc', 5, '>'));
+        self::assertFalse(ConditionEvaluator::matchesNumericComparison(5, 'abc', '>'));
 
-        self::assertTrue(\SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::compareNumeric(10, 5, '>'));
-        self::assertFalse(\SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::compareNumeric(5, 5, '>'));
-        self::assertTrue(\SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::compareNumeric(5, 5, '>='));
-        self::assertTrue(\SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::compareNumeric(5, 10, '<'));
-        self::assertTrue(\SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::compareNumeric(5, 5, '<='));
-        self::assertFalse(\SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::compareNumeric(5, 5, 'unknown'));
+        self::assertTrue(ConditionEvaluator::matchesNumericComparison(10, 5, '>'));
+        self::assertFalse(ConditionEvaluator::matchesNumericComparison(5, 5, '>'));
+        self::assertTrue(ConditionEvaluator::matchesNumericComparison(5, 5, '>='));
+        self::assertTrue(ConditionEvaluator::matchesNumericComparison(5, 10, '<'));
+        self::assertTrue(ConditionEvaluator::matchesNumericComparison(5, 5, '<='));
+        self::assertFalse(ConditionEvaluator::matchesNumericComparison(5, 5, 'unknown'));
     }
 
     /**
@@ -834,7 +852,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testMatchesBoolCoercesBothSidesSymmetrically(): void
     {
-        $cls = \SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::class;
+        $cls = ConditionEvaluator::class;
 
         self::assertTrue($cls::matchesBool(true, 'true'));
         self::assertTrue($cls::matchesBool('1', 1));
@@ -852,7 +870,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testMatchesCidrMatrix(): void
     {
-        $cls = \SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::class;
+        $cls = ConditionEvaluator::class;
 
         // Exact match with no slash.
         self::assertTrue($cls::matchesCidr('10.0.0.1', '10.0.0.1'));
@@ -877,28 +895,28 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `compareTimes` uses the `<` / `>` comparator; anything else returns
-     * false. Pins the default-arm `false` against FalseValue / MatchArmRemoval
-     * mutants.
+     * `matchesTimeComparison` uses the `<` / `>` comparator; anything else
+     * returns false. Pins the default-arm `false` against FalseValue /
+     * MatchArmRemoval mutants.
      *
      * @return void
      */
     public function testCompareTimesDefaultArmReturnsFalse(): void
     {
-        $cls = \SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::class;
+        $cls = ConditionEvaluator::class;
 
-        self::assertTrue($cls::compareTimes('2026-01-01', '2026-06-01', '<'));
-        self::assertTrue($cls::compareTimes('2026-06-01', '2026-01-01', '>'));
-        self::assertFalse($cls::compareTimes('2026-01-01', '2026-06-01', '>'));
-        self::assertFalse($cls::compareTimes('2026-06-01', '2026-01-01', '<'));
+        self::assertTrue($cls::matchesTimeComparison('2026-01-01', '2026-06-01', '<'));
+        self::assertTrue($cls::matchesTimeComparison('2026-06-01', '2026-01-01', '>'));
+        self::assertFalse($cls::matchesTimeComparison('2026-01-01', '2026-06-01', '>'));
+        self::assertFalse($cls::matchesTimeComparison('2026-06-01', '2026-01-01', '<'));
 
         // Default arm.
-        self::assertFalse($cls::compareTimes('2026-01-01', '2026-06-01', '=='));
-        self::assertFalse($cls::compareTimes('2026-01-01', '2026-06-01', 'unknown'));
+        self::assertFalse($cls::matchesTimeComparison('2026-01-01', '2026-06-01', '=='));
+        self::assertFalse($cls::matchesTimeComparison('2026-01-01', '2026-06-01', 'unknown'));
 
         // Null timestamps fail closed.
-        self::assertFalse($cls::compareTimes('not-a-time', '2026-06-01', '<'));
-        self::assertFalse($cls::compareTimes('2026-01-01', 'not-a-time', '<'));
+        self::assertFalse($cls::matchesTimeComparison('not-a-time', '2026-06-01', '<'));
+        self::assertFalse($cls::matchesTimeComparison('2026-01-01', 'not-a-time', '<'));
     }
 
     /**
@@ -910,7 +928,7 @@ final class MutationKillersTest extends TestCase
      */
     public function testMatchesBetweenRequiresBothBoundsAndInclusive(): void
     {
-        $cls = \SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator::class;
+        $cls = ConditionEvaluator::class;
 
         self::assertTrue($cls::matchesBetween('2026-06-15', ['2026-06-01', '2026-06-30']));
 
@@ -942,17 +960,17 @@ final class MutationKillersTest extends TestCase
      */
     public function testAuthorizeWritesLastDecisionOnBothOutcomes(): void
     {
-        $this->app->make(\SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore::class)->forget(); // @phpstan-ignore method.nonObject
+        $this->app->make(LastDecisionStore::class)->forget(); // @phpstan-ignore method.nonObject
 
         // Deny path — authorize() throws, lastDecision captures the result.
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'la', 'guard_name' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         try {
-            \SineMacula\Laravel\Authorization\Facades\Authorization::for($user)->authorize('forbidden:action');
+            Authorization::for($user)->authorize('forbidden:action');
             self::fail('Expected AuthorizationException.');
-        } catch (\SineMacula\Laravel\Authorization\Exceptions\AuthorizationException) {
-            $last = \SineMacula\Laravel\Authorization\Facades\Authorization::lastDecision();
+        } catch (AuthorizationException) {
+            $last = Authorization::lastDecision();
             self::assertNotNull($last);
             self::assertFalse($last->allowed);
         }
@@ -962,9 +980,9 @@ final class MutationKillersTest extends TestCase
         $role->givePermission($permission);
         $user->assignRole($role);
 
-        \SineMacula\Laravel\Authorization\Facades\Authorization::for($user->fresh())->authorize('allow:me');
+        Authorization::for($user->fresh())->authorize('allow:me');
 
-        $last = \SineMacula\Laravel\Authorization\Facades\Authorization::lastDecision();
+        $last = Authorization::lastDecision();
         self::assertNotNull($last);
         self::assertTrue($last->allowed);
     }
@@ -977,14 +995,14 @@ final class MutationKillersTest extends TestCase
      */
     public function testWithPoliciesReturnsDistinctClone(): void
     {
-        $manager = \SineMacula\Laravel\Authorization\Facades\Authorization::getFacadeRoot();
-        self::assertInstanceOf(\SineMacula\Laravel\Authorization\AuthorizationManager::class, $manager);
+        $manager = Authorization::getFacadeRoot();
+        self::assertInstanceOf(AuthorizationManager::class, $manager);
 
-        $policy = new \SineMacula\Laravel\Authorization\Evaluation\Policy(
+        $policy = new Policy(
             name: 'clone-probe',
             statements: [
-                new \SineMacula\Laravel\Authorization\Evaluation\Statement(
-                    effect: \SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect::ALLOW,
+                new Statement(
+                    effect: PolicyEffect::ALLOW,
                     actions: ['probe:clone'],
                 ),
             ],
@@ -995,8 +1013,8 @@ final class MutationKillersTest extends TestCase
         // Clones are distinct objects — pins CloneRemoval.
         self::assertNotSame($manager, $scoped);
 
-        // The scoped clone evaluates through the supplied policies
-        // and yields allow; the base does not.
+        // The scoped clone evaluates through the supplied policies and yields
+        // allow; the base does not.
         $scopedPrincipal = StubIdentity::create(['id' => (string) Str::uuid()]);
         self::assertTrue($scoped->for($scopedPrincipal)->can('probe:clone'));
         self::assertFalse($manager->for($scopedPrincipal)->can('probe:clone'));
@@ -1010,8 +1028,8 @@ final class MutationKillersTest extends TestCase
      */
     public function testAttachPolicyFiresExpiryChangedWhenWindowMoves(): void
     {
-        \Illuminate\Support\Facades\Event::fake(
-            [\SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged::class],
+        Event::fake(
+            [PolicyExpiryChanged::class],
         );
 
         $policy = \SineMacula\Laravel\Authorization\Models\Policy::create([
@@ -1021,19 +1039,19 @@ final class MutationKillersTest extends TestCase
         ]);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        // Anchor Carbon so the two expiries are computed against a
-        // fixed instant — keeps the +1h vs +2h delta deterministic.
-        \Illuminate\Support\Carbon::setTestNow('2026-01-01 00:00:00');
+        // Anchor Carbon so the two expiries are computed against a fixed
+        // instant — keeps the +1h vs +2h delta deterministic.
+        Carbon::setTestNow('2026-01-01 00:00:00');
 
         try {
-            $user->attachPolicy($policy, \Illuminate\Support\Carbon::now()->addHour()->toDateTimeImmutable());
-            $user->attachPolicy($policy, \Illuminate\Support\Carbon::now()->addHours(2)->toDateTimeImmutable());
+            $user->attachPolicy($policy, Carbon::now()->addHour()->toDateTimeImmutable());
+            $user->attachPolicy($policy, Carbon::now()->addHours(2)->toDateTimeImmutable());
         } finally {
-            \Illuminate\Support\Carbon::setTestNow();
+            Carbon::setTestNow();
         }
 
-        \Illuminate\Support\Facades\Event::assertDispatchedTimes(
-            \SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged::class,
+        Event::assertDispatchedTimes(
+            PolicyExpiryChanged::class,
             1,
         );
     }
@@ -1076,6 +1094,7 @@ final class MutationKillersTest extends TestCase
             /**
              * @return mixed
              */
+            #[\Override]
             public function getKey(): mixed
             {
                 return $this->fixedKey;

@@ -190,8 +190,7 @@ final class AuthorizationManagerBench extends BenchmarkCase
     }
 
     /**
-     * Attach the allow-and-deny benchmark policy to the given
-     * principal.
+     * Attach the allow-and-deny benchmark policy to the given principal.
      *
      * @param  \Benchmarks\Support\BenchmarkIdentity  $user
      * @return void

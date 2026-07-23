@@ -16,14 +16,13 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
 /**
  * Boot-time validator for the shipped authorization config.
  *
- * Runs from the service provider's boot phase (after every package
- * has had a chance to register its bindings) so the failure mode
- * is a clear typed exception on container boot rather than a deep
- * stack trace from the first `can()` call in production. Each
- * accepted config key is validated against the concrete contract
- * it must satisfy; the thrown
- * `InvalidAuthorizationConfigException` carries the offending
- * key and a human-readable reason.
+ * Runs from the service provider's boot phase (after every package has had a
+ * chance to register its bindings) so the failure mode is a clear typed
+ * exception on container boot rather than a deep stack trace from the first
+ * `can()` call in production. Each accepted config key is validated against the
+ * concrete contract it must satisfy; the thrown
+ * `InvalidAuthorizationConfigException` carries the offending key and a
+ * human-readable reason.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -33,8 +32,8 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
 final class ConfigValidator
 {
     /**
-     * Validate the supplied authorization config. Throws on the
-     * first failure encountered — consumers fix one key at a time.
+     * Validate the supplied authorization config. Throws on the first failure
+     * encountered — consumers fix one key at a time.
      *
      * @param  array<string, mixed>  $config
      * @param  \Illuminate\Contracts\Container\Container  $container
@@ -54,8 +53,8 @@ final class ConfigValidator
     }
 
     /**
-     * Validate that every entry in `permission_enums` resolves to
-     * a class implementing the `PermissionEnum` contract.
+     * Validate that every entry in `permission_enums` resolves to a class
+     * implementing the `PermissionEnum` contract.
      *
      * @param  mixed  $value
      * @return void
@@ -69,23 +68,38 @@ final class ConfigValidator
         }
 
         foreach ($value as $index => $class) {
-            if (!\is_string($class) || $class === '') {
-                throw new InvalidAuthorizationConfigException("authorization.permission_enums.{$index}", 'entry must be a non-empty class-string.');
-            }
-
-            if (!\class_exists($class) && !\interface_exists($class) && !\enum_exists($class)) {
-                throw new InvalidAuthorizationConfigException("authorization.permission_enums.{$index}", "class '{$class}' does not exist.");
-            }
-
-            if (!\is_subclass_of($class, PermissionEnum::class)) {
-                throw new InvalidAuthorizationConfigException("authorization.permission_enums.{$index}", "class '{$class}' does not implement " . PermissionEnum::class . '.');
-            }
+            self::validatePermissionEnumEntry($index, $class);
         }
     }
 
     /**
-     * Validate that every entry in `permission_providers` resolves
-     * to a class implementing the `PermissionProvider` contract.
+     * Validate a single `permission_enums` entry resolves to an existing type
+     * implementing the `PermissionEnum` contract.
+     *
+     * @param  int|string  $index
+     * @param  mixed  $class
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    private static function validatePermissionEnumEntry(int|string $index, mixed $class): void
+    {
+        if (!\is_string($class) || $class === '') {
+            throw new InvalidAuthorizationConfigException("authorization.permission_enums.{$index}", 'entry must be a non-empty class-string.');
+        }
+
+        if (!\class_exists($class) && !\interface_exists($class) && !\enum_exists($class)) {
+            throw new InvalidAuthorizationConfigException("authorization.permission_enums.{$index}", "class '{$class}' does not exist.");
+        }
+
+        if (!\is_subclass_of($class, PermissionEnum::class)) {
+            throw new InvalidAuthorizationConfigException("authorization.permission_enums.{$index}", "class '{$class}' does not implement " . PermissionEnum::class . '.');
+        }
+    }
+
+    /**
+     * Validate that every entry in `permission_providers` resolves to a class
+     * implementing the `PermissionProvider` contract.
      *
      * @param  mixed  $value
      * @return void
@@ -116,8 +130,8 @@ final class ConfigValidator
     }
 
     /**
-     * Validate that `gate.on_conflict` is one of the three accepted
-     * sentinels backing `GateConflictMode`.
+     * Validate that `gate.on_conflict` is one of the three accepted sentinels
+     * backing `GateConflictMode`.
      *
      * @param  mixed  $value
      * @return void
@@ -143,8 +157,8 @@ final class ConfigValidator
     }
 
     /**
-     * Validate that `principal_resolver` resolves to a class
-     * implementing `PrincipalResolver`.
+     * Validate that `principal_resolver` resolves to a class implementing
+     * `PrincipalResolver`.
      *
      * @param  mixed  $value
      * @return void
@@ -191,8 +205,8 @@ final class ConfigValidator
     }
 
     /**
-     * Validate that `policy_store`, when set, resolves to a class
-     * implementing `PolicyStore`.
+     * Validate that `policy_store`, when set, resolves to a class implementing
+     * `PolicyStore`.
      *
      * @param  mixed  $value
      * @return void
@@ -213,10 +227,10 @@ final class ConfigValidator
     }
 
     /**
-     * Validate that `cache.store`, when set, resolves through the
-     * Laravel cache manager. Uses a try/catch because the cache
-     * manager throws `InvalidArgumentException` on an unknown
-     * store name — we swap that for the typed config exception.
+     * Validate that `cache.store`, when set, resolves through the Laravel cache
+     * manager. Uses a try/catch because the cache manager throws
+     * `InvalidArgumentException` on an unknown store name — we swap that for
+     * the typed config exception.
      *
      * @param  mixed  $value
      * @param  \Illuminate\Contracts\Container\Container  $container
@@ -246,8 +260,8 @@ final class ConfigValidator
     }
 
     /**
-     * Shared contract-implementation check for
-     * `principal_resolver` and `policy_store`.
+     * Shared contract-implementation check for `principal_resolver` and
+     * `policy_store`.
      *
      * @param  mixed  $value
      * @param  class-string  $contract
@@ -272,13 +286,13 @@ final class ConfigValidator
     }
 
     /**
-     * Render a short debug description of a mixed value for use
-     * inside exception messages.
+     * Render a short debug description of a mixed value for use inside
+     * exception messages.
      *
-     * Every value — scalar or otherwise — is rendered in the same
-     * shape: the literal followed by the parenthesised debug type.
-     * Operators grepping production logs for misconfiguration get
-     * predictable output regardless of the value's runtime type.
+     * Every value — scalar or otherwise — is rendered in the same shape: the
+     * literal followed by the parenthesised debug type. Operators grepping
+     * production logs for misconfiguration get predictable output regardless of
+     * the value's runtime type.
      *
      * @param  mixed  $value
      * @return string

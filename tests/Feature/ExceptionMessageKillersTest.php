@@ -7,7 +7,10 @@ namespace Tests\Feature;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
+use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
+use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
+use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizationMiddlewareMisconfiguredException;
 use Tests\TestCase;
 
 /**
@@ -24,8 +27,8 @@ use Tests\TestCase;
  */
 #[CoversClass(ConfigValidator::class)]
 #[CoversClass(InvalidAuthorizationConfigException::class)]
-#[CoversClass(\SineMacula\Laravel\Authorization\Http\Middleware\AuthorizationMiddlewareMisconfiguredException::class)]
-#[CoversClass(\SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException::class)]
+#[CoversClass(AuthorizationMiddlewareMisconfiguredException::class)]
+#[CoversClass(GuardMismatchException::class)]
 final class ExceptionMessageKillersTest extends TestCase
 {
     /**
@@ -86,7 +89,7 @@ final class ExceptionMessageKillersTest extends TestCase
             self::fail('Expected InvalidAuthorizationConfigException.');
         } catch (InvalidAuthorizationConfigException $exception) {
             self::assertStringContainsString('class \'stdClass\' does not implement', $exception->getMessage());
-            self::assertStringContainsString(\SineMacula\Laravel\Authorization\Contracts\PermissionEnum::class, $exception->getMessage());
+            self::assertStringContainsString(PermissionEnum::class, $exception->getMessage());
             self::assertStringEndsWith('.', $exception->getMessage());
         }
     }
@@ -182,7 +185,7 @@ final class ExceptionMessageKillersTest extends TestCase
      */
     public function testMisconfiguredMiddlewareExceptionShortensContractFqcn(): void
     {
-        $exception = new \SineMacula\Laravel\Authorization\Http\Middleware\AuthorizationMiddlewareMisconfiguredException(
+        $exception = new AuthorizationMiddlewareMisconfiguredException(
             contract: 'SineMacula\Laravel\Authorization\Contracts\SupportsRoles',
             middleware: 'auth.role',
         );
@@ -202,7 +205,7 @@ final class ExceptionMessageKillersTest extends TestCase
      */
     public function testMisconfiguredMiddlewareExceptionHandlesUnqualifiedContract(): void
     {
-        $exception = new \SineMacula\Laravel\Authorization\Http\Middleware\AuthorizationMiddlewareMisconfiguredException(
+        $exception = new AuthorizationMiddlewareMisconfiguredException(
             contract: 'Bareword',
             middleware: 'auth.permission',
         );
@@ -219,7 +222,7 @@ final class ExceptionMessageKillersTest extends TestCase
      */
     public function testGuardMismatchExceptionMessageAndCode(): void
     {
-        $exception = new \SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException(
+        $exception = new GuardMismatchException(
             roleName: 'editor',
             permissionName: 'posts:create',
             roleGuard: 'web',

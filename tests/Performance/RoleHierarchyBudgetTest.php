@@ -7,10 +7,10 @@ namespace Tests\Performance;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
+use SineMacula\Laravel\Authorization\Concerns\HasRoleHierarchy;
+use SineMacula\Laravel\Authorization\Concerns\ManagesPermissions;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
-use SineMacula\Laravel\Authorization\Traits\HasRoleHierarchy;
-use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
 use Tests\TestCase;
 
 /**

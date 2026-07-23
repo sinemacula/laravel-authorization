@@ -93,13 +93,11 @@ final class RbacQueryBudgetTest extends TestCase
         /** @var \SineMacula\Laravel\Authorization\AuthorizationManager $manager */
         $manager = $app->make(AuthorizationManager::class);
 
-        // Prime the cache — the first `can()` pays the full
-        // resolution cost. Budget: at most six queries (roles,
-        // role-permissions, direct permissions, attached policies,
-        // plus up to two guard/tenant lookups executed inside the
-        // trait helpers). This is loose on purpose — the hard
-        // assertion below is the zero-query floor on subsequent
-        // calls.
+        // Prime the cache — the first `can()` pays the full resolution cost.
+        // Budget: at most six queries (roles, role-permissions, direct
+        // permissions, attached policies, plus up to two guard/tenant lookups
+        // executed inside the trait helpers). This is loose on purpose — the
+        // hard assertion below is the zero-query floor on subsequent calls.
         DB::enableQueryLog();
         DB::flushQueryLog();
 
@@ -112,9 +110,9 @@ final class RbacQueryBudgetTest extends TestCase
             'Initial RBAC resolution exceeded the 6-query priming budget.',
         );
 
-        // Clear the log and loop. A zero-query budget here is the
-        // N+1 regression guard — any added query means the memo
-        // tier missed and the resolver ran against the database.
+        // Clear the log and loop. A zero-query budget here is the N+1
+        // regression guard — any added query means the memo tier missed and the
+        // resolver ran against the database.
         DB::flushQueryLog();
 
         for ($i = 0; $i < 10; $i++) {

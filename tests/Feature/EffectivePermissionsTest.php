@@ -11,7 +11,7 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
-use Tests\Feature\Stubs\PermissionEnum;
+use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 

@@ -9,6 +9,7 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
+use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
 use Tests\TestCase;
 
 /**
@@ -112,7 +113,7 @@ final class ConfigValidatorEdgeCasesTest extends TestCase
         $container = new Container;
 
         ConfigValidator::validate([
-            'principal_resolver' => \SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver::class,
+            'principal_resolver' => NullPrincipalResolver::class,
             'cache'              => ['store' => 'redis'],
         ], $container);
 

@@ -8,6 +8,8 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
+use SineMacula\Laravel\Authorization\Concerns\HasRoleHierarchy;
+use SineMacula\Laravel\Authorization\Concerns\ManagesPermissions;
 use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
@@ -18,8 +20,6 @@ use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
-use SineMacula\Laravel\Authorization\Traits\HasRoleHierarchy;
-use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
 use Tests\TestCase;
 
 /**

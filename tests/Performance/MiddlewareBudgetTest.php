@@ -159,7 +159,6 @@ final class MiddlewareBudgetTest extends TestCase
 
                 /** The principal returned by every resolution call. */
                 private readonly object $principal,
-
             ) {}
 
             /**

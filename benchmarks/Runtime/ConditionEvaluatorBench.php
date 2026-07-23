@@ -12,19 +12,19 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
 /**
  * PHPBench micro-benchmark for the statement condition evaluator.
  *
- * Conditions are the heaviest per-statement work the evaluator does:
- * every matching statement walks its condition map and dispatches
- * each operator through the `evaluateOperator()` match arm. The
- * bench carves the 18-operator surface into four natural classes
- * so drift in any single arm shows up under its own subject:
+ * Conditions are the heaviest per-statement work the evaluator does: every
+ * matching statement walks its condition map and dispatches each operator
+ * through the `matchesOperator()` match arm. The bench carves the 18-operator
+ * surface into four natural classes so drift in any single arm shows up under
+ * its own subject:
  *
  * - string ops     — `eq`, `neq`, `starts_with`, `ends_with`, `string_like`;
  * - numeric ops    — `gt`, `gte`, `lt`, `lte`;
  * - temporal ops   — `before`, `after`, `between`;
  * - set ops        — `in`, `not_in`, `bool`, `null`, `not_null`, `cidr`.
  *
- * A fifth subject runs the full 18-operator chain so the
- * matching budget test has a direct comparator.
+ * A fifth subject runs the full 18-operator chain so the matching budget test
+ * has a direct comparator.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -55,8 +55,8 @@ final class ConditionEvaluatorBench
     private array $context = [];
 
     /**
-     * Bench setUp — materialise the five statement fixtures once per
-     * iteration so revolution cost measures only `evaluateConditions()`.
+     * Bench setUp — materialise the five statement fixtures once per iteration
+     * so revolution cost measures only `conditionsSatisfiedBy()`.
      *
      * @return void
      */
@@ -72,8 +72,8 @@ final class ConditionEvaluatorBench
     }
 
     /**
-     * Benchmark: string operators (`eq`, `neq`, `starts_with`,
-     * `ends_with`, `string_like`).
+     * Benchmark: string operators (`eq`, `neq`, `starts_with`, `ends_with`,
+     * `string_like`).
      *
      * @return void
      */
@@ -82,7 +82,7 @@ final class ConditionEvaluatorBench
     #[Bench\Revs(5000)]
     public function benchStringOperators(): void
     {
-        $this->stringStatement->evaluateConditions($this->context);
+        $this->stringStatement->conditionsSatisfiedBy($this->context);
     }
 
     /**
@@ -95,13 +95,12 @@ final class ConditionEvaluatorBench
     #[Bench\Revs(5000)]
     public function benchNumericOperators(): void
     {
-        $this->numericStatement->evaluateConditions($this->context);
+        $this->numericStatement->conditionsSatisfiedBy($this->context);
     }
 
     /**
-     * Benchmark: temporal operators (`before`, `after`, `between`) —
-     * the heaviest class because every comparator runs through
-     * `strtotime()`.
+     * Benchmark: temporal operators (`before`, `after`, `between`) — the
+     * heaviest class because every comparator runs through `strtotime()`.
      *
      * @return void
      */
@@ -110,7 +109,7 @@ final class ConditionEvaluatorBench
     #[Bench\Revs(2000)]
     public function benchTemporalOperators(): void
     {
-        $this->temporalStatement->evaluateConditions($this->context);
+        $this->temporalStatement->conditionsSatisfiedBy($this->context);
     }
 
     /**
@@ -123,12 +122,12 @@ final class ConditionEvaluatorBench
     #[Bench\Revs(5000)]
     public function benchSetOperators(): void
     {
-        $this->setStatement->evaluateConditions($this->context);
+        $this->setStatement->conditionsSatisfiedBy($this->context);
     }
 
     /**
-     * Benchmark: the full 18-operator chain — matches the budget
-     * reference shape so both surfaces measure identical work.
+     * Benchmark: the full 18-operator chain — matches the budget reference
+     * shape so both surfaces measure identical work.
      *
      * @return void
      */
@@ -137,7 +136,7 @@ final class ConditionEvaluatorBench
     #[Bench\Revs(1000)]
     public function benchFullChain(): void
     {
-        $this->fullStatement->evaluateConditions($this->context);
+        $this->fullStatement->conditionsSatisfiedBy($this->context);
     }
 
     /**

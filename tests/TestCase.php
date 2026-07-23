@@ -4,12 +4,18 @@ declare(strict_types = 1);
 
 namespace Tests;
 
+// phpcs:disable PSR12.Files.FileHeader -- the shared formatter interleaves the
+// function import with the class imports, which this sniff rejects.
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Schema;
+use function Orchestra\Testbench\load_migration_paths;
 use Orchestra\Testbench\TestCase as OrchestraTestCase;
+
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
+
+// phpcs:enable PSR12.Files.FileHeader
 
 /**
  * Shared base test case for the package's Testbench-powered tests.
@@ -102,15 +108,15 @@ abstract class TestCase extends OrchestraTestCase
      * Uses `load_migration_paths` directly instead of `loadMigrationsFrom` so
      * Testbench never caches a per-test `MigrateProcessor` — which under
      * `RefreshDatabase` would otherwise run `migrate:rollback` in teardown and
-     * fight the transactional rollback (fatal on Postgres once a test raises
-     * an exception, silently corrupting state on MySQL).
+     * fight the transactional rollback (fatal on Postgres once a test raises an
+     * exception, silently corrupting state on MySQL).
      *
      * @return void
      */
     #[\Override]
     protected function defineDatabaseMigrations(): void
     {
-        \Orchestra\Testbench\load_migration_paths($this->app, __DIR__ . '/../database/migrations');
+        load_migration_paths($this->app, __DIR__ . '/../database/migrations');
     }
 
     /**

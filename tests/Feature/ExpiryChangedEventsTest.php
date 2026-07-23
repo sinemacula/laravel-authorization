@@ -9,6 +9,9 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
+use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
+use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
+use SineMacula\Laravel\Authorization\Concerns\HasRoles;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged as IdentityPermissionExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted as IdentityPermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyAttached as IdentityPolicyAttached;
@@ -18,9 +21,6 @@ use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged as Identi
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
-use SineMacula\Laravel\Authorization\Traits\HasPermissions;
-use SineMacula\Laravel\Authorization\Traits\HasPolicies;
-use SineMacula\Laravel\Authorization\Traits\HasRoles;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 

@@ -9,15 +9,14 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 /**
  * Dispatched after a permission row is updated.
  *
- * Carries the full before/after diff so audit consumers can render
- * the change set without a second round-trip. The `before` map
- * holds the pre-save values for every dirty attribute (sourced via
- * `getOriginal()` at the moment the update fired); the `after`
- * map holds the post-save values (sourced via `getChanges()`).
- * Both maps share the same key set.
+ * Carries the full before/after diff so audit consumers can render the change
+ * set without a second round-trip. The `before` map holds the pre-save values
+ * for every dirty attribute (sourced via `getOriginal()` at the moment the
+ * update fired); the `after` map holds the post-save values (sourced via
+ * `getChanges()`). Both maps share the same key set.
  *
- * Part of the SemVer-stable event API; breaking changes require a
- * major version bump.
+ * Part of the SemVer-stable event API; breaking changes require a major version
+ * bump.
  *
  * @api
  *
@@ -39,6 +38,5 @@ final readonly class Updated
 
         /** Before/after attribute diff captured across the update. */
         public array $changes,
-
     ) {}
 }

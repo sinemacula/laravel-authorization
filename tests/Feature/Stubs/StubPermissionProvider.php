@@ -23,6 +23,7 @@ final class StubPermissionProvider implements PermissionProvider
      *
      * @return array<int, string>
      */
+    #[\Override]
     public function permissions(): array
     {
         return ['media:upload', 'media:delete'];
@@ -32,8 +33,11 @@ final class StubPermissionProvider implements PermissionProvider
      * Return the guard name these permissions are scoped to.
      *
      * @return string|null
+     *
+     * @phpstan-ignore return.unusedType
      */
-    public function guard(): ?string // @phpstan-ignore return.unusedType
+    #[\Override]
+    public function guard(): ?string
     {
         return 'web';
     }

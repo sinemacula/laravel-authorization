@@ -2,7 +2,7 @@
 
 declare(strict_types = 1);
 
-namespace Tests\Feature\Stubs;
+namespace Tests\Feature\Stubs\Enums;
 
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum as PermissionEnumContract;
 
@@ -16,14 +16,15 @@ use SineMacula\Laravel\Authorization\Contracts\PermissionEnum as PermissionEnumC
  */
 enum PermissionEnum: string implements PermissionEnumContract
 {
-    case PostsCreate = 'posts:create';
-    case PostsDelete = 'posts:delete';
+    case POSTS_CREATE = 'posts:create';
+    case POSTS_DELETE = 'posts:delete';
 
     /**
      * Return the permission string.
      *
      * @return string
      */
+    #[\Override]
     public function toString(): string
     {
         return $this->value;

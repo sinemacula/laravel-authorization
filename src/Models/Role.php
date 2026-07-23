@@ -10,21 +10,21 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
+use SineMacula\Laravel\Authorization\Concerns\HasRoleHierarchy;
+use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
+use SineMacula\Laravel\Authorization\Concerns\ManagesPermissions;
+use SineMacula\Laravel\Authorization\Concerns\ValidatesAuthorizationName;
 use SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
-use SineMacula\Laravel\Authorization\Traits\HasRoleHierarchy;
-use SineMacula\Laravel\Authorization\Traits\HasSystemProtection;
-use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
-use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
 
 /**
- * Eloquent model for role rows — named buckets of permissions shared
- * across authorizable identities. Behaviour is composed from
- * `HasRoleHierarchy`, `ManagesPermissions`, `HasSystemProtection`, and
- * the `RoleObserver` wired via `#[ObservedBy]`.
+ * Eloquent model for role rows — named buckets of permissions shared across
+ * authorizable identities. Behaviour is composed from `HasRoleHierarchy`,
+ * `ManagesPermissions`, `HasSystemProtection`, and the `RoleObserver` wired via
+ * `#[ObservedBy]`.
  *
  * @property string $id
  * @property string $name
@@ -35,6 +35,8 @@ use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
  * @property int|null $rank
  * @property string|null $tenant_type
  * @property string|null $tenant_id
+ *
+ * @inheritable
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -57,12 +59,6 @@ class Role extends Model
         'tenant_id',
     ];
 
-    /** @var array<string, string> Attribute cast map. */
-    protected $casts = [
-        'is_system' => 'boolean',
-        'rank'      => 'integer',
-    ];
-
     /**
      * Create a new Eloquent model instance.
      *
@@ -78,15 +74,14 @@ class Role extends Model
     }
 
     /**
-     * Resolve a role by name under the supplied guard, favouring
-     * guard-specific rows over guard-agnostic rows.
+     * Resolve a role by name under the supplied guard, favouring guard-specific
+     * rows over guard-agnostic rows.
      *
      * Centralises the guard-precedence query shared by
-     * `HasRoles::resolveRole()` and any direct static caller — a
-     * single owner for the guard-agnostic disjunction so evolution
-     * of the matching rules happens in one place. Consumers calling
-     * `$class::resolveByName(...)` where
-     * `$class` is read from `authorization.models.role` get correct
+     * `HasRoles::resolveRole()` and any direct static caller — a single owner
+     * for the guard-agnostic disjunction so evolution of the matching rules
+     * happens in one place. Consumers calling `$class::resolveByName(...)`
+     * where `$class` is read from `authorization.models.role` get correct
      * late-static-binding against their swapped model.
      *
      * @param  string  $name
@@ -127,8 +122,7 @@ class Role extends Model
     }
 
     /**
-     * Determine whether this role is global (not owned by any
-     * tenant).
+     * Determine whether this role is global (not owned by any tenant).
      *
      * @return bool
      */
@@ -150,10 +144,9 @@ class Role extends Model
     /**
      * Scope the query to rows owned by the given tenant.
      *
-     * Delegates morph-pair extraction to
-     * `TenantScope::extractTenantPair()` so the global scope and
-     * this local scope share a single owner for the acceptance
-     * rules — refuses any tenant that is neither a Model nor an
+     * Delegates morph-pair extraction to `TenantScope::extractTenantPair()` so
+     * the global scope and this local scope share a single owner for the
+     * acceptance rules — refuses any tenant that is neither a Model nor an
      * `AuthorizableTenant` implementer with a typed exception.
      *
      * @param  \Illuminate\Database\Eloquent\Builder<static>  $query
@@ -171,27 +164,38 @@ class Role extends Model
     }
 
     /**
-     * Scope the query to global rows only (tenant columns are
-     * null).
+     * Scope the query to global rows only (tenant columns are null).
      *
      * @param  \Illuminate\Database\Eloquent\Builder<static>  $query
      * @return \Illuminate\Database\Eloquent\Builder<static>
      */
     public function scopeGlobalOnly(Builder $query): Builder
     {
-        // `whereNull` is declared as `@method static` on the Eloquent
-        // Builder docblock; PHPStan flags the dynamic instance call
-        // as `staticMethod.dynamicCall` even though runtime dispatch
-        // is genuinely dynamic. The same pattern is used in
-        // `GuardScopedLookup` — a docblock-soup artefact, not an
-        // unsafe call.
+        // `whereNull` is declared as `@method static` on the Eloquent Builder
+        // docblock; PHPStan flags the dynamic instance call as
+        // `staticMethod.dynamicCall` even though runtime dispatch is genuinely
+        // dynamic. The same pattern is used in `GuardScopedLookup` — a
+        // docblock-soup artefact, not an unsafe call.
         // @phpstan-ignore staticMethod.dynamicCall
         return $query->whereNull($this->getTable() . '.tenant_type');
     }
 
     /**
-     * Human-readable label used in a name-validation exception
-     * message.
+     * The attribute cast map.
+     *
+     * @return array<string, string>
+     */
+    #[\Override]
+    protected function casts(): array
+    {
+        return [
+            'is_system' => 'boolean',
+            'rank'      => 'integer',
+        ];
+    }
+
+    /**
+     * Human-readable label used in a name-validation exception message.
      *
      * @return string
      */
@@ -202,29 +206,31 @@ class Role extends Model
 
     /**
      * Return the attribute names whose dirty state triggers the
-     * system-protection guard on `updating`. For roles, only `name`
-     * changes are protected.
+     * system-protection guard on `updating`. For roles, only `name` changes are
+     * protected.
      *
      * @return list<string>
      */
+    #[\Override]
     protected function systemProtectedFields(): array
     {
         return ['name'];
     }
 
     /**
-     * Construct the per-model exception raised when a protected
-     * mutation on a system role is refused.
+     * Construct the per-model exception raised when a protected mutation on a
+     * system role is refused.
      *
      * @param  string  $operation
      * @return \Throwable
      */
+    #[\Override]
     protected function systemProtectionException(string $operation): \Throwable
     {
-        // Use the ORIGINAL name — on a rename, `getAttribute('name')`
-        // already reflects the mutated value. Audit consumers want
-        // "which role was targeted" (the canonical persisted name),
-        // not "what the attempted rename would produce."
+        // Use the ORIGINAL name — on a rename, `getAttribute('name')` already
+        // reflects the mutated value. Audit consumers want "which role was
+        // targeted" (the canonical persisted name), not "what the attempted
+        // rename would produce."
         /** @var string $roleName */
         $roleName = $this->getOriginal('name', $this->getAttribute('name'));
 

@@ -11,26 +11,24 @@ use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
+use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
+use SineMacula\Laravel\Authorization\Concerns\ValidatesAuthorizationName;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPermissionProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Observers\PermissionObserver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
-use SineMacula\Laravel\Authorization\Traits\HasSystemProtection;
-use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
 
 /**
  * Eloquent model for permission rows.
  *
- * Permissions are atomic action strings that can be granted directly
- * to an identity or inherited via a role. The `guard_name` column is
- * nullable: a null value marks the permission as guard-agnostic
- * (applies to every guard), a concrete string scopes it to a single
- * guard. The `is_system` flag marks platform-shipped permissions as
- * delete-protected: deletion or a rename of an `is_system = true`
- * row raises `SystemPermissionProtectedException` unless
- * `forceSystem()` is invoked to unlock the next operation on the
- * instance.
+ * Permissions are atomic action strings that can be granted directly to an
+ * identity or inherited via a role. The `guard_name` column is nullable: a null
+ * value marks the permission as guard-agnostic (applies to every guard), a
+ * concrete string scopes it to a single guard. The `is_system` flag marks
+ * platform-shipped permissions as delete-protected: deletion or a rename of an
+ * `is_system = true` row raises `SystemPermissionProtectedException` unless
+ * `forceSystem()` is invoked to unlock the next operation on the instance.
  *
  * @property string $id
  * @property string $name
@@ -40,6 +38,8 @@ use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
  * @property bool $is_system
  * @property string|null $tenant_type
  * @property string|null $tenant_id
+ *
+ * @inheritable
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -59,11 +59,6 @@ class Permission extends Model
         'is_system',
         'tenant_type',
         'tenant_id',
-    ];
-
-    /** @var array<string, string> Attribute cast map. */
-    protected $casts = [
-        'is_system' => 'boolean',
     ];
 
     /**
@@ -119,10 +114,9 @@ class Permission extends Model
     /**
      * Scope the query to rows owned by the given tenant.
      *
-     * Delegates morph-pair extraction to
-     * `TenantScope::extractTenantPair()` so the global scope and
-     * this local scope share a single owner for the acceptance
-     * rules — refuses any tenant that is neither a Model nor an
+     * Delegates morph-pair extraction to `TenantScope::extractTenantPair()` so
+     * the global scope and this local scope share a single owner for the
+     * acceptance rules — refuses any tenant that is neither a Model nor an
      * `AuthorizableTenant` implementer with a typed exception.
      *
      * @param  \Illuminate\Database\Eloquent\Builder<static>  $query
@@ -147,12 +141,11 @@ class Permission extends Model
      */
     public function scopeGlobalOnly(Builder $query): Builder
     {
-        // `whereNull` is declared as `@method static` on the Eloquent
-        // Builder docblock; PHPStan flags the dynamic instance call
-        // as `staticMethod.dynamicCall` even though runtime dispatch
-        // is genuinely dynamic. The same pattern is used in
-        // `GuardScopedLookup` — a docblock-soup artefact, not an
-        // unsafe call.
+        // `whereNull` is declared as `@method static` on the Eloquent Builder
+        // docblock; PHPStan flags the dynamic instance call as
+        // `staticMethod.dynamicCall` even though runtime dispatch is genuinely
+        // dynamic. The same pattern is used in `GuardScopedLookup` — a
+        // docblock-soup artefact, not an unsafe call.
         // @phpstan-ignore staticMethod.dynamicCall
         return $query->whereNull($this->getTable() . '.tenant_type');
     }
@@ -187,17 +180,16 @@ class Permission extends Model
     }
 
     /**
-     * Resolve a permission by name under the supplied guard,
-     * favouring guard-specific rows over guard-agnostic rows.
+     * Resolve a permission by name under the supplied guard, favouring
+     * guard-specific rows over guard-agnostic rows.
      *
      * Centralises the guard-precedence query shared by
-     * `HasPermissions::resolvePermission()` and
-     * `Role::resolvePermission()` — a single owner for the
-     * guard-agnostic disjunction so evolution of the matching
-     * rules happens in one place. Consumers
-     * calling `$class::resolveByName(...)` where `$class` is
-     * read from `authorization.models.permission` get correct
-     * late-static-binding against their swapped model.
+     * `HasPermissions::resolvePermission()` and `Role::resolvePermission()` — a
+     * single owner for the guard-agnostic disjunction so evolution of the
+     * matching rules happens in one place. Consumers calling
+     * `$class::resolveByName(...)` where `$class` is read from
+     * `authorization.models.permission` get correct late-static-binding against
+     * their swapped model.
      *
      * @param  string  $name
      * @param  string|null  $guard
@@ -225,8 +217,20 @@ class Permission extends Model
     }
 
     /**
-     * Human-readable label used in a name-validation exception
-     * message.
+     * The attribute cast map.
+     *
+     * @return array<string, string>
+     */
+    #[\Override]
+    protected function casts(): array
+    {
+        return [
+            'is_system' => 'boolean',
+        ];
+    }
+
+    /**
+     * Human-readable label used in a name-validation exception message.
      *
      * @return string
      */
@@ -237,29 +241,31 @@ class Permission extends Model
 
     /**
      * Return the attribute names whose dirty state triggers the
-     * system-protection guard on `updating`. For permissions,
-     * only `name` changes are protected.
+     * system-protection guard on `updating`. For permissions, only `name`
+     * changes are protected.
      *
      * @return list<string>
      */
+    #[\Override]
     protected function systemProtectedFields(): array
     {
         return ['name'];
     }
 
     /**
-     * Construct the per-model exception raised when a protected
-     * mutation on a system permission is refused.
+     * Construct the per-model exception raised when a protected mutation on a
+     * system permission is refused.
      *
      * @param  string  $operation
      * @return \Throwable
      */
+    #[\Override]
     protected function systemProtectionException(string $operation): \Throwable
     {
-        // Use the ORIGINAL name — on a rename, `getAttribute('name')`
-        // already reflects the mutated value. Audit consumers want
-        // "which permission was targeted" (the canonical persisted
-        // name), not "what the attempted rename would produce."
+        // Use the ORIGINAL name — on a rename, `getAttribute('name')` already
+        // reflects the mutated value. Audit consumers want "which permission
+        // was targeted" (the canonical persisted name), not "what the attempted
+        // rename would produce."
         /** @var string $permissionName */
         $permissionName = $this->getOriginal('name', $this->getAttribute('name'));
 
