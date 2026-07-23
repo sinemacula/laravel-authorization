@@ -36,24 +36,16 @@ defaults:
 jobs:
 
     # ==========================================================================
-    # JOB: TESTS
+    # JOB: PHP TESTS
     # ==========================================================================
-    tests:
-        name: Test / PHP ${{ matrix.php }} / Laravel ${{ matrix.laravel.label }}
+    php:
+        name: Test / PHP ${{ matrix.php }}
         runs-on: ubuntu-latest
 
         strategy:
             fail-fast: false
             matrix:
-                include:
-                    -   php: 8.3
-                        laravel:
-                            constraint: ^12.40
-                            label: 12
-                    -   php: 8.3
-                        laravel:
-                            constraint: ^13.3
-                            label: 13
+                php: [ 8.3, 8.4, 8.5 ]
 
         steps:
             -   name: Checkout
@@ -62,9 +54,47 @@ jobs:
                     persist-credentials: false
 
             -   name: Setup PHP
-                uses: sinemacula/.github/.github/actions/setup-php@v1.1.0
+                uses: sinemacula/.github/.github/actions/setup-php@v1.1.1
                 with:
                     php-version: ${{ matrix.php }}
+                    extensions: dom, mbstring, openssl
+
+            -   name: PHPUnit
+                run: composer test:coverage
+
+            -   name: Publish code coverage
+                if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' && matrix.php == '8.3' }}
+                uses: qltysh/qlty-action/coverage@v2
+                with:
+                    token: ${{ secrets.QLTY_COVERAGE_TOKEN }}
+                    files: clover.xml
+
+    # ==========================================================================
+    # JOB: LARAVEL TESTS
+    # ==========================================================================
+    laravel:
+        name: Test / Laravel ${{ matrix.laravel.label }}
+        runs-on: ubuntu-latest
+
+        strategy:
+            fail-fast: false
+            matrix:
+                laravel:
+                    -   constraint: ^12.40
+                        label: 12
+                    -   constraint: ^13.3
+                        label: 13
+
+        steps:
+            -   name: Checkout
+                uses: actions/checkout@v5
+                with:
+                    persist-credentials: false
+
+            -   name: Setup PHP
+                uses: sinemacula/.github/.github/actions/setup-php@v1.1.1
+                with:
+                    php-version: 8.3
                     extensions: dom, mbstring, openssl
 
             -   name: Pin Laravel version
@@ -73,14 +103,7 @@ jobs:
                 run: composer update --with="laravel/framework:${LARAVEL_CONSTRAINT}" --prefer-dist --no-interaction --no-progress
 
             -   name: PHPUnit
-                run: composer test:coverage
-
-            -   name: Publish code coverage
-                if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/master' && matrix.laravel.label == '13' }}
-                uses: qltysh/qlty-action/coverage@v2
-                with:
-                    token: ${{ secrets.QLTY_COVERAGE_TOKEN }}
-                    files: clover.xml
+                run: composer test
 
     # ==========================================================================
     # JOB: DATABASE TESTS
