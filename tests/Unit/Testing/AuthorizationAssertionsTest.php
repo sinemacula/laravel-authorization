@@ -12,7 +12,7 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
-use SineMacula\Laravel\Authorization\Testing\AuthorizationAssertions;
+use SineMacula\Laravel\Authorization\Testing\Concerns\AuthorizationAssertions;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 

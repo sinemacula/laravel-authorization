@@ -15,7 +15,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
-use Tests\Feature\Stubs\PermissionEnum;
+use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -23,14 +23,14 @@ use Tests\TestCase;
  * Coverage for the two `translateGateArguments` / `stringifyGateResource`
  * branches the primary forwarding tests do not reach:
  *
- * - A list-shaped `$arguments` whose leading entry is itself an
- *   associative array. Gate consumers who build arguments
- *   programmatically — e.g. `Gate::allows('x', [$context])` — land
- *   here because the outer list is expanded into the variadic but
- *   the inner assoc array is retained at numeric index 0.
- * - A non-string, non-object leading entry (integer, list-array)
- *   that `stringifyGateResource` must coerce to a null resource so
- *   the Gate call still evaluates against the principal's RBAC.
+ * - A list-shaped `$arguments` whose leading entry is itself an associative
+ *   array. Gate consumers who build arguments programmatically — e.g.
+ *   `Gate::allows('x', [$context])` — land here because the outer list is
+ *   expanded into the variadic but the inner assoc array is retained at numeric
+ *   index 0.
+ * - A non-string, non-object leading entry (integer, list-array) that
+ *   `stringifyGateResource` must coerce to a null resource so the Gate call
+ *   still evaluates against the principal's RBAC.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -88,8 +88,8 @@ final class GateArgumentEdgeCasesTest extends TestCase
             ],
         ]));
 
-        // The outer list [$ctx] spreads to $arguments = [['tenant' => ...]],
-        // hitting the index-0-assoc branch of translateGateArguments().
+        // The outer list wrapper spreads so the gate receives one associative
+        // array argument, hitting the translator's index-0-assoc branch.
         self::assertTrue(Gate::allows('posts:create', [['tenant' => 'org-7']]));
         self::assertFalse(Gate::allows('posts:create', [['tenant' => 'org-9']]));
     }
@@ -141,7 +141,6 @@ final class GateArgumentEdgeCasesTest extends TestCase
 
                 /** The user returned by every resolution call. */
                 private readonly object $user,
-
             ) {}
 
             /**

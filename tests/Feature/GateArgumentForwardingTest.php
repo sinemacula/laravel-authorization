@@ -16,7 +16,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
-use Tests\Feature\Stubs\PermissionEnum;
+use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -59,9 +59,9 @@ final class GateArgumentForwardingTest extends TestCase
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
-        // Register a morph alias so `$stub->getMorphClass()` returns a
-        // clean string; the default FQN contains backslashes that
-        // trigger PHP's fnmatch escape handling in the evaluator.
+        // Register a morph alias so `$stub->getMorphClass()` returns a clean
+        // string; the default FQN contains backslashes that trigger PHP's
+        // fnmatch escape handling in the evaluator.
         Relation::morphMap(['stub' => StubIdentity::class]);
 
         (new AuthorizationServiceProvider($this->app))->boot();
@@ -156,6 +156,7 @@ final class GateArgumentForwardingTest extends TestCase
             /**
              * @return string
              */
+            #[\Override]
             public function __toString(): string
             {
                 return 'arn:post:stringable';
@@ -290,7 +291,6 @@ final class GateArgumentForwardingTest extends TestCase
 
                 /** The user returned by every resolution call. */
                 private readonly object $user,
-
             ) {}
 
             /**

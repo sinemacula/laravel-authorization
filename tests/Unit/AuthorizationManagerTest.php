@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace Tests\Unit;
 
 use Illuminate\Contracts\Events\Dispatcher;
-use Mockery;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
@@ -388,8 +387,8 @@ final class AuthorizationManagerTest extends TestCase
 
         $principal = $this->stubAuthorizable(['ok']);
 
-        // authorize() returns void on a granted decision and throws
-        // on a denial — confirm the allowed path does not raise.
+        // authorize() returns void on a granted decision and throws on a denial
+        // — confirm the allowed path does not raise.
         $threw = false;
 
         try {

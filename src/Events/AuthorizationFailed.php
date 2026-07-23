@@ -7,20 +7,19 @@ namespace SineMacula\Laravel\Authorization\Events;
 use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
 
 /**
- * Dispatched immediately before an authorization exception is thrown
- * from the manager's `authorize()` entry point.
+ * Dispatched immediately before an authorization exception is thrown from the
+ * manager's `authorize()` entry point.
  *
- * This event is the hard-denial signal: it fires only when
- * `authorize()` is about to raise `AuthorizationException`. A
- * `can()` call returning false is a soft denial and does not
- * fire this event — use `DecisionEvaluated` (which fires on every
- * evaluation regardless of outcome) and filter on
- * `$event->result->allowed === false` when a full denial audit is
- * required. The split is intentional: hard-denial is rare and
- * security-relevant; soft-denial is routine and filterable.
+ * This event is the hard-denial signal: it fires only when `authorize()` is
+ * about to raise `AuthorizationException`. A `can()` call returning false is a
+ * soft denial and does not fire this event — use `DecisionEvaluated` (which
+ * fires on every evaluation regardless of outcome) and filter on
+ * `$event->result->allowed === false` when a full denial audit is required. The
+ * split is intentional: hard-denial is rare and security-relevant; soft-denial
+ * is routine and filterable.
  *
- * Part of the SemVer-stable event API; breaking changes require a
- * major version bump.
+ * Part of the SemVer-stable event API; breaking changes require a major version
+ * bump.
  *
  * @api
  *
@@ -54,6 +53,5 @@ final readonly class AuthorizationFailed
 
         /** Final evaluation result, including the reproducible trace. */
         public EvaluationResult $result,
-
     ) {}
 }

@@ -9,12 +9,13 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
+use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
-use Tests\Feature\Stubs\PermissionEnum;
+use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\TestCase;
 
 /**
@@ -283,7 +284,7 @@ final class ConfigValidationTest extends TestCase
     {
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.gate.on_conflict', \SineMacula\Laravel\Authorization\Enums\GateConflictMode::THROW);
+        $config->set('authorization.gate.on_conflict', GateConflictMode::THROW);
 
         ConfigValidator::validate((array) $config->get('authorization'), $this->app);
 

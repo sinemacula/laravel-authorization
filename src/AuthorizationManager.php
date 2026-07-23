@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization;
 
 use Illuminate\Contracts\Events\Dispatcher;
+use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
@@ -12,27 +13,24 @@ use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
-use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
-use SineMacula\Laravel\Authorization\Traits\HasContainerInstance;
 
 /**
  * Authorization manager — the facade-facing entry point.
  *
- * Coordinates principal resolution, policy gathering, evaluation, and
- * RBAC fallback into a single API. The manager is deliberately small
+ * Coordinates principal resolution, policy gathering, evaluation, and RBAC
+ * fallback into a single API. The manager is deliberately small
  * and delegates the actual statement walking to the policy evaluator;
- * all four evaluation branches ultimately return an evaluation
- * result, with the reason code and trace recorded for audit
- * consumers.
+ * all four evaluation branches ultimately return an evaluation result, with the
+ * reason code and trace recorded for audit consumers.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-class AuthorizationManager
+final class AuthorizationManager
 {
     use HasContainerInstance;
 
@@ -70,12 +68,11 @@ class AuthorizationManager
 
         /** Event dispatcher used to emit decision events; null disables. */
         private readonly ?Dispatcher $events = null,
-
     ) {}
 
     /**
-     * Determine whether the current principal is allowed to perform
-     * the supplied action.
+     * Determine whether the current principal is allowed to perform the
+     * supplied action.
      *
      * @param  string  $action
      * @param  string|null  $resource
@@ -88,8 +85,8 @@ class AuthorizationManager
     }
 
     /**
-     * Authorize the current principal for the supplied action, raising
-     * an authorization exception when denied.
+     * Authorize the current principal for the supplied action, raising an
+     * authorization exception when denied.
      *
      * @param  string  $action
      * @param  string|null  $resource
@@ -114,8 +111,8 @@ class AuthorizationManager
     }
 
     /**
-     * Evaluate the supplied action for the current principal and
-     * return the full evaluation result.
+     * Evaluate the supplied action for the current principal and return the
+     * full evaluation result.
      *
      * @param  string  $action
      * @param  string|null  $resource
@@ -134,14 +131,13 @@ class AuthorizationManager
     }
 
     /**
-     * Return the most recent evaluation result produced by this
-     * process — across every scoped clone and Gate-dispatched path.
-     * Request-layer error handlers use this to answer "why was the
-     * last check denied?" without re-running the evaluation.
+     * Return the most recent evaluation result produced by this process —
+     * across every scoped clone and Gate-dispatched path. Request-layer error
+     * handlers use this to answer "why was the last check denied?" without
+     * re-running the evaluation.
      *
-     * Returns null when the process has not yet produced a
-     * decision or when the store was explicitly cleared between
-     * requests in a long-running worker.
+     * Returns null when the process has not yet produced a decision or when the
+     * store was explicitly cleared between requests in a long-running worker.
      *
      * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult|null
      */
@@ -151,11 +147,10 @@ class AuthorizationManager
     }
 
     /**
-     * Evaluate the supplied action and return the human-readable
-     * explanation produced by the resulting trace. Convenience
-     * shortcut over `evaluate(...)->explain()` for error-handler
-     * output and the future `authorization:why-can` Artisan
-     * command.
+     * Evaluate the supplied action and return the human-readable explanation
+     * produced by the resulting trace. Convenience shortcut over
+     * `evaluate(...)->explain()` for error-handler output and the future
+     * `authorization:why-can` Artisan command.
      *
      * @param  string  $action
      * @param  string|null  $resource
@@ -168,9 +163,8 @@ class AuthorizationManager
     }
 
     /**
-     * Clear the recorded last decision. Long-running workers call
-     * this between requests so a stale decision does not leak
-     * across the request boundary.
+     * Clear the recorded last decision. Long-running workers call this between
+     * requests so a stale decision does not leak across the request boundary.
      *
      * @return void
      */
@@ -180,20 +174,18 @@ class AuthorizationManager
     }
 
     /**
-     * Return a map of every registered permission to its effective
-     * decision for the current principal.
+     * Return a map of every registered permission to its effective decision for
+     * the current principal.
      *
-     * Walks every case of every configured `PermissionEnum` and
-     * evaluates each through the full 4-step evaluator (explicit
-     * deny, explicit allow, RBAC, implicit deny). The result is an
-     * associative array keyed by permission string with boolean
-     * values indicating whether the principal is allowed.
+     * Walks every case of every configured `PermissionEnum` and evaluates each
+     * through the full 4-step evaluator (explicit deny, explicit allow, RBAC,
+     * implicit deny). The result is an associative array keyed by permission
+     * string with boolean values indicating whether the principal is allowed.
      *
-     * Performance note: this method performs N evaluations where
-     * N is the total number of registered enum cases. Callers should
-     * cache the result when rendering permission-picker UIs or
-     * capability checklists rather than calling this on every
-     * request.
+     * Performance note: this method performs N evaluations where N is the total
+     * number of registered enum cases. Callers should cache the result when
+     * rendering permission-picker UIs or capability checklists rather than
+     * calling this on every request.
      *
      * @param  array<string, mixed>  $context
      * @return array<string, bool>
@@ -240,9 +232,9 @@ class AuthorizationManager
     }
 
     /**
-     * Return a scoped manager that evaluates only the supplied
-     * policies, bypassing the principal's own attached policies and
-     * any configured policy store.
+     * Return a scoped manager that evaluates only the supplied policies,
+     * bypassing the principal's own attached policies and any configured policy
+     * store.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
      * @return static
@@ -258,11 +250,10 @@ class AuthorizationManager
     /**
      * Resolve the principal in scope for this invocation.
      *
-     * Honours a `for()` override when active; otherwise defers to the
-     * bound `PrincipalResolver`. Public so every surface that needs the
-     * current principal — middleware, Blade helpers, custom Gates — can
-     * delegate here instead of re-implementing the override + resolver
-     * trio.
+     * Honours a `for()` override when active; otherwise defers to the bound
+     * `PrincipalResolver`. Public so every surface that needs the current
+     * principal — middleware, Blade helpers, custom Gates — can delegate here
+     * instead of re-implementing the override + resolver trio.
      *
      * @return object|null
      */
@@ -284,12 +275,8 @@ class AuthorizationManager
      * @param  array<string, mixed>  $context
      * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult
      */
-    private function evaluateFor(
-        ?object $principal,
-        string $action,
-        ?string $resource,
-        array $context,
-    ): EvaluationResult {
+    private function evaluateFor(?object $principal, string $action, ?string $resource, array $context): EvaluationResult
+    {
         if ($principal === null) {
             return EvaluationResult::implicitlyDenied();
         }
@@ -309,11 +296,10 @@ class AuthorizationManager
     /**
      * Gather the policies applicable to the supplied principal.
      *
-     * When a per-call override is in effect, it is returned
-     * verbatim. Otherwise the manager delegates to the bound
-     * `PolicyResolver` — consumers swap the resolver to introduce
-     * caching, tenant scoping, or other gathering strategies
-     * without touching the manager.
+     * When a per-call override is in effect, it is returned verbatim. Otherwise
+     * the manager delegates to the bound `PolicyResolver` — consumers swap the
+     * resolver to introduce caching, tenant scoping, or other gathering
+     * strategies without touching the manager.
      *
      * @param  object  $principal
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>

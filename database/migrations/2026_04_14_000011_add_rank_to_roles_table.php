@@ -3,11 +3,10 @@
 /**
  * Add the `rank` column to the `roles` table.
  *
- * Introduces a nullable integer rank that models role seniority.
- * Lower values denote more senior roles (0 is the most senior,
- * mirroring IAM conventions). Null means "unranked" — the role is
- * not subject to rank-based checks, making the feature opt-in per
- * role and imposing no complexity on simple consumers.
+ * Introduces a nullable integer rank that models role seniority. Lower values
+ * denote more senior roles (0 is the most senior, mirroring IAM conventions).
+ * Null means "unranked" — the role is not subject to rank-based checks, making
+ * the feature opt-in per role and imposing no complexity on simple consumers.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

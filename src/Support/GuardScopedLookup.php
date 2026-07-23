@@ -10,11 +10,11 @@ use Illuminate\Database\Eloquent\Model;
 /**
  * Shared guard-precedence query builder.
  *
- * Both `Role::resolveByName()` and `Permission::resolveByName()`
- * need an identical query that finds a row by `(name, guard_name)`
- * with guard-specific rows outranking guard-agnostic rows. This
- * helper owns the single copy of that logic so the two models
- * delegate here instead of carrying duplicated private methods.
+ * Both `Role::resolveByName()` and `Permission::resolveByName()` need an
+ * identical query that finds a row by `(name, guard_name)` with guard-specific
+ * rows outranking guard-agnostic rows. This helper owns the single copy of that
+ * logic so the two models delegate here instead of carrying duplicated private
+ * methods.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

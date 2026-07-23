@@ -4,13 +4,15 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
-use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
+use SineMacula\Laravel\Authorization\Concerns\HasRoleHierarchy;
+use SineMacula\Laravel\Authorization\Concerns\HasRoles;
+use SineMacula\Laravel\Authorization\Concerns\ManagesPermissions;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
@@ -20,11 +22,8 @@ use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
-use SineMacula\Laravel\Authorization\Traits\HasAuthorization;
-use SineMacula\Laravel\Authorization\Traits\HasPermissions;
-use SineMacula\Laravel\Authorization\Traits\HasRoleHierarchy;
-use SineMacula\Laravel\Authorization\Traits\HasRoles;
-use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
+use Tests\Feature\Stubs\ApiGuardedUser;
+use Tests\Feature\Stubs\DefaultGuardUser;
 use Tests\TestCase;
 
 /**
@@ -59,8 +58,8 @@ final class GuardRoutingTest extends TestCase
     /**
      * Ensure the api-guard stub table exists whenever this suite runs. Needs to
      * work regardless of whether `migrate:fresh` already ran in this process,
-     * so it's keyed off `Schema::hasTable` rather than the
-     * `DatabaseRefreshed` hook.
+     * so it's keyed off `Schema::hasTable` rather than the `DatabaseRefreshed`
+     * hook.
      *
      * @return void
      */
@@ -69,12 +68,14 @@ final class GuardRoutingTest extends TestCase
     {
         parent::setUp();
 
-        if (!Schema::hasTable('api_guarded_users')) {
-            Schema::create('api_guarded_users', static function ($table): void {
-                $table->string('id')->primary();
-                $table->timestamps();
-            });
+        if (Schema::hasTable('api_guarded_users')) {
+            return;
         }
+
+        Schema::create('api_guarded_users', static function ($table): void {
+            $table->string('id')->primary();
+            $table->timestamps();
+        });
     }
 
     /**
@@ -160,10 +161,9 @@ final class GuardRoutingTest extends TestCase
         $user->givePermission('api:only');
         self::assertTrue($user->fresh()?->hasPermission('api:only'));
 
-        // The permission never matches under the default guard,
-        // so creating a web-guard permission with the same name
-        // is permitted and the web-guard lookup resolves it
-        // without leaking into the api-guard row.
+        // The permission never matches under the default guard, so creating a
+        // web-guard permission with the same name is permitted and the
+        // web-guard lookup resolves it without leaking into the api-guard row.
         Permission::create([
             'id'         => (string) Str::uuid(),
             'name'       => 'api:only',
@@ -219,66 +219,4 @@ final class GuardRoutingTest extends TestCase
 
         self::assertTrue($user->fresh()?->hasRole('default-bound'));
     }
-}
-
-/**
- * Test stub — identity declaring `api` as its authorization guard via the
- * duck-typed hook.
- *
- * @internal
- */
-// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
-class ApiGuardedUser extends Model implements AuthorizableIdentity
-{
-    use HasAuthorization;
-
-    /** @var bool */
-    public $incrementing = false;
-
-    /** @var string */
-    protected $primaryKey = 'id';
-
-    /** @var string */
-    protected $keyType = 'string';
-
-    /** @var array<int, string> */
-    protected $fillable = ['id']; // @phpstan-ignore property.phpDocType
-
-    /** @var string */
-    protected $table = 'api_guarded_users'; // @phpstan-ignore property.phpDocType
-
-    /**
-     * @return string
-     */
-    public function getAuthorizationGuard(): string
-    {
-        return 'api';
-    }
-}
-
-/**
- * Test stub — identity that does not declare the hook, so the trait falls back
- * to `config('authorization.defaults.guard')`.
- *
- * @internal
- */
-// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
-class DefaultGuardUser extends Model implements AuthorizableIdentity
-{
-    use HasAuthorization;
-
-    /** @var bool */
-    public $incrementing = false;
-
-    /** @var string */
-    protected $primaryKey = 'id';
-
-    /** @var string */
-    protected $keyType = 'string';
-
-    /** @var array<int, string> */
-    protected $fillable = ['id']; // @phpstan-ignore property.phpDocType
-
-    /** @var string */
-    protected $table = 'stub_identities'; // @phpstan-ignore property.phpDocType
 }

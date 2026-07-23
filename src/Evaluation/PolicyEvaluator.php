@@ -10,11 +10,10 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision;
 /**
  * AWS IAM-style policy evaluator.
  *
- * The evaluator walks every statement from every supplied policy in
- * order, building up a trace as it goes. Behaviour mirrors AWS IAM's
- * four-step decision order — implicit deny → explicit deny → allow →
- * implicit deny — so an explicit deny always wins, regardless of how
- * many allows preceded it.
+ * The evaluator walks every statement from every supplied policy in order,
+ * building up a trace as it goes. Behaviour mirrors AWS IAM's four-step
+ * decision order — implicit deny → explicit deny → allow → implicit deny — so
+ * an explicit deny always wins, regardless of how many allows preceded it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -25,8 +24,7 @@ final class PolicyEvaluator
     private ?ContextInterpolator $interpolator = null;
 
     /**
-     * Evaluate the supplied policies against the action, resource and
-     * context.
+     * Evaluate the supplied policies against the action, resource and context.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
      * @param  string  $action
@@ -35,42 +33,28 @@ final class PolicyEvaluator
      * @param  object|null  $principal
      * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult
      */
-    public function evaluate(
-        array $policies,
-        string $action,
-        ?string $resource = null,
-        array $context = [],
-        ?object $principal = null,
-    ): EvaluationResult {
+    public function evaluate(array $policies, string $action, ?string $resource = null, array $context = [], ?object $principal = null): EvaluationResult
+    {
         $interpolator = $this->interpolator();
 
-        // @formatter:off
         /** @var list<array{policy: string, statement_index: int, decision: \SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision, reason: string}> $trace */
-        // @formatter:on
         $trace          = [];
         $allowStatement = null;
 
         foreach ($policies as $policy) {
             foreach ($policy->statements as $index => $statement) {
-                $reason        = $this->classifyStatement($statement, $action, $resource, $context, $principal, $interpolator);
-                $traceDecision = $reason === 'action/resource did not match' || $reason === 'conditions not satisfied'
-                    ? TraceDecision::SKIPPED
-                    : TraceDecision::MATCHED;
-
-                $trace[] = [
-                    'policy'          => $policy->name,
-                    'statement_index' => $index,
-                    'decision'        => $traceDecision,
-                    'reason'          => $reason,
-                ];
+                $reason  = $this->classifyStatement($statement, $action, $resource, $context, $principal, $interpolator);
+                $trace[] = $this->traceEntry($policy->name, $index, $reason);
 
                 if ($reason === 'explicit deny') {
                     return EvaluationResult::explicitlyDenied($statement, $trace);
                 }
 
-                if ($reason === 'explicit allow') {
-                    $allowStatement ??= $statement;
+                if ($reason !== 'explicit allow') {
+                    continue;
                 }
+
+                $allowStatement ??= $statement;
             }
         }
 
@@ -80,8 +64,8 @@ final class PolicyEvaluator
     }
 
     /**
-     * Classify a statement against the evaluation inputs into one of
-     * the four trace reasons used by `evaluate()`.
+     * Classify a statement against the evaluation inputs into one of the four
+     * trace reasons used by `evaluate()`.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
      * @param  string  $action
@@ -91,23 +75,39 @@ final class PolicyEvaluator
      * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator  $interpolator
      * @return string
      */
-    private function classifyStatement(
-        Statement $statement,
-        string $action,
-        ?string $resource,
-        array $context,
-        ?object $principal,
-        ContextInterpolator $interpolator,
-    ): string {
+    private function classifyStatement(Statement $statement, string $action, ?string $resource, array $context, ?object $principal, ContextInterpolator $interpolator): string
+    {
         if (!$statement->matches($action, $resource, $interpolator, $principal, $context)) {
             return 'action/resource did not match';
         }
 
-        if (!$statement->evaluateConditions($context, $interpolator, $principal, $resource)) {
+        if (!$statement->conditionsSatisfiedBy($context, $interpolator, $principal, $resource)) {
             return 'conditions not satisfied';
         }
 
         return $statement->effect === PolicyEffect::DENY ? 'explicit deny' : 'explicit allow';
+    }
+
+    /**
+     * Build the trace entry recorded for a classified statement.
+     *
+     * @param  string  $policy
+     * @param  int  $index
+     * @param  string  $reason
+     * @return array{policy: string, statement_index: int, decision: \SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision, reason: string}
+     */
+    private function traceEntry(string $policy, int $index, string $reason): array
+    {
+        $decision = $reason === 'action/resource did not match' || $reason === 'conditions not satisfied'
+            ? TraceDecision::SKIPPED
+            : TraceDecision::MATCHED;
+
+        return [
+            'policy'          => $policy,
+            'statement_index' => $index,
+            'decision'        => $decision,
+            'reason'          => $reason,
+        ];
     }
 
     /**

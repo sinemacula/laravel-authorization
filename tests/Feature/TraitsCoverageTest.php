@@ -5,12 +5,12 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use PHPUnit\Framework\Attributes\CoversTrait;
+use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
+use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
+use SineMacula\Laravel\Authorization\Concerns\HasRoles;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
-use SineMacula\Laravel\Authorization\Traits\HasPermissions;
-use SineMacula\Laravel\Authorization\Traits\HasPolicies;
-use SineMacula\Laravel\Authorization\Traits\HasRoles;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 

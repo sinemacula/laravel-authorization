@@ -14,16 +14,17 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 /**
  * Row-lifecycle observer for the `Permission` model.
  *
- * Translates Eloquent's native `saving` / `updating` / `created` /
- * `updated` / `deleted` events into the package's typed CRUD events
- * and enforces the tenant-columns both-or-neither invariant on save.
- * System-protection hooks (`deleting`, `updating` guard, `saved`
- * bypass reset) live in
- * `HasSystemProtection::bootHasSystemProtection()` and run
- * independently of this observer.
+ * Translates Eloquent's native `saving` / `updating` / `created` / `updated` /
+ * `deleted` events into the package's typed CRUD events and enforces the
+ * tenant-columns both-or-neither invariant on save. System-protection hooks
+ * (`deleting`, `updating` guard, `saved` bypass reset) live in
+ * `HasSystemProtection::bootHasSystemProtection()` and run independently of
+ * this observer.
  *
- * Registered via `#[ObservedBy(PermissionObserver::class)]` on the
- * `Permission` model.
+ * Registered via `#[ObservedBy(PermissionObserver::class)]` on the `Permission`
+ * model.
+ *
+ * @managed-static
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -51,8 +52,8 @@ final class PermissionObserver
     }
 
     /**
-     * Capture the pre-update attribute snapshot so the paired
-     * `updated` hook can emit a complete before/after diff.
+     * Capture the pre-update attribute snapshot so the paired `updated` hook
+     * can emit a complete before/after diff.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission  $permission
      * @return void
@@ -80,8 +81,8 @@ final class PermissionObserver
     }
 
     /**
-     * Emit the typed `PermissionUpdated` event with the before/after
-     * diff captured in the paired `updating` hook.
+     * Emit the typed `PermissionUpdated` event with the before/after diff
+     * captured in the paired `updating` hook.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission  $permission
      * @return void

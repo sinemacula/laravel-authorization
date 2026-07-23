@@ -64,8 +64,8 @@ final class PrincipalResolverBindingTest extends TestCase
      */
     public function testNullResolverYieldsImplicitDeny(): void
     {
-        // Seed a user whose permissions should NEVER be consulted,
-        // proving the null resolver short-circuits the evaluator.
+        // Seed a user whose permissions should NEVER be consulted, proving the
+        // null resolver short-circuits the evaluator.
         $this->makeIdentityWithPermission(self::PUBLISH_PERMISSION);
 
         $this->bindResolverReturning(null);
@@ -91,8 +91,7 @@ final class PrincipalResolverBindingTest extends TestCase
         self::assertTrue(Authorization::can(self::VIEW_REPORTS_PERMISSION));
         self::assertFalse(Authorization::can(self::EXPORT_REPORTS_PERMISSION));
 
-        // Swap the resolver — the next evaluation must pick up the
-        // new subject.
+        // Swap the resolver — the next evaluation must pick up the new subject.
         $this->bindResolverReturning($second);
 
         self::assertFalse(Authorization::can(self::VIEW_REPORTS_PERMISSION));
@@ -120,7 +119,6 @@ final class PrincipalResolverBindingTest extends TestCase
 
                 /** The principal returned by every resolution call. */
                 private readonly ?object $principal,
-
             ) {}
 
             /**

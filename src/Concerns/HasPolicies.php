@@ -2,8 +2,9 @@
 
 declare(strict_types = 1);
 
-namespace SineMacula\Laravel\Authorization\Traits;
+namespace SineMacula\Laravel\Authorization\Concerns;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
@@ -18,9 +19,9 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 /**
  * Policy attachment trait for authorizable models.
  *
- * Manages the polymorphic pivot between an identity and one or more
- * policy rows. The `getPolicies()` helper hydrates each attached row
- * into an evaluation-ready value object.
+ * Manages the polymorphic pivot between an identity and one or more policy
+ * rows. The `getPolicies()` helper hydrates each attached row into an
+ * evaluation-ready value object.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,11 +37,10 @@ trait HasPolicies // @phpstan-ignore trait.unused
     /**
      * Morph-to-many relation onto policies.
      *
-     * Filters out pivot rows whose `expires_at` is in the past —
-     * temporal policy attachments disappear from the relation
-     * automatically at expiry without requiring a sweeper run.
-     * The pivot's `expires_at` column is surfaced via
-     * `withPivot()`.
+     * Filters out pivot rows whose `expires_at` is in the past — temporal
+     * policy attachments disappear from the relation automatically at expiry
+     * without requiring a sweeper run. The pivot's `expires_at` column is
+     * surfaced via `withPivot()`.
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
@@ -61,11 +61,10 @@ trait HasPolicies // @phpstan-ignore trait.unused
         /** @var string $pivot */
         $pivot = config('authorization.tables.authorizable_policies', 'authorizable_policies');
 
-        // The `where(...)` and inner `whereNull()/orWhere()` calls are
-        // resolved by PHPStan to static methods on Eloquent's Builder
-        // via Laravel's annotation soup — the underlying dispatch is
-        // instance-level. Same pattern, same justification, as
-        // `GuardScopedLookup`.
+        // The `where(...)` and inner `whereNull()/orWhere()` calls are resolved
+        // by PHPStan to static methods on Eloquent's Builder via Laravel's
+        // annotation soup — the underlying dispatch is instance-level. Same
+        // pattern, same justification, as `GuardScopedLookup`.
         // @phpstan-ignore staticMethod.dynamicCall
         return $this->morphToMany(
             related: $model,
@@ -76,7 +75,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
         )
             ->using(AuthorizablePolicyPivot::class)
             ->withPivot('expires_at')
-            ->where(static function (\Illuminate\Database\Eloquent\Builder $query) use ($pivot): void {
+            ->where(static function (Builder $query) use ($pivot): void {
                 // @phpstan-ignore staticMethod.dynamicCall
                 $query->whereNull($pivot . '.expires_at')
                     ->orWhere($pivot . '.expires_at', '>', Carbon::now());
@@ -86,19 +85,17 @@ trait HasPolicies // @phpstan-ignore trait.unused
     /**
      * Attach the given policy to this identity.
      *
-     * Accepts a `Policy` instance or any Eloquent model — consumers
-     * who swap the policy model via `authorization.models.policy`
-     * may pass their own subclass (or a duck-typed model persisted
-     * in the same pivot) without jumping through inheritance
-     * hoops. The shipped `IdentityPolicyAttached` event expects a `Policy`
-     * instance, so non-Policy models are attached silently; use
-     * a Policy-shaped class when event wiring matters.
+     * Accepts a `Policy` instance or any Eloquent model — consumers who swap
+     * the policy model via `authorization.models.policy` may pass their own
+     * subclass (or a duck-typed model persisted in the same pivot) without
+     * jumping through inheritance hoops. The shipped `IdentityPolicyAttached`
+     * event expects a `Policy` instance, so non-Policy models are attached
+     * silently; use a Policy-shaped class when event wiring matters.
      *
-     * An optional `$expiresAt` makes the attachment temporal — the
-     * row is filtered out of `$user->policies` the moment the
-     * clock passes the supplied instant, without requiring a
-     * sweeper run. Passing null (the default) creates a forever
-     * attachment.
+     * An optional `$expiresAt` makes the attachment temporal — the row is
+     * filtered out of `$user->policies` the moment the clock passes the
+     * supplied instant, without requiring a sweeper run. Passing null (the
+     * default) creates a forever attachment.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @param  \DateTimeInterface|null  $expiresAt
@@ -122,7 +119,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
         if ($policy instanceof Policy) {
             Event::dispatch(new IdentityPolicyAttached($this, $policy));
 
-            if ($prior['exists'] && !self::authorizationGrantExpiriesEqual($prior['expires_at'], $expiresAt)) {
+            if ($prior['exists'] && !self::areAuthorizationGrantExpiriesEqual($prior['expires_at'], $expiresAt)) {
                 Event::dispatch(new IdentityPolicyExpiryChanged(
                     $this,
                     $policy,
@@ -138,8 +135,8 @@ trait HasPolicies // @phpstan-ignore trait.unused
     /**
      * Detach the given policy from this identity.
      *
-     * Accepts a `Policy` instance or any Eloquent model — same
-     * widened contract as `attachPolicy()`.
+     * Accepts a `Policy` instance or any Eloquent model — same widened contract
+     * as `attachPolicy()`.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return static
@@ -162,19 +159,17 @@ trait HasPolicies // @phpstan-ignore trait.unused
     /**
      * Replace the identity's attached policies with the supplied set.
      *
-     * Accepts `Policy` instances or any Eloquent model — same
-     * widened contract as `attachPolicy()`.
+     * Accepts `Policy` instances or any Eloquent model — same widened contract
+     * as `attachPolicy()`.
      *
-     * Each net attachment fires `IdentityPolicyAttached` and
-     * each net detachment fires `IdentityPolicyDetached` for
-     * Policy-shaped rows, mirroring the per-row signal of
-     * `attachPolicy()` / `detachPolicy()`. The cache invalidation
-     * listener wired to those events keeps the resolution cache
-     * coherent without a separate forget call in this method.
-     * Non-Policy models are still synced silently — the events
-     * carry a `Policy` instance by contract, so detached IDs
-     * that resolve to a non-Policy model (or nothing) are
-     * skipped without raising.
+     * Each net attachment fires `IdentityPolicyAttached` and each net
+     * detachment fires `IdentityPolicyDetached` for Policy-shaped rows,
+     * mirroring the per-row signal of `attachPolicy()` / `detachPolicy()`. The
+     * cache invalidation listener wired to those events keeps the resolution
+     * cache coherent without a separate forget call in this method. Non-Policy
+     * models are still synced silently — the events carry a `Policy` instance
+     * by contract, so detached IDs that resolve to a non-Policy model (or
+     * nothing) are skipped without raising.
      *
      * @formatter:off
      *
@@ -202,17 +197,21 @@ trait HasPolicies // @phpstan-ignore trait.unused
         foreach ($result['attached'] as $id) {
             $model = $resolved[(string) $id] ?? $this->lookupPolicyById((string) $id);
 
-            if ($model instanceof Policy) {
-                Event::dispatch(new IdentityPolicyAttached($this, $model));
+            if (!($model instanceof Policy)) {
+                continue;
             }
+
+            Event::dispatch(new IdentityPolicyAttached($this, $model));
         }
 
         foreach ($result['detached'] as $id) {
             $model = $this->lookupPolicyById((string) $id);
 
-            if ($model instanceof Policy) {
-                Event::dispatch(new IdentityPolicyDetached($this, $model));
+            if (!($model instanceof Policy)) {
+                continue;
             }
+
+            Event::dispatch(new IdentityPolicyDetached($this, $model));
         }
 
         return $this;
@@ -221,13 +220,12 @@ trait HasPolicies // @phpstan-ignore trait.unused
     /**
      * Return the evaluation-ready policies attached to this identity.
      *
-     * A single malformed row must not short-circuit the entire
-     * evaluation — §12.3 mandates "fail closed (denied)" rather
-     * than "fail loud (500)". Each hydration runs inside its own
-     * try/catch: the offending row is logged through the
-     * `authorization` channel (or Laravel's default if the
-     * channel is unconfigured) and skipped. An excluded `ALLOW`
-     * cannot win, so the net decision stays deny-biased.
+     * A single malformed row must not short-circuit the entire evaluation —
+     * §12.3 mandates "fail closed (denied)" rather than "fail loud (500)". Each
+     * hydration runs inside its own try/catch: the offending row is logged
+     * through the `authorization` channel (or Laravel's default if the channel
+     * is unconfigured) and skipped. An excluded `ALLOW` cannot win, so the net
+     * decision stays deny-biased.
      *
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
      */
@@ -250,12 +248,11 @@ trait HasPolicies // @phpstan-ignore trait.unused
     }
 
     /**
-     * Look up a policy model by primary key, used by
-     * `syncPolicies()` when the sync delta surfaces an ID that
-     * was not part of the caller's input set (the detachment
-     * list). Returns null when the row no longer exists or
-     * resolves to a non-Policy model — both branches are
-     * handled by the caller as "skip the event.".
+     * Look up a policy model by primary key, used by `syncPolicies()` when the
+     * sync delta surfaces an ID that was not part of the caller's input set
+     * (the detachment list). Returns null when the row no longer exists or
+     * resolves to a non-Policy model — both branches are handled by the caller
+     * as "skip the event.".
      *
      * @param  string  $id
      * @return \SineMacula\Laravel\Authorization\Models\Policy|null
@@ -271,9 +268,8 @@ trait HasPolicies // @phpstan-ignore trait.unused
     }
 
     /**
-     * Report a malformed policy row without raising — the engine
-     * stays fail-closed because the bad row is excluded from the
-     * evaluation set.
+     * Report a malformed policy row without raising — the engine stays
+     * fail-closed because the bad row is excluded from the evaluation set.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @param  \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException  $exception
@@ -282,12 +278,14 @@ trait HasPolicies // @phpstan-ignore trait.unused
     private static function logMalformedPolicy(Policy $policy, InvalidPolicyDocumentException $exception): void
     {
         // @codeCoverageIgnoreStart
-        // Defensive: the Laravel `logger()` helper is always present under a booted framework, so this fallback is reachable only from non-Laravel embeddings.
+        // Defensive: the Laravel `logger()` helper is always present under a
+        // booted framework, so this fallback is reachable only from non-Laravel
+        // embeddings.
         if (!\function_exists('logger')) {
             return;
         }
-        // @codeCoverageIgnoreEnd
 
+        // @codeCoverageIgnoreEnd
         try {
             /** @var \Illuminate\Log\LogManager $logger */
             $logger  = logger();

@@ -10,15 +10,14 @@ use SineMacula\Laravel\Authorization\Console\Concerns\ResolvesIdentity;
 /**
  * Revoke a role from an authorizable identity.
  *
- * Accepts the identity as `{morphType}:{key}` (e.g. `user:123`)
- * and the role by name. Resolves the morph alias via the Eloquent
- * morph map, validates the `AuthorizableIdentity` contract, and
- * delegates to `revokeRole()`.
+ * Accepts the identity as `{morphType}:{key}` (e.g. `user:123`) and the role by
+ * name. Resolves the morph alias via the Eloquent morph map, validates the
+ * `AuthorizableIdentity` contract, and delegates to `revokeRole()`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-class RevokeRoleCommand extends Command
+final class RevokeRoleCommand extends Command
 {
     use ResolvesIdentity;
 

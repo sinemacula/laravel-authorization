@@ -133,7 +133,6 @@ final class BladeHelpersBudgetTest extends TestCase
 
                 /** The principal returned by every resolution call. */
                 private readonly object $principal,
-
             ) {}
 
             /**

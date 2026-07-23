@@ -7,10 +7,10 @@ namespace Tests\Feature;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversTrait;
+use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Policy;
-use SineMacula\Laravel\Authorization\Traits\HasPolicies;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -59,10 +59,9 @@ final class FailClosedPolicyHydrationTest extends TestCase
         ]);
         $user->attachPolicy($good);
 
-        // Persist a malformed row by writing raw JSON that does
-        // not satisfy `Policy::fromArray()`. `DB::table()`
-        // bypasses the Eloquent mutator so the invalid document
-        // lands in the database.
+        // Persist a malformed row by writing raw JSON that does not satisfy
+        // `Policy::fromArray()`. `DB::table()` bypasses the Eloquent mutator so
+        // the invalid document lands in the database.
         $badId = (string) Str::uuid();
         DB::table('policies')->insert([
             'id'         => $badId,

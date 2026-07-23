@@ -10,6 +10,10 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
+use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
+use SineMacula\Laravel\Authorization\Concerns\HasRoleHierarchy;
+use SineMacula\Laravel\Authorization\Concerns\ManagesPermissions;
+use SineMacula\Laravel\Authorization\Concerns\ValidatesAuthorizationName;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
@@ -21,29 +25,22 @@ use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
-use SineMacula\Laravel\Authorization\Traits\HasPermissions;
-use SineMacula\Laravel\Authorization\Traits\HasRoleHierarchy;
-use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
-use SineMacula\Laravel\Authorization\Traits\ValidatesAuthorizationName;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
  * Feature coverage for the wildcard-permission bundle.
  *
- * - `HasPermissions::hasPermission()` and `Role::hasPermission()`
- *   treat held names as `fnmatch` patterns: a held `posts:*`
- *   satisfies an asked `posts:create`, a held `*:*` satisfies
- *   anything (the super-admin bypass). The reverse direction does
- *   not match.
- * - `Statement::matchesAction()` / `matchesResource()` compare
- *   patterns with `FNM_NOESCAPE`, so backslash-bearing resource
- *   identifiers (fully-qualified morph classes without an alias)
- *   match literally.
- * - `ValidatesAuthorizationName` rejects role and permission names
- *   that contain glob metacharacters or whitespace before the row
- *   hits the database, so `fnmatch` cannot be tricked by a
- *   malformed value.
+ * - `HasPermissions::hasPermission()` and `Role::hasPermission()` treat held
+ *   names as `fnmatch` patterns: a held `posts:*` satisfies an asked
+ *   `posts:create`, a held `*:*` satisfies anything (the super-admin bypass).
+ *   The reverse direction does not match.
+ * - `Statement::matchesAction()` / `matchesResource()` compare patterns with
+ *   `FNM_NOESCAPE`, so backslash-bearing resource identifiers (fully-qualified
+ *   morph classes without an alias) match literally.
+ * - `ValidatesAuthorizationName` rejects role and permission names that contain
+ *   glob metacharacters or whitespace before the row hits the database, so
+ *   `fnmatch` cannot be tricked by a malformed value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -190,9 +187,9 @@ final class WildcardPermissionTest extends TestCase
      */
     public function testStatementMatchesBackslashBearingResourceLiterally(): void
     {
-        // Keep an empty morph map so a Statement's resource pattern
-        // is compared against a raw FQN-like string. Any prior test
-        // that registered an alias has been torn down.
+        // Keep an empty morph map so a Statement's resource pattern is compared
+        // against a raw FQN-like string. Any prior test that registered an
+        // alias has been torn down.
         Relation::morphMap([], false);
 
         $statement = Statement::fromArray([

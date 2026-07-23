@@ -17,7 +17,7 @@ use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
-use Tests\Feature\Stubs\PermissionEnum;
+use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\TestCase;
 
 /**

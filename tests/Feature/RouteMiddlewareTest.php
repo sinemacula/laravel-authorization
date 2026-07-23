@@ -4,7 +4,6 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
-use Closure;
 use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -484,7 +483,6 @@ final class RouteMiddlewareTest extends TestCase
 
                 /** The principal returned by every resolution call. */
                 private readonly ?object $principal,
-
             ) {}
 
             /**

@@ -9,10 +9,10 @@ use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 /**
  * Static-slot principal resolver for benches.
  *
- * Benches need to swap the resolved principal between revolutions
- * without rebuilding the container. The resolver is stateful on a
- * single slot so any bench can bind it once, flip the principal
- * per subject, and avoid a rebinding round-trip.
+ * Benches need to swap the resolved principal between revolutions without
+ * rebuilding the container. The resolver is stateful on a single slot so any
+ * bench can bind it once, flip the principal per subject, and avoid a rebinding
+ * round-trip.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,13 +29,14 @@ final class BenchmarkPrincipalResolver implements PrincipalResolver
      * @param  object|null  $principal
      */
     public function __construct(
+
         /** @var object|null Currently slotted principal returned by `resolve()`. */
         private ?object $principal = null,
     ) {}
 
     /**
-     * Swap the resolved principal — used by benches that carve
-     * admit / deny shapes on a shared resolver binding.
+     * Swap the resolved principal — used by benches that carve admit / deny
+     * shapes on a shared resolver binding.
      *
      * @param  object|null  $principal
      * @return void

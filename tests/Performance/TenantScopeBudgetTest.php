@@ -7,10 +7,11 @@ namespace Tests\Performance;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
-use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use Tests\Performance\Support\CountedBenchTenant;
+use Tests\Performance\Support\CountingTenantResolver;
 use Tests\TestCase;
 
 /**
@@ -116,72 +117,5 @@ final class TenantScopeBudgetTest extends TestCase
             $elapsed,
             "TenantScope warm-apply budget exceeded ({$elapsed}s for 1,000 iterations).",
         );
-    }
-}
-
-/**
- * Counting tenant resolver used by the memo-contract assertion — exposes
- * `$calls` so the test can prove single-invocation semantics.
- *
- * @internal
- */
-// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
-final class CountingTenantResolver implements TenantResolver
-{
-    /** @var int Number of times `resolve` was invoked. */
-    public int $calls = 0;
-
-    /**
-     * Create a new counting resolver wrapping a fixed tenant.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant  $tenant
-     * @return void
-     */
-    public function __construct(
-
-        /** The tenant returned by every resolution call. */
-        private readonly AuthorizableTenant $tenant,
-
-    ) {}
-
-    /**
-     * Resolve the tenant and increment the call counter.
-     *
-     * @return object|null
-     *
-     * @phpstan-ignore-next-line return.unusedType
-     */
-    #[\Override]
-    public function resolve(): ?object
-    {
-        $this->calls++;
-
-        return $this->tenant;
-    }
-}
-
-/**
- * Minimal tenant fixture — kept here rather than in a shared helper so the
- * performance suite has no runtime dependency on the benchmark-support tree.
- *
- * @internal
- */
-// phpcs:ignore PSR1.Classes.ClassDeclaration.MultipleClasses
-final class CountedBenchTenant implements AuthorizableTenant
-{
-    /**
-     * @return string
-     */
-    public function getKey(): string
-    {
-        return 'bench-tenant';
-    }
-
-    /**
-     * @return string
-     */
-    public function getMorphClass(): string
-    {
-        return 'bench_tenant';
     }
 }

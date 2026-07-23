@@ -4,12 +4,18 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Cache\Repository;
+use Illuminate\Contracts\Cache\Store;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
+use PHPUnit\Framework\Assert;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
+use SineMacula\Laravel\Authorization\Cache\PrincipalCacheKey;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Listeners\InvalidateResolutionCache;
@@ -20,6 +26,7 @@ use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Resolvers\CachingPolicyResolver;
+use Tests\Feature\Stubs\NonTaggableCacheStore;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -40,6 +47,7 @@ use Tests\TestCase;
  * @SuppressWarnings("php:S1192")
  * @SuppressWarnings("php:S1448")
  */
+#[CoversClass(PrincipalCacheKey::class)]
 #[CoversClass(ResolutionCache::class)]
 #[CoversClass(CachingPolicyResolver::class)]
 #[CoversClass(InvalidateResolutionCache::class)]
@@ -121,9 +129,9 @@ final class ResolutionCacheTest extends TestCase
         $keys  = \array_filter(
             \array_keys((array) $this->extractPrivate($store->getStore(), 'storage') ?? []), // @phpstan-ignore nullCoalesce.expr
             // Laravel's tagged array entries are stored under a
-            // `<hash>:<original-key>` shape; the suffix match keeps
-            // the assertion faithful to the prefix-scoped entry
-            // without coupling to the opaque tag hash.
+            // `<hash>:<original-key>` shape; the suffix match keeps the
+            // assertion faithful to the prefix-scoped entry without coupling to
+            // the opaque tag hash.
             static fn (mixed $key): bool => \is_string($key) && \str_contains($key, 'authorization-test:permissions:'),
         );
 
@@ -131,7 +139,7 @@ final class ResolutionCacheTest extends TestCase
 
         // New cache instance with the same store — simulates a fresh request.
         $fresh         = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
-        $cachedEntries = $fresh->rememberPermissions($principal, static fn (): array => \PHPUnit\Framework\Assert::fail('Resolver should not be called on a store hit.'));
+        $cachedEntries = $fresh->rememberPermissions($principal, static fn (): array => Assert::fail('Resolver should not be called on a store hit.'));
 
         self::assertSame(['posts:create', 'posts:delete'], $cachedEntries);
     }
@@ -223,8 +231,8 @@ final class ResolutionCacheTest extends TestCase
      */
     public function testRolePermissionGrantedFlushesInMemoryCache(): void
     {
-        // Rebind the cache to in-memory only so the listener's
-        // flush() is the only invalidation path under test.
+        // Rebind the cache to in-memory only so the listener's flush() is the
+        // only invalidation path under test.
         $this->app->instance(ResolutionCache::class, new ResolutionCache(store: null)); // @phpstan-ignore method.nonObject
 
         $cache = $this->app->make(ResolutionCache::class); // @phpstan-ignore method.nonObject
@@ -262,15 +270,13 @@ final class ResolutionCacheTest extends TestCase
 
         $user->assignRole('editor');
 
-        // Prime the persistent cache via the canonical accessor —
-        // the trait wires role IDs through so the entry carries
-        // the role tag.
+        // Prime the persistent cache via the canonical accessor — the trait
+        // wires role IDs through so the entry carries the role tag.
         self::assertSame(['posts:read'], $user->fresh()?->getPermissions());
 
-        // Attaching a new permission to the role fires
-        // `RolePermissionGranted`. On a tag-capable store the
-        // listener must flush the principal's entry via the role
-        // tag — not just the in-memory memo.
+        // Attaching a new permission to the role fires `RolePermissionGranted`.
+        // On a tag-capable store the listener must flush the principal's entry
+        // via the role tag — not just the in-memory memo.
         $second = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard_name' => 'web']);
         $role->givePermission($second);
 
@@ -301,11 +307,10 @@ final class ResolutionCacheTest extends TestCase
 
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        // Seed the in-memory memo with a stale entry — the
-        // resolver runs once and the result is memoised for the
-        // lifetime of the process. The persistent tier also
-        // receives the same value so we can confirm afterwards
-        // that the listener does not touch it.
+        // Seed the in-memory memo with a stale entry — the resolver runs once
+        // and the result is memoised for the lifetime of the process. The
+        // persistent tier also receives the same value so we can confirm
+        // afterwards that the listener does not touch it.
         $cache->rememberPermissions($principal, static fn (): array => ['stale:entry']);
 
         $keysBefore = \array_keys((array) $this->extractPrivate($driver, 'storage') ?? []); // @phpstan-ignore nullCoalesce.expr
@@ -315,18 +320,18 @@ final class ResolutionCacheTest extends TestCase
         $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard_name' => 'web']);
         $role->givePermission($permission);
 
-        // Persistent entries are intentionally untouched — the
-        // non-tag branch leaves them to expire on TTL.
+        // Persistent entries are intentionally untouched — the non-tag branch
+        // leaves them to expire on TTL.
         self::assertSame(
             $keysBefore,
             \array_keys((array) $this->extractPrivate($driver, 'storage') ?? []), // @phpstan-ignore nullCoalesce.expr
             'Non-tag store must keep persistent entries after a role-pivot mutation.',
         );
 
-        // But the memo was flushed — drop the persistent entry
-        // for the original principal (so the store read on the
-        // next lookup misses) and observe that the resolver runs
-        // again instead of returning the memoised `stale:entry`.
+        // But the memo was flushed — drop the persistent entry for the original
+        // principal (so the store read on the next lookup misses) and observe
+        // that the resolver runs again instead of returning the memoised
+        // `stale:entry`.
         foreach ($keysBefore as $key) {
             $driver->forget((string) $key);
         }
@@ -388,7 +393,6 @@ final class ResolutionCacheTest extends TestCase
 
                 /** The stable identifier used as the cache key. */
                 private readonly string $id,
-
             ) {}
 
             /**
@@ -424,13 +428,13 @@ final class ResolutionCacheTest extends TestCase
 
         self::assertNotEmpty($keys, 'Persistent cache entry should key on the duck-typed morph class and key.');
 
-        // A fresh cache instance reusing the same store must hit the
-        // persistent tier — proves cross-request caching actually
-        // works for non-Model principals.
+        // A fresh cache instance reusing the same store must hit the persistent
+        // tier — proves cross-request caching actually works for non-Model
+        // principals.
         $fresh         = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
         $cachedEntries = $fresh->rememberPermissions(
             $principal,
-            static fn (): array => \PHPUnit\Framework\Assert::fail('Resolver should not be called on a store hit.'),
+            static fn (): array => Assert::fail('Resolver should not be called on a store hit.'),
         );
 
         self::assertSame(['svc:read', 'svc:write'], $cachedEntries);
@@ -447,21 +451,19 @@ final class ResolutionCacheTest extends TestCase
     {
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        // Target the non-taggable store path with an anonymous
-        // driver that hides `tags()` — this keeps the test's
-        // payload shape in sync with the cache's untagged write
-        // so the fail-closed recovery can be observed without
-        // tangling with Laravel's tag-namespace hashing. The
-        // tag-capable store exercises its own recovery via
-        // `forgetFromStore()` which the tag-capable scenarios
-        // cover indirectly.
+        // Target the non-taggable store path with an anonymous driver that
+        // hides `tags()` — this keeps the test's payload shape in sync with the
+        // cache's untagged write so the fail-closed recovery can be observed
+        // without tangling with Laravel's tag-namespace hashing. The
+        // tag-capable store exercises its own recovery via `forgetFromStore()`
+        // which the tag-capable scenarios cover indirectly.
         $driver = self::makeNonTaggableDriver();
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
 
         $cache = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
 
-        // Prime the persistent tier with the correct shape so the
-        // cache key is discoverable, then corrupt it.
+        // Prime the persistent tier with the correct shape so the cache key is
+        // discoverable, then corrupt it.
         $cache->rememberPolicies($principal, static fn (): array => []);
 
         $keys = \array_filter(
@@ -472,12 +474,12 @@ final class ResolutionCacheTest extends TestCase
         self::assertNotEmpty($keys);
         $policyKey = (string) \array_values($keys)[0]; // @phpstan-ignore cast.useless
 
-        // Seed a malformed payload — a list of non-array entries
-        // will fail the `Policy::fromArray` contract.
+        // Seed a malformed payload — a list of non-array entries will fail the
+        // `Policy::fromArray` contract.
         $driver->put($policyKey, ['not-a-policy-document', 42], 60);
 
-        // Fresh cache instance forces the persistent tier to be
-        // consulted (bypasses the in-memory memo primed above).
+        // Fresh cache instance forces the persistent tier to be consulted
+        // (bypasses the in-memory memo primed above).
         $fresh = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
 
         $expected = [
@@ -491,8 +493,8 @@ final class ResolutionCacheTest extends TestCase
 
         self::assertSame($expected, $cachedEntries);
 
-        // Store should have been rewritten with the recomputed
-        // (valid) payload, not the corrupt one.
+        // Store should have been rewritten with the recomputed (valid) payload,
+        // not the corrupt one.
         /** @var mixed $stored */
         $stored = $driver->get($policyKey);
         self::assertIsArray($stored);
@@ -511,7 +513,7 @@ final class ResolutionCacheTest extends TestCase
     public function testForgetDropsAllThreeSlotsFromNonTagStore(): void
     {
         $driver = self::makeNonTaggableDriver();
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'fgt');
 
         $principal = new class {
@@ -578,7 +580,7 @@ final class ResolutionCacheTest extends TestCase
     public function testNonArrayPolicyDocumentThrowsAndRecovery(): void
     {
         $driver = self::makeNonTaggableDriver();
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'thr');
 
         $principal = new class {
@@ -619,7 +621,7 @@ final class ResolutionCacheTest extends TestCase
     public function testCorruptStringListEntryIsForgottenAndRecomputed(): void
     {
         $driver = self::makeNonTaggableDriver();
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'csl');
 
         $principal = new class {
@@ -649,9 +651,9 @@ final class ResolutionCacheTest extends TestCase
         self::assertInstanceOf(ResolutionCache::class, $cache);
 
         // The throwable from is_array(string) being true but
-        // array_filter('is_string') being applied... Actually, a
-        // string value will fail is_array, so resolver re-runs.
-        // Let's use an object to trigger a throw.
+        // array_filter('is_string') being applied... Actually, a string value
+        // will fail is_array, so resolver re-runs. Let's use an object to
+        // trigger a throw.
         $driver->put('csl:permissions:sl:1', new \stdClass, 60);
 
         $fresh2        = new ResolutionCache(store: $store, ttl: 0, prefix: 'csl');
@@ -669,7 +671,7 @@ final class ResolutionCacheTest extends TestCase
     public function testKeyForIntegerGetKey(): void
     {
         $driver = self::makeNonTaggableDriver();
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'kf');
 
         $principal = new class {
@@ -705,7 +707,7 @@ final class ResolutionCacheTest extends TestCase
     public function testKeyForFallsBackToSplObjectHashOnEmptyKey(): void
     {
         $driver = self::makeNonTaggableDriver();
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'spl');
 
         $principal = new class {
@@ -743,7 +745,7 @@ final class ResolutionCacheTest extends TestCase
      */
     public function testPrincipalTagShapeIsCorrect(): void
     {
-        $cache = new ResolutionCache(store: \Illuminate\Support\Facades\Cache::store('array'), ttl: 0, prefix: 'ptag');
+        $cache = new ResolutionCache(store: Cache::store('array'), ttl: 0, prefix: 'ptag');
 
         $ref = new \ReflectionMethod($cache, 'principalTag');
 
@@ -779,7 +781,7 @@ final class ResolutionCacheTest extends TestCase
      */
     public function testTagsForComposesCorrectTagSet(): void
     {
-        $cache = new ResolutionCache(store: \Illuminate\Support\Facades\Cache::store('array'), ttl: 0, prefix: 'tf');
+        $cache = new ResolutionCache(store: Cache::store('array'), ttl: 0, prefix: 'tf');
 
         $ref = new \ReflectionMethod($cache, 'tagsFor');
 
@@ -804,8 +806,8 @@ final class ResolutionCacheTest extends TestCase
         /** @var array<int, string> $tags */
         $tags = $ref->invoke($cache, $principal, ['r1', '', 'r2', 'r1']);
 
-        // Must contain prefix, principal tag, and both role tags
-        // (deduped), and must skip the empty-string role ID.
+        // Must contain prefix, principal tag, and both role tags (deduped), and
+        // must skip the empty-string role ID.
         self::assertSame([
             'tf',
             'tf:principal:tg:7',
@@ -822,7 +824,7 @@ final class ResolutionCacheTest extends TestCase
      */
     public function testIsTaggableMemoReturnValue(): void
     {
-        $cache = new ResolutionCache(store: \Illuminate\Support\Facades\Cache::store('array'), ttl: 0, prefix: 'itm');
+        $cache = new ResolutionCache(store: Cache::store('array'), ttl: 0, prefix: 'itm');
 
         // First call computes and caches.
         self::assertTrue($cache->supportsTags());
@@ -843,7 +845,7 @@ final class ResolutionCacheTest extends TestCase
     public function testPutInStoreSkipsWriteWhenTtlNotPositive(): void
     {
         $driver = self::makeNonTaggableDriver();
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
 
         // ttl=0 is forever, but maxTtl=0 forces computed TTL to
         // min(INT_MAX, 0) - 1 = -1 — the write should be skipped.
@@ -870,11 +872,11 @@ final class ResolutionCacheTest extends TestCase
         $cache->rememberPermissions(
             $principal,
             static fn (): array => ['x'],
-            new \SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext(maxTtl: 0),
+            new ResolutionCacheContext(maxTtl: 0),
         );
 
-        // The memo is populated but the store should NOT have the entry
-        // because the TTL is -1.
+        // The memo is populated but the store should NOT have the entry because
+        // the TTL is -1.
         self::assertEmpty($driver->storage); // @phpstan-ignore property.notFound
     }
 
@@ -887,7 +889,7 @@ final class ResolutionCacheTest extends TestCase
     public function testPutInStoreUsesConfiguredTtlWhenPositive(): void
     {
         $driver = self::makeNonTaggableDriver();
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 300, prefix: 'ttlp');
 
         $principal = new class {
@@ -922,7 +924,7 @@ final class ResolutionCacheTest extends TestCase
     public function testPutInStoreSkipsWhenMaxTtlIsOne(): void
     {
         $driver = self::makeNonTaggableDriver();
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'ttl1');
 
         $principal = new class {
@@ -947,7 +949,7 @@ final class ResolutionCacheTest extends TestCase
         $cache->rememberPermissions(
             $principal,
             static fn (): array => ['z'],
-            new \SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext(maxTtl: 1),
+            new ResolutionCacheContext(maxTtl: 1),
         );
 
         self::assertEmpty($driver->storage); // @phpstan-ignore property.notFound
@@ -962,7 +964,7 @@ final class ResolutionCacheTest extends TestCase
     public function testCorruptCacheLogIncludesKey(): void
     {
         $driver = self::makeNonTaggableDriver();
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'logk');
 
         $principal = new class {
@@ -988,14 +990,14 @@ final class ResolutionCacheTest extends TestCase
         $driver->put('logk:permissions:lg:1', new \stdClass, 60);
 
         // Capture log output.
-        \Illuminate\Support\Facades\Log::spy();
+        Log::spy();
 
         $fresh = new ResolutionCache(store: $store, ttl: 0, prefix: 'logk');
         $fresh->rememberPermissions($principal, static fn (): array => ['b']);
 
-        // We cannot easily assert the exact log call through the
-        // authorization channel, but we can confirm the resolver ran
-        // (meaning the corrupt path was hit) and the result is correct.
+        // We cannot easily assert the exact log call through the authorization
+        // channel, but we can confirm the resolver ran (meaning the corrupt
+        // path was hit) and the result is correct.
         $cachedEntries = $fresh->rememberPermissions($principal, static fn (): array => ['c']);
         self::assertSame(['b'], $cachedEntries);
     }
@@ -1010,7 +1012,7 @@ final class ResolutionCacheTest extends TestCase
     public function testRememberPoliciesPersistsAndRehydratesPolicies(): void
     {
         $driver = self::makeNonTaggableDriver();
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'pol');
 
         $principal = new class {
@@ -1044,7 +1046,7 @@ final class ResolutionCacheTest extends TestCase
         $fresh         = new ResolutionCache(store: $store, ttl: 0, prefix: 'pol');
         $cachedEntries = $fresh->rememberPolicies(
             $principal,
-            static fn (): array => \PHPUnit\Framework\Assert::fail('Resolver should not run.'),
+            static fn (): array => Assert::fail('Resolver should not run.'),
         );
 
         self::assertCount(1, $cachedEntries);
@@ -1060,7 +1062,7 @@ final class ResolutionCacheTest extends TestCase
     public function testKeyForPrincipalWithoutGetKey(): void
     {
         $driver = self::makeNonTaggableDriver();
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'nk');
 
         $principal = new \stdClass;
@@ -1081,7 +1083,7 @@ final class ResolutionCacheTest extends TestCase
      */
     public function testForgetRoleTagsSkipsEmptyRoleKey(): void
     {
-        $cache = new ResolutionCache(store: \Illuminate\Support\Facades\Cache::store('array'), prefix: 'frt');
+        $cache = new ResolutionCache(store: Cache::store('array'), prefix: 'frt');
 
         $emptyRole = new class {
             /**
@@ -1107,7 +1109,7 @@ final class ResolutionCacheTest extends TestCase
      */
     public function testForgetRoleTagsSkipsNoGetKeyMethod(): void
     {
-        $cache = new ResolutionCache(store: \Illuminate\Support\Facades\Cache::store('array'), prefix: 'frt2');
+        $cache = new ResolutionCache(store: Cache::store('array'), prefix: 'frt2');
 
         $noKey = new \stdClass;
 
@@ -1125,7 +1127,7 @@ final class ResolutionCacheTest extends TestCase
      */
     public function testForgetRoleTagsWithIntegerKey(): void
     {
-        $cache = new ResolutionCache(store: \Illuminate\Support\Facades\Cache::store('array'), prefix: 'fri');
+        $cache = new ResolutionCache(store: Cache::store('array'), prefix: 'fri');
 
         $intRole = new class {
             /**
@@ -1150,12 +1152,12 @@ final class ResolutionCacheTest extends TestCase
      * @param  \Illuminate\Contracts\Cache\Store  $driver
      * @return \SineMacula\Laravel\Authorization\Cache\ResolutionCache
      */
-    private function bindNonTagResolutionCache(\Illuminate\Contracts\Cache\Store $driver): ResolutionCache
+    private function bindNonTagResolutionCache(Store $driver): ResolutionCache
     {
         $this->app->instance( // @phpstan-ignore method.nonObject
             ResolutionCache::class,
             new ResolutionCache(
-                store: new \Illuminate\Cache\Repository($driver),
+                store: new Repository($driver),
                 ttl: 0,
                 prefix: 'authorization-test',
             ),
@@ -1203,8 +1205,8 @@ final class ResolutionCacheTest extends TestCase
      *
      * @return \Tests\Feature\Stubs\NonTaggableCacheStore
      */
-    private static function makeNonTaggableDriver(): \Tests\Feature\Stubs\NonTaggableCacheStore
+    private static function makeNonTaggableDriver(): NonTaggableCacheStore
     {
-        return new \Tests\Feature\Stubs\NonTaggableCacheStore;
+        return new NonTaggableCacheStore;
     }
 }

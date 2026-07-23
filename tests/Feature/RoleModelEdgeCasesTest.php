@@ -9,6 +9,8 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
+use SineMacula\Laravel\Authorization\Concerns\HasRoleHierarchy;
+use SineMacula\Laravel\Authorization\Concerns\ManagesPermissions;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
@@ -18,8 +20,6 @@ use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
-use SineMacula\Laravel\Authorization\Traits\HasRoleHierarchy;
-use SineMacula\Laravel\Authorization\Traits\ManagesPermissions;
 use Tests\TestCase;
 
 /**
@@ -27,15 +27,14 @@ use Tests\TestCase;
  * exercise:
  *
  * - `givePermission()` and `syncPermissions()` clear the eager-loaded
- *   `permissions` relation when mutation occurs, so subsequent
- *   reads re-hydrate from the pivot. The clear branch only fires
- *   when the caller has in fact loaded the relation — the
- *   RBAC-heavy suites all mutate before loading, so the branch
- *   stays cold.
- * - `resolvePermissionById()` raises `UnknownPermissionException`
- *   when the sync delta surfaces a detached ID whose row has been
- *   deleted. This race can only happen under a concurrent DELETE
- *   between the sync call and the event-dispatch loop.
+ *   `permissions` relation when mutation occurs, so subsequent reads re-hydrate
+ *   from the pivot. The clear branch only fires when the caller has in fact
+ *   loaded the relation — the RBAC-heavy suites all mutate before loading, so
+ *   the branch stays cold.
+ * - `resolvePermissionById()` raises `UnknownPermissionException` when the sync
+ *   delta surfaces a detached ID whose row has been deleted. This race can only
+ *   happen under a concurrent DELETE between the sync call and the
+ *   event-dispatch loop.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -76,8 +75,8 @@ final class RoleModelEdgeCasesTest extends TestCase
             'guard_name' => 'web',
         ]);
 
-        // Pre-load the relation so the eviction branch of
-        // givePermission() fires.
+        // Pre-load the relation so the eviction branch of givePermission()
+        // fires.
         $role->load('permissions');
         self::assertTrue($role->relationLoaded('permissions'));
 
@@ -137,8 +136,8 @@ final class RoleModelEdgeCasesTest extends TestCase
             'parent_id'  => $parent->getKey(),
         ]);
 
-        // Simulate a detached parent row without running through the
-        // model's delete pipeline (which would nullify children).
+        // Simulate a detached parent row without running through the model's
+        // delete pipeline (which would nullify children).
         DB::table('roles')->where('id', $parent->getKey())->delete();
 
         $ancestors = $child->fresh()?->ancestors();

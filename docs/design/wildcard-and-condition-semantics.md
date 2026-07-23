@@ -54,7 +54,7 @@ not override policy-layer denials.
 ## Condition Operators
 
 Policy statement conditions are expressed as a map of context keys to operator payloads. When a statement's
-action/resource patterns match, the evaluator calls `evaluateConditions($context)` before committing the effect. Every
+action/resource patterns match, the evaluator calls `conditionsSatisfiedBy($context)` before committing the effect. Every
 condition entry must pass for the statement to apply.
 
 | Operator      | Operand type             | Semantics                                         |
@@ -106,7 +106,7 @@ This statement allows any `billing:*` action, but only when the context carries 
 
 - `HasPermissions::hasPermission()` -- the RBAC wildcard match loop with `fnmatch($held, $asked, FNM_NOESCAPE)`.
 - `Statement::matchesAction()`, `Statement::matchesResource()` -- policy-level `fnmatch` matching.
-- `Statement::evaluateConditions()` -- the condition walk.
+- `Statement::conditionsSatisfiedBy()` -- the condition walk.
 - `Statement::evaluateOperator()` -- the operator dispatch table.
 - `ConditionEvaluator` -- the internal helper for CIDR, time comparisons, and unknown-operator logging.
 

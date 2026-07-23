@@ -36,25 +36,25 @@ use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
 /**
  * Service provider for the authorization package.
  *
- * Orchestrates the package's container bindings, config validation,
- * publishing, command registration, and boot-time wiring. Delegates
- * the bulkier responsibilities to dedicated registrars:
+ * Orchestrates the package's container bindings, config validation, publishing,
+ * command registration, and boot-time wiring. Delegates the bulkier
+ * responsibilities to dedicated registrars:
  *
- * - `GateRegistrar` — walks every configured permission enum and
- *   registers a matching Laravel Gate.
- * - `BladeDirectiveRegistrar` — wires the `@role` / `@permission`
- *   directive quartet and Spatie-compat aliases.
- * - `EventListenerRegistrar` — wires the resolution-cache
- *   invalidator and the Octane request-boundary reset.
+ * - `GateRegistrar` — walks every configured permission enum and registers a
+ *   matching Laravel Gate.
+ * - `BladeDirectiveRegistrar` — wires the `@role` / `@permission` directive
+ *   quartet and Spatie-compat aliases.
+ * - `EventListenerRegistrar` — wires the resolution-cache invalidator and the
+ *   Octane request-boundary reset.
  *
- * Row-lifecycle behaviour for `Role` / `Permission` / `Policy` is
- * attached via the `#[ObservedBy]` attribute on each model; the
- * service provider does not touch model booting.
+ * Row-lifecycle behaviour for `Role` / `Permission` / `Policy` is attached via
+ * the `#[ObservedBy]` attribute on each model; the service provider does not
+ * touch model booting.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-class AuthorizationServiceProvider extends ServiceProvider
+final class AuthorizationServiceProvider extends ServiceProvider
 {
     /**
      * Register container bindings.
@@ -99,10 +99,9 @@ class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Fail fast on a malformed `authorization` config. Runs before
-     * any binding is resolved so a typo surfaces as a clear typed
-     * exception rather than a deep stack trace from the first
-     * `can()` call in production.
+     * Fail fast on a malformed `authorization` config. Runs before any binding
+     * is resolved so a typo surfaces as a clear typed exception rather than a
+     * deep stack trace from the first `can()` call in production.
      *
      * @return void
      *
@@ -117,23 +116,25 @@ class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Register the package's Artisan commands when the application
-     * is running in the console.
+     * Register the package's Artisan commands when the application is running
+     * in the console.
      *
      * @return void
      */
     protected function registerCommands(): void
     {
-        if ($this->app->runningInConsole()) {
-            $this->commands([
-                ListRolesCommand::class,
-                ListPermissionsCommand::class,
-                GrantRoleCommand::class,
-                RevokeRoleCommand::class,
-                WhyCanCommand::class,
-                MigrateSpatieCommand::class,
-            ]);
+        if (!$this->app->runningInConsole()) {
+            return;
         }
+
+        $this->commands([
+            ListRolesCommand::class,
+            ListPermissionsCommand::class,
+            GrantRoleCommand::class,
+            RevokeRoleCommand::class,
+            WhyCanCommand::class,
+            MigrateSpatieCommand::class,
+        ]);
     }
 
     /**
@@ -172,16 +173,17 @@ class AuthorizationServiceProvider extends ServiceProvider
         /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\PolicyStore>|null $class */
         $class = $this->app['config']->get('authorization.policy_store');
 
-        if ($class !== null) {
-            $this->app->singleton(PolicyStore::class, $class);
+        if ($class === null) {
+            return;
         }
+
+        $this->app->singleton(PolicyStore::class, $class);
     }
 
     /**
-     * Bind the resolution cache that memoises policy, permission,
-     * and role lookups per-principal. Always on for in-memory
-     * memoisation; consults `authorization.cache.store` for
-     * optional cross-request persistence.
+     * Bind the resolution cache that memoises policy, permission, and role
+     * lookups per-principal. Always on for in-memory memoisation; consults
+     * `authorization.cache.store` for optional cross-request persistence.
      *
      * @return void
      */
@@ -208,11 +210,10 @@ class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Bind the policy resolver — the internal policy-gathering seam
-     * the manager consults on every evaluation. The default
-     * implementation unions an optional `PolicyStore` with the
-     * principal's own attached policies; the caching decorator
-     * wraps it so the `ResolutionCache` memoises the result.
+     * Bind the policy resolver — the internal policy-gathering seam the manager
+     * consults on every evaluation. The default implementation unions an
+     * optional `PolicyStore` with the principal's own attached policies; the
+     * caching decorator wraps it so the `ResolutionCache` memoises the result.
      *
      * @return void
      */
@@ -231,8 +232,8 @@ class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Bind the single-slot store that holds the most recent
-     * evaluation result across every scoped clone of the manager.
+     * Bind the single-slot store that holds the most recent evaluation result
+     * across every scoped clone of the manager.
      *
      * @return void
      */
@@ -270,14 +271,12 @@ class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Register the `role` and `permission` route-middleware
-     * aliases.
+     * Register the `role` and `permission` route-middleware aliases.
      *
-     * The aliases only light up when the `router` binding is
-     * available (Laravel's default HTTP kernel), so console-only
-     * applications that do not resolve the router never pay the
-     * registration cost. Existing aliases on the same keys are
-     * respected — a consumer that has already wired their own
+     * The aliases only light up when the `router` binding is available
+     * (Laravel's default HTTP kernel), so console-only applications that do not
+     * resolve the router never pay the registration cost. Existing aliases on
+     * the same keys are respected — a consumer that has already wired their own
      * `role` or `permission` middleware keeps theirs untouched.
      *
      * @return void
@@ -298,9 +297,11 @@ class AuthorizationServiceProvider extends ServiceProvider
             $router->aliasMiddleware('role', RequireRole::class);
         }
 
-        if (!isset($existing['permission'])) {
-            $router->aliasMiddleware('permission', RequirePermission::class);
+        if (isset($existing['permission'])) {
+            return;
         }
+
+        $router->aliasMiddleware('permission', RequirePermission::class);
     }
 
     /**
@@ -326,13 +327,12 @@ class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Walk every configured permission provider and create
-     * `Permission` rows for each string the provider declares.
+     * Walk every configured permission provider and create `Permission` rows
+     * for each string the provider declares.
      *
-     * Providers are instantiated through the container so they can
-     * inject dependencies. Each permission string is persisted via
-     * `firstOrCreate` keyed on `(name, guard_name)` so the method
-     * is idempotent across boots.
+     * Providers are instantiated through the container so they can inject
+     * dependencies. Each permission string is persisted via `firstOrCreate`
+     * keyed on `(name, guard_name)` so the method is idempotent across boots.
      *
      * @return void
      */
@@ -353,29 +353,36 @@ class AuthorizationServiceProvider extends ServiceProvider
                 continue;
             }
 
-            /** @var \SineMacula\Laravel\Authorization\Contracts\PermissionProvider $provider */
-            $provider = $this->app->make($providerClass);
+            $this->syncProviderPermissions($providerClass, $permissionModel);
+        }
+    }
 
-            $guard = $provider->guard();
+    /**
+     * Persist a single provider's permission strings for its guard scope.
+     *
+     * @param  class-string<\SineMacula\Laravel\Authorization\Contracts\PermissionProvider>  $providerClass
+     * @param  class-string<\SineMacula\Laravel\Authorization\Models\Permission>  $permissionModel
+     * @return void
+     */
+    protected function syncProviderPermissions(string $providerClass, string $permissionModel): void
+    {
+        /** @var \SineMacula\Laravel\Authorization\Contracts\PermissionProvider $provider */
+        $provider = $this->app->make($providerClass);
 
-            foreach ($provider->permissions() as $permission) {
-                // Defensive guard against providers whose runtime return
-                // violates the `array<int, string>` contract. The tests in
-                // `ServiceProviderExtraBranchesTest` pin both the empty-
-                // string skip and the non-string skip as mutation kills;
-                // PHPStan narrows `$permission` to `string` from the
-                // contract and flags `is_string()` as redundant. The
-                // guard is load-bearing in the face of non-conforming
-                // provider implementations.
-                // @phpstan-ignore function.alreadyNarrowedType
-                if (!\is_string($permission) || $permission === '') {
-                    continue;
-                }
+        $guard = $provider->guard();
 
-                $permissionModel::firstOrCreate(
-                    ['name' => $permission, 'guard_name' => $guard],
-                );
+        foreach ($provider->permissions() as $permission) {
+            // Load-bearing guard against providers whose runtime return
+            // violates the string-list contract, despite the contract narrowing
+            // making it read as redundant.
+            // @phpstan-ignore function.alreadyNarrowedType
+            if (!\is_string($permission) || $permission === '') {
+                continue;
             }
+
+            $permissionModel::firstOrCreate(
+                ['name' => $permission, 'guard_name' => $guard],
+            );
         }
     }
 }

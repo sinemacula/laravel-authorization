@@ -11,11 +11,11 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy;
 /**
  * PHPBench micro-benchmark for `Policy::fromArray()`.
  *
- * Tracks the wall-clock cost of hydrating a realistic policy
- * document (20 statements, 5 actions × 3 resources × 2 conditions
- * per statement) into the immutable `Policy` value object. The
- * performance-test suite asserts a hard budget on the same shape —
- * this bench exists for trend tracking across commits.
+ * Tracks the wall-clock cost of hydrating a realistic policy document (20
+ * statements, 5 actions × 3 resources × 2 conditions per statement) into the
+ * immutable `Policy` value object. The performance-test suite asserts a hard
+ * budget on the same shape — this bench exists for trend tracking across
+ * commits.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,8 +31,8 @@ final class PolicyParseBench
     private array $document = [];
 
     /**
-     * Bench setUp — build the reusable policy document once per
-     * iteration so parse revolutions measure only parse cost.
+     * Bench setUp — build the reusable policy document once per iteration so
+     * parse revolutions measure only parse cost.
      *
      * @return void
      */

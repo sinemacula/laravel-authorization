@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
 use Tests\Feature\Stubs\RolesOnlyPrincipal;
@@ -48,7 +49,6 @@ final class BladeHelpersNarrowContractsTest extends TestCase
 
                 /** The principal returned by every resolution call. */
                 private readonly RolesOnlyPrincipal $principal,
-
             ) {}
 
             /**
@@ -67,7 +67,7 @@ final class BladeHelpersNarrowContractsTest extends TestCase
 
         $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject
         $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
-        $this->app->forgetInstance(\SineMacula\Laravel\Authorization\AuthorizationManager::class); // @phpstan-ignore method.nonObject
+        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
     }
 
     /**
