@@ -55,7 +55,7 @@ jobs:
                     fetch-depth: 0
 
             -   name: Setup PHP
-                uses: sinemacula/.github/.github/actions/setup-php@v1.1.0
+                uses: sinemacula/.github/.github/actions/setup-php@v1.13.0
                 with:
                     php-version: 8.3
                     extensions: mbstring, openssl
@@ -97,7 +97,7 @@ jobs:
                     persist-credentials: false
 
             -   name: Setup PHP
-                uses: sinemacula/.github/.github/actions/setup-php@v1.1.0
+                uses: sinemacula/.github/.github/actions/setup-php@v1.13.0
                 with:
                     php-version: 8.3
                     extensions: mbstring, openssl
@@ -125,7 +125,7 @@ jobs:
                     persist-credentials: false
 
             -   name: Setup PHP
-                uses: sinemacula/.github/.github/actions/setup-php@v1.1.0
+                uses: sinemacula/.github/.github/actions/setup-php@v1.13.0
                 with:
                     php-version: 8.3
                     extensions: mbstring, openssl
