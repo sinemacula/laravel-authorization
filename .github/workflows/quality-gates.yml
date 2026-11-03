@@ -134,7 +134,7 @@ jobs:
                 run: composer update --with="laravel/framework:^13.3" --prefer-dist --no-interaction --no-progress
 
             -   name: Run PHPBench suite
-                run: XDEBUG_MODE=off composer bench:ci 2>&1 | tee build/phpbench-console.txt
+                run: mkdir -p build && XDEBUG_MODE=off composer bench:ci 2>&1 | tee build/phpbench-console.txt
 
             -   name: Render benchmark summary
                 if: always()
