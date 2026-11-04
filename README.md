@@ -47,8 +47,8 @@ principal's role and permission grants, and anything left is denied.
 - **Gate auto-wiring**: every case of a configured permission enum is registered as a Gate ability, with a choice of
   what happens when an ability of the same name already exists.
 - **Route middleware and Blade directives** for roles and permissions, with `|` or `,` between alternatives.
-- **System records**: roles, permissions and policies flagged `is_system` are protected against renaming, rewriting
-  and deletion.
+- **System records**: roles, permissions and policies flagged `is_system` cannot be edited, deleted or have the flag
+  cleared unless `forceSystem()` unlocks the next change.
 - **Explanations**: `Authorization::explain()`, the last decision of the request, and `authorization:why-can` on the
   command line.
 - **Events** for every grant, revocation, expiry change and model change, for each decision, and when `authorize()`

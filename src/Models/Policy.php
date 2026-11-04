@@ -17,15 +17,14 @@ use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
 /**
  * Eloquent model for policy rows.
  *
- * The `document` column persists the full statement body as JSON.
- * Reads round-trip the column through the evaluation policy's
- * `fromArray()` factory; a failing round-trip raises an invalid
- * policy document exception rather than leaving the consumer with a
- * partial object. The `is_system` flag marks platform-shipped
- * policies as delete-protected: deletion or a rename of an
- * `is_system = true` row raises `SystemPolicyProtectedException`
- * unless `forceSystem()` is invoked to unlock the next operation on
- * the instance.
+ * The `document` column persists the full statement body as JSON. Reads
+ * round-trip the column through the evaluation policy's `fromArray()` factory;
+ * a failing round-trip raises an invalid policy document exception rather than
+ * leaving the consumer with a partial object. The `is_system` flag marks
+ * platform-shipped policies as protected: deleting, editing or clearing the
+ * flag of a persisted `is_system = true` row raises
+ * `SystemPolicyProtectedException` unless `forceSystem()` is invoked to unlock
+ * the next operation on the instance.
  *
  * @property string $id
  * @property string $name
@@ -146,21 +145,6 @@ class Policy extends Model
                 return $encoded;
             },
         );
-    }
-
-    /**
-     * Return the attribute names whose dirty state triggers the
-     * system-protection guard on `updating`. For policies, both `name` and
-     * `document` changes are protected — the document carries the authorization
-     * payload and its mutation is the security-relevant edit on the Policy
-     * table.
-     *
-     * @return list<string>
-     */
-    #[\Override]
-    protected function systemProtectedFields(): array
-    {
-        return ['name', 'document'];
     }
 
     /**

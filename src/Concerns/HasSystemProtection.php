@@ -6,8 +6,9 @@ namespace SineMacula\Laravel\Authorization\Concerns;
 
 /**
  * Shared `is_system` row-protection hooks for the primitive authorization
- * models. Consumers declare the protected-field list and per-model exception
- * factory; `forceSystem()` provides a per-instance, single-use bypass.
+ * models. Every change to a persisted system row, clearing the flag included,
+ * is refused unless `forceSystem()` unlocks it; consumers supply the per-model
+ * exception factory.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -34,19 +35,10 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
     }
 
     /**
-     * Return the attribute names whose dirty state triggers the
-     * system-protection guard on `updating`. `Role` and `Permission` return
-     * `['name']`; `Policy` returns `['name', 'document']`.
-     *
-     * @return list<string>
-     */
-    abstract protected function systemProtectedFields(): array;
-
-    /**
      * Construct the per-model exception raised when a protected mutation is
-     * refused. The operation label (e.g. `'delete'`, `'rename'`,
-     * `'document-rewrite'`) is carried on the exception alongside the row's
-     * canonical name.
+     * refused. The operation label (`'delete'`, `'unprotect'`, `'rename'`,
+     * `'document-rewrite'` or `'modify'`) is carried on the exception alongside
+     * the row's canonical name.
      *
      * @param  string  $operation
      * @return \Throwable
@@ -56,7 +48,7 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
     /**
      * Register the `deleting` / `updating` / `saved` hooks that enforce the
      * system-row protection invariant. The `updating` hook names the operation
-     * after the first protected attribute found in `getDirty()`.
+     * after the most significant attribute found in `getDirty()`.
      *
      * @return void
      */
@@ -77,11 +69,11 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
         });
 
         // Clear the bypass flag after every completed save so it cannot hop
-        // across an intervening non-protected mutation (e.g. a description
-        // update) and silently unlock the next protected change. `saved` fires
-        // after `updating` has had a chance to consume the flag for a
-        // legitimate protected mutation, so this reset is strictly idempotent
-        // on that path.
+        // across an intervening unprotected save (e.g. a `touch()` or a save
+        // with nothing dirty) and silently unlock the next protected change.
+        // `saved` fires after `updating` has had a chance to consume the flag
+        // for a legitimate protected mutation, so this reset is strictly
+        // idempotent on that path.
         static::saved(static function (self $model): void {
             $model->systemProtectionBypassed = false;
         });
@@ -99,7 +91,7 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
      */
     protected function assertSystemProtectionAllows(string $operation): void
     {
-        if ((bool) $this->getAttribute('is_system') === false) {
+        if (!$this->isPersistedAsSystem()) {
             return;
         }
 
@@ -113,43 +105,81 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
     }
 
     /**
-     * Return the operation label for the pending update when a protected
-     * attribute is dirty on a system row, or null otherwise. Labels: `'rename'`
-     * for `name`, `'document-rewrite'` for `document`, `'modify'` for anything
-     * else.
+     * Determine whether the row is a system row as persisted. The original
+     * value is read, not the dirty one, so clearing `is_system` in the same
+     * update (or before a delete) cannot lift the protection it is meant to
+     * guard.
+     *
+     * @return bool
+     */
+    private function isPersistedAsSystem(): bool
+    {
+        return (bool) $this->getOriginal('is_system');
+    }
+
+    /**
+     * Return the operation label for the pending update when any attribute
+     * other than the update timestamp is dirty on a system row, or null
+     * otherwise. Labels, most significant first: `'unprotect'` for `is_system`,
+     * `'rename'` for `name`, `'document-rewrite'` for `document`, `'modify'`
+     * for anything else.
      *
      * @return string|null
      */
     private function pendingSystemProtectedOperation(): ?string
     {
-        if (!(bool) $this->getAttribute('is_system')) {
+        if (!$this->isPersistedAsSystem()) {
             return null;
         }
 
-        /** @var array<string, mixed> $dirty */
-        $dirty = $this->getDirty();
+        $dirty = $this->systemProtectedChanges();
 
-        foreach ($this->systemProtectedFields() as $field) {
-            if (\array_key_exists($field, $dirty)) {
-                return self::systemProtectedOperationLabel($field);
-            }
+        if ($dirty === []) {
+            return null;
         }
 
-        return null;
+        return self::systemProtectedOperationLabel($dirty);
     }
 
     /**
-     * Map a protected-field name onto its canonical operation label.
+     * Return the dirty attributes the guard protects: every dirty attribute
+     * except the update timestamp, so a `touch()` stays allowed.
      *
-     * @param  string  $field
+     * @return array<string, mixed>
+     */
+    private function systemProtectedChanges(): array
+    {
+        /** @var array<string, mixed> $dirty */
+        $dirty = $this->getDirty();
+
+        if ($this->usesTimestamps()) {
+            unset($dirty[$this->getUpdatedAtColumn()]);
+        }
+
+        return $dirty;
+    }
+
+    /**
+     * Map the protected changes onto the canonical label of the most
+     * significant one.
+     *
+     * @param  array<string, mixed>  $dirty
      * @return string
      */
-    private static function systemProtectedOperationLabel(string $field): string
+    private static function systemProtectedOperationLabel(array $dirty): string
     {
-        return match ($field) {
-            'name'     => 'rename',
-            'document' => 'document-rewrite',
-            default    => 'modify',
-        };
+        $labels = [
+            'is_system' => 'unprotect',
+            'name'      => 'rename',
+            'document'  => 'document-rewrite',
+        ];
+
+        foreach ($labels as $field => $label) {
+            if (\array_key_exists($field, $dirty)) {
+                return $label;
+            }
+        }
+
+        return 'modify';
     }
 }

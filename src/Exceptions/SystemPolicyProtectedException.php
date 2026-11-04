@@ -5,13 +5,13 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Exceptions;
 
 /**
- * Thrown when a system-flagged policy would be deleted or renamed without the
- * explicit `forceSystem()` escape hatch.
+ * Thrown when a system-flagged policy would be deleted, edited or have its
+ * system flag cleared without the explicit `forceSystem()` escape hatch.
  *
  * Protects platform-shipped policies (e.g. `break-glass`, `system-audit`) from
- * accidental removal by a caller with raw Eloquent access. The exception
- * carries the policy's current name so audit and error reporting can identify
- * the offending target.
+ * accidental removal or change by a caller with raw Eloquent access. The
+ * exception carries the policy's current name so audit and error reporting can
+ * identify the offending target.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -29,7 +29,7 @@ final class SystemPolicyProtectedException extends \RuntimeException
         /** Name of the policy whose mutation was refused. */
         private readonly string $policyName,
 
-        /** Operation that was refused ("delete" or "rename"). */
+        /** Operation that was refused, such as "delete" or "modify". */
         private readonly string $operation,
     ) {
         parent::__construct(

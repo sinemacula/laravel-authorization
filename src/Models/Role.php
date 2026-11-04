@@ -217,19 +217,6 @@ class Role extends Model
     }
 
     /**
-     * Return the attribute names whose dirty state triggers the
-     * system-protection guard on `updating`. For roles, only `name` changes are
-     * protected.
-     *
-     * @return list<string>
-     */
-    #[\Override]
-    protected function systemProtectedFields(): array
-    {
-        return ['name'];
-    }
-
-    /**
      * Construct the per-model exception raised when a protected mutation on a
      * system role is refused.
      *

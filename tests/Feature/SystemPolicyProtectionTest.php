@@ -16,10 +16,10 @@ use Tests\TestCase;
 /**
  * Feature coverage for the system-policy protection flag.
  *
- * `is_system = true` blocks the next delete, rename, or document rewrite on the
- * instance unless `forceSystem()` is called first; the bypass is per-instance,
- * in-memory, and single-use — it does not persist across `$policy->fresh()`
- * hydrations and re-arms on the next protected mutation.
+ * `is_system = true` blocks the next delete or edit, document rewrites
+ * included, on the instance unless `forceSystem()` is called first; the bypass
+ * is per-instance, in-memory, and single-use — it does not persist across
+ * `$policy->fresh()` hydrations and re-arms on the next protected mutation.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -106,23 +106,91 @@ final class SystemPolicyProtectionTest extends TestCase
     }
 
     /**
-     * Non-protected updates — description changes — pass without needing the
-     * escape hatch. (`name` and `document` are protected; `description` is
-     * not.).
+     * Every field of a system policy is protected, so a description update
+     * without the escape hatch is refused as a `modify`.
      *
      * @return void
      */
-    public function testDescriptionUpdateOnSystemPolicyPasses(): void
+    public function testDescriptionUpdateOnSystemPolicyIsRefused(): void
     {
         $policy = $this->makeSystemPolicy('break-glass');
 
-        $policy->description = 'Break-glass — elevated platform access.';
-        $policy->save();
+        try {
+            $policy->description = 'Break-glass — elevated platform access.';
+            $policy->save();
+            self::fail('Expected SystemPolicyProtectedException was not thrown.');
+        } catch (SystemPolicyProtectedException $exception) { // @phpstan-ignore catch.neverThrown
+            self::assertSame('break-glass', $exception->getPolicyName());
+            self::assertSame('modify', $exception->getOperation());
+        }
 
-        self::assertSame(
-            'Break-glass — elevated platform access.',
-            $policy->fresh()?->description,
-        );
+        self::assertNull($policy->fresh()?->description); // @phpstan-ignore deadCode.unreachable
+    }
+
+    /**
+     * Clearing the system flag in the same mass-assigned update as a rename is
+     * refused as an `unprotect`: the guard reads the persisted flag, not the
+     * dirty one.
+     *
+     * @return void
+     */
+    public function testClearingSystemFlagThroughMassAssignmentIsRefused(): void
+    {
+        $policy = $this->makeSystemPolicy('break-glass');
+
+        try {
+            $policy->update(['is_system' => false, 'name' => 'renamed']);
+            self::fail('Expected SystemPolicyProtectedException was not thrown.');
+        } catch (SystemPolicyProtectedException $exception) { // @phpstan-ignore catch.neverThrown
+            self::assertSame('break-glass', $exception->getPolicyName());
+            self::assertSame('unprotect', $exception->getOperation());
+        }
+
+        $fresh = $policy->fresh(); // @phpstan-ignore deadCode.unreachable
+
+        self::assertSame('break-glass', $fresh?->name);
+        self::assertTrue($fresh?->is_system);
+    }
+
+    /**
+     * Clearing the system flag in memory and then deleting is refused, because
+     * the persisted flag still marks the row as system.
+     *
+     * @return void
+     */
+    public function testClearingSystemFlagThenDeletingIsRefused(): void
+    {
+        $policy = $this->makeSystemPolicy('break-glass');
+
+        $policy->is_system = false;
+
+        try {
+            $policy->delete();
+            self::fail('Expected SystemPolicyProtectedException was not thrown.');
+        } catch (SystemPolicyProtectedException $exception) { // @phpstan-ignore catch.neverThrown
+            self::assertSame('delete', $exception->getOperation());
+        }
+
+        self::assertNotNull(Policy::query()->find($policy->getKey())); // @phpstan-ignore deadCode.unreachable
+    }
+
+    /**
+     * `forceSystem()` unlocks clearing the flag, after which the row is no
+     * longer protected and deletes freely.
+     *
+     * @return void
+     */
+    public function testForceSystemAllowsClearingSystemFlag(): void
+    {
+        $policy = $this->makeSystemPolicy('break-glass');
+
+        $policy->forceSystem()->update(['is_system' => false]);
+
+        self::assertFalse($policy->fresh()?->is_system);
+
+        $policy->delete();
+
+        self::assertNull(Policy::query()->find($policy->getKey()));
     }
 
     /**
@@ -148,9 +216,9 @@ final class SystemPolicyProtectionTest extends TestCase
     }
 
     /**
-     * `forceSystem()` is consumed by an intervening non-protected save (e.g. a
-     * description update), so a subsequent rename without re-arming the bypass
-     * is refused.
+     * `forceSystem()` is cleared by an intervening unprotected save (a
+     * `touch()`), so a subsequent rename without re-arming the bypass is
+     * refused.
      *
      * @return void
      */
@@ -159,8 +227,7 @@ final class SystemPolicyProtectionTest extends TestCase
         $policy = $this->makeSystemPolicy('break-glass');
 
         $policy->forceSystem();
-        $policy->description = 'Updated description.';
-        $policy->save();
+        $policy->touch();
 
         $this->expectException(SystemPolicyProtectedException::class);
 

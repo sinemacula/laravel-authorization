@@ -26,9 +26,10 @@ use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
  * identity or inherited via a role. The `guard_name` column is nullable: a null
  * value marks the permission as guard-agnostic (applies to every guard), a
  * concrete string scopes it to a single guard. The `is_system` flag marks
- * platform-shipped permissions as delete-protected: deletion or a rename of an
- * `is_system = true` row raises `SystemPermissionProtectedException` unless
- * `forceSystem()` is invoked to unlock the next operation on the instance.
+ * platform-shipped permissions as protected: deleting, editing or clearing the
+ * flag of a persisted `is_system = true` row raises
+ * `SystemPermissionProtectedException` unless `forceSystem()` is invoked to
+ * unlock the next operation on the instance.
  *
  * @property string $id
  * @property string $name
@@ -249,19 +250,6 @@ class Permission extends Model
     protected function getAuthorizationNameKind(): string
     {
         return 'permission';
-    }
-
-    /**
-     * Return the attribute names whose dirty state triggers the
-     * system-protection guard on `updating`. For permissions, only `name`
-     * changes are protected.
-     *
-     * @return list<string>
-     */
-    #[\Override]
-    protected function systemProtectedFields(): array
-    {
-        return ['name'];
     }
 
     /**
