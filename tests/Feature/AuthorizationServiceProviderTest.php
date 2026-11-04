@@ -17,6 +17,7 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
+use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
@@ -27,10 +28,13 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
+use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
+use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
 use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubPolicyStore;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\SwitchableTenantResolver;
 use Tests\TestCase;
@@ -132,6 +136,75 @@ final class AuthorizationServiceProviderTest extends TestCase
         }
 
         self::assertSame($app->make('authorization'), $app->make(AuthorizationManager::class));
+    }
+
+    /**
+     * The configured policy store is shared within a job and rebuilt for the
+     * next one, so any state it keeps ends with the job.
+     *
+     * @return void
+     */
+    public function testConfiguredPolicyStoreIsRebuiltForEachJob(): void
+    {
+        $app = $this->application();
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $app->make(ConfigRepository::class);
+        $config->set('authorization.policy_store', StubPolicyStore::class);
+
+        (new AuthorizationServiceProvider($app))->register();
+
+        $first = $app->make(PolicyStore::class);
+
+        self::assertInstanceOf(StubPolicyStore::class, $first);
+        self::assertSame($first, $app->make(PolicyStore::class));
+
+        $this->startNextJob();
+
+        $next = $app->make(PolicyStore::class);
+
+        self::assertInstanceOf(StubPolicyStore::class, $next);
+        self::assertNotSame($first, $next);
+    }
+
+    /**
+     * A resolver contract the application binds itself, after the package
+     * registered its defaults, survives the reset between jobs and is the one
+     * the next job's manager is built with.
+     *
+     * @return void
+     */
+    public function testApplicationBoundResolversSurviveTheJobReset(): void
+    {
+        $app = $this->application();
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $app->make(ConfigRepository::class);
+        $config->set('authorization.policy_store', StubPolicyStore::class);
+
+        (new AuthorizationServiceProvider($app))->register();
+
+        $bound = [
+            PrincipalResolver::class => new NullPrincipalResolver,
+            TenantResolver::class    => new NullTenantResolver,
+            PolicyStore::class       => new StubPolicyStore,
+            PolicyResolver::class    => new DefaultPolicyResolver,
+        ];
+
+        foreach ($bound as $contract => $instance) {
+            $app->instance($contract, $instance);
+        }
+
+        $this->startNextJob();
+
+        foreach ($bound as $contract => $instance) {
+            self::assertSame($instance, $app->make($contract), "{$contract} bound by the application should survive the reset.");
+        }
+
+        $manager = $app->make(AuthorizationManager::class);
+
+        self::assertSame($bound[PrincipalResolver::class], (new \ReflectionProperty($manager, 'principalResolver'))->getValue($manager));
+        self::assertSame($bound[PolicyResolver::class], (new \ReflectionProperty($manager, 'policyResolver'))->getValue($manager));
     }
 
     /**
