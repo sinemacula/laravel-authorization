@@ -32,17 +32,27 @@ a condition operator catalogue for context-sensitive decisions. This note docume
 
 ## Wildcard Matching
 
-Both RBAC permission checks and policy statement matching use PHP's `fnmatch` function. The matching supports the full
-glob pattern syntax:
+Both RBAC permission checks and policy statement matching use PHP's `fnmatch` function:
 
 | Pattern    | Matches                          | Does not match         |
 |------------|----------------------------------|------------------------|
 | `posts:*`  | `posts:create`, `posts:delete`   | `comments:create`      |
+| `posts.*`  | `posts.create`, `posts.delete`   | `comments.create`      |
 | `*:*`      | Everything (super-admin path)    | --                     |
 | `posts:c*` | `posts:create`, `posts:clone`    | `posts:delete`         |
 | `*:create` | `posts:create`, `users:create`   | `posts:delete`         |
 
+A `.` in a pattern matches only itself, so `posts.*` does not match `postsXcreate`.
+
 The `*:*` pattern is the canonical super-admin wildcard -- it satisfies every `hasPermission()` check.
+
+### Names
+
+Role and permission names are strings of letters, digits and `_ - : . *`, so `posts:edit`, `posts.edit` and
+`sso.connection.trust` are all valid. `*` is the only wildcard a held permission can carry: whitespace and the other
+glob metacharacters (`?`, `[`, `]`, `{`, `}`) are refused with an `InvalidAuthorizationNameException` when the name is
+saved, so a malformed name cannot match unrelated permissions. `authorization:migrate-spatie` applies the same rule
+before it writes a row, and reports and skips any role or permission whose name fails it, along with its grants.
 
 ### RBAC interaction
 
