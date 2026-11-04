@@ -8,6 +8,9 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameException;
+use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
  * Migrate data from Spatie's `laravel-permission` tables into this package's
@@ -16,8 +19,10 @@ use Illuminate\Support\Str;
  * Reads Spatie's default table names (`roles`, `permissions`,
  * `model_has_roles`, `model_has_permissions`, `role_has_permissions`) and
  * copies rows into this package's tables, mapping column names and generating
- * UUIDs when Spatie used auto-increment IDs. Everything runs inside a
- * transaction; the `--dry-run` flag reports counts without writing.
+ * UUIDs when Spatie used auto-increment IDs. Role and permission names are
+ * checked against the models' name rule before they are written; a name that
+ * fails it is reported and skipped together with its grants. Everything runs
+ * inside a transaction; the `--dry-run` flag reports counts without writing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -189,7 +194,14 @@ final class MigrateSpatieCommand extends Command
         foreach ($rows as $row) {
             /** @var array{id: int|string, name: string, guard_name: string|null, created_at: string|null, updated_at: string|null} $roleRow */
             $roleRow = (array) $row;
-            $newId   = \is_int($roleRow['id']) ? (string) Str::orderedUuid() : $roleRow['id'];
+
+            if (!Role::isValidAuthorizationName($roleRow['name'])) {
+                $this->reportRefusedName('role', $roleRow['name']);
+
+                continue;
+            }
+
+            $newId = \is_int($roleRow['id']) ? (string) Str::orderedUuid() : $roleRow['id'];
 
             $idMap[$roleRow['id']] = $newId;
 
@@ -229,7 +241,14 @@ final class MigrateSpatieCommand extends Command
         foreach ($rows as $row) {
             /** @var array{id: int|string, name: string, guard_name: string|null, created_at: string|null, updated_at: string|null} $permissionRow */
             $permissionRow = (array) $row;
-            $newId         = \is_int($permissionRow['id']) ? (string) Str::orderedUuid() : $permissionRow['id'];
+
+            if (!Permission::isValidAuthorizationName($permissionRow['name'])) {
+                $this->reportRefusedName('permission', $permissionRow['name']);
+
+                continue;
+            }
+
+            $newId = \is_int($permissionRow['id']) ? (string) Str::orderedUuid() : $permissionRow['id'];
 
             $idMap[$permissionRow['id']] = $newId;
 
@@ -247,6 +266,21 @@ final class MigrateSpatieCommand extends Command
         }
 
         return $idMap;
+    }
+
+    /**
+     * Report a Spatie role or permission whose name the package refuses, so it
+     * and every grant that references it are skipped visibly.
+     *
+     * @param  string  $kind
+     * @param  string  $name
+     * @return void
+     */
+    private function reportRefusedName(string $kind, string $name): void
+    {
+        $reason = (new InvalidAuthorizationNameException($kind, $name))->getMessage();
+
+        $this->warn("Skipped: {$reason} Its grants are not migrated.");
     }
 
     /**

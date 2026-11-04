@@ -9,7 +9,7 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
  * outside the allowed character set.
  *
  * Permission names double as `fnmatch` patterns during evaluation, so only
- * alphanumerics, underscores, hyphens, colons, and the `*` wildcard are
+ * letters, digits, underscores, hyphens, colons, dots, and the `*` wildcard are
  * permitted; whitespace and the remaining glob metacharacters (`?`, `[`, `]`,
  * `{`, `}`) are rejected at save time to prevent an accidental
  * pattern-injection leak.
@@ -34,7 +34,7 @@ final class InvalidAuthorizationNameException extends \RuntimeException
         private readonly string $name,
     ) {
         parent::__construct(
-            "Invalid {$kind} name '{$name}': allowed characters are alphanumerics, ':', '_', '-', and '*'.",
+            "Invalid {$kind} name '{$name}': allowed characters are letters, digits, '_', '-', ':', '.', and '*'.",
             422,
         );
     }

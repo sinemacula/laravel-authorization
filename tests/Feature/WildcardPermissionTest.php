@@ -38,9 +38,10 @@ use Tests\TestCase;
  * - `Statement::matchesAction()` / `matchesResource()` compare patterns with
  *   `FNM_NOESCAPE`, so backslash-bearing resource identifiers (fully-qualified
  *   morph classes without an alias) match literally.
- * - `ValidatesAuthorizationName` rejects role and permission names that contain
- *   glob metacharacters or whitespace before the row hits the database, so
- *   `fnmatch` cannot be tricked by a malformed value.
+ * - `ValidatesAuthorizationName` accepts letters, digits and `_ - : . *` and
+ *   rejects names that contain any other glob metacharacter or whitespace
+ *   before the row hits the database, so `fnmatch` cannot be tricked by a
+ *   malformed value.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -105,6 +106,87 @@ final class WildcardPermissionTest extends TestCase
         $user = $this->userHolding(self::ASKED_ACTION);
 
         self::assertFalse($user->fresh()?->hasPermission('posts:*'));
+    }
+
+    /**
+     * Dotted names take part in wildcard matching — a held `posts.*` satisfies
+     * `posts.edit`, the dot matching only itself, and does not satisfy another
+     * prefix.
+     *
+     * @return void
+     */
+    public function testHeldDottedWildcardSatisfiesDottedAsk(): void
+    {
+        $user = $this->userHolding('posts.*');
+
+        $fresh = $user->fresh();
+
+        self::assertNotNull($fresh);
+        self::assertTrue($fresh->hasPermission('posts.edit'));
+        self::assertFalse($fresh->hasPermission('postsXedit'));
+        self::assertFalse($fresh->hasPermission('users.edit'));
+    }
+
+    /**
+     * The asked dotted action is literal — holding `posts.edit` does not
+     * satisfy an asked `posts.*`.
+     *
+     * @return void
+     */
+    public function testHeldDottedConcreteDoesNotSatisfyDottedWildcardAsk(): void
+    {
+        $user = $this->userHolding('posts.edit');
+
+        $fresh = $user->fresh();
+
+        self::assertNotNull($fresh);
+        self::assertTrue($fresh->hasPermission('posts.edit'));
+        self::assertFalse($fresh->hasPermission('posts.*'));
+    }
+
+    /**
+     * A role holding `posts.*` answers dotted checks with the same wildcard
+     * semantics as the identity.
+     *
+     * @return void
+     */
+    public function testRoleHasDottedPermissionWildcardMatch(): void
+    {
+        $role = Role::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => 'content.editor',
+            'guard_name' => 'web',
+        ]);
+        Permission::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => 'posts.*',
+            'guard_name' => 'web',
+        ]);
+
+        $role->givePermission('posts.*');
+
+        $fresh = $role->fresh();
+
+        self::assertNotNull($fresh);
+        self::assertSame('content.editor', $fresh->name);
+        self::assertTrue($fresh->hasPermission('posts.edit'));
+        self::assertFalse($fresh->hasPermission('users.edit'));
+    }
+
+    /**
+     * A statement action pattern `posts.*` matches a dotted asked action.
+     *
+     * @return void
+     */
+    public function testStatementMatchesDottedActionWildcard(): void
+    {
+        $statement = Statement::fromArray([
+            'effect'  => 'allow',
+            'actions' => ['posts.*'],
+        ]);
+
+        self::assertTrue($statement->matches('posts.edit'));
+        self::assertFalse($statement->matches('users.edit'));
     }
 
     /**
@@ -283,11 +365,15 @@ final class WildcardPermissionTest extends TestCase
         yield 'hyphenated' => ['platform-admin'];
         yield 'underscored' => ['a_b_c'];
         yield 'numeric' => ['v2:post:42'];
+        yield 'dot-separated' => ['posts.edit'];
+        yield 'nested-dots' => ['sso.connection.trust'];
+        yield 'dotted-wildcard' => ['posts.*'];
+        yield 'bare-wildcard' => ['*'];
     }
 
     /**
      * The allowed character class covers the common permission shapes — action
-     * strings, hyphenated names, underscores, and wildcards.
+     * strings, dotted names, hyphenated names, underscores, and wildcards.
      *
      * @param  string  $name
      * @return void
