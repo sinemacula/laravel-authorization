@@ -10,6 +10,11 @@ namespace SineMacula\Laravel\Authorization\Concerns;
  * is refused unless `forceSystem()` unlocks it; consumers supply the per-model
  * exception factory.
  *
+ * The guard runs on the model's `updating` and `deleting` events, so writes
+ * that fire no model events skip it: `saveQuietly()`, `deleteQuietly()`, and
+ * mass updates or deletes through the query builder. These are an explicit
+ * developer bypass, outside the package's own write paths.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -108,30 +113,38 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
      * Determine whether the row is a system row as persisted. The original
      * value is read, not the dirty one, so clearing `is_system` in the same
      * update (or before a delete) cannot lift the protection it is meant to
-     * guard.
+     * guard. When the instance was loaded without the column, the flag is read
+     * from the database, and a row that cannot be found counts as system so the
+     * guard fails closed.
      *
      * @return bool
      */
     private function isPersistedAsSystem(): bool
     {
-        return (bool) $this->getOriginal('is_system');
+        if (\array_key_exists('is_system', $this->original)) {
+            return (bool) $this->original['is_system'];
+        }
+
+        $persisted = $this->newQueryWithoutScopes()
+            ->whereKey($this->getKeyForSaveQuery())
+            ->toBase()
+            ->value('is_system');
+
+        return (bool) ($persisted ?? true);
     }
 
     /**
      * Return the operation label for the pending update when any attribute
-     * other than the update timestamp is dirty on a system row, or null
-     * otherwise. Labels, most significant first: `'unprotect'` for `is_system`,
-     * `'rename'` for `name`, `'document-rewrite'` for `document`, `'modify'`
-     * for anything else.
+     * other than the update timestamp is dirty, or null otherwise. Whether the
+     * row is a system row is left to the guard, so a `touch()` or a clean save
+     * never reads the flag. Labels, most significant first: `'unprotect'` for
+     * `is_system`, `'rename'` for `name`, `'document-rewrite'` for `document`,
+     * `'modify'` for anything else.
      *
      * @return string|null
      */
     private function pendingSystemProtectedOperation(): ?string
     {
-        if (!$this->isPersistedAsSystem()) {
-            return null;
-        }
-
         $dirty = $this->systemProtectedChanges();
 
         if ($dirty === []) {

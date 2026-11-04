@@ -394,6 +394,105 @@ final class HasSystemProtectionTest extends TestCase
     }
 
     /**
+     * A system role loaded without the `is_system` column cannot be deleted:
+     * the guard reads the flag from the database.
+     *
+     * @return void
+     */
+    public function testPartiallyLoadedSystemRoleDeleteIsRefused(): void
+    {
+        $role    = $this->makeSystemRole('super-admin');
+        $partial = Role::query()->select(['id', 'name'])->findOrFail($role->id);
+
+        $exception = $this->captureRoleRefusal(static fn () => $partial->delete());
+
+        self::assertSame('super-admin', $exception->getRoleName());
+        self::assertSame('delete', $exception->getOperation());
+        self::assertNotNull(Role::query()->find($role->getKey()));
+    }
+
+    /**
+     * A system role loaded without the `is_system` column cannot be renamed.
+     *
+     * @return void
+     */
+    public function testPartiallyLoadedSystemRoleRenameIsRefused(): void
+    {
+        $role    = $this->makeSystemRole('super-admin');
+        $partial = Role::query()->select(['id', 'name'])->findOrFail($role->id);
+
+        $exception = $this->captureRoleRefusal(static fn () => $partial->update(['name' => 'renamed']));
+
+        self::assertSame('rename', $exception->getOperation());
+        self::assertSame('super-admin', self::reload($role)->name);
+    }
+
+    /**
+     * An ordinary role loaded without the `is_system` column still edits and
+     * deletes freely once the database confirms it is not a system row.
+     *
+     * @return void
+     */
+    public function testPartiallyLoadedOrdinaryRoleEditsFreely(): void
+    {
+        $role = Role::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => 'ordinary',
+            'guard_name' => 'web',
+        ]);
+
+        $partial = Role::query()->select(['id', 'name'])->findOrFail($role->id);
+
+        self::assertTrue($partial->update(['name' => 'renamed']));
+        self::assertSame('renamed', self::reload($role)->name);
+
+        self::assertTrue($partial->delete());
+        self::assertNull(Role::query()->find($role->getKey()));
+    }
+
+    /**
+     * A role loaded without its key or the `is_system` column cannot be matched
+     * to a row, so the guard fails closed and refuses the delete.
+     *
+     * @return void
+     */
+    public function testRoleLoadedWithoutKeyIsRefused(): void
+    {
+        Role::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => 'ordinary',
+            'guard_name' => 'web',
+        ]);
+
+        $partial = Role::query()->select(['name'])->where('name', 'ordinary')->firstOrFail();
+
+        $exception = $this->captureRoleRefusal(static fn () => $partial->delete());
+
+        self::assertSame('ordinary', $exception->getRoleName());
+        self::assertSame('delete', $exception->getOperation());
+        self::assertSame(1, Role::query()->where('name', 'ordinary')->count());
+    }
+
+    /**
+     * A loaded system role stays protected even when the stored flag has since
+     * been cleared elsewhere: the loaded flag is trusted without a re-read.
+     *
+     * @return void
+     */
+    public function testLoadedSystemFlagIsTrustedOverStoredValue(): void
+    {
+        $role   = $this->makeSystemRole('super-admin');
+        $loaded = self::reload($role);
+
+        Role::query()->whereKey($role->id)->toBase()->update(['is_system' => false]);
+
+        $exception = $this->captureRoleRefusal(static fn () => $loaded->delete());
+
+        self::assertSame('delete', $exception->getOperation());
+        self::assertNotNull(Role::query()->find($role->getKey()));
+    }
+
+    /**
      * Run the callback and return the system-role refusal it raises.
      *
      * @param  callable(): mixed  $callback
