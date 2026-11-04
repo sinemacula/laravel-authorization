@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use Tests\Feature\Stubs\CustomPermission;
+use Tests\Feature\Stubs\CustomRole;
 use Tests\TestCase;
 
 /**
@@ -140,14 +141,100 @@ final class RolePermissionTest extends TestCase
      */
     public function testPermissionSideIsRecognisedForConfiguredPermissionClass(): void
     {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.models.permission', CustomPermission::class);
+        $this->configurePermissionSubclass();
 
         $role       = $this->makeRole('web');
         $permission = CustomPermission::query()->create(['name' => 'posts:edit', 'guard_name' => 'api']);
 
         $this->assertGuardMismatchWritesNothing(static fn () => $permission->roles()->attach($role->id));
+    }
+
+    /**
+     * A shipped `Permission` instance is still recognised as the permission
+     * side when a subclass is configured, so matching guards persist the row
+     * with each id in its own column.
+     *
+     * @return void
+     */
+    public function testPermissionSideIsRecognisedForBasePermissionWithConfiguredSubclass(): void
+    {
+        $this->configurePermissionSubclass();
+
+        $role       = $this->makeRole('web');
+        $permission = $this->makePermission('web');
+
+        $permission->roles()->attach($role->id);
+
+        self::assertSame(
+            [['role_id' => $role->id, 'permission_id' => $permission->id]],
+            $this->pivotRows(),
+        );
+    }
+
+    /**
+     * A shipped `Permission` instance with a configured subclass is checked for
+     * guard parity from the permission side.
+     *
+     * @return void
+     */
+    public function testBasePermissionWithConfiguredSubclassAndMismatchedGuardsThrows(): void
+    {
+        $this->configurePermissionSubclass();
+
+        $role       = $this->makeRole('web');
+        $permission = $this->makePermission('api');
+
+        $this->assertGuardMismatchWritesNothing(static fn () => $permission->roles()->attach($role->id));
+    }
+
+    /**
+     * A shipped `Permission` instance is still used as the in-memory parent
+     * when a subclass is configured, so its unsaved guard is the one checked.
+     *
+     * @return void
+     */
+    public function testBasePermissionWithConfiguredSubclassIsUsedAsInMemoryParent(): void
+    {
+        $this->configurePermissionSubclass();
+
+        $role       = $this->makeRole('web');
+        $permission = $this->makePermission('web');
+
+        $permission->guard_name = 'api';
+
+        $this->assertGuardMismatchWritesNothing(static fn () => $permission->roles()->attach($role->id));
+    }
+
+    /**
+     * A shipped `Role` instance is still used as the in-memory parent when a
+     * subclass is configured, so its unsaved guard is the one checked.
+     *
+     * @return void
+     */
+    public function testBaseRoleWithConfiguredSubclassIsUsedAsInMemoryParent(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config->set('authorization.models.role', CustomRole::class);
+
+        $role       = $this->makeRole('api');
+        $permission = $this->makePermission('api');
+
+        $role->guard_name = 'web';
+
+        $this->assertGuardMismatchWritesNothing(static fn () => $role->permissions()->attach($permission->id));
+    }
+
+    /**
+     * Point `authorization.models.permission` at the subclass stub.
+     *
+     * @return void
+     */
+    private function configurePermissionSubclass(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config->set('authorization.models.permission', CustomPermission::class);
     }
 
     /**

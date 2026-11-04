@@ -96,7 +96,9 @@ final class RolePermission extends Pivot
 
         $parent = $this->pivotParent;
 
-        if ($parent instanceof $roleClass && $parent->id === $roleId) {
+        // Any package role is accepted as the in-memory parent, so a shipped
+        // `Role` instance still counts when a subclass is configured.
+        if ($parent instanceof Role && $parent->id === $roleId) {
             return $parent;
         }
 
@@ -136,8 +138,9 @@ final class RolePermission extends Pivot
         $parent = $this->pivotParent;
 
         // The permission is the pivot parent when the row is built from the
-        // permission side, through `Permission::roles()`.
-        if ($parent instanceof $permissionClass && $parent->id === $permissionId) {
+        // permission side, through `Permission::roles()`. Any package
+        // permission is accepted, as for the role side.
+        if ($parent instanceof Permission && $parent->id === $permissionId) {
             return $parent;
         }
 
@@ -226,13 +229,14 @@ final class RolePermission extends Pivot
      * `Permission::roles()`, so its foreign key is the permission column and
      * its related key is the role column.
      *
+     * Detection uses the package `Permission` class rather than the configured
+     * one, so a shipped `Permission` instance is still recognised when a
+     * subclass is configured.
+     *
      * @return bool
      */
     private function isPermissionSide(): bool
     {
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $permissionClass */
-        $permissionClass = config('authorization.models.permission', Permission::class);
-
-        return $this->pivotParent instanceof $permissionClass;
+        return $this->pivotParent instanceof Permission;
     }
 }
