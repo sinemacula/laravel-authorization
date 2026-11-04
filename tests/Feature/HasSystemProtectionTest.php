@@ -497,6 +497,25 @@ final class HasSystemProtectionTest extends TestCase
     }
 
     /**
+     * A system record with an integer key, loaded without its name, is named by
+     * the key as a string.
+     *
+     * @return void
+     */
+    public function testIntegerKeyIsReportedAsString(): void
+    {
+        $role = new Role;
+
+        $role->setRawAttributes(['id' => 42, 'is_system' => true], true);
+
+        $role->exists = true;
+
+        $exception = $this->captureRoleRefusal(static fn () => $role->delete());
+
+        self::assertSame('42', $exception->getRoleName());
+    }
+
+    /**
      * A system role loaded without its name or key is still refused with the
      * protection exception, which reports it as unnamed.
      *

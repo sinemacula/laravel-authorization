@@ -122,7 +122,7 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
      *
      * @return string
      */
-    protected function systemProtectedName(): string
+    private function systemProtectedName(): string
     {
         $name = $this->getOriginal('name');
 
