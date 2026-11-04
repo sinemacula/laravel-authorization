@@ -220,9 +220,9 @@ final class AuthorizationManager
      * Return a scoped manager bound to the supplied principal.
      *
      * @param  object  $principal
-     * @return static
+     * @return self
      */
-    public function for(object $principal): static
+    public function for(object $principal): self
     {
         $scoped                      = clone $this;
         $scoped->principalOverride   = $principal;
@@ -237,9 +237,9 @@ final class AuthorizationManager
      * store.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
-     * @return static
+     * @return self
      */
-    public function withPolicies(array $policies): static
+    public function withPolicies(array $policies): self
     {
         $scoped                 = clone $this;
         $scoped->policyOverride = \array_values($policies);

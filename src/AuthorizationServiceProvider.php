@@ -80,6 +80,8 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * Boot the provider.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\GateConflictException
      */
     public function boot(): void
     {

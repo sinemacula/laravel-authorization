@@ -24,7 +24,7 @@ use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final class DefaultPolicyResolver implements PolicyResolver
+final readonly class DefaultPolicyResolver implements PolicyResolver
 {
     /**
      * Create a new resolver instance.
@@ -34,7 +34,7 @@ final class DefaultPolicyResolver implements PolicyResolver
     public function __construct(
 
         /** Optional external policy source unioned with the principal's own. */
-        private readonly ?PolicyStore $store = null,
+        private ?PolicyStore $store = null,
     ) {}
 
     /**

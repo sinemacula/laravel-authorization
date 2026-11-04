@@ -28,7 +28,7 @@ use SineMacula\Laravel\Authorization\Support\BladeHelpers;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final class BladeDirectiveRegistrar
+final readonly class BladeDirectiveRegistrar
 {
     /**
      * Create a new registrar instance.
@@ -38,7 +38,7 @@ final class BladeDirectiveRegistrar
     public function __construct(
 
         /** Framework container consulted for the blade compiler binding. */
-        private readonly Application $app,
+        private Application $app,
     ) {}
 
     /**

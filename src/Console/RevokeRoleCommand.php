@@ -52,7 +52,7 @@ final class RevokeRoleCommand extends Command
 
         try {
             $model->revokeRole($roleName);
-        } catch (\Throwable $e) {
+        } catch (\Throwable $e) { // @phpstan-ignore catch.neverThrown
             $this->error($e->getMessage());
 
             return self::FAILURE;

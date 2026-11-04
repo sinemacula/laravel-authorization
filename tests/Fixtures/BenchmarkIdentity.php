@@ -2,7 +2,7 @@
 
 declare(strict_types = 1);
 
-namespace Benchmarks\Support;
+namespace Tests\Fixtures;
 
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Concerns\HasAuthorization;
@@ -11,9 +11,9 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 /**
  * Eloquent identity used by database-backed benchmarks.
  *
- * Mirrors the shape of the test-suite `StubIdentity` but lives in the
- * `Benchmarks` namespace so the bench runner never touches the test autoload
- * tree.
+ * Mirrors the shape of the test-suite `StubIdentity`, on a table of its own.
+ * Kept with the test fixtures, like every other model the package does not
+ * ship.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

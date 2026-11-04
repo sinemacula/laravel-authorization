@@ -62,7 +62,13 @@ class Role extends Model
     /**
      * Create a new Eloquent model instance.
      *
+     * Binds the model to the table the package configuration names. The table
+     * has to be set on each instantiation so runtime config swaps take effect,
+     * so this is construction rather than model behaviour.
+     *
      * @param  array<string, mixed>  $attributes
+     *
+     * @phpstan-ignore sineMaculaLaravel.modelBehaviour
      */
     public function __construct(array $attributes = [])
     {
@@ -189,8 +195,14 @@ class Role extends Model
     protected function casts(): array
     {
         return [
-            'is_system' => 'boolean',
-            'rank'      => 'integer',
+            'name'        => 'string',
+            'guard_name'  => 'string',
+            'description' => 'string',
+            'is_system'   => 'boolean',
+            'parent_id'   => 'string',
+            'rank'        => 'integer',
+            'tenant_type' => 'string',
+            'tenant_id'   => 'string',
         ];
     }
 

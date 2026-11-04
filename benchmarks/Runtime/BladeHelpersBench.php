@@ -6,7 +6,6 @@ namespace Benchmarks\Runtime;
 
 use Benchmarks\Support\BenchmarkCase;
 use Benchmarks\Support\BenchmarkFixtures;
-use Benchmarks\Support\BenchmarkIdentity;
 use Benchmarks\Support\BenchmarkPrincipalResolver;
 use Illuminate\Support\Str;
 use PhpBench\Attributes as Bench;
@@ -15,6 +14,7 @@ use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
+use Tests\Fixtures\BenchmarkIdentity;
 
 /**
  * PHPBench micro-benchmark for the Blade runtime helpers.

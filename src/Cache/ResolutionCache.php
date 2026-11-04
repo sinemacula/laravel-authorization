@@ -305,7 +305,7 @@ final class ResolutionCache
                 if (\is_array($raw)) {
                     return $this->memo[$key] = \array_values(\array_filter($raw, 'is_string'));
                 }
-            } catch (\Throwable $exception) {
+            } catch (\Throwable $exception) { // @phpstan-ignore catch.neverThrown
                 // Corrupt persistent-cache entry — forget the key, log, and
                 // fall through to the fresh-read path.
                 $this->forgetFromStore($key, $principal, $roleIds);
@@ -496,7 +496,7 @@ final class ResolutionCache
 
             try {
                 $channel = $logger->channel('authorization');
-            } catch (\Throwable) {
+            } catch (\Throwable) { // @phpstan-ignore catch.neverThrown
                 $channel = $logger;
             }
 
@@ -507,7 +507,7 @@ final class ResolutionCache
                     'reason'    => $exception->getMessage(),
                 ],
             );
-        } catch (\Throwable) {
+        } catch (\Throwable) { // @phpstan-ignore catch.neverThrown
             // Logging failures are not allowed to abort the check.
         }
     }

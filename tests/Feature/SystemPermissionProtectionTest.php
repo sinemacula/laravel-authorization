@@ -88,12 +88,12 @@ final class SystemPermissionProtectionTest extends TestCase
             $permission->name = 'system:rebranded-audit';
             $permission->save();
             self::fail('Expected SystemPermissionProtectedException was not thrown.');
-        } catch (SystemPermissionProtectedException $exception) {
+        } catch (SystemPermissionProtectedException $exception) { // @phpstan-ignore catch.neverThrown
             self::assertSame($name, $exception->getPermissionName());
             self::assertSame('rename', $exception->getOperation());
         }
 
-        self::assertSame($name, $permission->fresh()?->name);
+        self::assertSame($name, $permission->fresh()?->name); // @phpstan-ignore deadCode.unreachable
     }
 
     /**

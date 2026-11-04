@@ -45,6 +45,8 @@ final class MiddlewareBudgetTest extends TestCase
      * budget for CI variance).
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
      */
     public function testRequireRoleAdmitOverheadStaysBounded(): void
     {
@@ -77,6 +79,8 @@ final class MiddlewareBudgetTest extends TestCase
      * role-inherited resolve is the heavier path).
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
      */
     public function testRequirePermissionAdmitOverheadStaysBounded(): void
     {

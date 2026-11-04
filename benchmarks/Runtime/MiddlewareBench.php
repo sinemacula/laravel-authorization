@@ -6,7 +6,6 @@ namespace Benchmarks\Runtime;
 
 use Benchmarks\Support\BenchmarkCase;
 use Benchmarks\Support\BenchmarkFixtures;
-use Benchmarks\Support\BenchmarkIdentity;
 use Benchmarks\Support\BenchmarkPrincipalResolver;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -18,6 +17,7 @@ use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use Tests\Fixtures\BenchmarkIdentity;
 
 /**
  * PHPBench micro-benchmark for `RequireRole::handle()` and
@@ -102,6 +102,8 @@ final class MiddlewareBench extends BenchmarkCase
      * Benchmark: `RequireRole::handle()` — admit path, single needle match.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
      */
     #[Bench\BeforeMethods('setUp')]
     #[Bench\Iterations(3)]
@@ -116,6 +118,8 @@ final class MiddlewareBench extends BenchmarkCase
      * match via role-inherited permission.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
      */
     #[Bench\BeforeMethods('setUp')]
     #[Bench\Iterations(3)]
