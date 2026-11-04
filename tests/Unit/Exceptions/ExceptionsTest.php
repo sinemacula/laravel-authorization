@@ -13,8 +13,6 @@ use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\GateConflictException;
-use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
-use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 
 /**
  * Unit tests for the package's typed exceptions.
@@ -30,8 +28,6 @@ use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 #[CoversClass(GateConflictException::class)]
 #[CoversClass(InvalidPolicyDocumentException::class)]
 #[CoversClass(MigrationCollisionException::class)]
-#[CoversClass(UnknownPermissionException::class)]
-#[CoversClass(UnknownRoleException::class)]
 final class ExceptionsTest extends TestCase
 {
     /**
@@ -76,32 +72,6 @@ final class ExceptionsTest extends TestCase
 
         self::assertSame(400, $exception->getCode());
         self::assertSame('example', $exception->getPolicyName());
-    }
-
-    /**
-     * UnknownRoleException exposes the role name.
-     *
-     * @return void
-     */
-    public function testUnknownRoleException(): void
-    {
-        $exception = new UnknownRoleException('admin');
-
-        self::assertSame(404, $exception->getCode());
-        self::assertSame('admin', $exception->getRole());
-    }
-
-    /**
-     * UnknownPermissionException exposes the permission name.
-     *
-     * @return void
-     */
-    public function testUnknownPermissionException(): void
-    {
-        $exception = new UnknownPermissionException('posts:create');
-
-        self::assertSame(404, $exception->getCode());
-        self::assertSame('posts:create', $exception->getPermission());
     }
 
     /**
