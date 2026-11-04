@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
@@ -223,6 +224,103 @@ final class RolePermissionTest extends TestCase
         $role->guard_name = 'web';
 
         $this->assertGuardMismatchWritesNothing(static fn () => $role->permissions()->attach($permission->id));
+    }
+
+    /**
+     * A role parent whose id is not the row's role id is not the in-memory
+     * role, so the stored role's guard is the one checked.
+     *
+     * @return void
+     */
+    public function testRoleParentWithDifferentIdIsNotUsedAsInMemoryRole(): void
+    {
+        $role       = $this->makeRole('web');
+        $permission = $this->makePermission('web');
+        $parent     = Role::query()->create(['name' => 'author', 'guard_name' => 'api']);
+
+        $this->savePivot($parent, $role->id, $permission->id);
+
+        self::assertSame(
+            [['role_id' => $role->id, 'permission_id' => $permission->id]],
+            $this->pivotRows(),
+        );
+    }
+
+    /**
+     * A parent that is not a role is not the in-memory role, even when its id
+     * is the row's role id.
+     *
+     * @return void
+     */
+    public function testNonRoleParentWithRoleIdIsNotUsedAsInMemoryRole(): void
+    {
+        $role       = $this->makeRole('web');
+        $permission = $this->makePermission('web');
+        $parent     = new Permission(['name' => 'posts:delete', 'guard_name' => 'api']);
+        $parent->id = $role->id;
+
+        $this->savePivot($parent, $role->id, $permission->id);
+
+        self::assertSame(
+            [['role_id' => $role->id, 'permission_id' => $permission->id]],
+            $this->pivotRows(),
+        );
+    }
+
+    /**
+     * A permission parent whose id is not the row's permission id is not the
+     * in-memory permission, so the stored permission's guard is the one
+     * checked.
+     *
+     * @return void
+     */
+    public function testPermissionParentWithDifferentIdIsNotUsedAsInMemoryPermission(): void
+    {
+        $role       = $this->makeRole('web');
+        $permission = $this->makePermission('web');
+        $parent     = Permission::query()->create(['name' => 'posts:delete', 'guard_name' => 'api']);
+
+        $this->savePivot($parent, $role->id, $permission->id);
+
+        self::assertSame(
+            [['role_id' => $role->id, 'permission_id' => $permission->id]],
+            $this->pivotRows(),
+        );
+    }
+
+    /**
+     * A parent that is not a permission is not the in-memory permission, even
+     * when its id is the row's permission id.
+     *
+     * @return void
+     */
+    public function testNonPermissionParentWithPermissionIdIsNotUsedAsInMemoryPermission(): void
+    {
+        $role       = $this->makeRole('web');
+        $permission = $this->makePermission('web');
+        $parent     = new Role(['name' => 'author', 'guard_name' => 'api']);
+        $parent->id = $permission->id;
+
+        $this->savePivot($parent, $role->id, $permission->id);
+
+        self::assertSame(
+            [['role_id' => $role->id, 'permission_id' => $permission->id]],
+            $this->pivotRows(),
+        );
+    }
+
+    /**
+     * Save a pivot row built directly against the given parent, outside any
+     * relation, so the parent and the row's ids can disagree.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model  $parent
+     * @param  string  $roleId
+     * @param  string  $permissionId
+     * @return void
+     */
+    private function savePivot(Model $parent, string $roleId, string $permissionId): void
+    {
+        RolePermission::fromAttributes($parent, ['role_id' => $roleId, 'permission_id' => $permissionId], 'role_permissions')->save();
     }
 
     /**
