@@ -4,74 +4,53 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Exceptions;
 
-use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
+use Illuminate\Auth\Access\AuthorizationException as LaravelAuthorizationException;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 
 /**
  * Thrown when the authorization manager's `authorize()` entry point denies a
  * request.
  *
- * Carries the full evaluation result, including the reproducible statement
- * trace, so consumers can persist the decision to an audit log without
- * re-running the check.
+ * Extends Laravel's own authorization exception, so the application's handler
+ * renders it as a `403`. It carries the decision's reason code and nothing
+ * else: the action, the resource, the matched statement and the trace stay out
+ * of the exception, and the message is the translated
+ * `authorization::authorization.denied` line. A consumer that needs the full
+ * decision reads it from the `AuthorizationFailed` event or the manager's last
+ * decision.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final class AuthorizationException extends \RuntimeException
+final class AuthorizationException extends LaravelAuthorizationException
 {
+    /** @var string Translation key of the message a denial carries. */
+    public const string MESSAGE_KEY = 'authorization::authorization.denied';
+
     /**
      * Create a new authorization exception instance.
      *
-     * @param  string  $action
-     * @param  string|null  $resource
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult  $result
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason  $reason
+     * @param  string|null  $message
      */
     public function __construct(
 
-        /** Action string that triggered the denial. */
-        private readonly string $action,
+        /** Reason code of the decision that denied the request. */
+        private readonly DecisionReason $reason,
 
-        /** Resource identifier the action targeted, or null when omitted. */
-        private readonly ?string $resource,
-
-        /** Full evaluation result captured at the moment of denial. */
-        private readonly EvaluationResult $result,
+        // Translated message; null keeps Laravel's English default.
+        ?string $message = null,
     ) {
-        $message = $resource !== null
-            ? "Unauthorized action '{$action}' on resource '{$resource}'"
-            : "Unauthorized action '{$action}'";
-
         parent::__construct($message, 403);
     }
 
     /**
-     * Return the action that triggered the denial.
+     * Return the reason code of the decision that denied the request.
      *
-     * @return string
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason
      */
-    public function getAction(): string
+    public function getReason(): DecisionReason
     {
-        return $this->action;
-    }
-
-    /**
-     * Return the resource (when supplied) that triggered the denial.
-     *
-     * @return string|null
-     */
-    public function getResource(): ?string
-    {
-        return $this->resource;
-    }
-
-    /**
-     * Return the evaluation result, including the trace of every statement
-     * considered during the check.
-     *
-     * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult
-     */
-    public function getResult(): EvaluationResult
-    {
-        return $this->result;
+        return $this->reason;
     }
 }
