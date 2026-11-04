@@ -43,9 +43,9 @@ principal's role and permission grants, and anything left is denied.
   `sso.connection.trust` are all valid; anything else is refused when the name is saved.
 - **Wildcard permissions** (`posts:*`, `posts.*`, `*:create`, and `*` for everything; `*:*` matches only names with a
   `:`) and **role hierarchy**: a role inherits its parent's permissions, with cycle checks on write.
-- **Policy documents** with `effect`, `actions`, `resources` and `conditions`, seventeen condition operators (equality,
-  set membership, prefix and suffix, CIDR, numeric and time comparisons, booleans and nulls) and `${…}` interpolation
-  from the check's context.
+- **Policy documents** with `effect`, `actions`, `resources` and `conditions`, eighteen condition operators (equality,
+  set membership, prefix, suffix and glob, IPv4 and IPv6 CIDR, numeric and time comparisons, booleans and nulls) and
+  `${…}` interpolation from the check's context. Malformed documents are refused when they are saved.
 - **Gate auto-wiring**: every case of a configured permission enum is registered as a Gate ability, with a choice of
   what happens when an ability of the same name already exists.
 - **Route middleware and Blade directives** for roles and permissions, with `|` or `,` between alternatives.
@@ -194,6 +194,11 @@ Authorization::for($user)->can('posts:delete', 'posts/42', ['ip' => request()->i
 Authorization::for($user)->explain('posts:delete', 'posts/42', ['ip' => request()->ip()]);
 ```
 
+Policies fail closed. A deny whose condition cannot be decided, such as a check made without `ip` in its context,
+still applies, while an allow in the same position does not. A check without a resource matches only statements whose
+resources include `*`. A stored policy that cannot be read denies every check for its holder, with the reason
+`invalid_policy`, until it is fixed.
+
 `Authorization::authorize()` throws `SineMacula\Laravel\Authorization\Exceptions\AuthorizationException` when the check
 is denied. It extends Laravel's `Illuminate\Auth\Access\AuthorizationException`, so Laravel's handler answers `403`. It
 carries the decision's reason code (`getReason()`) and nothing else: its message is the translated
@@ -225,7 +230,7 @@ The contracts behind the evaluator, for maintainers and reviewers, are in [docs/
 | Note                                                                                        | Covers                                                      |
 |---------------------------------------------------------------------------------------------|-------------------------------------------------------------|
 | [Evaluation order and deny precedence](docs/design/evaluation-order-and-deny-precedence.md) | The four-step decision order and why an explicit deny wins  |
-| [Wildcard and condition semantics](docs/design/wildcard-and-condition-semantics.md)         | Pattern matching, missing keys and the condition operators  |
+| [Wildcard and condition semantics](docs/design/wildcard-and-condition-semantics.md)         | Pattern matching, undecidable tests and condition operators |
 | [Polymorphic identity pivots](docs/design/polymorphic-identity-pivots.md)                   | Why grants work for integer, UUID and ULID keys             |
 | [Principal resolver contract](docs/design/principal-resolver-contract.md)                   | The default resolver and how an application binds its own   |
 | [Model extension](docs/design/model-extension.md)                                           | Swapping the shipped models for your own subclasses         |
