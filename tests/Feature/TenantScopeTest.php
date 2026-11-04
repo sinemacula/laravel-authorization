@@ -206,7 +206,7 @@ final class TenantScopeTest extends TestCase
         Permission::create(['name' => 'platform-permission', 'guard_name' => 'web']);
 
         foreach (['a' => $tenantA, 'b' => $tenantB] as $prefix => $tenant) {
-            $owner = ['guard_name' => 'web', 'tenant_type' => $tenant->getMorphClass(), 'tenant_id' => $tenant->id];
+            $owner = ['guard_name' => 'web', 'tenant_type' => $tenant->getMorphClass(), 'tenant_id' => $tenant->getKey()];
 
             Role::create(['name' => "{$prefix}-role"] + $owner);
             Permission::create(['name' => "{$prefix}-permission"] + $owner);
