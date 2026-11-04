@@ -488,4 +488,39 @@ final class StatementValidatorTest extends TestCase
             self::assertSame("Policy statement resource pattern '{$pattern}' has a malformed \${…} reference.", $exception->getMessage());
         }
     }
+
+    /**
+     * conditionErrors() maps each malformed condition to its fault, keyed by
+     * the condition's key, and leaves well-formed conditions out.
+     *
+     * @return void
+     */
+    public function testConditionErrorsMapsOnlyMalformedConditions(): void
+    {
+        $errors = StatementValidator::conditionErrors([
+            'tenant' => ['eq' => 'org-1'],
+            'region' => 'eu',
+            'empty'  => [],
+            7        => 'x',
+            'op'     => ['bogus' => 1],
+        ]);
+
+        self::assertSame([
+            'empty' => 'condition \'empty\' has no operators',
+            7       => 'a condition key is not a string',
+            'op'    => 'condition \'op\' has an unknown operator \'bogus\'',
+        ], $errors);
+    }
+
+    /**
+     * conditionErrors() returns an empty map for an empty or well-formed
+     * condition map.
+     *
+     * @return void
+     */
+    public function testConditionErrorsIsEmptyForWellFormedConditions(): void
+    {
+        self::assertSame([], StatementValidator::conditionErrors([]));
+        self::assertSame([], StatementValidator::conditionErrors(['tenant' => ['eq' => 'org-1'], 'flag' => true]));
+    }
 }

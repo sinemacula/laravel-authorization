@@ -52,14 +52,27 @@ final class ConditionEvaluator
     /** @var list<string> Operators whose operand is never interpolated (a list or a pair of bounds). */
     private const array LITERAL_OPERAND_OPERATORS = ['in', 'not_in', 'between'];
 
-    /** @var list<string> Operators comparing the value for equality or membership. */
-    private const array EQUALITY_OPERATORS = ['eq', 'neq', 'in', 'not_in', 'null', 'not_null'];
-
-    /** @var list<string> Operators testing a string value against a string operand. */
-    private const array STRING_OPERATORS = ['starts_with', 'ends_with', 'string_like'];
-
-    /** @var list<string> Operators comparing numbers. */
-    private const array NUMERIC_OPERATORS = ['gt', 'gte', 'lt', 'lte'];
+    /** @var array<string, string> The family each operator is evaluated by. */
+    private const array FAMILIES = [
+        'eq'          => 'equality',
+        'neq'         => 'equality',
+        'in'          => 'equality',
+        'not_in'      => 'equality',
+        'null'        => 'equality',
+        'not_null'    => 'equality',
+        'starts_with' => 'string',
+        'ends_with'   => 'string',
+        'string_like' => 'string',
+        'before'      => 'time',
+        'after'       => 'time',
+        'between'     => 'between',
+        'gt'          => 'number',
+        'gte'         => 'number',
+        'lt'          => 'number',
+        'lte'         => 'number',
+        'cidr'        => 'cidr',
+        'bool'        => 'bool',
+    ];
 
     /** @var array<int|string, bool> Values the `bool` operator accepts, by their boolean meaning. */
     private const array BOOLEAN_FORMS = [
@@ -79,15 +92,15 @@ final class ConditionEvaluator
      */
     public static function evaluate(string $operator, mixed $operand, mixed $actual): MatchResult
     {
-        return match (true) {
-            \in_array($operator, self::EQUALITY_OPERATORS, true) => self::matchesEquality($operator, $operand, $actual),
-            \in_array($operator, self::STRING_OPERATORS, true)   => self::matchesString($operator, $operand, $actual),
-            \in_array($operator, ['before', 'after'], true)      => self::matchesTimeComparison($operator, $operand, $actual),
-            $operator === 'between'                              => self::matchesBetween($operand, $actual),
-            \in_array($operator, self::NUMERIC_OPERATORS, true)  => self::matchesNumericComparison($operator, $operand, $actual),
-            $operator === 'cidr'                                 => self::matchesCidr($operand, $actual),
-            $operator === 'bool'                                 => self::matchesBool($operand, $actual),
-            default                                              => self::unknownOperator($operator),
+        return match (self::FAMILIES[$operator] ?? null) {
+            'equality' => self::matchesEquality($operator, $operand, $actual),
+            'string'   => self::matchesString($operator, $operand, $actual),
+            'time'     => self::matchesTimeComparison($operator, $operand, $actual),
+            'between'  => self::matchesBetween($operand, $actual),
+            'number'   => self::matchesNumericComparison($operator, $operand, $actual),
+            'cidr'     => self::matchesCidr($operand, $actual),
+            'bool'     => self::matchesBool($operand, $actual),
+            default    => self::unknownOperator($operator),
         };
     }
 

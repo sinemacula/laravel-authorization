@@ -75,6 +75,25 @@ final class StatementValidator
     }
 
     /**
+     * Work out why each malformed condition of a condition map cannot be
+     * evaluated, keyed by the condition's key; well-formed conditions are left
+     * out.
+     *
+     * @param  array<array-key, mixed>  $conditions
+     * @return array<array-key, string>
+     */
+    public static function conditionErrors(array $conditions): array
+    {
+        $errors = [];
+
+        foreach ($conditions as $key => $condition) {
+            $errors[$key] = \is_string($key) ? self::conditionError($key, $condition) : 'a condition key is not a string';
+        }
+
+        return \array_filter($errors, static fn (?string $error): bool => $error !== null);
+    }
+
+    /**
      * Describe why a condition cannot be evaluated, or return null when it is
      * well formed: an empty operator map, a non-string operator name, an
      * unknown operator, an operand of the wrong type, or a malformed `${…}`

@@ -42,7 +42,9 @@ final readonly class MatchResult
      */
     public static function matches(): self
     {
-        return new self(MatchOutcome::MATCHES);
+        static $shared = null;
+
+        return $shared ??= new self(MatchOutcome::MATCHES);
     }
 
     /**
@@ -53,7 +55,12 @@ final readonly class MatchResult
      */
     public static function doesNotMatch(string $detail = ''): self
     {
-        return new self(MatchOutcome::DOES_NOT_MATCH, $detail);
+        // Most statements of a policy do not apply to a check, so the result is
+        // shared rather than built each time; details are a fixed set of
+        // phrases, never context values.
+        static $shared = [];
+
+        return $shared[$detail] ??= new self(MatchOutcome::DOES_NOT_MATCH, $detail);
     }
 
     /**

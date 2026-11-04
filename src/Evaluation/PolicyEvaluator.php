@@ -64,14 +64,18 @@ final class PolicyEvaluator
         $allowStatement = null;
 
         foreach (self::statementsOf($policies) as [$policyName, $index, $statement]) {
-            $assessment = $statement->assess($action, $resource, $context, $interpolator, $principal);
-            $decision   = self::decide($statement, $assessment);
-            $trace[]    = $this->traceEntry($policyName, $index, $decision, self::reason($decision, $assessment));
+            if (!$statement->coversAction($action)) {
+                $trace[] = ['policy' => $policyName, 'statement_index' => $index, 'decision' => TraceDecision::SKIPPED, 'reason' => Statement::TARGET_MISMATCH];
 
-            if ($decision === self::INVALID || $decision === self::DENY) {
-                return $decision === self::INVALID
-                    ? EvaluationResult::invalidPolicy($trace)
-                    : EvaluationResult::explicitlyDenied($statement, $trace);
+                continue;
+            }
+
+            $assessment = $statement->assess($action, $resource, $context, $interpolator, $principal);
+            $decision   = $this->record($trace, $policyName, $index, $statement, $assessment);
+            $final      = $decision === self::SKIP ? null : self::conclude($decision, $statement, $trace);
+
+            if ($final !== null) {
+                return $final;
             }
 
             $allowStatement ??= $decision === self::ALLOW ? $statement : null;
@@ -99,7 +103,65 @@ final class PolicyEvaluator
     }
 
     /**
-     * Decide what an assessed statement contributes to the check.
+     * Decide what an assessed statement contributes and append its trace entry.
+     * The common case, a statement that does not apply, skips the decision
+     * helpers.
+     *
+     * @param  list<array{policy: string, statement_index: int, decision: \SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision, reason: string}>  $trace
+     * @param  string  $policyName
+     * @param  int  $index
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\MatchResult  $assessment
+     * @return string
+     *
+     * @param-out list<array{policy: string, statement_index: int, decision: \SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision, reason: string}>  $trace
+     */
+    private function record(array &$trace, string $policyName, int $index, Statement $statement, MatchResult $assessment): string
+    {
+        if ($assessment->outcome === MatchOutcome::DOES_NOT_MATCH) {
+            $trace[] = ['policy' => $policyName, 'statement_index' => $index, 'decision' => TraceDecision::SKIPPED, 'reason' => self::mismatchReason($assessment)];
+
+            return self::SKIP;
+        }
+
+        $decision = self::decide($statement, $assessment);
+        $trace[]  = $this->traceEntry($policyName, $index, $decision, self::reason($decision, $assessment));
+
+        return $decision;
+    }
+
+    /**
+     * Describe a statement that does not apply, for the trace.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\MatchResult  $assessment
+     * @return string
+     */
+    private static function mismatchReason(MatchResult $assessment): string
+    {
+        return $assessment->detail !== '' ? $assessment->detail : 'conditions not satisfied';
+    }
+
+    /**
+     * Return the result that ends the walk: a deny or an invalid statement.
+     * Returns null when the walk continues.
+     *
+     * @param  string  $decision
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
+     * @param  list<array{policy: string, statement_index: int, decision: \SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision, reason: string}>  $trace
+     * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult|null
+     */
+    private static function conclude(string $decision, Statement $statement, array $trace): ?EvaluationResult
+    {
+        return match ($decision) {
+            self::INVALID => EvaluationResult::invalidPolicy($trace),
+            self::DENY    => EvaluationResult::explicitlyDenied($statement, $trace),
+            default       => null,
+        };
+    }
+
+    /**
+     * Decide what an assessed statement contributes to the check. Statements
+     * that definitely do not apply are skipped before this is called.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
      * @param  \SineMacula\Laravel\Authorization\Evaluation\MatchResult  $assessment
@@ -107,13 +169,11 @@ final class PolicyEvaluator
      */
     private static function decide(Statement $statement, MatchResult $assessment): string
     {
-        $deny = $statement->effect === PolicyEffect::DENY;
-
-        return match ($assessment->outcome) {
-            MatchOutcome::INVALID        => self::INVALID,
-            MatchOutcome::MATCHES        => $deny ? self::DENY : self::ALLOW,
-            MatchOutcome::UNDECIDABLE    => $deny ? self::DENY : self::SKIP,
-            MatchOutcome::DOES_NOT_MATCH => self::SKIP,
+        return match (true) {
+            $assessment->outcome === MatchOutcome::INVALID => self::INVALID,
+            $statement->effect   === PolicyEffect::DENY    => self::DENY,
+            $assessment->outcome === MatchOutcome::MATCHES => self::ALLOW,
+            default                                        => self::SKIP,
         };
     }
 
@@ -130,12 +190,8 @@ final class PolicyEvaluator
             self::INVALID => 'invalid statement',
             self::DENY    => 'explicit deny',
             self::ALLOW   => 'explicit allow',
-            default       => $assessment->outcome === MatchOutcome::UNDECIDABLE ? 'could not be decided' : 'conditions not satisfied',
+            default       => 'could not be decided',
         };
-
-        if ($assessment->outcome === MatchOutcome::DOES_NOT_MATCH) {
-            return $assessment->detail !== '' ? $assessment->detail : $label;
-        }
 
         return $assessment->detail !== '' ? "{$label}: {$assessment->detail}" : $label;
     }

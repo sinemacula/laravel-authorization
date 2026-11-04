@@ -229,4 +229,21 @@ final class MatchResultTest extends TestCase
         self::assertSame(MatchOutcome::DOES_NOT_MATCH, $combined->outcome);
         self::assertSame('definite failure', $combined->detail);
     }
+
+    /**
+     * The plain results are shared: matches() is one instance, and
+     * doesNotMatch() is one instance per detail.
+     *
+     * @return void
+     */
+    public function testPlainResultsAreShared(): void
+    {
+        self::assertSame(MatchResult::matches(), MatchResult::matches());
+        self::assertSame(MatchResult::doesNotMatch(), MatchResult::doesNotMatch(''));
+        self::assertSame(MatchResult::doesNotMatch('a'), MatchResult::doesNotMatch('a'));
+        self::assertNotSame(MatchResult::doesNotMatch('a'), MatchResult::doesNotMatch('b'));
+        self::assertSame('b', MatchResult::doesNotMatch('b')->detail);
+        self::assertSame(MatchResult::matches(), MatchResult::fromBool(true));
+        self::assertSame(MatchResult::doesNotMatch(), MatchResult::fromBool(false));
+    }
 }

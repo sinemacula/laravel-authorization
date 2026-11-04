@@ -33,7 +33,10 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 final readonly class Statement
 {
     /** @var string Trace detail for a statement whose action or resource patterns do not cover the check. */
-    private const string TARGET_MISMATCH = 'action/resource did not match';
+    public const string TARGET_MISMATCH = 'action/resource did not match';
+
+    /** @var array<array-key, string> Why each malformed condition cannot be evaluated, by key, worked out once on construction. */
+    private array $conditionErrors;
 
     /**
      * Create a new statement instance.
@@ -56,7 +59,9 @@ final readonly class Statement
 
         /** Condition map keyed by context key; each value is an operator map. */
         public array $conditions = [],
-    ) {}
+    ) {
+        $this->conditionErrors = StatementValidator::conditionErrors($conditions);
+    }
 
     /**
      * Hydrate a statement from its array representation.
@@ -70,12 +75,18 @@ final readonly class Statement
     {
         StatementValidator::assertKnownKeys($data);
 
-        return new self(
+        $statement = new self(
             effect: self::resolveEffect($data),
             actions: self::resolveActions($data),
             resources: self::resolveResources($data),
             conditions: self::resolveConditions($data),
         );
+
+        foreach ($statement->conditionErrors as $error) {
+            throw new \InvalidArgumentException("Policy statement {$error}.");
+        }
+
+        return $statement;
     }
 
     /**
@@ -116,7 +127,8 @@ final readonly class Statement
      */
     public function matches(string $action, ?string $resource = null, ?ContextInterpolator $interpolator = null, ?object $principal = null, array $context = []): bool
     {
-        return $this->matchesTarget($action, new InterpolationScope($interpolator, $principal, $resource, $context))->holds();
+        return $this->coversAction($action)
+            && $this->matchesTarget(new InterpolationScope($interpolator, $principal, $resource, $context))->holds();
     }
 
     /**
@@ -148,27 +160,52 @@ final readonly class Statement
      */
     public function assess(string $action, ?string $resource = null, array $context = [], ?ContextInterpolator $interpolator = null, ?object $principal = null): MatchResult
     {
-        $scope  = new InterpolationScope($interpolator, $principal, $resource, $context);
-        $target = $this->matchesTarget($action, $scope);
-
-        if ($target->outcome === MatchOutcome::DOES_NOT_MATCH) {
-            return $target;
+        // Most statements of a policy do not name the action, so that case
+        // returns before the scope is built.
+        if (!$this->coversAction($action)) {
+            return MatchResult::doesNotMatch(self::TARGET_MISMATCH);
         }
 
-        return $target->and($this->assessConditions($scope));
+        $scope  = new InterpolationScope($interpolator, $principal, $resource, $context);
+        $target = $this->matchesTarget($scope);
+
+        return $target->outcome === MatchOutcome::DOES_NOT_MATCH ? $target : $target->and($this->assessConditions($scope));
     }
 
     /**
-     * Assess the action and resource patterns against the check.
+     * Determine whether any of the statement's action patterns covers the
+     * action. The evaluator asks this first, since most statements of a policy
+     * do not name the action being checked.
+     *
+     * Action patterns use `fnmatch` with `FNM_NOESCAPE` so backslashes are
+     * compared literally. Resource patterns get the same literal backslashes by
+     * escaping instead, since their substituted values must be escaped too (see
+     * `matchesResource()`).
      *
      * @param  string  $action
+     * @return bool
+     */
+    public function coversAction(string $action): bool
+    {
+        foreach ($this->actions as $pattern) {
+            if (\fnmatch($pattern, $action, \FNM_NOESCAPE)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Assess the resource patterns against a check whose action the statement
+     * names.
+     *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\InterpolationScope  $scope
      * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
      */
-    private function matchesTarget(string $action, InterpolationScope $scope): MatchResult
+    private function matchesTarget(InterpolationScope $scope): MatchResult
     {
         return match (true) {
-            !$this->matchesAction($action)         => MatchResult::doesNotMatch(self::TARGET_MISMATCH),
             $scope->resource !== null              => $this->matchesResource($scope->resource, $scope),
             \in_array('*', $this->resources, true) => MatchResult::matches(),
             default                                => MatchResult::doesNotMatch(self::TARGET_MISMATCH),
@@ -186,7 +223,8 @@ final readonly class Statement
         $result = MatchResult::matches();
 
         foreach ($this->conditions as $key => $expected) {
-            $result = $result->and($this->assessCondition($key, $expected, $scope));
+            $part   = $this->assessCondition($key, $expected, $scope);
+            $result = $part->outcome === MatchOutcome::MATCHES ? $result : $result->and($part);
         }
 
         return $result;
@@ -202,13 +240,10 @@ final readonly class Statement
      */
     private function assessCondition(int|string $key, mixed $expected, InterpolationScope $scope): MatchResult
     {
-        if (!\is_string($key)) {
-            return MatchResult::invalid('a condition key is not a string');
-        }
-
         // A malformed condition is invalid whatever the context holds, so its
-        // shape is checked before the key is looked up.
-        $error   = StatementValidator::conditionError($key, $expected);
+        // shape (worked out on construction) is checked before the key is
+        // looked up.
+        $error   = $this->conditionErrors[$key] ?? null;
         $problem = match (true) {
             $error !== null                           => MatchResult::invalid($error),
             !\array_key_exists($key, $scope->context) => MatchResult::undecidable("key '{$key}' is missing from the context"),
@@ -253,7 +288,8 @@ final readonly class Statement
         $result = MatchResult::matches();
 
         foreach ($operators as $operator => $operand) {
-            $result = $result->and($this->assessOperator($key, (string) $operator, $operand, $scope));
+            $part   = $this->assessOperator($key, (string) $operator, $operand, $scope);
+            $result = $part->outcome === MatchOutcome::MATCHES ? $result : $result->and($part);
         }
 
         return $result;
@@ -392,8 +428,6 @@ final readonly class Statement
                 throw new \InvalidArgumentException('Policy statement conditions must use string keys.');
             }
 
-            StatementValidator::assertValidCondition($key, $value);
-
             $conditions[$key] = $value;
         }
 
@@ -418,28 +452,6 @@ final readonly class Statement
 
             return $value;
         }, $values));
-    }
-
-    /**
-     * Determine whether the action matches any configured pattern.
-     *
-     * Action patterns use `fnmatch` with `FNM_NOESCAPE` so backslashes are
-     * compared literally. Resource patterns get the same literal backslashes by
-     * escaping instead, since their substituted values must be escaped too (see
-     * `matchesResource()`).
-     *
-     * @param  string  $action
-     * @return bool
-     */
-    private function matchesAction(string $action): bool
-    {
-        foreach ($this->actions as $pattern) {
-            if (\fnmatch($pattern, $action, \FNM_NOESCAPE)) {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /**
