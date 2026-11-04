@@ -111,6 +111,37 @@ final class HasRoleHierarchyTest extends TestCase
     }
 
     /**
+     * The `ancestors()` cycle lookup hydrates the configured subclass even when
+     * the walk starts from a shipped `Role` instance, so the lookup reads the
+     * configured class rather than the class it is called on.
+     *
+     * @return void
+     */
+    public function testAncestorsCycleLookupFromBaseRoleUsesConfiguredRoleClass(): void
+    {
+        $root  = $this->makeRole('admin');
+        $child = $this->makeRole('editor', $root->id);
+
+        DB::table('roles')->where('id', $root->id)->update(['parent_id' => $child->id]);
+
+        $start = Role::query()->findOrFail($child->id);
+
+        self::assertSame(Role::class, $start::class);
+
+        $hydrated = $this->recordHydratedRoleClasses();
+
+        try {
+            $start->ancestors();
+            self::fail('RoleHierarchyCycleException was not thrown.');
+        } catch (RoleHierarchyCycleException $exception) {
+            self::assertSame('editor', $exception->getRoleName());
+            self::assertSame('admin', $exception->getProposedParentName());
+        }
+
+        self::assertSame([CustomRole::class, CustomRole::class, CustomRole::class], $hydrated->getArrayCopy());
+    }
+
+    /**
      * Record the class of every role model hydrated from here on.
      *
      * @return \ArrayObject<int, string>
