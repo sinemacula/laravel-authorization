@@ -37,6 +37,9 @@ abstract class TestCase extends OrchestraTestCase
     /** @var bool Process-level flag so the Testbench Blade view cache is cleared once per phpunit run. */
     private static bool $viewCacheCleared = false;
 
+    /** @var array<string, true> Worker databases this process has created. */
+    private static array $workerDatabases = [];
+
     /**
      * Clear Testbench's shared compiled-view cache once per phpunit process.
      * Blade compiles anonymous templates (including those passed to
@@ -158,8 +161,7 @@ abstract class TestCase extends OrchestraTestCase
      */
     private function databaseConnection(): array
     {
-        /** @var string $driver */
-        $driver = env('DB_CONNECTION', 'sqlite'); // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig
+        $driver = getenv('DB_CONNECTION') ?: 'sqlite';
 
         if ($driver === 'sqlite') {
             return [
@@ -169,16 +171,76 @@ abstract class TestCase extends OrchestraTestCase
             ];
         }
 
-        return [
+        $connection = [
             'driver'    => $driver,
-            'host'      => env('DB_HOST', '127.0.0.1'), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig
-            'port'      => env('DB_PORT', $driver === 'pgsql' ? '5432' : '3306'), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig
-            'database'  => env('DB_DATABASE', 'laravel_authorization_test'), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig
-            'username'  => env('DB_USERNAME', 'root'), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig
-            'password'  => env('DB_PASSWORD', ''), // @phpstan-ignore larastan.noEnvCallsOutsideOfConfig
+            'host'      => getenv('DB_HOST') ?: '127.0.0.1',
+            'port'      => getenv('DB_PORT') ?: $this->defaultPort($driver),
+            'database'  => getenv('DB_DATABASE') ?: 'laravel_authorization_test',
+            'username'  => getenv('DB_USERNAME') ?: $this->defaultUsername($driver),
+            'password'  => getenv('DB_PASSWORD') ?: '',
             'prefix'    => '',
             'charset'   => $driver === 'pgsql' ? 'utf8' : 'utf8mb4',
             'collation' => $driver === 'pgsql' ? null : 'utf8mb4_unicode_ci',
         ];
+
+        $connection['database'] = $this->workerDatabase($connection);
+
+        return $connection;
+    }
+
+    /**
+     * Return the database this process tests against.
+     *
+     * Tests create, empty and drop the same tables, so paratest workers sharing
+     * one database would collide. Each process gets its own database, named
+     * after its paratest `TEST_TOKEN` (`0` outside paratest) and created afresh
+     * on first use from a connection to the configured one, so nothing a
+     * previous or interrupted run left behind reaches the next.
+     *
+     * @param  array{driver: string, host: string, port: string, database: string, username: string, password: string}  $connection
+     * @return string
+     */
+    private function workerDatabase(array $connection): string
+    {
+        $token    = getenv('TEST_TOKEN');
+        $database = $connection['database'] . '_' . ($token === false || $token === '' ? '0' : $token);
+
+        if (isset(self::$workerDatabases[$database])) {
+            return $database;
+        }
+
+        $dsn = sprintf('%s:host=%s;port=%s;dbname=%s', $connection['driver'], $connection['host'], $connection['port'], $connection['database']);
+        $pdo = new \PDO($dsn, $connection['username'], $connection['password']);
+
+        $quoted = $connection['driver'] === 'pgsql' ? '"' . $database . '"' : '`' . $database . '`';
+
+        $pdo->exec('DROP DATABASE IF EXISTS ' . $quoted . ($connection['driver'] === 'pgsql' ? ' WITH (FORCE)' : ''));
+        $pdo->exec('CREATE DATABASE ' . $quoted);
+
+        self::$workerDatabases[$database] = true;
+
+        return $database;
+    }
+
+    /**
+     * Return the default database port for the given driver.
+     *
+     * @param  string  $driver
+     * @return string
+     */
+    private function defaultPort(string $driver): string
+    {
+        return $driver === 'pgsql' ? '5432' : '3306';
+    }
+
+    /**
+     * Return the default database username for the given driver.
+     *
+     * @param  string  $driver
+     * @return string
+     */
+    private function defaultUsername(string $driver): string
+    {
+        return $driver === 'pgsql' ? 'postgres' : 'root';
     }
 }

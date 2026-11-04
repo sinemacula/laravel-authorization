@@ -3,20 +3,6 @@
     source: {
         directories: [
             "src"
-        ],
-        excludes: [
-            "AuthorizationServiceProvider.php",
-            "Contracts",
-            "Database",
-            "Enums",
-            "Events",
-            "Exceptions",
-            "Facades",
-            "Models",
-            "Observers",
-            "Registrars",
-            "Resolvers",
-            "Traits"
         ]
     },
     logs: {
@@ -27,7 +13,8 @@
         configDir: ".",
         customPath: "vendor/bin/phpunit"
     },
-    timeout: 15,
+    initialTestsPhpOptions: "-d memory_limit=1G",
+    timeout: 30,
     mutators: {
         "@default": true
     }
