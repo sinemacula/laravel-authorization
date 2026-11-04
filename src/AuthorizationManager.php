@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization;
 
 use Illuminate\Contracts\Events\Dispatcher;
+use Illuminate\Contracts\Translation\Translator;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
@@ -51,6 +52,7 @@ final class AuthorizationManager
      * @param  \SineMacula\Laravel\Authorization\Contracts\PolicyResolver  $policyResolver
      * @param  \SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore  $lastDecisionStore
      * @param  \Illuminate\Contracts\Events\Dispatcher|null  $events
+     * @param  \Illuminate\Contracts\Translation\Translator|null  $translator
      */
     public function __construct(
 
@@ -68,6 +70,9 @@ final class AuthorizationManager
 
         /** Event dispatcher used to emit decision events; null disables. */
         private readonly ?Dispatcher $events = null,
+
+        /** Translator that words a denial's message; null keeps English. */
+        private readonly ?Translator $translator = null,
     ) {}
 
     /**
@@ -106,7 +111,7 @@ final class AuthorizationManager
         if (!$result->allowed) {
             $this->dispatch(new AuthorizationFailed($principal, $action, $resource, $context, $result));
 
-            throw new AuthorizationException($action, $resource, $result);
+            throw new AuthorizationException($result->reason, $this->deniedMessage());
         }
     }
 
@@ -311,6 +316,19 @@ final class AuthorizationManager
         }
 
         return $this->policyResolver->policiesFor($principal);
+    }
+
+    /**
+     * Return the denial message in the translator's current locale, or null
+     * when there is no translator or it has no line for the message.
+     *
+     * @return string|null
+     */
+    private function deniedMessage(): ?string
+    {
+        $line = $this->translator?->get(AuthorizationException::MESSAGE_KEY);
+
+        return \is_string($line) && $line !== AuthorizationException::MESSAGE_KEY ? $line : null;
     }
 
     /**

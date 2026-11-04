@@ -10,6 +10,8 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Facade;
+use Illuminate\Support\ServiceProvider;
+use Illuminate\Translation\Translator;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
@@ -19,6 +21,7 @@ use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
+use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
@@ -33,12 +36,16 @@ use Tests\Feature\Stubs\SwitchableTenantResolver;
 use Tests\TestCase;
 
 /**
- * Feature coverage for the service provider's request and job lifetimes.
+ * Feature coverage for the service provider's request and job lifetimes and its
+ * language-file wiring.
  *
  * Every binding that holds state for one request or job is bound with
  * `scoped()`, so a queue worker running job after job in one container, and
  * Octane running request after request on cloned sandboxes, never see another
- * job's or request's tenant, cached grants or last decision.
+ * job's or request's tenant, cached grants or last decision. The package's
+ * language lines load under the `authorization` namespace, publish under the
+ * `authorization-lang` tag, and reach the manager through the translator it is
+ * given.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -327,6 +334,54 @@ final class AuthorizationServiceProviderTest extends TestCase
     }
 
     /**
+     * The shipped English lines load under the `authorization` namespace.
+     *
+     * @return void
+     */
+    public function testLoadsTheLanguageLinesUnderThePackageNamespace(): void
+    {
+        self::assertSame('This action is unauthorized.', $this->translator()->get('authorization::authorization.denied'));
+    }
+
+    /**
+     * The `authorization-lang` tag publishes the shipped `lang` directory into
+     * the application's `lang/vendor/authorization` directory.
+     *
+     * @return void
+     */
+    public function testLangTagPublishesTheLanguageFiles(): void
+    {
+        $paths = ServiceProvider::pathsToPublish(AuthorizationServiceProvider::class, 'authorization-lang');
+
+        self::assertCount(1, $paths);
+
+        $source = (string) \array_key_first($paths);
+
+        self::assertSame(\realpath(__DIR__ . '/../../lang'), \realpath($source));
+        self::assertSame($this->application()->langPath('vendor/authorization'), $paths[$source]);
+    }
+
+    /**
+     * The manager words a denial through the application's translator, in its
+     * current locale.
+     *
+     * @return void
+     */
+    public function testManagerTranslatesTheDenialInTheCurrentLocale(): void
+    {
+        $translator = $this->translator();
+        $translator->addLines(['authorization.denied' => 'Action non autorisée.'], 'fr', 'authorization');
+        $translator->setLocale('fr');
+
+        try {
+            $this->application()->make(AuthorizationManager::class)->authorize('posts:create');
+            self::fail('Expected AuthorizationException.');
+        } catch (AuthorizationException $exception) {
+            self::assertSame('Action non autorisée.', $exception->getMessage());
+        }
+    }
+
+    /**
      * Seed two tenants, a platform role, a temporary platform role, one role
      * owned by each tenant, and one identity holding every role but the plain
      * platform one. The temporary grant expires at 12:05.
@@ -436,6 +491,17 @@ final class AuthorizationServiceProviderTest extends TestCase
     private function identity(string $userId): StubIdentity
     {
         return StubIdentity::query()->findOrFail($userId);
+    }
+
+    /**
+     * Resolve the application's translator.
+     *
+     * @return \Illuminate\Translation\Translator
+     */
+    private function translator(): Translator
+    {
+        /** @var \Illuminate\Translation\Translator */
+        return $this->application()->make('translator');
     }
 
     /**

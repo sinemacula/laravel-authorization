@@ -16,13 +16,13 @@ use Tests\TestCase;
  * Feature coverage for the `vendor:publish` tag mappings exposed by the service
  * provider.
  *
- * Asserts the package registers exactly two publishable groups —
- * `authorization-config` and `authorization-migrations` — and that each tag
- * resolves to the shipped source path on disk. File creation is not asserted
- * because Testbench treats `vendor:publish` as a no-op when the target file
- * already exists; the `ServiceProvider::$publishes` registry is the canonical
- * source of truth and is inspected directly via the framework's public
- * `pathsToPublish()` accessor.
+ * Asserts the package registers the `authorization-config` and
+ * `authorization-migrations` publishable groups, and that each tag resolves to
+ * the shipped source path on disk; `AuthorizationServiceProviderTest` covers
+ * the `authorization-lang` tag. File creation is not asserted because Testbench
+ * treats `vendor:publish` as a no-op when the target file already exists; the
+ * `ServiceProvider::$publishes` registry is the canonical source of truth and
+ * is inspected directly via the framework's public `pathsToPublish()` accessor.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
