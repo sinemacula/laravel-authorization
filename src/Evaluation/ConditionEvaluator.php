@@ -173,7 +173,7 @@ final class ConditionEvaluator
             try {
                 // @phpstan-ignore-next-line function.notFound
                 logger()->debug("Unknown authorization condition operator '{$operator}' — evaluated to false.");
-            } catch (\Throwable) {
+            } catch (\Throwable) { // @phpstan-ignore catch.neverThrown
                 // Intentional: see the method docblock above.
             }
         }
@@ -234,7 +234,7 @@ final class ConditionEvaluator
             // Defensive: `strtotime()` returns false on PHP 8+ rather than
             // raising, retained for forward-compatibility with ext-date engine
             // changes.
-        } catch (\Throwable) {
+        } catch (\Throwable) { // @phpstan-ignore catch.neverThrown
             return false;
         }
         // @codeCoverageIgnoreEnd

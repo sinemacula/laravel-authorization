@@ -6,13 +6,13 @@ namespace Benchmarks\Runtime;
 
 use Benchmarks\Support\BenchmarkCase;
 use Benchmarks\Support\BenchmarkFixtures;
-use Benchmarks\Support\BenchmarkIdentity;
 use Illuminate\Support\Str;
 use PhpBench\Attributes as Bench;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy as PolicyModel;
 use SineMacula\Laravel\Authorization\Models\Role;
+use Tests\Fixtures\BenchmarkIdentity;
 
 /**
  * PHPBench micro-benchmark for the full `AuthorizationManager` pipeline.
@@ -41,7 +41,7 @@ final class AuthorizationManagerBench extends BenchmarkCase
     /** @var \SineMacula\Laravel\Authorization\AuthorizationManager|null Container-resolved manager under test; populated by `setUp()`. */
     private ?AuthorizationManager $manager = null;
 
-    /** @var \Benchmarks\Support\BenchmarkIdentity|null Seeded principal with a role + policy; populated by `setUp()`. */
+    /** @var \Tests\Fixtures\BenchmarkIdentity|null Seeded principal with a role + policy; populated by `setUp()`. */
     private ?BenchmarkIdentity $user = null;
 
     /**
@@ -84,7 +84,7 @@ final class AuthorizationManagerBench extends BenchmarkCase
     /**
      * Return the principal seeded by `setUp()`.
      *
-     * @return \Benchmarks\Support\BenchmarkIdentity
+     * @return \Tests\Fixtures\BenchmarkIdentity
      */
     public function getUser(): BenchmarkIdentity
     {
@@ -163,7 +163,7 @@ final class AuthorizationManagerBench extends BenchmarkCase
      * Seed a role carrying the fixture permissions, create the principal, and
      * assign the role.
      *
-     * @return \Benchmarks\Support\BenchmarkIdentity
+     * @return \Tests\Fixtures\BenchmarkIdentity
      */
     private function seedRoleAndPrincipal(): BenchmarkIdentity
     {
@@ -192,7 +192,7 @@ final class AuthorizationManagerBench extends BenchmarkCase
     /**
      * Attach the allow-and-deny benchmark policy to the given principal.
      *
-     * @param  \Benchmarks\Support\BenchmarkIdentity  $user
+     * @param  \Tests\Fixtures\BenchmarkIdentity  $user
      * @return void
      */
     private function attachBenchmarkPolicy(BenchmarkIdentity $user): void

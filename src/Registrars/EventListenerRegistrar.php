@@ -37,7 +37,7 @@ use SineMacula\Laravel\Authorization\Listeners\InvalidateResolutionCache;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final class EventListenerRegistrar
+final readonly class EventListenerRegistrar
 {
     /**
      * Create a new registrar instance.
@@ -47,7 +47,7 @@ final class EventListenerRegistrar
     public function __construct(
 
         /** Framework container consulted for dispatcher binding. */
-        private readonly Application $app,
+        private Application $app,
     ) {}
 
     /**

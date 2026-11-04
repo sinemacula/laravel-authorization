@@ -22,7 +22,7 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final class GateRegistrar
+final readonly class GateRegistrar
 {
     /**
      * Create a new registrar instance.
@@ -32,7 +32,7 @@ final class GateRegistrar
     public function __construct(
 
         /** Framework container consulted for config and bindings. */
-        private readonly Application $app,
+        private Application $app,
     ) {}
 
     /**
@@ -221,7 +221,7 @@ final class GateRegistrar
             Log::channel('authorization')->warning(
                 "Authorization gate '{$permission}' already registered; existing Gate preserved.",
             );
-        } catch (\Throwable) {
+        } catch (\Throwable) { // @phpstan-ignore catch.neverThrown
             Log::warning(
                 "Authorization gate '{$permission}' already registered; existing Gate preserved.",
             );

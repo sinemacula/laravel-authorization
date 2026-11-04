@@ -20,7 +20,7 @@ use SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked as RolePermis
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final class InvalidateResolutionCache
+final readonly class InvalidateResolutionCache
 {
     /**
      * Create a new listener instance.
@@ -30,7 +30,7 @@ final class InvalidateResolutionCache
     public function __construct(
 
         /** Shared cache whose entries the listener invalidates. */
-        private readonly ResolutionCache $cache,
+        private ResolutionCache $cache,
     ) {}
 
     /**

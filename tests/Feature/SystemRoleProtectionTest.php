@@ -91,12 +91,12 @@ final class SystemRoleProtectionTest extends TestCase
             $role->name = 'rebranded-auditor';
             $role->save();
             self::fail('Expected SystemRoleProtectedException was not thrown.');
-        } catch (SystemRoleProtectedException $exception) {
+        } catch (SystemRoleProtectedException $exception) { // @phpstan-ignore catch.neverThrown
             self::assertSame('auditor', $exception->getRoleName());
             self::assertSame('rename', $exception->getOperation());
         }
 
-        self::assertSame('auditor', $role->fresh()?->name);
+        self::assertSame('auditor', $role->fresh()?->name); // @phpstan-ignore deadCode.unreachable
     }
 
     /**

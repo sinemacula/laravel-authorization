@@ -111,9 +111,9 @@ final class RolePermissionPivotTest extends TestCase
 
         try {
             $pivot->save();
-        } catch (GuardMismatchException|OrphanedRolePermissionException) {
+        } catch (GuardMismatchException|OrphanedRolePermissionException) { // @phpstan-ignore catch.neverThrown, catch.neverThrown
             $raised = true;
-        } catch (\Throwable) {
+        } catch (\Throwable) { // @phpstan-ignore catch.neverThrown
             // DB-layer failure is expected and acceptable — the assertion is
             // only that neither of our typed guards fired on null identifiers.
         }
@@ -206,7 +206,7 @@ final class RolePermissionPivotTest extends TestCase
         try {
             $pivot->save();
             self::fail('Expected OrphanedRolePermissionException was not thrown.');
-        } catch (OrphanedRolePermissionException $exception) {
+        } catch (OrphanedRolePermissionException $exception) { // @phpstan-ignore catch.neverThrown
             self::assertSame(OrphanSide::ROLE, $exception->getSide());
             self::assertSame($pivot->getAttribute('role_id'), $exception->getParentId());
         }
@@ -230,7 +230,7 @@ final class RolePermissionPivotTest extends TestCase
         try {
             $pivot->save();
             self::fail('Expected OrphanedRolePermissionException was not thrown.');
-        } catch (OrphanedRolePermissionException $exception) {
+        } catch (OrphanedRolePermissionException $exception) { // @phpstan-ignore catch.neverThrown
             self::assertSame(OrphanSide::PERMISSION, $exception->getSide());
             self::assertSame($pivot->getAttribute('permission_id'), $exception->getParentId());
         }

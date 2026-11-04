@@ -61,6 +61,8 @@ final class RouteMiddlewareTest extends TestCase
      * exception handler renders that as a 401.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
      */
     public function testRoleMiddlewareRejectsUnauthenticatedRequest(): void
     {
@@ -79,6 +81,8 @@ final class RouteMiddlewareTest extends TestCase
      * looks like a legitimate deny.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
      */
     public function testRoleMiddlewareRaisesMisconfigurationWhenIdentityLacksContract(): void
     {
@@ -94,6 +98,8 @@ final class RouteMiddlewareTest extends TestCase
      * A user missing every required role is denied with a 403.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
      */
     public function testRoleMiddlewareDeniesWhenRoleMissing(): void
     {
@@ -116,6 +122,8 @@ final class RouteMiddlewareTest extends TestCase
      * A user holding the required role is admitted.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
      */
     public function testRoleMiddlewareAdmitsWhenRolePresent(): void
     {
@@ -145,6 +153,8 @@ final class RouteMiddlewareTest extends TestCase
      * holding either role is enough.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
      */
     public function testRoleMiddlewareHonoursCommaSeparatedOrSemantics(): void
     {
@@ -180,6 +190,8 @@ final class RouteMiddlewareTest extends TestCase
      * the comma form — holding either role suffices.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
      */
     public function testRoleMiddlewareHonoursPipeSeparatedOrSemantics(): void
     {
@@ -214,6 +226,8 @@ final class RouteMiddlewareTest extends TestCase
      * comma across arguments should both expand.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
      */
     public function testRoleMiddlewareExpandsMixedSeparators(): void
     {
@@ -244,6 +258,8 @@ final class RouteMiddlewareTest extends TestCase
      * `RequireRole` does.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
      */
     public function testPermissionMiddlewareRejectsUnauthenticatedRequest(): void
     {
@@ -260,6 +276,8 @@ final class RouteMiddlewareTest extends TestCase
      * exception — same contract as `RequireRole`.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
      */
     public function testPermissionMiddlewareRaisesMisconfigurationWhenIdentityLacksContract(): void
     {
@@ -275,6 +293,8 @@ final class RouteMiddlewareTest extends TestCase
      * A user missing every required permission is denied.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
      */
     public function testPermissionMiddlewareDeniesWhenPermissionMissing(): void
     {
@@ -297,6 +317,8 @@ final class RouteMiddlewareTest extends TestCase
      * A user with the required permission (direct grant) is admitted.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
      */
     public function testPermissionMiddlewareAdmitsDirectGrant(): void
     {
@@ -326,6 +348,8 @@ final class RouteMiddlewareTest extends TestCase
      * `hasPermission()` folds direct + role-inherited grants.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
      */
     public function testPermissionMiddlewareAdmitsRoleInheritedGrant(): void
     {
@@ -361,6 +385,8 @@ final class RouteMiddlewareTest extends TestCase
      * either permission suffices.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
      */
     public function testPermissionMiddlewareHonoursPipeSeparatedOrSemantics(): void
     {
@@ -434,6 +460,8 @@ final class RouteMiddlewareTest extends TestCase
      * single source of truth.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
      */
     public function testMiddlewareResolvesPrincipalThroughResolverNotRequestUser(): void
     {

@@ -67,12 +67,12 @@ final class SystemPolicyProtectionTest extends TestCase
             $policy->name = 'rebranded-audit';
             $policy->save();
             self::fail('Expected SystemPolicyProtectedException was not thrown.');
-        } catch (SystemPolicyProtectedException $exception) {
+        } catch (SystemPolicyProtectedException $exception) { // @phpstan-ignore catch.neverThrown
             self::assertSame('system-audit', $exception->getPolicyName());
             self::assertSame('rename', $exception->getOperation());
         }
 
-        self::assertSame('system-audit', $policy->fresh()?->name);
+        self::assertSame('system-audit', $policy->fresh()?->name); // @phpstan-ignore deadCode.unreachable
     }
 
     /**
@@ -219,7 +219,7 @@ final class SystemPolicyProtectionTest extends TestCase
             ];
             $policy->save();
             self::fail('Expected SystemPolicyProtectedException was not thrown.');
-        } catch (SystemPolicyProtectedException $exception) {
+        } catch (SystemPolicyProtectedException $exception) { // @phpstan-ignore catch.neverThrown
             self::assertSame('break-glass', $exception->getPolicyName());
             self::assertSame('document-rewrite', $exception->getOperation());
         }

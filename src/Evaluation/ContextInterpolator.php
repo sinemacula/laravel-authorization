@@ -196,7 +196,7 @@ final class ContextInterpolator
         try {
             // @phpstan-ignore-next-line function.notFound
             logger()->debug("Unresolved interpolation token '\${$token}' — resolved to empty string.");
-        } catch (\Throwable) {
+        } catch (\Throwable) { // @phpstan-ignore catch.neverThrown
             // Intentional: mirrors ConditionEvaluator::logUnknownOperator.
         }
     }

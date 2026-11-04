@@ -52,7 +52,7 @@ final class GrantRoleCommand extends Command
 
         try {
             $model->assignRole($roleName);
-        } catch (\Throwable $e) {
+        } catch (\Throwable $e) { // @phpstan-ignore catch.neverThrown
             $this->error($e->getMessage());
 
             return self::FAILURE;

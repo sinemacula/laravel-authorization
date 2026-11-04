@@ -122,7 +122,12 @@ final class MutationKillersTest extends TestCase
 
         $empty = new class extends Model {
             /**
+             * A test double overriding the framework key accessor, not model
+             * behaviour.
+             *
              * @return mixed
+             *
+             * @phpstan-ignore sineMaculaLaravel.modelBehaviour
              */
             #[\Override]
             public function getKey(): mixed
@@ -133,7 +138,12 @@ final class MutationKillersTest extends TestCase
 
         $objectKeyedIdentity = new class extends Model {
             /**
+             * A test double overriding the framework key accessor, not model
+             * behaviour.
+             *
              * @return mixed
+             *
+             * @phpstan-ignore sineMaculaLaravel.modelBehaviour
              */
             #[\Override]
             public function getKey(): mixed
@@ -1092,7 +1102,12 @@ final class MutationKillersTest extends TestCase
             public mixed $fixedKey = null;
 
             /**
+             * A test double overriding the framework key accessor, not model
+             * behaviour.
+             *
              * @return mixed
+             *
+             * @phpstan-ignore sineMaculaLaravel.modelBehaviour
              */
             #[\Override]
             public function getKey(): mixed

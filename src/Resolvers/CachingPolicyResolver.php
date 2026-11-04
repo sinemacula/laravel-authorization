@@ -20,7 +20,7 @@ use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final class CachingPolicyResolver implements PolicyResolver
+final readonly class CachingPolicyResolver implements PolicyResolver
 {
     /**
      * Create a new caching resolver instance.
@@ -31,10 +31,10 @@ final class CachingPolicyResolver implements PolicyResolver
     public function __construct(
 
         /** Wrapped resolver that actually gathers policies on a cold miss. */
-        private readonly PolicyResolver $inner,
+        private PolicyResolver $inner,
 
         /** Shared cache holding memoised and optionally persisted results. */
-        private readonly ResolutionCache $cache,
+        private ResolutionCache $cache,
     ) {}
 
     /**

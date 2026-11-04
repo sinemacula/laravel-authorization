@@ -25,7 +25,7 @@ use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final class AuthGuardPrincipalResolver implements PrincipalResolver
+final readonly class AuthGuardPrincipalResolver implements PrincipalResolver
 {
     /**
      * Create a new resolver instance.
@@ -36,10 +36,10 @@ final class AuthGuardPrincipalResolver implements PrincipalResolver
     public function __construct(
 
         /** Laravel auth factory consulted on every resolution. */
-        private readonly AuthFactory $auth,
+        private AuthFactory $auth,
 
         /** Guard name to resolve; null falls back to the configured default. */
-        private readonly ?string $guard = null,
+        private ?string $guard = null,
     ) {}
 
     /**

@@ -39,7 +39,11 @@ final class ApiGuardedUser extends Model implements AuthorizableIdentity
     /**
      * The guard name used for name-based authorization lookups.
      *
+     * A test double answering the package contract, not model behaviour.
+     *
      * @return string
+     *
+     * @phpstan-ignore sineMaculaLaravel.modelBehaviour
      */
     public function getAuthorizationGuard(): string
     {
