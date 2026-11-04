@@ -7,6 +7,7 @@ namespace Tests\Feature;
 use Illuminate\Cache\Repository;
 use Illuminate\Contracts\Cache\Store;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
@@ -79,6 +80,159 @@ final class ResolutionCacheTest extends TestCase
 
         // Re-run the registration so the fresh config is consumed.
         (new AuthorizationServiceProvider($this->app))->register();
+    }
+
+    /**
+     * Reset the clock.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
+    }
+
+    /**
+     * A memo entry bounded by a grant expiry lapses a second before the grant
+     * does, so a long job stops serving it.
+     *
+     * @return void
+     */
+    public function testMemoEntryLapsesBeforeNearestGrantExpiry(): void
+    {
+        $cache     = new ResolutionCache(store: null, ttl: 0, prefix: 'memo');
+        $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $context   = new ResolutionCacheContext(maxTtl: 60);
+
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        self::assertSame(['first'], $cache->rememberRoles($principal, static fn (): array => ['first'], $context));
+
+        Carbon::setTestNow('2026-07-01 12:00:58');
+
+        self::assertSame(['first'], $cache->rememberRoles($principal, static fn (): array => ['second'], $context));
+
+        Carbon::setTestNow('2026-07-01 12:00:59');
+
+        self::assertSame(['second'], $cache->rememberRoles($principal, static fn (): array => ['second'], $context));
+    }
+
+    /**
+     * Without a grant expiry a memo entry lives no longer than the configured
+     * TTL.
+     *
+     * @return void
+     */
+    public function testMemoEntryLapsesAtConfiguredTtl(): void
+    {
+        $cache     = new ResolutionCache(store: null, ttl: 100, prefix: 'memo');
+        $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
+
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        self::assertSame(['first'], $cache->rememberPermissions($principal, static fn (): array => ['first']));
+
+        Carbon::setTestNow('2026-07-01 12:01:39');
+
+        self::assertSame(['first'], $cache->rememberPermissions($principal, static fn (): array => ['second']));
+
+        Carbon::setTestNow('2026-07-01 12:01:40');
+
+        self::assertSame(['second'], $cache->rememberPermissions($principal, static fn (): array => ['second']));
+    }
+
+    /**
+     * With neither a TTL nor a grant expiry a memo entry does not lapse.
+     *
+     * @return void
+     */
+    public function testMemoEntryWithoutExpiryDoesNotLapse(): void
+    {
+        $cache     = new ResolutionCache(store: null, ttl: 0, prefix: 'memo');
+        $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
+
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        $cache->rememberRoles($principal, static fn (): array => ['first']);
+
+        Carbon::setTestNow('2036-07-01 12:00:00');
+
+        self::assertSame(['first'], $cache->rememberRoles($principal, static fn (): array => ['second']));
+    }
+
+    /**
+     * A role list read from the persistent store is memoised with the same
+     * expiry: it is served from memory once the store is emptied, and lapses
+     * before the grant does.
+     *
+     * @return void
+     */
+    public function testStringListReadFromStoreIsMemoisedWithExpiry(): void
+    {
+        $driver    = self::makeNonTaggableDriver();
+        $store     = new Repository($driver);
+        $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $context   = new ResolutionCacheContext(maxTtl: 60);
+
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        (new ResolutionCache(store: $store, ttl: 0, prefix: 'memo'))
+            ->rememberRoles($principal, static fn (): array => ['stored'], $context);
+
+        $reader = new ResolutionCache(store: $store, ttl: 0, prefix: 'memo');
+
+        self::assertSame(['stored'], $reader->rememberRoles($principal, static fn (): array => ['fresh'], $context));
+
+        $driver->storage = []; // @phpstan-ignore property.notFound
+
+        Carbon::setTestNow('2026-07-01 12:00:58');
+
+        self::assertSame(['stored'], $reader->rememberRoles($principal, static fn (): array => ['fresh'], $context));
+
+        Carbon::setTestNow('2026-07-01 12:00:59');
+
+        self::assertSame(['fresh'], $reader->rememberRoles($principal, static fn (): array => ['fresh'], $context));
+    }
+
+    /**
+     * Policies, whether resolved or read from the persistent store, are
+     * memoised with the expiry their grants give them.
+     *
+     * @return void
+     */
+    public function testPoliciesAreMemoisedWithExpiry(): void
+    {
+        $driver    = self::makeNonTaggableDriver();
+        $store     = new Repository($driver);
+        $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $context   = new ResolutionCacheContext(maxTtl: 60);
+        $stored    = static fn (): array => [new EvaluationPolicy(name: 'stored', statements: [])];
+        $fresh     = static fn (): array => [new EvaluationPolicy(name: 'fresh', statements: [])];
+
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        $writer = new ResolutionCache(store: $store, ttl: 0, prefix: 'memo');
+        $writer->rememberPolicies($principal, $stored, $context);
+
+        $reader = new ResolutionCache(store: $store, ttl: 0, prefix: 'memo');
+
+        self::assertSame('stored', $reader->rememberPolicies($principal, $fresh, $context)[0]->name);
+
+        $driver->storage = []; // @phpstan-ignore property.notFound
+
+        Carbon::setTestNow('2026-07-01 12:00:58');
+
+        self::assertSame('stored', $writer->rememberPolicies($principal, $fresh, $context)[0]->name);
+        self::assertSame('stored', $reader->rememberPolicies($principal, $fresh, $context)[0]->name);
+
+        Carbon::setTestNow('2026-07-01 12:00:59');
+
+        self::assertSame('fresh', $writer->rememberPolicies($principal, $fresh, $context)[0]->name);
+        $driver->storage = []; // @phpstan-ignore property.notFound
+        self::assertSame('fresh', $reader->rememberPolicies($principal, $fresh, $context)[0]->name);
     }
 
     /**
@@ -847,8 +1001,8 @@ final class ResolutionCacheTest extends TestCase
         $driver = self::makeNonTaggableDriver();
         $store  = new Repository($driver);
 
-        // ttl=0 is forever, but maxTtl=0 forces computed TTL to
-        // min(INT_MAX, 0) - 1 = -1 — the write should be skipped.
+        // ttl=0 is forever, but maxTtl=0 forces computed TTL to min(INT_MAX, 0)
+        // - 1 = -1 — the write should be skipped.
         $cache = new ResolutionCache(store: $store, ttl: 0, prefix: 'ttl0');
 
         $principal = new class {

@@ -11,21 +11,22 @@ use Illuminate\Database\Eloquent\Scope;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
+use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 
 /**
  * Global query scope for row-level multi-tenant filtering.
  *
- * When a `TenantResolver` returns a non-null tenant, this scope restricts
- * queries to rows that are either global (null tenant columns) or owned by the
- * resolved tenant. When the resolver returns null (no tenant context), no
- * filtering is applied and all rows remain visible — preserving
- * backward-compatible platform-level behaviour.
+ * When a `TenantResolver` returns a tenant, this scope restricts queries to
+ * rows that are either platform-wide (null tenant columns) or owned by the
+ * resolved tenant. When the resolver returns null (no tenant context), only
+ * platform-wide rows remain visible: a missing tenant never makes every
+ * tenant's rows visible.
  *
- * The scope memoises the resolver result on the instance so a single Eloquent
- * request-pattern (the `effectivePermissions()` enum sweep, relation walks,
- * cache-miss paths) pays the resolver cost once rather than once per query.
- * Call `flushResolvedTenant()` at the request boundary under Octane to clear
- * the memo.
+ * The scope holds no state of its own. It reads the tenant from the
+ * `ResolvedTenant` holder, which the service provider binds with `scoped()`, so
+ * a single request or job (the `effectivePermissions()` enum sweep, relation
+ * walks, cache-miss paths) pays the resolver cost once, and the next request or
+ * job resolves its own tenant.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -34,9 +35,6 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
  */
 final class TenantScope implements Scope
 {
-    /** @var array{container_id: int, tenant: object|null}|null Per-container memo of the resolved tenant, rebuilt when the container changes. */
-    private ?array $resolvedTenantMemo = null;
-
     /**
      * Apply the tenant scope to the given Eloquent builder.
      *
@@ -52,26 +50,31 @@ final class TenantScope implements Scope
     #[\Override]
     public function apply(Builder $builder, Model $model): void
     {
-        $tenant = $this->resolveTenant();
-
-        if ($tenant === null) {
-            return;
-        }
-
-        [$morphType, $morphId] = self::extractTenantPair($tenant);
+        $typeColumn = $model->getTable() . '.tenant_type';
+        $idColumn   = $model->getTable() . '.tenant_id';
+        $tenant     = self::resolveTenant();
 
         // `whereNull` / `orWhere` are declared as `@method static` on the
         // Eloquent Builder docblock; PHPStan flags dynamic instance calls as
         // `staticMethod.dynamicCall` even though runtime dispatch is genuinely
         // dynamic. The same pattern is used in `GuardScopedLookup` —
         // docblock-soup artefacts, not unsafe calls.
-        // @phpstan-ignore staticMethod.dynamicCall
-        $builder->where(function ($q) use ($model, $morphType, $morphId): void {
+        if ($tenant === null) {
             // @phpstan-ignore staticMethod.dynamicCall
-            $q->whereNull($model->getTable() . '.tenant_type')
-                ->orWhere(function ($q2) use ($model, $morphType, $morphId): void {
-                    $q2->where($model->getTable() . '.tenant_type', $morphType)
-                        ->where($model->getTable() . '.tenant_id', $morphId);
+            $builder->whereNull($typeColumn);
+
+            return;
+        }
+
+        [$morphType, $morphId] = self::extractTenantPair($tenant);
+
+        // @phpstan-ignore staticMethod.dynamicCall
+        $builder->where(function ($q) use ($typeColumn, $idColumn, $morphType, $morphId): void {
+            // @phpstan-ignore staticMethod.dynamicCall
+            $q->whereNull($typeColumn)
+                ->orWhere(function ($q2) use ($typeColumn, $idColumn, $morphType, $morphId): void {
+                    $q2->where($typeColumn, $morphType)
+                        ->where($idColumn, $morphId);
                 });
         });
     }
@@ -80,6 +83,10 @@ final class TenantScope implements Scope
      * Extract the `(tenant_type, tenant_id)` pair from an arbitrary tenant
      * object, refusing anything that cannot supply a stable pair without a
      * `spl_object_hash`-style fallback.
+     *
+     * A tenant without a key (an unsaved model, or an `AuthorizableTenant`
+     * returning an empty string) is refused as well: its pair would be
+     * `tenant_id = ''`, which matches no row it owns.
      *
      * Shared by the global scope and the `scopeForTenant` local scope on `Role`
      * / `Permission` so the acceptance rules have a single owner.
@@ -91,54 +98,53 @@ final class TenantScope implements Scope
      */
     public static function extractTenantPair(object $tenant): array
     {
-        if ($tenant instanceof Model || $tenant instanceof AuthorizableTenant) {
-            /** @var int|string|null $key */
-            $key = $tenant->getKey();
-
-            return [$tenant->getMorphClass(), (string) $key];
+        if (!$tenant instanceof Model && !$tenant instanceof AuthorizableTenant) {
+            throw new InvalidTenantException($tenant);
         }
 
-        throw new InvalidTenantException($tenant);
+        /** @var int|string|null $key */
+        $key = $tenant->getKey();
+
+        if ($key === null || $key === '') {
+            throw InvalidTenantException::withoutKey($tenant);
+        }
+
+        return [$tenant->getMorphClass(), (string) $key];
     }
 
     /**
-     * Flush the memoised tenant resolver result. Exposed for tests and for
-     * consumers that pivot the current tenant mid-request (for example an admin
-     * console that switches context).
+     * Drop the tenant resolved for the current request or job, so the next
+     * query asks the resolver again. Exposed for consumers that pivot the
+     * current tenant mid-request (for example an admin console that switches
+     * context) without rebinding the resolver.
      *
      * @return void
      */
     public function flushResolvedTenant(): void
     {
-        $this->resolvedTenantMemo = null;
+        Container::getInstance()->forgetInstance(ResolvedTenant::class);
     }
 
     /**
-     * Resolve the current tenant, memoising the result for the lifetime of the
-     * current container instance. Long-lived processes that rebuild the
-     * container per request (Octane) observe a new container ID on the next
-     * call and re-resolve.
+     * Return the tenant resolved for the current request or job, resolving it
+     * again when the bound resolver is not the one it was read from.
      *
      * @return object|null
      */
-    private function resolveTenant(): ?object
+    private static function resolveTenant(): ?object
     {
-        $container   = Container::getInstance();
-        $containerId = \spl_object_id($container);
-
-        if ($this->resolvedTenantMemo !== null && $this->resolvedTenantMemo['container_id'] === $containerId) {
-            return $this->resolvedTenantMemo['tenant'];
-        }
+        $container = Container::getInstance();
 
         /** @var \SineMacula\Laravel\Authorization\Contracts\TenantResolver $resolver */
         $resolver = $container->make(TenantResolver::class);
-        $tenant   = $resolver->resolve();
 
-        $this->resolvedTenantMemo = [
-            'container_id' => $containerId,
-            'tenant'       => $tenant,
-        ];
+        /** @var \SineMacula\Laravel\Authorization\Support\ResolvedTenant $resolved */
+        $resolved = $container->make(ResolvedTenant::class);
 
-        return $tenant;
+        if (!$resolved->isFrom($resolver)) {
+            $resolved = $container->instance(ResolvedTenant::class, ResolvedTenant::from($resolver));
+        }
+
+        return $resolved->tenant;
     }
 }

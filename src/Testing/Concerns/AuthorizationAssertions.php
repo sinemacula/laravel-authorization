@@ -159,9 +159,9 @@ trait AuthorizationAssertions
 
         $container->instance(PrincipalResolver::class, $resolver);
 
-        // Rebuild the manager singleton so it picks up the new resolver.
-        // Forgetting both the alias and the concrete class ensures the next
-        // resolve rebuilds from scratch.
+        // Rebuild the manager so it picks up the new resolver. Forgetting both
+        // the alias and the concrete class ensures the next resolve rebuilds
+        // from scratch.
         if ($container->bound('authorization')) {
             $container->forgetInstance('authorization');
             $container->forgetInstance(AuthorizationManager::class);

@@ -40,7 +40,8 @@ use Tests\TestCase;
 final class ServiceProviderTest extends TestCase
 {
     /**
-     * Bindings are registered as singletons.
+     * The bindings resolve to the expected classes, and the manager's class
+     * alias shares the manager instance.
      *
      * @return void
      */

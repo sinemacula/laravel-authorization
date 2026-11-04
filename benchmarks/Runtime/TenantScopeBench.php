@@ -16,7 +16,7 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  * PHPBench micro-benchmark for `TenantScope::apply()`.
  *
  * The global scope fires on every Eloquent query against `Role` / `Permission`.
- * The scope memoises its resolver output keyed by container `spl_object_id`, so
+ * The tenant is resolved once per request or job and held in the container, so
  * a warm request never pays the resolver cost twice. The bench carves the call
  * surface into two production shapes:
  *

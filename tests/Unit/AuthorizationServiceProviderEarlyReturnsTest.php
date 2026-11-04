@@ -19,15 +19,14 @@ use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
  * Unit coverage for the service provider's defensive early-return branches.
  *
  * Each of the boot-time wiring methods (`registerCacheInvalidationListeners`,
- * `registerOctaneResetListener`, `registerRouteMiddleware`,
- * `registerBladeDirectives`, `offerPublishing`) short-circuits when its
- * required container binding is absent. These branches matter for library-mode
- * embedding — non-Laravel applications that load the package for its core
- * evaluator without wanting the full framework glue.
+ * `registerRouteMiddleware`, `registerBladeDirectives`, `offerPublishing`)
+ * short-circuits when its required container binding is absent. These branches
+ * matter for library-mode embedding — non-Laravel applications that load the
+ * package for its core evaluator without wanting the full framework glue.
  *
  * The tests exercise each branch against a bare `Container` that never binds
- * `events`, `router`, `blade.compiler`, or the Octane request class, and an
- * application whose `runningInConsole()` returns false.
+ * `events`, `router` or `blade.compiler`, and an application whose
+ * `runningInConsole()` returns false.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -69,23 +68,6 @@ final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
         $app = $this->bareApplication();
 
         $this->invokePrivateOn(new EventListenerRegistrar($app), 'registerCacheInvalidationListeners');
-
-        self::assertFalse($app->bound(Dispatcher::class));
-    }
-
-    /**
-     * The Octane reset listener registration short-circuits when the container
-     * has no `Dispatcher` binding — covers the second half of the
-     * `!class_exists(...) || !bound(Dispatcher)` guard.
-     *
-     * @return void
-     */
-    public function testOctaneResetListenerSkipsWhenDispatcherUnbound(): void
-    {
-        $app = $this->bareApplication();
-
-        // No exception and no listener wiring attempt.
-        $this->invokePrivateOn(new EventListenerRegistrar($app), 'registerOctaneResetListener');
 
         self::assertFalse($app->bound(Dispatcher::class));
     }

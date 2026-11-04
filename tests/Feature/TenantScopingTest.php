@@ -47,11 +47,12 @@ use Tests\TestCase;
 final class TenantScopingTest extends TestCase
 {
     /**
-     * When no tenant resolver is bound every role remains visible.
+     * When no tenant is resolved only platform-wide roles are visible, never
+     * every tenant's.
      *
      * @return void
      */
-    public function testNullResolverShowsAllRoles(): void
+    public function testNullResolverShowsOnlyPlatformRoles(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
@@ -64,15 +65,16 @@ final class TenantScopingTest extends TestCase
             'tenant_id' => (string) $tenantA->getKey(),
         ]);
 
-        self::assertCount(2, Role::all());
+        self::assertSame(['global-role'], Role::query()->pluck('name')->all());
     }
 
     /**
-     * When no tenant resolver is bound every permission remains visible.
+     * When no tenant is resolved only platform-wide permissions are visible,
+     * never every tenant's.
      *
      * @return void
      */
-    public function testNullResolverShowsAllPermissions(): void
+    public function testNullResolverShowsOnlyPlatformPermissions(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
@@ -85,7 +87,7 @@ final class TenantScopingTest extends TestCase
             'tenant_id' => (string) $tenantA->getKey(),
         ]);
 
-        self::assertCount(2, Permission::all());
+        self::assertSame(['global-perm'], Permission::query()->pluck('name')->all());
     }
 
     /**
@@ -394,6 +396,8 @@ final class TenantScopingTest extends TestCase
             'tenant_id' => (string) $tenantB->getKey(),
         ]);
 
+        $this->bindTenantResolver($tenantA);
+
         $roles = Role::forTenant($tenantA)->get();
 
         self::assertCount(1, $roles);
@@ -450,6 +454,8 @@ final class TenantScopingTest extends TestCase
             'tenant_id' => (string) $tenantB->getKey(),
         ]);
 
+        $this->bindTenantResolver($tenantA);
+
         $perms = Permission::forTenant($tenantA)->get();
 
         self::assertCount(1, $perms);
@@ -489,6 +495,8 @@ final class TenantScopingTest extends TestCase
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
+        $this->bindTenantResolver($tenantA);
+
         $role = Role::create([
             'name'        => 'editor',
             'guard_name'  => 'web',
@@ -507,8 +515,6 @@ final class TenantScopingTest extends TestCase
 
         $identity = StubIdentity::create(['id' => 'user-1', 'name' => 'Alice']);
         $identity->assignRole($role);
-
-        $this->bindTenantResolver($tenantA);
 
         self::assertTrue($identity->hasRole('editor'));
         self::assertTrue($identity->hasPermission('posts:edit'));
@@ -606,10 +612,10 @@ final class TenantScopingTest extends TestCase
     }
 
     /**
-     * The `TenantResolver` is consulted at most once per scope instance per
-     * container lifetime — a spy resolver wrapping a concrete tenant records
-     * one `resolve()` invocation regardless of how many Eloquent queries the
-     * scope filters.
+     * The `TenantResolver` is consulted once per request or job — a spy
+     * resolver wrapping a concrete tenant records one `resolve()` invocation
+     * regardless of how many Eloquent queries the scope filters, on either
+     * model.
      *
      * @return void
      */
@@ -668,12 +674,10 @@ final class TenantScopingTest extends TestCase
 
         /** @var \Illuminate\Foundation\Application $app */
         $app = $this->app;
-        $app->instance(TenantResolver::class, $spy);
 
-        // Flush any memo the scope captured before the spy was bound — previous
-        // tests may have resolved the null tenant against the
-        // NullTenantResolver default.
-        $this->flushTenantScopeMemos();
+        // Binding the spy drops the tenant resolved by the queries above, so
+        // the spy is asked on the next query.
+        $app->instance(TenantResolver::class, $spy);
 
         // Issue multiple queries against both scoped models — each one invokes
         // `TenantScope::apply`. Without memoisation the spy would record one
@@ -684,11 +688,9 @@ final class TenantScopingTest extends TestCase
         Permission::all();
         Permission::query()->where('name', 'perm-a')->get();
 
-        // One call per scope instance (Role + Permission each hold
-        // their own global scope registration). That is O(models),
-        // not O(queries) — the regression guard.
-        self::assertLessThanOrEqual(2, $spy->calls);
-        self::assertGreaterThan(0, $spy->calls);
+        // One call for the request: the resolved tenant is held by the
+        // container, not by each model's scope instance.
+        self::assertSame(1, $spy->calls);
     }
 
     /**
@@ -748,7 +750,6 @@ final class TenantScopingTest extends TestCase
         Role::create(['name' => 'global-role', 'guard_name' => 'web']);
 
         $this->bindTenantResolver($customTenant);
-        $this->flushTenantScopeMemos();
 
         $roles = Role::all();
 
@@ -852,24 +853,5 @@ final class TenantScopingTest extends TestCase
                 }
             };
         });
-
-        $this->flushTenantScopeMemos();
-    }
-
-    /**
-     * Flush the per-instance tenant memo on the global scopes registered on
-     * `Role` and `Permission` so a re-bound resolver is observed on the next
-     * query.
-     *
-     * @return void
-     */
-    private function flushTenantScopeMemos(): void
-    {
-        foreach ([Role::class, Permission::class] as $class) {
-            /** @var \SineMacula\Laravel\Authorization\Scopes\TenantScope|null $scope */ // @phpstan-ignore varTag.type
-            $scope = $class::getGlobalScope(TenantScope::class);
-
-            $scope?->flushResolvedTenant();
-        }
     }
 }

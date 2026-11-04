@@ -32,6 +32,7 @@ use SineMacula\Laravel\Authorization\Resolvers\CachingPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
 use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
+use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 
 /**
  * Service provider for the authorization package.
@@ -44,8 +45,14 @@ use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
  *   matching Laravel Gate.
  * - `BladeDirectiveRegistrar` — wires the `@role` / `@permission` directive
  *   quartet and Spatie-compat aliases.
- * - `EventListenerRegistrar` — wires the resolution-cache invalidator and the
- *   Octane request-boundary reset.
+ * - `EventListenerRegistrar` — wires the resolution-cache invalidator.
+ *
+ * Every binding that holds state for one request or job (the resolvers, the
+ * policy store, the resolved tenant, the resolution cache, the last decision
+ * and the manager that holds them) is registered with `scoped()`, so Laravel's
+ * queue worker drops it before each job and Octane builds it afresh on each
+ * request's sandbox. They are scoped together: a singleton holding a scoped
+ * instance would keep the old instance alive.
  *
  * Row-lifecycle behaviour for `Role` / `Permission` / `Policy` is attached via
  * the `#[ObservedBy]` attribute on each model; the service provider does not
@@ -68,6 +75,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
         $this->registerPrincipalResolver();
         $this->registerTenantResolver();
+        $this->registerResolvedTenant();
         $this->registerPolicyStore();
         $this->registerResolutionCache();
         $this->registerPolicyResolver();
@@ -140,7 +148,8 @@ final class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Bind the principal resolver.
+     * Bind the principal resolver, scoped to the request or job so any state
+     * the application's resolver keeps does not reach the next one.
      *
      * @return void
      */
@@ -149,24 +158,44 @@ final class AuthorizationServiceProvider extends ServiceProvider
         /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\PrincipalResolver> $class */
         $class = $this->app['config']->get('authorization.principal_resolver', NullPrincipalResolver::class);
 
-        $this->app->singleton(PrincipalResolver::class, $class);
+        $this->app->scoped(PrincipalResolver::class, $class);
     }
 
     /**
-     * Bind the tenant resolver.
+     * Bind the tenant resolver, scoped to the request or job. A null
+     * `tenant_resolver` means no tenant resolver and binds the null resolver,
+     * under which only platform-wide rows are visible.
      *
      * @return void
      */
     protected function registerTenantResolver(): void
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\TenantResolver> $class */
-        $class = $this->app['config']->get('authorization.tenant_resolver', NullTenantResolver::class);
+        $class = $this->app['config']->get('authorization.tenant_resolver') ?? NullTenantResolver::class;
 
-        $this->app->singleton(TenantResolver::class, $class);
+        $this->app->scoped(TenantResolver::class, $class);
     }
 
     /**
-     * Bind the optional policy store.
+     * Bind the holder of the tenant resolved for the current request or job,
+     * which `TenantScope` reads. The holder remembers the resolver it came
+     * from, so a resolver bound after the first query is still honoured.
+     *
+     * @return void
+     */
+    protected function registerResolvedTenant(): void
+    {
+        $this->app->scoped(ResolvedTenant::class, static function (Application $app): ResolvedTenant {
+            /** @var \SineMacula\Laravel\Authorization\Contracts\TenantResolver $resolver */
+            $resolver = $app->make(TenantResolver::class);
+
+            return ResolvedTenant::from($resolver);
+        });
+    }
+
+    /**
+     * Bind the optional policy store, scoped to the request or job so any state
+     * the application's store keeps does not reach the next one.
      *
      * @return void
      */
@@ -179,19 +208,20 @@ final class AuthorizationServiceProvider extends ServiceProvider
             return;
         }
 
-        $this->app->singleton(PolicyStore::class, $class);
+        $this->app->scoped(PolicyStore::class, $class);
     }
 
     /**
      * Bind the resolution cache that memoises policy, permission, and role
-     * lookups per-principal. Always on for in-memory memoisation; consults
-     * `authorization.cache.store` for optional cross-request persistence.
+     * lookups per-principal. Always on for in-memory memoisation, scoped to the
+     * request or job; consults `authorization.cache.store` for optional
+     * cross-request persistence.
      *
      * @return void
      */
     protected function registerResolutionCache(): void
     {
-        $this->app->singleton(ResolutionCache::class, static function (Application $app): ResolutionCache {
+        $this->app->scoped(ResolutionCache::class, static function (Application $app): ResolutionCache {
             /** @var string|null $storeName */
             $storeName = $app['config']->get('authorization.cache.store');
             /** @var int $ttl */
@@ -221,7 +251,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
      */
     protected function registerPolicyResolver(): void
     {
-        $this->app->singleton(PolicyResolver::class, static function (Application $app): PolicyResolver {
+        $this->app->scoped(PolicyResolver::class, static function (Application $app): PolicyResolver {
             $default = new DefaultPolicyResolver(
                 store: $app->bound(PolicyStore::class) ? $app->make(PolicyStore::class) : null,
             );
@@ -235,13 +265,13 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
     /**
      * Bind the single-slot store that holds the most recent evaluation result
-     * across every scoped clone of the manager.
+     * of the current request or job across every scoped clone of the manager.
      *
      * @return void
      */
     protected function registerLastDecisionStore(): void
     {
-        $this->app->singleton(LastDecisionStore::class);
+        $this->app->scoped(LastDecisionStore::class);
     }
 
     /**
@@ -251,17 +281,18 @@ final class AuthorizationServiceProvider extends ServiceProvider
      */
     protected function registerPolicyEvaluator(): void
     {
-        $this->app->singleton(PolicyEvaluator::class);
+        $this->app->scoped(PolicyEvaluator::class);
     }
 
     /**
-     * Bind the authorization manager.
+     * Bind the authorization manager, scoped to the request or job together
+     * with the resolvers and stores it holds.
      *
      * @return void
      */
     protected function registerAuthorizationManager(): void
     {
-        $this->app->singleton('authorization', static fn (Application $app): AuthorizationManager => new AuthorizationManager(
+        $this->app->scoped('authorization', static fn (Application $app): AuthorizationManager => new AuthorizationManager(
             evaluator: $app->make(PolicyEvaluator::class),
             principalResolver: $app->make(PrincipalResolver::class),
             policyResolver: $app->make(PolicyResolver::class),

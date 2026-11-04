@@ -387,21 +387,21 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `ResolutionCache::resolveTtl` returns `[true, 0]` for a
-     * forever-configured cache with no `$maxTtl`, `[false, ttl]` when just the
-     * config applies, and `[false, min - 1]` when `$maxTtl` bounds the window.
-     * Pins the subtraction-of-1, min comparison, and forever short-circuit.
+     * `ResolutionCache::resolveTtl` returns null for a forever-configured cache
+     * with no `$maxTtl`, the TTL when just the config applies, and `min - 1`
+     * when `$maxTtl` bounds the window. Pins the subtraction-of-1, min
+     * comparison, and forever short-circuit.
      *
      * @return void
      */
     public function testResolveTtlMatrix(): void
     {
-        $invoke = static function (int $configuredTtl, ?int $maxTtl): array {
+        $invoke = static function (int $configuredTtl, ?int $maxTtl): ?int {
             $cache = new ResolutionCache(store: null, ttl: $configuredTtl);
 
             $ref = new \ReflectionMethod($cache, 'resolveTtl');
 
-            /** @var array{0: bool, 1: int} */
+            /** @var int|null */
             return $ref->invoke($cache, $maxTtl);
         };
 
@@ -410,28 +410,28 @@ final class MutationKillersTest extends TestCase
         // parameter value against IncrementInteger mutation.
         $defaultCache = new ResolutionCache(store: null);
         $defaultRef   = new \ReflectionMethod($defaultCache, 'resolveTtl');
-        self::assertSame([true, 0], $defaultRef->invoke($defaultCache, null));
+        self::assertNull($defaultRef->invoke($defaultCache, null));
 
         // Forever (ttl=0) + no maxTtl: forever short-circuit.
-        self::assertSame([true, 0], $invoke(0, null));
+        self::assertNull($invoke(0, null));
 
         // Positive ttl + no maxTtl: use ttl verbatim.
-        self::assertSame([false, 3600], $invoke(3600, null));
+        self::assertSame(3600, $invoke(3600, null));
 
         // Forever (ttl=0) + maxTtl: bound by maxTtl - 1.
-        self::assertSame([false, 59], $invoke(0, 60));
+        self::assertSame(59, $invoke(0, 60));
 
         // Positive ttl, maxTtl smaller: maxTtl wins, minus 1.
-        self::assertSame([false, 29], $invoke(600, 30));
+        self::assertSame(29, $invoke(600, 30));
 
         // Positive ttl, maxTtl larger: ttl wins, minus 1.
-        self::assertSame([false, 599], $invoke(600, 3600));
+        self::assertSame(599, $invoke(600, 3600));
 
         // Equal ttl and maxTtl: either wins, minus 1.
-        self::assertSame([false, 99], $invoke(100, 100));
+        self::assertSame(99, $invoke(100, 100));
 
         // maxTtl <= 0 ends up negative/zero — caller skips the put.
-        self::assertSame([false, -1], $invoke(0, 0));
+        self::assertSame(-1, $invoke(0, 0));
     }
 
     /**

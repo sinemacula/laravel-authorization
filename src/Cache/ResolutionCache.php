@@ -14,6 +14,11 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy;
  * is event-driven via listener calls to `forget()` / `forgetRoleTags()` /
  * `flush()`.
  *
+ * Each memo entry carries the same expiry as its persistent entry (the
+ * configured TTL, bounded by the nearest grant expiry), so a temporal grant
+ * lapses within a long request, job or command too. The service provider binds
+ * the cache with `scoped()`, so the memo itself lasts one request or job.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -21,8 +26,8 @@ final class ResolutionCache
 {
     use HasContainerInstance;
 
-    /** @var array<string, mixed> In-memory memo keyed by full cache key. */
-    private array $memo = [];
+    /** @var \SineMacula\Laravel\Authorization\Cache\ResolutionMemo In-memory tier, keyed by full cache key. */
+    private readonly ResolutionMemo $memo;
 
     /** @var bool|null Cached taggable capability flag; null until probed. */
     private ?bool $taggable = null;
@@ -44,7 +49,9 @@ final class ResolutionCache
 
         /** Namespace prefix for every key written by this cache. */
         private readonly string $prefix = 'authorization',
-    ) {}
+    ) {
+        $this->memo = new ResolutionMemo;
+    }
 
     /**
      * Return the cached list of policies for the principal, or invoke the
@@ -60,20 +67,24 @@ final class ResolutionCache
         $context ??= new ResolutionCacheContext;
         $key = $this->key('policies', $principal);
 
-        if (\array_key_exists($key, $this->memo)) {
-            /** @var array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy> */
-            return $this->memo[$key];
+        /** @var array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>|null $memoised */
+        $memoised = $this->memo->get($key);
+
+        if ($memoised !== null) {
+            return $memoised;
         }
 
         $cached = $this->readCachedPolicies($key, $principal, $context->roleIds);
 
         if ($cached !== null) {
-            return $this->memo[$key] = $cached;
+            $this->memo->put($key, $cached, $this->resolveTtl($context->maxTtl));
+
+            return $cached;
         }
 
         /** @var array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy> $policies */
-        $policies         = $resolver();
-        $this->memo[$key] = $policies;
+        $policies = $resolver();
+        $this->memo->put($key, $policies, $this->resolveTtl($context->maxTtl));
 
         if ($this->store !== null) {
             $documents = \array_map(static fn (Policy $policy): array => $policy->toArray(), $policies);
@@ -121,9 +132,8 @@ final class ResolutionCache
      * (`IdentityRoleAssigned`, `IdentityPermissionGranted`,
      * `IdentityPolicyAttached`, and their inverses).
      *
-     * On a tag-capable store the principal tag flushes every slot
-     * in one call; non-tagged stores fall back to per-slot
-     * `forget()`.
+     * On a tag-capable store the principal tag flushes every slot in one call;
+     * non-tagged stores fall back to per-slot `forget()`.
      *
      * @param  object  $principal
      * @return void
@@ -131,8 +141,7 @@ final class ResolutionCache
     public function forget(object $principal): void
     {
         foreach (['policies', 'permissions', 'roles'] as $kind) {
-            $key = $this->key($kind, $principal);
-            unset($this->memo[$key]);
+            $this->memo->forget($this->key($kind, $principal));
         }
 
         if ($this->store === null) {
@@ -197,7 +206,7 @@ final class ResolutionCache
      */
     public function flush(): void
     {
-        $this->memo = [];
+        $this->memo->flush();
         // Persistent store is not cleared here because flushing the entire
         // configured cache would wipe unrelated entries — the per-request memo
         // reset is the practical safety net on non-tag stores; tag-capable
@@ -292,9 +301,11 @@ final class ResolutionCache
     {
         $key = $this->key($kind, $principal);
 
-        if (\array_key_exists($key, $this->memo)) {
-            /** @var array<int, string> */
-            return $this->memo[$key];
+        /** @var array<int, string>|null $memoised */
+        $memoised = $this->memo->get($key);
+
+        if ($memoised !== null) {
+            return $memoised;
         }
 
         if ($this->store !== null) {
@@ -303,7 +314,10 @@ final class ResolutionCache
                 $raw = $this->readFromStore($key, $principal, $roleIds);
 
                 if (\is_array($raw)) {
-                    return $this->memo[$key] = \array_values(\array_filter($raw, 'is_string'));
+                    $values = \array_values(\array_filter($raw, 'is_string'));
+                    $this->memo->put($key, $values, $this->resolveTtl($maxTtl));
+
+                    return $values;
                 }
             } catch (\Throwable $exception) { // @phpstan-ignore catch.neverThrown
                 // Corrupt persistent-cache entry — forget the key, log, and
@@ -314,8 +328,8 @@ final class ResolutionCache
         }
 
         /** @var array<int, string> $values */
-        $values           = $resolver();
-        $this->memo[$key] = $values;
+        $values = $resolver();
+        $this->memo->put($key, $values, $this->resolveTtl($maxTtl));
 
         if ($this->store !== null) {
             $this->putInStore($key, $values, $principal, $roleIds, $maxTtl);
@@ -533,9 +547,9 @@ final class ResolutionCache
             return;
         }
         // @codeCoverageIgnoreEnd
-        [$useForever, $seconds] = $this->resolveTtl($maxTtl);
+        $seconds = $this->resolveTtl($maxTtl);
 
-        if (!$useForever && $seconds <= 0) {
+        if ($seconds !== null && $seconds <= 0) {
             return;
         }
 
@@ -548,7 +562,7 @@ final class ResolutionCache
             $writer = $store->tags($this->tagsFor($principal, $roleIds));
         }
 
-        if ($useForever) {
+        if ($seconds === null) {
             $writer->forever($key, $value);
 
             return;
@@ -558,19 +572,19 @@ final class ResolutionCache
     }
 
     /**
-     * Compute the effective TTL for a put call.
+     * Compute the effective lifetime of an entry, shared by both tiers.
      *
-     * Returns `[useForever, seconds]` — `useForever = true` short-circuits to
-     * `forever()`, otherwise the seconds value is the bounded lifetime (may be
-     * ≤ 0, in which case the caller skips the write).
+     * Returns null when the entry is stored forever, otherwise the bounded
+     * lifetime in seconds (may be ≤ 0, in which case the persistent write is
+     * skipped and the memo entry has already lapsed).
      *
      * @param  int|null  $maxTtl
-     * @return array{0: bool, 1: int}
+     * @return int|null
      */
-    private function resolveTtl(?int $maxTtl): array
+    private function resolveTtl(?int $maxTtl): ?int
     {
         if ($maxTtl === null) {
-            return $this->ttl <= 0 ? [true, 0] : [false, $this->ttl];
+            return $this->ttl <= 0 ? null : $this->ttl;
         }
 
         $base = $this->ttl <= 0 ? \PHP_INT_MAX : $this->ttl;
@@ -579,6 +593,6 @@ final class ResolutionCache
         // invalidates itself before the grant actually elapses — avoids a race
         // where the cache returns a role one millisecond before the DB filter
         // would drop it.
-        return [false, \min($base, $maxTtl) - 1];
+        return \min($base, $maxTtl) - 1;
     }
 }

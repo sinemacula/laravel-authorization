@@ -81,8 +81,8 @@ that use different naming conventions.
 Each grant method (`assignRole`, `givePermission`, `attachPolicy`) accepts an optional `$expiresAt` parameter. The
 relation's `where()` clause filters expired rows at query time -- rows whose `expires_at` is null or in the future are
 included; everything else is invisible. The resolution cache honours this by inspecting the nearest `expires_at` across
-pivot rows and capping the cache entry's lifetime accordingly, so a temporal grant that lapses at 3:00 PM does not
-remain cached past 3:00 PM.
+pivot rows and capping the lifetime of both the in-memory and the persistent cache entry accordingly, so a temporal
+grant that lapses at 3:00 PM does not remain cached past 3:00 PM, even within a long-running job.
 
 ## Trade-offs
 

@@ -302,8 +302,8 @@ final class TemporalGrantsTest extends TestCase
         $fresh = $user->fresh();
         self::assertNotNull($fresh);
 
-        // Wipe the singleton's in-memory memo that was primed at
-        // t=12:00 — the persistent tier is the one under test.
+        // Wipe the cache's in-memory memo that was primed at t=12:00 — the
+        // persistent tier is the one under test.
         $this->app->forgetInstance(ResolutionCache::class); // @phpstan-ignore method.nonObject
         (new AuthorizationServiceProvider($this->app))->register();
 
