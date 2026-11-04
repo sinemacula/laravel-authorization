@@ -17,11 +17,12 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  *
  * The global scope fires on every Eloquent query against `Role` / `Permission`.
  * The tenant is resolved once per request or job and held in the container, so
- * a warm request never pays the resolver cost twice. The bench carves the call
+ * a warm request never pays the resolver cost twice. Each iteration binds one
+ * resolver instance, as a request has one, and the bench carves the call
  * surface into two production shapes:
  *
- * - Warm apply — memoised tenant; shortcut read.
- * - Cold apply — memo flushed each rev; resolver runs.
+ * - Warm apply — tenant resolved once in setUp; each rev reads the held tenant.
+ * - Cold apply — held tenant forgotten each rev; the resolver runs every time.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -40,9 +41,10 @@ final class TenantScopeBench extends BenchmarkCase
     private Role $role; // @phpstan-ignore property.uninitialized
 
     /**
-     * Bench setUp — boot a Laravel application, bind a tenant resolver that
-     * returns a stable `AuthorizableTenant` implementation, and seed a role row
-     * so the builder the scope applies against has something to query.
+     * Bench setUp — boot a Laravel application, bind one tenant resolver
+     * instance that returns a stable `AuthorizableTenant` implementation, and
+     * seed a role row so the builder the scope applies against has something to
+     * query.
      *
      * @return void
      */
@@ -50,7 +52,7 @@ final class TenantScopeBench extends BenchmarkCase
     {
         $app = $this->boot();
 
-        $app->bind(TenantResolver::class, static fn (): TenantResolver => new BenchmarkTenantResolver);
+        $app->instance(TenantResolver::class, new BenchmarkTenantResolver);
 
         Role::query()->delete();
 
@@ -64,13 +66,14 @@ final class TenantScopeBench extends BenchmarkCase
 
         $this->scope = new TenantScope;
 
-        // Prime the memo so the warm-apply subject observes the memoised fast
-        // path from its very first revolution.
+        // Resolve the tenant once, as the first query of a request does, so the
+        // warm-apply subject reads the held tenant from its very first
+        // revolution.
         $this->scope->apply(Role::query(), $this->role);
     }
 
     /**
-     * Benchmark: warm apply — memo hit, no resolver call.
+     * Benchmark: warm apply — the held tenant is read, no resolver call.
      *
      * @return void
      */
@@ -83,9 +86,9 @@ final class TenantScopeBench extends BenchmarkCase
     }
 
     /**
-     * Benchmark: cold apply — memo flushed each rev so the resolver runs every
-     * time. Measures the worst-case per-query cost under a hot reload or
-     * mid-request tenant pivot.
+     * Benchmark: cold apply — the held tenant is forgotten each rev so the
+     * resolver runs every time. Measures the worst-case per-query cost under a
+     * hot reload or mid-request tenant pivot.
      *
      * @return void
      */
