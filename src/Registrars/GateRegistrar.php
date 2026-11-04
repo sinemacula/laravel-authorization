@@ -118,11 +118,15 @@ final readonly class GateRegistrar
             static function (?object $user = null, mixed ...$arguments) use ($permission): bool {
                 [$resource, $context] = self::translateGateArguments($arguments);
 
-                if ($user === null) {
-                    return Authorization::can($permission, $resource, $context);
-                }
+                /** @var \SineMacula\Laravel\Authorization\AuthorizationManager $manager */
+                $manager = $user === null ? Authorization::getFacadeRoot() : Authorization::for($user);
 
-                return Authorization::for($user)->can($permission, $resource, $context);
+                // An argument the evaluator cannot identify as a resource
+                // denies, rather than turning the check into one about no
+                // resource at all.
+                return $resource === false
+                    ? $manager->refuseUnidentifiedResource($permission, $context)->allowed
+                    : $manager->can($permission, $resource, $context);
             },
         );
     }
@@ -131,10 +135,11 @@ final readonly class GateRegistrar
      * Translate the arguments Laravel hands to a Gate callback into the
      * `(resource, context)` pair the authorization manager accepts. Positional
      * entries map to the resource identifier; string keys and string-keyed
-     * arrays merge into the context map.
+     * arrays merge into the context map. The resource is false when the first
+     * positional argument cannot be identified as a resource.
      *
      * @param  array<int|string, mixed>  $arguments
-     * @return array{0: string|null, 1: array<string, mixed>}
+     * @return array{0: false|string|null, 1: array<string, mixed>}
      */
     private static function translateGateArguments(array $arguments): array
     {
@@ -165,11 +170,11 @@ final readonly class GateRegistrar
      *
      * @param  int  $key
      * @param  mixed  $value
-     * @param  string|null  $resource
+     * @param  false|string|null  $resource
      * @param  array<string, mixed>  $context
-     * @return array{0: string|null, 1: array<string, mixed>}
+     * @return array{0: false|string|null, 1: array<string, mixed>}
      */
-    private static function applyPositionalGateArgument(int $key, mixed $value, ?string $resource, array $context): array
+    private static function applyPositionalGateArgument(int $key, mixed $value, false|string|null $resource, array $context): array
     {
         $isContextMap = \is_array($value) && !\array_is_list($value);
 
@@ -187,26 +192,39 @@ final readonly class GateRegistrar
 
     /**
      * Coerce a Gate-callback argument into a resource identifier string.
-     * Returns null when the value is not a resource the evaluator can reason
-     * about.
+     *
+     * Returns null for a null argument (no resource) and false for a value the
+     * evaluator cannot identify, such as an unsaved model, a number or a list,
+     * so the check denies instead of matching every resource-less statement.
+     * The resource contract wins over a model's own identifier.
      *
      * @param  mixed  $value
-     * @return string|null
+     * @return false|string|null
      */
-    private static function stringifyGateResource(mixed $value): ?string
+    private static function stringifyGateResource(mixed $value): false|string|null
     {
-        if ($value instanceof Model) {
-            $key = $value->getKey();
-
-            return \is_scalar($key) ? $value->getMorphClass() . ':' . (string) $key : null;
-        }
-
         return match (true) {
-            \is_string($value)                                         => $value,
+            $value === null                                            => null,
             $value instanceof AuthorizableResource                     => $value->toResourceIdentifier(),
+            $value instanceof Model                                    => self::modelIdentifier($value),
+            \is_string($value)                                         => $value,
             \is_object($value) && \method_exists($value, '__toString') => (string) $value,
-            default                                                    => null,
+            default                                                    => false,
         };
+    }
+
+    /**
+     * Identify a model as `morphClass:key`, or false when it has no usable key
+     * (an unsaved model).
+     *
+     * @param  \Illuminate\Database\Eloquent\Model  $model
+     * @return false|string
+     */
+    private static function modelIdentifier(Model $model): false|string
+    {
+        $key = $model->getKey();
+
+        return \is_scalar($key) && $key !== '' ? $model->getMorphClass() . ':' . $key : false;
     }
 
     /**

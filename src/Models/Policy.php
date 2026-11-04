@@ -83,12 +83,12 @@ class Policy extends Model
     public function toEvaluationPolicy(): EvaluationPolicy
     {
         $document = $this->normaliseDocument($this->document);
-        $document = $this->withName($document);
+        $document = $this->withName($document, true);
 
         try {
             return EvaluationPolicy::fromArray($document);
         } catch (\Throwable $exception) {
-            throw new InvalidPolicyDocumentException(policyName: $this->name, reason: $exception->getMessage(), previous: $exception);
+            throw new InvalidPolicyDocumentException(policyName: $this->resolveName(), reason: $exception->getMessage(), previous: $exception);
         }
     }
 
@@ -202,12 +202,17 @@ class Policy extends Model
     /**
      * Ensure the document body carries the model's name.
      *
+     * On hydration the model's name always wins over the document's own, so
+     * traces and decisions name the stored policy and a document cannot claim
+     * another policy's name.
+     *
      * @param  array<string, mixed>  $document
+     * @param  bool  $override
      * @return array<string, mixed>
      */
-    private function withName(array $document): array
+    private function withName(array $document, bool $override = false): array
     {
-        if (!isset($document['name']) || !\is_string($document['name']) || $document['name'] === '') {
+        if ($override || !isset($document['name']) || !\is_string($document['name']) || $document['name'] === '') {
             $name = $this->name ?? ($this->attributes['name'] ?? null);
 
             if (\is_string($name) && $name !== '') {

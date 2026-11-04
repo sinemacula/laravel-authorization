@@ -19,7 +19,6 @@ use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
 use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
 use SineMacula\Laravel\Authorization\Concerns\HasRoles;
 use SineMacula\Laravel\Authorization\Concerns\ResolvesPivotExpiry;
-use SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
@@ -54,7 +53,6 @@ use Tests\TestCase;
  */
 #[CoversClass(ResolutionCache::class)]
 #[CoversClass(Statement::class)]
-#[CoversClass(ConditionEvaluator::class)]
 #[CoversClass(AuthorizationManager::class)]
 #[CoversTrait(HasRoles::class)]
 #[CoversTrait(HasPermissions::class)]
@@ -93,8 +91,8 @@ final class MutationKillersTest extends TestCase
             $this->makeModelWithKey(new \stdClass),
         ]);
 
-        // Integer 42 must be cast to string '42'; empties dropped;
-        // duplicates squashed; non-string/non-int keys skipped.
+        // Integer 42 must be cast to string '42'; empties dropped; duplicates
+        // squashed; non-string/non-int keys skipped.
         self::assertSame(['42', 'alpha'], $collected); // @phpstan-ignore staticMethod.impossibleType
     }
 
@@ -833,131 +831,6 @@ final class MutationKillersTest extends TestCase
         ]);
 
         self::assertSame(['*'], $statement->resources);
-    }
-
-    /**
-     * `matchesNumericComparison` returns false for non-numeric actual / operand
-     * inputs, and performs strict comparison for numeric values.
-     *
-     * @return void
-     */
-    public function testCompareNumericAcrossOperatorMatrix(): void
-    {
-        self::assertFalse(ConditionEvaluator::matchesNumericComparison('abc', 5, '>'));
-        self::assertFalse(ConditionEvaluator::matchesNumericComparison(5, 'abc', '>'));
-
-        self::assertTrue(ConditionEvaluator::matchesNumericComparison(10, 5, '>'));
-        self::assertFalse(ConditionEvaluator::matchesNumericComparison(5, 5, '>'));
-        self::assertTrue(ConditionEvaluator::matchesNumericComparison(5, 5, '>='));
-        self::assertTrue(ConditionEvaluator::matchesNumericComparison(5, 10, '<'));
-        self::assertTrue(ConditionEvaluator::matchesNumericComparison(5, 5, '<='));
-        self::assertFalse(ConditionEvaluator::matchesNumericComparison(5, 5, 'unknown'));
-    }
-
-    /**
-     * `matchesBool` coerces both sides before equality — pins the symmetric
-     * coercion against mutants that skip one side.
-     *
-     * @return void
-     */
-    public function testMatchesBoolCoercesBothSidesSymmetrically(): void
-    {
-        $cls = ConditionEvaluator::class;
-
-        self::assertTrue($cls::matchesBool(true, 'true'));
-        self::assertTrue($cls::matchesBool('1', 1));
-        self::assertTrue($cls::matchesBool(false, 'no'));
-        self::assertTrue($cls::matchesBool('anything-else', 0));
-        self::assertFalse($cls::matchesBool(true, false));
-        self::assertFalse($cls::matchesBool(false, true));
-    }
-
-    /**
-     * `matchesCidr` handles exact-match, /0 mask, /32 mask, and bad-input
-     * cases. Pins the `0 ? 0 : (-1 << (32 - $bits))` ternary.
-     *
-     * @return void
-     */
-    public function testMatchesCidrMatrix(): void
-    {
-        $cls = ConditionEvaluator::class;
-
-        // Exact match with no slash.
-        self::assertTrue($cls::matchesCidr('10.0.0.1', '10.0.0.1'));
-        self::assertFalse($cls::matchesCidr('10.0.0.1', '10.0.0.2'));
-
-        // /0 matches everything.
-        self::assertTrue($cls::matchesCidr('8.8.8.8', '0.0.0.0/0'));
-        self::assertTrue($cls::matchesCidr('255.255.255.255', '0.0.0.0/0'));
-
-        // /32 matches only exact.
-        self::assertTrue($cls::matchesCidr('1.2.3.4', '1.2.3.4/32'));
-        self::assertFalse($cls::matchesCidr('1.2.3.5', '1.2.3.4/32'));
-
-        // Bad IP.
-        self::assertFalse($cls::matchesCidr('not-an-ip', '10.0.0.0/8'));
-
-        // Bad bits.
-        self::assertFalse($cls::matchesCidr('10.0.0.1', '10.0.0.0/abc'));
-
-        // Bits too big.
-        self::assertFalse($cls::matchesCidr('10.0.0.1', '10.0.0.0/64'));
-    }
-
-    /**
-     * `matchesTimeComparison` uses the `<` / `>` comparator; anything else
-     * returns false. Pins the default-arm `false` against FalseValue /
-     * MatchArmRemoval mutants.
-     *
-     * @return void
-     */
-    public function testCompareTimesDefaultArmReturnsFalse(): void
-    {
-        $cls = ConditionEvaluator::class;
-
-        self::assertTrue($cls::matchesTimeComparison('2026-01-01', '2026-06-01', '<'));
-        self::assertTrue($cls::matchesTimeComparison('2026-06-01', '2026-01-01', '>'));
-        self::assertFalse($cls::matchesTimeComparison('2026-01-01', '2026-06-01', '>'));
-        self::assertFalse($cls::matchesTimeComparison('2026-06-01', '2026-01-01', '<'));
-
-        // Default arm.
-        self::assertFalse($cls::matchesTimeComparison('2026-01-01', '2026-06-01', '=='));
-        self::assertFalse($cls::matchesTimeComparison('2026-01-01', '2026-06-01', 'unknown'));
-
-        // Null timestamps fail closed.
-        self::assertFalse($cls::matchesTimeComparison('not-a-time', '2026-06-01', '<'));
-        self::assertFalse($cls::matchesTimeComparison('2026-01-01', 'not-a-time', '<'));
-    }
-
-    /**
-     * `matchesBetween` requires both bounds; returns false on missing operand
-     * keys, malformed operand, or out-of-range values. Pins the `>=` and `<=`
-     * inclusive bounds.
-     *
-     * @return void
-     */
-    public function testMatchesBetweenRequiresBothBoundsAndInclusive(): void
-    {
-        $cls = ConditionEvaluator::class;
-
-        self::assertTrue($cls::matchesBetween('2026-06-15', ['2026-06-01', '2026-06-30']));
-
-        // Inclusive lower bound.
-        self::assertTrue($cls::matchesBetween('2026-06-01', ['2026-06-01', '2026-06-30']));
-        // Inclusive upper bound.
-        self::assertTrue($cls::matchesBetween('2026-06-30', ['2026-06-01', '2026-06-30']));
-
-        // Just outside.
-        self::assertFalse($cls::matchesBetween('2026-05-31', ['2026-06-01', '2026-06-30']));
-        self::assertFalse($cls::matchesBetween('2026-07-01', ['2026-06-01', '2026-06-30']));
-
-        // Missing operand keys.
-        self::assertFalse($cls::matchesBetween('2026-06-15', ['2026-06-01']));
-        self::assertFalse($cls::matchesBetween('2026-06-15', 'not-array'));
-
-        // Unparseable operand.
-        self::assertFalse($cls::matchesBetween('2026-06-15', ['bad', '2026-06-30']));
-        self::assertFalse($cls::matchesBetween('not-a-time', ['2026-06-01', '2026-06-30']));
     }
 
     /**

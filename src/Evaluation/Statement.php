@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
+use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 
 /**
@@ -15,15 +16,25 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
  * `(action, resource, context)` tuple.
  *
  * Conditions are expressed as a map of context keys to an operator map, for
- * example `['tenant' => ['eq' => 'org-1']]`. Missing context keys cause the
- * condition to fail without throwing, and unknown operators short-circuit to
- * false while emitting a debug log line.
+ * example `['tenant' => ['eq' => 'org-1']]`, or to a plain value compared by
+ * strict equality. A test that cannot be decided (a missing context key, a
+ * `${…}` reference that cannot be resolved, a context value of the wrong type)
+ * is undecidable rather than false, and a malformed test is invalid; see
+ * `assess()`. The evaluator applies a deny whose test is undecidable and denies
+ * the whole check on an invalid one, so neither ever skips a deny.
+ *
+ * Documents are validated on hydration: unknown keys, an empty resource list,
+ * an empty operator map, an unknown operator or a malformed operand are
+ * refused.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
 final readonly class Statement
 {
+    /** @var string Trace detail for a statement whose action or resource patterns do not cover the check. */
+    private const string TARGET_MISMATCH = 'action/resource did not match';
+
     /**
      * Create a new statement instance.
      *
@@ -57,6 +68,8 @@ final readonly class Statement
      */
     public static function fromArray(array $data): self
     {
+        StatementValidator::assertKnownKeys($data);
+
         return new self(
             effect: self::resolveEffect($data),
             actions: self::resolveActions($data),
@@ -86,12 +99,13 @@ final readonly class Statement
     }
 
     /**
-     * Determine whether the statement applies to the supplied action and
-     * optional resource.
+     * Determine whether the statement's action and resource patterns
+     * definitively cover the supplied action and optional resource.
      *
-     * When an interpolator is provided, resource patterns are interpolated
-     * before fnmatch comparison, allowing `${...}` tokens in persisted policy
-     * documents to resolve at evaluation time.
+     * A check without a resource is covered only by a statement whose resources
+     * include `*`; a statement scoped to particular resources never covers it.
+     * A resource pattern whose `${…}` reference cannot be resolved does not
+     * cover the resource here: use `assess()` for the undecidable outcome.
      *
      * @param  string  $action
      * @param  string|null  $resource
@@ -102,19 +116,13 @@ final readonly class Statement
      */
     public function matches(string $action, ?string $resource = null, ?ContextInterpolator $interpolator = null, ?object $principal = null, array $context = []): bool
     {
-        if (!$this->matchesAction($action)) {
-            return false;
-        }
-
-        return $resource === null || $this->matchesResource($resource, $interpolator, $principal, $context);
+        return $this->matchesTarget($action, new InterpolationScope($interpolator, $principal, $resource, $context))->holds();
     }
 
     /**
-     * Evaluate every condition against the supplied context.
-     *
-     * When an interpolator is provided, string operands within the condition
-     * map are interpolated before operator evaluation, allowing `${...}` tokens
-     * in persisted policy documents.
+     * Determine whether every condition definitively holds for the supplied
+     * context. A condition that cannot be decided does not hold here: use
+     * `assess()` for the undecidable outcome.
      *
      * @param  array<string, mixed>  $context
      * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null  $interpolator
@@ -124,43 +132,175 @@ final readonly class Statement
      */
     public function conditionsSatisfiedBy(array $context, ?ContextInterpolator $interpolator = null, ?object $principal = null, ?string $resource = null): bool
     {
-        foreach ($this->conditions as $key => $expected) {
-            if (!$this->matchesConditionEntry($key, $expected, $context, $interpolator, $principal, $resource)) {
-                return false;
-            }
-        }
-
-        return true;
+        return $this->assessConditions(new InterpolationScope($interpolator, $principal, $resource, $context))->holds();
     }
 
     /**
-     * Decide whether a single condition key/value pair is satisfied.
+     * Assess the statement against a check: whether its patterns and conditions
+     * match, definitively do not, cannot be decided, or are malformed.
      *
-     * @param  int|string  $key
-     * @param  mixed  $expected
+     * @param  string  $action
+     * @param  string|null  $resource
      * @param  array<string, mixed>  $context
      * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null  $interpolator
      * @param  object|null  $principal
-     * @param  string|null  $resource
-     * @return bool
+     * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
      */
-    private function matchesConditionEntry(
-        int|string $key,
-        mixed $expected,
-        array $context,
-        ?ContextInterpolator $interpolator = null,
-        ?object $principal = null,
-        ?string $resource = null,
-    ): bool {
-        if (!\is_string($key) || !\array_key_exists($key, $context)) {
-            return false;
+    public function assess(string $action, ?string $resource = null, array $context = [], ?ContextInterpolator $interpolator = null, ?object $principal = null): MatchResult
+    {
+        $scope  = new InterpolationScope($interpolator, $principal, $resource, $context);
+        $target = $this->matchesTarget($action, $scope);
+
+        if ($target->outcome === MatchOutcome::DOES_NOT_MATCH) {
+            return $target;
         }
 
-        $interpolated = $interpolator !== null
-            ? self::interpolateOperands($expected, $interpolator, $principal, $resource, $context)
-            : $expected;
+        return $target->and($this->assessConditions($scope));
+    }
 
-        return $this->matchesCondition($interpolated, $context[$key]);
+    /**
+     * Assess the action and resource patterns against the check.
+     *
+     * @param  string  $action
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\InterpolationScope  $scope
+     * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
+     */
+    private function matchesTarget(string $action, InterpolationScope $scope): MatchResult
+    {
+        return match (true) {
+            !$this->matchesAction($action)         => MatchResult::doesNotMatch(self::TARGET_MISMATCH),
+            $scope->resource !== null              => $this->matchesResource($scope->resource, $scope),
+            \in_array('*', $this->resources, true) => MatchResult::matches(),
+            default                                => MatchResult::doesNotMatch(self::TARGET_MISMATCH),
+        };
+    }
+
+    /**
+     * Assess every condition against the context.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\InterpolationScope  $scope
+     * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
+     */
+    private function assessConditions(InterpolationScope $scope): MatchResult
+    {
+        $result = MatchResult::matches();
+
+        foreach ($this->conditions as $key => $expected) {
+            $result = $result->and($this->assessCondition($key, $expected, $scope));
+        }
+
+        return $result;
+    }
+
+    /**
+     * Assess a single condition key/value pair.
+     *
+     * @param  int|string  $key
+     * @param  mixed  $expected
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\InterpolationScope  $scope
+     * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
+     */
+    private function assessCondition(int|string $key, mixed $expected, InterpolationScope $scope): MatchResult
+    {
+        if (!\is_string($key)) {
+            return MatchResult::invalid('a condition key is not a string');
+        }
+
+        // A malformed condition is invalid whatever the context holds, so its
+        // shape is checked before the key is looked up.
+        $error   = StatementValidator::conditionError($key, $expected);
+        $problem = match (true) {
+            $error !== null                           => MatchResult::invalid($error),
+            !\array_key_exists($key, $scope->context) => MatchResult::undecidable("key '{$key}' is missing from the context"),
+            default                                   => null,
+        };
+
+        return $problem ?? (\is_array($expected)
+            ? $this->assessOperators($key, $expected, $scope)
+            : $this->assessEquality($key, $expected, $scope));
+    }
+
+    /**
+     * Assess a condition written as a plain value: strict equality with the
+     * context value.
+     *
+     * @param  string  $key
+     * @param  mixed  $expected
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\InterpolationScope  $scope
+     * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
+     */
+    private function assessEquality(string $key, mixed $expected, InterpolationScope $scope): MatchResult
+    {
+        $resolved = \is_string($expected) ? $scope->literal($expected) : $expected;
+
+        if (\is_string($expected) && $resolved === null) {
+            return MatchResult::undecidable("condition '{$key}' references a value that cannot be resolved");
+        }
+
+        return MatchResult::fromBool($resolved === $scope->context[$key]);
+    }
+
+    /**
+     * Assess every operator of a condition.
+     *
+     * @param  string  $key
+     * @param  array<array-key, mixed>  $operators
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\InterpolationScope  $scope
+     * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
+     */
+    private function assessOperators(string $key, array $operators, InterpolationScope $scope): MatchResult
+    {
+        $result = MatchResult::matches();
+
+        foreach ($operators as $operator => $operand) {
+            $result = $result->and($this->assessOperator($key, (string) $operator, $operand, $scope));
+        }
+
+        return $result;
+    }
+
+    /**
+     * Assess one operator of a condition whose shape has been validated.
+     *
+     * A literal operand of the wrong type was refused with the condition, so an
+     * operand the evaluator still finds malformed came from a substituted
+     * value: like any context value of the wrong type, it is undecidable.
+     *
+     * @param  string  $key
+     * @param  string  $operator
+     * @param  mixed  $operand
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\InterpolationScope  $scope
+     * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
+     */
+    private function assessOperator(string $key, string $operator, mixed $operand, InterpolationScope $scope): MatchResult
+    {
+        $resolved = \is_string($operand) ? self::resolveOperand($operator, $operand, $scope) : $operand;
+
+        if (\is_string($operand) && $resolved === null) {
+            return MatchResult::undecidable("condition '{$key}' references a value that cannot be resolved");
+        }
+
+        $result  = ConditionEvaluator::evaluate($operator, $resolved, $scope->context[$key]);
+        $outcome = $result->outcome === MatchOutcome::INVALID ? MatchOutcome::UNDECIDABLE : $result->outcome;
+        $detail  = $result->outcome === MatchOutcome::INVALID ? "the substituted operand is an {$result->detail}" : $result->detail;
+
+        return $detail === '' ? $result : new MatchResult($outcome, "condition '{$key}': {$detail}");
+    }
+
+    /**
+     * Interpolate a string operand, preparing a pattern operand for
+     * `fnmatch()`. Returns null when a reference cannot be resolved.
+     *
+     * @param  string  $operator
+     * @param  string  $operand
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\InterpolationScope  $scope
+     * @return string|null
+     */
+    private static function resolveOperand(string $operator, string $operand, InterpolationScope $scope): ?string
+    {
+        return \in_array($operator, ConditionEvaluator::PATTERN_OPERATORS, true)
+            ? $scope->pattern($operand)
+            : $scope->literal($operand);
     }
 
     /**
@@ -218,7 +358,13 @@ final readonly class Statement
 
         $resources = self::normaliseStringList($data['resources'], 'resources');
 
-        return $resources === [] ? ['*'] : $resources;
+        if ($resources === []) {
+            throw new \InvalidArgumentException('Policy statement resources must not be empty; omit the key to cover every resource.');
+        }
+
+        \array_walk($resources, static fn (string $pattern) => StatementValidator::assertValidResource($pattern));
+
+        return $resources;
     }
 
     /**
@@ -245,6 +391,8 @@ final readonly class Statement
             if (!\is_string($key)) {
                 throw new \InvalidArgumentException('Policy statement conditions must use string keys.');
             }
+
+            StatementValidator::assertValidCondition($key, $value);
 
             $conditions[$key] = $value;
         }
@@ -275,10 +423,10 @@ final readonly class Statement
     /**
      * Determine whether the action matches any configured pattern.
      *
-     * Patterns use `fnmatch` with `FNM_NOESCAPE` so backslashes are compared
-     * literally — fully-qualified class names appearing in action or resource
-     * strings (`App\Models\Post:42`) stay intact instead of being consumed as
-     * shell-glob escape sequences.
+     * Action patterns use `fnmatch` with `FNM_NOESCAPE` so backslashes are
+     * compared literally. Resource patterns get the same literal backslashes by
+     * escaping instead, since their substituted values must be escaped too (see
+     * `matchesResource()`).
      *
      * @param  string  $action
      * @return bool
@@ -295,189 +443,31 @@ final readonly class Statement
     }
 
     /**
-     * Determine whether the resource matches any configured pattern.
+     * Assess the resource against the configured patterns.
      *
-     * When an interpolator is supplied, each resource pattern is interpolated
-     * before the fnmatch comparison.
+     * Each pattern is interpolated with its substituted values escaped, so a
+     * value only ever matches itself. A pattern whose reference cannot be
+     * resolved makes the result undecidable unless another pattern matches.
      *
      * @param  string  $resource
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null  $interpolator
-     * @param  object|null  $principal
-     * @param  array<string, mixed>  $context
-     * @return bool
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\InterpolationScope  $scope
+     * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
      */
-    private function matchesResource(string $resource, ?ContextInterpolator $interpolator = null, ?object $principal = null, array $context = []): bool
+    private function matchesResource(string $resource, InterpolationScope $scope): MatchResult
     {
+        $unresolved = false;
+
         foreach ($this->resources as $pattern) {
-            $resolved = $interpolator !== null
-                ? $interpolator->interpolate($pattern, $principal, $resource, $context)
-                : $pattern;
+            $resolved   = $scope->pattern($pattern);
+            $unresolved = $unresolved || $resolved === null;
 
-            if (\fnmatch($resolved, $resource, \FNM_NOESCAPE)) {
-                return true;
+            if ($resolved !== null && \fnmatch($resolved, $resource)) {
+                return MatchResult::matches();
             }
         }
 
-        return false;
-    }
-
-    /**
-     * Recursively interpolate string operands within a condition payload.
-     *
-     * If the payload is a plain string, it is interpolated directly. If it is
-     * an array (operator map), every string value within the array is
-     * interpolated. Non-string values pass through unchanged.
-     *
-     * @param  mixed  $expected
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator  $interpolator
-     * @param  object|null  $principal
-     * @param  string|null  $resource
-     * @param  array<string, mixed>  $context
-     * @return mixed
-     */
-    private static function interpolateOperands(mixed $expected, ContextInterpolator $interpolator, ?object $principal, ?string $resource, array $context): mixed
-    {
-        if (\is_string($expected)) {
-            return $interpolator->interpolate($expected, $principal, $resource, $context);
-        }
-
-        if (\is_array($expected)) {
-            $interpolated = [];
-
-            foreach ($expected as $key => $value) {
-                $interpolated[$key] = \is_string($value)
-                    ? $interpolator->interpolate($value, $principal, $resource, $context)
-                    : $value;
-            }
-
-            return $interpolated;
-        }
-
-        return $expected;
-    }
-
-    /**
-     * Evaluate a single condition entry against the context value.
-     *
-     * @param  mixed  $expected
-     * @param  mixed  $actual
-     * @return bool
-     */
-    private function matchesCondition(mixed $expected, mixed $actual): bool
-    {
-        if (!\is_array($expected)) {
-            return $expected === $actual;
-        }
-
-        foreach ($expected as $operator => $operand) {
-            if (!\is_string($operator) || !self::matchesOperator($operator, $operand, $actual)) {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /**
-     * Evaluate a single operator against the context value.
-     *
-     * @param  string  $operator
-     * @param  mixed  $operand
-     * @param  mixed  $actual
-     * @return bool
-     */
-    private static function matchesOperator(string $operator, mixed $operand, mixed $actual): bool
-    {
-        return match ($operator) {
-            'eq',
-            'neq',
-            'in',
-            'not_in',
-            'null',
-            'not_null' => self::matchesEqualityOperator($operator, $operand, $actual),
-            'cidr',
-            'starts_with',
-            'ends_with',
-            'string_like' => self::matchesStringOperator($operator, $operand, $actual),
-            'before',
-            'after',
-            'between',
-            'gt',
-            'gte',
-            'lt',
-            'lte'   => self::matchesComparisonOperator($operator, $operand, $actual),
-            'bool'  => ConditionEvaluator::matchesBool($actual, $operand),
-            default => ConditionEvaluator::logUnknownOperator($operator),
-        };
-    }
-
-    /**
-     * Evaluate the equality and membership operators (`eq`, `neq`, `in`,
-     * `not_in`, `null`, `not_null`) against the context value.
-     *
-     * @param  string  $operator
-     * @param  mixed  $operand
-     * @param  mixed  $actual
-     * @return bool
-     */
-    private static function matchesEqualityOperator(string $operator, mixed $operand, mixed $actual): bool
-    {
-        return match ($operator) {
-            'eq'       => $actual === $operand,
-            'neq'      => $actual !== $operand,
-            'in'       => \is_array($operand) && \in_array($actual, $operand, true),
-            'not_in'   => \is_array($operand) && !\in_array($actual, $operand, true),
-            'null'     => $actual === null,
-            'not_null' => $actual !== null,
-            default    => false,
-        };
-    }
-
-    /**
-     * Evaluate the temporal and numeric comparison operators (`before`,
-     * `after`, `between`, `gt`, `gte`, `lt`, `lte`) against the context value.
-     *
-     * @param  string  $operator
-     * @param  mixed  $operand
-     * @param  mixed  $actual
-     * @return bool
-     */
-    private static function matchesComparisonOperator(string $operator, mixed $operand, mixed $actual): bool
-    {
-        return match ($operator) {
-            'before'  => ConditionEvaluator::matchesTimeComparison($actual, $operand, '<'),
-            'after'   => ConditionEvaluator::matchesTimeComparison($actual, $operand, '>'),
-            'between' => ConditionEvaluator::matchesBetween($actual, $operand),
-            'gt'      => ConditionEvaluator::matchesNumericComparison($actual, $operand, '>'),
-            'gte'     => ConditionEvaluator::matchesNumericComparison($actual, $operand, '>='),
-            'lt'      => ConditionEvaluator::matchesNumericComparison($actual, $operand, '<'),
-            'lte'     => ConditionEvaluator::matchesNumericComparison($actual, $operand, '<='),
-            default   => false,
-        };
-    }
-
-    /**
-     * Evaluate the string-predicate operators (`cidr`, `starts_with`,
-     * `ends_with`, `string_like`) — all of which require both sides to be
-     * strings before dispatching to their concrete predicate.
-     *
-     * @param  string  $operator
-     * @param  mixed  $operand
-     * @param  mixed  $actual
-     * @return bool
-     */
-    private static function matchesStringOperator(string $operator, mixed $operand, mixed $actual): bool
-    {
-        if (!\is_string($actual) || !\is_string($operand)) {
-            return false;
-        }
-
-        return match ($operator) {
-            'cidr'        => ConditionEvaluator::matchesCidr($actual, $operand),
-            'starts_with' => \str_starts_with($actual, $operand),
-            'ends_with'   => \str_ends_with($actual, $operand),
-            'string_like' => \fnmatch($operand, $actual, \FNM_NOESCAPE),
-            default       => false,
-        };
+        return $unresolved
+            ? MatchResult::undecidable('a resource pattern references a value that cannot be resolved')
+            : MatchResult::doesNotMatch(self::TARGET_MISMATCH);
     }
 }

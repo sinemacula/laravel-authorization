@@ -11,6 +11,9 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
+use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
@@ -28,9 +31,9 @@ use Tests\TestCase;
  *   `Gate::allows('x', [$context])` — land here because the outer list is
  *   expanded into the variadic but the inner assoc array is retained at numeric
  *   index 0.
- * - A non-string, non-object leading entry (integer, list-array) that
- *   `stringifyGateResource` must coerce to a null resource so the Gate call
- *   still evaluates against the principal's RBAC.
+ * - A non-string, non-object leading entry (integer) that
+ *   `stringifyGateResource` cannot identify as a resource, so the Gate records
+ *   an implicit deny rather than treating it as a check about no resource.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -95,15 +98,19 @@ final class GateArgumentEdgeCasesTest extends TestCase
     }
 
     /**
-     * A non-string, non-object leading entry (integer) coerces to a null
-     * resource — the Gate still dispatches, evaluating against the principal's
-     * RBAC alone.
+     * A non-string, non-object leading entry (integer) cannot be identified as
+     * a resource, so the Gate records an implicit deny even though a
+     * wildcard-resource allow and a held RBAC permission would both allow a
+     * resource-less check.
      *
      * @return void
      */
-    public function testGateCoercesNonStringNonObjectResourceToNull(): void
+    public function testGateDeniesNonStringNonObjectResourceArgument(): void
     {
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard_name' => 'web']);
+
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user->givePermission('posts:create');
         $this->actAs($user);
 
         $user->attachPolicy(Policy::create([
@@ -116,9 +123,20 @@ final class GateArgumentEdgeCasesTest extends TestCase
             ],
         ]));
 
-        // An integer at index 0 yields null resource via stringifyGateResource;
-        // the policy still matches because it has no `resources` clause.
-        self::assertTrue(Gate::allows('posts:create', [42]));
+        // An integer at index 0 is not a resource identifier; the Gate records
+        // an implicit deny without consulting the policy or the RBAC grant.
+        self::assertFalse(Gate::allows('posts:create', [42]));
+
+        $refusal = Authorization::lastDecision();
+
+        self::assertNotNull($refusal);
+        self::assertSame(DecisionReason::IMPLICIT_DENY, $refusal->reason);
+        self::assertSame([], $refusal->trace);
+
+        // The same principal is allowed when no resource is supplied, so the
+        // denial above is down to the argument alone.
+        self::assertTrue(Gate::allows('posts:create'));
+        self::assertSame(DecisionReason::EXPLICIT_ALLOW, Authorization::lastDecision()?->reason);
     }
 
     /**

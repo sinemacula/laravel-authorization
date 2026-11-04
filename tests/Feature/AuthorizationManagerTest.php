@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -14,8 +15,13 @@ use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
 use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
 use SineMacula\Laravel\Authorization\Concerns\HasRoles;
+use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision;
+use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
+use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted as IdentityPermissionGranted;
@@ -355,6 +361,206 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * An invalid statement supplied through `withPolicies()` denies the check
+     * with the `invalid_policy` reason even though the principal holds the
+     * permission: RBAC never overrides an invalid policy.
+     *
+     * @return void
+     */
+    public function testInvalidOverridePolicyDeniesDespiteHeldPermission(): void
+    {
+        Permission::create(['id' => '0f1c8c43-5a59-4f4e-9d1f-3b2b9a8f6e01', 'name' => 'posts:create', 'guard_name' => 'web']);
+
+        $user = StubIdentity::create(['id' => '6c0b5d4e-2f7a-4e43-8b6e-1d9c3a7f2e02']);
+        $user->givePermission('posts:create');
+
+        $invalid = new EvaluationPolicy(
+            name: 'broken-override',
+            statements: [
+                new Statement(
+                    effect: PolicyEffect::ALLOW,
+                    actions: ['posts:create'],
+                    conditions: ['tenant' => ['nope' => 'org-1']],
+                ),
+            ],
+        );
+
+        $decision = Authorization::for($user)->withPolicies([$invalid])->evaluate('posts:create', null, ['tenant' => 'org-1']);
+
+        self::assertFalse($decision->allowed);
+        self::assertSame(DecisionReason::INVALID_POLICY, $decision->reason);
+        self::assertNull($decision->matchedStatement);
+        self::assertSame([
+            [
+                'policy'          => 'broken-override',
+                'statement_index' => 0,
+                'decision'        => TraceDecision::MATCHED,
+                'reason'          => 'invalid statement: condition \'tenant\' has an unknown operator \'nope\'',
+            ],
+        ], $decision->trace);
+        self::assertFalse(Authorization::for($user)->withPolicies([$invalid])->can('posts:create', null, ['tenant' => 'org-1']));
+    }
+
+    /**
+     * A stored policy row whose document cannot be read denies the check with
+     * the `invalid_policy` reason even though the principal holds the
+     * permission.
+     *
+     * @return void
+     */
+    public function testMalformedStoredPolicyDeniesDespiteHeldPermission(): void
+    {
+        Permission::create(['id' => '3e8a1f2b-7c4d-4b9e-a6f0-5d2c8e1b7a03', 'name' => 'posts:create', 'guard_name' => 'web']);
+
+        $user = StubIdentity::create(['id' => '9a7e3c1d-4b2f-4e8a-b5c6-0f1e2d3c4b04']);
+        $user->givePermission('posts:create');
+
+        DB::table('policies')->insert([
+            'id'         => 'b4c3d2e1-f0a9-4b8c-9d7e-6f5a4b3c2d05',
+            'name'       => 'stored-broken',
+            'document'   => \json_encode(['statements' => [['effect' => 'allow', 'actions' => ['posts:create'], 'unexpected' => true]]]),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('authorizable_policies')->insert([
+            'policy_id'         => 'b4c3d2e1-f0a9-4b8c-9d7e-6f5a4b3c2d05',
+            'authorizable_type' => $user->getMorphClass(),
+            'authorizable_id'   => '9a7e3c1d-4b2f-4e8a-b5c6-0f1e2d3c4b04',
+        ]);
+
+        $decision = Authorization::for($user)->evaluate('posts:create');
+
+        self::assertFalse($decision->allowed);
+        self::assertSame(DecisionReason::INVALID_POLICY, $decision->reason);
+        self::assertNull($decision->matchedStatement);
+        self::assertSame([], $decision->trace);
+    }
+
+    /**
+     * RBAC still applies when no policy decides the check: an implicit deny
+     * falls back to the held permission and keeps the evaluator's trace.
+     *
+     * @return void
+     */
+    public function testHeldPermissionAppliesOnImplicitDeny(): void
+    {
+        Permission::create(['id' => '5d4c3b2a-1f0e-4d9c-8b7a-6e5f4d3c2b06', 'name' => 'posts:create', 'guard_name' => 'web']);
+
+        $user = StubIdentity::create(['id' => '7f6e5d4c-3b2a-4190-8f7e-6d5c4b3a2f07']);
+        $user->givePermission('posts:create');
+
+        $unrelated = EvaluationPolicy::fromArray([
+            'name'       => 'unrelated',
+            'statements' => [['effect' => 'allow', 'actions' => ['posts:delete']]],
+        ]);
+
+        $decision = Authorization::for($user)->withPolicies([$unrelated])->evaluate('posts:create');
+
+        self::assertTrue($decision->allowed);
+        self::assertSame(DecisionReason::RBAC_ALLOW, $decision->reason);
+        self::assertSame([
+            [
+                'policy'          => 'unrelated',
+                'statement_index' => 0,
+                'decision'        => TraceDecision::SKIPPED,
+                'reason'          => 'action/resource did not match',
+            ],
+        ], $decision->trace);
+    }
+
+    /**
+     * An allow whose conditions cannot be decided is skipped, so the check
+     * falls through to RBAC; a deny whose conditions cannot be decided applies
+     * and RBAC does not override it.
+     *
+     * @return void
+     */
+    public function testUndecidableConditionsSkipAllowButApplyDeny(): void
+    {
+        Permission::create(['id' => '2a3b4c5d-6e7f-4a8b-9c0d-1e2f3a4b5c08', 'name' => 'posts:create', 'guard_name' => 'web']);
+
+        $user = StubIdentity::create(['id' => '8e9f0a1b-2c3d-4e5f-a6b7-c8d9e0f1a209']);
+        $user->givePermission('posts:create');
+
+        $allow = EvaluationPolicy::fromArray([
+            'name'       => 'conditional-allow',
+            'statements' => [['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['tenant' => ['eq' => 'org-1']]]],
+        ]);
+        $deny = EvaluationPolicy::fromArray([
+            'name'       => 'conditional-deny',
+            'statements' => [['effect' => 'deny', 'actions' => ['posts:create'], 'conditions' => ['tenant' => ['eq' => 'org-1']]]],
+        ]);
+
+        $skipped = Authorization::for($user)->withPolicies([$allow])->evaluate('posts:create');
+
+        self::assertTrue($skipped->allowed);
+        self::assertSame(DecisionReason::RBAC_ALLOW, $skipped->reason);
+        self::assertSame('could not be decided: key \'tenant\' is missing from the context', $skipped->trace[0]['reason'] ?? null);
+
+        $denied = Authorization::for($user)->withPolicies([$deny])->evaluate('posts:create');
+
+        self::assertFalse($denied->allowed);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $denied->reason);
+        self::assertSame('explicit deny: key \'tenant\' is missing from the context', $denied->trace[0]['reason'] ?? null);
+    }
+
+    /**
+     * `refuseUnidentifiedResource()` denies the resolved principal implicitly
+     * without consulting RBAC, records the denial as the last decision and
+     * dispatches exactly one decision event without a resource.
+     *
+     * @return void
+     */
+    public function testRefuseUnidentifiedResourceDeniesTheResolvedPrincipal(): void
+    {
+        Permission::create(['id' => '4c5d6e7f-8a9b-4c0d-9e1f-2a3b4c5d6e10', 'name' => 'posts:create', 'guard_name' => 'web']);
+
+        $user = StubIdentity::create(['id' => '5d6e7f8a-9b0c-4d1e-8f2a-3b4c5d6e7f11']);
+        $user->givePermission('posts:create');
+
+        $this->resolvePrincipalAs($user);
+
+        Event::fake();
+
+        $result = Authorization::refuseUnidentifiedResource('posts:create', ['tenant' => 'org-1']);
+
+        self::assertFalse($result->allowed);
+        self::assertSame(DecisionReason::IMPLICIT_DENY, $result->reason);
+        self::assertNull($result->matchedStatement);
+        self::assertSame([], $result->trace);
+        self::assertSame($result, Authorization::lastDecision());
+
+        self::assertSoleDecisionEvent($user, ['tenant' => 'org-1'], $result);
+    }
+
+    /**
+     * `refuseUnidentifiedResource()` on a `for()` scope denies that principal
+     * implicitly without consulting RBAC, records the denial as the last
+     * decision and dispatches exactly one decision event without a resource.
+     *
+     * @return void
+     */
+    public function testRefuseUnidentifiedResourceDeniesTheScopedPrincipal(): void
+    {
+        Permission::create(['id' => '6e7f8a9b-0c1d-4e2f-9a3b-4c5d6e7f8a12', 'name' => 'posts:create', 'guard_name' => 'web']);
+
+        $user = StubIdentity::create(['id' => '7f8a9b0c-1d2e-4f3a-8b4c-5d6e7f8a9b13']);
+        $user->givePermission('posts:create');
+
+        Event::fake();
+
+        $result = Authorization::for($user)->refuseUnidentifiedResource('posts:create', ['tenant' => 'org-2']);
+
+        self::assertFalse($result->allowed);
+        self::assertSame(DecisionReason::IMPLICIT_DENY, $result->reason);
+        self::assertNull($result->matchedStatement);
+        self::assertSame([], $result->trace);
+        self::assertSame($result, Authorization::lastDecision());
+
+        self::assertSoleDecisionEvent($user, ['tenant' => 'org-2'], $result);
+    }
+
+    /**
      * Spatie aliases mirror the canonical trait methods.
      *
      * @return void
@@ -395,6 +601,74 @@ final class AuthorizationManagerTest extends TestCase
         $user = StubIdentity::create(['id' => '1bf39684-eb97-4b99-8898-2971c1e19c35']);
 
         self::assertSame($user, Authorization::for($user)->currentPrincipal());
+    }
+
+    /**
+     * Assert that exactly one decision event was dispatched, for the check of
+     * `posts:create` without a resource, carrying the supplied principal,
+     * context and result, and that no failure event was dispatched.
+     *
+     * @param  object  $principal
+     * @param  array<string, mixed>  $context
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult  $result
+     * @return void
+     */
+    private static function assertSoleDecisionEvent(object $principal, array $context, EvaluationResult $result): void
+    {
+        $events = \array_values(
+            Event::dispatched(DecisionEvaluated::class)
+                ->map(static fn (array $arguments): DecisionEvaluated => $arguments[0])
+                ->all(),
+        );
+
+        self::assertCount(1, $events);
+        self::assertSame($principal, $events[0]->principal);
+        self::assertSame('posts:create', $events[0]->action);
+        self::assertNull($events[0]->resource);
+        self::assertSame($context, $events[0]->context);
+        self::assertSame($result, $events[0]->result);
+        Event::assertNotDispatched(AuthorizationFailed::class);
+    }
+
+    /**
+     * Swap the principal resolver for one that returns the supplied
+     * authorizable and refresh the manager so the next facade call picks it up.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @return void
+     */
+    private function resolvePrincipalAs(StubIdentity $user): void
+    {
+        $resolver = new class ($user) implements PrincipalResolver {
+            /**
+             * Create a new resolver wrapping a fixed user.
+             *
+             * @param  object  $user
+             * @return void
+             */
+            public function __construct(
+
+                /** The user returned by every resolution call. */
+                private readonly object $user,
+            ) {}
+
+            /**
+             * Resolve the current principal.
+             *
+             * @return object|null
+             *
+             * @phpstan-ignore-next-line return.unusedType
+             */
+            #[\Override]
+            public function resolve(): ?object
+            {
+                return $this->user;
+            }
+        };
+
+        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject
+        $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
+        $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
     }
 
     /**

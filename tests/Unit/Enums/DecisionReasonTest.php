@@ -34,13 +34,38 @@ final class DecisionReasonTest extends TestCase
     }
 
     /**
-     * The case count matches the four-step evaluation model.
+     * The case count matches the four-step evaluation model plus the
+     * invalid-policy denial.
      *
      * @return void
      */
-    public function testExactlyFourCases(): void
+    public function testExactlyFiveCases(): void
     {
-        self::assertCount(4, DecisionReason::cases());
+        self::assertCount(5, DecisionReason::cases());
+    }
+
+    /**
+     * The invalid-policy case is backed by its stable audit-log value.
+     *
+     * @return void
+     */
+    public function testInvalidPolicyBackingValue(): void
+    {
+        self::assertSame('invalid_policy', DecisionReason::INVALID_POLICY->value);
+    }
+
+    /**
+     * label() returns the exact human-readable text for every case.
+     *
+     * @return void
+     */
+    public function testLabelReturnsExactTextForEachCase(): void
+    {
+        self::assertSame('explicit allow from a policy statement', DecisionReason::EXPLICIT_ALLOW->label());
+        self::assertSame('explicit deny from a policy statement', DecisionReason::EXPLICIT_DENY->label());
+        self::assertSame('implicit deny (no statement matched)', DecisionReason::IMPLICIT_DENY->label());
+        self::assertSame('RBAC grant (direct permission or role-inherited)', DecisionReason::RBAC_ALLOW->label());
+        self::assertSame('invalid policy (a policy could not be evaluated)', DecisionReason::INVALID_POLICY->label());
     }
 
     /**
@@ -66,6 +91,7 @@ final class DecisionReasonTest extends TestCase
         self::assertSame(DecisionReason::EXPLICIT_DENY, DecisionReason::tryFrom('explicit_deny'));
         self::assertSame(DecisionReason::IMPLICIT_DENY, DecisionReason::tryFrom('implicit_deny'));
         self::assertSame(DecisionReason::RBAC_ALLOW, DecisionReason::tryFrom('rbac_allow'));
+        self::assertSame(DecisionReason::INVALID_POLICY, DecisionReason::tryFrom('invalid_policy'));
     }
 
     /**

@@ -23,6 +23,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static string explain(string $action, string|null $resource = null, array<string, mixed> $context = [])
  * @method static array<string, bool> effectivePermissions(array<string, mixed> $context = [])
  * @method static object|null currentPrincipal()
+ * @method static \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult refuseUnidentifiedResource(string $action, array<string, mixed> $context = [])
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
