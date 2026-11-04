@@ -24,6 +24,7 @@ use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
+use Tests\Fixtures\ExtendedRole;
 use Tests\TestCase;
 
 /**
@@ -493,6 +494,59 @@ final class HasSystemProtectionTest extends TestCase
     }
 
     /**
+     * A subclass that extends the boot hook and calls the parent keeps the
+     * protection.
+     *
+     * @return void
+     */
+    public function testSubclassExtendingBootHookKeepsProtection(): void
+    {
+        $role = ExtendedRole::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => 'super-admin',
+            'guard_name' => 'web',
+            'is_system'  => true,
+        ]);
+
+        $exception = $this->captureRoleRefusal(static fn () => $role->delete());
+
+        self::assertSame('delete', $exception->getOperation());
+        self::assertNotNull(Role::query()->find($role->getKey()));
+    }
+
+    /**
+     * A subclass can run the guard from its own scope: it refuses on a system
+     * row and allows on an ordinary one.
+     *
+     * @return void
+     */
+    public function testSubclassCanRunGuard(): void
+    {
+        $system = ExtendedRole::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => 'super-admin',
+            'guard_name' => 'web',
+            'is_system'  => true,
+        ]);
+
+        $ordinary = ExtendedRole::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => 'ordinary',
+            'guard_name' => 'web',
+            'is_system'  => false,
+        ]);
+
+        $exception = $this->captureRoleRefusal(static fn () => self::runGuardAsSubclass($system, 'rename'));
+
+        self::assertSame('super-admin', $exception->getRoleName());
+        self::assertSame('rename', $exception->getOperation());
+
+        self::runGuardAsSubclass($ordinary, 'rename');
+
+        self::assertFalse(self::reload($ordinary)->is_system);
+    }
+
+    /**
      * Run the callback and return the system-role refusal it raises.
      *
      * @param  callable(): mixed  $callback
@@ -524,6 +578,25 @@ final class HasSystemProtectionTest extends TestCase
         }
 
         self::fail('Expected SystemPolicyProtectedException was not thrown.');
+    }
+
+    /**
+     * Run the protection guard on the role from the scope of the subclass
+     * fixture, as a consumer's own model method would.
+     *
+     * @param  \Tests\Fixtures\ExtendedRole  $role
+     * @param  string  $operation
+     * @return void
+     */
+    private static function runGuardAsSubclass(ExtendedRole $role, string $operation): void
+    {
+        $guard = \Closure::bind(
+            fn () => $this->assertSystemProtectionAllows($operation),
+            $role,
+            ExtendedRole::class,
+        );
+
+        $guard();
     }
 
     /**
