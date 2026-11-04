@@ -97,6 +97,34 @@ final class SystemPermissionProtectionTest extends TestCase
     }
 
     /**
+     * A system permission loaded without its name is refused with the
+     * protection exception, which names the permission by its key.
+     *
+     * @return void
+     */
+    public function testSystemPermissionLoadedWithoutNameIsNamedByKey(): void
+    {
+        $permission = Permission::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => '*:*',
+            'guard_name' => 'web',
+            'is_system'  => true,
+        ]);
+
+        $partial = Permission::query()->select(['id'])->findOrFail($permission->id);
+
+        try {
+            $partial->delete();
+            self::fail('Expected SystemPermissionProtectedException was not thrown.');
+        } catch (SystemPermissionProtectedException $exception) { // @phpstan-ignore catch.neverThrown
+            self::assertSame($permission->id, $exception->getPermissionName());
+            self::assertSame('delete', $exception->getOperation());
+        }
+
+        self::assertNotNull(Permission::query()->find($permission->getKey())); // @phpstan-ignore deadCode.unreachable
+    }
+
+    /**
      * `forceSystem()` unlocks the next delete.
      *
      * @return void

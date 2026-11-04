@@ -22,6 +22,9 @@ namespace SineMacula\Laravel\Authorization\Concerns;
  */
 trait HasSystemProtection // @phpstan-ignore trait.unused
 {
+    /** @var string Name reported for a system record loaded without its name or key. */
+    private const string UNNAMED_SYSTEM_RECORD = '[unnamed]';
+
     /** @var bool Per-instance single-use bypass flag for the next protected mutation. */
     private bool $systemProtectionBypassed = false;
 
@@ -107,6 +110,29 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
         }
 
         throw $this->systemProtectionException($operation);
+    }
+
+    /**
+     * Return the name the refusal reports for this record. The persisted name
+     * is used, not the dirty one, so a refused rename reports the record that
+     * was targeted rather than the name it would have taken. A record loaded
+     * without its name falls back to its key, and one loaded without either is
+     * reported as `[unnamed]`, so the refusal is never lost to a missing
+     * attribute.
+     *
+     * @return string
+     */
+    protected function systemProtectedName(): string
+    {
+        $name = $this->getOriginal('name');
+
+        if (\is_string($name)) {
+            return $name;
+        }
+
+        $key = $this->getKeyForSaveQuery();
+
+        return \is_scalar($key) ? (string) $key : self::UNNAMED_SYSTEM_RECORD;
     }
 
     /**

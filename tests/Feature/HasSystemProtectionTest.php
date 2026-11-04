@@ -478,6 +478,43 @@ final class HasSystemProtectionTest extends TestCase
     }
 
     /**
+     * A system role loaded without its name is still refused with the
+     * protection exception, which names the role by its key rather than by the
+     * attempted rename.
+     *
+     * @return void
+     */
+    public function testSystemRoleLoadedWithoutNameIsNamedByKey(): void
+    {
+        $role    = $this->makeSystemRole('super-admin');
+        $partial = Role::query()->select(['id'])->findOrFail($role->id);
+
+        $exception = $this->captureRoleRefusal(static fn () => $partial->update(['name' => 'renamed']));
+
+        self::assertSame($role->id, $exception->getRoleName());
+        self::assertSame('rename', $exception->getOperation());
+        self::assertSame('super-admin', self::reload($role)->name);
+    }
+
+    /**
+     * A system role loaded without its name or key is still refused with the
+     * protection exception, which reports it as unnamed.
+     *
+     * @return void
+     */
+    public function testSystemRoleLoadedWithoutNameOrKeyIsUnnamed(): void
+    {
+        $role    = $this->makeSystemRole('super-admin');
+        $partial = Role::query()->select(['guard_name'])->whereKey($role->id)->firstOrFail();
+
+        $exception = $this->captureRoleRefusal(static fn () => $partial->delete());
+
+        self::assertSame('[unnamed]', $exception->getRoleName());
+        self::assertSame('delete', $exception->getOperation());
+        self::assertNotNull(Role::query()->find($role->getKey()));
+    }
+
+    /**
      * A role loaded without its key or the `is_system` column cannot be matched
      * to a row, so the guard fails closed and refuses the delete.
      *

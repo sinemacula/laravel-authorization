@@ -10,8 +10,8 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
  *
  * Protects platform-shipped policies (e.g. `break-glass`, `system-audit`) from
  * accidental removal or change by a caller with raw Eloquent access. The
- * exception carries the policy's current name so audit and error reporting can
- * identify the offending target.
+ * exception carries the policy's persisted name, or its key when it was loaded
+ * without one, so audit and error reporting can identify the offending target.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

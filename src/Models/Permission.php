@@ -262,13 +262,6 @@ class Permission extends Model
     #[\Override]
     protected function systemProtectionException(string $operation): \Throwable
     {
-        // Use the ORIGINAL name — on a rename, `getAttribute('name')` already
-        // reflects the mutated value. Audit consumers want "which permission
-        // was targeted" (the canonical persisted name), not "what the attempted
-        // rename would produce."
-        /** @var string $permissionName */
-        $permissionName = $this->getOriginal('name', $this->getAttribute('name'));
-
-        return new SystemPermissionProtectedException(permissionName: $permissionName, operation: $operation);
+        return new SystemPermissionProtectedException(permissionName: $this->systemProtectedName(), operation: $operation);
     }
 }

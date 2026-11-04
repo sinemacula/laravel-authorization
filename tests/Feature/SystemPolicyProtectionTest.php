@@ -76,6 +76,28 @@ final class SystemPolicyProtectionTest extends TestCase
     }
 
     /**
+     * A system policy loaded without its name is refused with the protection
+     * exception, which names the policy by its key.
+     *
+     * @return void
+     */
+    public function testSystemPolicyLoadedWithoutNameIsNamedByKey(): void
+    {
+        $policy  = $this->makeSystemPolicy('break-glass');
+        $partial = Policy::query()->select(['id'])->findOrFail($policy->id);
+
+        try {
+            $partial->delete();
+            self::fail('Expected SystemPolicyProtectedException was not thrown.');
+        } catch (SystemPolicyProtectedException $exception) { // @phpstan-ignore catch.neverThrown
+            self::assertSame($policy->id, $exception->getPolicyName());
+            self::assertSame('delete', $exception->getOperation());
+        }
+
+        self::assertNotNull(Policy::query()->find($policy->getKey())); // @phpstan-ignore deadCode.unreachable
+    }
+
+    /**
      * `forceSystem()` unlocks the next delete.
      *
      * @return void
