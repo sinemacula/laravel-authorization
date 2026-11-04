@@ -29,23 +29,28 @@ trait HasRoleHierarchy // @phpstan-ignore trait.unused
     /**
      * The parent role in the hierarchy.
      *
-     * A null `parent_id` marks this role as a root (no parent).
+     * A null `parent_id` marks this role as a root (no parent). The related
+     * class is read from `authorization.models.role`, so a configured subclass
+     * is returned.
      *
      * @return \Illuminate\Database\Eloquent\Relations\BelongsTo<\SineMacula\Laravel\Authorization\Models\Role, $this>
      */
     public function parent(): BelongsTo
     {
-        return $this->belongsTo(Role::class, 'parent_id');
+        return $this->belongsTo(self::configuredRoleClass(), 'parent_id');
     }
 
     /**
      * The direct children of this role in the hierarchy.
      *
+     * The related class is read from `authorization.models.role`, so a
+     * configured subclass is returned.
+     *
      * @return \Illuminate\Database\Eloquent\Relations\HasMany<\SineMacula\Laravel\Authorization\Models\Role, $this>
      */
     public function children(): HasMany
     {
-        return $this->hasMany(Role::class, 'parent_id');
+        return $this->hasMany(self::configuredRoleClass(), 'parent_id');
     }
 
     /**
@@ -69,8 +74,8 @@ trait HasRoleHierarchy // @phpstan-ignore trait.unused
 
         while ($current->parent_id !== null) {
             if (isset($visited[$current->parent_id])) {
-                /** @var static|null $proposedParent */
-                $proposedParent = static::query()->find($current->parent_id);
+                /** @var \SineMacula\Laravel\Authorization\Models\Role|null $proposedParent */
+                $proposedParent = self::configuredRoleClass()::query()->find($current->parent_id);
                 /** @var string $parentId */
                 $parentId     = $current->parent_id;
                 $proposedName = $proposedParent === null ? $parentId : $proposedParent->name;
@@ -240,5 +245,16 @@ trait HasRoleHierarchy // @phpstan-ignore trait.unused
         $otherRank = $other->rank;
 
         return $thisRank <= $otherRank;
+    }
+
+    /**
+     * Return the role class configured under `authorization.models.role`.
+     *
+     * @return class-string<\SineMacula\Laravel\Authorization\Models\Role>
+     */
+    private static function configuredRoleClass(): string
+    {
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
+        return config('authorization.models.role', Role::class);
     }
 }

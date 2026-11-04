@@ -1,0 +1,206 @@
+<?php
+
+declare(strict_types = 1);
+
+namespace Tests\Feature;
+
+use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
+use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
+use SineMacula\Laravel\Authorization\Models\Role;
+use Tests\Feature\Stubs\CustomPermission;
+use Tests\TestCase;
+
+/**
+ * Feature tests for the `RolePermission` pivot built from either side of the
+ * role-permission relation.
+ *
+ * `Role::permissions()` builds the pivot with the role column as its foreign
+ * key; `Permission::roles()` builds it with the permission column as its
+ * foreign key. Guard parity must read the right column on each side.
+ *
+ * @author      Ben Carey <bdmc@sinemacula.co.uk>
+ * @copyright   2026 Sine Macula Limited
+ *
+ * @internal
+ *
+ * @SuppressWarnings("php:S1192")
+ */
+#[CoversClass(RolePermission::class)]
+#[CoversClass(GuardMismatchException::class)]
+final class RolePermissionTest extends TestCase
+{
+    /** @var string The guard-mismatch message for the `editor` role and `posts:edit` permission. */
+    private const string MISMATCH = 'Guard mismatch: role \'editor\' (guard \'web\') cannot carry permission \'posts:edit\' (guard \'api\').'
+        . ' Scope one side to null for a guard-agnostic attachment, or match the guards.';
+
+    /**
+     * Attaching from the permission side with matching guards writes one pivot
+     * row with each id in its own column.
+     *
+     * @return void
+     */
+    public function testAttachFromPermissionSideWithMatchingGuardsPersists(): void
+    {
+        $role       = $this->makeRole('web');
+        $permission = $this->makePermission('web');
+
+        $permission->roles()->attach($role->id);
+
+        self::assertSame(
+            [['role_id' => $role->id, 'permission_id' => $permission->id]],
+            $this->pivotRows(),
+        );
+    }
+
+    /**
+     * Attaching from the permission side with two concrete, different guards is
+     * refused with the role and permission on their own sides of the message.
+     *
+     * @return void
+     */
+    public function testAttachFromPermissionSideWithMismatchedGuardsThrows(): void
+    {
+        $role       = $this->makeRole('web');
+        $permission = $this->makePermission('api');
+
+        $this->assertGuardMismatchWritesNothing(static fn () => $permission->roles()->attach($role->id));
+    }
+
+    /**
+     * Syncing from the permission side runs the same guard parity check.
+     *
+     * @return void
+     */
+    public function testSyncFromPermissionSideWithMismatchedGuardsThrows(): void
+    {
+        $role       = $this->makeRole('web');
+        $permission = $this->makePermission('api');
+
+        $this->assertGuardMismatchWritesNothing(static fn () => $permission->roles()->sync([$role->id]));
+    }
+
+    /**
+     * Attaching from the role side keeps reading the role column as the foreign
+     * key.
+     *
+     * @return void
+     */
+    public function testAttachFromRoleSideWithMismatchedGuardsThrows(): void
+    {
+        $role       = $this->makeRole('web');
+        $permission = $this->makePermission('api');
+
+        $this->assertGuardMismatchWritesNothing(static fn () => $role->permissions()->attach($permission->id));
+    }
+
+    /**
+     * Attaching from the role side with matching guards writes one pivot row
+     * with each id in its own column.
+     *
+     * @return void
+     */
+    public function testAttachFromRoleSideWithMatchingGuardsPersists(): void
+    {
+        $role       = $this->makeRole('web');
+        $permission = $this->makePermission('web');
+
+        $role->permissions()->attach($permission->id);
+
+        self::assertSame(
+            [['role_id' => $role->id, 'permission_id' => $permission->id]],
+            $this->pivotRows(),
+        );
+    }
+
+    /**
+     * From the permission side the in-memory permission is the parent, so its
+     * unsaved guard is the one checked rather than the stored one.
+     *
+     * @return void
+     */
+    public function testPermissionSideUsesInMemoryPermissionAsParent(): void
+    {
+        $role       = $this->makeRole('web');
+        $permission = $this->makePermission('web');
+
+        $permission->guard_name = 'api';
+
+        $this->assertGuardMismatchWritesNothing(static fn () => $permission->roles()->attach($role->id));
+    }
+
+    /**
+     * The permission side is recognised through the configured permission
+     * subclass.
+     *
+     * @return void
+     */
+    public function testPermissionSideIsRecognisedForConfiguredPermissionClass(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config->set('authorization.models.permission', CustomPermission::class);
+
+        $role       = $this->makeRole('web');
+        $permission = CustomPermission::query()->create(['name' => 'posts:edit', 'guard_name' => 'api']);
+
+        $this->assertGuardMismatchWritesNothing(static fn () => $permission->roles()->attach($role->id));
+    }
+
+    /**
+     * Assert the callback is refused for guard mismatch and writes no pivot
+     * row.
+     *
+     * @param  callable(): mixed  $callback
+     * @return void
+     */
+    private function assertGuardMismatchWritesNothing(callable $callback): void
+    {
+        try {
+            $callback();
+            self::fail('GuardMismatchException was not thrown.');
+        } catch (GuardMismatchException $exception) { // @phpstan-ignore catch.neverThrown
+            self::assertSame(self::MISMATCH, $exception->getMessage());
+            self::assertSame([], $this->pivotRows());
+        }
+    }
+
+    /**
+     * Return every pivot row as a column map.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function pivotRows(): array
+    {
+        /** @var list<array<string, mixed>> */
+        return DB::table('role_permissions')
+            ->get(['role_id', 'permission_id'])
+            ->map(static fn (object $row): array => (array) $row)
+            ->all();
+    }
+
+    /**
+     * Create the `editor` role under the given guard.
+     *
+     * @param  string  $guard
+     * @return \SineMacula\Laravel\Authorization\Models\Role
+     */
+    private function makeRole(string $guard): Role
+    {
+        return Role::query()->create(['name' => 'editor', 'guard_name' => $guard]);
+    }
+
+    /**
+     * Create the `posts:edit` permission under the given guard.
+     *
+     * @param  string  $guard
+     * @return \SineMacula\Laravel\Authorization\Models\Permission
+     */
+    private function makePermission(string $guard): Permission
+    {
+        return Permission::query()->create(['name' => 'posts:edit', 'guard_name' => $guard]);
+    }
+}

@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Concerns\ValidatesAuthorizationName;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPermissionProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
+use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
 use SineMacula\Laravel\Authorization\Observers\PermissionObserver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
@@ -163,11 +164,21 @@ class Permission extends Model
     /**
      * Roles that carry this permission.
      *
+     * The inverse of `Role::permissions()`: the same pivot table, the same
+     * columns and the same `RolePermission` pivot model, so an `attach(...)` or
+     * `sync(...)` from the permission side runs through the pivot's `saving`
+     * hook and the guard-parity invariant it enforces.
+     *
+     * @phpcs:disable Generic.Files.LineLength.TooLong
+     *
      * @formatter:off
      *
-     * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany<\SineMacula\Laravel\Authorization\Models\Role, $this>
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany<\SineMacula\Laravel\Authorization\Models\Role, $this,
+     *     \SineMacula\Laravel\Authorization\Models\Pivots\RolePermission, 'pivot'>
      *
      * @formatter:on
+     *
+     * @phpcs:enable Generic.Files.LineLength.TooLong
      */
     public function roles(): BelongsToMany
     {
@@ -182,7 +193,7 @@ class Permission extends Model
             table: $pivot,
             foreignPivotKey: 'permission_id',
             relatedPivotKey: 'role_id',
-        );
+        )->using(RolePermission::class);
     }
 
     /**
