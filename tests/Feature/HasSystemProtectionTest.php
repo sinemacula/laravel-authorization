@@ -25,6 +25,8 @@ use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use Tests\Fixtures\ExtendedRole;
+use Tests\Fixtures\QueryRecorder;
+use Tests\Fixtures\QueryRecordingRole;
 use Tests\TestCase;
 
 /**
@@ -68,6 +70,8 @@ final class HasSystemProtectionTest extends TestCase
     protected function tearDown(): void
     {
         Carbon::setTestNow();
+
+        QueryRecorder::reset();
 
         parent::tearDown();
     }
@@ -449,6 +453,28 @@ final class HasSystemProtectionTest extends TestCase
 
         self::assertTrue($partial->delete());
         self::assertNull(Role::query()->find($role->getKey()));
+    }
+
+    /**
+     * The flag of a record loaded without the `is_system` column is read on the
+     * write connection, so a lagging read replica cannot report a stale value
+     * and lift the protection.
+     *
+     * @return void
+     */
+    public function testPartiallyLoadedFlagIsReadOnWriteConnection(): void
+    {
+        $role    = $this->makeSystemRole('super-admin');
+        $partial = QueryRecordingRole::query()->select(['id', 'name'])->findOrFail($role->id);
+
+        QueryRecorder::reset();
+
+        $this->captureRoleRefusal(static fn () => $partial->delete());
+
+        $queries = QueryRecorder::recorded();
+
+        self::assertCount(1, $queries);
+        self::assertTrue($queries[0]->useWritePdo);
     }
 
     /**

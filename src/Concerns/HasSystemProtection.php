@@ -114,8 +114,9 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
      * value is read, not the dirty one, so clearing `is_system` in the same
      * update (or before a delete) cannot lift the protection it is meant to
      * guard. When the instance was loaded without the column, the flag is read
-     * from the database, and a row that cannot be found counts as system so the
-     * guard fails closed.
+     * from the database on the write connection, so a lagging read replica
+     * cannot report a stale value, and a row that cannot be found counts as
+     * system so the guard fails closed.
      *
      * @return bool
      */
@@ -128,6 +129,7 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
         $persisted = $this->newQueryWithoutScopes()
             ->whereKey($this->getKeyForSaveQuery())
             ->toBase()
+            ->useWritePdo()
             ->value('is_system');
 
         return (bool) ($persisted ?? true);
