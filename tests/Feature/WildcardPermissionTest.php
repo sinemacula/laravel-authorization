@@ -33,8 +33,9 @@ use Tests\TestCase;
  *
  * - `HasPermissions::hasPermission()` and `Role::hasPermission()` treat held
  *   names as `fnmatch` patterns: a held `posts:*` satisfies an asked
- *   `posts:create`, a held `*:*` satisfies anything (the super-admin bypass).
- *   The reverse direction does not match.
+ *   `posts:create`, a held `*` satisfies anything (the super-admin bypass), and
+ *   a held `*:*` satisfies only names that contain a colon. The reverse
+ *   direction does not match.
  * - `Statement::matchesAction()` / `matchesResource()` compare patterns with
  *   `FNM_NOESCAPE`, so backslash-bearing resource identifiers (fully-qualified
  *   morph classes without an alias) match literally.
@@ -190,21 +191,43 @@ final class WildcardPermissionTest extends TestCase
     }
 
     /**
-     * The super-admin principal holds `*:*` and satisfies every concrete asked
-     * permission — including prefixes it has never seen before.
+     * The super-admin principal holds `*` and satisfies every concrete asked
+     * permission — colon-separated, dotted or neither, including prefixes it
+     * has never seen before.
      *
      * @return void
      */
     public function testSuperAdminWildcardSatisfiesEverything(): void
+    {
+        $user = $this->userHolding('*');
+
+        $fresh = $user->fresh();
+
+        self::assertNotNull($fresh);
+        self::assertTrue($fresh->hasPermission(self::ASKED_ACTION));
+        self::assertTrue($fresh->hasPermission('billing:export'));
+        self::assertTrue($fresh->hasPermission('posts.edit'));
+        self::assertTrue($fresh->hasPermission('sso.connection.trust'));
+        self::assertTrue($fresh->hasPermission('platform-admin'));
+    }
+
+    /**
+     * A held `*:*` satisfies only names that contain a colon, so it does not
+     * satisfy dotted names or names with no separator.
+     *
+     * @return void
+     */
+    public function testColonWildcardSatisfiesOnlyColonNames(): void
     {
         $user = $this->userHolding('*:*');
 
         $fresh = $user->fresh();
 
         self::assertNotNull($fresh);
-        self::assertTrue($fresh->hasPermission(self::ASKED_ACTION));
         self::assertTrue($fresh->hasPermission('users:delete'));
-        self::assertTrue($fresh->hasPermission('billing:export'));
+        self::assertFalse($fresh->hasPermission('posts.edit'));
+        self::assertFalse($fresh->hasPermission('sso.connection.trust'));
+        self::assertFalse($fresh->hasPermission('platform-admin'));
     }
 
     /**
@@ -361,14 +384,14 @@ final class WildcardPermissionTest extends TestCase
     {
         yield 'colon-separated' => ['posts:create'];
         yield 'wildcard' => ['posts:*'];
-        yield 'super-admin' => ['*:*'];
+        yield 'colon-wildcard' => ['*:*'];
         yield 'hyphenated' => ['platform-admin'];
         yield 'underscored' => ['a_b_c'];
         yield 'numeric' => ['v2:post:42'];
         yield 'dot-separated' => ['posts.edit'];
         yield 'nested-dots' => ['sso.connection.trust'];
         yield 'dotted-wildcard' => ['posts.*'];
-        yield 'bare-wildcard' => ['*'];
+        yield 'super-admin' => ['*'];
     }
 
     /**

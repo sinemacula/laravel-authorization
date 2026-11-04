@@ -41,8 +41,8 @@ principal's role and permission grants, and anything left is denied.
   UUID and ULID keys all work), each grant with an optional expiry.
 - **Role and permission names** of letters, digits and `_ - : . *`, so `posts:edit`, `posts.edit` and
   `sso.connection.trust` are all valid; anything else is refused when the name is saved.
-- **Wildcard permissions** (`posts:*`, `posts.*`, `*:create`, `*:*`) and **role hierarchy**: a role inherits its
-  parent's permissions, with cycle checks on write.
+- **Wildcard permissions** (`posts:*`, `posts.*`, `*:create`, and `*` for everything; `*:*` matches only names with a
+  `:`) and **role hierarchy**: a role inherits its parent's permissions, with cycle checks on write.
 - **Policy documents** with `effect`, `actions`, `resources` and `conditions`, seventeen condition operators (equality,
   set membership, prefix and suffix, CIDR, numeric and time comparisons, booleans and nulls) and `${…}` interpolation
   from the check's context.
@@ -59,8 +59,8 @@ principal's role and permission grants, and anything left is denied.
 - **Swappable everything**: models, table and pivot column names, the principal resolver, the tenant resolver and the
   policy store.
 - **Spatie import**: `authorization:migrate-spatie` copies roles, permissions and grants from
-  `spatie/laravel-permission`, reporting and skipping any role or permission whose name the package refuses, along with
-  its grants.
+  `spatie/laravel-permission`, reporting and skipping any role or permission whose name the package refuses, and any
+  permission whose name contains `*`, along with its grants.
 
 ## Installation
 
