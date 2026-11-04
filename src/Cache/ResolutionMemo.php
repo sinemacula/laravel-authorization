@@ -31,17 +31,25 @@ final class ResolutionMemo
      */
     public function get(string $key): ?array
     {
-        if (!isset($this->entries[$key])) {
+        if (!isset($this->entries[$key]) || $this->lapsed($key)) {
             return null;
         }
 
-        $entry = $this->entries[$key];
+        return $this->entries[$key]['value'];
+    }
 
-        if ($entry['expires_at'] !== null && Carbon::now()->getTimestamp() >= $entry['expires_at']) {
-            return null;
-        }
+    /**
+     * Determine whether the key holds an entry that has lapsed, as opposed to a
+     * live entry or none at all.
+     *
+     * @param  string  $key
+     * @return bool
+     */
+    public function lapsed(string $key): bool
+    {
+        $expiresAt = $this->entries[$key]['expires_at'] ?? null;
 
-        return $entry['value'];
+        return $expiresAt !== null && Carbon::now()->getTimestamp() >= $expiresAt;
     }
 
     /**

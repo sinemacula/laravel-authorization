@@ -220,6 +220,8 @@ trait HasRoles // @phpstan-ignore trait.unused
      * via role tags). The persistent-tier TTL is additionally bounded by the
      * nearest upcoming `expires_at` across the relation's pivot rows so
      * temporal grants invalidate themselves at the exact moment they lapse.
+     * Once the in-memory entry has lapsed the relation is reloaded, so a reused
+     * instance does not rebuild the entry from the roles it loaded before.
      *
      * @return array<int, string>
      */
@@ -228,6 +230,10 @@ trait HasRoles // @phpstan-ignore trait.unused
         $cache = ResolutionCache::instance();
 
         if ($cache instanceof ResolutionCache) {
+            if ($cache->lapsed('roles', $this)) {
+                $this->unsetRelation('roles');
+            }
+
             /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
             $roles   = $this->roles;
             $roleIds = self::authorizationCollectModelIds($roles);

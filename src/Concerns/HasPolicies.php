@@ -248,6 +248,31 @@ trait HasPolicies // @phpstan-ignore trait.unused
     }
 
     /**
+     * Return the seconds until the nearest attached policy lapses, or null when
+     * none of them expires.
+     *
+     * The caching policy resolver bounds its entries by this, as `getRoles()`
+     * and `getPermissions()` bound theirs, so a temporary policy stops applying
+     * when it lapses. With `$reload`, which the resolver passes once its entry
+     * has lapsed, the attachments are read afresh rather than from the relation
+     * already loaded on this instance.
+     *
+     * @param  bool  $reload
+     * @return int|null
+     */
+    public function secondsUntilPolicyExpiry(bool $reload = false): ?int
+    {
+        if ($reload) {
+            $this->unsetRelation('policies');
+        }
+
+        /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Policy> $models */
+        $models = $this->policies;
+
+        return self::authorizationNearestPivotExpirySeconds($models);
+    }
+
+    /**
      * Look up a policy model by primary key, used by `syncPolicies()` when the
      * sync delta surfaces an ID that was not part of the caller's input set
      * (the detachment list). Returns null when the row no longer exists or

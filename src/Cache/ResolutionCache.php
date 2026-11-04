@@ -127,6 +127,25 @@ final class ResolutionCache
     }
 
     /**
+     * Determine whether the principal's in-memory entry of the given kind
+     * (`roles`, `permissions` or `policies`) has lapsed.
+     *
+     * The identity traits and the caching policy resolver ask before they read
+     * the grants an entry is built from: once it has lapsed they read them
+     * afresh rather than from relations already loaded on the instance, so a
+     * grant that expired, or changed outside the package, stops counting even
+     * while the same instance is reused.
+     *
+     * @param  string  $kind
+     * @param  object  $principal
+     * @return bool
+     */
+    public function lapsed(string $kind, object $principal): bool
+    {
+        return $this->memo->lapsed($this->key($kind, $principal));
+    }
+
+    /**
      * Drop every cached entry for the supplied principal — memo and persistent
      * store alike. Listeners call this on principal-scoped mutations
      * (`IdentityRoleAssigned`, `IdentityPermissionGranted`,
@@ -152,7 +171,7 @@ final class ResolutionCache
             /** @var \Illuminate\Contracts\Cache\Repository $store */
             $store = $this->store;
             // @phpstan-ignore-next-line method.notFound
-            $store->tags([$this->principalTag($principal)])->flush();
+            $store->tags([$this->key('principal', $principal)])->flush();
 
             return;
         }
@@ -341,6 +360,10 @@ final class ResolutionCache
     /**
      * Build the cache key for a given slot + principal.
      *
+     * The `principal` kind names the principal-scoped tag instead — used to
+     * flush every slot for a single identity in one `tags()->flush()` call on
+     * tag-capable stores.
+     *
      * @param  string  $kind
      * @param  object  $principal
      * @return string
@@ -348,18 +371,6 @@ final class ResolutionCache
     private function key(string $kind, object $principal): string
     {
         return "{$this->prefix}:{$kind}:" . PrincipalCacheKey::for($principal);
-    }
-
-    /**
-     * Build the principal-scoped tag — used to flush every slot for a single
-     * identity in one `tags()->flush()` call on tag-capable stores.
-     *
-     * @param  object  $principal
-     * @return string
-     */
-    private function principalTag(object $principal): string
-    {
-        return "{$this->prefix}:principal:" . PrincipalCacheKey::for($principal);
     }
 
     /**
@@ -372,7 +383,7 @@ final class ResolutionCache
      */
     private function tagsFor(object $principal, array $roleIds): array
     {
-        $tags = [$this->prefix, $this->principalTag($principal)];
+        $tags = [$this->prefix, $this->key('principal', $principal)];
 
         foreach ($roleIds as $id) {
             if ($id === '') {

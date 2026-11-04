@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Resolvers;
 
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 
 /**
@@ -16,6 +17,11 @@ use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
  * to the inner resolver. The inner resolver stays responsible for gathering
  * strategy; this decorator only adds the memoisation and persistent-cache
  * tiers.
+ *
+ * Both tiers are bounded by the nearest expiry among the policies the principal
+ * attaches itself (through `HasPolicies`), so a temporary policy stops applying
+ * when it lapses, within one request or job too. Once the in-memory entry has
+ * lapsed the principal reads its attachments afresh.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -47,6 +53,26 @@ final readonly class CachingPolicyResolver implements PolicyResolver
         return $this->cache->rememberPolicies(
             $principal,
             fn (): array => $this->inner->policiesFor($principal),
+            new ResolutionCacheContext(maxTtl: $this->nearestPolicyExpiry($principal)),
         );
+    }
+
+    /**
+     * Return the seconds until the nearest policy the principal attaches itself
+     * lapses, or null when it attaches none that expire or cannot attach
+     * policies at all. The attachments are read afresh once the cached entry
+     * has lapsed.
+     *
+     * @param  object  $principal
+     * @return int|null
+     */
+    private function nearestPolicyExpiry(object $principal): ?int
+    {
+        if (!\method_exists($principal, 'secondsUntilPolicyExpiry')) {
+            return null;
+        }
+
+        /** @var int|null */
+        return $principal->secondsUntilPolicyExpiry($this->cache->lapsed('policies', $principal));
     }
 }

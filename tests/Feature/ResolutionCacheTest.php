@@ -164,6 +164,34 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
+     * `lapsed()` reports the principal's entry of the given kind only, and only
+     * once its lifetime has run out.
+     *
+     * @return void
+     */
+    public function testLapsedReportsTheEntryOfTheGivenKind(): void
+    {
+        $cache     = new ResolutionCache(store: null, ttl: 0, prefix: 'memo');
+        $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $other     = StubIdentity::create(['id' => (string) Str::uuid()]);
+
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        $cache->rememberRoles($principal, static fn (): array => ['editor'], new ResolutionCacheContext(maxTtl: 60));
+        $cache->rememberRoles($other, static fn (): array => ['editor'], new ResolutionCacheContext(maxTtl: 600));
+        $cache->rememberPermissions($principal, static fn (): array => ['posts:read']);
+
+        self::assertFalse($cache->lapsed('roles', $principal));
+
+        Carbon::setTestNow('2026-07-01 12:00:59');
+
+        self::assertTrue($cache->lapsed('roles', $principal));
+        self::assertFalse($cache->lapsed('roles', $other));
+        self::assertFalse($cache->lapsed('permissions', $principal));
+        self::assertFalse($cache->lapsed('policies', $principal));
+    }
+
+    /**
      * A role list read from the persistent store is memoised with the same
      * expiry: it is served from memory once the store is emptied, and lapses
      * before the grant does.
@@ -892,8 +920,9 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `principalTag` is assembled as `<prefix>:principal:<keyFor>`. Pins the
-     * Concat/ConcatOperandRemoval mutants on line 411.
+     * The principal tag, the key of the `principal` kind, is assembled as
+     * `<prefix>:principal:<keyFor>`. Pins the Concat/ConcatOperandRemoval
+     * mutants on the key.
      *
      * @return void
      */
@@ -901,7 +930,7 @@ final class ResolutionCacheTest extends TestCase
     {
         $cache = new ResolutionCache(store: Cache::store('array'), ttl: 0, prefix: 'ptag');
 
-        $ref = new \ReflectionMethod($cache, 'principalTag');
+        $ref = new \ReflectionMethod($cache, 'key');
 
         $principal = new class {
             /**
@@ -921,7 +950,7 @@ final class ResolutionCacheTest extends TestCase
             }
         };
 
-        $tag = $ref->invoke($cache, $principal);
+        $tag = $ref->invoke($cache, 'principal', $principal);
 
         self::assertSame('ptag:principal:pt:abc', $tag);
     }

@@ -231,7 +231,9 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * temporal grants on either side invalidate the entry at the moment they
      * lapse. The role IDs are tagged into the entry so a
      * `RolePermissionGranted` / `RolePermissionRevoked` event flushes every
-     * principal carrying the mutated role on tag-capable stores.
+     * principal carrying the mutated role on tag-capable stores. Once the
+     * in-memory entry has lapsed both relations are reloaded, so a reused
+     * instance does not rebuild the entry from the grants it loaded before.
      *
      * @return array<int, string>
      */
@@ -240,6 +242,11 @@ trait HasPermissions // @phpstan-ignore trait.unused
         $cache = ResolutionCache::instance();
 
         if ($cache instanceof ResolutionCache) {
+            if ($cache->lapsed('permissions', $this)) {
+                $this->unsetRelation('permissions');
+                $this->unsetRelation('roles');
+            }
+
             /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission> $direct */
             $direct = $this->permissions;
 

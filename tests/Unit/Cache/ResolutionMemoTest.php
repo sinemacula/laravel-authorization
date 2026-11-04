@@ -123,6 +123,34 @@ final class ResolutionMemoTest extends TestCase
     }
 
     /**
+     * Only an entry whose lifetime has run out has lapsed: a missing key, a
+     * live entry and an entry stored forever have not.
+     *
+     * @return void
+     */
+    public function testOnlyAnEntryPastItsLifetimeHasLapsed(): void
+    {
+        $memo = new ResolutionMemo;
+        $memo->put(self::KEY, ['editor'], 30);
+        $memo->put('forever', ['viewer'], null);
+
+        self::assertFalse($memo->lapsed('missing'));
+
+        Carbon::setTestNow('2026-07-01 12:00:29');
+
+        self::assertFalse($memo->lapsed(self::KEY));
+
+        Carbon::setTestNow('2026-07-01 12:00:30');
+
+        self::assertTrue($memo->lapsed(self::KEY));
+
+        Carbon::setTestNow('2036-07-01 12:00:00');
+
+        self::assertFalse($memo->lapsed('forever'));
+        self::assertSame(['viewer'], $memo->get('forever'));
+    }
+
+    /**
      * `forget()` drops one entry and `flush()` drops every entry.
      *
      * @return void
