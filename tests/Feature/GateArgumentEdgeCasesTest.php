@@ -24,7 +24,7 @@ use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
 /**
- * Coverage for the two `translateGateArguments` / `stringifyGateResource`
+ * Coverage for the two `translateGateArguments` / `ResourceIdentifier::of()`
  * branches the primary forwarding tests do not reach:
  *
  * - A list-shaped `$arguments` whose leading entry is itself an associative
@@ -33,8 +33,9 @@ use Tests\TestCase;
  *   expanded into the variadic but the inner assoc array is retained at numeric
  *   index 0.
  * - A non-string, non-object leading entry (integer) that
- *   `stringifyGateResource` cannot identify as a resource, so the Gate records
- *   an implicit deny rather than treating it as a check about no resource.
+ *   `ResourceIdentifier::of()` cannot identify as a resource, so the Gate
+ *   records an implicit deny rather than treating it as a check about no
+ *   resource.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
