@@ -109,7 +109,7 @@ final class AuthorizationManager
         if (!$result->allowed) {
             $this->dispatch(new AuthorizationFailed($subject?->subject, $action, $resource, $context, $result));
 
-            throw new AuthorizationException($result->reason, $this->deniedMessage());
+            throw AuthorizationException::translated($result->reason, $this->translator);
         }
     }
 
@@ -376,19 +376,6 @@ final class AuthorizationManager
         }
 
         return $this->policyResolver->policiesFor($principal);
-    }
-
-    /**
-     * Return the denial message in the translator's current locale, or null
-     * when there is no translator or it has no line for the message.
-     *
-     * @return string|null
-     */
-    private function deniedMessage(): ?string
-    {
-        $line = $this->translator?->get(AuthorizationException::MESSAGE_KEY);
-
-        return \is_string($line) && $line !== AuthorizationException::MESSAGE_KEY ? $line : null;
     }
 
     /**

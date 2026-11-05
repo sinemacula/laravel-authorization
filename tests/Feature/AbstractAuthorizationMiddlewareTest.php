@@ -5,104 +5,185 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Auth\AuthenticationException;
-use Illuminate\Http\Request;
+use Illuminate\Contracts\Translation\Translator;
 use Illuminate\Http\Response;
-use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Translation\Translator as TranslatorImplementation;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\TestWith;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
 use SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware;
+use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
-use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
+use Tests\Concerns\ChecksAccess;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\TestCase;
 
 /**
- * Feature coverage for the subject the shipped `role` and `permission`
- * middleware check: the one the subject resolver returns, which with the
- * shipped resolver is the user Laravel signed in.
+ * Feature coverage for what every shipped route middleware shares: the subject
+ * the subject resolver returns (with the shipped resolver, the user Laravel
+ * signed in), the arguments it takes, and the denial it throws.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @SuppressWarnings("php:S1192")
  */
 #[CoversClass(AbstractAuthorizationMiddleware::class)]
 #[CoversClass(RequireRole::class)]
 #[CoversClass(RequirePermission::class)]
+#[CoversClass(AuthorizeAction::class)]
 final class AbstractAuthorizationMiddlewareTest extends TestCase
 {
+    use ChecksAccess;
+
     /**
-     * With no user signed in there is no subject, and the role middleware
-     * answers unauthenticated.
+     * With no user signed in there is no subject, and every middleware answers
+     * unauthenticated.
      *
+     * @param  class-string<\SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware>  $middleware
+     * @param  string  $names
      * @return void
-     *
-     * @throws \Illuminate\Auth\AuthenticationException
      */
-    public function testRoleMiddlewareWithoutASignedInUserIsUnauthenticated(): void
+    #[TestWith([RequireRole::class, 'admin'])]
+    #[TestWith([RequirePermission::class, 'posts:create'])]
+    #[TestWith([AuthorizeAction::class, 'posts:create'])]
+    public function testWithoutASignedInUserTheRequestIsUnauthenticated(string $middleware, string $names): void
     {
         $this->seedGrantedUser();
 
         $this->expectException(AuthenticationException::class);
+        $this->expectExceptionMessage('Unauthenticated.');
 
-        (new RequireRole)->handle(Request::create('/test'), self::passThrough(), 'admin');
-    }
-
-    /**
-     * With no user signed in there is no subject, and the permission middleware
-     * answers unauthenticated.
-     *
-     * @return void
-     *
-     * @throws \Illuminate\Auth\AuthenticationException
-     */
-    public function testPermissionMiddlewareWithoutASignedInUserIsUnauthenticated(): void
-    {
-        $this->seedGrantedUser();
-
-        $this->expectException(AuthenticationException::class);
-
-        (new RequirePermission)->handle(Request::create('/test'), self::passThrough(), 'posts:create');
+        $this->runMiddleware($middleware, self::request(), $names);
     }
 
     /**
      * The user Laravel signed in passes the role and permission it holds, with
-     * no resolver of the application's own.
+     * no resolver of the application's own, and the request is passed on.
      *
      * @return void
-     *
-     * @throws \Illuminate\Auth\AuthenticationException
      */
     public function testTheSignedInUserPassesWhatItHolds(): void
     {
         $this->actingAs($this->seedGrantedUser());
 
-        $role       = (new RequireRole)->handle(Request::create('/test'), self::passThrough(), 'admin');
-        $permission = (new RequirePermission)->handle(Request::create('/test'), self::passThrough(), 'posts:create');
-
-        self::assertInstanceOf(Response::class, $role);
-        self::assertSame(200, $role->getStatusCode());
-        self::assertInstanceOf(Response::class, $permission);
-        self::assertSame(200, $permission->getStatusCode());
+        self::assertSame('ok', $this->runMiddleware(RequireRole::class, self::request(), 'admin')->getContent());
+        self::assertSame('ok', $this->runMiddleware(RequirePermission::class, self::request(), 'posts:create')->getContent());
+        self::assertSame('ok', $this->runMiddleware(AuthorizeAction::class, self::request(), 'posts:create')->getContent());
     }
 
     /**
-     * The user Laravel signed in is refused a role it does not hold.
+     * The user Laravel signed in is refused a role it does not hold, with the
+     * role message, and an action it is not allowed, with the denial message.
      *
      * @return void
-     *
-     * @throws \Illuminate\Auth\AuthenticationException
      */
     public function testTheSignedInUserIsRefusedWhatItLacks(): void
     {
         $this->actingAs($this->seedGrantedUser());
 
-        $this->expectException(AccessDeniedHttpException::class);
-        $this->expectExceptionMessage('Role required.');
+        $role   = self::denialOf(fn (): Response => $this->runMiddleware(RequireRole::class, self::request(), 'auditor'));
+        $action = self::denialOf(fn (): Response => $this->runMiddleware(RequirePermission::class, self::request(), 'posts:delete'));
 
-        (new RequireRole)->handle(Request::create('/test'), self::passThrough(), 'auditor');
+        self::assertSame('This action requires a role you do not have.', $role->getMessage());
+        self::assertSame(DecisionReason::IMPLICIT_DENY, $role->getReason());
+        self::assertSame('This action is unauthorized.', $action->getMessage());
+        self::assertSame(DecisionReason::IMPLICIT_DENY, $action->getReason());
+    }
+
+    /**
+     * Two arguments are taken; a third is refused, even without a subject.
+     *
+     * @return void
+     */
+    public function testAThirdArgumentIsRefused(): void
+    {
+        $this->actingAs($this->seedGrantedUser());
+
+        self::assertSame(200, $this->runMiddleware(RequireRole::class, self::request(), 'admin', 'web')->getStatusCode());
+
+        $this->actAs(null);
+
+        $this->expectException(InvalidCheckArgumentException::class);
+        $this->expectExceptionMessage(RequireRole::class . ' takes at most two arguments, 3 given. Separate several names with \'|\', not \',\'.');
+
+        $this->runMiddleware(RequireRole::class, self::request(), 'admin', 'editor', 'auditor');
+    }
+
+    /**
+     * With no arguments nothing is named, and the request is denied.
+     *
+     * @return void
+     */
+    public function testNoArgumentsDeny(): void
+    {
+        $this->actingAs($this->seedGrantedUser());
+
+        self::assertFalse($this->admits(RequireRole::class, self::request()));
+        self::assertFalse($this->admits(RequirePermission::class, self::request()));
+    }
+
+    /**
+     * Any allowed action admits the request and the rest are not decided; when
+     * none is, the last one is authorised, firing `AuthorizationFailed` once.
+     *
+     * @return void
+     */
+    public function testAnyAllowedActionAdmitsAndTheLastIsAuthorized(): void
+    {
+        $this->actingAs($this->seedGrantedUser());
+
+        Event::fake([AuthorizationFailed::class]);
+
+        self::assertTrue($this->admits(RequirePermission::class, self::request(), 'posts:create|posts:delete'));
+        self::assertTrue($this->admits(RequirePermission::class, self::request(), 'posts:delete|posts:create'));
+        Event::assertNotDispatched(AuthorizationFailed::class);
+
+        self::assertFalse($this->admits(RequirePermission::class, self::request(), 'posts:update|posts:delete'));
+        Event::assertDispatchedTimes(AuthorizationFailed::class, 1);
+        Event::assertDispatched(AuthorizationFailed::class, static fn (AuthorizationFailed $event): bool => $event->action === 'posts:delete');
+    }
+
+    /**
+     * A middleware the container resolves words its denials in the translator's
+     * current locale.
+     *
+     * @return void
+     */
+    public function testDenialsAreTranslatedInTheCurrentLocale(): void
+    {
+        $translator = $this->app?->make(Translator::class);
+        self::assertInstanceOf(TranslatorImplementation::class, $translator);
+
+        $translator->addLines(['authorization.role_required' => 'Rôle requis.', 'authorization.denied' => 'Action non autorisée.'], 'fr', 'authorization');
+        $translator->setLocale('fr');
+
+        $this->actingAs($this->seedGrantedUser());
+
+        self::assertSame('Rôle requis.', self::denialOf(fn (): Response => $this->runMiddleware(RequireRole::class, self::request(), 'auditor'))->getMessage());
+        self::assertSame('Action non autorisée.', self::denialOf(fn (): Response => $this->runMiddleware(RequirePermission::class, self::request(), ''))->getMessage());
+    }
+
+    /**
+     * A middleware built without a translator keeps Laravel's English message.
+     *
+     * @return void
+     */
+    public function testWithoutATranslatorTheMessageIsLaravelsEnglish(): void
+    {
+        $this->actingAs($this->seedGrantedUser());
+
+        $denial = self::denialOf(static fn (): mixed => (new RequireRole)->handle(self::request(), self::passThrough(), 'auditor'));
+
+        self::assertSame('This action is unauthorized.', $denial->getMessage());
     }
 
     /**
@@ -112,24 +193,10 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
      */
     private function seedGrantedUser(): AuthenticatableIdentity
     {
-        Role::create(['id' => (string) Str::uuid(), 'name' => 'admin', 'guard' => 'web']);
-        Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard' => 'web']);
-
-        $user = AuthenticatableIdentity::create(['id' => (string) Str::uuid()]);
-        $user->assignRole('admin');
-        $user->givePermission('posts:create');
+        $user = AuthenticatableIdentity::create(['id' => 'signed-in']);
+        $user->assignRole(Role::create(['name' => 'admin', 'guard' => 'web']));
+        $user->givePermission(Permission::create(['name' => 'posts:create', 'guard' => 'web']));
 
         return $user;
-    }
-
-    /**
-     * A pass-through `$next` closure that proves the middleware forwarded the
-     * request.
-     *
-     * @return \Closure(\Illuminate\Http\Request): \Illuminate\Http\Response
-     */
-    private static function passThrough(): \Closure
-    {
-        return static fn (): Response => new Response('ok', 200);
     }
 }

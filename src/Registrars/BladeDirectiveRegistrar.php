@@ -11,6 +11,13 @@ use SineMacula\Laravel\Authorization\Support\BladeHelpers;
 /**
  * Register Blade directives for role and permission checks.
  *
+ * The permission directives decide through the authorization manager's full
+ * decision and the role directives check role membership, both on the subject
+ * the bound resolver returns (see `BladeHelpers`). Every directive takes its
+ * names as a string or a list, with `|` between names
+ * (`@role('admin|editor')`), then an optional guard (`@role('admin', 'web')`),
+ * which a role directive honours and a permission directive refuses.
+ *
  * `Blade::if('role', …)` auto-generates the paired
  * `@role / @unlessrole / @elserole / @endrole` quartet; the same pattern covers
  * `@permission`, `@anyrole`, `@allroles`, `@anypermission`, and
@@ -59,10 +66,10 @@ final readonly class BladeDirectiveRegistrar
         $roleNames       = ['role', 'anyrole', 'allroles', 'hasrole', 'hasanyrole', 'hasallroles'];
         $permissionNames = ['permission', 'anypermission', 'allpermissions', 'haspermission', 'hasanypermission', 'hasallpermissions'];
 
-        $anyRole = static fn (array|string $roles): bool => BladeHelpers::hasRole($roles);
-        $allRole = static fn (array|string $roles): bool => BladeHelpers::hasAllRoles($roles);
-        $anyPerm = static fn (array|string $permissions): bool => BladeHelpers::hasPermission($permissions);
-        $allPerm = static fn (array|string $permissions): bool => BladeHelpers::hasAllPermissions($permissions);
+        $anyRole = static fn (array|string $roles, ?string $guard = null): bool => BladeHelpers::hasRole($roles, $guard);
+        $allRole = static fn (array|string $roles, ?string $guard = null): bool => BladeHelpers::hasAllRoles($roles, $guard);
+        $anyPerm = static fn (array|string $permissions, ?string $guard = null): bool => BladeHelpers::hasPermission($permissions, $guard);
+        $allPerm = static fn (array|string $permissions, ?string $guard = null): bool => BladeHelpers::hasAllPermissions($permissions, $guard);
 
         Blade::if('role', $anyRole);
         Blade::if('anyrole', $anyRole);

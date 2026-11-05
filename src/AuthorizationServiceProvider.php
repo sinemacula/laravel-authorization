@@ -22,6 +22,7 @@ use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
+use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
@@ -305,13 +306,14 @@ final class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Register the `role` and `permission` route-middleware aliases.
+     * Register the `role`, `permission` and `authorize` route-middleware
+     * aliases.
      *
      * The aliases only light up when the `router` binding is available
      * (Laravel's default HTTP kernel), so console-only applications that do not
      * resolve the router never pay the registration cost. Existing aliases on
      * the same keys are respected — a consumer that has already wired their own
-     * `role` or `permission` middleware keeps theirs untouched.
+     * `role`, `permission` or `authorize` middleware keeps theirs untouched.
      *
      * @return void
      */
@@ -324,18 +326,15 @@ final class AuthorizationServiceProvider extends ServiceProvider
         /** @var \Illuminate\Routing\Router $router */
         $router = $this->app->make('router');
 
-        /** @var array<string, class-string> $existing */
-        $existing = $router->getMiddleware();
+        $aliases = [
+            'role'       => RequireRole::class,
+            'permission' => RequirePermission::class,
+            'authorize'  => AuthorizeAction::class,
+        ];
 
-        if (!isset($existing['role'])) {
-            $router->aliasMiddleware('role', RequireRole::class);
+        foreach (\array_diff_key($aliases, $router->getMiddleware()) as $alias => $middleware) {
+            $router->aliasMiddleware($alias, $middleware);
         }
-
-        if (isset($existing['permission'])) {
-            return;
-        }
-
-        $router->aliasMiddleware('permission', RequirePermission::class);
     }
 
     /**

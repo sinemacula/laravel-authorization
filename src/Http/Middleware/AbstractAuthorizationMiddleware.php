@@ -5,18 +5,27 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Http\Middleware;
 
 use Illuminate\Auth\AuthenticationException;
+use Illuminate\Contracts\Translation\Translator;
 use Illuminate\Http\Request;
+use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
-use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
+use SineMacula\Laravel\Authorization\Subject;
 
 /**
- * Shared template method for the shipped authorization middleware. Concrete
- * subclasses supply the required capability contract, the per-needle check, and
- * the rejection message; everything else — the subject lookup through the
- * subject resolver, anonymous/misconfig guards, and argument flattening — lives
- * here.
+ * Shared template method for the shipped authorization middleware.
  *
- * @template TContract of object
+ * Every middleware takes at most two arguments: the names to check, separated
+ * by `|`, and one option (a guard, or a route parameter). A request without a
+ * subject is unauthenticated (401); a denial throws the package's
+ * `AuthorizationException`, which Laravel renders as a 403 with the reason code
+ * and a translated message.
+ *
+ * Run it after authentication and after any step-up middleware, so a request
+ * that is not signed in, or not signed in strongly enough, is answered by those
+ * before it is denied here.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -24,92 +33,126 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 abstract class AbstractAuthorizationMiddleware
 {
     /**
+     * Create a new middleware instance.
+     *
+     * @param  \Illuminate\Contracts\Translation\Translator|null  $translator
+     */
+    public function __construct(
+
+        /** Translator that words a denial's message; null keeps English. */
+        private readonly ?Translator $translator = null,
+    ) {}
+
+    /**
      * Handle an incoming request.
      *
      * @param  \Illuminate\Http\Request  $request
      * @param  \Closure(\Illuminate\Http\Request): mixed  $next
-     * @param  string  ...$needles
+     * @param  string  ...$arguments
      * @return mixed
      *
      * @throws \Illuminate\Auth\AuthenticationException
-     * @throws \Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException
-     * @throws \SineMacula\Laravel\Authorization\Http\Middleware\AuthorizationMiddlewareMisconfiguredException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
      */
-    public function handle(Request $request, \Closure $next, string ...$needles): mixed
+    public function handle(Request $request, \Closure $next, string ...$arguments): mixed
     {
-        $principal = Authorization::currentSubject()?->subject;
+        self::refuseExtraArguments($arguments);
 
-        if ($principal === null) {
-            throw new AuthenticationException('Unauthenticated.');
-        }
+        $this->authorize($request, $arguments[0] ?? '', $arguments[1] ?? null);
 
-        $contract = $this->requiredContract();
-
-        if (!$principal instanceof $contract) {
-            throw new AuthorizationMiddlewareMisconfiguredException($contract, static::class);
-        }
-
-        foreach (self::expand($needles) as $needle) {
-            if ($this->matches($principal, $needle)) {
-                return $next($request);
-            }
-        }
-
-        throw new AccessDeniedHttpException($this->rejectionMessage());
+        return $next($request);
     }
 
     /**
-     * Return the fully-qualified class name of the narrow capability contract
-     * this middleware probes (`SupportsRoles` / `SupportsPermissions`).
+     * Authorise the request, or throw when it is denied.
      *
-     * @return class-string<TContract>
+     * @param  \Illuminate\Http\Request  $request
+     * @param  string  $names
+     * @param  string|null  $option
+     * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
      */
-    abstract protected function requiredContract(): string;
+    abstract protected function authorize(Request $request, string $names, ?string $option): void;
 
     /**
-     * Test whether the supplied principal satisfies a single needle (role name,
-     * permission string, …). The principal arrives narrowed to the class-bound
-     * `TContract` by `handle()`'s instanceof guard.
+     * Return the subject the request is about, or throw when there is none.
      *
-     * @param  TContract  $principal
-     * @param  string  $needle
-     * @return bool
-     */
-    abstract protected function matches(object $principal, string $needle): bool;
-
-    /**
-     * Human-readable message attached to the `AccessDenied` response when no
-     * needle matches.
+     * @return \SineMacula\Laravel\Authorization\Subject
      *
-     * @return string
+     * @throws \Illuminate\Auth\AuthenticationException
      */
-    abstract protected function rejectionMessage(): string;
-
-    /**
-     * Flatten pipe-separated arguments so a single middleware declaration like
-     * `role:admin|editor` behaves identically to the native Laravel
-     * `role:admin,editor` form. Shared across every concrete subclass — the
-     * separator rules do not vary by capability.
-     *
-     * @param  array<int, string>  $arguments
-     * @return array<int, string>
-     */
-    private static function expand(array $arguments): array
+    protected function subject(): Subject
     {
-        $needles = [];
+        return self::manager()->currentSubject() ?? throw new AuthenticationException('Unauthenticated.');
+    }
 
-        foreach ($arguments as $argument) {
-            foreach (\explode('|', $argument) as $candidate) {
-                $candidate = \trim($candidate);
+    /**
+     * Admit the request when the full decision allows any of the actions.
+     *
+     * Each action is decided in turn and the first one allowed admits the
+     * request. The last is authorised, so its denial is recorded, fires the
+     * `AuthorizationFailed` event and throws with its reason code, as
+     * `Authorization::authorize()` does. With no action, the request is denied.
+     *
+     * @param  list<string>  $actions
+     * @param  string|null  $resource
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    protected function authorizeAny(array $actions, ?string $resource): void
+    {
+        $manager = self::manager();
+        $last    = \array_pop($actions) ?? throw $this->denial(DecisionReason::IMPLICIT_DENY);
 
-                if ($candidate === '') {
-                    continue;
-                }
-
-                $needles[] = $candidate;
+        foreach ($actions as $action) {
+            if ($manager->can($action, $resource)) {
+                return;
             }
         }
 
-        return $needles;
+        $manager->authorize($last, $resource);
+    }
+
+    /**
+     * Build the denial for the reason, worded by the line the key names.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason  $reason
+     * @param  string  $key
+     * @return \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    protected function denial(DecisionReason $reason, string $key = AuthorizationException::MESSAGE_KEY): AuthorizationException
+    {
+        return AuthorizationException::translated($reason, $this->translator, $key);
+    }
+
+    /**
+     * Return the authorization manager the facade resolves.
+     *
+     * @return \SineMacula\Laravel\Authorization\AuthorizationManager
+     */
+    protected static function manager(): AuthorizationManager
+    {
+        /** @var \SineMacula\Laravel\Authorization\AuthorizationManager */
+        return Authorization::getFacadeRoot();
+    }
+
+    /**
+     * Refuse more than the two arguments every middleware takes.
+     *
+     * @param  array<int, string>  $arguments
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
+     */
+    private static function refuseExtraArguments(array $arguments): void
+    {
+        if (\count($arguments) > 2) {
+            throw InvalidCheckArgumentException::tooManyArguments(static::class, \count($arguments));
+        }
     }
 }

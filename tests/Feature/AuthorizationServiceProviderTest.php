@@ -7,7 +7,9 @@ namespace Tests\Feature;
 use Illuminate\Config\Repository as ConfigRepositoryImplementation;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Events\Dispatcher;
 use Illuminate\Foundation\Application;
+use Illuminate\Routing\Router;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Facade;
@@ -24,6 +26,9 @@ use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
+use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
+use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
+use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
@@ -33,6 +38,7 @@ use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
+use Tests\Feature\Stubs\CustomRoleMiddlewareDouble;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubPolicyStore;
 use Tests\Feature\Stubs\StubSubjectResolver;
@@ -474,6 +480,57 @@ final class AuthorizationServiceProviderTest extends TestCase
     }
 
     /**
+     * The shipped language file has a line for the missing-role denial.
+     *
+     * @return void
+     */
+    public function testLoadsTheRoleRequiredLine(): void
+    {
+        self::assertSame('This action requires a role you do not have.', $this->translator()->get(AuthorizationException::ROLE_REQUIRED_KEY));
+    }
+
+    /**
+     * The provider registers the `role`, `permission` and `authorize` route
+     * middleware aliases.
+     *
+     * @return void
+     */
+    public function testRegistersTheRouteMiddlewareAliases(): void
+    {
+        $middleware = $this->router()->getMiddleware();
+
+        self::assertSame(RequireRole::class, $middleware['role'] ?? null);
+        self::assertSame(RequirePermission::class, $middleware['permission'] ?? null);
+        self::assertSame(AuthorizeAction::class, $middleware['authorize'] ?? null);
+    }
+
+    /**
+     * An alias the application has already taken keeps its middleware, while
+     * the free ones are still registered.
+     *
+     * @return void
+     */
+    public function testKeepsTheRouteMiddlewareAliasesTheApplicationTook(): void
+    {
+        foreach (['role', 'permission', 'authorize'] as $taken) {
+            $router = new Router(new Dispatcher($this->application()), $this->application());
+            $router->aliasMiddleware($taken, CustomRoleMiddlewareDouble::class);
+
+            $this->application()->instance('router', $router);
+
+            (new AuthorizationServiceProvider($this->application()))->boot();
+
+            $expected = [
+                'role'       => RequireRole::class,
+                'permission' => RequirePermission::class,
+                'authorize'  => AuthorizeAction::class,
+            ];
+
+            self::assertSame([$taken => CustomRoleMiddlewareDouble::class] + $expected, $router->getMiddleware(), "The {$taken} alias was not kept.");
+        }
+    }
+
+    /**
      * Seed two tenants, a platform role, a temporary platform role, one role
      * owned by each tenant, and one identity holding every role but the plain
      * platform one. The temporary grant expires at 12:05.
@@ -594,6 +651,17 @@ final class AuthorizationServiceProviderTest extends TestCase
     {
         /** @var \Illuminate\Translation\Translator */
         return $this->application()->make('translator');
+    }
+
+    /**
+     * Return the application's router.
+     *
+     * @return \Illuminate\Routing\Router
+     */
+    private function router(): Router
+    {
+        /** @var \Illuminate\Routing\Router */
+        return $this->application()->make('router');
     }
 
     /**

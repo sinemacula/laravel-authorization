@@ -48,6 +48,7 @@ final class MiddlewareBudgetTest extends TestCase
      * @return void
      *
      * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      */
     public function testRequireRoleAdmitOverheadStaysBounded(): void
     {
@@ -82,6 +83,7 @@ final class MiddlewareBudgetTest extends TestCase
      * @return void
      *
      * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      */
     public function testRequirePermissionAdmitOverheadStaysBounded(): void
     {
@@ -144,9 +146,9 @@ final class MiddlewareBudgetTest extends TestCase
     }
 
     /**
-     * Bind a subject resolver that returns the supplied subject — mirrors the
-     * helper used by the feature `RouteMiddlewareTest` so both suites exercise
-     * the middleware through the package's own resolver contract.
+     * Bind a subject resolver that returns the supplied subject, so the budget
+     * exercises the middleware through the package's own resolver contract, as
+     * the feature middleware tests do.
      *
      * @param  object  $principal
      * @return void

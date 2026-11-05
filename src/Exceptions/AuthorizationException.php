@@ -5,19 +5,20 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Exceptions;
 
 use Illuminate\Auth\Access\AuthorizationException as LaravelAuthorizationException;
+use Illuminate\Contracts\Translation\Translator;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 
 /**
- * Thrown when the authorization manager's `authorize()` entry point denies a
- * request.
+ * Thrown when the authorization manager's `authorize()` entry point, or one of
+ * the package's route middleware, denies a request.
  *
  * Extends Laravel's own authorization exception, so the application's handler
  * renders it as a `403`. It carries the decision's reason code and nothing
  * else: the action, the resource, the matched statement and the trace stay out
- * of the exception, and the message is the translated
- * `authorization::authorization.denied` line. A consumer that needs the full
- * decision reads it from the `AuthorizationFailed` event or the manager's last
- * decision.
+ * of the exception, and the message is a translated line of the package's
+ * `authorization` language file: `denied` for a decision, `role_required` for a
+ * role the subject does not hold. A consumer that needs the full decision reads
+ * it from the `AuthorizationFailed` event or the manager's last decision.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -26,6 +27,9 @@ final class AuthorizationException extends LaravelAuthorizationException
 {
     /** @var string Translation key of the message a denial carries. */
     public const string MESSAGE_KEY = 'authorization::authorization.denied';
+
+    /** @var string Translation key of the message a missing role carries. */
+    public const string ROLE_REQUIRED_KEY = 'authorization::authorization.role_required';
 
     /**
      * Create a new authorization exception instance.
@@ -42,6 +46,25 @@ final class AuthorizationException extends LaravelAuthorizationException
         ?string $message = null,
     ) {
         parent::__construct($message, 403);
+    }
+
+    /**
+     * Create an exception whose message is the line the translator words for
+     * the key, in its current locale.
+     *
+     * Without a translator, or when it has no line for the key, the message is
+     * Laravel's English default.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason  $reason
+     * @param  \Illuminate\Contracts\Translation\Translator|null  $translator
+     * @param  string  $key
+     * @return self
+     */
+    public static function translated(DecisionReason $reason, ?Translator $translator, string $key = self::MESSAGE_KEY): self
+    {
+        $line = $translator?->get($key);
+
+        return new self($reason, \is_string($line) && $line !== $key ? $line : null);
     }
 
     /**
