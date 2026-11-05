@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\Console\ListPermissionsCommand;
 use SineMacula\Laravel\Authorization\Console\ListRolesCommand;
 use SineMacula\Laravel\Authorization\Console\MigrateSpatieCommand;
 use SineMacula\Laravel\Authorization\Console\RevokeRoleCommand;
+use SineMacula\Laravel\Authorization\Console\SyncPermissionsCommand;
 use SineMacula\Laravel\Authorization\Console\WhyCanCommand;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
@@ -65,7 +66,9 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
  *
  * Booting never queries or writes the database, so `config:cache`,
  * `route:cache` and `migrate` run before the package's tables exist, and a
- * configured permission provider is never read at boot.
+ * configured permission provider is never read at boot. The permission
+ * catalogue the enums and providers declare reaches the database only when
+ * `authorization:sync` runs.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -155,6 +158,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
             RevokeRoleCommand::class,
             WhyCanCommand::class,
             MigrateSpatieCommand::class,
+            SyncPermissionsCommand::class,
         ]);
     }
 

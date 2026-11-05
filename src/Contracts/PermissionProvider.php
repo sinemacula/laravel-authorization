@@ -9,8 +9,11 @@ namespace SineMacula\Laravel\Authorization\Contracts;
  *
  * Packages and modules that ship their own permission sets implement this
  * contract and register their class in the `authorization.permission_providers`
- * config array. The service provider validates the configured classes at boot
- * but never reads a provider there, so booting writes no `Permission` rows.
+ * config array. `authorization:sync` resolves each provider through the
+ * container and writes the definitions it returns to the permission catalogue,
+ * alongside the cases of the configured permission enums. The service provider
+ * validates the configured classes at boot but never reads a provider there, so
+ * booting writes no `Permission` rows.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -18,18 +21,10 @@ namespace SineMacula\Laravel\Authorization\Contracts;
 interface PermissionProvider
 {
     /**
-     * Return the permission strings this provider contributes.
+     * Return the permissions this provider declares, each with its name,
+     * description, category and guard (null for guard-agnostic).
      *
-     * @return array<int, string>
+     * @return list<\SineMacula\Laravel\Authorization\Support\PermissionDefinition>
      */
     public function permissions(): array;
-
-    /**
-     * Return the guard name these permissions are scoped to.
-     *
-     * Return null for guard-agnostic permissions.
-     *
-     * @return string|null
-     */
-    public function guard(): ?string;
 }

@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature\Stubs;
 
 use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
+use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 
 /**
  * Stub provider that counts how often its permissions are read, so a test can
@@ -21,26 +22,15 @@ final class RecordingPermissionProvider implements PermissionProvider
     public static int $reads = 0;
 
     /**
-     * Return the permission strings this provider contributes.
+     * Return the permissions this provider declares.
      *
-     * @return array<int, string>
+     * @return list<\SineMacula\Laravel\Authorization\Support\PermissionDefinition>
      */
     #[\Override]
     public function permissions(): array
     {
         self::$reads++;
 
-        return ['reports:export'];
-    }
-
-    /**
-     * Return the guard name these permissions are scoped to.
-     *
-     * @return string|null
-     */
-    #[\Override]
-    public function guard(): ?string
-    {
-        return null;
+        return [new PermissionDefinition(name: 'reports:export')];
     }
 }

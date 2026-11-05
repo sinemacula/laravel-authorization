@@ -9,6 +9,7 @@ use Illuminate\Container\Container;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Foundation\Application;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Facade;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Translation\Translator;
@@ -205,6 +206,21 @@ final class AuthorizationServiceProviderTest extends TestCase
 
         self::assertSame($bound[PrincipalResolver::class], (new \ReflectionProperty($manager, 'principalResolver'))->getValue($manager));
         self::assertSame($bound[PolicyResolver::class], (new \ReflectionProperty($manager, 'policyResolver'))->getValue($manager));
+    }
+
+    /**
+     * Every package command is registered in the console, the catalogue sync
+     * included.
+     *
+     * @return void
+     */
+    public function testRegistersThePackageCommands(): void
+    {
+        $commands = \array_keys(Artisan::all());
+
+        foreach (['list-roles', 'list-permissions', 'grant', 'revoke', 'why-can', 'migrate-spatie', 'sync'] as $name) {
+            self::assertContains("authorization:{$name}", $commands);
+        }
     }
 
     /**

@@ -5,40 +5,31 @@ declare(strict_types = 1);
 namespace Tests\Feature\Stubs;
 
 use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
+use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 
 /**
- * Stub provider that contributes two permissions under the `web` guard.
+ * Stub provider that declares two `web` permissions with metadata and one
+ * guard-agnostic permission without.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
- *
- * @SuppressWarnings("php:S1192")
  */
 final class StubPermissionProvider implements PermissionProvider
 {
     /**
-     * Return the permission strings this provider contributes.
+     * Return the permissions this provider declares.
      *
-     * @return array<int, string>
+     * @return list<\SineMacula\Laravel\Authorization\Support\PermissionDefinition>
      */
     #[\Override]
     public function permissions(): array
     {
-        return ['media:upload', 'media:delete'];
-    }
-
-    /**
-     * Return the guard name these permissions are scoped to.
-     *
-     * @return string|null
-     *
-     * @phpstan-ignore return.unusedType
-     */
-    #[\Override]
-    public function guard(): ?string
-    {
-        return 'web';
+        return [
+            new PermissionDefinition(name: 'media:upload', description: 'Upload media', category: 'Media', guard: 'web'),
+            new PermissionDefinition(name: 'media:delete', description: 'Delete media', category: 'Media', guard: 'web'),
+            new PermissionDefinition(name: 'billing:view'),
+        ];
     }
 }
