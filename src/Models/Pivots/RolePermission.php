@@ -32,21 +32,23 @@ final class RolePermission extends Pivot
 
     /**
      * Return the connection the pivot table lives on: the configured
-     * `authorization.connection`, or Laravel's choice when it is unset.
+     * `authorization.connection`, or the application's default when it is
+     * unset.
      *
      * Laravel hands a pivot the connection of the model the relation starts
-     * from, so without this a pivot row would follow its parent rather than the
-     * package's tables. Naming the connection is schema, so this is a framework
-     * hook rather than model behaviour.
+     * from, so the pivot never uses the connection it carries: a pivot row
+     * stays with the package's tables whichever connection its parent was
+     * loaded from. Naming the connection is schema, so this is a framework hook
+     * rather than model behaviour.
      *
-     * @return string|null
+     * @return string
      *
      * @phpstan-ignore sineMaculaLaravel.modelBehaviour
      */
     #[\Override]
-    public function getConnectionName(): ?string
+    public function getConnectionName(): string
     {
-        return AuthorizationConnection::name() ?? parent::getConnectionName();
+        return AuthorizationConnection::resolve();
     }
 
     /**

@@ -71,4 +71,15 @@ final class AuthorizableGrantPivotTest extends TestCase
     {
         return new AuthorizableRolePivot;
     }
+
+    /**
+     * Determine whether the class under test is a pivot.
+     *
+     * @return bool
+     */
+    #[\Override]
+    protected static function isAPivot(): bool
+    {
+        return true;
+    }
 }

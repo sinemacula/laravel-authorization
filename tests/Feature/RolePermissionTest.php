@@ -431,6 +431,17 @@ final class RolePermissionTest extends TestCase
     }
 
     /**
+     * Determine whether the class under test is a pivot.
+     *
+     * @return bool
+     */
+    #[\Override]
+    protected static function isAPivot(): bool
+    {
+        return true;
+    }
+
+    /**
      * Save a pivot row built directly against the given parent, outside any
      * relation, so the parent and the row's ids can disagree.
      *

@@ -76,6 +76,17 @@ abstract class StringCastsTestCase extends TestCase
     }
 
     /**
+     * Determine whether the class under test is a pivot.
+     *
+     * @return bool
+     */
+    #[\Override]
+    protected static function isAPivot(): bool
+    {
+        return false;
+    }
+
+    /**
      * Return the model's fillable string columns.
      *
      * @return list<string>

@@ -82,19 +82,20 @@ class Role extends Model
 
     /**
      * Return the connection the role table lives on: the configured
-     * `authorization.connection`, or Laravel's choice when it is unset.
+     * `authorization.connection`, else the instance's own, else the
+     * application's default.
      *
      * Naming the connection is schema, so this is a framework hook rather than
      * model behaviour.
      *
-     * @return string|null
+     * @return string
      *
      * @phpstan-ignore sineMaculaLaravel.modelBehaviour
      */
     #[\Override]
-    public function getConnectionName(): ?string
+    public function getConnectionName(): string
     {
-        return AuthorizationConnection::name() ?? parent::getConnectionName();
+        return AuthorizationConnection::resolve(parent::getConnectionName());
     }
 
     /**

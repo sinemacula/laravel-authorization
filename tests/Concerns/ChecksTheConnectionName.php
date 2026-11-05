@@ -6,11 +6,12 @@ namespace Tests\Concerns;
 
 use Illuminate\Config\Repository;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 
 /**
  * Shared checks that a package model or pivot names the configured
- * `authorization.connection`, and leaves the choice to Laravel when it is
- * unset.
+ * `authorization.connection`, and the application's default connection when it
+ * is unset.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,23 +43,43 @@ trait ChecksTheConnectionName
     }
 
     /**
-     * With the setting unset, the instance's own connection is used, which is
-     * null (the default connection) until Laravel sets one.
+     * With the setting unset, the application's default connection is named
+     * rather than left to Laravel, so a relation never hands the model or pivot
+     * the connection of the model it starts from.
      *
      * @return void
      */
-    public function testConnectionNameIsLaravelsChoiceWhenUnset(): void
+    public function testConnectionNameIsTheDefaultConnectionWhenUnset(): void
+    {
+        $this->configureConnection(null);
+
+        self::assertSame(DB::getDefaultConnection(), static::newConnectionModel()->getConnectionName());
+    }
+
+    /**
+     * With the setting unset, a model keeps a connection set on the instance,
+     * as `on()` sets one; a pivot does not, since the one it carries is always
+     * its parent's.
+     *
+     * @return void
+     */
+    public function testInstanceConnectionWhenUnsetIsKeptByModelsOnly(): void
     {
         $this->configureConnection(null);
 
         $model = static::newConnectionModel();
 
-        self::assertNull($model->getConnectionName());
-
         $model->setConnection('other');
 
-        self::assertSame('other', $model->getConnectionName());
+        self::assertSame(static::isAPivot() ? DB::getDefaultConnection() : 'other', $model->getConnectionName());
     }
+
+    /**
+     * Determine whether the class under test is a pivot.
+     *
+     * @return bool
+     */
+    abstract protected static function isAPivot(): bool;
 
     /**
      * Create an instance of the model under test.
