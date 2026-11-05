@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\RecordsRowLocks;
 use Tests\Feature\Stubs\CustomRole;
 use Tests\TestCase;
 
@@ -36,7 +37,7 @@ use Tests\TestCase;
 #[CoversClass(ReservedRoleNameException::class)]
 final class RoleObserverTest extends TestCase
 {
-    use ActsAsTenant;
+    use ActsAsTenant, RecordsRowLocks;
 
     /** @var array{tenant_type: string, tenant_id: string} The owner columns of a tenant's role. */
     private const array TENANT = ['tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a'];
@@ -175,6 +176,43 @@ final class RoleObserverTest extends TestCase
         $child->save();
 
         self::assertSame($another->id, $child->fresh()?->parent_id);
+    }
+
+    /**
+     * The walk locks each ancestor it reads, in order up the chain.
+     *
+     * @return void
+     */
+    public function testTheWalkLocksEachAncestor(): void
+    {
+        $root   = $this->makeRole('root');
+        $parent = $this->makeRole('parent', $root->id);
+        $role   = $this->makeRole('editor');
+
+        $locks = $this->recordRowLocks();
+
+        $role->parent_id = $parent->id;
+        $role->save();
+
+        self::assertSame([['roles', [$parent->id]], ['roles', [$root->id]]], $locks->getArrayCopy());
+    }
+
+    /**
+     * A chain that names an ancestor no row answers, as a parent key written
+     * past the foreign key would, ends the walk there without an error.
+     *
+     * @return void
+     */
+    public function testAChainThatReachesAMissingAncestorEndsTheWalk(): void
+    {
+        $role            = $this->makeRole('editor');
+        $role->parent_id = '00000000-0000-4000-8000-000000000000';
+
+        $locks = $this->recordRowLocks();
+
+        (new RoleObserver)->saving($role);
+
+        self::assertSame([['roles', ['00000000-0000-4000-8000-000000000000']]], $locks->getArrayCopy());
     }
 
     /**

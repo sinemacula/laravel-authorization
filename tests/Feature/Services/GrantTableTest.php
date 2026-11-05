@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChange;
 use SineMacula\Laravel\Authorization\Services\Support\GrantTable;
+use Tests\Concerns\RecordsRowLocks;
 use Tests\TestCase;
 
 /**
@@ -28,8 +29,17 @@ use Tests\TestCase;
 #[CoversClass(GrantChange::class)]
 final class GrantTableTest extends TestCase
 {
+    use RecordsRowLocks;
+
     /** @var string The instant every test starts at. */
     private const string NOW = '2026-07-01 12:00:00';
+
+    /** @var array<string, array<string, string>> Rows that differ from the platform-wide row in one scope column only. */
+    private const array SCOPED_ROWS = [
+        'tenant type only' => ['tenant_type' => 'stub_tenant', 'expires_at' => '2026-07-03 12:00:00'],
+        'tenant id only'   => ['tenant_id' => 'tenant-a', 'expires_at' => '2026-07-04 12:00:00'],
+        'application only' => ['application' => 'admin', 'expires_at' => '2026-07-05 12:00:00'],
+    ];
 
     /**
      * Freeze the clock.
@@ -226,6 +236,72 @@ final class GrantTableTest extends TestCase
         self::assertSame(GrantOutcome::GRANTED, self::table()->grant($role->id, null)->outcome);
         self::assertSame(2, DB::table('authorizable_roles')->where('expires_at', '2026-07-01 13:00:00')->count());
         self::assertSame(1, DB::table('authorizable_roles')->whereNull('expires_at')->whereNull('tenant_type')->whereNull('application')->count());
+    }
+
+    /**
+     * Granting a held grant again reads back and rewrites only the
+     * platform-wide row, never a row scoped by one column, and reports the
+     * platform-wide row's expiry as the previous one.
+     *
+     * @return void
+     */
+    public function testARegrantReadsAndRewritesOnlyThePlatformWideRow(): void
+    {
+        $role = self::role();
+
+        self::insertRow($role->id, ['expires_at' => '2026-07-02 12:00:00']);
+
+        foreach (self::SCOPED_ROWS as $columns) {
+            self::insertRow($role->id, $columns);
+        }
+
+        $change = self::table()->grant($role->id, Carbon::parse('2026-07-06 12:00:00', 'UTC'));
+
+        self::assertSame(GrantOutcome::EXPIRY_CHANGED, $change->outcome);
+        self::assertSame('2026-07-02 12:00:00', $change->previousExpiresAt?->format('Y-m-d H:i:s'));
+        self::assertSame(['2026-07-03 12:00:00', '2026-07-04 12:00:00', '2026-07-05 12:00:00', '2026-07-06 12:00:00'], self::expiries());
+    }
+
+    /**
+     * Re-arming an expired grant reads back and rewrites only the platform-wide
+     * row, never a row scoped by one column.
+     *
+     * @return void
+     */
+    public function testARearmReadsAndRewritesOnlyThePlatformWideRow(): void
+    {
+        $role = self::role();
+
+        self::insertRow($role->id, ['expires_at' => '2026-07-01 11:00:00']);
+
+        foreach (self::SCOPED_ROWS as $columns) {
+            self::insertRow($role->id, $columns);
+        }
+
+        $change = self::table()->rearm($role->id, Carbon::parse('2026-07-06 12:00:00', 'UTC'));
+
+        self::assertSame(GrantOutcome::REARMED, $change->outcome);
+        self::assertSame('2026-07-01 11:00:00', $change->previousExpiresAt?->format('Y-m-d H:i:s'));
+        self::assertSame(['2026-07-03 12:00:00', '2026-07-04 12:00:00', '2026-07-05 12:00:00', '2026-07-06 12:00:00'], self::expiries());
+    }
+
+    /**
+     * A held grant's expiry is read back under a row lock on the grant table.
+     *
+     * @return void
+     */
+    public function testAHeldGrantIsReadBackUnderARowLock(): void
+    {
+        $role  = self::role();
+        $table = self::table();
+
+        $table->grant($role->id, null);
+
+        $locks = $this->recordRowLocks();
+
+        $table->grant($role->id, null);
+
+        self::assertSame([['authorizable_roles', ['stub_identity', 'user-1', $role->id]]], $locks->getArrayCopy());
     }
 
     /**
@@ -446,6 +522,17 @@ final class GrantTableTest extends TestCase
             'authorizable_id'   => 'user-1',
             ...$columns,
         ]);
+    }
+
+    /**
+     * Return the expiry of every role grant row, in order.
+     *
+     * @return list<string|null>
+     */
+    private static function expiries(): array
+    {
+        /** @var list<string|null> */
+        return DB::table('authorizable_roles')->orderBy('expires_at')->pluck('expires_at')->all();
     }
 
     /**
