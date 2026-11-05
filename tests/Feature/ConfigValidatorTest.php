@@ -13,16 +13,21 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use Tests\Feature\Stubs\Contracts\PermissionEnumInterface;
 use Tests\Feature\Stubs\CustomPermission;
 use Tests\Feature\Stubs\CustomPolicy;
 use Tests\Feature\Stubs\CustomRole;
+use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
+use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\TestCase;
 
 /**
- * Feature tests for the boot-time validation of `authorization.models.*`.
+ * Feature tests for the boot-time validation of `authorization.models.*`, the
+ * connection and the backing of `authorization.permission_enums`.
  *
- * Each entry must name an existing class that is the shipped model or a
- * subclass of it; anything else is refused with the offending key.
+ * Each model entry must name an existing class that is the shipped model or a
+ * subclass of it, and each permission enum must be backed by strings; anything
+ * else is refused with the offending key.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -208,6 +213,113 @@ final class ConfigValidatorTest extends TestCase
             'authorization.connection',
             'database connection \'missing\' is not configured.',
         );
+    }
+
+    /**
+     * A string-backed permission enum passes validation.
+     *
+     * @return void
+     */
+    public function testStringBackedPermissionEnumPasses(): void
+    {
+        $this->validateWithPermissionEnums([PermissionEnum::class]);
+
+        $this->expectNotToPerformAssertions();
+    }
+
+    /**
+     * A permission enum backed by integers is refused, since a case's value is
+     * the permission name.
+     *
+     * @return void
+     */
+    public function testIntBackedPermissionEnumIsRejected(): void
+    {
+        $this->assertRejected(
+            fn () => $this->validateWithPermissionEnums([PermissionEnum::class, IntBackedPermissionEnum::class]),
+            'authorization.permission_enums.1',
+            'enum \'' . IntBackedPermissionEnum::class . '\' must be backed by strings, since each case\'s value is a permission name.',
+        );
+    }
+
+    /**
+     * An interface extending the contract is refused, since it is not an enum.
+     *
+     * @return void
+     */
+    public function testPermissionEnumInterfaceIsRejected(): void
+    {
+        $this->assertRejected(
+            fn () => $this->validateWithPermissionEnums([PermissionEnumInterface::class]),
+            'authorization.permission_enums.0',
+            'enum \'' . PermissionEnumInterface::class . '\' must be backed by strings, since each case\'s value is a permission name.',
+        );
+    }
+
+    /**
+     * A permission enum backed by integers fails the provider's boot.
+     *
+     * @return void
+     */
+    public function testIntBackedPermissionEnumFailsBoot(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config->set('authorization.permission_enums', [IntBackedPermissionEnum::class]);
+
+        $this->assertRejected(
+            fn () => (new AuthorizationServiceProvider($this->app))->boot(),
+            'authorization.permission_enums.0',
+            'enum \'' . IntBackedPermissionEnum::class . '\' must be backed by strings, since each case\'s value is a permission name.',
+        );
+    }
+
+    /**
+     * Provide `permission_enums` entries with whether each is a string-backed
+     * permission enum.
+     *
+     * @return iterable<string, array{mixed, bool}>
+     */
+    public static function permissionEnumEntryProvider(): iterable
+    {
+        yield 'string-backed enum' => [PermissionEnum::class, true];
+
+        yield 'integer-backed enum' => [IntBackedPermissionEnum::class, false];
+
+        yield 'contract interface' => [PermissionEnumInterface::class, false];
+
+        yield 'class not implementing the contract' => [\stdClass::class, false];
+
+        yield 'non-string entry' => [123, false];
+    }
+
+    /**
+     * Only a string-backed enum implementing the contract is a usable
+     * `permission_enums` entry for the code that reads the list at run time.
+     *
+     * @param  mixed  $class
+     * @param  bool  $expected
+     * @return void
+     */
+    #[DataProvider('permissionEnumEntryProvider')]
+    public function testIdentifiesAStringBackedPermissionEnum(mixed $class, bool $expected): void
+    {
+        self::assertSame($expected, ConfigValidator::isStringBackedPermissionEnum($class));
+    }
+
+    /**
+     * Run the validator over the package config with the given
+     * `permission_enums`.
+     *
+     * @param  list<string>  $enums
+     * @return void
+     */
+    private function validateWithPermissionEnums(array $enums): void
+    {
+        $config                     = $this->authorizationConfig();
+        $config['permission_enums'] = $enums;
+
+        ConfigValidator::validate($config, $this->app);
     }
 
     /**

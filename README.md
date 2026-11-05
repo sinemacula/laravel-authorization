@@ -52,6 +52,9 @@ principal's role and permission grants, and anything left is denied.
   `${…}` interpolation from the check's context. Malformed documents are refused when they are saved.
 - **Gate auto-wiring**: every case of a configured permission enum is registered as a Gate ability, with a choice of
   what happens when an ability of the same name already exists.
+- **A permission catalogue in code**: enums and providers declare each permission with a description, a category and
+  its guards, and `authorization:sync` writes them to the database on deploy, reporting stale rows rather than
+  deleting them. Booting never touches the database.
 - **Route middleware and Blade directives** for roles and permissions, with `|` or `,` between alternatives.
 - **System records**: roles, permissions and policies flagged `is_system` cannot be edited, deleted or have the flag
   cleared unless `forceSystem()` unlocks the next change.
@@ -96,12 +99,25 @@ use SineMacula\Laravel\Authorization\Resolvers\AuthGuardPrincipalResolver;
 'principal_resolver' => AuthGuardPrincipalResolver::class,
 ```
 
-List the enums whose cases should become Gate abilities:
+List the enums whose cases should become Gate abilities and permissions, and any permission providers:
 
 ```php
 'permission_enums' => [
     App\Authorization\PostPermission::class,
 ],
+
+'permission_providers' => [
+    App\Authorization\MediaPermissions::class,
+],
+```
+
+Booting the package never queries or writes the database, so `config:cache`, `route:cache` and `migrate` run before
+the tables exist. The permissions the enums and providers declare reach the database when you sync them, which belongs
+in your deployment after the migrations:
+
+```bash
+php artisan migrate --force
+php artisan authorization:sync
 ```
 
 The package writes its warnings (a Gate conflict under the `log` mode, a discarded cache entry, a policy whose document
@@ -131,7 +147,7 @@ class User extends Authenticatable implements AuthorizableIdentity
 }
 ```
 
-Define permissions as an enum:
+Define permissions as a string-backed enum. Each case's value is the permission name:
 
 ```php
 namespace App\Authorization;
@@ -142,23 +158,64 @@ enum PostPermission: string implements PermissionEnum
 {
     case UPDATE = 'posts:update';
     case DELETE = 'posts:delete';
+}
+```
 
-    public function toString(): string
+A `#[Permission]` attribute on a case gives the permission a description and a category, and limits it to guards. A
+case without `guards` declares one guard-agnostic permission; a list declares one permission per guard. The attribute
+shares its short name with the permission model, so alias it:
+
+```php
+use SineMacula\Laravel\Authorization\Attributes\Permission as PermissionMeta;
+use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
+
+enum PostPermission: string implements PermissionEnum
+{
+    #[PermissionMeta(description: 'Edit any post', category: 'Posts')]
+    case UPDATE = 'posts:update';
+
+    #[PermissionMeta(description: 'Delete any post', category: 'Posts', guards: ['web', 'api'])]
+    case DELETE = 'posts:delete';
+}
+```
+
+A module that ships its own permissions can declare them with a provider. A provider's permissions are written to the
+catalogue and can be checked through the `Authorization` facade and `hasPermission()`, but they are not registered as
+Gate abilities and do not appear in `effectivePermissions()`. Declare a permission as an enum case when it must work
+with `Gate`, `@can` or the `can:` middleware:
+
+```php
+use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
+use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
+
+final class MediaPermissions implements PermissionProvider
+{
+    public function permissions(): array
     {
-        return $this->value;
+        return [
+            new PermissionDefinition(name: 'media:upload', description: 'Upload media', category: 'Media', guard: 'web'),
+        ];
     }
 }
 ```
 
-Grant roles and permissions, then check them as with any Laravel ability:
+`authorization:sync` adds the declared permissions that have no row and updates the description and category of those
+that differ, in one transaction, through the configured permission model. A platform permission that no enum or
+provider declares is reported as `stale` and left alone; `--prune` deletes stale permissions, except system ones, which
+are reported as `protected` and never changed. Permissions owned by a tenant are never read or changed. Every row is
+listed with its action, as a table or, with `--format=json`, as JSON. A name outside the package's name rules, an empty
+guard list or a guard that is not a non-empty string fails the sync with exit code `2` before anything is written. In
+CI, `--dry-run` exits with `1` when anything would be added, updated or pruned:
+
+```bash
+php artisan authorization:sync --dry-run --format=json
+```
+
+Once the permissions are synced, grant roles and permissions, then check them as with any Laravel ability:
 
 ```php
 use Illuminate\Support\Facades\Gate;
-use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
-
-Permission::create(['name' => 'posts:update']);
-Permission::create(['name' => 'posts:delete']);
 
 Role::create(['name' => 'editor'])->givePermission('posts:update');
 
@@ -255,6 +312,7 @@ The contracts behind the evaluator, for maintainers and reviewers, are in [docs/
 | [Model extension](docs/design/model-extension.md)                                           | Swapping the shipped models for your own subclasses         |
 | [Impersonation](docs/design/impersonation.md)                                               | Checking as another principal                               |
 | [Spatie compatibility](docs/design/spatie-compatibility.md)                                 | The import from `spatie/laravel-permission` and its aliases |
+| [Permission catalogue sync](docs/design/permission-catalogue-sync.md)                       | Declaring permissions in code and `authorization:sync`      |
 
 ## Requirements
 

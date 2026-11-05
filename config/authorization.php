@@ -87,10 +87,16 @@ return [
     | Permission enums
     |---------------------------------------------------------------------------
     |
-    | Backed or unit enums implementing `PermissionEnum`. Every case is wired
-    | into a Laravel Gate on boot, so a permission defined here is immediately
-    | callable via `Gate::allows(...)`, `$user->can(...)`, `@can(...)`, and the
-    | `can:` route middleware.
+    | String-backed enums implementing `PermissionEnum`; each case's value is
+    | the permission name, and an enum backed by integers is refused at boot.
+    | Every case is wired into a Laravel Gate on boot, so a permission defined
+    | here is immediately callable via `Gate::allows(...)`, `$user->can(...)`,
+    | `@can(...)`, and the `can:` route middleware.
+    |
+    | The cases are also the permission catalogue: `authorization:sync` writes
+    | each one to the database, with the description, category and guards of
+    | the `#[Permission]` attribute on the case. Booting never writes them, so
+    | run the sync after `migrate` when you deploy.
     |
     | **Required for Laravel's Gate surface.** The `Authorization` facade
     | (`Authorization::can(...)`, `Authorization::for($user)->can(...)`) works
@@ -109,11 +115,17 @@ return [
     | Permission providers
     |---------------------------------------------------------------------------
     |
-    | Class-strings implementing `PermissionProvider`. Each provider contributes
-    | a list of permission strings and a guard scope. At boot the service
-    | provider walks every entry and creates `Permission` rows via
-    | `firstOrCreate`, so modular packages can ship their own permission sets
-    | without the host application editing a central enum.
+    | Class-strings implementing `PermissionProvider`. Each provider returns
+    | `PermissionDefinition` objects, each a permission's name, description,
+    | category and guard, so modular packages can ship their own permission
+    | sets without the host application editing a central enum. The classes
+    | are validated at boot, but a provider is read only by
+    | `authorization:sync`, which writes its permissions alongside the enums'.
+    | A provider's permissions can be checked through the `Authorization`
+    | facade and `hasPermission()`, but they are not registered as Gate
+    | abilities and do not appear in `effectivePermissions()`; declare a
+    | permission as an enum case when it must work with `Gate`, `@can` or the
+    | `can:` middleware.
     |
     */
 

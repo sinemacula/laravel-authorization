@@ -7,8 +7,8 @@ namespace SineMacula\Laravel\Authorization;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Translation\Translator;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
+use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
-use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
@@ -219,7 +219,7 @@ final class AuthorizationManager
         $permissions = [];
 
         foreach ($enums as $enumClass) {
-            if (!\is_string($enumClass) || !\is_subclass_of($enumClass, PermissionEnum::class)) {
+            if (!ConfigValidator::isStringBackedPermissionEnum($enumClass)) {
                 continue;
             }
 
@@ -227,7 +227,9 @@ final class AuthorizationManager
             $className = $enumClass;
 
             foreach ($className::cases() as $case) {
-                $action               = $case->toString();
+                // Only enums backed by strings get this far.
+                /** @var string $action */
+                $action               = $case->value;
                 $permissions[$action] = $this->can($action, null, $context);
             }
         }

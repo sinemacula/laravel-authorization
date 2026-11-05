@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Registrars;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Gate;
+use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableResource;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
 use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
@@ -50,7 +51,7 @@ final readonly class GateRegistrar
         $onConflict = $this->resolveConflictMode();
 
         foreach ($enums as $enumClass) {
-            if (!\is_string($enumClass) || !\is_subclass_of($enumClass, PermissionEnum::class)) {
+            if (!ConfigValidator::isStringBackedPermissionEnum($enumClass)) {
                 continue;
             }
 
@@ -93,7 +94,9 @@ final readonly class GateRegistrar
      */
     private function registerEnumGate(PermissionEnum $case, GateConflictMode $onConflict): void
     {
-        $permission = $case->toString();
+        // register() skips an enum not backed by strings.
+        /** @var string $permission */
+        $permission = $case->value;
 
         if (Gate::has($permission)) {
             // Exhaustive match over GateConflictMode: Throw short-circuits,

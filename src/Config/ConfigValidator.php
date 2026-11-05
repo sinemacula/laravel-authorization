@@ -65,6 +65,25 @@ final class ConfigValidator
     }
 
     /**
+     * Determine whether the given value names an enum that implements the
+     * `PermissionEnum` contract and is backed by strings: an entry of
+     * `permission_enums` the validation accepts.
+     *
+     * The Gate registrar and the manager read the configured enums at run time,
+     * after boot, so they skip an entry for which this is false rather than
+     * fail on it.
+     *
+     * @param  mixed  $class
+     * @return bool
+     */
+    public static function isStringBackedPermissionEnum(mixed $class): bool
+    {
+        return \is_string($class)
+            && \is_subclass_of($class, PermissionEnum::class)
+            && self::isStringBackedEnum($class);
+    }
+
+    /**
      * Validate that `connection`, when set, names a connection the application
      * configures under `database.connections`. Null or an empty name selects
      * the application's default connection.
@@ -165,8 +184,9 @@ final class ConfigValidator
     }
 
     /**
-     * Validate a single `permission_enums` entry resolves to an existing type
-     * implementing the `PermissionEnum` contract.
+     * Validate a single `permission_enums` entry resolves to an existing enum
+     * implementing the `PermissionEnum` contract and backed by strings, since a
+     * case's value is the permission name.
      *
      * @param  int|string  $index
      * @param  mixed  $class
@@ -187,6 +207,25 @@ final class ConfigValidator
         if (!\is_subclass_of($class, PermissionEnum::class)) {
             throw new InvalidAuthorizationConfigException("authorization.permission_enums.{$index}", "class '{$class}' does not implement " . PermissionEnum::class . '.');
         }
+
+        if (!self::isStringBackedEnum($class)) {
+            $reason = "enum '{$class}' must be backed by strings, since each case's value is a permission name.";
+
+            throw new InvalidAuthorizationConfigException("authorization.permission_enums.{$index}", $reason);
+        }
+    }
+
+    /**
+     * Determine whether the given type is an enum backed by strings. An
+     * interface extending the contract is not an enum.
+     *
+     * @param  string  $class
+     * @return bool
+     */
+    private static function isStringBackedEnum(string $class): bool
+    {
+        return \enum_exists($class)
+            && (string) (new \ReflectionEnum($class))->getBackingType() === 'string';
     }
 
     /**

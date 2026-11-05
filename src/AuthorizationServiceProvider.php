@@ -15,8 +15,8 @@ use SineMacula\Laravel\Authorization\Console\ListPermissionsCommand;
 use SineMacula\Laravel\Authorization\Console\ListRolesCommand;
 use SineMacula\Laravel\Authorization\Console\MigrateSpatieCommand;
 use SineMacula\Laravel\Authorization\Console\RevokeRoleCommand;
+use SineMacula\Laravel\Authorization\Console\SyncPermissionsCommand;
 use SineMacula\Laravel\Authorization\Console\WhyCanCommand;
-use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
@@ -25,7 +25,6 @@ use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
-use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
@@ -64,6 +63,12 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
  * Row-lifecycle behaviour for `Role` / `Permission` / `Policy` is attached via
  * the `#[ObservedBy]` attribute on each model; the service provider does not
  * touch model booting.
+ *
+ * Booting never queries or writes the database, so `config:cache`,
+ * `route:cache` and `migrate` run before the package's tables exist, and a
+ * configured permission provider is never read at boot. The permission
+ * catalogue the enums and providers declare reaches the database only when
+ * `authorization:sync` runs.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -110,8 +115,6 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
         (new GateRegistrar($this->app))->register();
 
-        $this->registerPermissionProviders();
-
         (new EventListenerRegistrar($this->app))->register();
 
         $this->registerRouteMiddleware();
@@ -155,6 +158,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
             RevokeRoleCommand::class,
             WhyCanCommand::class,
             MigrateSpatieCommand::class,
+            SyncPermissionsCommand::class,
         ]);
     }
 
@@ -377,66 +381,6 @@ final class AuthorizationServiceProvider extends ServiceProvider
             [__DIR__ . '/../lang' => $this->app->langPath('vendor/authorization')],
             'authorization-lang',
         );
-    }
-
-    /**
-     * Walk every configured permission provider and create `Permission` rows
-     * for each string the provider declares.
-     *
-     * Providers are instantiated through the container so they can inject
-     * dependencies. Each permission string is persisted via `firstOrCreate`
-     * keyed on `(name, guard)` so the method is idempotent across boots.
-     *
-     * @return void
-     */
-    protected function registerPermissionProviders(): void
-    {
-        /** @var array<int, mixed> $providers */
-        $providers = $this->app['config']->get('authorization.permission_providers', []);
-
-        if ($providers === []) {
-            return;
-        }
-
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $permissionModel */
-        $permissionModel = $this->app['config']->get('authorization.models.permission', Permission::class);
-
-        foreach ($providers as $providerClass) {
-            if (!\is_string($providerClass) || !\is_subclass_of($providerClass, PermissionProvider::class)) {
-                continue;
-            }
-
-            $this->syncProviderPermissions($providerClass, $permissionModel);
-        }
-    }
-
-    /**
-     * Persist a single provider's permission strings for its guard scope.
-     *
-     * @param  class-string<\SineMacula\Laravel\Authorization\Contracts\PermissionProvider>  $providerClass
-     * @param  class-string<\SineMacula\Laravel\Authorization\Models\Permission>  $permissionModel
-     * @return void
-     */
-    protected function syncProviderPermissions(string $providerClass, string $permissionModel): void
-    {
-        /** @var \SineMacula\Laravel\Authorization\Contracts\PermissionProvider $provider */
-        $provider = $this->app->make($providerClass);
-
-        $guard = $provider->guard();
-
-        foreach ($provider->permissions() as $permission) {
-            // Load-bearing guard against providers whose runtime return
-            // violates the string-list contract, despite the contract narrowing
-            // making it read as redundant.
-            // @phpstan-ignore function.alreadyNarrowedType
-            if (!\is_string($permission) || $permission === '') {
-                continue;
-            }
-
-            $permissionModel::firstOrCreate(
-                ['name' => $permission, 'guard' => $guard],
-            );
-        }
     }
 
     /**

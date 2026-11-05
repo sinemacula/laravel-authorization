@@ -23,6 +23,7 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
+use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
@@ -86,6 +87,20 @@ final class GateRegistrarTest extends TestCase
         Relation::morphMap([], false);
 
         parent::tearDown();
+    }
+
+    /**
+     * Every case of a configured enum is registered as a Gate named by the
+     * case's value, which is the permission name.
+     *
+     * @return void
+     */
+    public function testRegistersAGateNamedByEachCaseValue(): void
+    {
+        foreach (PermissionEnum::cases() as $case) {
+            self::assertTrue(Gate::has($case->value));
+            self::assertFalse(Gate::has($case->name));
+        }
     }
 
     /**
@@ -391,6 +406,26 @@ final class GateRegistrarTest extends TestCase
         self::assertTrue(Gate::forUser((object) [])->allows('posts:create'));
 
         $spy->shouldHaveReceived('warning')->with('Authorization gate \'posts:create\' already registered; existing Gate preserved.', [])->once();
+    }
+
+    /**
+     * The registrar reads the configured enums itself, so it skips an enum not
+     * backed by strings, whose values name no permission, rather than fail with
+     * a TypeError, and still registers the valid enums.
+     *
+     * @return void
+     */
+    public function testSkipsAnEnumNotBackedByStrings(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config->set('authorization.permission_enums', [IntBackedPermissionEnum::class, PermissionEnum::class]);
+        $config->set('authorization.gate.on_conflict', 'overwrite');
+
+        (new GateRegistrar($this->app))->register();
+
+        self::assertFalse(Gate::has((string) IntBackedPermissionEnum::POSTS_CREATE->value));
+        self::assertTrue(Gate::has(PermissionEnum::POSTS_CREATE->value));
     }
 
     /**
