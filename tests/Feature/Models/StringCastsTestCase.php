@@ -5,13 +5,15 @@ declare(strict_types = 1);
 namespace Tests\Feature\Models;
 
 use Illuminate\Database\Eloquent\Model;
+use Tests\Concerns\ChecksTheConnectionName;
 use Tests\TestCase;
 
 /**
- * Shared checks for the string casts on a shipped model.
+ * Shared checks for the string casts and the connection of a shipped model.
  *
  * A driver may hand back a scalar column as an integer or a float; the fillable
- * string columns read back as strings whatever the driver returns.
+ * string columns read back as strings whatever the driver returns. The model
+ * names the configured `authorization.connection`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -20,6 +22,8 @@ use Tests\TestCase;
  */
 abstract class StringCastsTestCase extends TestCase
 {
+    use ChecksTheConnectionName;
+
     /**
      * A stored non-string value in a fillable string column reads back as a
      * string.
@@ -59,6 +63,28 @@ abstract class StringCastsTestCase extends TestCase
      * @return \Illuminate\Database\Eloquent\Model
      */
     abstract protected static function newModel(): Model;
+
+    /**
+     * Create an instance of the model whose connection is checked.
+     *
+     * @return \Illuminate\Database\Eloquent\Model
+     */
+    #[\Override]
+    protected static function newConnectionModel(): Model
+    {
+        return static::newModel();
+    }
+
+    /**
+     * Determine whether the class under test is a pivot.
+     *
+     * @return bool
+     */
+    #[\Override]
+    protected static function isAPivot(): bool
+    {
+        return false;
+    }
 
     /**
      * Return the model's fillable string columns.

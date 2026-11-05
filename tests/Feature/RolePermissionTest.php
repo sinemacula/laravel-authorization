@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use Tests\Concerns\ChecksTheConnectionName;
 use Tests\Feature\Stubs\CustomPermission;
 use Tests\Feature\Stubs\CustomRole;
 use Tests\TestCase;
@@ -35,6 +36,8 @@ use Tests\TestCase;
 #[CoversClass(GuardMismatchException::class)]
 final class RolePermissionTest extends TestCase
 {
+    use ChecksTheConnectionName;
+
     /** @var string The guard-mismatch message for the `editor` role and `posts:edit` permission. */
     private const string MISMATCH = 'Guard mismatch: role \'editor\' (guard \'web\') cannot carry permission \'posts:edit\' (guard \'api\').'
         . ' Scope one side to null for a guard-agnostic attachment, or match the guards.';
@@ -129,7 +132,7 @@ final class RolePermissionTest extends TestCase
         $role       = $this->makeRole('web');
         $permission = $this->makePermission('web');
 
-        $permission->guard_name = 'api';
+        $permission->guard = 'api';
 
         $this->assertGuardMismatchWritesNothing(static fn () => $permission->roles()->attach($role->id));
     }
@@ -145,7 +148,7 @@ final class RolePermissionTest extends TestCase
         $this->configurePermissionSubclass();
 
         $role       = $this->makeRole('web');
-        $permission = CustomPermission::query()->create(['name' => 'posts:edit', 'guard_name' => 'api']);
+        $permission = CustomPermission::query()->create(['name' => 'posts:edit', 'guard' => 'api']);
 
         $this->assertGuardMismatchWritesNothing(static fn () => $permission->roles()->attach($role->id));
     }
@@ -201,7 +204,7 @@ final class RolePermissionTest extends TestCase
         $role       = $this->makeRole('web');
         $permission = $this->makePermission('web');
 
-        $permission->guard_name = 'api';
+        $permission->guard = 'api';
 
         $this->assertGuardMismatchWritesNothing(static fn () => $permission->roles()->attach($role->id));
     }
@@ -221,7 +224,7 @@ final class RolePermissionTest extends TestCase
         $role       = $this->makeRole('api');
         $permission = $this->makePermission('api');
 
-        $role->guard_name = 'web';
+        $role->guard = 'web';
 
         $this->assertGuardMismatchWritesNothing(static fn () => $role->permissions()->attach($permission->id));
     }
@@ -236,7 +239,7 @@ final class RolePermissionTest extends TestCase
     {
         $role       = $this->makeRole('web');
         $permission = $this->makePermission('web');
-        $parent     = Role::query()->create(['name' => 'author', 'guard_name' => 'api']);
+        $parent     = Role::query()->create(['name' => 'author', 'guard' => 'api']);
 
         $this->savePivot($parent, $role->id, $permission->id);
 
@@ -256,7 +259,7 @@ final class RolePermissionTest extends TestCase
     {
         $role       = $this->makeRole('web');
         $permission = $this->makePermission('web');
-        $parent     = new Permission(['name' => 'posts:delete', 'guard_name' => 'api']);
+        $parent     = new Permission(['name' => 'posts:delete', 'guard' => 'api']);
         $parent->id = $role->id;
 
         $this->savePivot($parent, $role->id, $permission->id);
@@ -278,7 +281,7 @@ final class RolePermissionTest extends TestCase
     {
         $role       = $this->makeRole('web');
         $permission = $this->makePermission('web');
-        $parent     = Permission::query()->create(['name' => 'posts:delete', 'guard_name' => 'api']);
+        $parent     = Permission::query()->create(['name' => 'posts:delete', 'guard' => 'api']);
 
         $this->savePivot($parent, $role->id, $permission->id);
 
@@ -297,9 +300,9 @@ final class RolePermissionTest extends TestCase
      */
     public function testTenantOwnedRoleIsFoundAsStoredParentWithoutTenant(): void
     {
-        $role       = Role::query()->create(['name' => 'tenant-editor', 'guard_name' => 'web', 'tenant_type' => 'tenant', 'tenant_id' => 't-1']);
+        $role       = Role::query()->create(['name' => 'tenant-editor', 'guard' => 'web', 'tenant_type' => 'tenant', 'tenant_id' => 't-1']);
         $permission = $this->makePermission('web');
-        $parent     = Permission::query()->create(['name' => 'posts:delete', 'guard_name' => 'web']);
+        $parent     = Permission::query()->create(['name' => 'posts:delete', 'guard' => 'web']);
 
         self::assertNull(Role::query()->find($role->id));
 
@@ -320,8 +323,8 @@ final class RolePermissionTest extends TestCase
     public function testTenantOwnedPermissionIsFoundAsStoredParentWithoutTenant(): void
     {
         $role       = $this->makeRole('web');
-        $permission = Permission::query()->create(['name' => 'tenant:read', 'guard_name' => 'web', 'tenant_type' => 'tenant', 'tenant_id' => 't-1']);
-        $parent     = Role::query()->create(['name' => 'author', 'guard_name' => 'web']);
+        $permission = Permission::query()->create(['name' => 'tenant:read', 'guard' => 'web', 'tenant_type' => 'tenant', 'tenant_id' => 't-1']);
+        $parent     = Role::query()->create(['name' => 'author', 'guard' => 'web']);
 
         self::assertNull(Permission::query()->find($permission->id));
 
@@ -343,7 +346,7 @@ final class RolePermissionTest extends TestCase
     {
         $role       = $this->makeRole('web');
         $permission = $this->makePermission('web');
-        $parent     = new Role(['name' => 'author', 'guard_name' => 'api']);
+        $parent     = new Role(['name' => 'author', 'guard' => 'api']);
         $parent->id = $permission->id;
 
         $this->savePivot($parent, $role->id, $permission->id);
@@ -352,6 +355,90 @@ final class RolePermissionTest extends TestCase
             [['role_id' => $role->id, 'permission_id' => $permission->id]],
             $this->pivotRows(),
         );
+    }
+
+    /**
+     * A pivot built outside a relation reads the table's fixed `role_id` and
+     * `permission_id` columns, so guard parity still holds.
+     *
+     * @return void
+     */
+    public function testPivotWithoutARelationReadsTheFixedColumns(): void
+    {
+        $pivot = new RolePermission;
+        $pivot->setTable('role_permissions');
+        $pivot->setRawAttributes(['role_id' => $this->makeRole('web')->id, 'permission_id' => $this->makePermission('api')->id]);
+
+        $this->expectException(GuardMismatchException::class);
+
+        $pivot->save();
+    }
+
+    /**
+     * Keys a relation supplies win over the fixed columns on the role side,
+     * where the foreign key is the role column.
+     *
+     * @return void
+     */
+    public function testRelationSuppliedKeysAreReadOnTheRoleSide(): void
+    {
+        $role       = $this->makeRole('web');
+        $permission = $this->makePermission('api');
+
+        $pivot = new RolePermission;
+        $pivot->setTable('role_permissions');
+        $pivot->setPivotKeys('role_ref', 'permission_ref');
+        $pivot->setRawAttributes(['role_ref' => $role->id, 'permission_ref' => $permission->id]);
+
+        $this->expectException(GuardMismatchException::class);
+        $this->expectExceptionMessage(self::MISMATCH);
+
+        $pivot->save();
+    }
+
+    /**
+     * Keys a relation supplies win over the fixed columns on the permission
+     * side, where the foreign key is the permission column.
+     *
+     * @return void
+     */
+    public function testRelationSuppliedKeysAreReadOnThePermissionSide(): void
+    {
+        $role       = $this->makeRole('web');
+        $permission = $this->makePermission('api');
+
+        $pivot              = new RolePermission;
+        $pivot->pivotParent = $permission;
+        $pivot->setTable('role_permissions');
+        $pivot->setPivotKeys('permission_ref', 'role_ref');
+        $pivot->setRawAttributes(['role_ref' => $role->id, 'permission_ref' => $permission->id]);
+
+        $this->expectException(GuardMismatchException::class);
+        $this->expectExceptionMessage(self::MISMATCH);
+
+        $pivot->save();
+    }
+
+    /**
+     * Create the pivot whose connection is checked.
+     *
+     * @return \Illuminate\Database\Eloquent\Model
+     */
+    #[\Override]
+    protected static function newConnectionModel(): Model
+    {
+        return new RolePermission;
+    }
+
+    /**
+     * Determine whether the class under test is a pivot.
+     *
+     * @return bool
+     */
+    #[\Override]
+    protected static function isAPivot(): bool
+    {
+        return true;
     }
 
     /**
@@ -420,7 +507,7 @@ final class RolePermissionTest extends TestCase
      */
     private function makeRole(string $guard): Role
     {
-        return Role::query()->create(['name' => 'editor', 'guard_name' => $guard]);
+        return Role::query()->create(['name' => 'editor', 'guard' => $guard]);
     }
 
     /**
@@ -431,6 +518,6 @@ final class RolePermissionTest extends TestCase
      */
     private function makePermission(string $guard): Permission
     {
-        return Permission::query()->create(['name' => 'posts:edit', 'guard_name' => $guard]);
+        return Permission::query()->create(['name' => 'posts:edit', 'guard' => $guard]);
     }
 }

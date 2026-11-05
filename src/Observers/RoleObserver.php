@@ -4,11 +4,13 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Observers;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
 use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
 use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
+use SineMacula\Laravel\Authorization\Exceptions\ReservedRoleNameException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Role;
 
@@ -17,11 +19,11 @@ use SineMacula\Laravel\Authorization\Models\Role;
  *
  * Translates Eloquent's native `saving` / `updating` / `created` / `updated` /
  * `deleted` events into the package's typed CRUD events, enforces the
- * tenant-columns both-or-neither invariant on save, and guards against
- * hierarchy cycles before a `parent_id` change is persisted. System-protection
- * hooks (`deleting`, `updating` guard, `saved` bypass reset) live in
- * `HasSystemProtection::bootHasSystemProtection()` and run independently of
- * this observer.
+ * tenant-columns both-or-neither invariant and the reserved system role names
+ * on save, and guards against hierarchy cycles before a `parent_id` change is
+ * persisted. System-protection hooks (`deleting`, `updating` guard, `saved`
+ * bypass reset) live in `HasSystemProtection::bootHasSystemProtection()` and
+ * run independently of this observer.
  *
  * Registered via `#[ObservedBy(RoleObserver::class)]` on the `Role` model.
  *
@@ -36,18 +38,20 @@ final class RoleObserver
     private static ?\WeakMap $snapshots = null;
 
     /**
-     * Enforce the tenant-columns invariant and the hierarchy cycle-detection
-     * guard before any persistence.
+     * Enforce the tenant-columns invariant, the reserved system role names and
+     * the hierarchy cycle-detection guard before any persistence.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\ReservedRoleNameException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
      */
     public function saving(Role $role): void
     {
         $this->assertTenantColumnsInvariant($role);
+        $this->assertNoSystemRoleNameIsShared($role);
 
         if ($role->parent_id === null) {
             return;
@@ -145,6 +149,52 @@ final class RoleObserver
         }
 
         throw new InvalidTenantColumnsException(modelKind: 'role', missingColumn: $role->tenant_type === null ? 'tenant_type' : 'tenant_id');
+    }
+
+    /**
+     * Refuse a tenant role that shares its name with a platform system role
+     * under a guard both answer, and a platform system role whose name a tenant
+     * role already holds.
+     *
+     * A check by name matches any held role of that name, so a tenant's role
+     * named after a platform system role would pass every name check written
+     * for the system role. Two guards both answer when they are equal or either
+     * row is guard-agnostic. The check runs only when one of the columns it
+     * reads changes.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\ReservedRoleNameException
+     */
+    private function assertNoSystemRoleNameIsShared(Role $role): void
+    {
+        $isTenantOwned = $role->tenant_type !== null;
+
+        if (!$role->isDirty(['name', 'guard', 'tenant_type', 'tenant_id', 'is_system']) || (!$isTenantOwned && !$role->is_system)) {
+            return;
+        }
+
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $roleClass */
+        $roleClass = config('authorization.models.role', Role::class);
+        $guard     = $role->guard;
+
+        // @phpstan-ignore staticMethod.dynamicCall
+        $shared = $roleClass::query()
+            ->withoutGlobalScopes()
+            ->where('name', $role->name)
+            ->when($role->exists, static fn (Builder $query) => $query->whereKeyNot($role->getKey()))
+            ->when(
+                $isTenantOwned,
+                static fn (Builder $query) => $query->whereNull('tenant_type')->where('is_system', true),
+                static fn (Builder $query) => $query->whereNotNull('tenant_type'),
+            )
+            ->when($guard !== null, static fn (Builder $query) => $query->where(static fn (Builder $inner) => $inner->where('guard', $guard)->orWhereNull('guard')))
+            ->exists();
+
+        if ($shared) {
+            throw new ReservedRoleNameException($role->name);
+        }
     }
 
     /**

@@ -5,9 +5,11 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Console;
 
 use Illuminate\Console\Command;
+use Illuminate\Database\Connection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -18,12 +20,15 @@ use SineMacula\Laravel\Authorization\Models\Role;
  *
  * Reads Spatie's default table names (`roles`, `permissions`,
  * `model_has_roles`, `model_has_permissions`, `role_has_permissions`) and
- * copies rows into this package's tables, mapping column names and generating
- * UUIDs when Spatie used auto-increment IDs. Role and permission names are
- * checked against the models' name rule before they are written; a name that
- * fails it is reported and skipped together with its grants, as is a permission
- * name containing `*`, because `*` is a wildcard here. Everything runs inside a
- * transaction; the `--dry-run` flag reports counts without writing.
+ * copies rows into this package's tables, mapping column names (Spatie's
+ * `guard_name` becomes `guard`) and generating UUIDs when Spatie used
+ * auto-increment IDs. Role and permission names are checked against the models'
+ * name rule before they are written; a name that fails it is reported and
+ * skipped together with its grants, as is a permission name containing `*`,
+ * because `*` is a wildcard here. Spatie's tables are read on the application's
+ * default connection and this package's are written on its own
+ * (`authorization.connection`), inside one transaction there; the `--dry-run`
+ * flag reports counts without writing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -84,14 +89,14 @@ final class MigrateSpatieCommand extends Command
             $roleIdMap       = $this->migrateRoles($dryRun, $counts);
             $permissionIdMap = $this->migratePermissions($dryRun, $counts);
             $this->migrateRolePermissions($roleIdMap, $permissionIdMap, $dryRun, $counts);
-            $this->migrateModelHasRoles($roleIdMap, $dryRun, $counts);
-            $this->migrateModelHasPermissions($permissionIdMap, $dryRun, $counts);
+            $counts['authorizable_roles']       = $this->migrateGrants('model_has_roles', 'role_id', 'authorizable_roles', $roleIdMap, $dryRun);
+            $counts['authorizable_permissions'] = $this->migrateGrants('model_has_permissions', 'permission_id', 'authorizable_permissions', $permissionIdMap, $dryRun);
         };
 
         if ($dryRun) {
             $callback();
         } else {
-            DB::transaction($callback);
+            $this->target()->transaction($callback);
         }
 
         $this->renderMigrationSummary($counts, $dryRun);
@@ -147,12 +152,14 @@ final class MigrateSpatieCommand extends Command
     }
 
     /**
-     * Verify that all target tables exist.
+     * Verify that all target tables exist on the package's connection.
      *
      * @return bool
      */
     private function verifyTargetSchema(): bool
     {
+        $schema = $this->target()->getSchemaBuilder();
+
         $targets = [
             'authorization.tables.roles'                    => 'roles',
             'authorization.tables.permissions'              => 'permissions',
@@ -165,7 +172,7 @@ final class MigrateSpatieCommand extends Command
             /** @var string $table */
             $table = config($configKey, $default);
 
-            if (!Schema::hasTable($table)) {
+            if (!$schema->hasTable($table)) {
                 $this->error("Target table '{$table}' does not exist. Run the package migrations first.");
 
                 return false;
@@ -173,6 +180,19 @@ final class MigrateSpatieCommand extends Command
         }
 
         return true;
+    }
+
+    /**
+     * Return the connection the package's tables live on, which the import
+     * writes to and runs its transaction on. Spatie's tables are read on the
+     * application's default connection.
+     *
+     * @return \Illuminate\Database\Connection
+     */
+    private function target(): Connection
+    {
+        /** @var \Illuminate\Database\Connection */
+        return DB::connection(AuthorizationConnection::name());
     }
 
     /**
@@ -207,10 +227,10 @@ final class MigrateSpatieCommand extends Command
             $idMap[$roleRow['id']] = $newId;
 
             if (!$dryRun) {
-                DB::table($targetTable)->insert([
+                $this->target()->table($targetTable)->insert([
                     'id'         => $newId,
                     'name'       => $roleRow['name'],
-                    'guard_name' => $roleRow['guard_name'] ?? null,
+                    'guard'      => $roleRow['guard_name'] ?? null,
                     'created_at' => $roleRow['created_at'] ?? now(),
                     'updated_at' => $roleRow['updated_at'] ?? now(),
                 ]);
@@ -252,10 +272,10 @@ final class MigrateSpatieCommand extends Command
             $idMap[$permissionRow['id']] = $newId;
 
             if (!$dryRun) {
-                DB::table($targetTable)->insert([
+                $this->target()->table($targetTable)->insert([
                     'id'         => $newId,
                     'name'       => $permissionRow['name'],
-                    'guard_name' => $permissionRow['guard_name'] ?? null,
+                    'guard'      => $permissionRow['guard_name'] ?? null,
                     'created_at' => $permissionRow['created_at'] ?? now(),
                     'updated_at' => $permissionRow['updated_at'] ?? now(),
                 ]);
@@ -340,7 +360,7 @@ final class MigrateSpatieCommand extends Command
             }
 
             if (!$dryRun) {
-                DB::table($targetTable)->insert([
+                $this->target()->table($targetTable)->insert([
                     'role_id'       => $mappedRoleId,
                     'permission_id' => $mappedPermissionId,
                 ]);
@@ -351,74 +371,47 @@ final class MigrateSpatieCommand extends Command
     }
 
     /**
-     * Migrate `model_has_roles` to `authorizable_roles`.
+     * Migrate one of Spatie's grant tables (`model_has_roles`,
+     * `model_has_permissions`) to the package's matching grant table and return
+     * the number of grants migrated. A grant whose role or permission was
+     * skipped is skipped with it. Spatie's grants carry no scope, so each is
+     * imported platform-wide, for every application.
      *
-     * @param  array<int|string, string>  $roleIdMap
+     * @param  string  $source
+     * @param  string  $column
+     * @param  string  $target
+     * @param  array<int|string, string>  $idMap
      * @param  bool  $dryRun
-     * @param  array<string, int>  $counts
-     * @return void
+     * @return int
      */
-    private function migrateModelHasRoles(array $roleIdMap, bool $dryRun, array &$counts): void
+    private function migrateGrants(string $source, string $column, string $target, array $idMap, bool $dryRun): int
     {
         /** @var string $targetTable */
-        $targetTable = config('authorization.tables.authorizable_roles', 'authorizable_roles');
+        $targetTable = config('authorization.tables.' . $target, $target);
+        $migrated    = 0;
 
-        $rows = DB::table('model_has_roles')->get();
+        foreach (DB::table($source)->get() as $row) {
+            /** @var array<string, int|string> $grant */
+            $grant    = (array) $row;
+            $mappedId = $idMap[$grant[$column]] ?? null;
 
-        foreach ($rows as $row) {
-            /** @var array{role_id: int|string, model_type: string, model_id: int|string} $modelRoleRow */
-            $modelRoleRow = (array) $row;
-            $mappedRoleId = $roleIdMap[$modelRoleRow['role_id']] ?? null;
-
-            if ($mappedRoleId === null) {
+            if ($mappedId === null) {
                 continue;
             }
 
             if (!$dryRun) {
-                DB::table($targetTable)->insert([
-                    'authorizable_type' => $modelRoleRow['model_type'],
-                    'authorizable_id'   => (string) $modelRoleRow['model_id'],
-                    'role_id'           => $mappedRoleId,
+                $this->target()->table($targetTable)->insert([
+                    'authorizable_type' => $grant['model_type'],
+                    'authorizable_id'   => (string) $grant['model_id'],
+                    $column             => $mappedId,
+                    'created_at'        => now(),
+                    'updated_at'        => now(),
                 ]);
             }
 
-            $counts['authorizable_roles']++;
+            $migrated++;
         }
-    }
 
-    /**
-     * Migrate `model_has_permissions` to `authorizable_permissions`.
-     *
-     * @param  array<int|string, string>  $permissionIdMap
-     * @param  bool  $dryRun
-     * @param  array<string, int>  $counts
-     * @return void
-     */
-    private function migrateModelHasPermissions(array $permissionIdMap, bool $dryRun, array &$counts): void
-    {
-        /** @var string $targetTable */
-        $targetTable = config('authorization.tables.authorizable_permissions', 'authorizable_permissions');
-
-        $rows = DB::table('model_has_permissions')->get();
-
-        foreach ($rows as $row) {
-            /** @var array{permission_id: int|string, model_type: string, model_id: int|string} $modelPermissionRow */
-            $modelPermissionRow = (array) $row;
-            $mappedPermissionId = $permissionIdMap[$modelPermissionRow['permission_id']] ?? null;
-
-            if ($mappedPermissionId === null) {
-                continue;
-            }
-
-            if (!$dryRun) {
-                DB::table($targetTable)->insert([
-                    'authorizable_type' => $modelPermissionRow['model_type'],
-                    'authorizable_id'   => (string) $modelPermissionRow['model_id'],
-                    'permission_id'     => $mappedPermissionId,
-                ]);
-            }
-
-            $counts['authorizable_permissions']++;
-        }
+        return $migrated;
     }
 }

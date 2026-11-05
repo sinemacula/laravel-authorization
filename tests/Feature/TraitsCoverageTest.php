@@ -37,9 +37,9 @@ final class TraitsCoverageTest extends TestCase
      */
     public function testSyncPermissionsReplacesSet(): void
     {
-        Permission::create(['id' => '844d9762-e1d9-490e-8d0d-d0d856689036', 'name' => 'a:do', 'guard_name' => 'web']);
-        Permission::create(['id' => '50b2af60-b3ff-4d51-8002-f923cf97d9e3', 'name' => 'b:do', 'guard_name' => 'web']);
-        Permission::create(['id' => '0b1f39a5-ea11-4390-8143-3a2f85811785', 'name' => 'c:do', 'guard_name' => 'web']);
+        Permission::create(['id' => '844d9762-e1d9-490e-8d0d-d0d856689036', 'name' => 'a:do', 'guard' => 'web']);
+        Permission::create(['id' => '50b2af60-b3ff-4d51-8002-f923cf97d9e3', 'name' => 'b:do', 'guard' => 'web']);
+        Permission::create(['id' => '0b1f39a5-ea11-4390-8143-3a2f85811785', 'name' => 'c:do', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => 'e1be5db2-7198-4edc-8269-d30117f6dc17']);
 
@@ -85,8 +85,8 @@ final class TraitsCoverageTest extends TestCase
      */
     public function testRoleAndPermissionAcceptModelInstances(): void
     {
-        $role       = Role::create(['id' => '9e8c50ef-c078-4e48-8085-a15e365f1b34', 'name' => 'mod', 'guard_name' => 'web']);
-        $permission = Permission::create(['id' => '76186991-c4cc-42cb-8ef2-f83d7c13e46b', 'name' => 'mod:do', 'guard_name' => 'web']);
+        $role       = Role::create(['id' => '9e8c50ef-c078-4e48-8085-a15e365f1b34', 'name' => 'mod', 'guard' => 'web']);
+        $permission = Permission::create(['id' => '76186991-c4cc-42cb-8ef2-f83d7c13e46b', 'name' => 'mod:do', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => '1ba57f4e-f9b6-4eaf-8cd7-72a9dae46814']);
 

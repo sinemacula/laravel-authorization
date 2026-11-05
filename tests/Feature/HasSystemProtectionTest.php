@@ -145,7 +145,7 @@ final class HasSystemProtectionTest extends TestCase
     public static function roleFieldProvider(): iterable
     {
         yield 'description' => ['description', 'Edited.'];
-        yield 'guard' => ['guard_name', 'api'];
+        yield 'guard' => ['guard', 'api'];
         yield 'rank' => ['rank', 5];
     }
 
@@ -167,8 +167,8 @@ final class HasSystemProtectionTest extends TestCase
         self::assertSame('super-admin', $exception->getRoleName());
         self::assertSame('modify', $exception->getOperation());
         self::assertSame(
-            ['description' => null, 'guard_name' => 'web', 'rank' => null],
-            self::reload($role)->only(['description', 'guard_name', 'rank']),
+            ['description' => null, 'guard' => 'web', 'rank' => null],
+            self::reload($role)->only(['description', 'guard', 'rank']),
         );
     }
 
@@ -180,9 +180,9 @@ final class HasSystemProtectionTest extends TestCase
     public function testReparentingSystemRoleIsRefused(): void
     {
         $parent = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'parent',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'parent',
+            'guard' => 'web',
         ]);
 
         $role = $this->makeSystemRole('child');
@@ -308,9 +308,9 @@ final class HasSystemProtectionTest extends TestCase
     public function testRowBecomesProtectedOnceMarkedSystem(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'ordinary',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'ordinary',
+            'guard' => 'web',
         ]);
 
         $role->update(['description' => 'Edited.', 'is_system' => true]);
@@ -441,9 +441,9 @@ final class HasSystemProtectionTest extends TestCase
     public function testPartiallyLoadedOrdinaryRoleEditsFreely(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'ordinary',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'ordinary',
+            'guard' => 'web',
         ]);
 
         $partial = Role::query()->select(['id', 'name'])->findOrFail($role->id);
@@ -524,7 +524,7 @@ final class HasSystemProtectionTest extends TestCase
     public function testSystemRoleLoadedWithoutNameOrKeyIsUnnamed(): void
     {
         $role    = $this->makeSystemRole('super-admin');
-        $partial = Role::query()->select(['guard_name'])->whereKey($role->id)->firstOrFail();
+        $partial = Role::query()->select(['guard'])->whereKey($role->id)->firstOrFail();
 
         $exception = $this->captureRoleRefusal(static fn () => $partial->delete());
 
@@ -542,9 +542,9 @@ final class HasSystemProtectionTest extends TestCase
     public function testRoleLoadedWithoutKeyIsRefused(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'ordinary',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'ordinary',
+            'guard' => 'web',
         ]);
 
         $partial = Role::query()->select(['name'])->where('name', 'ordinary')->firstOrFail();
@@ -584,10 +584,10 @@ final class HasSystemProtectionTest extends TestCase
     public function testSubclassExtendingBootHookKeepsProtection(): void
     {
         $role = ExtendedRole::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'super-admin',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => 'super-admin',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         $exception = $this->captureRoleRefusal(static fn () => $role->delete());
@@ -605,17 +605,17 @@ final class HasSystemProtectionTest extends TestCase
     public function testSubclassCanRunGuard(): void
     {
         $system = ExtendedRole::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'super-admin',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => 'super-admin',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         $ordinary = ExtendedRole::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'ordinary',
-            'guard_name' => 'web',
-            'is_system'  => false,
+            'id'        => (string) Str::uuid(),
+            'name'      => 'ordinary',
+            'guard'     => 'web',
+            'is_system' => false,
         ]);
 
         $exception = $this->captureRoleRefusal(static fn () => self::runGuardAsSubclass($system, 'rename'));
@@ -701,10 +701,10 @@ final class HasSystemProtectionTest extends TestCase
     private function makeSystemRole(string $name): Role
     {
         return Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => $name,
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => $name,
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
     }
 

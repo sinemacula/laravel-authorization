@@ -34,7 +34,7 @@ final class InvalidAuthorizationNameException extends \RuntimeException
         private readonly string $name,
     ) {
         parent::__construct(
-            "Invalid {$kind} name '{$name}': allowed characters are letters, digits, '_', '-', ':', '.', and '*'.",
+            "Invalid {$kind} name '{$name}': allowed characters are letters, digits, '_', '-', ':', '.', and '*', at most 191 of them.",
             422,
         );
     }

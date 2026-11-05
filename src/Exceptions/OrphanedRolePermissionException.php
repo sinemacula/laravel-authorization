@@ -10,8 +10,8 @@ use SineMacula\Laravel\Authorization\Enums\OrphanSide;
  * Thrown when a `RolePermission` pivot save references a role or permission row
  * that cannot be resolved.
  *
- * The pivot's guard-parity hook has to read both parents' `guard_name` columns.
- * If the caller attaches a pivot whose `role_id` or `permission_id` points at a
+ * The pivot's guard-parity hook has to read both parents' `guard` columns. If
+ * the caller attaches a pivot whose `role_id` or `permission_id` points at a
  * missing row (deleted under the request, cross-tenant leak, stale ID cache),
  * the save surfaces this typed failure rather than silently passing the guard
  * check and deferring to the DB's FK constraint — which is absent on SQLite by

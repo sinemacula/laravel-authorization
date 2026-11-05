@@ -41,7 +41,9 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * Filters out pivot rows whose `expires_at` is in the past — temporal
      * policy attachments disappear from the relation automatically at expiry
      * without requiring a sweeper run. The pivot's `expires_at` column is
-     * surfaced via `withPivot()`.
+     * surfaced via `withPivot()`, and the attachment's timestamps are kept. The
+     * scope columns keep their defaults: every attachment made here is
+     * platform-wide, for every application.
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
@@ -76,10 +78,11 @@ trait HasPolicies // @phpstan-ignore trait.unused
         )
             ->using(AuthorizablePolicyPivot::class)
             ->withPivot('expires_at')
+            ->withTimestamps()
             ->where(static function (Builder $query) use ($pivot): void {
                 // @phpstan-ignore staticMethod.dynamicCall
                 $query->whereNull($pivot . '.expires_at')
-                    ->orWhere($pivot . '.expires_at', '>', Carbon::now());
+                    ->orWhere($pivot . '.expires_at', '>', Carbon::now('UTC'));
             });
     }
 
@@ -104,10 +107,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
      */
     public function attachPolicy(Model|Policy $policy, ?\DateTimeInterface $expiresAt = null): static
     {
-        /** @var string $table */
-        $table   = config('authorization.tables.authorizable_policies', 'authorizable_policies');
-        $columns = self::authorizationResolveGrantPivotColumns('authorizable_policies', 'policy_column', 'policy_id');
-        $prior   = self::authorizationReadGrantPivot($this, $table, $columns, (string) $policy->getKey());
+        $prior = self::authorizationReadGrantPivot($this, $this->policies()->newPivotStatement(), 'policy_id', (string) $policy->getKey());
 
         $this->policies()->syncWithoutDetaching([
             (string) $policy->getKey() => ['expires_at' => $expiresAt],

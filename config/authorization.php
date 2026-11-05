@@ -31,12 +31,28 @@ return [
 
     /*
     |---------------------------------------------------------------------------
+    | Database connection
+    |---------------------------------------------------------------------------
+    |
+    | The connection the package's tables live on. Every package model and
+    | pivot reads and writes on it, the shipped migrations create and drop
+    | their tables on it, and the package's own transactions run on it. Point
+    | it at the connection the application keeps its identity tables on, so
+    | a transaction that creates a principal and its grants commits or rolls
+    | back as one. Null uses the application's default connection.
+    |
+    */
+
+    'connection' => env('AUTHORIZATION_DB_CONNECTION'),
+
+    /*
+    |---------------------------------------------------------------------------
     | Tables
     |---------------------------------------------------------------------------
     |
     | Physical table names used by the shipped migrations and Eloquent models.
     | Override here if you need to sidestep naming collisions with existing
-    | application tables.
+    | application tables. The tables' column names are fixed.
     |
     */
 
@@ -52,51 +68,13 @@ return [
 
     /*
     |---------------------------------------------------------------------------
-    | Pivot columns
-    |---------------------------------------------------------------------------
-    |
-    | Column names used on the shipped pivot tables. Consumers who swap the
-    | pivot table schema (renamed FKs, legacy column names, bespoke naming
-    | conventions) can override each side here. The `RolePermission` pivot
-    | reads these when Laravel has not already supplied the relation's pivot
-    | keys (e.g. direct instantiation paths); otherwise the pivot prefers the
-    | relation-supplied keys so a consumer who overrides a relation definition
-    | still gets the invariant enforced.
-    |
-    */
-
-    'pivots' => [
-        'role_permissions' => [
-            'role_column'       => env('AUTHORIZATION_PIVOT_ROLE_PERMISSIONS_ROLE_COLUMN', 'role_id'),
-            'permission_column' => env('AUTHORIZATION_PIVOT_ROLE_PERMISSIONS_PERMISSION_COLUMN', 'permission_id'),
-        ],
-        'authorizable_roles' => [
-            'authorizable_type_column' => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_ROLES_TYPE_COLUMN', 'authorizable_type'),
-            'authorizable_id_column'   => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_ROLES_ID_COLUMN', 'authorizable_id'),
-            'role_column'              => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_ROLES_ROLE_COLUMN', 'role_id'),
-            'expires_at_column'        => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_ROLES_EXPIRES_AT_COLUMN', 'expires_at'),
-        ],
-        'authorizable_permissions' => [
-            'authorizable_type_column' => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_PERMISSIONS_TYPE_COLUMN', 'authorizable_type'),
-            'authorizable_id_column'   => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_PERMISSIONS_ID_COLUMN', 'authorizable_id'),
-            'permission_column'        => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_PERMISSIONS_PERMISSION_COLUMN', 'permission_id'),
-            'expires_at_column'        => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_PERMISSIONS_EXPIRES_AT_COLUMN', 'expires_at'),
-        ],
-        'authorizable_policies' => [
-            'authorizable_type_column' => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_POLICIES_TYPE_COLUMN', 'authorizable_type'),
-            'authorizable_id_column'   => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_POLICIES_ID_COLUMN', 'authorizable_id'),
-            'policy_column'            => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_POLICIES_POLICY_COLUMN', 'policy_id'),
-            'expires_at_column'        => env('AUTHORIZATION_PIVOT_AUTHORIZABLE_POLICIES_EXPIRES_AT_COLUMN', 'expires_at'),
-        ],
-    ],
-
-    /*
-    |---------------------------------------------------------------------------
     | Defaults
     |---------------------------------------------------------------------------
     |
-    | The default guard recorded on role and permission rows. Retained for
-    | migration compatibility with Spatie's `laravel-permission` package.
+    | The guard a role or permission lookup by name uses when the caller names
+    | none, and the auth guard `AuthGuardPrincipalResolver` reads by default.
+    | Rows record their own guard in the `guard` column; a null guard makes a
+    | row apply to every guard.
     |
     */
 

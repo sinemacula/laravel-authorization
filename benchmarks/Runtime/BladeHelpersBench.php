@@ -66,17 +66,17 @@ final class BladeHelpersBench extends BenchmarkCase
         $this->permissionNames = BenchmarkFixtures::permissionNames();
 
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => $this->roleName,
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => $this->roleName,
+            'guard' => 'web',
         ]);
 
         foreach ($this->permissionNames as $name) {
 
             $permission = Permission::create([
-                'id'         => (string) Str::uuid(),
-                'name'       => $name,
-                'guard_name' => 'web',
+                'id'    => (string) Str::uuid(),
+                'name'  => $name,
+                'guard' => 'web',
             ]);
             $role->permissions()->attach($permission->getKey());
         }

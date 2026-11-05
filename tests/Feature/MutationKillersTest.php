@@ -4,7 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
-use Illuminate\Contracts\Config\Repository;
+use Illuminate\Cache\Repository;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -268,45 +268,6 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `authorizationCoerceExpiresAt` returns a Carbon for strings and DateTime
-     * values, null for everything else. Pins the string-not-empty and DateTime
-     * instanceof branches.
-     *
-     * @return void
-     */
-    public function testCoerceExpiresAtCoerciveBranches(): void
-    {
-        /** @phpstan-ignore-next-line class.missingExtends */
-        $probe = new class {
-            use ResolvesPivotExpiry;
-
-            /**
-             * @param  mixed  $raw
-             * @return mixed
-             */
-            public function coerce(mixed $raw): mixed
-            {
-                return self::authorizationCoerceExpiresAt($raw);
-            }
-        };
-
-        $timestamp = $probe->coerce('2026-06-01 12:00:00');
-        self::assertInstanceOf(Carbon::class, $timestamp);
-        self::assertSame('2026-06-01 12:00:00', $timestamp->toDateTimeString());
-
-        $source    = new \DateTimeImmutable('2025-01-01 00:00:00');
-        $timestamp = $probe->coerce($source);
-        self::assertInstanceOf(Carbon::class, $timestamp);
-        self::assertSame('2025-01-01 00:00:00', $timestamp->toDateTimeString());
-
-        self::assertNull($probe->coerce(null));
-        self::assertNull($probe->coerce(''));
-        self::assertNull($probe->coerce(0));
-        self::assertNull($probe->coerce(42));
-        self::assertNull($probe->coerce(new \stdClass));
-    }
-
-    /**
      * `authorizationSecondsUntilPivotExpiry` subtracts `nowTimestamp` from the
      * pivot expiry and returns null when the result is zero or negative. Pins
      * the `> 0` branch against `>= 0` mutants.
@@ -462,7 +423,7 @@ final class MutationKillersTest extends TestCase
         $cache     = new ResolutionCache(store: Cache::store('array'), prefix: 'authorization-test');
         $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'r1', 'guard_name' => 'web']);
+        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'r1', 'guard' => 'web']);
 
         // Prime the cache so the tag namespace has something to flush.
         $cache->rememberPermissions(
@@ -503,7 +464,7 @@ final class MutationKillersTest extends TestCase
             [RoleExpiryChanged::class],
         );
 
-        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'idem', 'guard_name' => 'web']);
+        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'idem', 'guard' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         // Anchor Carbon so the computed expiry is deterministic and identical
@@ -536,7 +497,7 @@ final class MutationKillersTest extends TestCase
             [RoleExpiryChanged::class],
         );
 
-        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'moving', 'guard_name' => 'web']);
+        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'moving', 'guard' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         // Anchor Carbon so the two expiries are computed against a fixed
@@ -568,7 +529,7 @@ final class MutationKillersTest extends TestCase
             [PermissionExpiryChanged::class],
         );
 
-        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'p:m', 'guard_name' => 'web']);
+        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'p:m', 'guard' => 'web']);
         $user       = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         // Anchor Carbon so the two expiries are computed against a fixed
@@ -589,78 +550,6 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `authorizationResolveGrantPivotColumns` reads the per-pivot column map
-     * from `authorization.pivots.<pivot>.<column>`. A custom override at each
-     * config path is applied — pins every concat operand in the prefix assembly
-     * (line 224) and each `$prefix . 'column'` call.
-     *
-     * @return void
-     */
-    public function testAuthorizationResolveGrantPivotColumnsHonoursPerPivotOverrides(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(Repository::class); // @phpstan-ignore method.nonObject
-
-        $config->set('authorization.pivots.authorizable_roles.authorizable_type_column', 'custom_type');
-        $config->set('authorization.pivots.authorizable_roles.authorizable_id_column', 'custom_id');
-        $config->set('authorization.pivots.authorizable_roles.role_column', 'custom_role_fk');
-        $config->set('authorization.pivots.authorizable_roles.expires_at_column', 'custom_expires_at');
-
-        /** @phpstan-ignore-next-line class.missingExtends */
-        $probe = new class {
-            use ResolvesPivotExpiry;
-
-            /**
-             * @return array<string, mixed>
-             */
-            public function columns(): array
-            {
-                return self::authorizationResolveGrantPivotColumns('authorizable_roles', 'role_column', 'role_id');
-            }
-        };
-
-        $columns = $probe->columns();
-
-        self::assertSame('custom_type', $columns['authorizable_type']);
-        self::assertSame('custom_id', $columns['authorizable_id']);
-        self::assertSame('custom_role_fk', $columns['target']);
-        self::assertSame('custom_expires_at', $columns['expires_at']);
-    }
-
-    /**
-     * Without an override, `authorizationResolveGrantPivotColumns` returns the
-     * package defaults for each column. Pins the default values passed as
-     * second argument to each `config()` call.
-     *
-     * @return void
-     */
-    public function testAuthorizationResolveGrantPivotColumnsDefaultsToPackageColumns(): void
-    {
-        /** @phpstan-ignore-next-line class.missingExtends */
-        $probe = new class {
-            use ResolvesPivotExpiry;
-
-            /**
-             * @param  string  $pivot
-             * @param  string  $targetKey
-             * @param  string  $defaultTarget
-             * @return array<string, mixed>
-             */
-            public function columns(string $pivot, string $targetKey, string $defaultTarget): array
-            {
-                return self::authorizationResolveGrantPivotColumns($pivot, $targetKey, $defaultTarget);
-            }
-        };
-
-        $columns = $probe->columns('some_new_pivot', 'custom_key', 'custom_default');
-
-        self::assertSame('authorizable_type', $columns['authorizable_type']);
-        self::assertSame('authorizable_id', $columns['authorizable_id']);
-        self::assertSame('custom_default', $columns['target']);
-        self::assertSame('expires_at', $columns['expires_at']);
-    }
-
-    /**
      * The cache key is built as `<prefix>:<kind>:<morph>:<id>` — targeted
      * assertions pin the exact shape so concat-removal and concat-reorder
      * mutations around `keyFor()` break.
@@ -670,7 +559,7 @@ final class MutationKillersTest extends TestCase
     public function testCacheKeyShapeIsPrefixKindMorphId(): void
     {
         $driver = new NonTaggableCacheStore;
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'km-test');
 
         // A principal exposing getMorphClass + getKey should key as
@@ -712,7 +601,7 @@ final class MutationKillersTest extends TestCase
     public function testCacheKeyShapeFallsBackToClassNameWhenMorphMissing(): void
     {
         $driver = new NonTaggableCacheStore;
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'km');
 
         $principal = new class {
@@ -848,7 +737,7 @@ final class MutationKillersTest extends TestCase
         $this->app->make(LastDecisionStore::class)->forget(); // @phpstan-ignore method.nonObject
 
         // Deny path — authorize() throws, lastDecision captures the result.
-        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'la', 'guard_name' => 'web']);
+        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'la', 'guard' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         try {
@@ -861,7 +750,7 @@ final class MutationKillersTest extends TestCase
         }
 
         // Allow path — authorize() returns, lastDecision captures allow.
-        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'allow:me', 'guard_name' => 'web']);
+        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'allow:me', 'guard' => 'web']);
         $role->givePermission($permission);
         $user->assignRole($role);
 

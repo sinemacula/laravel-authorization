@@ -5,14 +5,17 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabaseState;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Console\MigrateSpatieCommand;
+use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\TestCase;
 
 /**
@@ -34,6 +37,8 @@ use Tests\TestCase;
 #[CoversClass(MigrateSpatieCommand::class)]
 final class MigrateSpatieCommandTest extends TestCase
 {
+    use UsesAnAuthorizationConnection;
+
     /** @var string The Spatie role ID used by the string-keyed fixture. */
     private const string STRING_ROLE_ID = '0192f0c4-3b1a-7d2e-9a4b-1c2d3e4f5a6b';
 
@@ -101,6 +106,101 @@ final class MigrateSpatieCommandTest extends TestCase
         self::assertSame(2, DB::table('auth_role_permissions')->count());
         self::assertSame(1, DB::table('auth_authorizable_roles')->count());
         self::assertSame(1, DB::table('auth_authorizable_permissions')->count());
+    }
+
+    /**
+     * Spatie's grants carry no scope, so each is imported platform-wide, for
+     * every application, stamped with the time of the import.
+     *
+     * @return void
+     */
+    public function testImportedGrantsArePlatformWideAndStamped(): void
+    {
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        try {
+            Artisan::call('authorization:migrate-spatie');
+        } finally {
+            Carbon::setTestNow();
+        }
+
+        foreach (['auth_authorizable_roles', 'auth_authorizable_permissions'] as $table) {
+            $row = DB::table($table)->sole();
+
+            self::assertNull($row->tenant_type, $table);
+            self::assertNull($row->application, $table);
+            self::assertSame('2026-07-01 12:00:00', Carbon::parse((string) $row->created_at)->format('Y-m-d H:i:s'), $table);
+            self::assertSame('2026-07-01 12:00:00', Carbon::parse((string) $row->updated_at)->format('Y-m-d H:i:s'), $table);
+        }
+    }
+
+    /**
+     * With `authorization.connection` set, Spatie's tables are read on the
+     * default connection and every row is written on the package's connection,
+     * none on the default one.
+     *
+     * @return void
+     */
+    public function testWritesOnThePackageConnection(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        self::assertSame(0, Artisan::call('authorization:migrate-spatie'));
+
+        $counts = [
+            'auth_roles'                    => 2,
+            'auth_permissions'              => 3,
+            'auth_role_permissions'         => 2,
+            'auth_authorizable_roles'       => 1,
+            'auth_authorizable_permissions' => 1,
+        ];
+
+        foreach ($counts as $table => $count) {
+            self::assertSame($count, self::authorizationConnection()->table($table)->count(), $table);
+            self::assertSame(0, DB::table($table)->count(), $table);
+        }
+    }
+
+    /**
+     * The import runs in one transaction on the package's connection: when a
+     * write fails part-way, the rows written before it are rolled back there.
+     * The second role collides with a row the package's table already holds,
+     * after the first role has been written.
+     *
+     * @return void
+     */
+    public function testAFailedImportIsRolledBackOnThePackageConnection(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        self::authorizationConnection()->table('auth_roles')->insert(['id' => '0192f0c4-3b1a-7d2e-9a4b-000000000001', 'name' => 'editor', 'guard' => 'web']);
+
+        $failure = null;
+
+        try {
+            Artisan::call('authorization:migrate-spatie');
+        } catch (\Throwable $exception) {
+            $failure = $exception;
+        }
+
+        self::assertInstanceOf(QueryException::class, $failure);
+        self::assertSame(['editor'], self::authorizationConnection()->table('auth_roles')->pluck('name')->all());
+    }
+
+    /**
+     * The target tables are looked for on the package's connection: with it set
+     * to a connection that has none, the import stops before writing.
+     *
+     * @return void
+     */
+    public function testLooksForTheTargetTablesOnThePackageConnection(): void
+    {
+        $this->useAnAuthorizationConnection();
+        $this->reversePackageMigrations();
+
+        self::assertSame(1, Artisan::call('authorization:migrate-spatie'));
+        self::assertStringContainsString('Target table \'auth_roles\' does not exist', Artisan::output());
+        self::assertSame(0, DB::table('auth_roles')->count());
     }
 
     /**
@@ -346,6 +446,30 @@ final class MigrateSpatieCommandTest extends TestCase
     }
 
     /**
+     * A grant that follows one skipped with its refused role or permission is
+     * still migrated.
+     *
+     * @return void
+     */
+    public function testGrantsAfterASkippedGrantAreMigrated(): void
+    {
+        $this->seedNamesForValidation();
+
+        DB::table('model_has_roles')->insert([
+            ['role_id' => 2, 'model_type' => 'App\Models\User', 'model_id' => 8],
+        ]);
+
+        DB::table('model_has_permissions')->insert([
+            ['permission_id' => 3, 'model_type' => 'App\Models\User', 'model_id' => 8],
+        ]);
+
+        Artisan::call('authorization:migrate-spatie');
+
+        self::assertSame(['42', '8'], DB::table('auth_authorizable_roles')->orderBy('authorizable_id')->pluck('authorizable_id')->all());
+        self::assertSame(['42', '8'], DB::table('auth_authorizable_permissions')->orderBy('authorizable_id')->pluck('authorizable_id')->all());
+    }
+
+    /**
      * A dry run reports the names it would refuse and excludes them from the
      * summary counts.
      *
@@ -364,6 +488,8 @@ final class MigrateSpatieCommandTest extends TestCase
         self::assertMatchesRegularExpression('/\|\s+roles\s+\|\s+3\s+\|/', $output);
         self::assertMatchesRegularExpression('/\|\s+permissions\s+\|\s+4\s+\|/', $output);
         self::assertMatchesRegularExpression('/\|\s+role_permissions\s+\|\s+3\s+\|/', $output);
+        self::assertMatchesRegularExpression('/\|\s+authorizable_roles\s+\|\s+1\s+\|/', $output);
+        self::assertMatchesRegularExpression('/\|\s+authorizable_permissions\s+\|\s+1\s+\|/', $output);
         self::assertSame(0, DB::table('auth_roles')->count());
         self::assertSame(0, DB::table('auth_permissions')->count());
     }
@@ -446,7 +572,7 @@ final class MigrateSpatieCommandTest extends TestCase
     private static function refusalLine(string $kind, string $name): string
     {
         return "Skipped: Invalid {$kind} name '{$name}': allowed characters are letters, digits, '_', '-', ':', '.', "
-            . 'and \'*\'. Its grants are not migrated.';
+            . 'and \'*\', at most 191 of them. Its grants are not migrated.';
     }
 
     /**

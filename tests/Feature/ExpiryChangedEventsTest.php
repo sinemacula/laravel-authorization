@@ -82,9 +82,9 @@ final class ExpiryChangedEventsTest extends TestCase
     public function testShorteningForeverRoleGrantFiresExpiryChanged(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'oncall',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'oncall',
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -113,9 +113,9 @@ final class ExpiryChangedEventsTest extends TestCase
     public function testExtendingExpiringRoleGrantToForeverFiresExpiryChanged(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'oncall',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'oncall',
+            'guard' => 'web',
         ]);
 
         $user    = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -143,9 +143,9 @@ final class ExpiryChangedEventsTest extends TestCase
     public function testRoleReassignmentWithSameExpiryDoesNotFireExpiryChanged(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'oncall',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'oncall',
+            'guard' => 'web',
         ]);
 
         $user    = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -168,9 +168,9 @@ final class ExpiryChangedEventsTest extends TestCase
     public function testFreshRoleGrantDoesNotFireExpiryChanged(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'oncall',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'oncall',
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -192,9 +192,9 @@ final class ExpiryChangedEventsTest extends TestCase
     public function testShorteningForeverPermissionGrantFiresExpiryChanged(): void
     {
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::PERMISSION_NAME,
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => self::PERMISSION_NAME,
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -223,9 +223,9 @@ final class ExpiryChangedEventsTest extends TestCase
     public function testExtendingExpiringPermissionGrantToForeverFiresExpiryChanged(): void
     {
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::PERMISSION_NAME,
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => self::PERMISSION_NAME,
+            'guard' => 'web',
         ]);
 
         $user    = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -253,9 +253,9 @@ final class ExpiryChangedEventsTest extends TestCase
     public function testPermissionRegrantWithSameExpiryDoesNotFireExpiryChanged(): void
     {
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::PERMISSION_NAME,
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => self::PERMISSION_NAME,
+            'guard' => 'web',
         ]);
 
         $user    = StubIdentity::create(['id' => (string) Str::uuid()]);

@@ -8,10 +8,11 @@ use Illuminate\Database\Eloquent\Model;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use Tests\Feature\Stubs\StubTenant;
 
 /**
- * Feature tests for the string casts on the shipped `Policy` model, and for the
- * name it gives the evaluation policy it hydrates.
+ * Feature tests for the string casts on the shipped `Policy` model, its tenant
+ * relation, and the name it gives the evaluation policy it hydrates.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -21,6 +22,24 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 #[CoversClass(Policy::class)]
 final class PolicyTest extends StringCastsTestCase
 {
+    /**
+     * The tenant relation resolves the tenant that owns the policy, and nothing
+     * for a platform-wide one.
+     *
+     * @return void
+     */
+    public function testTenantRelationResolvesTheOwningTenant(): void
+    {
+        $tenant = StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'Tenant A']);
+
+        $document = ['version' => 1, 'statements' => []];
+        $owned    = Policy::query()->create(['name' => 'readers', 'document' => $document, 'tenant_type' => $tenant->getMorphClass(), 'tenant_id' => 'tenant-a']);
+        $platform = Policy::query()->create(['name' => 'readers', 'document' => $document]);
+
+        self::assertTrue($tenant->is($owned->tenant));
+        self::assertNull($platform->tenant);
+    }
+
     /**
      * Hydration names the evaluation policy after the model, even when the
      * stored document carries a name of its own.
@@ -109,6 +128,6 @@ final class PolicyTest extends StringCastsTestCase
     #[\Override]
     protected static function stringColumns(): array
     {
-        return ['name', 'description'];
+        return ['name', 'description', 'tenant_type', 'tenant_id'];
     }
 }

@@ -202,11 +202,11 @@ final class TenantScopeTest extends TestCase
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
         $tenantB = StubTenant::create(['id' => 'tenant-b', 'name' => 'Tenant B']);
 
-        Role::create(['name' => 'platform-role', 'guard_name' => 'web']);
-        Permission::create(['name' => 'platform-permission', 'guard_name' => 'web']);
+        Role::create(['name' => 'platform-role', 'guard' => 'web']);
+        Permission::create(['name' => 'platform-permission', 'guard' => 'web']);
 
         foreach (['a' => $tenantA, 'b' => $tenantB] as $prefix => $tenant) {
-            $owner = ['guard_name' => 'web', 'tenant_type' => $tenant->getMorphClass(), 'tenant_id' => $tenant->getKey()];
+            $owner = ['guard' => 'web', 'tenant_type' => $tenant->getMorphClass(), 'tenant_id' => $tenant->getKey()];
 
             Role::create(['name' => "{$prefix}-role"] + $owner);
             Permission::create(['name' => "{$prefix}-permission"] + $owner);

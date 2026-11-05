@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Concerns\HasRoleHierarchy;
 use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Concerns\ManagesPermissions;
 use SineMacula\Laravel\Authorization\Concerns\ValidatesAuthorizationName;
+use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
@@ -28,7 +29,7 @@ use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
  *
  * @property string $id
  * @property string $name
- * @property string|null $guard_name
+ * @property string|null $guard
  * @property string|null $description
  * @property bool $is_system
  * @property string|null $parent_id
@@ -50,7 +51,7 @@ class Role extends Model
     /** @var list<string> Attributes that are mass assignable. */
     protected $fillable = [
         'name',
-        'guard_name',
+        'guard',
         'description',
         'is_system',
         'parent_id',
@@ -80,15 +81,34 @@ class Role extends Model
     }
 
     /**
-     * Resolve a role by name under the supplied guard, favouring guard-specific
-     * rows over guard-agnostic rows.
+     * Return the connection the role table lives on: the configured
+     * `authorization.connection`, else the instance's own, else the
+     * application's default.
      *
-     * Centralises the guard-precedence query shared by
-     * `HasRoles::resolveRole()` and any direct static caller — a single owner
-     * for the guard-agnostic disjunction so evolution of the matching rules
-     * happens in one place. Consumers calling `$class::resolveByName(...)`
-     * where `$class` is read from `authorization.models.role` get correct
-     * late-static-binding against their swapped model.
+     * Naming the connection is schema, so this is a framework hook rather than
+     * model behaviour.
+     *
+     * @return string
+     *
+     * @phpstan-ignore sineMaculaLaravel.modelBehaviour
+     */
+    #[\Override]
+    public function getConnectionName(): string
+    {
+        return AuthorizationConnection::resolve(parent::getConnectionName());
+    }
+
+    /**
+     * Resolve a role by name under the supplied guard, in the order
+     * `GuardScopedLookup` ranks the rows that answer it: the current tenant's
+     * row before the platform's, then a guard-specific row before a
+     * guard-agnostic one, then the lowest primary key.
+     *
+     * Delegates to the precedence query shared by `HasRoles::resolveRole()` and
+     * any direct static caller, so the matching rules have one owner. Consumers
+     * calling `$class::resolveByName(...)` where `$class` is read from
+     * `authorization.models.role` get correct late-static-binding against their
+     * swapped model.
      *
      * @param  string  $name
      * @param  string|null  $guard
@@ -196,7 +216,7 @@ class Role extends Model
     {
         return [
             'name'        => 'string',
-            'guard_name'  => 'string',
+            'guard'       => 'string',
             'description' => 'string',
             'is_system'   => 'boolean',
             'parent_id'   => 'string',

@@ -4,13 +4,19 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
+use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked;
+use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use Tests\Concerns\ChecksGrantExpiry;
+use Tests\Concerns\ChecksGrantsByName;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -28,6 +34,8 @@ use Tests\TestCase;
 #[CoversTrait(HasPermissions::class)]
 final class HasPermissionsTest extends TestCase
 {
+    use ChecksGrantExpiry, ChecksGrantsByName;
+
     /**
      * Reset the clock.
      *
@@ -42,6 +50,28 @@ final class HasPermissionsTest extends TestCase
     }
 
     /**
+     * A direct grant records when it was made and when it last changed.
+     *
+     * @return void
+     */
+    public function testGrantKeepsItsTimestamps(): void
+    {
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user->givePermission(Permission::create(['name' => 'posts:edit', 'guard' => 'web']));
+
+        Carbon::setTestNow('2026-07-01 12:30:00');
+
+        $user->givePermission('posts:edit', Carbon::parse('2026-07-01 14:00:00'));
+
+        $row = DB::table('authorizable_permissions')->sole();
+
+        self::assertSame('2026-07-01 12:00:00', Carbon::parse((string) $row->created_at)->format('Y-m-d H:i:s'));
+        self::assertSame('2026-07-01 12:30:00', Carbon::parse((string) $row->updated_at)->format('Y-m-d H:i:s'));
+    }
+
+    /**
      * A permission granted directly until 12:05 lapses at 12:05 for the same
      * identity instance.
      *
@@ -50,7 +80,7 @@ final class HasPermissionsTest extends TestCase
     public function testExpiringDirectPermissionLapsesForTheSameInstance(): void
     {
         $user = $this->identity();
-        $user->givePermission(Permission::create(['name' => 'posts:publish', 'guard_name' => 'web']), Carbon::parse('2026-07-01 12:05:00'));
+        $user->givePermission(Permission::create(['name' => 'posts:publish', 'guard' => 'web']), Carbon::parse('2026-07-01 12:05:00'));
 
         self::assertSame(['posts:publish'], $user->getPermissions());
 
@@ -67,8 +97,8 @@ final class HasPermissionsTest extends TestCase
      */
     public function testPermissionThroughExpiringRoleLapsesForTheSameInstance(): void
     {
-        $role = Role::create(['name' => 'publisher', 'guard_name' => 'web']);
-        $role->givePermission(Permission::create(['name' => 'posts:publish', 'guard_name' => 'web']));
+        $role = Role::create(['name' => 'publisher', 'guard' => 'web']);
+        $role->givePermission(Permission::create(['name' => 'posts:publish', 'guard' => 'web']));
 
         $user = $this->identity();
         $user->assignRole($role, Carbon::parse('2026-07-01 12:05:00'));
@@ -88,7 +118,7 @@ final class HasPermissionsTest extends TestCase
     public function testLiveEntryDoesNotReloadThePermissions(): void
     {
         $user = $this->identity();
-        $user->givePermission(Permission::create(['name' => 'posts:publish', 'guard_name' => 'web']), Carbon::parse('2026-07-01 13:00:00'));
+        $user->givePermission(Permission::create(['name' => 'posts:publish', 'guard' => 'web']), Carbon::parse('2026-07-01 13:00:00'));
 
         self::assertSame(['posts:publish'], $user->getPermissions());
 
@@ -101,6 +131,175 @@ final class HasPermissionsTest extends TestCase
         self::assertSame([], DB::getQueryLog());
 
         DB::disableQueryLog();
+    }
+
+    /**
+     * Return the grant table the expiry check reads.
+     *
+     * @return string
+     */
+    #[\Override]
+    protected static function grantTable(): string
+    {
+        return 'authorizable_permissions';
+    }
+
+    /**
+     * Return the event a change of the grant's expiry dispatches.
+     *
+     * @return class-string
+     */
+    #[\Override]
+    protected static function expiryChangedEvent(): string
+    {
+        return PermissionExpiryChanged::class;
+    }
+
+    /**
+     * Return the name of the row the expiry check grants.
+     *
+     * @return string
+     */
+    #[\Override]
+    protected static function grantedName(): string
+    {
+        return 'posts:edit';
+    }
+
+    /**
+     * Grant the identity the checked row until the given instant.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \DateTimeInterface  $expiresAt
+     * @return void
+     */
+    #[\Override]
+    protected function grantUntil(StubIdentity $identity, \DateTimeInterface $expiresAt): void
+    {
+        $identity->givePermission(Permission::query()->firstOrCreate(['name' => 'posts:edit']), $expiresAt);
+    }
+
+    /**
+     * Return the names of the rows the identity holds.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @return list<string>
+     */
+    #[\Override]
+    protected function heldNames(StubIdentity $identity): array
+    {
+        /** @var list<string> */
+        return $identity->permissions->pluck('name')->all();
+    }
+
+    /**
+     * Return the column of the grant table that names the granted row.
+     *
+     * @return string
+     */
+    #[\Override]
+    protected static function targetColumn(): string
+    {
+        return 'permission_id';
+    }
+
+    /**
+     * Return the exception a name no row answers raises.
+     *
+     * @return class-string<\Throwable>
+     */
+    #[\Override]
+    protected static function unknownNameException(): string
+    {
+        return UnknownPermissionException::class;
+    }
+
+    /**
+     * Return the event a revocation dispatches.
+     *
+     * @return class-string
+     */
+    #[\Override]
+    protected static function revokedEvent(): string
+    {
+        return PermissionRevoked::class;
+    }
+
+    /**
+     * Create a permission with the given name and owner, for the `web` guard.
+     *
+     * @param  string  $name
+     * @param  array{tenant_type: string|null, tenant_id: string|null}  $owner
+     * @return \Illuminate\Database\Eloquent\Model
+     */
+    #[\Override]
+    protected static function createNamed(string $name, array $owner): Model
+    {
+        return Permission::query()->create(['name' => $name, 'guard' => 'web'] + $owner);
+    }
+
+    /**
+     * Grant the permission to the identity.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Illuminate\Database\Eloquent\Model  $row
+     * @param  \DateTimeInterface|null  $expiresAt
+     * @return void
+     */
+    #[\Override]
+    protected function grantTo(StubIdentity $identity, Model $row, ?\DateTimeInterface $expiresAt = null): void
+    {
+        \assert($row instanceof Permission);
+
+        $identity->givePermission($row, $expiresAt);
+    }
+
+    /**
+     * Revoke the permission, or the permission name, from the identity.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Illuminate\Database\Eloquent\Model|string  $grant
+     * @return void
+     */
+    #[\Override]
+    protected function revokeFrom(StubIdentity $identity, Model|string $grant): void
+    {
+        \assert(\is_string($grant) || $grant instanceof Permission);
+
+        $identity->revokePermission($grant);
+    }
+
+    /**
+     * Synchronise the identity's permissions to the given ones and names.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  list<\Illuminate\Database\Eloquent\Model|string>  $grants
+     * @return void
+     */
+    #[\Override]
+    protected function syncTo(StubIdentity $identity, array $grants): void
+    {
+        $typed = [];
+
+        foreach ($grants as $grant) {
+            \assert(\is_string($grant) || $grant instanceof Permission);
+
+            $typed[] = $grant;
+        }
+
+        $identity->syncPermissions($typed);
+    }
+
+    /**
+     * Return the permission a revocation event reports.
+     *
+     * @param  object  $event
+     * @return \Illuminate\Database\Eloquent\Model|null
+     */
+    #[\Override]
+    protected static function revokedRow(object $event): ?Model
+    {
+        return $event instanceof PermissionRevoked ? $event->permission : null;
     }
 
     /**

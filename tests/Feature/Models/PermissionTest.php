@@ -37,8 +37,8 @@ final class PermissionTest extends StringCastsTestCase
     {
         $this->useCustomRole();
 
-        $role       = CustomRole::query()->create(['name' => 'editor', 'guard_name' => 'web']);
-        $permission = Permission::query()->create(['name' => 'posts:edit', 'guard_name' => 'web']);
+        $role       = CustomRole::query()->create(['name' => 'editor', 'guard' => 'web']);
+        $permission = Permission::query()->create(['name' => 'posts:edit', 'guard' => 'web']);
 
         $role->givePermission($permission);
 
@@ -76,8 +76,8 @@ final class PermissionTest extends StringCastsTestCase
     {
         $this->useCustomRole();
 
-        $role       = CustomRole::query()->create(['name' => 'editor', 'guard_name' => 'web']);
-        $permission = Permission::query()->create(['name' => 'posts:edit', 'guard_name' => 'api']);
+        $role       = CustomRole::query()->create(['name' => 'editor', 'guard' => 'web']);
+        $permission = Permission::query()->create(['name' => 'posts:edit', 'guard' => 'api']);
 
         try {
             $permission->roles()->attach($role->id);
@@ -108,7 +108,7 @@ final class PermissionTest extends StringCastsTestCase
     #[\Override]
     protected static function stringColumns(): array
     {
-        return ['name', 'guard_name', 'description', 'category', 'tenant_type', 'tenant_id'];
+        return ['name', 'guard', 'description', 'category', 'tenant_type', 'tenant_id'];
     }
 
     /**

@@ -493,22 +493,31 @@ final class MigrateSpatieSkipBranchesTest extends TestCase
     }
 
     /**
-     * Null guard_name passes through as null. Pins the Coalesce mutants on
+     * Spatie's `guard_name` is imported as the package's `guard`, for roles and
+     * permissions alike. Pins the Coalesce mutants on
      * `$data['guard_name'] ?? null`.
      *
      * @return void
      */
-    public function testNullGuardNamePassesThrough(): void
+    public function testSpatieGuardNameIsImportedAsTheGuard(): void
     {
         DB::table('roles')->insert([
-            ['id' => 1, 'name' => 'null-guard', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 1, 'name' => 'web-role', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
+        DB::table('permissions')->insert([
+            ['id' => 1, 'name' => 'api-permission', 'guard_name' => 'api', 'created_at' => now(), 'updated_at' => now()],
         ]);
 
         Artisan::call('authorization:migrate-spatie');
 
-        $row = DB::table('auth_roles')->where('name', 'null-guard')->first();
-        self::assertNotNull($row);
-        self::assertSame('web', $row->guard_name);
+        $role       = DB::table('auth_roles')->where('name', 'web-role')->first();
+        $permission = DB::table('auth_permissions')->where('name', 'api-permission')->first();
+
+        self::assertNotNull($role);
+        self::assertNotNull($permission);
+        self::assertSame('web', $role->guard);
+        self::assertSame('api', $permission->guard);
     }
 
     /**

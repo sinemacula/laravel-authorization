@@ -67,7 +67,7 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testAssignRoleClearsLoadedRolesRelationCache(): void
     {
-        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard_name' => 'web']);
+        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         // Prime the relation cache.
@@ -88,8 +88,8 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testSyncRolesClearsLoadedRolesRelationCache(): void
     {
-        Role::create(['id' => (string) Str::uuid(), 'name' => 'a', 'guard_name' => 'web']);
-        Role::create(['id' => (string) Str::uuid(), 'name' => 'b', 'guard_name' => 'web']);
+        Role::create(['id' => (string) Str::uuid(), 'name' => 'a', 'guard' => 'web']);
+        Role::create(['id' => (string) Str::uuid(), 'name' => 'b', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->load('roles');
@@ -108,7 +108,7 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testGivePermissionClearsLoadedPermissionsRelationCache(): void
     {
-        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard_name' => 'web']);
+        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard' => 'web']);
         $user       = StubIdentity::create(['id' => (string) Str::uuid()]);
 
         $user->load('permissions');
@@ -126,8 +126,8 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testSyncPermissionsClearsLoadedPermissionsRelationCache(): void
     {
-        Permission::create(['id' => (string) Str::uuid(), 'name' => 'a:do', 'guard_name' => 'web']);
-        Permission::create(['id' => (string) Str::uuid(), 'name' => 'b:do', 'guard_name' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'a:do', 'guard' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'b:do', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->load('permissions');
@@ -196,7 +196,7 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testGetRolesFallsBackToComputeWhenCacheUnbound(): void
     {
-        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'viewer', 'guard_name' => 'web']);
+        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'viewer', 'guard' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole($role);
 
@@ -217,7 +217,7 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testGetPermissionsFallsBackToComputeWhenCacheUnbound(): void
     {
-        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:read', 'guard_name' => 'web']);
+        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:read', 'guard' => 'web']);
         $user       = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->givePermission($permission);
 
@@ -237,7 +237,7 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testCanActOnReturnsFalseWhenTargetLacksRolesMethod(): void
     {
-        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'admin', 'guard_name' => 'web', 'rank' => 0]);
+        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'admin', 'guard' => 'web', 'rank' => 0]);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole($role);
 
@@ -414,7 +414,7 @@ final class UncoveredBranchesTest extends TestCase
         $store  = new Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
 
-        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'ghost', 'guard_name' => 'web']);
+        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'ghost', 'guard' => 'web']);
 
         // Expect no exception raised when the underlying driver lacks `tags()`
         // — the method exits at the early guard.
@@ -562,53 +562,13 @@ final class UncoveredBranchesTest extends TestCase
      */
     public function testCoerceExpiresAtHandlesStringValue(): void
     {
-        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'temp', 'guard_name' => 'web']);
+        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'temp', 'guard' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole($role, Carbon::now()->addHour());
 
         $names = $user->fresh()?->getRoles() ?? [];
 
         self::assertSame(['temp'], $names);
-    }
-
-    /**
-     * `ResolvesPivotExpiry::authorizationCoerceExpiresAt` returns null when the
-     * raw pivot value is an empty string. Targets line 139 of the trait.
-     *
-     * @return void
-     */
-    public function testCoerceExpiresAtReturnsNullForEmptyString(): void
-    {
-        // Direct invocation through a helper class that composes the trait —
-        // the public behaviour routes through
-        // `authorizationNearestPivotExpirySeconds` which calls
-        // `authorizationCoerceExpiresAt`. We invoke via reflection on a
-        // freshly-instantiated test-only composer.
-        /** @phpstan-ignore-next-line class.missingExtends */
-        $probe = new class {
-            use ResolvesPivotExpiry;
-
-            /**
-             * @param  mixed  $raw
-             * @return mixed
-             */
-            public function coerce(mixed $raw): mixed
-            {
-                return self::authorizationCoerceExpiresAt($raw);
-            }
-        };
-
-        self::assertNull($probe->coerce(''));
-        self::assertNull($probe->coerce(null));
-        self::assertNull($probe->coerce(42));
-
-        // Non-empty string — exercises the `Carbon::parse($raw)` branch.
-        $carbon = $probe->coerce('2026-01-01 00:00:00');
-        self::assertInstanceOf(\Illuminate\Support\Carbon::class, $carbon);
-
-        // DateTimeInterface — exercises the other branch.
-        $carbon = $probe->coerce(new \DateTimeImmutable('2026-01-01 00:00:00'));
-        self::assertInstanceOf(\Illuminate\Support\Carbon::class, $carbon);
     }
 
     /**
@@ -639,40 +599,6 @@ final class UncoveredBranchesTest extends TestCase
         self::assertSame(5, $probe->min(null, 5));
         self::assertSame(5, $probe->min(5, null));
         self::assertNull($probe->min(null, null));
-    }
-
-    /**
-     * `ResolvesPivotExpiry::authorizationCoerceGrantExpiry` returns the
-     * DateTimeInterface unchanged, parses strings, and null-pads everything
-     * else. Targets lines 254-262.
-     *
-     * @return void
-     */
-    public function testAuthorizationCoerceGrantExpiryHandlesAllBranches(): void
-    {
-        /** @phpstan-ignore-next-line class.missingExtends */
-        $probe = new class {
-            use ResolvesPivotExpiry;
-
-            /**
-             * @param  mixed  $value
-             * @return mixed
-             */
-            public function coerce(mixed $value): mixed
-            {
-                return self::authorizationCoerceGrantExpiry($value);
-            }
-        };
-
-        $expiresAt = new \DateTimeImmutable('+1 hour');
-        self::assertSame($expiresAt, $probe->coerce($expiresAt));
-
-        $carbon = $probe->coerce('2026-01-01 00:00:00');
-        self::assertInstanceOf(\DateTimeInterface::class, $carbon);
-
-        self::assertNull($probe->coerce(null));
-        self::assertNull($probe->coerce(''));
-        self::assertNull($probe->coerce(42));
     }
 
     /**

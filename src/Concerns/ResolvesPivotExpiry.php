@@ -5,8 +5,10 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Concerns;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
+use SineMacula\Laravel\Authorization\Database\UtcDateTime;
+use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 
 /**
  * Shared helpers used by the authorizable-identity traits to feed the
@@ -118,7 +120,7 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
         /** @var mixed $raw */
         $raw = $pivot->expires_at ?? null;
 
-        $expiresAt = self::authorizationCoerceExpiresAt($raw);
+        $expiresAt = UtcDateTime::toUtc($raw);
 
         if ($expiresAt === null) {
             return null;
@@ -127,22 +129,6 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
         $seconds = $expiresAt->getTimestamp() - $nowTimestamp;
 
         return $seconds > 0 ? $seconds : null;
-    }
-
-    /**
-     * Coerce a raw pivot `expires_at` value (string, Carbon,
-     * `DateTimeInterface`, or null) into a `Carbon` instance or null.
-     *
-     * @param  mixed  $raw
-     * @return \Illuminate\Support\Carbon|null
-     */
-    private static function authorizationCoerceExpiresAt(mixed $raw): ?Carbon
-    {
-        return match (true) {
-            $raw instanceof \DateTimeInterface => Carbon::instance(Carbon::parse($raw)),
-            \is_string($raw) && $raw !== ''    => Carbon::parse($raw),
-            default                            => null,
-        };
     }
 
     /**
@@ -167,110 +153,52 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
     }
 
     /**
-     * Read the existing pivot row for the authorizable-to-grant triplet
-     * `(type, id, $targetId)` against the supplied pivot table and return its
-     * existence and `expires_at` value. Returns
-     * `['exists' => false, 'expires_at' => null]` when no row exists. The query
-     * bypasses any relation-level expiry filter so it observes both live and
-     * expired pivot rows — both are candidates for an expiry mutation by a
-     * re-call to the surface-specific grant method.
+     * Read the existing pivot row for the authorizable-to-grant triplet `(type,
+     * id, $targetId)` through the supplied query on the grant relation's pivot
+     * table and return its existence and `expires_at` value. Returns `['exists'
+     * => false, 'expires_at' => null]` when no row exists. The query bypasses
+     * any relation-level expiry filter so it observes both live and expired
+     * pivot rows — both are candidates for an expiry mutation by a re-call to
+     * the surface-specific grant method. A relation's pivot query runs on the
+     * relation's connection, the one the grant is then written on.
      *
-     * Column names are supplied by the caller from the per-table
-     * `authorization.pivots.*` config block so a consumer who swaps a pivot
-     * column name (type / id / FK / expires_at) at the config seam sees the
-     * override honoured here as well.
+     * The grantee and expiry columns are the grant tables' fixed
+     * `authorizable_type`, `authorizable_id` and `expires_at`; the caller names
+     * the column that points at the granted row.
      *
      * Shared by the three authorizable-identity traits so the expiry-change
      * detection machinery lives in one place.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $identity
-     * @param  string  $table
-     * @param  array{authorizable_type: string, authorizable_id: string, target: string, expires_at: string}  $columns
+     * @param  \Illuminate\Database\Query\Builder  $pivot
+     * @param  string  $targetColumn
      * @param  string  $targetId
      * @return array{exists: bool, expires_at: \DateTimeInterface|null}
      */
-    private static function authorizationReadGrantPivot(Model $identity, string $table, array $columns, string $targetId): array
+    private static function authorizationReadGrantPivot(Model $identity, Builder $pivot, string $targetColumn, string $targetId): array
     {
-        $row = DB::table($table)
-            ->where($columns['authorizable_type'], $identity->getMorphClass())
-            ->where($columns['authorizable_id'], (string) $identity->getKey())
-            ->where($columns['target'], $targetId)
+        $row = $pivot
+            ->where('authorizable_type', $identity->getMorphClass())
+            ->where('authorizable_id', (string) $identity->getKey())
+            ->where($targetColumn, $targetId)
             ->first();
 
         if ($row === null) {
             return ['exists' => false, 'expires_at' => null];
         }
 
-        $expiresAtColumn = $columns['expires_at'];
-
         return [
             'exists'     => true,
-            'expires_at' => self::authorizationCoerceGrantExpiry($row->{$expiresAtColumn} ?? null),
+            'expires_at' => UtcDateTime::toUtc($row->expires_at),
         ];
     }
 
     /**
-     * Resolve the full column map for a pivot's `authorization.pivots.*` config
-     * sub-block. Returns the `authorizable_type`, `authorizable_id`, `target`
-     * (the FK column pointing at the related model), and `expires_at` column
-     * names. Consumers who leave the config untouched get the package defaults
-     * — `authorizable_type`, `authorizable_id`, `{entity}_id`, and `expires_at`
-     * respectively.
-     *
-     * @param  string  $pivot
-     * @param  string  $targetKey
-     * @param  string  $defaultTarget
-     * @return array{authorizable_type: string, authorizable_id: string, target: string, expires_at: string}
-     */
-    private static function authorizationResolveGrantPivotColumns(string $pivot, string $targetKey, string $defaultTarget): array
-    {
-        $prefix = 'authorization.pivots.' . $pivot . '.';
-
-        /** @var string $type */
-        $type = config($prefix . 'authorizable_type_column', 'authorizable_type');
-        /** @var string $id */
-        $id = config($prefix . 'authorizable_id_column', 'authorizable_id');
-        /** @var string $target */
-        $target = config($prefix . $targetKey, $defaultTarget);
-        /** @var string $expiresAt */
-        $expiresAt = config($prefix . 'expires_at_column', 'expires_at');
-
-        return [
-            'authorizable_type' => $type,
-            'authorizable_id'   => $id,
-            'target'            => $target,
-            'expires_at'        => $expiresAt,
-        ];
-    }
-
-    /**
-     * Coerce a raw pivot `expires_at` value (string from a DB query, Carbon,
-     * `DateTimeInterface`, or null) into a `DateTimeInterface` or null. Shared
-     * by the three authorizable-identity traits.
-     *
-     * @param  mixed  $value
-     * @return \DateTimeInterface|null
-     */
-    private static function authorizationCoerceGrantExpiry(mixed $value): ?\DateTimeInterface
-    {
-        if ($value instanceof \DateTimeInterface) {
-            return $value;
-        }
-
-        if (\is_string($value) && $value !== '') {
-            return Carbon::parse($value);
-        }
-
-        return null;
-    }
-
-    /**
-     * Compare two expiry values for equality. Two nulls are equal
-     * (forever vs. forever); a null and a concrete instant differ
-     * (forever vs. expiring); two concrete instants are compared
-     * by their UTC timestamp so DST and timezone normalisation do
-     * not produce spurious false positives. Shared by the three
-     * authorizable-identity traits.
+     * Compare two expiry values for equality. Two nulls are equal (forever vs.
+     * forever); a null and a concrete instant differ (forever vs. expiring);
+     * two concrete instants are compared by their UTC timestamp so DST and
+     * timezone normalisation do not produce spurious false positives. Shared by
+     * the three authorizable-identity traits.
      *
      * @param  \DateTimeInterface|null  $left
      * @param  \DateTimeInterface|null  $right
@@ -287,6 +215,44 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
         }
 
         return $left->getTimestamp() === $right->getTimestamp();
+    }
+
+    /**
+     * Return every row of the given class that answers the name under the
+     * identity's guard (the package default when the identity names none), in
+     * the order the lookup ranks them. Shared by the role and permission
+     * traits, which revoke and synchronise by name from these.
+     *
+     * @param  object  $identity
+     * @param  class-string<\Illuminate\Database\Eloquent\Model>  $class
+     * @param  string  $name
+     * @return list<\Illuminate\Database\Eloquent\Model>
+     */
+    private static function authorizationAllNamed(object $identity, string $class, string $name): array
+    {
+        /** @var string $guard */
+        $guard = self::authorizationResolveGuard($identity) ?? config('authorization.defaults.guard', 'web');
+
+        return GuardScopedLookup::allForGuard($class, $name, $guard);
+    }
+
+    /**
+     * Return the models among the given ones the identity holds, read through
+     * the grant relation's pivot query on the column that names the granted
+     * row, so an expired grant counts as held. Shared by the role and
+     * permission traits.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $pivot
+     * @param  string  $column
+     * @param  list<\Illuminate\Database\Eloquent\Model>  $models
+     * @return list<\Illuminate\Database\Eloquent\Model>
+     */
+    private static function authorizationHeldAmong(Builder $pivot, string $column, array $models): array
+    {
+        $keys = \array_map(static fn (Model $model): string => (string) $model->getKey(), $models);
+        $held = \array_map(static fn (mixed $key): string => \is_scalar($key) ? (string) $key : '', $pivot->whereIn($column, $keys)->pluck($column)->all());
+
+        return \array_values(\array_filter($models, static fn (Model $model): bool => \in_array((string) $model->getKey(), $held, true)));
     }
 
     /**

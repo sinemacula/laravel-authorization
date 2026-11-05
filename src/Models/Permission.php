@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Concerns\ValidatesAuthorizationName;
+use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPermissionProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
@@ -24,7 +25,7 @@ use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
  * Eloquent model for permission rows.
  *
  * Permissions are atomic action strings that can be granted directly to an
- * identity or inherited via a role. The `guard_name` column is nullable: a null
+ * identity or inherited via a role. The `guard` column is nullable: a null
  * value marks the permission as guard-agnostic (applies to every guard), a
  * concrete string scopes it to a single guard. The `is_system` flag marks
  * platform-shipped permissions as protected: deleting, editing or clearing the
@@ -34,7 +35,7 @@ use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
  *
  * @property string $id
  * @property string $name
- * @property string|null $guard_name
+ * @property string|null $guard
  * @property string|null $description
  * @property string|null $category
  * @property bool $is_system
@@ -55,7 +56,7 @@ class Permission extends Model
     /** @var list<string> Attributes that are mass assignable. */
     protected $fillable = [
         'name',
-        'guard_name',
+        'guard',
         'description',
         'category',
         'is_system',
@@ -81,6 +82,24 @@ class Permission extends Model
         /** @var string $table */
         $table       = config('authorization.tables.permissions', 'permissions');
         $this->table = $table;
+    }
+
+    /**
+     * Return the connection the permission table lives on: the configured
+     * `authorization.connection`, else the instance's own, else the
+     * application's default.
+     *
+     * Naming the connection is schema, so this is a framework hook rather than
+     * model behaviour.
+     *
+     * @return string
+     *
+     * @phpstan-ignore sineMaculaLaravel.modelBehaviour
+     */
+    #[\Override]
+    public function getConnectionName(): string
+    {
+        return AuthorizationConnection::resolve(parent::getConnectionName());
     }
 
     // ------------------------------------------------------------------
@@ -198,13 +217,14 @@ class Permission extends Model
     }
 
     /**
-     * Resolve a permission by name under the supplied guard, favouring
-     * guard-specific rows over guard-agnostic rows.
+     * Resolve a permission by name under the supplied guard, in the order
+     * `GuardScopedLookup` ranks the rows that answer it: the current tenant's
+     * row before the platform's, then a guard-specific row before a
+     * guard-agnostic one, then the lowest primary key.
      *
-     * Centralises the guard-precedence query shared by
-     * `HasPermissions::resolvePermission()` and `Role::resolvePermission()` — a
-     * single owner for the guard-agnostic disjunction so evolution of the
-     * matching rules happens in one place. Consumers calling
+     * Delegates to the precedence query shared by
+     * `HasPermissions::resolvePermission()` and `Role::resolvePermission()`, so
+     * the matching rules have one owner. Consumers calling
      * `$class::resolveByName(...)` where `$class` is read from
      * `authorization.models.permission` get correct late-static-binding against
      * their swapped model.
@@ -244,7 +264,7 @@ class Permission extends Model
     {
         return [
             'name'        => 'string',
-            'guard_name'  => 'string',
+            'guard'       => 'string',
             'description' => 'string',
             'category'    => 'string',
             'is_system'   => 'boolean',

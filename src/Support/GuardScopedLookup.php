@@ -8,13 +8,14 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 
 /**
- * Shared guard-precedence query builder.
+ * Shared owner- and guard-precedence query builder.
  *
  * Both `Role::resolveByName()` and `Permission::resolveByName()` need an
- * identical query that finds a row by `(name, guard_name)` with guard-specific
- * rows outranking guard-agnostic rows. This helper owns the single copy of that
- * logic so the two models delegate here instead of carrying duplicated private
- * methods.
+ * identical query that finds a row by name under a guard. A name is unique
+ * within its owner and guard, not globally, so up to four rows can answer: the
+ * current tenant's and the platform's, each for the guard or guard-agnostic.
+ * This helper owns the single copy of the precedence between them so the two
+ * models delegate here instead of carrying duplicated private methods.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -22,22 +23,23 @@ use Illuminate\Database\Eloquent\Model;
 final class GuardScopedLookup
 {
     /**
-     * Find a row by `(name, guard_name)` for the supplied model
-     * class, preferring guard-specific rows over guard-agnostic
-     * ones. The lookup is the shared half of
-     * `Role::resolveByName()` / `Permission::resolveByName()`.
-     * The return is typed as `Model|null`; callers validate the
-     * concrete class with `instanceof` before using the result.
-     * Larastan cannot flow a `TModel` template through
-     * `new $class->newQuery()->first()` (the Builder generic is
-     * inferred as `Model` once the receiver is a dynamic
-     * class-string), so a generic return shape would produce
-     * false `return.type` errors at callsites. The two
-     * `staticMethod.dynamicCall` suppressions on `orderByRaw()`
-     * and `orWhereNull()` cover Laravel's `@method static`
-     * annotations on `Illuminate\Database\Eloquent\Builder`; the
-     * dispatch is runtime-dynamic on a Builder instance, not
-     * static.
+     * Find a row by name under the given guard for the supplied model class.
+     *
+     * The model's global scopes apply, so the tenant scope limits the
+     * candidates to the platform's rows and the current tenant's. Among them
+     * the current tenant's row wins over the platform's, then a row for the
+     * guard wins over a guard-agnostic one, and the primary key breaks any
+     * remaining tie, so the same row is found every time.
+     *
+     * The return is typed as `Model|null`; callers validate the concrete class
+     * with `instanceof` before using the result. Larastan cannot flow a
+     * `TModel` template through `new $class->newQuery()->first()` (the Builder
+     * generic is inferred as `Model` once the receiver is a dynamic
+     * class-string), so a generic return shape would produce false
+     * `return.type` errors at callsites. The `staticMethod.dynamicCall`
+     * suppressions cover Laravel's `@method static` annotations on
+     * `Illuminate\Database\Eloquent\Builder`; the dispatch is runtime-dynamic
+     * on a Builder instance, not static.
      *
      * @param  class-string<\Illuminate\Database\Eloquent\Model>  $class
      * @param  string  $name
@@ -46,16 +48,52 @@ final class GuardScopedLookup
      */
     public static function findForGuard(string $class, string $name, string $guard): ?Model
     {
+        return self::queryForGuard($class, $name, $guard)->first();
+    }
+
+    /**
+     * Return every row that answers the name under the given guard, in the
+     * order `findForGuard()` ranks them.
+     *
+     * A revocation or synchronisation by name works from these, since an
+     * identity may hold the platform's row while the current tenant owns one of
+     * the same name that `findForGuard()` would pick.
+     *
+     * @param  class-string<\Illuminate\Database\Eloquent\Model>  $class
+     * @param  string  $name
+     * @param  string  $guard
+     * @return list<\Illuminate\Database\Eloquent\Model>
+     */
+    public static function allForGuard(string $class, string $name, string $guard): array
+    {
+        /** @var list<\Illuminate\Database\Eloquent\Model> */
+        return self::queryForGuard($class, $name, $guard)->get()->all();
+    }
+
+    /**
+     * Build the query for the rows that answer the name under the given guard,
+     * ordered by precedence.
+     *
+     * @param  class-string<\Illuminate\Database\Eloquent\Model>  $class
+     * @param  string  $name
+     * @param  string  $guard
+     * @return \Illuminate\Database\Eloquent\Builder<\Illuminate\Database\Eloquent\Model>
+     */
+    private static function queryForGuard(string $class, string $name, string $guard): Builder
+    {
         $instance = new $class;
+        $grammar  = $instance->getConnection()->getQueryGrammar();
+        $column   = static fn (string $column): string => $instance->qualifyColumn($column);
 
         // @phpstan-ignore staticMethod.dynamicCall
         return $instance->newQuery()
-            ->where('name', $name)
-            ->where(static function (Builder $query) use ($guard): void {
+            ->where($column('name'), $name)
+            ->where(static function (Builder $query) use ($column, $guard): void {
                 // @phpstan-ignore staticMethod.dynamicCall
-                $query->where('guard_name', $guard)->orWhereNull('guard_name');
+                $query->where($column('guard'), $guard)->orWhereNull($column('guard'));
             })
-            ->orderByRaw('guard_name IS NULL')
-            ->first();
+            ->orderByRaw($grammar->wrap($column('tenant_type')) . ' IS NULL')
+            ->orderByRaw($grammar->wrap($column('guard')) . ' IS NULL')
+            ->orderBy($instance->getQualifiedKeyName());
     }
 }
