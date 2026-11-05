@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization;
 
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Translation\Translator;
 use Illuminate\Support\ServiceProvider;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
@@ -86,6 +87,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
     public function boot(): void
     {
         $this->validateConfig();
+        $this->loadTranslationsFrom(__DIR__ . '/../lang', 'authorization');
         $this->offerPublishing();
         $this->registerCommands();
 
@@ -267,6 +269,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
             policyResolver: $app->make(PolicyResolver::class),
             lastDecisionStore: $app->make(LastDecisionStore::class),
             events: $app->bound(Dispatcher::class) ? $app->make(Dispatcher::class) : null,
+            translator: $app->bound(Translator::class) ? $app->make(Translator::class) : null,
         ));
 
         $this->app->alias('authorization', AuthorizationManager::class);
@@ -307,7 +310,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Offer config and migration publishing.
+     * Offer config, migration and language-file publishing.
      *
      * @return void
      */
@@ -325,6 +328,11 @@ final class AuthorizationServiceProvider extends ServiceProvider
         $this->publishes(
             [__DIR__ . '/../database/migrations' => database_path('migrations')],
             'authorization-migrations',
+        );
+
+        $this->publishes(
+            [__DIR__ . '/../lang' => $this->app->langPath('vendor/authorization')],
+            'authorization-lang',
         );
     }
 

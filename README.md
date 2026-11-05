@@ -191,6 +191,17 @@ Authorization::for($user)->can('posts:delete', 'posts/42', ['ip' => request()->i
 Authorization::for($user)->explain('posts:delete', 'posts/42', ['ip' => request()->ip()]);
 ```
 
+`Authorization::authorize()` throws `SineMacula\Laravel\Authorization\Exceptions\AuthorizationException` when the check
+is denied. It extends Laravel's `Illuminate\Auth\Access\AuthorizationException`, so Laravel's handler answers `403`. It
+carries the decision's reason code (`getReason()`) and nothing else: its message is the translated
+`authorization::authorization.denied` line, and the action, the resource and the policies stay out of it. The full
+decision is on the `AuthorizationFailed` event and `Authorization::lastDecision()`. To reword the message or add a
+locale, publish the language files:
+
+```bash
+php artisan vendor:publish --tag=authorization-lang
+```
+
 From the command line, naming an identity as `{morph type}:{key}`, where the type is a morph map alias or a class:
 
 ```bash
