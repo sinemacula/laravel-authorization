@@ -140,17 +140,4 @@ final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
         $reflection = new \ReflectionMethod($provider, $method);
         $reflection->invoke($provider);
     }
-
-    /**
-     * Invoke a private method on an arbitrary target via reflection.
-     *
-     * @param  object  $target
-     * @param  string  $method
-     * @return void
-     */
-    private function invokePrivateOn(object $target, string $method): void
-    {
-        $reflection = new \ReflectionMethod($target, $method);
-        $reflection->invoke($target);
-    }
 }
