@@ -5,13 +5,15 @@ declare(strict_types = 1);
 namespace Tests\Unit\Exceptions;
 
 use Illuminate\Auth\Access\AuthorizationException as LaravelAuthorizationException;
+use Illuminate\Contracts\Translation\Translator;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 
 /**
- * Unit tests for `AuthorizationException`, the denial `authorize()` raises.
+ * Unit tests for `AuthorizationException`, the denial `authorize()` and the
+ * route middleware raise.
  *
  * Pins that it is Laravel's authorization exception, so the handler renders a
  * `403`, and that it carries the decision's reason code and the message it is
@@ -85,5 +87,59 @@ final class AuthorizationExceptionTest extends TestCase
     public function testMessageKeyNamesThePackageLine(): void
     {
         self::assertSame('authorization::authorization.denied', AuthorizationException::MESSAGE_KEY);
+    }
+
+    /**
+     * The role key names the `role_required` line of the package's
+     * `authorization` language file.
+     *
+     * @return void
+     */
+    public function testRoleRequiredKeyNamesThePackageLine(): void
+    {
+        self::assertSame('authorization::authorization.role_required', AuthorizationException::ROLE_REQUIRED_KEY);
+    }
+
+    /**
+     * `translated()` words the message with the translator's line for the
+     * denial key by default, and for the key it is given otherwise.
+     *
+     * @return void
+     */
+    public function testTranslatedUsesTheTranslatorsLineForTheKey(): void
+    {
+        $translator = self::createStub(Translator::class);
+        $translator->method('get')->willReturnMap([
+            [AuthorizationException::MESSAGE_KEY, [], null, 'Action non autorisée.'],
+            [AuthorizationException::ROLE_REQUIRED_KEY, [], null, 'Rôle requis.'],
+        ]);
+
+        $denied = AuthorizationException::translated(DecisionReason::EXPLICIT_DENY, $translator);
+        $role   = AuthorizationException::translated(DecisionReason::IMPLICIT_DENY, $translator, AuthorizationException::ROLE_REQUIRED_KEY);
+
+        self::assertSame('Action non autorisée.', $denied->getMessage());
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $denied->getReason());
+        self::assertSame('Rôle requis.', $role->getMessage());
+        self::assertSame(DecisionReason::IMPLICIT_DENY, $role->getReason());
+    }
+
+    /**
+     * Without a translator, or when the translator has no line for the key (it
+     * answers with the key) or answers with something other than a line, the
+     * message is Laravel's English default.
+     *
+     * @return void
+     */
+    public function testTranslatedFallsBackToLaravelsMessage(): void
+    {
+        $missing = self::createStub(Translator::class);
+        $missing->method('get')->willReturn(AuthorizationException::MESSAGE_KEY);
+
+        $group = self::createStub(Translator::class);
+        $group->method('get')->willReturn(['denied' => 'Denied.']);
+
+        foreach ([null, $missing, $group] as $translator) {
+            self::assertSame('This action is unauthorized.', AuthorizationException::translated(DecisionReason::IMPLICIT_DENY, $translator)->getMessage());
+        }
     }
 }

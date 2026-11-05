@@ -6,7 +6,10 @@ namespace SineMacula\Laravel\Authorization;
 
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Http\Kernel as HttpKernelContract;
 use Illuminate\Contracts\Translation\Translator;
+use Illuminate\Foundation\Http\Kernel as HttpKernel;
+use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\ServiceProvider;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
@@ -22,6 +25,7 @@ use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
+use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
@@ -305,13 +309,18 @@ final class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Register the `role` and `permission` route-middleware aliases.
+     * Register the `role`, `permission` and `authorize` route-middleware
+     * aliases.
      *
      * The aliases only light up when the `router` binding is available
      * (Laravel's default HTTP kernel), so console-only applications that do not
      * resolve the router never pay the registration cost. Existing aliases on
      * the same keys are respected — a consumer that has already wired their own
-     * `role` or `permission` middleware keeps theirs untouched.
+     * `role`, `permission` or `authorize` middleware keeps theirs untouched.
+     *
+     * `AuthorizeAction` is also placed right after `SubstituteBindings` in the
+     * middleware priority, as Laravel places its own `can` middleware, so it
+     * decides on the bound model however the route orders its middleware.
      *
      * @return void
      */
@@ -324,18 +333,36 @@ final class AuthorizationServiceProvider extends ServiceProvider
         /** @var \Illuminate\Routing\Router $router */
         $router = $this->app->make('router');
 
-        /** @var array<string, class-string> $existing */
-        $existing = $router->getMiddleware();
+        $aliases = [
+            'role'       => RequireRole::class,
+            'permission' => RequirePermission::class,
+            'authorize'  => AuthorizeAction::class,
+        ];
 
-        if (!isset($existing['role'])) {
-            $router->aliasMiddleware('role', RequireRole::class);
+        foreach (\array_diff_key($aliases, $router->getMiddleware()) as $alias => $middleware) {
+            $router->aliasMiddleware($alias, $middleware);
         }
 
-        if (isset($existing['permission'])) {
+        $this->prioritiseAuthorizeAction();
+    }
+
+    /**
+     * Place `AuthorizeAction` right after `SubstituteBindings` in the HTTP
+     * kernel's middleware priority, which the kernel copies to the router.
+     *
+     * Without Laravel's HTTP kernel there is no priority to extend.
+     *
+     * @return void
+     */
+    protected function prioritiseAuthorizeAction(): void
+    {
+        $kernel = $this->app->bound(HttpKernelContract::class) ? $this->app->make(HttpKernelContract::class) : null;
+
+        if (!$kernel instanceof HttpKernel) {
             return;
         }
 
-        $router->aliasMiddleware('permission', RequirePermission::class);
+        $kernel->addToMiddlewarePriorityAfter(SubstituteBindings::class, AuthorizeAction::class);
     }
 
     /**

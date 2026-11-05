@@ -5,15 +5,14 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Registrars;
 
 use Illuminate\Contracts\Foundation\Application;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Gate;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
-use SineMacula\Laravel\Authorization\Contracts\AuthorizableResource;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
 use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
 use SineMacula\Laravel\Authorization\Exceptions\GateConflictException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
+use SineMacula\Laravel\Authorization\Support\ResourceIdentifier;
 
 /**
  * Walk every configured permission enum and register a matching Laravel Gate.
@@ -184,7 +183,7 @@ final readonly class GateRegistrar
         $isContextMap = \is_array($value) && !\array_is_list($value);
 
         if ($key === 0 && !$isContextMap) {
-            return [self::stringifyGateResource($value), $context];
+            return [ResourceIdentifier::of($value), $context];
         }
 
         if (!$isContextMap) {
@@ -193,43 +192,6 @@ final readonly class GateRegistrar
 
         /** @var array<string, mixed> $value */
         return [$resource, \array_merge($context, $value)];
-    }
-
-    /**
-     * Coerce a Gate-callback argument into a resource identifier string.
-     *
-     * Returns null for a null argument (no resource) and false for a value the
-     * evaluator cannot identify, such as an unsaved model, a number or a list,
-     * so the check denies instead of matching every resource-less statement.
-     * The resource contract wins over a model's own identifier.
-     *
-     * @param  mixed  $value
-     * @return false|string|null
-     */
-    private static function stringifyGateResource(mixed $value): false|string|null
-    {
-        return match (true) {
-            $value === null                                            => null,
-            $value instanceof AuthorizableResource                     => $value->toResourceIdentifier(),
-            $value instanceof Model                                    => self::modelIdentifier($value),
-            \is_string($value)                                         => $value,
-            \is_object($value) && \method_exists($value, '__toString') => (string) $value,
-            default                                                    => false,
-        };
-    }
-
-    /**
-     * Identify a model as `morphClass:key`, or false when it has no usable key
-     * (an unsaved model).
-     *
-     * @param  \Illuminate\Database\Eloquent\Model  $model
-     * @return false|string
-     */
-    private static function modelIdentifier(Model $model): false|string
-    {
-        $key = $model->getKey();
-
-        return \is_scalar($key) && $key !== '' ? $model->getMorphClass() . ':' . $key : false;
     }
 
     /**

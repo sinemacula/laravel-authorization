@@ -18,7 +18,7 @@ use Tests\TestCase;
 /**
  * Performance budget for the Blade helpers.
  *
- * Every `@role` and `@can` block in a view compiles to a call on
+ * Every `@role` and `@permission` block in a view compiles to a call on
  * `BladeHelpers::hasRole()` / `hasPermission()`. A single page renders one call
  * per permission-gated block; the budget bounds the per-call overhead on a
  * realistic page weight (50 role directives).
@@ -73,9 +73,9 @@ final class BladeHelpersBudgetTest extends TestCase
     }
 
     /**
-     * 50 `@can`-style directive calls against a role-inherited permission must
-     * complete in under 200ms — permission checks pay the heavier
-     * `hasPermission()` lookup.
+     * 50 `@permission` directive calls against a role-inherited permission must
+     * complete in under 200ms — permission checks pay the heavier full
+     * decision, whose RBAC step resolves the held permissions.
      *
      * @return void
      */

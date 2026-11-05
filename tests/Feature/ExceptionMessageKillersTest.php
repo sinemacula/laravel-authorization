@@ -10,7 +10,6 @@ use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
 use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
-use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizationMiddlewareMisconfiguredException;
 use Tests\TestCase;
 
 /**
@@ -27,7 +26,6 @@ use Tests\TestCase;
  */
 #[CoversClass(ConfigValidator::class)]
 #[CoversClass(InvalidAuthorizationConfigException::class)]
-#[CoversClass(AuthorizationMiddlewareMisconfiguredException::class)]
 #[CoversClass(GuardMismatchException::class)]
 final class ExceptionMessageKillersTest extends TestCase
 {
@@ -173,44 +171,6 @@ final class ExceptionMessageKillersTest extends TestCase
             self::assertStringContainsString('authorization.cache.store', $exception->getMessage());
             self::assertStringContainsString('expected a cache-store name string, got 42 (int).', $exception->getMessage());
         }
-    }
-
-    /**
-     * `AuthorizationMiddlewareMisconfiguredException` shortens the FQCN to the
-     * trailing class name and embeds it at the exact position in the message.
-     * Pins the `strrpos + 1` arithmetic against Increment / Decrement /
-     * UnwrapSubstr mutations.
-     *
-     * @return void
-     */
-    public function testMisconfiguredMiddlewareExceptionShortensContractFqcn(): void
-    {
-        $exception = new AuthorizationMiddlewareMisconfiguredException(
-            contract: 'SineMacula\Laravel\Authorization\Contracts\SupportsRoles',
-            middleware: 'auth.role',
-        );
-
-        self::assertSame(
-            'Middleware auth.role requires the authenticated identity to implement SupportsRoles; '
-            . 'apply the appropriate trait on the user model or remove the middleware from this route.',
-            $exception->getMessage(),
-        );
-    }
-
-    /**
-     * A contract with no namespace separator falls back to the raw string —
-     * pins the `strrpos !== false` ternary false branch.
-     *
-     * @return void
-     */
-    public function testMisconfiguredMiddlewareExceptionHandlesUnqualifiedContract(): void
-    {
-        $exception = new AuthorizationMiddlewareMisconfiguredException(
-            contract: 'Bareword',
-            middleware: 'auth.permission',
-        );
-
-        self::assertStringContainsString('implement Bareword;', $exception->getMessage());
     }
 
     /**

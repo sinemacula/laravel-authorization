@@ -46,10 +46,13 @@ interface SupportsRoles
     /**
      * Determine whether this identity has the given role.
      *
+     * With a guard, only a role of that guard or of no guard counts.
+     *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
+     * @param  string|null  $guard
      * @return bool
      */
-    public function hasRole(RoleModel|string $role): bool;
+    public function hasRole(RoleModel|string $role, ?string $guard = null): bool;
 
     /**
      * Return the names of every role assigned to this identity.

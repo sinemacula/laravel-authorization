@@ -17,4 +17,6 @@ return [
 
     'denied' => 'This action is unauthorized.',
 
+    'role_required' => 'This action requires a role you do not have.',
+
 ];

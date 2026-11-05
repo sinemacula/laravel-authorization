@@ -5,19 +5,25 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Support;
 
 use SineMacula\Laravel\Authorization\AuthorizationManager;
-use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 use SineMacula\Laravel\Authorization\Subject;
 
 /**
  * Runtime helpers that the shipped Blade directives compile into.
  *
- * The directives register thin callbacks that delegate here; every check
- * resolves the current subject through the bound `SubjectResolver` so the view
- * layer stays consistent with Gate / facade evaluation in the same request. A
- * request with no subject — or a subject that does not implement the matching
- * narrow contract — evaluates as `false`, keeping the view layer fail-closed by
- * default.
+ * The directives register thin callbacks that delegate here. The permission
+ * directives decide each action through the authorization manager's full
+ * decision for the subject, as `Authorization::can()`, `@can` and the Gate do:
+ * policies, an explicit deny, the permissions held and the subject's tenant.
+ * The role directives check role membership on the subject the bound
+ * `SubjectResolver` resolves, through its `hasRole()`; a role is not an action,
+ * so policies do not apply to it. A request with no subject, or a subject that
+ * cannot hold roles, evaluates as `false`, keeping the view layer fail-closed.
+ *
+ * Every helper takes the names as a string or a list, each entry holding one or
+ * more names separated by `|`, and an optional guard. The role helpers honour
+ * the guard; the permission helpers refuse it, since no guard changes the
+ * decision.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,22 +48,24 @@ final class BladeHelpers
 
     /**
      * Whether the current subject holds at least one of the supplied roles.
-     * Accepts either a single role name or an array — the Blade directive
-     * passes the user-supplied expression straight through.
      *
      * @param  array<int, string>|string  $roles
+     * @param  string|null  $guard
      * @return bool
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
      */
-    public static function hasRole(array|string $roles): bool
+    public static function hasRole(array|string $roles, ?string $guard = null): bool
     {
+        $guard     = CheckArguments::guard($guard);
         $principal = self::currentSubject()?->subject;
 
         if (!$principal instanceof SupportsRoles) {
             return false;
         }
 
-        foreach (self::flatten($roles) as $role) {
-            if ($principal->hasRole($role)) {
+        foreach (CheckArguments::names($roles) as $role) {
+            if ($principal->hasRole($role, $guard)) {
                 return true;
             }
         }
@@ -69,44 +77,48 @@ final class BladeHelpers
      * Whether the current subject holds every supplied role.
      *
      * @param  array<int, string>|string  $roles
+     * @param  string|null  $guard
      * @return bool
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
      */
-    public static function hasAllRoles(array|string $roles): bool
+    public static function hasAllRoles(array|string $roles, ?string $guard = null): bool
     {
+        $guard     = CheckArguments::guard($guard);
         $principal = self::currentSubject()?->subject;
+        $required  = CheckArguments::names($roles);
 
-        if (!$principal instanceof SupportsRoles) {
+        if (!$principal instanceof SupportsRoles || $required === []) {
             return false;
         }
 
-        $required = self::flatten($roles);
-
         foreach ($required as $role) {
-            if (!$principal->hasRole($role)) {
+            if (!$principal->hasRole($role, $guard)) {
                 return false;
             }
         }
 
-        return $required !== [];
+        return true;
     }
 
     /**
-     * Whether the current subject holds at least one of the supplied
-     * permissions.
+     * Whether the full decision allows the current subject at least one of the
+     * supplied actions.
      *
      * @param  array<int, string>|string  $permissions
+     * @param  string|null  $guard
      * @return bool
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
      */
-    public static function hasPermission(array|string $permissions): bool
+    public static function hasPermission(array|string $permissions, ?string $guard = null): bool
     {
-        $principal = self::currentSubject()?->subject;
+        CheckArguments::refuseGuard('permission', $guard);
 
-        if (!$principal instanceof SupportsPermissions) {
-            return false;
-        }
+        $manager = AuthorizationManager::instance();
 
-        foreach (self::flatten($permissions) as $permission) {
-            if ($principal->hasPermission($permission)) {
+        foreach (CheckArguments::names($permissions) as $permission) {
+            if ($manager?->can($permission) === true) {
                 return true;
             }
         }
@@ -115,54 +127,32 @@ final class BladeHelpers
     }
 
     /**
-     * Whether the current subject holds every supplied permission.
+     * Whether the full decision allows the current subject every supplied
+     * action.
      *
      * @param  array<int, string>|string  $permissions
+     * @param  string|null  $guard
      * @return bool
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
      */
-    public static function hasAllPermissions(array|string $permissions): bool
+    public static function hasAllPermissions(array|string $permissions, ?string $guard = null): bool
     {
-        $principal = self::currentSubject()?->subject;
+        CheckArguments::refuseGuard('permission', $guard);
 
-        if (!$principal instanceof SupportsPermissions) {
+        $manager  = AuthorizationManager::instance();
+        $required = CheckArguments::names($permissions);
+
+        if ($manager === null || $required === []) {
             return false;
         }
 
-        $required = self::flatten($permissions);
-
         foreach ($required as $permission) {
-            if (!$principal->hasPermission($permission)) {
+            if (!$manager->can($permission)) {
                 return false;
             }
         }
 
-        return $required !== [];
-    }
-
-    /**
-     * Normalise a string-or-array argument into a flat list of non-empty
-     * strings. Empty inputs are dropped so an accidental `@role('')` never
-     * admits everyone.
-     *
-     * @param  array<int, string>|string  $value
-     * @return array<int, string>
-     */
-    private static function flatten(array|string $value): array
-    {
-        $items = \is_array($value) ? $value : [$value];
-
-        $flattened = [];
-
-        foreach ($items as $item) {
-            $trimmed = \trim($item);
-
-            if ($trimmed === '') {
-                continue;
-            }
-
-            $flattened[] = $trimmed;
-        }
-
-        return $flattened;
+        return true;
     }
 }

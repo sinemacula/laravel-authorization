@@ -18,11 +18,12 @@ use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 /**
  * Unit coverage for the service provider's defensive early-return branches.
  *
- * Each of the boot-time wiring methods (`registerCacheInvalidationListeners`,
- * `registerRouteMiddleware`, `registerBladeDirectives`, `offerPublishing`)
- * short-circuits when its required container binding is absent. These branches
- * matter for library-mode embedding — non-Laravel applications that load the
- * package for its core evaluator without wanting the full framework glue.
+ * Each of the boot-time wiring steps (`registerCacheInvalidationListeners`,
+ * `registerRouteMiddleware`, `BladeDirectiveRegistrar::register()`,
+ * `offerPublishing`) short-circuits when its required container binding is
+ * absent. These branches matter for library-mode embedding — non-Laravel
+ * applications that load the package for its core evaluator without wanting the
+ * full framework glue.
  *
  * The tests exercise each branch against a bare `Container` that never binds
  * `events`, `router` or `blade.compiler`, and an application whose

@@ -8,19 +8,21 @@ use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
-use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
+use Tests\Concerns\ChecksAccess;
 use Tests\Feature\Stubs\StubIdentity;
-use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
 /**
- * Feature coverage for the shipped Blade directives.
+ * Feature coverage for the shipped Blade directives: the permission directives
+ * decide on the full decision, the role directives check role membership, and
+ * every directive splits `|` lists and passes its guard on.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -34,8 +36,10 @@ use Tests\TestCase;
 #[CoversClass(GateRegistrar::class)]
 #[CoversClass(BladeDirectiveRegistrar::class)]
 #[CoversClass(EventListenerRegistrar::class)]
-final class BladeDirectivesTest extends TestCase
+final class BladeDirectiveRegistrarTest extends TestCase
 {
+    use ChecksAccess;
+
     /** @var string Permission string reused across multiple directive assertions. */
     private const string PERMISSION = 'posts:edit';
 
@@ -220,8 +224,8 @@ final class BladeDirectivesTest extends TestCase
     }
 
     /**
-     * `@permission` admits a role-inherited grant — the helper folds direct +
-     * role-derived permissions through `hasPermission()`.
+     * `@permission` admits a role-inherited grant, which the decision's RBAC
+     * step counts as a held permission.
      *
      * @return void
      */
@@ -477,18 +481,130 @@ final class BladeDirectivesTest extends TestCase
     }
 
     /**
-     * Bind a subject resolver that returns the supplied user — equivalent to
-     * `actingAs()` for the purposes of the view layer, without needing an
-     * auth-provider backing.
+     * Every directive splits `|` lists, the any directives admitting on one
+     * held name, the all directives requiring each.
      *
-     * @param  object|null  $principal
      * @return void
      */
-    private function actAs(?object $principal): void
+    public function testEveryDirectiveSplitsPipeLists(): void
     {
-        $resolver = new StubSubjectResolver($principal);
+        $this->actAs(self::identityHolding(['admin', 'editor'], [self::PERMISSION, 'posts:delete']));
 
-        $this->app->instance(SubjectResolver::class, $resolver); // @phpstan-ignore method.nonObject
+        foreach (['role', 'anyrole', 'hasrole', 'hasanyrole'] as $name) {
+            self::assertSame('yes', $this->render("@{$name}('auditor|admin') yes @end{$name}"), "@{$name} did not split.");
+        }
+
+        foreach (['allroles', 'hasallroles'] as $name) {
+            self::assertSame('yes', $this->render("@{$name}('admin | editor') yes @end{$name}"), "@{$name} did not split.");
+            self::assertSame('', $this->render("@{$name}('admin|auditor') yes @end{$name}"), "@{$name} admitted a partial list.");
+        }
+
+        foreach (['permission', 'anypermission', 'haspermission', 'hasanypermission'] as $name) {
+            self::assertSame('yes', $this->render("@{$name}('posts:publish|posts:delete') yes @end{$name}"), "@{$name} did not split.");
+        }
+
+        foreach (['allpermissions', 'hasallpermissions'] as $name) {
+            self::assertSame('yes', $this->render("@{$name}('" . self::PERMISSION . "|posts:delete') yes @end{$name}"), "@{$name} did not split.");
+            self::assertSame('', $this->render("@{$name}('" . self::PERMISSION . "|posts:publish') yes @end{$name}"), "@{$name} admitted a partial list.");
+        }
+    }
+
+    /**
+     * The permission directives decide on the full decision: an explicit deny
+     * wins over a held permission, and a policy allow admits without one.
+     *
+     * @return void
+     */
+    public function testPermissionDirectivesDecideOnTheFullDecision(): void
+    {
+        $identity = self::identityHolding(permissions: [self::PERMISSION]);
+        self::attachStatement($identity, 'deny', [self::PERMISSION]);
+        self::attachStatement($identity, 'allow', ['posts:publish']);
+
+        $this->actAs($identity);
+
+        self::assertSame('', $this->render('@permission(\'' . self::PERMISSION . '\') yes @endpermission'));
+        self::assertSame('yes', $this->render('@allpermissions(\'posts:publish\') yes @endallpermissions'));
+    }
+
+    /**
+     * Every role directive passes its guard on: only roles of that guard or of
+     * no guard count.
+     *
+     * @return void
+     */
+    public function testRoleDirectivesHonourAGuard(): void
+    {
+        config(['auth.guards.api' => ['driver' => 'session', 'provider' => 'users']]);
+
+        $identity = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $identity->assignRole(Role::create(['name' => 'admin', 'guard' => 'api']));
+
+        $this->actAs($identity);
+
+        foreach (['role', 'anyrole', 'allroles', 'hasrole', 'hasanyrole', 'hasallroles'] as $name) {
+            self::assertSame('yes', $this->render("@{$name}('admin', 'api') yes @end{$name}"), "@{$name} dropped the guard.");
+            self::assertSame('', $this->render("@{$name}('admin', 'web') yes @end{$name}"), "@{$name} ignored the guard.");
+        }
+    }
+
+    /**
+     * Every permission directive refuses a guard rather than dropping it.
+     *
+     * @return void
+     */
+    public function testPermissionDirectivesRefuseAGuard(): void
+    {
+        $this->actAs(self::identityHolding(permissions: [self::PERMISSION]));
+
+        foreach (['permission', 'anypermission', 'allpermissions', 'haspermission', 'hasanypermission', 'hasallpermissions'] as $name) {
+            try {
+                $this->render("@{$name}('" . self::PERMISSION . "', 'web') yes @end{$name}");
+                self::fail("@{$name} dropped the guard.");
+            } catch (\Throwable $exception) {
+                self::assertInstanceOf(InvalidCheckArgumentException::class, $exception->getPrevious() ?? $exception, "@{$name} did not refuse the guard.");
+            }
+        }
+    }
+
+    /**
+     * Every directive refuses a third argument rather than dropping it, naming
+     * the directive and the count, even when the first two would admit.
+     *
+     * @return void
+     */
+    public function testEveryDirectiveRefusesAThirdArgument(): void
+    {
+        $this->actAs(self::identityHolding(roles: ['admin'], permissions: [self::PERMISSION]));
+
+        $directives = [
+            'role'              => '\'admin\', \'web\'',
+            'anyrole'           => '\'admin\', \'web\'',
+            'allroles'          => '\'admin\', \'web\'',
+            'hasrole'           => '\'admin\', \'web\'',
+            'hasanyrole'        => '\'admin\', \'web\'',
+            'hasallroles'       => '\'admin\', \'web\'',
+            'permission'        => '\'' . self::PERMISSION . '\', null',
+            'anypermission'     => '\'' . self::PERMISSION . '\', null',
+            'allpermissions'    => '\'' . self::PERMISSION . '\', null',
+            'haspermission'     => '\'' . self::PERMISSION . '\', null',
+            'hasanypermission'  => '\'' . self::PERMISSION . '\', null',
+            'hasallpermissions' => '\'' . self::PERMISSION . '\', null',
+        ];
+
+        foreach ($directives as $name => $arguments) {
+            self::assertSame('yes', $this->render("@{$name}({$arguments}) yes @end{$name}"), "@{$name} refused two arguments.");
+
+            try {
+                $this->render("@{$name}({$arguments}, 'extra', 'more') yes @end{$name}");
+                self::fail("@{$name} dropped the third argument.");
+            } catch (\Throwable $exception) {
+                $refusal = $exception->getPrevious() ?? $exception;
+
+                self::assertInstanceOf(InvalidCheckArgumentException::class, $refusal, "@{$name} did not refuse the third argument.");
+                self::assertSame("@{$name} takes at most two arguments, 4 given. Separate several names with '|', not ','.", $refusal->getMessage());
+            }
+        }
     }
 
     /**

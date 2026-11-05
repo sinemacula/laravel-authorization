@@ -4,28 +4,23 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Http\Middleware;
 
-use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
+use Illuminate\Http\Request;
+use SineMacula\Laravel\Authorization\Support\CheckArguments;
 
 /**
- * Route middleware that admits only identities holding one of the supplied
- * permissions.
+ * Route middleware that admits a request when the full decision allows any of
+ * the listed actions for the subject, with no resource.
  *
- * Wired under the `permission` alias by the service provider. Checks direct
- * grants and role-inherited grants via the identity's `hasPermission()` —
- * policy-based decisions should continue to use Laravel's `can:` middleware or
- * the `Authorization` facade, since route-middleware RBAC cannot supply the
- * resource and context a policy statement expects. Arguments accept both
- * Laravel-native comma separation (`permission:posts:edit,posts:delete`) and
- * Spatie-style pipe separation (`permission:posts:edit|posts:delete`); both
- * resolve to OR semantics. For AND across several permissions, chain the
- * middleware —
- * `->middleware(['permission:posts:edit', 'permission:posts:publish'])`.
+ * Wired under the `permission` alias by the service provider, as
+ * `permission:posts:update|posts:manage`. Each action is decided by the
+ * authorization manager as `Authorization::can()` and the Gate decide it:
+ * policies, an explicit deny, the permissions held and the subject's tenant. An
+ * explicit deny wins over a held permission, and a policy allow admits without
+ * one. For every one of several actions, chain the middleware:
+ * `->middleware(['permission:posts:update', 'permission:posts:publish'])`.
  *
- * @formatter:off
- *
- * @extends \SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware<\SineMacula\Laravel\Authorization\Contracts\SupportsPermissions>
- *
- * @formatter:on
+ * The decision takes no guard, so a guard argument
+ * (`permission:posts:update,web`) is refused rather than ignored.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -33,31 +28,23 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
 final class RequirePermission extends AbstractAuthorizationMiddleware
 {
     /**
-     * @return class-string<\SineMacula\Laravel\Authorization\Contracts\SupportsPermissions>
+     * Admit the request when any listed action is allowed.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @param  non-empty-list<string>  $names
+     * @param  string|null  $option
+     * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
      */
     #[\Override]
-    protected function requiredContract(): string
+    protected function authorize(Request $request, array $names, ?string $option): void
     {
-        return SupportsPermissions::class;
-    }
+        CheckArguments::refuseGuard('permission', $option);
 
-    /**
-     * @param  \SineMacula\Laravel\Authorization\Contracts\SupportsPermissions  $principal
-     * @param  string  $needle
-     * @return bool
-     */
-    #[\Override]
-    protected function matches(object $principal, string $needle): bool
-    {
-        return $principal->hasPermission($needle);
-    }
-
-    /**
-     * @return string
-     */
-    #[\Override]
-    protected function rejectionMessage(): string
-    {
-        return 'Permission required.';
+        $this->subject();
+        $this->authorizeAny($names, null);
     }
 }

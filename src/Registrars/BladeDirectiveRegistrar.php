@@ -6,10 +6,19 @@ namespace SineMacula\Laravel\Authorization\Registrars;
 
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\Facades\Blade;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
 
 /**
  * Register Blade directives for role and permission checks.
+ *
+ * The permission directives decide through the authorization manager's full
+ * decision and the role directives check role membership, both on the subject
+ * the bound resolver returns (see `BladeHelpers`). Every directive takes its
+ * names as a string or a list, with `|` between names
+ * (`@role('admin|editor')`), then an optional guard (`@role('admin', 'web')`),
+ * which a role directive honours and a permission directive refuses. A third
+ * argument is refused rather than dropped.
  *
  * `Blade::if('role', …)` auto-generates the paired
  * `@role / @unlessrole / @elserole / @endrole` quartet; the same pattern covers
@@ -56,30 +65,48 @@ final readonly class BladeDirectiveRegistrar
             return;
         }
 
-        $roleNames       = ['role', 'anyrole', 'allroles', 'hasrole', 'hasanyrole', 'hasallroles'];
-        $permissionNames = ['permission', 'anypermission', 'allpermissions', 'haspermission', 'hasanypermission', 'hasallpermissions'];
+        $anyRole = BladeHelpers::hasRole(...);
+        $allRole = BladeHelpers::hasAllRoles(...);
+        $anyPerm = BladeHelpers::hasPermission(...);
+        $allPerm = BladeHelpers::hasAllPermissions(...);
 
-        $anyRole = static fn (array|string $roles): bool => BladeHelpers::hasRole($roles);
-        $allRole = static fn (array|string $roles): bool => BladeHelpers::hasAllRoles($roles);
-        $anyPerm = static fn (array|string $permissions): bool => BladeHelpers::hasPermission($permissions);
-        $allPerm = static fn (array|string $permissions): bool => BladeHelpers::hasAllPermissions($permissions);
+        $directives = [
+            'role'              => $anyRole,
+            'anyrole'           => $anyRole,
+            'allroles'          => $allRole,
+            'hasrole'           => $anyRole,
+            'hasanyrole'        => $anyRole,
+            'hasallroles'       => $allRole,
+            'permission'        => $anyPerm,
+            'anypermission'     => $anyPerm,
+            'allpermissions'    => $allPerm,
+            'haspermission'     => $anyPerm,
+            'hasanypermission'  => $anyPerm,
+            'hasallpermissions' => $allPerm,
+        ];
 
-        Blade::if('role', $anyRole);
-        Blade::if('anyrole', $anyRole);
-        Blade::if('allroles', $allRole);
-        Blade::if('hasrole', $anyRole);
-        Blade::if('hasanyrole', $anyRole);
-        Blade::if('hasallroles', $allRole);
-
-        Blade::if('permission', $anyPerm);
-        Blade::if('anypermission', $anyPerm);
-        Blade::if('allpermissions', $allPerm);
-        Blade::if('haspermission', $anyPerm);
-        Blade::if('hasanypermission', $anyPerm);
-        Blade::if('hasallpermissions', $allPerm);
-
-        foreach ([...$roleNames, ...$permissionNames] as $name) {
+        foreach ($directives as $name => $check) {
+            Blade::if($name, self::condition($name, $check));
             Blade::directive('endunless' . $name, static fn (): string => '<?php endif; ?>');
         }
+    }
+
+    /**
+     * Return the condition a directive compiles into: the check, given the
+     * names and the optional guard, refusing any further argument.
+     *
+     * @param  string  $name
+     * @param  \Closure(array<int, string>|string, ?string): bool  $check
+     * @return \Closure(array<int, string>|string, ?string, mixed...): bool
+     */
+    private static function condition(string $name, \Closure $check): \Closure
+    {
+        return static function (array|string $names, ?string $guard = null, mixed ...$extra) use ($name, $check): bool {
+            if ($extra !== []) {
+                throw InvalidCheckArgumentException::tooManyDirectiveArguments($name, 2 + \count($extra));
+            }
+
+            return $check($names, $guard);
+        };
     }
 }
