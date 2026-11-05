@@ -159,10 +159,10 @@ final class TenantScopeTest extends TestCase
     }
 
     /**
-     * A query the resolver runs while it resolves the subject (a user model
-     * that eager-loads its roles, say) sees platform rows only, instead of
-     * asking the resolver again without end, and the tenant it returns then
-     * scopes every later query.
+     * A query on any scoped model the resolver runs while it resolves the
+     * subject (a user model that eager-loads its roles and permissions, say)
+     * sees platform rows only, so the resolver runs once instead of again for
+     * each model, and the tenant it returns then scopes every later query.
      *
      * @return void
      */
@@ -173,6 +173,12 @@ final class TenantScopeTest extends TestCase
         $resolver = new class ($tenantB) implements SubjectResolver {
             /** @var list<string> The role names the resolver's own query saw. */
             public array $seen = [];
+
+            /** @var list<string> The permission names the resolver's own query saw. */
+            public array $seenPermissions = [];
+
+            /** @var int How many times the subject was resolved. */
+            public int $resolutions = 0;
 
             /**
              * Create a new resolver for a fixed tenant.
@@ -186,17 +192,23 @@ final class TenantScopeTest extends TestCase
             ) {}
 
             /**
-             * Query the roles, as loading a user with its roles does, then
-             * resolve a subject in the tenant.
+             * Query the roles and permissions, as loading a user with both
+             * does, then resolve a subject in the tenant.
              *
              * @return \SineMacula\Laravel\Authorization\Subject
              */
             #[\Override]
             public function resolve(): Subject
             {
+                $this->resolutions++;
+
                 /** @var list<string> $names */
                 $names      = Role::query()->orderBy('name')->pluck('name')->all();
                 $this->seen = $names;
+
+                /** @var list<string> $permissions */
+                $permissions           = Permission::query()->orderBy('name')->pluck('name')->all();
+                $this->seenPermissions = $permissions;
 
                 return $this->forUser(new \stdClass);
             }
@@ -218,7 +230,9 @@ final class TenantScopeTest extends TestCase
 
         self::assertSame(['b-role', 'platform-role'], $this->roleNames());
         self::assertSame(['platform-role'], $resolver->seen);
+        self::assertSame(['platform-permission'], $resolver->seenPermissions);
         self::assertSame(['b-permission', 'platform-permission'], $this->permissionNames());
+        self::assertSame(1, $resolver->resolutions);
     }
 
     /**

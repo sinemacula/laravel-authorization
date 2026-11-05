@@ -26,8 +26,9 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
  * `ResolvedTenant` holder, which the service provider binds with `scoped()`, so
  * a single request or job (the `effectivePermissions()` enum sweep, relation
  * walks, cache-miss paths) pays the resolver cost once, and the next request or
- * job resolves its own tenant. The only state it holds is whether a resolution
- * is under way, for the duration of that resolution.
+ * job resolves its own tenant. While a resolution is under way it marks it in
+ * the container, rather than on the scope, since each scoped model holds its
+ * own instance of the scope.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,8 +37,8 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
  */
 final class TenantScope implements Scope
 {
-    /** @var bool Whether the subject's tenant is being resolved, so a query the resolver runs meanwhile sees platform rows only. */
-    private bool $resolving = false;
+    /** @var string The container key bound while the subject's tenant is being resolved, so a query on any scoped model the resolver runs meanwhile sees platform rows only. */
+    private const string RESOLVING = 'authorization.tenant_scope.resolving';
 
     /**
      * Apply the tenant scope to the given Eloquent builder.
@@ -56,7 +57,7 @@ final class TenantScope implements Scope
     {
         $typeColumn = $model->getTable() . '.tenant_type';
         $idColumn   = $model->getTable() . '.tenant_id';
-        $tenant     = $this->resolveTenant();
+        $tenant     = self::resolveTenant();
 
         // `whereNull` / `orWhere` are declared as `@method static` on the
         // Eloquent Builder docblock; PHPStan flags dynamic instance calls as
@@ -135,23 +136,26 @@ final class TenantScope implements Scope
      *
      * Resolving the subject can itself query a scoped model: the shipped
      * resolver reads the signed-in user, and a user model that eager-loads its
-     * roles queries them. That query sees platform rows only, rather than
-     * asking the resolver again without end.
+     * roles and permissions queries them. Those queries, on any scoped model,
+     * see platform rows only, so the resolver runs once rather than again for
+     * each model, or without end.
      *
      * @return object|null
      */
-    private function resolveTenant(): ?object
+    private static function resolveTenant(): ?object
     {
-        if ($this->resolving) {
+        $container = Container::getInstance();
+
+        if ($container->bound(self::RESOLVING)) {
             return null;
         }
 
-        $this->resolving = true;
+        $container->instance(self::RESOLVING, true);
 
         try {
-            return self::readResolvedTenant();
+            return self::readResolvedTenant($container);
         } finally {
-            $this->resolving = false;
+            $container->forgetInstance(self::RESOLVING);
         }
     }
 
@@ -159,12 +163,11 @@ final class TenantScope implements Scope
      * Return the tenant resolved for the current request or job, resolving it
      * again when the bound resolver is not the one it was read from.
      *
+     * @param  \Illuminate\Container\Container  $container
      * @return object|null
      */
-    private static function readResolvedTenant(): ?object
+    private static function readResolvedTenant(Container $container): ?object
     {
-        $container = Container::getInstance();
-
         /** @var \SineMacula\Laravel\Authorization\Contracts\SubjectResolver $resolver */
         $resolver = $container->make(SubjectResolver::class);
 
