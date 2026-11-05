@@ -326,7 +326,7 @@ final class AuthorizationServiceProviderTest extends TestCase
 
     /**
      * Every package command is registered in the console, the catalogue sync
-     * included.
+     * and the prune included.
      *
      * @return void
      */
@@ -334,7 +334,7 @@ final class AuthorizationServiceProviderTest extends TestCase
     {
         $commands = \array_keys(Artisan::all());
 
-        foreach (['list-roles', 'list-permissions', 'grant', 'revoke', 'why-can', 'migrate-spatie', 'sync'] as $name) {
+        foreach (['list-roles', 'list-permissions', 'grant', 'revoke', 'why-can', 'migrate-spatie', 'sync', 'prune'] as $name) {
             self::assertContains("authorization:{$name}", $commands);
         }
     }

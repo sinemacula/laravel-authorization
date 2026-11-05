@@ -8,13 +8,16 @@ use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
+use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyAttached;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyDetached;
+use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Identity\RoleExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
@@ -242,6 +245,30 @@ enum GrantTarget: string
         };
 
         return new $event($operation, $grantee, Reference::of($target), self::text($target->getAttribute('name')), $scope, self::immutable($expiresAt));
+    }
+
+    /**
+     * Build the event the removal of an expired grant dispatches.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model  $target
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
+     * @param  \DateTimeInterface  $expiredAt
+     * @return \SineMacula\Laravel\Authorization\Contracts\IdentityEvent
+     */
+    public function expiredEvent(Operation $operation, Reference $grantee, Model $target, GrantScope $scope, \DateTimeInterface $expiredAt): IdentityEvent
+    {
+        $event = match ($this) {
+            self::ROLE       => RoleExpired::class,
+            self::PERMISSION => PermissionExpired::class,
+            self::POLICY     => PolicyExpired::class,
+        };
+
+        /** @var \DateTimeImmutable $at */
+        $at = self::immutable($expiredAt);
+
+        return new $event($operation, $grantee, Reference::of($target), self::text($target->getAttribute('name')), $scope, $at);
     }
 
     /**
