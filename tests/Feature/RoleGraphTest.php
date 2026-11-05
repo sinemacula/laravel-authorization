@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -243,9 +244,10 @@ final class RoleGraphTest extends TestCase
         $root->permissions()->attach(Permission::create(['name' => 'posts:read', 'guard' => 'web'])->id);
         $leaf->permissions()->attach(Permission::create(['name' => 'posts:edit', 'guard' => 'web'])->id);
 
-        $reach = RoleGraph::reach([$leaf->id, 'missing']);
+        $missing = (string) Str::uuid();
+        $reach   = RoleGraph::reach([$leaf->id, $missing]);
 
-        self::assertEqualsCanonicalizing(['posts:read', 'posts:edit'], RoleGraph::permissionNamesWithin($reach, [$leaf->id, 'missing']));
+        self::assertEqualsCanonicalizing(['posts:read', 'posts:edit'], RoleGraph::permissionNamesWithin($reach, [$leaf->id, $missing]));
         self::assertSame([], RoleGraph::permissionNamesWithin(RoleGraph::reach([$other->id]), [$other->id]));
 
         config(['authorization.hierarchy.enabled' => false]);

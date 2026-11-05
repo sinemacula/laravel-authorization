@@ -49,7 +49,7 @@ final class ResolutionMemo
     {
         $expiresAt = $this->entries[$key]['expires_at'] ?? null;
 
-        return $expiresAt !== null && Carbon::now()->getTimestamp() >= $expiresAt;
+        return $expiresAt !== null && self::now() >= $expiresAt;
     }
 
     /**
@@ -66,7 +66,7 @@ final class ResolutionMemo
     {
         $this->entries[$key] = [
             'value'      => $value,
-            'expires_at' => $lifetime === null ? null : Carbon::now()->getTimestamp() + $lifetime,
+            'expires_at' => $lifetime === null ? null : self::now() + $lifetime,
         ];
     }
 
@@ -89,5 +89,17 @@ final class ResolutionMemo
     public function flush(): void
     {
         $this->entries = [];
+    }
+
+    /**
+     * Return the current Unix timestamp: the test clock when one is set,
+     * otherwise the system clock, which is far cheaper to read than Carbon on
+     * a path every memo hit takes.
+     *
+     * @return int
+     */
+    private static function now(): int
+    {
+        return Carbon::hasTestNow() ? Carbon::now()->getTimestamp() : \time();
     }
 }
