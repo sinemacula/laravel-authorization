@@ -89,8 +89,8 @@ final class MigrateSpatieCommand extends Command
             $roleIdMap       = $this->migrateRoles($dryRun, $counts);
             $permissionIdMap = $this->migratePermissions($dryRun, $counts);
             $this->migrateRolePermissions($roleIdMap, $permissionIdMap, $dryRun, $counts);
-            $this->migrateModelHasRoles($roleIdMap, $dryRun, $counts);
-            $this->migrateModelHasPermissions($permissionIdMap, $dryRun, $counts);
+            $counts['authorizable_roles']       = $this->migrateGrants('model_has_roles', 'role_id', 'authorizable_roles', $roleIdMap, $dryRun);
+            $counts['authorizable_permissions'] = $this->migrateGrants('model_has_permissions', 'permission_id', 'authorizable_permissions', $permissionIdMap, $dryRun);
         };
 
         if ($dryRun) {
@@ -371,81 +371,47 @@ final class MigrateSpatieCommand extends Command
     }
 
     /**
-     * Migrate `model_has_roles` to `authorizable_roles`. Spatie's grants carry
-     * no scope, so each is imported platform-wide, for every application.
+     * Migrate one of Spatie's grant tables (`model_has_roles`,
+     * `model_has_permissions`) to the package's matching grant table and return
+     * the number of grants migrated. A grant whose role or permission was
+     * skipped is skipped with it. Spatie's grants carry no scope, so each is
+     * imported platform-wide, for every application.
      *
-     * @param  array<int|string, string>  $roleIdMap
+     * @param  string  $source
+     * @param  string  $column
+     * @param  string  $target
+     * @param  array<int|string, string>  $idMap
      * @param  bool  $dryRun
-     * @param  array<string, int>  $counts
-     * @return void
+     * @return int
      */
-    private function migrateModelHasRoles(array $roleIdMap, bool $dryRun, array &$counts): void
+    private function migrateGrants(string $source, string $column, string $target, array $idMap, bool $dryRun): int
     {
         /** @var string $targetTable */
-        $targetTable = config('authorization.tables.authorizable_roles', 'authorizable_roles');
+        $targetTable = config('authorization.tables.' . $target, $target);
+        $migrated    = 0;
 
-        $rows = DB::table('model_has_roles')->get();
+        foreach (DB::table($source)->get() as $row) {
+            /** @var array<string, int|string> $grant */
+            $grant    = (array) $row;
+            $mappedId = $idMap[$grant[$column]] ?? null;
 
-        foreach ($rows as $row) {
-            /** @var array{role_id: int|string, model_type: string, model_id: int|string} $modelRoleRow */
-            $modelRoleRow = (array) $row;
-            $mappedRoleId = $roleIdMap[$modelRoleRow['role_id']] ?? null;
-
-            if ($mappedRoleId === null) {
+            if ($mappedId === null) {
                 continue;
             }
 
             if (!$dryRun) {
                 $this->target()->table($targetTable)->insert([
-                    'authorizable_type' => $modelRoleRow['model_type'],
-                    'authorizable_id'   => (string) $modelRoleRow['model_id'],
-                    'role_id'           => $mappedRoleId,
+                    'authorizable_type' => $grant['model_type'],
+                    'authorizable_id'   => (string) $grant['model_id'],
+                    $column             => $mappedId,
                     'created_at'        => now(),
                     'updated_at'        => now(),
                 ]);
             }
 
-            $counts['authorizable_roles']++;
+            $migrated++;
         }
-    }
 
-    /**
-     * Migrate `model_has_permissions` to `authorizable_permissions`. Spatie's
-     * grants carry no scope, so each is imported platform-wide, for every
-     * application.
-     *
-     * @param  array<int|string, string>  $permissionIdMap
-     * @param  bool  $dryRun
-     * @param  array<string, int>  $counts
-     * @return void
-     */
-    private function migrateModelHasPermissions(array $permissionIdMap, bool $dryRun, array &$counts): void
-    {
-        /** @var string $targetTable */
-        $targetTable = config('authorization.tables.authorizable_permissions', 'authorizable_permissions');
-
-        $rows = DB::table('model_has_permissions')->get();
-
-        foreach ($rows as $row) {
-            /** @var array{permission_id: int|string, model_type: string, model_id: int|string} $modelPermissionRow */
-            $modelPermissionRow = (array) $row;
-            $mappedPermissionId = $permissionIdMap[$modelPermissionRow['permission_id']] ?? null;
-
-            if ($mappedPermissionId === null) {
-                continue;
-            }
-
-            if (!$dryRun) {
-                $this->target()->table($targetTable)->insert([
-                    'authorizable_type' => $modelPermissionRow['model_type'],
-                    'authorizable_id'   => (string) $modelPermissionRow['model_id'],
-                    'permission_id'     => $mappedPermissionId,
-                    'created_at'        => now(),
-                    'updated_at'        => now(),
-                ]);
-            }
-
-            $counts['authorizable_permissions']++;
-        }
+        return $migrated;
     }
 }

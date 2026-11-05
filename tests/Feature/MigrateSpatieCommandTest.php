@@ -419,6 +419,30 @@ final class MigrateSpatieCommandTest extends TestCase
     }
 
     /**
+     * A grant that follows one skipped with its refused role or permission is
+     * still migrated.
+     *
+     * @return void
+     */
+    public function testGrantsAfterASkippedGrantAreMigrated(): void
+    {
+        $this->seedNamesForValidation();
+
+        DB::table('model_has_roles')->insert([
+            ['role_id' => 2, 'model_type' => 'App\Models\User', 'model_id' => 8],
+        ]);
+
+        DB::table('model_has_permissions')->insert([
+            ['permission_id' => 3, 'model_type' => 'App\Models\User', 'model_id' => 8],
+        ]);
+
+        Artisan::call('authorization:migrate-spatie');
+
+        self::assertSame(['42', '8'], DB::table('auth_authorizable_roles')->orderBy('authorizable_id')->pluck('authorizable_id')->all());
+        self::assertSame(['42', '8'], DB::table('auth_authorizable_permissions')->orderBy('authorizable_id')->pluck('authorizable_id')->all());
+    }
+
+    /**
      * A dry run reports the names it would refuse and excludes them from the
      * summary counts.
      *
@@ -437,6 +461,8 @@ final class MigrateSpatieCommandTest extends TestCase
         self::assertMatchesRegularExpression('/\|\s+roles\s+\|\s+3\s+\|/', $output);
         self::assertMatchesRegularExpression('/\|\s+permissions\s+\|\s+4\s+\|/', $output);
         self::assertMatchesRegularExpression('/\|\s+role_permissions\s+\|\s+3\s+\|/', $output);
+        self::assertMatchesRegularExpression('/\|\s+authorizable_roles\s+\|\s+1\s+\|/', $output);
+        self::assertMatchesRegularExpression('/\|\s+authorizable_permissions\s+\|\s+1\s+\|/', $output);
         self::assertSame(0, DB::table('auth_roles')->count());
         self::assertSame(0, DB::table('auth_permissions')->count());
     }
