@@ -8,11 +8,11 @@ use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Events\Policy\Created as PolicyCreated;
 use SineMacula\Laravel\Authorization\Events\Policy\Deleted as PolicyDeleted;
 use SineMacula\Laravel\Authorization\Events\Policy\Updated as PolicyUpdated;
-use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Observers\Support\RecordChanges;
 use SineMacula\Laravel\Authorization\Support\DocumentDigest;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
+use SineMacula\Laravel\Authorization\Support\RecordOwner;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
@@ -44,22 +44,18 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 final class PolicyObserver
 {
     /**
-     * Enforce the both-or-neither tenant ownership invariant before any
-     * persistence. A row with only one of `tenant_type` / `tenant_id` set would
-     * belong to neither the platform nor a tenant.
+     * Enforce the owner rules before any persistence (see `RecordOwner`): both
+     * tenant columns or neither, and an owner fixed once the policy is created.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\OwnerChangedException
      */
     public function saving(Policy $policy): void
     {
-        if (($policy->tenant_type === null) === ($policy->tenant_id === null)) {
-            return;
-        }
-
-        throw new InvalidTenantColumnsException(modelKind: 'policy', missingColumn: $policy->tenant_type === null ? 'tenant_type' : 'tenant_id');
+        RecordOwner::assertValid($policy, 'policy');
     }
 
     /**

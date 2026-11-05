@@ -9,18 +9,17 @@ use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
-use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
-use SineMacula\Laravel\Authorization\Scopes\TenantScope;
-use SineMacula\Laravel\Authorization\Services\Support\GrantChange;
+use SineMacula\Laravel\Authorization\Services\Support\GrantScopes;
 use SineMacula\Laravel\Authorization\Services\Support\GrantTable;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\RoleParity;
 
 /**
  * Grants, revokes and syncs roles, permissions and policies to a grantee.
@@ -286,34 +285,15 @@ final class GrantService
         $operation = Operation::begin($actor);
 
         $revoked = OperationScope::run($operation, static function (Operation $operation) use ($reference): int {
-            $count  = 0;
             $events = [];
 
             foreach (GrantTarget::cases() as $kind) {
-                $table  = self::table($kind, $reference, $operation, null);
-                $grants = $table->grantsInEveryScope();
-                $models = [];
-
-                foreach ($kind->find(\array_column($grants, 0)) as $model) {
-                    $models[self::key($model)] = $model;
-                }
-
-                $table->revokeInEveryScope();
-
-                foreach ($grants as [$id, $tenant]) {
-                    if (!isset($models[$id])) {
-                        continue;
-                    }
-
-                    $events[] = $kind->revokedEvent($operation, $reference, $models[$id], new GrantScope($tenant));
-                }
-
-                $count += \count($grants);
+                $events = [...$events, ...self::revokeEverywhere($kind, $reference, $operation)];
             }
 
             OperationScope::dispatch(...$events);
 
-            return $count;
+            return \count($events);
         });
 
         foreach (GrantTarget::cases() as $kind) {
@@ -321,6 +301,35 @@ final class GrantService
         }
 
         return $revoked;
+    }
+
+    /**
+     * Revoke every row of the given kind the grantee holds, in every scope, and
+     * return a revoked or detached event for each, in its scope.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @return list<\SineMacula\Laravel\Authorization\Contracts\IdentityEvent>
+     */
+    private static function revokeEverywhere(GrantTarget $kind, Reference $grantee, Operation $operation): array
+    {
+        $table  = self::table($kind, $grantee, $operation, null);
+        $grants = $table->grantsInEveryScope();
+        $models = [];
+        $events = [];
+
+        foreach ($kind->find(\array_column($grants, 0)) as $model) {
+            $models[self::key($model)] = $model;
+        }
+
+        $table->revokeInEveryScope();
+
+        foreach ($grants as [$id, $tenant]) {
+            $events[] = $kind->revokedEvent($operation, $grantee, $models[$id], new GrantScope($tenant));
+        }
+
+        return $events;
     }
 
     /**
@@ -346,16 +355,19 @@ final class GrantService
         Model|Reference|null $tenant,
     ): GrantOutcome {
         $reference = self::grantee($grantee);
-        $named     = self::tenant($tenant);
+        $named     = GrantScopes::named($tenant);
         $operation = Operation::begin($actor);
 
         /** @var \SineMacula\Laravel\Authorization\Enums\GrantOutcome $outcome */
         $outcome = OperationScope::run($operation, static function (Operation $operation) use ($kind, $grantee, $reference, $named, $target, $expiresAt): GrantOutcome {
-            $model  = $kind->resolve($target, self::guard($grantee), $named);
-            $scope  = self::scopeOf($kind, $model, $named);
+            $model = $kind->resolve($target, self::guard($grantee), $named);
+            $scope = GrantScopes::of($kind, $model, $named);
+
+            RoleParity::assertGrantable($kind->value, $model, self::guard($grantee));
+
             $change = self::table($kind, $reference, $operation, $scope)->grant(self::key($model), $expiresAt);
 
-            OperationScope::dispatch(...self::grantEvents($operation, $kind, $reference, $model, new GrantScope($scope), $change, $expiresAt));
+            OperationScope::dispatch(...$kind->changeEvents($operation, $reference, $model, new GrantScope($scope), $change, $expiresAt));
 
             return $change->outcome;
         });
@@ -381,7 +393,7 @@ final class GrantService
     private function revoke(GrantTarget $kind, Model|Reference $grantee, mixed $target, Model|Reference|null $actor, Model|Reference|null $tenant): int
     {
         $reference = self::grantee($grantee);
-        $named     = self::tenant($tenant);
+        $named     = GrantScopes::named($tenant);
         $operation = Operation::begin($actor);
 
         $revoked = OperationScope::run($operation, static function (Operation $operation) use ($kind, $grantee, $reference, $named, $target): int {
@@ -389,7 +401,7 @@ final class GrantService
             $events     = [];
 
             foreach ($candidates as $model) {
-                $scope = self::scopeOf($kind, $model, $named);
+                $scope = GrantScopes::of($kind, $model, $named);
                 $table = self::table($kind, $reference, $operation, $scope);
 
                 if ($table->held([self::key($model)]) === []) {
@@ -435,12 +447,12 @@ final class GrantService
         Model|Reference|null $tenant,
     ): SyncResult {
         $reference = self::grantee($grantee);
-        $named     = self::tenant($tenant);
+        $named     = GrantScopes::named($tenant);
         $operation = Operation::begin($actor);
 
         /** @var \SineMacula\Laravel\Authorization\Services\SyncResult $result */
         $result = OperationScope::run($operation, static function (Operation $operation) use ($kind, $grantee, $reference, $named, $targets, $expiresAt): SyncResult {
-            $scope   = $named ?? self::commonOwner($kind, $grantee, $targets);
+            $scope   = $named ?? GrantScopes::commonOwner($kind, self::guard($grantee), $targets);
             $table   = self::table($kind, $reference, $operation, $scope);
             $held    = $table->held();
             $keep    = self::toKeep($kind, $grantee, $targets, $held, $scope);
@@ -453,7 +465,7 @@ final class GrantService
             foreach ($keep as $model) {
                 $id     = self::key($model);
                 $change = $table->rearm($id, $expiresAt);
-                $events = [...$events, ...self::grantEvents($operation, $kind, $reference, $model, new GrantScope($scope), $change, $expiresAt)];
+                $events = [...$events, ...$kind->changeEvents($operation, $reference, $model, new GrantScope($scope), $change, $expiresAt)];
 
                 $changed[$change->outcome->value][] = $id;
             }
@@ -494,128 +506,14 @@ final class GrantService
             $models = \is_string($target) ? $kind->heldOrFirst($target, self::guard($grantee), $held, $scope) : [$kind->assertTarget($target)];
 
             foreach ($models as $model) {
-                self::assertGrantableIn($kind, $model, $scope);
+                GrantScopes::assertGrantableIn($kind, $model, $scope);
+                RoleParity::assertGrantable($kind->value, $model, self::guard($grantee));
 
                 $keep[self::key($model)] = $model;
             }
         }
 
         return $keep;
-    }
-
-    /**
-     * Return the tenant that owns every target of a sync, or null for the
-     * platform when any target is the platform's, their owners differ, or there
-     * is none.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
-     * @param  array<int, mixed>  $targets
-     * @return \SineMacula\Laravel\Authorization\Support\Reference|null
-     */
-    private static function commonOwner(GrantTarget $kind, Model|Reference $grantee, array $targets): ?Reference
-    {
-        $owners = \array_map(static fn (mixed $target): ?Reference => Reference::tenantOf($kind->resolve($target, self::guard($grantee))), $targets);
-        $first  = $owners[0] ?? null;
-
-        foreach ($owners as $owner) {
-            if (!self::isSameTenant($owner, $first)) {
-                return null;
-            }
-        }
-
-        return $first;
-    }
-
-    /**
-     * Return the scope a grant of the target holds in: the tenant that owns it,
-     * else the tenant named, else null for platform-wide. A target one tenant
-     * owns cannot be granted in another.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
-     * @param  \Illuminate\Database\Eloquent\Model  $target
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $named
-     * @return \SineMacula\Laravel\Authorization\Support\Reference|null
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException
-     */
-    private static function scopeOf(GrantTarget $kind, Model $target, ?Reference $named): ?Reference
-    {
-        $scope = $named ?? Reference::tenantOf($target);
-
-        self::assertGrantableIn($kind, $target, $scope);
-
-        return $scope;
-    }
-
-    /**
-     * Refuse a target one tenant owns in any scope but that tenant.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
-     * @param  \Illuminate\Database\Eloquent\Model  $target
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $scope
-     * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException
-     */
-    private static function assertGrantableIn(GrantTarget $kind, Model $target, ?Reference $scope): void
-    {
-        $owner = Reference::tenantOf($target);
-
-        if ($owner === null || self::isSameTenant($owner, $scope)) {
-            return;
-        }
-
-        /** @var string $name */
-        $name = $target->getAttribute('name');
-
-        throw new GrantScopeMismatchException($kind->value, $name, $owner, $scope);
-    }
-
-    /**
-     * Determine whether two scopes are the same: the same tenant, or both the
-     * platform.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $left
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $right
-     * @return bool
-     */
-    private static function isSameTenant(?Reference $left, ?Reference $right): bool
-    {
-        return $left?->type === $right?->type && $left?->id === $right?->id;
-    }
-
-    /**
-     * Build the events a grant's change dispatches: none when nothing changed,
-     * the granted event for a new grant, and also the expiry-changed event for
-     * a re-armed grant or a changed expiry.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
-     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
-     * @param  \Illuminate\Database\Eloquent\Model  $model
-     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
-     * @param  \SineMacula\Laravel\Authorization\Services\Support\GrantChange  $change
-     * @param  \DateTimeInterface|null  $expiresAt
-     * @return list<\SineMacula\Laravel\Authorization\Contracts\IdentityEvent>
-     */
-    private static function grantEvents(
-        Operation $operation,
-        GrantTarget $kind,
-        Reference $grantee,
-        Model $model,
-        GrantScope $scope,
-        GrantChange $change,
-        ?\DateTimeInterface $expiresAt,
-    ): array {
-        return match ($change->outcome) {
-            GrantOutcome::UNCHANGED => [],
-            GrantOutcome::GRANTED   => [$kind->grantedEvent($operation, $grantee, $model, $scope, $expiresAt)],
-            default                 => [
-                $kind->grantedEvent($operation, $grantee, $model, $scope, $expiresAt),
-                $kind->expiryChangedEvent($operation, $grantee, $model, $scope, $change->previousExpiresAt, $expiresAt),
-            ],
-        };
     }
 
     /**
@@ -669,25 +567,6 @@ final class GrantService
     private static function table(GrantTarget $kind, Reference $grantee, Operation $operation, ?Reference $tenant): GrantTable
     {
         return new GrantTable(AuthorizationConnection::connection(), $kind->table(), $kind->column(), $grantee->type, $grantee->id, $operation->actor, $tenant);
-    }
-
-    /**
-     * Return the reference to the tenant a call names, or null for none.
-     *
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
-     * @return \SineMacula\Laravel\Authorization\Support\Reference|null
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
-     */
-    private static function tenant(Model|Reference|null $tenant): ?Reference
-    {
-        if (!$tenant instanceof Model) {
-            return $tenant;
-        }
-
-        [$type, $id] = TenantScope::extractTenantPair($tenant);
-
-        return new Reference($type, $id);
     }
 
     /**

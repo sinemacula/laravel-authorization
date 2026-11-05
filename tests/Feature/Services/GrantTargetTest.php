@@ -9,6 +9,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted;
@@ -25,6 +26,7 @@ use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\Support\GrantChange;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -363,6 +365,31 @@ final class GrantTargetTest extends TestCase
             \array_values((array) $changedEvent),
         );
         self::assertSame('UTC', $changedEvent->previousExpiresAt?->getTimezone()->getName()); // @phpstan-ignore property.notFound
+    }
+
+    /**
+     * A grant's change dispatches nothing when unchanged, the granted event
+     * when new, and the granted and expiry-changed events when re-armed or
+     * changed.
+     *
+     * @return void
+     */
+    public function testBuildsTheEventsOfAChange(): void
+    {
+        $role      = Role::query()->create(['name' => 'editor']);
+        $operation = Operation::begin();
+        $grantee   = new Reference('stub_identity', 'user-1');
+        $scope     = GrantScope::platform();
+        $previous  = Carbon::parse('2026-07-01 12:00:00', 'UTC');
+        $classes   = static fn (GrantOutcome $outcome): array => \array_map(
+            static fn (object $event): string => $event::class,
+            GrantTarget::ROLE->changeEvents($operation, $grantee, $role, $scope, new GrantChange($outcome, $previous), null),
+        );
+
+        self::assertSame([], $classes(GrantOutcome::UNCHANGED));
+        self::assertSame([RoleAssigned::class], $classes(GrantOutcome::GRANTED));
+        self::assertSame([RoleAssigned::class, RoleExpiryChanged::class], $classes(GrantOutcome::REARMED));
+        self::assertSame([RoleAssigned::class, RoleExpiryChanged::class], $classes(GrantOutcome::EXPIRY_CHANGED));
     }
 
     /**

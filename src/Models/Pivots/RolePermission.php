@@ -7,11 +7,11 @@ namespace SineMacula\Laravel\Authorization\Models\Pivots;
 use Illuminate\Database\Eloquent\Relations\Pivot;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\OrphanSide;
-use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\OrphanedRolePermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Support\RoleParity;
 
 /**
  * Custom pivot model for the `role_permissions` table.
@@ -52,7 +52,7 @@ final class RolePermission extends Pivot
     }
 
     /**
-     * Boot the pivot and register the guard-parity hook.
+     * Boot the pivot and register the parity hook.
      *
      * @return void
      */
@@ -60,21 +60,23 @@ final class RolePermission extends Pivot
     protected static function booted(): void
     {
         self::saving(static function (self $pivot): void {
-            $pivot->ensureGuardParity();
+            $pivot->ensureParity();
         });
     }
 
     /**
-     * Reject a save when the role's and permission's guards are concrete and
-     * different. Guard-agnostic (`null`) rows pass. Parent models are resolved
-     * from the in-memory `pivotParent` / loaded relations where possible; a
-     * missing parent raises `OrphanedRolePermissionException`.
+     * Reject a save when the role cannot carry the permission: their guards are
+     * concrete and different, or another tenant owns the permission (see
+     * `RoleParity`). Parent models are resolved from the in-memory
+     * `pivotParent` / loaded relations where possible; a missing parent raises
+     * `OrphanedRolePermissionException`.
      *
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\OwnerMismatchException
      */
-    private function ensureGuardParity(): void
+    private function ensureParity(): void
     {
         $roleColumn       = $this->resolveRoleColumn();
         $permissionColumn = $this->resolvePermissionColumn();
@@ -91,16 +93,7 @@ final class RolePermission extends Pivot
         $role       = $this->resolveRoleParent($roleId);
         $permission = $this->resolvePermissionParent($permissionId);
 
-        $roleGuard       = $role->guard;
-        $permissionGuard = $permission->guard;
-
-        if ($roleGuard === null || $permissionGuard === null) {
-            return;
-        }
-
-        if ($roleGuard !== $permissionGuard) {
-            throw new GuardMismatchException(roleName: $role->name, permissionName: $permission->name, roleGuard: $roleGuard, permissionGuard: $permissionGuard);
-        }
+        RoleParity::assertCarries($role, $permission);
     }
 
     /**

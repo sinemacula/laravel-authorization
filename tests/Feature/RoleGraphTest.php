@@ -184,14 +184,15 @@ final class RoleGraphTest extends TestCase
     }
 
     /**
-     * Permissions another tenant owns are not held through a shared role.
+     * A tenant's own permissions held through its role count only in that
+     * tenant; the platform's count everywhere.
      *
      * @return void
      */
     public function testPermissionsFollowTheTenantScope(): void
     {
         $tenant = self::createTenant('t-2');
-        $role   = Role::create(['name' => 'shared', 'guard' => 'web']);
+        $role   = Role::query()->withoutGlobalScope(TenantScope::class)->create(['name' => 'shared', 'guard' => 'web', ...self::ownedBy($tenant)]);
 
         $role->permissions()->attach(Permission::create(['name' => 'posts:read', 'guard' => 'web'])->id);
         $role->permissions()->attach(Permission::query()->withoutGlobalScope(TenantScope::class)->create(['name' => 'posts:own', 'guard' => 'web', ...self::ownedBy($tenant)])->id);

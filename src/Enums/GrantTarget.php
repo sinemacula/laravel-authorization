@@ -24,6 +24,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Services\Support\GrantChange;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use SineMacula\Laravel\Authorization\Support\Operation;
@@ -297,6 +298,31 @@ enum GrantTarget: string
             self::immutable($previous),
             self::immutable($next),
         );
+    }
+
+    /**
+     * Build the events a grant's change dispatches: none when nothing changed,
+     * the granted event for a new grant, and also the expiry-changed event for
+     * a re-armed grant or a changed expiry.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model  $model
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
+     * @param  \SineMacula\Laravel\Authorization\Services\Support\GrantChange  $change
+     * @param  \DateTimeInterface|null  $expiresAt
+     * @return list<\SineMacula\Laravel\Authorization\Contracts\IdentityEvent>
+     */
+    public function changeEvents(Operation $operation, Reference $grantee, Model $model, GrantScope $scope, GrantChange $change, ?\DateTimeInterface $expiresAt): array
+    {
+        return match ($change->outcome) {
+            GrantOutcome::UNCHANGED => [],
+            GrantOutcome::GRANTED   => [$this->grantedEvent($operation, $grantee, $model, $scope, $expiresAt)],
+            default                 => [
+                $this->grantedEvent($operation, $grantee, $model, $scope, $expiresAt),
+                $this->expiryChangedEvent($operation, $grantee, $model, $scope, $change->previousExpiresAt, $expiresAt),
+            ],
+        };
     }
 
     /**

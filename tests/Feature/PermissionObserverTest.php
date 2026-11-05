@@ -9,12 +9,15 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Events\Permission\Created as PermissionCreated;
 use SineMacula\Laravel\Authorization\Events\Permission\Deleted as PermissionDeleted;
 use SineMacula\Laravel\Authorization\Events\Permission\Updated as PermissionUpdated;
+use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
+use SineMacula\Laravel\Authorization\Exceptions\OwnerChangedException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\PermissionObserver;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
 use Tests\TestCase;
 
@@ -32,7 +35,37 @@ use Tests\TestCase;
 #[CoversClass(PermissionObserver::class)]
 final class PermissionObserverTest extends TestCase
 {
-    use ComparesReferences;
+    use CatchesRefusals, ComparesReferences;
+
+    /**
+     * Changing a permission's guard re-checks every role that carries it, and a
+     * saved permission keeps its owner.
+     *
+     * @return void
+     */
+    public function testAGuardChangeIsCheckedAgainstItsRoles(): void
+    {
+        $permission = Permission::query()->create(['name' => 'posts:read']);
+
+        Role::query()->create(['name' => 'editor', 'guard' => 'web'])->permissions()->attach($permission->id);
+
+        $permission->guard = 'web';
+        $permission->save();
+
+        $permission->guard = 'api';
+
+        $refusal = self::refusalOf(static fn (): bool => $permission->save());
+
+        self::assertInstanceOf(GuardMismatchException::class, $refusal);
+        self::assertSame('editor', $refusal->getRoleName());
+
+        $permission->guard = 'web';
+        $permission->forceFill(['tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a']);
+
+        $this->expectException(OwnerChangedException::class);
+
+        $permission->save();
+    }
 
     /**
      * Creating a permission reports it as a snapshot: its reference, name,

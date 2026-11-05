@@ -23,6 +23,7 @@ use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
+use SineMacula\Laravel\Authorization\Exceptions\GranteeGuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
@@ -445,6 +446,31 @@ final class GrantServiceTest extends TestCase
         Event::assertDispatchedTimes(RoleRevoked::class, 2);
         Event::assertDispatched(RoleRevoked::class, static fn (RoleRevoked $event): bool => $event->scope->tenant === null);
         Event::assertDispatched(RoleRevoked::class, static fn (RoleRevoked $event): bool => self::refersTo($event->scope->tenant, $tenant));
+    }
+
+    /**
+     * A role or permission of another guard than the grantee declares is
+     * refused, in a grant and in a sync.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGrantMustSuitTheGranteesGuard(): void
+    {
+        $user = ApiGuardedUser::query()->create(['id' => 'api-user']);
+        $role = Role::query()->create(['name' => 'editor', 'guard' => 'web']);
+
+        foreach ([static fn () => self::service()->grantRole($user, $role), static fn () => self::service()->syncRoles($user, [$role])] as $write) {
+            try {
+                $write();
+                self::fail('A role of another guard was granted.');
+            } catch (GranteeGuardMismatchException $exception) {
+                self::assertSame('api', $exception->getGranteeGuard());
+            }
+        }
+
+        self::assertSame(0, DB::table('authorizable_roles')->count());
     }
 
     /**

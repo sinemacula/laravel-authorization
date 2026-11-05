@@ -59,15 +59,16 @@ final class ListCatalogueCommandTest extends TestCase
         $owned  = Permission::create(['name' => 'posts:edit', 'guard' => 'web', 'tenant_type' => 'tenant', 'tenant_id' => 't-1']);
         $shared = Permission::create(['name' => 'posts:read', 'guard' => 'web']);
 
-        $platform->permissions()->attach([$owned->id, $shared->id]);
+        $platform->permissions()->attach($shared->id);
+        $viewer->permissions()->attach([$owned->id, $shared->id]);
 
         self::assertSame(0, Artisan::call('authorization:list-roles'));
 
         $output = Artisan::output();
 
         self::assertMatchesRegularExpression('/\|\s*ID\s*\|\s*Name\s*\|\s*Guard\s*\|\s*Owner\s*\|\s*System\s*\|\s*Permissions\s*\|/', $output);
-        self::assertMatchesRegularExpression('/\|\s*' . $platform->id . '\s*\|\s*editor\s*\|\s*web\s*\|\s*platform\s*\|\s*Yes\s*\|\s*2\s*\|/', $output);
-        self::assertMatchesRegularExpression('/\|\s*' . $viewer->id . '\s*\|\s*viewer\s*\|\s*\(any\)\s*\|\s*tenant:t-1\s*\|\s*No\s*\|\s*0\s*\|/', $output);
+        self::assertMatchesRegularExpression('/\|\s*' . $platform->id . '\s*\|\s*editor\s*\|\s*web\s*\|\s*platform\s*\|\s*Yes\s*\|\s*1\s*\|/', $output);
+        self::assertMatchesRegularExpression('/\|\s*' . $viewer->id . '\s*\|\s*viewer\s*\|\s*\(any\)\s*\|\s*tenant:t-1\s*\|\s*No\s*\|\s*2\s*\|/', $output);
     }
 
     /**
