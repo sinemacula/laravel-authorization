@@ -4,9 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Concerns;
 
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
-use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePolicyPivot;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -56,29 +54,10 @@ trait HasPolicies // @phpstan-ignore trait.unused
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $model */
         $model = config('authorization.models.policy', Policy::class);
 
-        /** @var string $pivot */
-        $pivot = config('authorization.tables.authorizable_policies', 'authorizable_policies');
+        /** @var string $table */
+        $table = config('authorization.tables.authorizable_policies', 'authorizable_policies');
 
-        // The `where(...)` and inner `whereNull()/orWhere()` calls are resolved
-        // by PHPStan to static methods on Eloquent's Builder via Laravel's
-        // annotation soup — the underlying dispatch is instance-level. Same
-        // pattern, same justification, as `GuardScopedLookup`.
-        // @phpstan-ignore staticMethod.dynamicCall
-        return $this->morphToMany(
-            related: $model,
-            name: 'authorizable',
-            table: $pivot,
-            foreignPivotKey: 'authorizable_id',
-            relatedPivotKey: 'policy_id',
-        )
-            ->using(AuthorizablePolicyPivot::class)
-            ->withPivot('expires_at')
-            ->withTimestamps()
-            ->where(static function (Builder $query) use ($pivot): void {
-                // @phpstan-ignore staticMethod.dynamicCall
-                $query->whereNull($pivot . '.expires_at')
-                    ->orWhere($pivot . '.expires_at', '>', Carbon::now('UTC'));
-            });
+        return $this->authorizationGrantRelation($model, $table, 'policy_id', AuthorizablePolicyPivot::class);
     }
 
     /**
