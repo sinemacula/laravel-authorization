@@ -18,6 +18,7 @@ use SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked;
 use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
+use SineMacula\Laravel\Authorization\Exceptions\OwnerMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
@@ -328,24 +329,19 @@ final class RoleServiceTest extends TestCase
     }
 
     /**
-     * A cycle through another tenant's role is refused too: the walk is not
-     * narrowed by the tenant scope.
+     * A parent another tenant owns is refused, so no chain, and no cycle, runs
+     * through two tenants' roles.
      *
      * @return void
      */
-    public function testRefusesACycleThroughAnotherTenantsRole(): void
+    public function testRefusesAParentAnotherTenantOwns(): void
     {
-        $tenantA = self::createTenant('tenant-a');
-        $tenantB = self::createTenant('tenant-b');
-        $mine    = self::role('mine', self::ownedBy($tenantA));
-        $theirs  = self::role('theirs', [...self::ownedBy($tenantB), 'parent_id' => $mine->id]);
-        $middle  = self::role('middle', [...self::ownedBy($tenantA), 'parent_id' => $theirs->id]);
+        $mine   = self::role('mine', self::ownedBy(self::createTenant('tenant-a')));
+        $theirs = self::role('theirs', self::ownedBy(self::createTenant('tenant-b')));
 
-        $this->actAsTenant($tenantA);
+        $this->expectException(OwnerMismatchException::class);
 
-        $this->expectException(RoleHierarchyCycleException::class);
-
-        self::service()->setParent($mine, $middle);
+        self::service()->setParent($theirs, $mine);
     }
 
     /**
@@ -452,7 +448,7 @@ final class RoleServiceTest extends TestCase
     public function testRevokingANameRevokesEveryHeldPermissionOfIt(): void
     {
         $tenant   = self::createTenant('tenant-a');
-        $role     = self::role('editor');
+        $role     = self::role('editor', self::ownedBy($tenant));
         $platform = Permission::query()->create(['name' => 'posts:edit']);
         $owned    = Permission::query()->create(['name' => 'posts:edit', ...self::ownedBy($tenant)]);
         $other    = Permission::query()->create(['name' => 'posts:delete']);
@@ -486,7 +482,7 @@ final class RoleServiceTest extends TestCase
     public function testASyncNameKeepsTheHeldPermissionsOfIt(): void
     {
         $tenant   = self::createTenant('tenant-a');
-        $role     = self::role('editor');
+        $role     = self::role('editor', self::ownedBy($tenant));
         $platform = Permission::query()->create(['name' => 'posts:edit']);
         $owned    = Permission::query()->create(['name' => 'posts:edit', ...self::ownedBy($tenant)]);
 
@@ -578,8 +574,9 @@ final class RoleServiceTest extends TestCase
      */
     public function testASyncReportsARevokedPermissionOfAnotherTenant(): void
     {
-        $role  = self::role('editor');
-        $other = Permission::query()->create(['name' => 'posts:edit', ...self::ownedBy(self::createTenant('tenant-a'))]);
+        $tenant = self::createTenant('tenant-a');
+        $role   = self::role('editor', self::ownedBy($tenant));
+        $other  = Permission::query()->create(['name' => 'posts:edit', ...self::ownedBy($tenant)]);
 
         self::service()->grantPermission($role, $other);
 

@@ -11,6 +11,9 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
 use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
 use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
+use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
+use SineMacula\Laravel\Authorization\Exceptions\OwnerMismatchException;
+use SineMacula\Laravel\Authorization\Exceptions\ParentGuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\ReservedRoleNameException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -20,6 +23,7 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Feature\Stubs\CustomRole;
@@ -46,7 +50,7 @@ use Tests\TestCase;
 #[CoversClass(ReservedRoleNameException::class)]
 final class RoleObserverTest extends TestCase
 {
-    use ActsAsTenant, ComparesReferences, RecordsRowLocks;
+    use ActsAsTenant, CatchesRefusals, ComparesReferences, RecordsRowLocks;
 
     /** @var array{tenant_type: string, tenant_id: string} The owner columns of a tenant's role. */
     private const array TENANT = ['tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a'];
@@ -64,6 +68,40 @@ final class RoleObserverTest extends TestCase
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.models.role', CustomRole::class);
+    }
+
+    /**
+     * Changing a role's guard re-checks its parent, its children and its
+     * permissions, and a change that leaves them compatible is saved.
+     *
+     * @return void
+     */
+    public function testAGuardChangeIsCheckedAgainstTheRolesLinks(): void
+    {
+        $parent = Role::query()->create(['name' => 'parent', 'guard' => 'web']);
+        $role   = Role::query()->create(['name' => 'role', 'parent_id' => $parent->id]);
+        $child  = Role::query()->create(['name' => 'child', 'guard' => 'api', 'parent_id' => $role->id]);
+        $holder = Role::query()->create(['name' => 'holder']);
+
+        $holder->permissions()->attach(Permission::query()->create(['name' => 'posts:read', 'guard' => 'web'])->id);
+
+        $refusals = [[$role, 'api', ParentGuardMismatchException::class], [$role, 'web', ParentGuardMismatchException::class], [$holder, 'api', GuardMismatchException::class]];
+
+        foreach ($refusals as [$target, $guard, $exception]) {
+            $target->guard = $guard;
+
+            self::assertInstanceOf($exception, self::refusalOf(static fn (): bool => $target->save()));
+
+            $target->guard = null;
+        }
+
+        $child->guard = null;
+        $child->save();
+
+        $role->guard = 'web';
+        $role->save();
+
+        self::assertSame('web', $role->fresh()?->guard);
     }
 
     /**
@@ -87,7 +125,9 @@ final class RoleObserverTest extends TestCase
         } catch (RoleHierarchyCycleException $exception) { // @phpstan-ignore catch.neverThrown
             self::assertSame('admin', $exception->getRoleName());
             self::assertSame('editor', $exception->getProposedParentName());
-            self::assertSame([CustomRole::class], $hydrated->getArrayCopy());
+            // The parent is read once for the parity check, then the walk reads
+            // it again under a lock, each as the configured class.
+            self::assertSame([CustomRole::class, CustomRole::class], $hydrated->getArrayCopy());
         }
     }
 
@@ -127,25 +167,18 @@ final class RoleObserverTest extends TestCase
     }
 
     /**
-     * The walk reads every ancestor outside the tenant scope, so a cycle
-     * through another tenant's role is refused.
+     * A parent another tenant owns is refused, so no chain, and no cycle, runs
+     * through two tenants' roles.
      *
      * @return void
      */
-    public function testACycleThroughAnotherTenantsRoleIsRefused(): void
+    public function testAParentAnotherTenantOwnsIsRefused(): void
     {
-        $tenantA = self::createTenant('tenant-a');
-        $mine    = CustomRole::query()->create(['name' => 'mine', ...self::ownedBy($tenantA)]);
-        $theirs  = CustomRole::query()->create(['name' => 'theirs', ...self::ownedBy(self::createTenant('tenant-b')), 'parent_id' => $mine->id]);
-        $middle  = CustomRole::query()->create(['name' => 'middle', ...self::ownedBy($tenantA), 'parent_id' => $theirs->id]);
+        $mine = CustomRole::query()->create(['name' => 'mine', ...self::ownedBy(self::createTenant('tenant-a'))]);
 
-        $this->actAsTenant($tenantA);
+        $this->expectException(OwnerMismatchException::class);
 
-        $mine->parent_id = $middle->id;
-
-        $this->expectExceptionObject(new RoleHierarchyCycleException(roleName: 'mine', proposedParentName: 'middle'));
-
-        $mine->save();
+        CustomRole::query()->create(['name' => 'theirs', ...self::ownedBy(self::createTenant('tenant-b')), 'parent_id' => $mine->id]);
     }
 
     /**
@@ -324,9 +357,9 @@ final class RoleObserverTest extends TestCase
      */
     public function testARoleIsNeverRefusedBecauseOfItself(): void
     {
-        $role = CustomRole::query()->create(['name' => 'super-admin', 'guard' => 'web'] + self::TENANT);
+        $role = CustomRole::query()->create(['name' => 'super-admin', 'guard' => 'web']);
 
-        $role->forceFill(['tenant_type' => null, 'tenant_id' => null, 'is_system' => true])->save();
+        $role->forceFill(['is_system' => true])->save();
 
         self::assertTrue(CustomRole::query()->withoutGlobalScopes()->sole()->is_system);
     }

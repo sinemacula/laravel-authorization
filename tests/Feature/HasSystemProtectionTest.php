@@ -442,9 +442,14 @@ final class HasSystemProtectionTest extends TestCase
      */
     public function testAForcedDeleteIsReported(): void
     {
-        $policy = $this->makeSystemPolicy('root');
+        $policy = Policy::create([
+            'name'        => 'root',
+            'document'    => ['statements' => [['effect' => 'allow', 'actions' => ['*:*']]]],
+            'tenant_type' => 'stub_tenant',
+            'tenant_id'   => 'tenant-a',
+        ]);
 
-        $policy->forceFill(['tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a'])->forceSystem()->save();
+        $policy->forceFill(['is_system' => true])->forceSystem()->save();
 
         Event::fake([SystemOverrideUsed::class]);
 

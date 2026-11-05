@@ -8,11 +8,13 @@ use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Events\Permission\Created as PermissionCreated;
 use SineMacula\Laravel\Authorization\Events\Permission\Deleted as PermissionDeleted;
 use SineMacula\Laravel\Authorization\Events\Permission\Updated as PermissionUpdated;
-use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Observers\Support\RecordChanges;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
+use SineMacula\Laravel\Authorization\Support\RecordOwner;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\RoleParity;
 
 /**
  * Row-lifecycle observer for the `Permission` model.
@@ -39,20 +41,29 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 final class PermissionObserver
 {
     /**
-     * Enforce the tenant-columns invariant before any persistence.
+     * Enforce the owner rules before any persistence (see `RecordOwner`), and,
+     * when the permission's guard changes, its parity with every role that
+     * carries it.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission  $permission
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\OwnerChangedException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\OwnerMismatchException
      */
     public function saving(Permission $permission): void
     {
-        if (($permission->tenant_type === null) === ($permission->tenant_id === null)) {
+        RecordOwner::assertValid($permission, 'permission');
+
+        if (!$permission->exists || !$permission->isDirty('guard')) {
             return;
         }
 
-        throw new InvalidTenantColumnsException(modelKind: 'permission', missingColumn: $permission->tenant_type === null ? 'tenant_type' : 'tenant_id');
+        foreach ($permission->roles()->withoutGlobalScope(TenantScope::class)->get() as $role) {
+            RoleParity::assertCarries($role, $permission);
+        }
     }
 
     /**

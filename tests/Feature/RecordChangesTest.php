@@ -107,7 +107,7 @@ final class RecordChangesTest extends TestCase
      */
     public function testListsTheLinkedRowsFromThePivotTable(): void
     {
-        $role     = Role::query()->create(['name' => 'editor']);
+        $role     = Role::query()->create(['name' => 'editor', 'tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a']);
         $platform = Permission::query()->create(['name' => 'posts:edit']);
         $tenant   = Permission::query()->create(['name' => 'posts:delete', 'tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a']);
 

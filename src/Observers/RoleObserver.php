@@ -9,14 +9,15 @@ use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
 use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
 use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
-use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\ReservedRoleNameException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\Support\RecordChanges;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
+use SineMacula\Laravel\Authorization\Support\RecordOwner;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\RoleParity;
 
 /**
  * Row-lifecycle observer for the `Role` model.
@@ -44,20 +45,27 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 final class RoleObserver
 {
     /**
-     * Enforce the tenant-columns invariant, the reserved system role names and
-     * the hierarchy cycle-detection guard before any persistence.
+     * Enforce the owner rules (see `RecordOwner`), the reserved system role
+     * names, parity with the parent, children and permissions (see
+     * `RoleParity`) and the hierarchy cycle-detection guard before any
+     * persistence.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\OwnerChangedException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\OwnerMismatchException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\ParentGuardMismatchException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\ReservedRoleNameException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
      */
     public function saving(Role $role): void
     {
-        $this->assertTenantColumnsInvariant($role);
+        RecordOwner::assertValid($role, 'role');
         $this->assertNoSystemRoleNameIsShared($role);
+        $this->assertParity($role);
 
         if ($role->parent_id === null) {
             return;
@@ -154,24 +162,38 @@ final class RoleObserver
     }
 
     /**
-     * Enforce the both-or-neither tenant ownership invariant on save.
-     *
-     * A row with only one of `tenant_type` / `tenant_id` set would be invisible
-     * to the `TenantScope` global filter and to `scopeForTenant` /
-     * `scopeGlobalOnly`, silently orphaning the data. Fail loudly on save.
+     * Refuse a parent the role cannot sit under, and, when the role's guard
+     * changes, a child or permission it no longer suits.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return void
      *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\OwnerMismatchException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\ParentGuardMismatchException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException
      */
-    private function assertTenantColumnsInvariant(Role $role): void
+    private function assertParity(Role $role): void
     {
-        if (($role->tenant_type === null) === ($role->tenant_id === null)) {
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $roleClass */
+        $roleClass = config('authorization.models.role', Role::class);
+        $query     = $roleClass::query()->withoutGlobalScope(TenantScope::class);
+        $parent    = $role->parent_id === null || !$role->isDirty(['parent_id', 'guard']) ? null : (clone $query)->find($role->parent_id);
+
+        if ($parent instanceof Role) {
+            RoleParity::assertUnder($role, $parent);
+        }
+
+        if (!$role->exists || !$role->isDirty('guard')) {
             return;
         }
 
-        throw new InvalidTenantColumnsException(modelKind: 'role', missingColumn: $role->tenant_type === null ? 'tenant_type' : 'tenant_id');
+        foreach ($query->where('parent_id', $role->id)->get() as $child) {
+            RoleParity::assertUnder($child, $role);
+        }
+
+        foreach ($role->permissions()->withoutGlobalScope(TenantScope::class)->get() as $permission) {
+            RoleParity::assertCarries($role, $permission);
+        }
     }
 
     /**

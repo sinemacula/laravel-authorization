@@ -312,6 +312,13 @@ platform-wide grants. Granting a tenant's own role in another tenant, or platfor
 scope: the tenant named, else the tenant that owns every target, else the platform. Every grant is for every
 application.
 
+A role takes only the platform's permissions and parent roles and its own tenant's, so a platform role takes only the
+platform's; anything else is refused with `OwnerMismatchException`. Guards follow the same rule as a role and its
+permissions: two concrete guards must match, and a guard-agnostic side suits any. A parent of another guard is refused
+with `ParentGuardMismatchException`, and a role or permission granted to a grantee of another guard with
+`GranteeGuardMismatchException`. A role's, permission's or policy's owner is fixed once it is created
+(`OwnerChangedException`): to move one, create it in the new owner and grant it again.
+
 The trait methods (`assignRole()`, `givePermission()`, `attachPolicy()`, `$role->givePermission()` and the others)
 still work and go through the same services, with no actor. A raw relation write such as
 `$role->permissions()->attach()` bypasses them: it dispatches no event and leaves the resolution cache stale, so it is

@@ -178,7 +178,7 @@ final class ListPermissionsCommandTest extends TestCase
             'tenant_id'   => 't-1',
         ]);
 
-        $platform = Role::create(['id' => 'd7d7d7d7-0000-0000-0000-000000000001', 'name' => 'own-r1', 'guard' => 'web']);
+        $platform = Role::create(['id' => 'd7d7d7d7-0000-0000-0000-000000000001', 'name' => 'own-r1', 'guard' => 'web', 'tenant_type' => 'tenant', 'tenant_id' => 't-1']);
         $tenant   = Role::create([
             'id'          => 'd7d7d7d7-0000-0000-0000-000000000002',
             'name'        => 'own-r2',

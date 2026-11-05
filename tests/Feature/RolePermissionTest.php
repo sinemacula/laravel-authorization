@@ -9,9 +9,11 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
+use SineMacula\Laravel\Authorization\Exceptions\OwnerMismatchException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ChecksTheConnectionName;
 use Tests\Feature\Stubs\CustomPermission;
 use Tests\Feature\Stubs\CustomRole;
@@ -36,11 +38,35 @@ use Tests\TestCase;
 #[CoversClass(GuardMismatchException::class)]
 final class RolePermissionTest extends TestCase
 {
-    use ChecksTheConnectionName;
+    use CatchesRefusals, ChecksTheConnectionName;
 
     /** @var string The guard-mismatch message for the `editor` role and `posts:edit` permission. */
     private const string MISMATCH = 'Guard mismatch: role \'editor\' (guard \'web\') cannot carry permission \'posts:edit\' (guard \'api\').'
         . ' Scope one side to null for a guard-agnostic attachment, or match the guards.';
+
+    /**
+     * A role cannot carry a permission another tenant owns, nor, as a platform
+     * role, a tenant's; a tenant's role carries its own.
+     *
+     * @return void
+     */
+    public function testARoleCarriesOnlyThePlatformsAndItsOwnTenantsPermissions(): void
+    {
+        $owned  = Permission::query()->create(['name' => 'tenant:read', 'tenant_type' => 'tenant', 'tenant_id' => 't-1']);
+        $mine   = Role::query()->create(['name' => 'mine', 'tenant_type' => 'tenant', 'tenant_id' => 't-1']);
+        $theirs = Role::query()->create(['name' => 'theirs', 'tenant_type' => 'tenant', 'tenant_id' => 't-2']);
+
+        $mine->permissions()->attach($owned->id);
+
+        foreach ([$theirs, Role::query()->create(['name' => 'platform'])] as $role) {
+            $refusal = self::refusalOf(static fn () => $role->permissions()->attach($owned->id));
+
+            self::assertInstanceOf(OwnerMismatchException::class, $refusal);
+            self::assertSame('permission', $refusal->getRelatedKind());
+        }
+
+        self::assertSame(1, DB::table('role_permissions')->count());
+    }
 
     /**
      * Attaching from the permission side with matching guards writes one pivot
@@ -322,7 +348,7 @@ final class RolePermissionTest extends TestCase
      */
     public function testTenantOwnedPermissionIsFoundAsStoredParentWithoutTenant(): void
     {
-        $role       = $this->makeRole('web');
+        $role       = Role::query()->create(['name' => 'editor', 'guard' => 'web', 'tenant_type' => 'tenant', 'tenant_id' => 't-1']);
         $permission = Permission::query()->create(['name' => 'tenant:read', 'guard' => 'web', 'tenant_type' => 'tenant', 'tenant_id' => 't-1']);
         $parent     = Role::query()->create(['name' => 'author', 'guard' => 'web']);
 
