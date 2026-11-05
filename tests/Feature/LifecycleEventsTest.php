@@ -86,9 +86,9 @@ final class LifecycleEventsTest extends TestCase
         Event::fake([RoleCreated::class]);
 
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'editor',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'editor',
+            'guard' => 'web',
         ]);
 
         Event::assertDispatched(
@@ -109,7 +109,7 @@ final class LifecycleEventsTest extends TestCase
         $role = Role::create([
             'id'          => (string) Str::uuid(),
             'name'        => 'editor',
-            'guard_name'  => 'web',
+            'guard'       => 'web',
             'description' => self::EDITOR_ROLE_DESCRIPTION,
         ]);
 
@@ -135,9 +135,9 @@ final class LifecycleEventsTest extends TestCase
     public function testRoleUpdatedEventCarriesNullBeforeForFirstSet(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'editor',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'editor',
+            'guard' => 'web',
         ]);
 
         Event::fake([RoleUpdated::class]);
@@ -162,9 +162,9 @@ final class LifecycleEventsTest extends TestCase
     public function testRoleDeletedEventFires(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'transient',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'transient',
+            'guard' => 'web',
         ]);
 
         Event::fake([RoleDeleted::class]);
@@ -188,9 +188,9 @@ final class LifecycleEventsTest extends TestCase
         Event::fake([PermissionCreated::class]);
 
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'posts:create',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'posts:create',
+            'guard' => 'web',
         ]);
 
         Event::assertDispatched(
@@ -210,7 +210,7 @@ final class LifecycleEventsTest extends TestCase
         $permission = Permission::create([
             'id'          => (string) Str::uuid(),
             'name'        => 'posts:create',
-            'guard_name'  => 'web',
+            'guard'       => 'web',
             'description' => 'Create posts',
         ]);
 
@@ -236,9 +236,9 @@ final class LifecycleEventsTest extends TestCase
     public function testPermissionUpdatedEventCarriesNullBeforeForFirstSet(): void
     {
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'posts:create',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'posts:create',
+            'guard' => 'web',
         ]);
 
         Event::fake([PermissionUpdated::class]);
@@ -263,9 +263,9 @@ final class LifecycleEventsTest extends TestCase
     public function testPermissionDeletedEventFires(): void
     {
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'posts:create',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'posts:create',
+            'guard' => 'web',
         ]);
 
         Event::fake([PermissionDeleted::class]);

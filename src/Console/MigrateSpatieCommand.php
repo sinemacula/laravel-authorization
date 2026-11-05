@@ -20,14 +20,15 @@ use SineMacula\Laravel\Authorization\Models\Role;
  *
  * Reads Spatie's default table names (`roles`, `permissions`,
  * `model_has_roles`, `model_has_permissions`, `role_has_permissions`) and
- * copies rows into this package's tables, mapping column names and generating
- * UUIDs when Spatie used auto-increment IDs. Role and permission names are
- * checked against the models' name rule before they are written; a name that
- * fails it is reported and skipped together with its grants, as is a permission
- * name containing `*`, because `*` is a wildcard here. Spatie's tables are read
- * on the application's default connection and this package's are written on its
- * own (`authorization.connection`), inside one transaction there; the
- * `--dry-run` flag reports counts without writing.
+ * copies rows into this package's tables, mapping column names (Spatie's
+ * `guard_name` becomes `guard`) and generating UUIDs when Spatie used
+ * auto-increment IDs. Role and permission names are checked against the models'
+ * name rule before they are written; a name that fails it is reported and
+ * skipped together with its grants, as is a permission name containing `*`,
+ * because `*` is a wildcard here. Spatie's tables are read on the application's
+ * default connection and this package's are written on its own
+ * (`authorization.connection`), inside one transaction there; the `--dry-run`
+ * flag reports counts without writing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -229,7 +230,7 @@ final class MigrateSpatieCommand extends Command
                 $this->target()->table($targetTable)->insert([
                     'id'         => $newId,
                     'name'       => $roleRow['name'],
-                    'guard_name' => $roleRow['guard_name'] ?? null,
+                    'guard'      => $roleRow['guard_name'] ?? null,
                     'created_at' => $roleRow['created_at'] ?? now(),
                     'updated_at' => $roleRow['updated_at'] ?? now(),
                 ]);
@@ -274,7 +275,7 @@ final class MigrateSpatieCommand extends Command
                 $this->target()->table($targetTable)->insert([
                     'id'         => $newId,
                     'name'       => $permissionRow['name'],
-                    'guard_name' => $permissionRow['guard_name'] ?? null,
+                    'guard'      => $permissionRow['guard_name'] ?? null,
                     'created_at' => $permissionRow['created_at'] ?? now(),
                     'updated_at' => $permissionRow['updated_at'] ?? now(),
                 ]);

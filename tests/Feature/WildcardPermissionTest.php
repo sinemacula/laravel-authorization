@@ -154,14 +154,14 @@ final class WildcardPermissionTest extends TestCase
     public function testRoleHasDottedPermissionWildcardMatch(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'content.editor',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'content.editor',
+            'guard' => 'web',
         ]);
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'posts.*',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'posts.*',
+            'guard' => 'web',
         ]);
 
         $role->givePermission('posts.*');
@@ -239,14 +239,14 @@ final class WildcardPermissionTest extends TestCase
     public function testRoleHasPermissionWildcardMatch(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'editor',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'editor',
+            'guard' => 'web',
         ]);
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'posts:*',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'posts:*',
+            'guard' => 'web',
         ]);
 
         $role->givePermission('posts:*');
@@ -267,14 +267,14 @@ final class WildcardPermissionTest extends TestCase
     public function testIdentityInheritsRoleWildcard(): void
     {
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'posts:*',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'posts:*',
+            'guard' => 'web',
         ]);
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'editor',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'editor',
+            'guard' => 'web',
         ]);
         $role->givePermission('posts:*');
 
@@ -353,9 +353,9 @@ final class WildcardPermissionTest extends TestCase
         $this->expectException(InvalidAuthorizationNameException::class);
 
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => $name,
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => $name,
+            'guard' => 'web',
         ]);
     }
 
@@ -369,9 +369,9 @@ final class WildcardPermissionTest extends TestCase
         $this->expectException(InvalidAuthorizationNameException::class);
 
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'has space',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'has space',
+            'guard' => 'web',
         ]);
     }
 
@@ -405,9 +405,9 @@ final class WildcardPermissionTest extends TestCase
     public function testValidPermissionNameIsAccepted(string $name): void
     {
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => $name,
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => $name,
+            'guard' => 'web',
         ]);
 
         self::assertSame($name, $permission->name);
@@ -423,9 +423,9 @@ final class WildcardPermissionTest extends TestCase
     private function userHolding(string $name): StubIdentity
     {
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => $name,
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => $name,
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);

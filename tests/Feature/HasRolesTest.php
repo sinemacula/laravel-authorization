@@ -90,7 +90,7 @@ final class HasRolesTest extends TestCase
         Carbon::setTestNow('2026-07-01 12:00:00');
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
-        $user->assignRole(Role::create(['name' => 'on-call', 'guard_name' => 'web']), Carbon::parse($expiresAt));
+        $user->assignRole(Role::create(['name' => 'on-call', 'guard' => 'web']), Carbon::parse($expiresAt));
 
         return $user;
     }

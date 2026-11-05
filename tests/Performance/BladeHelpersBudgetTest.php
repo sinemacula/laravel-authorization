@@ -46,9 +46,9 @@ final class BladeHelpersBudgetTest extends TestCase
     public function testHasRoleOverheadStaysBoundedForFiftyDirectives(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'admin',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'admin',
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -81,15 +81,15 @@ final class BladeHelpersBudgetTest extends TestCase
     public function testHasPermissionOverheadStaysBoundedForFiftyDirectives(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'editor',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'editor',
+            'guard' => 'web',
         ]);
 
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'posts:edit',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'posts:edit',
+            'guard' => 'web',
         ]);
         $role->permissions()->attach($permission->getKey());
 

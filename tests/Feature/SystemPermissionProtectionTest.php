@@ -51,10 +51,10 @@ final class SystemPermissionProtectionTest extends TestCase
     public function testDeletingSystemPermissionIsRefused(): void
     {
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => '*:*',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => '*:*',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         try {
@@ -78,10 +78,10 @@ final class SystemPermissionProtectionTest extends TestCase
         $name = 'system:audit';
 
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => $name,
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => $name,
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         try {
@@ -105,10 +105,10 @@ final class SystemPermissionProtectionTest extends TestCase
     public function testSystemPermissionLoadedWithoutNameIsNamedByKey(): void
     {
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => '*:*',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => '*:*',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         $partial = Permission::query()->select(['id'])->findOrFail($permission->id);
@@ -132,10 +132,10 @@ final class SystemPermissionProtectionTest extends TestCase
     public function testForceSystemAllowsDelete(): void
     {
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'retired:permission',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => 'retired:permission',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         $permission->forceSystem()->delete();
@@ -151,10 +151,10 @@ final class SystemPermissionProtectionTest extends TestCase
     public function testForceSystemAllowsRename(): void
     {
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'legacy:name',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => 'legacy:name',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         $permission->forceSystem();
@@ -173,10 +173,10 @@ final class SystemPermissionProtectionTest extends TestCase
     public function testDescriptionUpdateOnSystemPermissionIsRefused(): void
     {
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => '*:*',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => '*:*',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         try {
@@ -201,10 +201,10 @@ final class SystemPermissionProtectionTest extends TestCase
     public function testClearingSystemFlagThroughMassAssignmentIsRefused(): void
     {
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => '*:*',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => '*:*',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         try {
@@ -230,10 +230,10 @@ final class SystemPermissionProtectionTest extends TestCase
     public function testClearingSystemFlagThenDeletingIsRefused(): void
     {
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => '*:*',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => '*:*',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         $permission->is_system = false;
@@ -257,10 +257,10 @@ final class SystemPermissionProtectionTest extends TestCase
     public function testForceSystemAllowsClearingSystemFlag(): void
     {
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => '*:*',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => '*:*',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         $permission->forceSystem()->update(['is_system' => false]);
@@ -281,10 +281,10 @@ final class SystemPermissionProtectionTest extends TestCase
     public function testForceSystemIsSingleUse(): void
     {
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'volatile:permission',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => 'volatile:permission',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         $permission->forceSystem();
@@ -309,10 +309,10 @@ final class SystemPermissionProtectionTest extends TestCase
     public function testBypassDoesNotHopAcrossUnrelatedSave(): void
     {
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => '*:*',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => '*:*',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         $permission->forceSystem();
@@ -333,9 +333,9 @@ final class SystemPermissionProtectionTest extends TestCase
     public function testNonSystemPermissionsDeleteFreely(): void
     {
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'ordinary:permission',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'ordinary:permission',
+            'guard' => 'web',
         ]);
 
         self::assertFalse((bool) $permission->is_system); // @phpstan-ignore cast.useless

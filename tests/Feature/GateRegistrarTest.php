@@ -495,7 +495,7 @@ final class GateRegistrarTest extends TestCase
      */
     private function actAsFullyPermittedPrincipal(): StubIdentity
     {
-        Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard_name' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->givePermission('posts:create');

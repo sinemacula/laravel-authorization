@@ -8,9 +8,9 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
  * Thrown when a role-to-permission attachment would pair two rows scoped to
  * different guards.
  *
- * Guard-agnostic rows (null `guard_name`) are compatible with every guard, so
- * they never trigger the mismatch. Two concrete guards must be equal. The check
- * runs from the pivot model's `saving` hook so direct relation use
+ * Guard-agnostic rows (null `guard`) are compatible with every guard, so they
+ * never trigger the mismatch. Two concrete guards must be equal. The check runs
+ * from the pivot model's `saving` hook so direct relation use
  * (`$role->permissions()->attach(...)`, `sync(...)`) is caught alongside the
  * typed Role API.
  *

@@ -362,7 +362,7 @@ final class ResolutionCacheTest extends TestCase
     public function testIdentityRoleAssignedInvalidatesCache(): void
     {
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
-        Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard_name' => 'web']);
+        Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard' => 'web']);
 
         // Prime the cache with the current (empty) state.
         self::assertSame([], $user->getRoles());
@@ -426,8 +426,8 @@ final class ResolutionCacheTest extends TestCase
 
         self::assertSame(['stale:entry'], $cache->rememberPermissions($principal, static fn (): array => ['live:entry']));
 
-        $role       = Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard_name' => 'web']);
-        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard_name' => 'web']);
+        $role       = Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard' => 'web']);
+        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard' => 'web']);
         $role->givePermission($permission);
 
         self::assertSame(['live:entry'], $cache->rememberPermissions($principal, static fn (): array => ['live:entry']));
@@ -446,9 +446,9 @@ final class ResolutionCacheTest extends TestCase
     public function testRolePermissionGrantedInvalidatesTaggedPersistentEntry(): void
     {
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
-        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard_name' => 'web']);
+        $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard' => 'web']);
 
-        $seed = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:read', 'guard_name' => 'web']);
+        $seed = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:read', 'guard' => 'web']);
         $role->givePermission($seed);
 
         $user->assignRole('editor');
@@ -460,7 +460,7 @@ final class ResolutionCacheTest extends TestCase
         // Attaching a new permission to the role fires `RolePermissionGranted`.
         // On a tag-capable store the listener must flush the principal's entry
         // via the role tag — not just the in-memory memo.
-        $second = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard_name' => 'web']);
+        $second = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard' => 'web']);
         $role->givePermission($second);
 
         // @phpstan-ignore-next-line nullCoalesce.expr, nullsafe.neverNull non-null post-persist)
@@ -499,8 +499,8 @@ final class ResolutionCacheTest extends TestCase
         $keysBefore = \array_keys((array) $this->extractPrivate($driver, 'storage') ?? []); // @phpstan-ignore nullCoalesce.expr
         self::assertNotEmpty($keysBefore, 'Persistent write should populate the non-tag store.');
 
-        $role       = Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard_name' => 'web']);
-        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard_name' => 'web']);
+        $role       = Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard' => 'web']);
+        $permission = Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard' => 'web']);
         $role->givePermission($permission);
 
         // Persistent entries are intentionally untouched — the non-tag branch
@@ -533,9 +533,9 @@ final class ResolutionCacheTest extends TestCase
      */
     public function testSyncRolesInvalidatesCacheWithoutAssignRoleEvent(): void
     {
-        Role::create(['id' => (string) Str::uuid(), 'name' => 'a', 'guard_name' => 'web']);
-        Role::create(['id' => (string) Str::uuid(), 'name' => 'b', 'guard_name' => 'web']);
-        Role::create(['id' => (string) Str::uuid(), 'name' => 'c', 'guard_name' => 'web']);
+        Role::create(['id' => (string) Str::uuid(), 'name' => 'a', 'guard' => 'web']);
+        Role::create(['id' => (string) Str::uuid(), 'name' => 'b', 'guard' => 'web']);
+        Role::create(['id' => (string) Str::uuid(), 'name' => 'c', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->syncRoles(['a', 'b']);

@@ -132,7 +132,7 @@ final class RolePermissionTest extends TestCase
         $role       = $this->makeRole('web');
         $permission = $this->makePermission('web');
 
-        $permission->guard_name = 'api';
+        $permission->guard = 'api';
 
         $this->assertGuardMismatchWritesNothing(static fn () => $permission->roles()->attach($role->id));
     }
@@ -148,7 +148,7 @@ final class RolePermissionTest extends TestCase
         $this->configurePermissionSubclass();
 
         $role       = $this->makeRole('web');
-        $permission = CustomPermission::query()->create(['name' => 'posts:edit', 'guard_name' => 'api']);
+        $permission = CustomPermission::query()->create(['name' => 'posts:edit', 'guard' => 'api']);
 
         $this->assertGuardMismatchWritesNothing(static fn () => $permission->roles()->attach($role->id));
     }
@@ -204,7 +204,7 @@ final class RolePermissionTest extends TestCase
         $role       = $this->makeRole('web');
         $permission = $this->makePermission('web');
 
-        $permission->guard_name = 'api';
+        $permission->guard = 'api';
 
         $this->assertGuardMismatchWritesNothing(static fn () => $permission->roles()->attach($role->id));
     }
@@ -224,7 +224,7 @@ final class RolePermissionTest extends TestCase
         $role       = $this->makeRole('api');
         $permission = $this->makePermission('api');
 
-        $role->guard_name = 'web';
+        $role->guard = 'web';
 
         $this->assertGuardMismatchWritesNothing(static fn () => $role->permissions()->attach($permission->id));
     }
@@ -239,7 +239,7 @@ final class RolePermissionTest extends TestCase
     {
         $role       = $this->makeRole('web');
         $permission = $this->makePermission('web');
-        $parent     = Role::query()->create(['name' => 'author', 'guard_name' => 'api']);
+        $parent     = Role::query()->create(['name' => 'author', 'guard' => 'api']);
 
         $this->savePivot($parent, $role->id, $permission->id);
 
@@ -259,7 +259,7 @@ final class RolePermissionTest extends TestCase
     {
         $role       = $this->makeRole('web');
         $permission = $this->makePermission('web');
-        $parent     = new Permission(['name' => 'posts:delete', 'guard_name' => 'api']);
+        $parent     = new Permission(['name' => 'posts:delete', 'guard' => 'api']);
         $parent->id = $role->id;
 
         $this->savePivot($parent, $role->id, $permission->id);
@@ -281,7 +281,7 @@ final class RolePermissionTest extends TestCase
     {
         $role       = $this->makeRole('web');
         $permission = $this->makePermission('web');
-        $parent     = Permission::query()->create(['name' => 'posts:delete', 'guard_name' => 'api']);
+        $parent     = Permission::query()->create(['name' => 'posts:delete', 'guard' => 'api']);
 
         $this->savePivot($parent, $role->id, $permission->id);
 
@@ -300,9 +300,9 @@ final class RolePermissionTest extends TestCase
      */
     public function testTenantOwnedRoleIsFoundAsStoredParentWithoutTenant(): void
     {
-        $role       = Role::query()->create(['name' => 'tenant-editor', 'guard_name' => 'web', 'tenant_type' => 'tenant', 'tenant_id' => 't-1']);
+        $role       = Role::query()->create(['name' => 'tenant-editor', 'guard' => 'web', 'tenant_type' => 'tenant', 'tenant_id' => 't-1']);
         $permission = $this->makePermission('web');
-        $parent     = Permission::query()->create(['name' => 'posts:delete', 'guard_name' => 'web']);
+        $parent     = Permission::query()->create(['name' => 'posts:delete', 'guard' => 'web']);
 
         self::assertNull(Role::query()->find($role->id));
 
@@ -323,8 +323,8 @@ final class RolePermissionTest extends TestCase
     public function testTenantOwnedPermissionIsFoundAsStoredParentWithoutTenant(): void
     {
         $role       = $this->makeRole('web');
-        $permission = Permission::query()->create(['name' => 'tenant:read', 'guard_name' => 'web', 'tenant_type' => 'tenant', 'tenant_id' => 't-1']);
-        $parent     = Role::query()->create(['name' => 'author', 'guard_name' => 'web']);
+        $permission = Permission::query()->create(['name' => 'tenant:read', 'guard' => 'web', 'tenant_type' => 'tenant', 'tenant_id' => 't-1']);
+        $parent     = Role::query()->create(['name' => 'author', 'guard' => 'web']);
 
         self::assertNull(Permission::query()->find($permission->id));
 
@@ -346,7 +346,7 @@ final class RolePermissionTest extends TestCase
     {
         $role       = $this->makeRole('web');
         $permission = $this->makePermission('web');
-        $parent     = new Role(['name' => 'author', 'guard_name' => 'api']);
+        $parent     = new Role(['name' => 'author', 'guard' => 'api']);
         $parent->id = $permission->id;
 
         $this->savePivot($parent, $role->id, $permission->id);
@@ -434,7 +434,7 @@ final class RolePermissionTest extends TestCase
      */
     private function makeRole(string $guard): Role
     {
-        return Role::query()->create(['name' => 'editor', 'guard_name' => $guard]);
+        return Role::query()->create(['name' => 'editor', 'guard' => $guard]);
     }
 
     /**
@@ -445,6 +445,6 @@ final class RolePermissionTest extends TestCase
      */
     private function makePermission(string $guard): Permission
     {
-        return Permission::query()->create(['name' => 'posts:edit', 'guard_name' => $guard]);
+        return Permission::query()->create(['name' => 'posts:edit', 'guard' => $guard]);
     }
 }

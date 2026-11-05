@@ -50,7 +50,7 @@ final class HasPermissionsTest extends TestCase
     public function testExpiringDirectPermissionLapsesForTheSameInstance(): void
     {
         $user = $this->identity();
-        $user->givePermission(Permission::create(['name' => 'posts:publish', 'guard_name' => 'web']), Carbon::parse('2026-07-01 12:05:00'));
+        $user->givePermission(Permission::create(['name' => 'posts:publish', 'guard' => 'web']), Carbon::parse('2026-07-01 12:05:00'));
 
         self::assertSame(['posts:publish'], $user->getPermissions());
 
@@ -67,8 +67,8 @@ final class HasPermissionsTest extends TestCase
      */
     public function testPermissionThroughExpiringRoleLapsesForTheSameInstance(): void
     {
-        $role = Role::create(['name' => 'publisher', 'guard_name' => 'web']);
-        $role->givePermission(Permission::create(['name' => 'posts:publish', 'guard_name' => 'web']));
+        $role = Role::create(['name' => 'publisher', 'guard' => 'web']);
+        $role->givePermission(Permission::create(['name' => 'posts:publish', 'guard' => 'web']));
 
         $user = $this->identity();
         $user->assignRole($role, Carbon::parse('2026-07-01 12:05:00'));
@@ -88,7 +88,7 @@ final class HasPermissionsTest extends TestCase
     public function testLiveEntryDoesNotReloadThePermissions(): void
     {
         $user = $this->identity();
-        $user->givePermission(Permission::create(['name' => 'posts:publish', 'guard_name' => 'web']), Carbon::parse('2026-07-01 13:00:00'));
+        $user->givePermission(Permission::create(['name' => 'posts:publish', 'guard' => 'web']), Carbon::parse('2026-07-01 13:00:00'));
 
         self::assertSame(['posts:publish'], $user->getPermissions());
 

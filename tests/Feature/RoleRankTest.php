@@ -324,10 +324,10 @@ final class RoleRankTest extends TestCase
     private function makeRole(string $name, ?int $rank = null): Role
     {
         return Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => $name,
-            'guard_name' => 'web',
-            'rank'       => $rank,
+            'id'    => (string) Str::uuid(),
+            'name'  => $name,
+            'guard' => 'web',
+            'rank'  => $rank,
         ]);
     }
 

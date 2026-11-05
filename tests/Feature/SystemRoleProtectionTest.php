@@ -56,10 +56,10 @@ final class SystemRoleProtectionTest extends TestCase
     public function testDeletingSystemRoleIsRefused(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'super-admin',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => 'super-admin',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         try {
@@ -81,10 +81,10 @@ final class SystemRoleProtectionTest extends TestCase
     public function testRenamingSystemRoleIsRefused(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'auditor',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => 'auditor',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         try {
@@ -107,10 +107,10 @@ final class SystemRoleProtectionTest extends TestCase
     public function testForceSystemAllowsDelete(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'retired-platform-role',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => 'retired-platform-role',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         $role->forceSystem()->delete();
@@ -126,10 +126,10 @@ final class SystemRoleProtectionTest extends TestCase
     public function testForceSystemAllowsRename(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'legacy-name',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => 'legacy-name',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         $role->forceSystem();
@@ -148,10 +148,10 @@ final class SystemRoleProtectionTest extends TestCase
     public function testDescriptionUpdateOnSystemRoleIsRefused(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'super-admin',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => 'super-admin',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         try {
@@ -176,10 +176,10 @@ final class SystemRoleProtectionTest extends TestCase
     public function testClearingSystemFlagThroughMassAssignmentIsRefused(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'super-admin',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => 'super-admin',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         try {
@@ -205,10 +205,10 @@ final class SystemRoleProtectionTest extends TestCase
     public function testClearingSystemFlagThenDeletingIsRefused(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'super-admin',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => 'super-admin',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         $role->is_system = false;
@@ -232,10 +232,10 @@ final class SystemRoleProtectionTest extends TestCase
     public function testForceSystemAllowsClearingSystemFlag(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'super-admin',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => 'super-admin',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         $role->forceSystem()->update(['is_system' => false]);
@@ -256,10 +256,10 @@ final class SystemRoleProtectionTest extends TestCase
     public function testForceSystemIsSingleUse(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'volatile',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => 'volatile',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         $role->forceSystem();
@@ -284,10 +284,10 @@ final class SystemRoleProtectionTest extends TestCase
     public function testBypassDoesNotHopAcrossUnrelatedSave(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'super-admin',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => 'super-admin',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         // Arm the bypass, then perform a save the guard does not inspect, so
@@ -313,10 +313,10 @@ final class SystemRoleProtectionTest extends TestCase
     public function testForceSystemImmediatelyFollowedByDeleteStillWorks(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'decommissioned',
-            'guard_name' => 'web',
-            'is_system'  => true,
+            'id'        => (string) Str::uuid(),
+            'name'      => 'decommissioned',
+            'guard'     => 'web',
+            'is_system' => true,
         ]);
 
         $role->forceSystem()->delete();
@@ -332,9 +332,9 @@ final class SystemRoleProtectionTest extends TestCase
     public function testNonSystemRolesDeleteFreely(): void
     {
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'ordinary',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'ordinary',
+            'guard' => 'web',
         ]);
 
         self::assertFalse((bool) $role->is_system); // @phpstan-ignore cast.useless

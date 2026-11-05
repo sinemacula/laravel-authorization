@@ -4,10 +4,9 @@
  * Create the `roles` table.
  *
  * Roles are named buckets of permissions shared across authorizable identities.
- * The `guard_name` column is nullable: a null value marks the role as
- * guard-agnostic (applies to every guard), a concrete string scopes the role to
- * a single guard and mirrors Spatie's `laravel-permission` convention for
- * migrating consumers.
+ * The `guard` column is nullable: a null value marks the role as guard-agnostic
+ * (applies to every guard), a concrete string scopes the role to a single guard
+ * and mirrors Spatie's `laravel-permission` convention for migrating consumers.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -38,7 +37,7 @@ return new class extends Migration {
         $schema->create($table, static function (Blueprint $blueprint) use ($table): void {
             $blueprint->uuid('id');
             $blueprint->string('name');
-            $blueprint->string('guard_name')->nullable();
+            $blueprint->string('guard')->nullable();
             $blueprint->string('description')->nullable();
 
             // Platform-protection marker. Roles flagged system refuse delete
@@ -73,13 +72,12 @@ return new class extends Migration {
             // every declared command.
             $blueprint->primary('id');
 
-            // Explicit lookup index on `(name, guard_name)`. Every
-            // `resolveRole()` / `hasRole()` query filters on both columns; most
-            // engines back unique constraints with an index already but older
-            // MySQL storage engines and some managed databases do not. The
-            // explicit declaration is belt-and-braces insurance for the hot
-            // path.
-            $blueprint->index(['name', 'guard_name'], $table . '_name_guard_index');
+            // Explicit lookup index on `(name, guard)`. Every `resolveRole()` /
+            // `hasRole()` query filters on both columns; most engines back
+            // unique constraints with an index already but older MySQL storage
+            // engines and some managed databases do not. The explicit
+            // declaration is belt-and-braces insurance for the hot path.
+            $blueprint->index(['name', 'guard'], $table . '_name_guard_index');
             $blueprint->index('parent_id', $table . '_parent_id_index');
             $blueprint->index('rank', $table . '_rank_index');
             $blueprint->index(['tenant_type', 'tenant_id'], $table . '_tenant_index');
@@ -89,14 +87,14 @@ return new class extends Migration {
             $blueprint->foreign('parent_id')->references('id')->on($table)->nullOnDelete();
         });
 
-        // Functional unique index on `(name, COALESCE(guard_name, ''))`.
-        // Ordinary UNIQUE(name, guard_name) would permit duplicate
-        // guard-agnostic rows because MySQL, PostgreSQL and SQLite all treat
-        // NULL as distinct inside unique indexes. COALESCE folds nulls to the
-        // empty string so the invariant "at most one row per (name, guard)
-        // pair, including the null-guard slot" is enforced at the data layer.
+        // Functional unique index on `(name, COALESCE(guard, ''))`. Ordinary
+        // UNIQUE(name, guard) would permit duplicate guard-agnostic rows
+        // because MySQL, PostgreSQL and SQLite all treat NULL as distinct
+        // inside unique indexes. COALESCE folds nulls to the empty string so
+        // the invariant "at most one row per (name, guard) pair, including the
+        // null-guard slot" is enforced at the data layer.
         $schema->getConnection()->statement(sprintf(
-            'CREATE UNIQUE INDEX %s_name_guard_unique ON %s (name, (COALESCE(guard_name, \'\')))',
+            'CREATE UNIQUE INDEX %s_name_guard_unique ON %s (name, (COALESCE(guard, \'\')))',
             $table,
             $table,
         ));

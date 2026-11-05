@@ -172,9 +172,9 @@ final class HasRoleHierarchyTest extends TestCase
     private function makeRole(string $name, ?string $parentId = null): CustomRole
     {
         return CustomRole::query()->create([
-            'name'       => $name,
-            'guard_name' => 'web',
-            'parent_id'  => $parentId,
+            'name'      => $name,
+            'guard'     => 'web',
+            'parent_id' => $parentId,
         ]);
     }
 }

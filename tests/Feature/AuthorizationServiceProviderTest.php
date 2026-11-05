@@ -235,8 +235,8 @@ final class AuthorizationServiceProviderTest extends TestCase
 
         self::assertInstanceOf(NullTenantResolver::class, $app->make(TenantResolver::class));
 
-        Role::create(['name' => 'platform', 'guard_name' => 'web']);
-        Role::create(['name' => 'owned', 'guard_name' => 'web', 'tenant_type' => 'tenant', 'tenant_id' => 't-1']);
+        Role::create(['name' => 'platform', 'guard' => 'web']);
+        Role::create(['name' => 'owned', 'guard' => 'web', 'tenant_type' => 'tenant', 'tenant_id' => 't-1']);
 
         self::assertSame(['platform'], Role::query()->pluck('name')->all());
     }
@@ -468,10 +468,10 @@ final class AuthorizationServiceProviderTest extends TestCase
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
         $tenantB = StubTenant::create(['id' => 'tenant-b', 'name' => 'Tenant B']);
 
-        Role::create(['name' => 'global', 'guard_name' => 'web']);
-        $onCall  = Role::create(['name' => 'on-call', 'guard_name' => 'web']);
-        $aEditor = Role::create(['name' => 'a-editor', 'guard_name' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => 'tenant-a']);
-        $bEditor = Role::create(['name' => 'b-editor', 'guard_name' => 'web', 'tenant_type' => $tenantB->getMorphClass(), 'tenant_id' => 'tenant-b']);
+        Role::create(['name' => 'global', 'guard' => 'web']);
+        $onCall  = Role::create(['name' => 'on-call', 'guard' => 'web']);
+        $aEditor = Role::create(['name' => 'a-editor', 'guard' => 'web', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => 'tenant-a']);
+        $bEditor = Role::create(['name' => 'b-editor', 'guard' => 'web', 'tenant_type' => $tenantB->getMorphClass(), 'tenant_id' => 'tenant-b']);
 
         $user = StubIdentity::create(['id' => 'user-1', 'name' => 'Alice']);
         $user->assignRole($onCall, Carbon::parse('2026-07-01 12:05:00'));

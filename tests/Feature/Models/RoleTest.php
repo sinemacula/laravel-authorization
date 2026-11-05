@@ -38,6 +38,6 @@ final class RoleTest extends StringCastsTestCase
     #[\Override]
     protected static function stringColumns(): array
     {
-        return ['name', 'guard_name', 'description', 'parent_id', 'tenant_type', 'tenant_id'];
+        return ['name', 'guard', 'description', 'parent_id', 'tenant_type', 'tenant_id'];
     }
 }

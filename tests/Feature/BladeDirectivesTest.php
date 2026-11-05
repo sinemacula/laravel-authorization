@@ -46,9 +46,9 @@ final class BladeDirectivesTest extends TestCase
     public function testRoleDirectiveAdmitsWhenRoleHeld(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'admin',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'admin',
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -74,9 +74,9 @@ final class BladeDirectivesTest extends TestCase
     public function testRoleDirectiveRendersEmptyWhenRoleMissing(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'admin',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'admin',
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -112,14 +112,14 @@ final class BladeDirectivesTest extends TestCase
     public function testRoleElseBranchFiresWhenRoleMissing(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'admin',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'admin',
+            'guard' => 'web',
         ]);
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'editor',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'editor',
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -139,8 +139,8 @@ final class BladeDirectivesTest extends TestCase
      */
     public function testAnyRoleDirectiveAdmitsOnAnyMatch(): void
     {
-        Role::create(['id' => (string) Str::uuid(), 'name' => 'admin', 'guard_name' => 'web']);
-        Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard_name' => 'web']);
+        Role::create(['id' => (string) Str::uuid(), 'name' => 'admin', 'guard' => 'web']);
+        Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole('editor');
@@ -159,8 +159,8 @@ final class BladeDirectivesTest extends TestCase
      */
     public function testAllRolesDirectiveRequiresEveryRole(): void
     {
-        Role::create(['id' => (string) Str::uuid(), 'name' => 'admin', 'guard_name' => 'web']);
-        Role::create(['id' => (string) Str::uuid(), 'name' => 'oncall', 'guard_name' => 'web']);
+        Role::create(['id' => (string) Str::uuid(), 'name' => 'admin', 'guard' => 'web']);
+        Role::create(['id' => (string) Str::uuid(), 'name' => 'oncall', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole('admin');
@@ -203,9 +203,9 @@ final class BladeDirectivesTest extends TestCase
     public function testPermissionDirectiveAdmitsDirectGrant(): void
     {
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::PERMISSION,
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => self::PERMISSION,
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -227,14 +227,14 @@ final class BladeDirectivesTest extends TestCase
     public function testPermissionDirectiveAdmitsRoleInheritedGrant(): void
     {
         $permission = Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'posts:publish',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'posts:publish',
+            'guard' => 'web',
         ]);
         $role = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'publisher',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'publisher',
+            'guard' => 'web',
         ]);
         $role->permissions()->attach($permission->getKey());
 
@@ -256,14 +256,14 @@ final class BladeDirectivesTest extends TestCase
     public function testAllPermissionsDirectiveRequiresEveryPermission(): void
     {
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => self::PERMISSION,
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => self::PERMISSION,
+            'guard' => 'web',
         ]);
         Permission::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'posts:delete',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'posts:delete',
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -289,9 +289,9 @@ final class BladeDirectivesTest extends TestCase
     public function testUnlessRoleDirectiveRendersWhenRoleMissing(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'banned',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'banned',
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -311,9 +311,9 @@ final class BladeDirectivesTest extends TestCase
     public function testUnlessRoleDirectiveSuppressesWhenRoleHeld(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'banned',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'banned',
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -335,9 +335,9 @@ final class BladeDirectivesTest extends TestCase
     public function testUnlessRoleAcceptsEndRoleAsClosingTag(): void
     {
         Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => 'banned',
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => 'banned',
+            'guard' => 'web',
         ]);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
@@ -362,8 +362,8 @@ final class BladeDirectivesTest extends TestCase
      */
     public function testEveryUnlessVariantHasASpatieShapedClosingAlias(): void
     {
-        Role::create(['id' => (string) Str::uuid(), 'name' => 'admin', 'guard_name' => 'web']);
-        Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:draft', 'guard_name' => 'web']);
+        Role::create(['id' => (string) Str::uuid(), 'name' => 'admin', 'guard' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:draft', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
@@ -397,8 +397,8 @@ final class BladeDirectivesTest extends TestCase
      */
     public function testSpatieAliasesMatchCanonicalBehaviour(): void
     {
-        Role::create(['id' => (string) Str::uuid(), 'name' => 'admin', 'guard_name' => 'web']);
-        Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard_name' => 'web']);
+        Role::create(['id' => (string) Str::uuid(), 'name' => 'admin', 'guard' => 'web']);
+        Role::create(['id' => (string) Str::uuid(), 'name' => 'editor', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole('admin');
@@ -422,8 +422,8 @@ final class BladeDirectivesTest extends TestCase
      */
     public function testSpatiePermissionAliasesMatchCanonicalBehaviour(): void
     {
-        Permission::create(['id' => (string) Str::uuid(), 'name' => self::PERMISSION, 'guard_name' => 'web']);
-        Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:delete', 'guard_name' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => self::PERMISSION, 'guard' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:delete', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->givePermission(self::PERMISSION);
@@ -448,7 +448,7 @@ final class BladeDirectivesTest extends TestCase
      */
     public function testSpatiePermissionUnlessAliasesCompileWithEndunless(): void
     {
-        Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:draft', 'guard_name' => 'web']);
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:draft', 'guard' => 'web']);
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);

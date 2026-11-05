@@ -117,10 +117,10 @@ final class RoleHierarchyBench extends BenchmarkCase
         for ($i = 0; $i < $depth; $i++) {
 
             $role = Role::create([
-                'id'         => (string) Str::uuid(),
-                'name'       => "{$namePrefix}-level-{$i}",
-                'guard_name' => 'web',
-                'parent_id'  => $parent?->getKey(),
+                'id'        => (string) Str::uuid(),
+                'name'      => "{$namePrefix}-level-{$i}",
+                'guard'     => 'web',
+                'parent_id' => $parent?->getKey(),
             ]);
 
             $parent = $role;
@@ -141,17 +141,17 @@ final class RoleHierarchyBench extends BenchmarkCase
     private static function buildWideSubtree(int $width, string $namePrefix): Role
     {
         $root = Role::create([
-            'id'         => (string) Str::uuid(),
-            'name'       => "{$namePrefix}-root",
-            'guard_name' => 'web',
+            'id'    => (string) Str::uuid(),
+            'name'  => "{$namePrefix}-root",
+            'guard' => 'web',
         ]);
 
         for ($i = 0; $i < $width; $i++) {
             Role::create([
-                'id'         => (string) Str::uuid(),
-                'name'       => "{$namePrefix}-child-{$i}",
-                'guard_name' => 'web',
-                'parent_id'  => $root->getKey(),
+                'id'        => (string) Str::uuid(),
+                'name'      => "{$namePrefix}-child-{$i}",
+                'guard'     => 'web',
+                'parent_id' => $root->getKey(),
             ]);
         }
 
