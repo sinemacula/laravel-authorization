@@ -8,8 +8,9 @@ namespace SineMacula\Laravel\Authorization\Support;
  * Where a grant holds: in one tenant, or platform-wide when the tenant is null,
  * and in one application, or every application when the application is null.
  *
- * The grant service writes platform-wide grants for every application today, so
- * every grant event reports `GrantScope::platform()`.
+ * Every grant event reports the scope of its grant: the tenant its target's
+ * owner fixes or the call names, else platform-wide. Grants are written for
+ * every application until applications are read.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

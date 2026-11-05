@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Database\GrantRelation;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 
 /**
@@ -32,6 +33,10 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      * Build the relation onto one kind of grant: polymorphic on the grantee,
      * through the target's grant table and pivot class, with the expiry and
      * timestamps on the pivot, and without grants that have expired.
+     *
+     * Only the grants that hold in the current tenant count: those made
+     * platform-wide, and those made in the tenant the tenant scope applies.
+     * Without a tenant only platform-wide grants count (AUTHZ-5.1, AUTHZ-5.7).
      *
      * Shared by the roles, permissions and policies relations so the grant
      * tables are always read the same way. The relation compares the grantee's
@@ -64,7 +69,35 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
                 // @phpstan-ignore staticMethod.dynamicCall
                 $query->whereNull($table . '.expires_at')
                     ->orWhere($table . '.expires_at', '>', Carbon::now('UTC'));
+            })
+            ->where(static function (Builder $query) use ($table): void {
+                self::authorizationInScope($query, $table, TenantScope::currentTenant());
             });
+    }
+
+    /**
+     * Limit a grant query to the grants that hold in the tenant: platform-wide
+     * ones, and the tenant's own; only platform-wide ones without a tenant.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<\Illuminate\Database\Eloquent\Model>  $query
+     * @param  string  $table
+     * @param  array{0: string, 1: string}|null  $tenant
+     * @return void
+     */
+    private static function authorizationInScope(Builder $query, string $table, ?array $tenant): void
+    {
+        // @phpstan-ignore staticMethod.dynamicCall
+        $query->whereNull($table . '.tenant_type');
+
+        if ($tenant === null) {
+            return;
+        }
+
+        // @phpstan-ignore staticMethod.dynamicCall
+        $query->orWhere(static function (Builder $query) use ($table, $tenant): void {
+            // @phpstan-ignore staticMethod.dynamicCall
+            $query->where($table . '.tenant_type', $tenant[0])->where($table . '.tenant_id', $tenant[1]);
+        });
     }
 
     /**

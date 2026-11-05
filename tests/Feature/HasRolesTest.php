@@ -312,14 +312,15 @@ final class HasRolesTest extends TestCase
      * @param  \Tests\Feature\Stubs\StubIdentity  $identity
      * @param  \Illuminate\Database\Eloquent\Model  $row
      * @param  \DateTimeInterface|null  $expiresAt
+     * @param  \Illuminate\Database\Eloquent\Model|null  $tenant
      * @return void
      */
     #[\Override]
-    protected function grantTo(StubIdentity $identity, Model $row, ?\DateTimeInterface $expiresAt = null): void
+    protected function grantTo(StubIdentity $identity, Model $row, ?\DateTimeInterface $expiresAt = null, ?Model $tenant = null): void
     {
         \assert($row instanceof Role);
 
-        $identity->assignRole($row, $expiresAt);
+        $identity->assignRole($row, $expiresAt, $tenant);
     }
 
     /**

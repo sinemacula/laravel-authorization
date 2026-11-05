@@ -30,7 +30,7 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
 - `permission-catalogue-sync.md`: declaring permissions in enums and providers, why booting never touches the
   database, and what `authorization:sync` adds, updates, reports as stale or protected, and prunes.
 - `management-services.md`: the services every role, permission, policy and grant write goes through, their
-  transaction, idempotent grants, re-armed expiries, the locked hierarchy check, and why grants are platform-wide.
+  transaction, idempotent grants, re-armed expiries, the locked hierarchy check, and the scope each grant holds in.
 - `events.md`: the one marker every event implements, the snapshot payloads, the actor the caller passes, one
   operation id per call, dispatch after commit, the grantees a delete reports and the document digests.
 

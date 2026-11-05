@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Concerns;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
@@ -11,6 +12,7 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePolicyPivot;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Resolvers\GrantResolver;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Policy attachment trait for authorizable models.
@@ -77,13 +79,14 @@ trait HasPolicies // @phpstan-ignore trait.unused
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @param  \DateTimeInterface|null  $expiresAt
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @return static
      *
      * @throws \Throwable
      */
-    public function attachPolicy(Policy $policy, ?\DateTimeInterface $expiresAt = null): static
+    public function attachPolicy(Policy $policy, ?\DateTimeInterface $expiresAt = null, Model|Reference|null $tenant = null): static
     {
-        self::authorizationGrants()->attachPolicy($this, $policy, $expiresAt);
+        self::authorizationGrants()->attachPolicy($this, $policy, $expiresAt, null, $tenant);
 
         return $this;
     }
@@ -93,13 +96,14 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * `IdentityPolicyDetached` fires only when the policy was attached.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @return static
      *
      * @throws \Throwable
      */
-    public function detachPolicy(Policy $policy): static
+    public function detachPolicy(Policy $policy, Model|Reference|null $tenant = null): static
     {
-        self::authorizationGrants()->detachPolicy($this, $policy);
+        self::authorizationGrants()->detachPolicy($this, $policy, null, $tenant);
 
         return $this;
     }
@@ -119,13 +123,14 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * `GrantService::syncPolicies()` with an expiry.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Policy>  $policies
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @return static
      *
      * @throws \Throwable
      */
-    public function syncPolicies(array $policies): static
+    public function syncPolicies(array $policies, Model|Reference|null $tenant = null): static
     {
-        self::authorizationGrants()->syncPolicies($this, $policies);
+        self::authorizationGrants()->syncPolicies($this, $policies, null, null, $tenant);
 
         return $this;
     }

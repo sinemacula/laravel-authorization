@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Concerns;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
@@ -11,6 +12,7 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePermissionPivot;
 use SineMacula\Laravel\Authorization\Resolvers\GrantResolver;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Direct permission trait for authorizable models.
@@ -78,13 +80,14 @@ trait HasPermissions // @phpstan-ignore trait.unused
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @param  \DateTimeInterface|null  $expiresAt
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @return static
      *
      * @throws \Throwable
      */
-    public function givePermission(Permission|string $permission, ?\DateTimeInterface $expiresAt = null): static
+    public function givePermission(Permission|string $permission, ?\DateTimeInterface $expiresAt = null, Model|Reference|null $tenant = null): static
     {
-        self::authorizationGrants()->grantPermission($this, $permission, $expiresAt);
+        self::authorizationGrants()->grantPermission($this, $permission, $expiresAt, null, $tenant);
 
         return $this;
     }
@@ -101,13 +104,14 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * held none.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @return static
      *
      * @throws \Throwable
      */
-    public function revokePermission(Permission|string $permission): static
+    public function revokePermission(Permission|string $permission, Model|Reference|null $tenant = null): static
     {
-        self::authorizationGrants()->revokePermission($this, $permission);
+        self::authorizationGrants()->revokePermission($this, $permission, null, $tenant);
 
         return $this;
     }
@@ -131,13 +135,14 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * of the same name never replaces a platform grant.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Permission|string>  $permissions
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @return static
      *
      * @throws \Throwable
      */
-    public function syncPermissions(array $permissions): static
+    public function syncPermissions(array $permissions, Model|Reference|null $tenant = null): static
     {
-        self::authorizationGrants()->syncPermissions($this, $permissions);
+        self::authorizationGrants()->syncPermissions($this, $permissions, null, null, $tenant);
 
         return $this;
     }

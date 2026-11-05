@@ -23,6 +23,7 @@ use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
+use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
@@ -308,6 +309,142 @@ final class GrantServiceTest extends TestCase
         self::assertCount(1, $operations);
         self::assertSame([], $user->getRoles());
         self::assertSame(0, self::service()->revokeAll($user));
+    }
+
+    /**
+     * A role a tenant owns is granted in that tenant without naming it, and the
+     * event reports the scope; naming another tenant is refused.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnOwnedRoleIsGrantedInItsTenant(): void
+    {
+        $user   = self::user();
+        $tenant = self::createTenant('tenant-a');
+        $role   = Role::query()->create(['name' => 'editor', ...self::ownedBy($tenant)]);
+
+        Event::fake();
+
+        self::service()->grantRole($user, $role);
+
+        $scopes = DB::table('authorizable_roles')->get(['tenant_type', 'tenant_id'])->map(static fn (object $row): array => [$row->tenant_type, $row->tenant_id]);
+
+        self::assertSame([[$tenant->getMorphClass(), 'tenant-a']], $scopes->all());
+        Event::assertDispatched(RoleAssigned::class, static fn (RoleAssigned $event): bool => self::refersTo($event->scope->tenant, $tenant));
+
+        try {
+            self::service()->grantRole($user, $role, null, null, self::createTenant('tenant-b'));
+            self::fail('A role granted outside its tenant was not refused.');
+        } catch (GrantScopeMismatchException $exception) {
+            self::assertSame('role', $exception->getKind());
+            self::assertSame('editor', $exception->getName());
+            self::assertTrue(self::refersTo($exception->getOwner(), $tenant));
+            self::assertSame('tenant-b', $exception->getScope()?->id);
+        }
+
+        self::assertSame(1, DB::table('authorizable_roles')->count());
+    }
+
+    /**
+     * A platform role is granted platform-wide unless a tenant is named, and in
+     * that tenant when one is; the same role may be held in both.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPlatformRoleIsGrantedWhereTheCallerNames(): void
+    {
+        $user   = self::user();
+        $tenant = self::createTenant('tenant-a');
+        $role   = self::role('editor');
+
+        self::service()->grantRole($user, $role);
+        self::service()->grantRole($user, $role, null, null, $tenant);
+
+        self::assertEqualsCanonicalizing([null, 'tenant-a'], DB::table('authorizable_roles')->pluck('tenant_id')->all());
+    }
+
+    /**
+     * A name is looked up among the rows visible in the tenant named, not the
+     * current tenant.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testANameIsLookedUpInTheTenantNamed(): void
+    {
+        $user    = self::user();
+        $tenantA = self::createTenant('tenant-a');
+        $owned   = Role::query()->create(['name' => 'editor', ...self::ownedBy($tenantA)]);
+
+        self::role('editor');
+        $this->actAsTenant(self::createTenant('tenant-b'));
+
+        self::service()->grantRole($user, 'editor', null, null, $tenantA);
+
+        self::assertSame([$owned->id], DB::table('authorizable_roles')->pluck('role_id')->all());
+        self::assertSame(1, self::service()->revokeRole($user, 'editor', null, $tenantA));
+    }
+
+    /**
+     * A sync with no tenant named works in the tenant that owns every target,
+     * and is refused when the targets are owned by different tenants or mix a
+     * tenant's role with the platform's.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASyncWorksInTheTenantItsTargetsShare(): void
+    {
+        $user     = self::user();
+        $tenant   = self::createTenant('tenant-a');
+        $editor   = Role::query()->create(['name' => 'editor', ...self::ownedBy($tenant)]);
+        $author   = Role::query()->create(['name' => 'author', ...self::ownedBy($tenant)]);
+        $platform = self::role('viewer');
+        $other    = Role::query()->create(['name' => 'owner', ...self::ownedBy(self::createTenant('tenant-b'))]);
+
+        self::assertSame([$editor->id, $author->id], self::service()->syncRoles($user, [$editor, $author])->granted);
+        self::assertSame(['tenant-a', 'tenant-a'], DB::table('authorizable_roles')->pluck('tenant_id')->all());
+
+        foreach ([[$editor, $platform], [$editor, $other]] as $targets) {
+            try {
+                self::service()->syncRoles($user, $targets);
+                self::fail('A sync across scopes was not refused.');
+            } catch (GrantScopeMismatchException $exception) {
+                self::assertSame('role', $exception->getKind());
+            }
+        }
+
+        self::assertSame(2, DB::table('authorizable_roles')->count());
+    }
+
+    /**
+     * Revoking everything reports each grant in the scope it was held in.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRevokingEverythingReportsEachScope(): void
+    {
+        $user   = self::user();
+        $tenant = self::createTenant('tenant-a');
+        $role   = self::role('editor');
+
+        self::service()->grantRole($user, $role);
+        self::service()->grantRole($user, $role, null, null, $tenant);
+
+        Event::fake();
+
+        self::assertSame(2, self::service()->revokeAll($user));
+        Event::assertDispatchedTimes(RoleRevoked::class, 2);
+        Event::assertDispatched(RoleRevoked::class, static fn (RoleRevoked $event): bool => $event->scope->tenant === null);
+        Event::assertDispatched(RoleRevoked::class, static fn (RoleRevoked $event): bool => self::refersTo($event->scope->tenant, $tenant));
     }
 
     /**
@@ -643,25 +780,24 @@ final class GrantServiceTest extends TestCase
     }
 
     /**
-     * Revoking a role removes its rows in every scope, since every row counts
-     * platform-wide until scope is read.
+     * Revoking a role removes its grant in one scope: platform-wide unless a
+     * tenant is named, so a grant in a tenant stays until it is revoked there.
      *
      * @return void
      */
-    public function testRevokingRemovesTheRoleInEveryScope(): void
+    public function testRevokingRemovesTheRoleInOneScope(): void
     {
-        $user = self::user();
-        $role = self::role('editor');
+        $user   = self::user();
+        $role   = self::role('editor');
+        $tenant = new Reference('stub_tenant', 'tenant-a');
 
-        DB::table('authorizable_roles')->insert([
-            'role_id'           => $role->id,
-            'authorizable_type' => $user->getMorphClass(),
-            'authorizable_id'   => 'user-1',
-            'tenant_type'       => 'stub_tenant',
-            'tenant_id'         => 'tenant-a',
-        ]);
+        self::service()->grantRole($user, $role);
+        self::service()->grantRole($user, $role, null, null, $tenant);
 
         self::assertSame(1, self::service()->revokeRole($user, $role));
+        self::assertSame(['tenant-a'], DB::table('authorizable_roles')->pluck('tenant_id')->all());
+        self::assertSame(0, self::service()->revokeRole($user, $role));
+        self::assertSame(1, self::service()->revokeRole($user, $role, null, $tenant));
         self::assertSame(0, DB::table('authorizable_roles')->count());
     }
 
@@ -766,8 +902,8 @@ final class GrantServiceTest extends TestCase
     }
 
     /**
-     * A name in a sync keeps every held role of that name, and only when none
-     * is held is the first the lookup ranks granted.
+     * A name in a sync keeps every role of that name held in the sync's scope,
+     * and only when none is held is the first the lookup ranks there granted.
      *
      * @return void
      */
@@ -778,30 +914,30 @@ final class GrantServiceTest extends TestCase
         $global = self::role('editor');
         $scoped = Role::query()->create(['name' => 'editor', ...self::ownedBy($tenant)]);
 
-        $this->actAsTenant($tenant);
+        self::service()->grantRole($user, $global, null, null, $tenant);
 
-        self::service()->grantRole($user, $global);
-
-        $result = self::service()->syncRoles($user, ['editor']);
+        $result = self::service()->syncRoles($user, ['editor'], null, null, $tenant);
 
         self::assertFalse($result->isChange());
         self::assertSame([$global->id], DB::table('authorizable_roles')->pluck('role_id')->all());
 
-        self::service()->syncRoles($user, []);
+        self::service()->syncRoles($user, [], null, null, $tenant);
 
-        self::assertSame([$scoped->id], self::service()->syncRoles($user, ['editor'])->granted);
+        self::assertSame([$scoped->id], self::service()->syncRoles($user, ['editor'], null, null, $tenant)->granted);
     }
 
     /**
-     * A sync reports a revoked role of another tenant, outside the tenant
-     * scope.
+     * A sync replaces the grants of one scope: one with no tenant named leaves
+     * a grant in another tenant, and one in that tenant reports it revoked,
+     * though another tenant is current.
      *
      * @return void
      */
     public function testASyncReportsARevokedRoleOfAnotherTenant(): void
     {
-        $user  = self::user();
-        $other = Role::query()->create(['name' => 'editor', ...self::ownedBy(self::createTenant('tenant-a'))]);
+        $user   = self::user();
+        $tenant = self::createTenant('tenant-a');
+        $other  = Role::query()->create(['name' => 'editor', ...self::ownedBy($tenant)]);
 
         self::service()->grantRole($user, $other);
 
@@ -809,8 +945,9 @@ final class GrantServiceTest extends TestCase
 
         Event::fake();
 
-        self::assertSame([$other->id], self::service()->syncRoles($user, [])->revoked);
-        Event::assertDispatched(RoleRevoked::class, static fn (RoleRevoked $event): bool => self::refersTo($event->role, $other));
+        self::assertSame([], self::service()->syncRoles($user, [])->revoked);
+        self::assertSame([$other->id], self::service()->syncRoles($user, [], null, null, $tenant)->revoked);
+        Event::assertDispatched(RoleRevoked::class, static fn (RoleRevoked $event): bool => self::refersTo($event->role, $other) && self::refersTo($event->scope->tenant, $tenant));
     }
 
     /**

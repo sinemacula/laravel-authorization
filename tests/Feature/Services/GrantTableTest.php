@@ -462,12 +462,12 @@ final class GrantTableTest extends TestCase
     }
 
     /**
-     * `revoke()` deletes the grantee's rows for the given keys in every scope,
-     * and nothing else.
+     * `revoke()` deletes the grantee's rows for the given keys in its scope,
+     * and nothing else: a grant in a tenant stays.
      *
      * @return void
      */
-    public function testRevokeDeletesTheGranteesRowsForTheKeysInEveryScope(): void
+    public function testRevokeDeletesTheGranteesRowsForTheKeysInItsScope(): void
     {
         $first  = self::role('first');
         $second = self::role('second');
@@ -476,12 +476,81 @@ final class GrantTableTest extends TestCase
         $table->grant($first->id, null);
         $table->grant($second->id, null);
         self::table('user-2')->grant($first->id, null);
-
-        self::insertRow($first->id, ['tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a']);
+        self::table(tenant: self::tenant())->grant($first->id, null);
 
         $table->revoke([$first->id]);
 
         self::assertSame([$second->id], $table->held());
+        self::assertSame([$first->id], self::table('user-2')->held());
+        self::assertSame([$first->id], self::table(tenant: self::tenant())->held());
+    }
+
+    /**
+     * A grant in a tenant writes the tenant columns, and is held, re-granted
+     * and revoked in that tenant only.
+     *
+     * @return void
+     */
+    public function testAGrantInATenantIsHeldThereOnly(): void
+    {
+        $role   = self::role();
+        $scoped = self::table(tenant: self::tenant());
+
+        self::assertSame(GrantOutcome::GRANTED, $scoped->grant($role->id, null)->outcome);
+        $scopes = DB::table('authorizable_roles')->get(['tenant_type', 'tenant_id'])->map(static fn (object $row): array => [$row->tenant_type, $row->tenant_id]);
+
+        self::assertSame([['stub_tenant', 'tenant-a']], $scopes->all());
+        self::assertSame([$role->id], $scoped->held());
+        self::assertSame([], self::table()->held());
+        self::assertSame([], self::table(tenant: new Reference('stub_tenant', 'tenant-b'))->held());
+
+        self::assertSame(GrantOutcome::EXPIRY_CHANGED, $scoped->grant($role->id, Carbon::parse('2026-07-02 12:00:00', 'UTC'))->outcome);
+        self::assertSame(GrantOutcome::GRANTED, self::table()->grant($role->id, null)->outcome);
+        $format   = static fn (mixed $value): ?string => $value === null ? null : Carbon::parse((string) $value)->format('Y-m-d H:i:s'); // @phpstan-ignore cast.string
+        $expiries = [];
+
+        foreach (DB::table('authorizable_roles')->get(['tenant_id', 'expires_at']) as $row) {
+            $expiries[$row->tenant_id ?? 'platform'] = $format($row->expires_at);
+        }
+
+        \ksort($expiries);
+
+        self::assertSame(['platform' => null, 'tenant-a' => '2026-07-02 12:00:00'], $expiries);
+
+        $scoped->revoke([$role->id]);
+
+        self::assertSame([], $scoped->held());
+        self::assertSame([$role->id], self::table()->held());
+    }
+
+    /**
+     * Every grant the grantee holds is listed with its tenant and revoked
+     * together, in every scope, leaving other grantees' grants.
+     *
+     * @return void
+     */
+    public function testEveryScopeIsReadAndRevokedTogether(): void
+    {
+        $first  = self::role('first');
+        $second = self::role('second');
+
+        self::table()->grant($first->id, null);
+        self::table(tenant: self::tenant())->grant($second->id, null);
+        self::table('user-2')->grant($first->id, null);
+
+        $grants = self::table()->grantsInEveryScope();
+
+        \usort($grants, static fn (array $left, array $right): int => $left[0] <=> $right[0]);
+
+        $expected = [[$first->id, null], [$second->id, self::tenant()]];
+
+        \usort($expected, static fn (array $left, array $right): int => $left[0] <=> $right[0]);
+
+        self::assertEquals($expected, $grants);
+
+        self::table()->revokeInEveryScope();
+
+        self::assertSame([], self::table()->grantsInEveryScope());
         self::assertSame([$first->id], self::table('user-2')->held());
     }
 
@@ -531,11 +600,22 @@ final class GrantTableTest extends TestCase
      *
      * @param  string  $granteeId
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $grantedBy
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @return \SineMacula\Laravel\Authorization\Services\Support\GrantTable
      */
-    private static function table(string $granteeId = 'user-1', ?Reference $grantedBy = null): GrantTable
+    private static function table(string $granteeId = 'user-1', ?Reference $grantedBy = null, ?Reference $tenant = null): GrantTable
     {
-        return new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_identity', $granteeId, $grantedBy);
+        return new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_identity', $granteeId, $grantedBy, $tenant);
+    }
+
+    /**
+     * Return the tenant scoped grants are made in.
+     *
+     * @return \SineMacula\Laravel\Authorization\Support\Reference
+     */
+    private static function tenant(): Reference
+    {
+        return new Reference('stub_tenant', 'tenant-a');
     }
 
     /**

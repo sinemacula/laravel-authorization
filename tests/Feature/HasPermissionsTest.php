@@ -293,14 +293,15 @@ final class HasPermissionsTest extends TestCase
      * @param  \Tests\Feature\Stubs\StubIdentity  $identity
      * @param  \Illuminate\Database\Eloquent\Model  $row
      * @param  \DateTimeInterface|null  $expiresAt
+     * @param  \Illuminate\Database\Eloquent\Model|null  $tenant
      * @return void
      */
     #[\Override]
-    protected function grantTo(StubIdentity $identity, Model $row, ?\DateTimeInterface $expiresAt = null): void
+    protected function grantTo(StubIdentity $identity, Model $row, ?\DateTimeInterface $expiresAt = null, ?Model $tenant = null): void
     {
         \assert($row instanceof Permission);
 
-        $identity->givePermission($row, $expiresAt);
+        $identity->givePermission($row, $expiresAt, $tenant);
     }
 
     /**
