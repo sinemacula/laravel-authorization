@@ -210,18 +210,22 @@ trait HasRoles // @phpstan-ignore trait.unused
      * platform's. A name matches any held role of that name the tenant scope
      * shows, the platform's or the current tenant's; a tenant cannot take the
      * name of a platform system role (see `RoleObserver`), so a name check for
-     * a system role is only ever met by the system role itself.
+     * a system role is only ever met by the system role itself. With a guard,
+     * only a held role of that guard or of no guard counts.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
+     * @param  string|null  $guard
      * @return bool
      */
-    public function hasRole(Role|string $role): bool
+    public function hasRole(Role|string $role, ?string $guard = null): bool
     {
         /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
         $roles = $this->roles;
 
         foreach ($roles as $existing) {
-            if ($role instanceof Role ? $existing->is($role) : $existing->name === $role) {
+            $named = $role instanceof Role ? $existing->is($role) : $existing->name === $role;
+
+            if ($named && ($guard === null || $existing->guard === null || $existing->guard === $guard)) {
                 return true;
             }
         }

@@ -277,10 +277,11 @@ final class UncoveredBranchesTest extends TestCase
 
             /**
              * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
+             * @param  string|null  $guard
              * @return bool
              */
             #[\Override]
-            public function hasRole(Role|string $role): bool
+            public function hasRole(Role|string $role, ?string $guard = null): bool
             {
                 return false;
             }

@@ -131,6 +131,31 @@ final class HasRolesTest extends TestCase
     }
 
     /**
+     * With a guard, a role counts only when it is of that guard or of no guard,
+     * by name or by model.
+     *
+     * @return void
+     */
+    public function testHasRoleWithAGuardCountsOnlyThatGuardsRoles(): void
+    {
+        $api  = Role::create(['name' => 'admin', 'guard' => 'api']);
+        $any  = Role::create(['name' => 'auditor', 'guard' => null]);
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+
+        $user->assignRole($api);
+        $user->assignRole($any);
+
+        self::assertTrue($user->hasRole('admin'));
+        self::assertTrue($user->hasRole('admin', 'api'));
+        self::assertFalse($user->hasRole('admin', 'web'));
+        self::assertTrue($user->hasRole('auditor', 'web'));
+        self::assertTrue($user->hasRole($api, 'api'));
+        self::assertFalse($user->hasRole($api, 'web'));
+        self::assertTrue($user->hasRole($any, 'web'));
+        self::assertFalse($user->hasRole('director', 'api'));
+    }
+
+    /**
      * Return the grant table the expiry check reads.
      *
      * @return string

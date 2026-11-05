@@ -61,10 +61,11 @@ final class RolesOnlyPrincipal implements SupportsRoles
      * Report whether the principal has the supplied role.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
+     * @param  string|null  $guard
      * @return bool
      */
     #[\Override]
-    public function hasRole(RoleModel|string $role): bool
+    public function hasRole(RoleModel|string $role, ?string $guard = null): bool
     {
         return $role === 'editor';
     }
