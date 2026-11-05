@@ -236,11 +236,6 @@ class Permission extends Model
      */
     public static function resolveByName(string $name, ?string $guard = null): self
     {
-        if ($guard === null) {
-            /** @var string $guard */
-            $guard = config('authorization.defaults.guard', 'web');
-        }
-
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
         $class = config('authorization.models.permission', static::class);
 

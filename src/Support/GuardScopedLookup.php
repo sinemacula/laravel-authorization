@@ -41,14 +41,20 @@ final class GuardScopedLookup
      * `Illuminate\Database\Eloquent\Builder`; the dispatch is runtime-dynamic
      * on a Builder instance, not static.
      *
+     * A null guard means the configured default
+     * (`authorization.defaults.guard`).
+     *
      * @param  class-string<\Illuminate\Database\Eloquent\Model>  $class
      * @param  string  $name
-     * @param  string  $guard
+     * @param  string|null  $guard
      * @return \Illuminate\Database\Eloquent\Model|null
      */
-    public static function findForGuard(string $class, string $name, string $guard): ?Model
+    public static function findForGuard(string $class, string $name, ?string $guard = null): ?Model
     {
-        return self::queryForGuard($class, $name, $guard)->first();
+        /** @var string $default */
+        $default = config('authorization.defaults.guard', 'web');
+
+        return self::queryForGuard($class, $name, $guard ?? $default)->first();
     }
 
     /**
