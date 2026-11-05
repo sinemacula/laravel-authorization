@@ -8,9 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
-use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
-use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
@@ -31,6 +29,16 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * as revoked. A soft-deleted grantee still exists and keeps its grants. A
  * grantee type that names no model class is skipped and reported, so a missing
  * morph map entry never removes grants.
+ *
+ * @phpstan-type ExpiredRow array{
+ *     target_id: string,
+ *     authorizable_type: string,
+ *     authorizable_id: string,
+ *     tenant_type: string|null,
+ *     tenant_id: string|null,
+ *     application: string|null,
+ *     expires_at: string,
+ * }
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -58,7 +66,7 @@ final readonly class GrantPruner
      *
      * @throws \Throwable
      */
-    public function prune(int $chunk = 1000, bool $pretend = false): PruneResult
+    public function prune(int $chunk, bool $pretend = false): PruneResult
     {
         $expired = 0;
 
@@ -73,12 +81,15 @@ final readonly class GrantPruner
             $orphaned += $pretend ? self::countGrants($grantee) : $this->grants->revokeAll($grantee);
         }
 
-        return new PruneResult($expired, $orphaned, $unresolved);
+        return new PruneResult($expired, $orphaned, \array_values($unresolved));
     }
 
     /**
      * Remove the expired grants of one kind, a chunk at a time, each chunk one
      * operation, and return how many were removed.
+     *
+     * Every row read is removed, or has been re-armed or removed since, so a
+     * later read never returns it and the sweep ends.
      *
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
      * @param  int  $chunk
@@ -91,11 +102,15 @@ final readonly class GrantPruner
         $removed = 0;
 
         do {
-            $rows   = self::expired($kind)->limit($chunk)->get()->map(static fn (object $row): array => (array) $row)->all();
-            $pruned = OperationScope::run(Operation::begin(), static fn (Operation $operation): int => self::pruneChunk($kind, $rows, $operation));
+            /** @var list<ExpiredRow> $rows */
+            $rows = self::expired($kind)
+                ->limit($chunk)
+                ->get([$kind->column() . ' as target_id', 'authorizable_type', 'authorizable_id', 'tenant_type', 'tenant_id', 'application', 'expires_at'])
+                ->map(static fn (object $row): array => (array) $row)
+                ->all();
 
-            $removed += $pruned;
-        } while ($pruned > 0 && \count($rows) === $chunk);
+            $removed += OperationScope::run(Operation::begin(), static fn (Operation $operation): int => self::pruneChunk($kind, $rows, $operation));
+        } while (\count($rows) === $chunk);
 
         return $removed;
     }
@@ -105,63 +120,33 @@ final readonly class GrantPruner
      * how many were removed.
      *
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
-     * @param  list<array<string, scalar|null>>  $rows
+     * @param  list<ExpiredRow>  $rows
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
      * @return int
      */
     private static function pruneChunk(GrantTarget $kind, array $rows, Operation $operation): int
     {
-        $targets = self::targets($kind, $rows);
+        $targets = [];
         $events  = [];
 
+        foreach ($kind->find(\array_column($rows, 'target_id')) as $model) {
+            $targets[$model->getKey()] = $model; // @phpstan-ignore offsetAccess.invalidOffset
+        }
+
         foreach ($rows as $row) {
-            $target = $targets[(string) $row[$kind->column()]] ?? null;
+            $target = $targets[$row['target_id']] ?? null;
 
             if ($target === null || self::grant($kind, $row)->delete() === 0) {
                 continue;
             }
 
-            $events[] = self::expiredEvent($kind, $operation, $row, $target);
+            $grantee  = new Reference($row['authorizable_type'], $row['authorizable_id']);
+            $events[] = $kind->expiredEvent($operation, $grantee, $target, self::scope($row), Carbon::parse($row['expires_at'], 'UTC'));
         }
 
         OperationScope::dispatch(...$events);
 
         return \count($events);
-    }
-
-    /**
-     * Load the roles, permissions or policies the rows grant, keyed by key.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
-     * @param  list<array<string, scalar|null>>  $rows
-     * @return array<string, \Illuminate\Database\Eloquent\Model>
-     */
-    private static function targets(GrantTarget $kind, array $rows): array
-    {
-        $ids     = \array_values(\array_unique(\array_map(static fn (array $row): string => (string) $row[$kind->column()], $rows)));
-        $targets = [];
-
-        foreach ($kind->find($ids) as $model) {
-            $targets[(string) $model->getKey()] = $model; // @phpstan-ignore cast.string
-        }
-
-        return $targets;
-    }
-
-    /**
-     * Build the event that reports the removal of one expired grant row.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
-     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
-     * @param  array<string, scalar|null>  $row
-     * @param  \Illuminate\Database\Eloquent\Model  $target
-     * @return \SineMacula\Laravel\Authorization\Contracts\IdentityEvent
-     */
-    private static function expiredEvent(GrantTarget $kind, Operation $operation, array $row, Model $target): IdentityEvent
-    {
-        $grantee = new Reference((string) $row['authorizable_type'], (string) $row['authorizable_id']);
-
-        return $kind->expiredEvent($operation, $grantee, $target, self::scope($row), UtcDateTime::toUtc($row['expires_at']) ?? Carbon::now('UTC'));
     }
 
     /**
@@ -181,18 +166,18 @@ final readonly class GrantPruner
      * left.
      *
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
-     * @param  array<string, scalar|null>  $columns
+     * @param  ExpiredRow  $row
      * @return \Illuminate\Database\Query\Builder
      */
-    private static function grant(GrantTarget $kind, array $columns): Builder
+    private static function grant(GrantTarget $kind, array $row): Builder
     {
         $query = self::expired($kind)
-            ->where($kind->column(), $columns[$kind->column()])
-            ->where('authorizable_type', $columns['authorizable_type'])
-            ->where('authorizable_id', $columns['authorizable_id']);
+            ->where($kind->column(), $row['target_id'])
+            ->where('authorizable_type', $row['authorizable_type'])
+            ->where('authorizable_id', $row['authorizable_id']);
 
         foreach (['tenant_type', 'tenant_id', 'application'] as $column) {
-            $columns[$column] === null ? $query->whereNull($column) : $query->where($column, $columns[$column]);
+            $row[$column] === null ? $query->whereNull($column) : $query->where($column, $row[$column]);
         }
 
         return $query;
@@ -201,22 +186,23 @@ final readonly class GrantPruner
     /**
      * Return the scope a grant row holds in.
      *
-     * @param  array<string, scalar|null>  $columns
+     * @param  ExpiredRow  $row
      * @return \SineMacula\Laravel\Authorization\Support\GrantScope
      */
-    private static function scope(array $columns): GrantScope
+    private static function scope(array $row): GrantScope
     {
-        $tenant = $columns['tenant_type'] === null ? null : new Reference((string) $columns['tenant_type'], (string) $columns['tenant_id']);
+        $tenant = $row['tenant_type'] === null ? null : new Reference($row['tenant_type'], (string) $row['tenant_id']);
 
-        return new GrantScope($tenant, $columns['application'] === null ? null : (string) $columns['application']);
+        return new GrantScope($tenant, $row['application']);
     }
 
     /**
-     * Return the grantees, across every grant table, that no longer exist, and
-     * the grantee types that name no model class.
+     * Return the grantees, across every grant table, that no longer exist,
+     * keyed so each is listed once, and the grantee types that name no model
+     * class.
      *
      * @param  int  $chunk
-     * @return array{0: list<\SineMacula\Laravel\Authorization\Support\Reference>, 1: list<string>}
+     * @return array{0: array<string, \SineMacula\Laravel\Authorization\Support\Reference>, 1: array<string, string>}
      */
     private static function orphans(int $chunk): array
     {
@@ -242,7 +228,7 @@ final readonly class GrantPruner
             }
         }
 
-        return [\array_values($orphans), \array_values($unresolved)];
+        return [$orphans, $unresolved];
     }
 
     /**
@@ -266,11 +252,13 @@ final readonly class GrantPruner
             ->orderBy('authorizable_id')
             ->chunk($chunk, static function ($rows) use ($class, &$missing): void {
                 /** @var list<string> $ids */
-                $ids      = $rows->pluck('authorizable_id')->map(static fn (mixed $id): string => (string) $id)->all(); // @phpstan-ignore cast.string
-                $existing = $class::query()->withoutGlobalScopes()->whereKey($ids)->pluck((new $class)->getKeyName());
-                $existing = $existing->map(static fn (mixed $key): string => (string) $key)->all(); // @phpstan-ignore cast.string
+                $ids = $rows->pluck('authorizable_id')->all();
 
-                $missing = [...$missing, ...\array_values(\array_diff($ids, $existing))];
+                // `array_diff()` compares as strings, so an integer key matches
+                // the grant's string id.
+                foreach (\array_diff($ids, $class::query()->withoutGlobalScopes()->whereKey($ids)->pluck((new $class)->getKeyName())->all()) as $id) {
+                    $missing[] = $id;
+                }
             });
 
         return $missing;

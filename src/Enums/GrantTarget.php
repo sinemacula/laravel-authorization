@@ -26,7 +26,6 @@ use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
-use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChange;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
@@ -193,7 +192,8 @@ enum GrantTarget: string
 
     /**
      * Load the rows of the configured model with the given keys, outside the
-     * tenant scope, so a grant of another tenant's row is still reported.
+     * global scopes, so a grant of another tenant's row, or of a row a scope
+     * hides, is still reported.
      *
      * @param  list<string>  $ids
      * @return list<\Illuminate\Database\Eloquent\Model>
@@ -201,7 +201,7 @@ enum GrantTarget: string
     public function find(array $ids): array
     {
         /** @var list<\Illuminate\Database\Eloquent\Model> */
-        return $this->modelClass()::query()->withoutGlobalScope(TenantScope::class)->whereKey($ids)->get()->all();
+        return $this->modelClass()::query()->withoutGlobalScopes()->whereKey($ids)->get()->all();
     }
 
     /**

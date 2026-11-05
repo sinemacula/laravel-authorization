@@ -51,7 +51,7 @@ final class PruneGrantsCommand extends Command
             return self::INVALID;
         }
 
-        $pretend = (bool) $this->option('pretend');
+        $pretend = $this->option('pretend') === true;
         $result  = $pruner->prune($chunk, $pretend);
 
         foreach ($result->unresolvedTypes as $type) {

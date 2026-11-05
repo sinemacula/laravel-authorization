@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Services;
 
+use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -52,7 +54,7 @@ final class GrantPrunerTest extends TestCase
     }
 
     /**
-     * Reset the clock.
+     * Reset the clock and the morph map.
      *
      * @return void
      */
@@ -60,6 +62,7 @@ final class GrantPrunerTest extends TestCase
     protected function tearDown(): void
     {
         Carbon::setTestNow();
+        Relation::morphMap([], false);
 
         parent::tearDown();
     }
@@ -86,7 +89,7 @@ final class GrantPrunerTest extends TestCase
 
         Event::fake();
 
-        $result = self::pruner()->prune();
+        $result = self::pruner()->prune(1000);
 
         self::assertSame(3, $result->expired);
         self::assertSame(0, $result->orphaned);
@@ -131,6 +134,79 @@ final class GrantPrunerTest extends TestCase
     }
 
     /**
+     * Each expired grant of the same grantee and target is removed and reported
+     * in its own scope, so grants that differ only in their tenant or
+     * application are told apart.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRemovesEachExpiredGrantInItsOwnScope(): void
+    {
+        $user  = StubIdentity::create(['id' => 'user-1']);
+        $role  = Role::create(['name' => 'editor']);
+        $until = Carbon::parse('2026-07-01 11:00:00');
+
+        $user->assignRole($role, $until);
+        $user->assignRole($role, $until, new Reference('stub_team', '1'));
+        $user->assignRole($role, $until, new Reference('stub_org', '1'));
+
+        DB::table('authorizable_roles')->insert([
+            'role_id'           => $role->id,
+            'authorizable_type' => $user->getMorphClass(),
+            'authorizable_id'   => 'user-1',
+            'application'       => 'admin',
+            'expires_at'        => '2026-07-01 11:00:00',
+        ]);
+
+        Event::fake();
+
+        self::assertSame(4, self::pruner()->prune(1000)->expired);
+        self::assertSame(0, DB::table('authorizable_roles')->count());
+
+        $scopes = \array_map(static fn (RoleExpired $event): string => \sprintf(
+            '%s:%s:%s',
+            $event->scope->tenant?->type,
+            $event->scope->tenant?->id,
+            $event->scope->application,
+        ), self::dispatchedEvents(RoleExpired::class));
+
+        self::assertEqualsCanonicalizing(['::', 'stub_team:1:', 'stub_org:1:', '::admin'], $scopes);
+    }
+
+    /**
+     * A grant re-armed between the read of the expired grants and its removal
+     * is kept, and nothing is reported.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testKeepsAGrantReArmedWhileThePruneRuns(): void
+    {
+        StubIdentity::create(['id' => 'user-1'])->assignRole(Role::create(['name' => 'editor']), Carbon::parse('2026-07-01 11:00:00'));
+
+        $rearmed = false;
+
+        DB::listen(static function (QueryExecuted $query) use (&$rearmed): void {
+            if ($rearmed || !\str_starts_with($query->sql, 'select') || !\str_contains($query->sql, 'authorizable_roles')) {
+                return;
+            }
+
+            $rearmed = true;
+
+            DB::table('authorizable_roles')->update(['expires_at' => '2026-07-02 12:00:00']);
+        });
+
+        Event::fake();
+
+        self::assertSame(0, self::pruner()->prune(1000)->expired);
+        self::assertSame(1, DB::table('authorizable_roles')->count());
+        Event::assertNotDispatched(RoleExpired::class);
+    }
+
+    /**
      * Pretending counts what would be removed and removes nothing.
      *
      * @return void
@@ -161,8 +237,9 @@ final class GrantPrunerTest extends TestCase
 
     /**
      * The grants of a grantee that no longer exists are revoked and reported; a
-     * soft-deleted grantee keeps its grants, and a grantee type naming no model
-     * class is reported and left.
+     * grantee whose type the morph map names is found, a soft-deleted grantee
+     * keeps its grants, and a grantee type naming no model class is reported
+     * and left while the types after it are still checked.
      *
      * @return void
      *
@@ -170,6 +247,8 @@ final class GrantPrunerTest extends TestCase
      */
     public function testRevokesTheGrantsOfGranteesThatAreGone(): void
     {
+        Relation::morphMap(['stub_identity' => StubIdentity::class]);
+
         $role  = Role::create(['name' => 'editor']);
         $gone  = StubIdentity::create(['id' => 'user-gone']);
         $kept  = StubIdentity::create(['id' => 'user-kept']);
@@ -185,17 +264,20 @@ final class GrantPrunerTest extends TestCase
         DB::table('stub_numbered_identities')->where('id', $other->id)->delete();
         $soft->delete();
 
-        DB::table('authorizable_roles')->insert(['role_id' => $role->id, 'authorizable_type' => 'unmapped_type', 'authorizable_id' => '1']);
+        DB::table('authorizable_roles')->insert(['role_id' => $role->id, 'authorizable_type' => 'ghost_type', 'authorizable_id' => '1']);
 
         Event::fake();
 
-        $result = self::pruner()->prune();
+        $result = self::pruner()->prune(1000);
 
         self::assertSame(2, $result->orphaned);
-        self::assertSame(['unmapped_type'], $result->unresolvedTypes);
+        self::assertSame(['ghost_type'], $result->unresolvedTypes);
         self::assertEqualsCanonicalizing(['user-kept', (string) $soft->id, '1'], DB::table('authorizable_roles')->pluck('authorizable_id')->all());
         Event::assertDispatchedTimes(RoleRevoked::class, 2);
-        Event::assertDispatched(RoleRevoked::class, static fn (RoleRevoked $event): bool => $event->grantee->id === 'user-gone' && $event->operation->actor === null);
+        Event::assertDispatched(
+            RoleRevoked::class,
+            static fn (RoleRevoked $event): bool => $event->grantee->id === 'user-gone' && $event->grantee->type === 'stub_identity' && $event->operation->actor === null,
+        );
     }
 
     /**
