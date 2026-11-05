@@ -5,14 +5,12 @@ declare(strict_types = 1);
 namespace Tests\Unit;
 
 use Illuminate\Container\Container;
-use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\Facades\Facade;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
-use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 
 /**
@@ -39,7 +37,6 @@ use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 #[CoversClass(AuthorizationServiceProvider::class)]
 #[CoversClass(GateRegistrar::class)]
 #[CoversClass(BladeDirectiveRegistrar::class)]
-#[CoversClass(EventListenerRegistrar::class)]
 final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
 {
     /**
@@ -56,21 +53,6 @@ final class AuthorizationServiceProviderEarlyReturnsTest extends TestCase
         \Mockery::close();
 
         parent::tearDown();
-    }
-
-    /**
-     * When the container has no `Dispatcher` binding the cache invalidation
-     * wiring short-circuits without raising.
-     *
-     * @return void
-     */
-    public function testCacheInvalidationListenersSkipWhenDispatcherUnbound(): void
-    {
-        $app = $this->bareApplication();
-
-        $this->invokePrivateOn(new EventListenerRegistrar($app), 'registerCacheInvalidationListeners');
-
-        self::assertFalse($app->bound(Dispatcher::class));
     }
 
     /**

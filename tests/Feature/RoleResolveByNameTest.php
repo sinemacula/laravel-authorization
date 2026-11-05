@@ -7,7 +7,6 @@ namespace Tests\Feature;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
-use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
 use SineMacula\Laravel\Authorization\Concerns\HasRoleHierarchy;
 use SineMacula\Laravel\Authorization\Concerns\ManagesPermissions;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
@@ -37,7 +36,6 @@ use Tests\TestCase;
 #[CoversClass(RoleObserver::class)]
 #[CoversClass(UnknownRoleException::class)]
 #[CoversClass(TenantScope::class)]
-#[CoversClass(ResolutionCacheContext::class)]
 #[CoversClass(InvalidTenantException::class)]
 #[CoversClass(InvalidTenantColumnsException::class)]
 #[CoversClass(GuardScopedLookup::class)]

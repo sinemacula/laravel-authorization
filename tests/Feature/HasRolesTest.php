@@ -82,7 +82,7 @@ final class HasRolesTest extends TestCase
         DB::flushQueryLog();
         DB::enableQueryLog();
 
-        Carbon::setTestNow('2026-07-01 12:30:00');
+        Carbon::setTestNow('2026-07-01 12:04:00');
 
         self::assertSame(['on-call'], $user->getRoles());
         self::assertSame([], DB::getQueryLog());

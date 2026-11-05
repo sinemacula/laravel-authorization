@@ -211,20 +211,25 @@ return [
     | Resolution cache
     |---------------------------------------------------------------------------
     |
-    | Two-tier cache for principal roles, permissions, and policies. The
-    | in-memory tier is always on and memoises results per request or job.
-    | The optional persistent tier kicks in when `store` is set to one of
-    | the configured cache connections — results are written there with
-    | the supplied TTL (0 = forever) under a namespaced key prefix, and the
-    | shipped `InvalidateResolutionCache` listener drops entries when the
-    | package's events fire. Entries in both tiers live no longer than the
-    | TTL and the nearest grant expiry.
+    | Two-tier cache for what an identity's roles, permissions and policies
+    | come to. The in-memory tier is always on and memoises results per
+    | request or job. The optional persistent tier is used when `store` names
+    | one of the configured cache stores; any store works, with or without
+    | tags. Entries are keyed by identity and tenant, and record a version of
+    | the identity and of every role and policy they were built from; every
+    | write bumps the versions it affects, so a change takes effect on the next
+    | check in every worker. A store that fails is skipped for the rest of the
+    | request or job, and checks read the database.
+    |
+    | `ttl` is the longest, in seconds, any entry lives in either tier; an
+    | entry also lapses a second before the nearest grant it counts expires.
+    | It must be a whole number of at least 1.
     |
     */
 
     'cache' => [
         'store'  => env('AUTHORIZATION_CACHE_STORE'),
-        'ttl'    => (int) env('AUTHORIZATION_CACHE_TTL_SECONDS', 0),
+        'ttl'    => (int) env('AUTHORIZATION_CACHE_TTL_SECONDS', 300),
         'prefix' => env('AUTHORIZATION_CACHE_PREFIX', 'authorization'),
     ],
 

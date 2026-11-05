@@ -106,6 +106,58 @@ final class ConfigValidatorTest extends TestCase
     }
 
     /**
+     * The longest an entry lives may be any whole number of seconds from 1, and
+     * defaults when it is not set.
+     *
+     * @return void
+     */
+    public function testCacheLifetimesFromOneSecondPass(): void
+    {
+        foreach ([1, 300] as $ttl) {
+            $config                 = $this->authorizationConfig();
+            $config['cache']['ttl'] = $ttl;
+
+            ConfigValidator::validate($config, $this->app);
+        }
+
+        $config = $this->authorizationConfig();
+        unset($config['cache']['ttl']);
+
+        ConfigValidator::validate($config, $this->app);
+
+        $this->expectNotToPerformAssertions();
+    }
+
+    /**
+     * A cache lifetime below a second, or that is not a whole number, is
+     * refused: there is no "forever".
+     *
+     * @return void
+     */
+    public function testCacheLifetimesBelowASecondAreRejected(): void
+    {
+        foreach ([0 => '0 (int)', -5 => '-5 (int)'] as $ttl => $described) {
+            $config                 = $this->authorizationConfig();
+            $config['cache']['ttl'] = $ttl;
+
+            $this->assertRejected(
+                fn () => ConfigValidator::validate($config, $this->app),
+                'authorization.cache.ttl',
+                "expected a whole number of seconds of at least 1, got {$described}.",
+            );
+        }
+
+        $config                 = $this->authorizationConfig();
+        $config['cache']['ttl'] = '300';
+
+        $this->assertRejected(
+            fn () => ConfigValidator::validate($config, $this->app),
+            'authorization.cache.ttl',
+            'expected a whole number of seconds of at least 1, got \'300\' (string).',
+        );
+    }
+
+    /**
      * A `models` block that is not an array is refused.
      *
      * @return void

@@ -53,7 +53,7 @@ final class RoleGraph
             $parents[] = $role->parent_id;
         }
 
-        $visible = self::load(self::reachableKeys($parents));
+        $visible = self::load(\array_keys(self::links($parents)));
         $chains  = [];
 
         foreach ($roles as $role) {
@@ -76,14 +76,63 @@ final class RoleGraph
     {
         $keys = \array_map(static fn (Role $role): string => $role->id, $roles);
 
-        /** @var bool $hierarchy */
-        $hierarchy = config('authorization.hierarchy.enabled', true);
-
-        if ($hierarchy) {
+        if (self::isHierarchyEnabled()) {
             foreach (self::ancestorsOf($roles) as $chain) {
                 foreach ($chain as $ancestor) {
                     $keys[] = $ancestor->id;
                 }
+            }
+        }
+
+        return self::permissionNames($keys);
+    }
+
+    /**
+     * Return the keys of the given roles and of every role above them, each
+     * with the key of its parent, in one recursive query that ignores the
+     * tenant scope; with the hierarchy disabled, only the given roles, without
+     * a query.
+     *
+     * The resolution cache pins the version of every role returned before it
+     * reads their permissions through `permissionNamesWithin()`.
+     *
+     * @param  list<string>  $keys
+     * @return array<string, string|null>
+     */
+    public static function reach(array $keys): array
+    {
+        return self::isHierarchyEnabled() ? self::links($keys) : \array_fill_keys($keys, null);
+    }
+
+    /**
+     * Return the names of every permission the held roles hold, with their
+     * ancestors' when the hierarchy is enabled, reading the roles `reach()`
+     * returned afresh; or null when a role now has a parent `reach()` did not
+     * return, because the hierarchy moved after it was read.
+     *
+     * @param  array<string, string|null>  $reach
+     * @param  list<string>  $held
+     * @return list<string>|null
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
+     */
+    public static function permissionNamesWithin(array $reach, array $held): ?array
+    {
+        $visible   = self::load(\array_keys($reach));
+        $hierarchy = self::isHierarchyEnabled();
+        $keys      = [];
+
+        foreach ($visible as $role) {
+            if ($hierarchy && $role->parent_id !== null && !\array_key_exists($role->parent_id, $reach)) {
+                return null;
+            }
+        }
+
+        foreach (\array_intersect($held, \array_keys($visible)) as $role) {
+            $keys[] = $role;
+
+            foreach ($hierarchy ? self::chain($visible[$role], $visible) : [] as $ancestor) {
+                $keys[] = $ancestor->id;
             }
         }
 
@@ -112,6 +161,7 @@ final class RoleGraph
 
         /** @var list<string> */
         return $class::query()
+            ->useWritePdo()
             ->join($pivot, $pivot . '.permission_id', '=', $model->getQualifiedKeyName())
             ->whereIn($pivot . '.role_id', $roleKeys)
             ->distinct()
@@ -120,17 +170,18 @@ final class RoleGraph
     }
 
     /**
-     * Return the keys of the given roles and of every role above them, in one
-     * recursive query that ignores the tenant scope.
+     * Return the keys of the given roles and of every role above them, each
+     * with the key of its parent, in one recursive query that ignores the
+     * tenant scope.
      *
      * `union` rather than `union all` drops a row the chain has already
      * produced, so a cycle in the stored hierarchy ends the recursion instead
      * of running it forever.
      *
      * @param  list<string>  $keys
-     * @return list<string>
+     * @return array<string, string|null>
      */
-    private static function reachableKeys(array $keys): array
+    private static function links(array $keys): array
     {
         if ($keys === []) {
             return [];
@@ -150,12 +201,13 @@ final class RoleGraph
                 . "select {$key}, {$parent} from {$table} where {$key} in ({$marks})"
                 . " union select {$table}.{$key}, {$table}.{$parent} from {$table}"
                 . " inner join {$chain} on {$table}.{$key} = {$chain}.{$parent}"
-                . ") select {$key} from {$chain}",
+                . ") select {$key}, {$parent} from {$chain}",
             $keys,
+            false,
         );
 
-        /** @var list<string> */
-        return \array_column($rows, $model->getKeyName());
+        /** @var array<string, string|null> */
+        return \array_column($rows, 'parent_id', $model->getKeyName());
     }
 
     /**
@@ -172,7 +224,7 @@ final class RoleGraph
         }
 
         /** @var array<string, \SineMacula\Laravel\Authorization\Models\Role> */
-        return self::roleClass()::query()->whereKey($keys)->get()->keyBy('id')->all();
+        return self::roleClass()::query()->useWritePdo()->whereKey($keys)->get()->keyBy('id')->all();
     }
 
     /**
@@ -203,6 +255,17 @@ final class RoleGraph
         }
 
         return $chain;
+    }
+
+    /**
+     * Determine whether the role hierarchy is enabled.
+     *
+     * @return bool
+     */
+    private static function isHierarchyEnabled(): bool
+    {
+        /** @var bool */
+        return config('authorization.hierarchy.enabled', true);
     }
 
     /**

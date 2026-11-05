@@ -18,7 +18,6 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
-use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
@@ -42,7 +41,6 @@ use Tests\TestCase;
 #[CoversClass(AuthorizationServiceProvider::class)]
 #[CoversClass(GateRegistrar::class)]
 #[CoversClass(BladeDirectiveRegistrar::class)]
-#[CoversClass(EventListenerRegistrar::class)]
 #[CoversClass(ResolutionCache::class)]
 #[CoversTrait(HasRoles::class)]
 #[CoversTrait(HasPermissions::class)]
@@ -84,7 +82,7 @@ final class TemporalGrantsTest extends TestCase
 
         self::assertTrue($user->fresh()?->hasRole('oncall'));
 
-        $this->advanceClockTo('2026-01-01 13:30:00', $user);
+        $this->advanceClockTo('2026-01-01 13:30:00');
         self::assertFalse($user->fresh()?->hasRole('oncall'));
     }
 
@@ -109,7 +107,7 @@ final class TemporalGrantsTest extends TestCase
 
         self::assertTrue($user->fresh()?->hasPermission('emergency:publish'));
 
-        $this->advanceClockTo('2026-02-01 11:00:00', $user);
+        $this->advanceClockTo('2026-02-01 11:00:00');
         self::assertFalse($user->fresh()?->hasPermission('emergency:publish'));
     }
 
@@ -136,7 +134,7 @@ final class TemporalGrantsTest extends TestCase
 
         self::assertCount(1, $user->fresh()?->getPolicies() ?? []);
 
-        $this->advanceClockTo('2026-03-01 10:00:00', $user);
+        $this->advanceClockTo('2026-03-01 10:00:00');
         self::assertCount(0, $user->fresh()?->getPolicies() ?? []);
     }
 
@@ -248,7 +246,7 @@ final class TemporalGrantsTest extends TestCase
             $this->sortedRoleNames($user->fresh()),
         );
 
-        $this->advanceClockTo('2026-05-01 10:00:00', $user);
+        $this->advanceClockTo('2026-05-01 10:00:00');
         self::assertSame(
             ['staff'],
             $this->sortedRoleNames($user->fresh()),
@@ -311,21 +309,13 @@ final class TemporalGrantsTest extends TestCase
     }
 
     /**
-     * Advance the clock and invalidate the resolution cache for the supplied
-     * principal in the same step.
-     *
-     * Temporal grants are filtered at the DB layer on every relation read, but
-     * the `ResolutionCache` has no way to observe wall-clock advance — when
-     * present it memoises the role / permission list per principal and keeps
-     * returning the cached set until an invalidation event fires. Tests that
-     * walk the clock forward must drop the memoised entry manually so the next
-     * read observes the expiry.
+     * Advance the clock and start a fresh request, as a later request would see
+     * the grants.
      *
      * @param  string  $instant
-     * @param  object  $principal
      * @return void
      */
-    private function advanceClockTo(string $instant, object $principal): void
+    private function advanceClockTo(string $instant): void
     {
         Carbon::setTestNow(Carbon::parse($instant));
 
@@ -335,7 +325,8 @@ final class TemporalGrantsTest extends TestCase
             return;
         }
 
-        $app->make(ResolutionCache::class)->forget($principal);
+        // A fresh request: the memo of the last one is gone.
+        $app->forgetInstance(ResolutionCache::class);
     }
 
     /**

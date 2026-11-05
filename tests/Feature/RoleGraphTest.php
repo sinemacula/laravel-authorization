@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -200,6 +201,86 @@ final class RoleGraphTest extends TestCase
         $this->actAsTenant($tenant);
 
         self::assertEqualsCanonicalizing(['posts:read', 'posts:own'], RoleGraph::permissionNamesHeldBy([$role]));
+    }
+
+    /**
+     * The reach of roles is each of them and every role above them, with its
+     * parent, in one query; with the hierarchy disabled it is only the roles,
+     * without one.
+     *
+     * @return void
+     */
+    public function testReachRunsUpTheHierarchy(): void
+    {
+        [$root, $middle, $leaf] = self::chainOf(3, 'r');
+
+        $reach = RoleGraph::reach([$leaf->id]);
+
+        self::assertSame(1, self::queriesFor(static fn (): array => RoleGraph::reach([$leaf->id])));
+        self::assertEqualsCanonicalizing([$leaf->id, $middle->id, $root->id], \array_keys($reach));
+        self::assertSame($middle->id, $reach[$leaf->id]);
+        self::assertSame($root->id, $reach[$middle->id]);
+        self::assertArrayHasKey($root->id, $reach);
+        self::assertNull($reach[$root->id]);
+        self::assertSame([], RoleGraph::reach([]));
+
+        config(['authorization.hierarchy.enabled' => false]);
+
+        self::assertSame(0, self::queriesFor(static fn (): array => RoleGraph::reach([$leaf->id])));
+        self::assertSame([$leaf->id => null], RoleGraph::reach([$leaf->id]));
+    }
+
+    /**
+     * Within the reach read, the held roles hold their own permissions and
+     * their ancestors'; a held role the tenant scope hides holds none.
+     *
+     * @return void
+     */
+    public function testPermissionsWithinTheReach(): void
+    {
+        [$root, $leaf] = self::chainOf(2, 'w');
+        $other         = Role::create(['name' => 'other', 'guard' => 'web']);
+
+        $root->permissions()->attach(Permission::create(['name' => 'posts:read', 'guard' => 'web'])->id);
+        $leaf->permissions()->attach(Permission::create(['name' => 'posts:edit', 'guard' => 'web'])->id);
+
+        $missing = (string) Str::uuid();
+        $reach   = RoleGraph::reach([$leaf->id, $missing]);
+
+        self::assertEqualsCanonicalizing(['posts:read', 'posts:edit'], RoleGraph::permissionNamesWithin($reach, [$leaf->id, $missing]));
+        self::assertSame([], RoleGraph::permissionNamesWithin(RoleGraph::reach([$other->id]), [$other->id]));
+
+        config(['authorization.hierarchy.enabled' => false]);
+
+        self::assertSame(['posts:edit'], RoleGraph::permissionNamesWithin(RoleGraph::reach([$leaf->id]), [$leaf->id]));
+    }
+
+    /**
+     * A role whose parent is now one the reach did not read means the hierarchy
+     * moved after it was read, so nothing is returned.
+     *
+     * @return void
+     */
+    public function testAMovedHierarchyIsReported(): void
+    {
+        [$root, $leaf] = self::chainOf(2, 'm');
+        $elsewhere     = Role::create(['name' => 'elsewhere', 'guard' => 'web']);
+
+        $reach = RoleGraph::reach([$leaf->id]);
+
+        DB::table('roles')->where('id', $leaf->id)->update(['parent_id' => $elsewhere->id]);
+
+        self::assertNull(RoleGraph::permissionNamesWithin($reach, [$leaf->id]));
+
+        DB::table('roles')->where('id', $leaf->id)->update(['parent_id' => $root->id]);
+        DB::table('roles')->where('id', $root->id)->update(['parent_id' => null]);
+
+        self::assertSame([], RoleGraph::permissionNamesWithin($reach, [$leaf->id]));
+
+        config(['authorization.hierarchy.enabled' => false]);
+        DB::table('roles')->where('id', $leaf->id)->update(['parent_id' => $elsewhere->id]);
+
+        self::assertSame([], RoleGraph::permissionNamesWithin(RoleGraph::reach([$leaf->id]), [$leaf->id]));
     }
 
     /**

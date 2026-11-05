@@ -65,7 +65,7 @@ final class RbacQueryBudgetTest extends TestCase
         /** @var \Illuminate\Config\Repository $config */
         $config = $app->make(ConfigRepository::class);
         $config->set('authorization.cache.store', 'array');
-        $config->set('authorization.cache.ttl', 0);
+        $config->set('authorization.cache.ttl', 300);
         $config->set('authorization.cache.prefix', 'authorization-rbac-budget');
 
         $app->forgetInstance(ResolutionCache::class);

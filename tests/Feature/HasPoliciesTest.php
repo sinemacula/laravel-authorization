@@ -4,7 +4,6 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
-use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
@@ -13,6 +12,7 @@ use PHPUnit\Framework\Attributes\CoversTrait;
 use Psr\Log\AbstractLogger;
 use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
+use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyAttached;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyDetached;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged;
@@ -195,79 +195,24 @@ final class HasPoliciesTest extends TestCase
     }
 
     /**
-     * A malformed row without a name is logged with an empty policy name and
-     * its key cast to a string.
+     * The policies lapse from the result a second before the nearest attachment
+     * expires, for the same identity instance, while a policy attached forever
+     * stays.
      *
      * @return void
      */
-    public function testGetPoliciesLogsUnnamedRowWithEmptyNameAndStringKey(): void
-    {
-        $logger = self::recordingLogger();
-        $this->app->instance('log', $logger); // @phpstan-ignore method.nonObject
-
-        $policy = new Policy;
-        $policy->setRawAttributes(['id' => 42, 'document' => 'not-a-json-document']);
-
-        $user = new StubIdentity;
-        $user->setRelation('policies', new Collection([$policy]));
-
-        $reason = 'Invalid policy document \'[unnamed]\': policy document must be a JSON object or array.';
-
-        try {
-            $user->getPolicies();
-            self::fail('getPolicies() should rethrow for an unreadable row.');
-        } catch (InvalidPolicyDocumentException $exception) {
-            self::assertSame($reason, $exception->getMessage());
-        }
-
-        self::assertSame([
-            [
-                'message' => "Authorization: malformed policy '42' denies every check for its holder: {$reason}",
-                'context' => [
-                    'policy_id'   => '42',
-                    'policy_name' => '',
-                    'reason'      => $reason,
-                ],
-            ],
-        ], $logger->warnings);
-    }
-
-    /**
-     * The nearest expiry among the attached policies bounds the result, and
-     * policies attached forever do not.
-     *
-     * @return void
-     */
-    public function testReturnsSecondsUntilTheNearestAttachedPolicyLapses(): void
+    public function testAnExpiringAttachmentLapsesForTheSameInstance(): void
     {
         $user = $this->identity();
-
-        self::assertNull($user->secondsUntilPolicyExpiry());
 
         $user->attachPolicy($this->policy('forever'));
-        $user->attachPolicy($this->policy('later'), Carbon::parse('2026-07-01 13:00:00'));
         $user->attachPolicy($this->policy('sooner'), Carbon::parse('2026-07-01 12:05:00'));
 
-        self::assertSame(300, $user->secondsUntilPolicyExpiry());
-    }
+        self::assertEqualsCanonicalizing(['forever', 'sooner'], self::names($user->getPolicies()));
 
-    /**
-     * The loaded attachments are reused unless a reload is asked for, which
-     * reads them afresh.
-     *
-     * @return void
-     */
-    public function testReloadReadsTheAttachmentsAfresh(): void
-    {
-        $user = $this->identity();
-        $user->attachPolicy($this->policy('sooner'), Carbon::parse('2026-07-01 12:05:00'));
+        Carbon::setTestNow('2026-07-01 12:05:00');
 
-        self::assertSame(300, $user->secondsUntilPolicyExpiry());
-
-        DB::table('authorizable_policies')->update(['expires_at' => Carbon::parse('2026-07-01 12:10:00')]);
-
-        self::assertSame(300, $user->secondsUntilPolicyExpiry());
-        self::assertSame(600, $user->secondsUntilPolicyExpiry(true));
+        self::assertSame(['forever'], self::names($user->getPolicies()));
     }
 
     /**
@@ -456,5 +401,16 @@ final class HasPoliciesTest extends TestCase
             #[\Override]
             public function log(mixed $level, string|\Stringable $message, array $context = []): void {}
         };
+    }
+
+    /**
+     * Return the names of the evaluation policies.
+     *
+     * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
+     * @return list<string>
+     */
+    private static function names(array $policies): array
+    {
+        return \array_values(\array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $policies));
     }
 }

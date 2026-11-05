@@ -29,10 +29,8 @@ use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
-use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
-use SineMacula\Laravel\Authorization\Resolvers\CachingPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
@@ -51,7 +49,6 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
  *   matching Laravel Gate.
  * - `BladeDirectiveRegistrar` — wires the `@role` / `@permission` directive
  *   quartet and Spatie-compat aliases.
- * - `EventListenerRegistrar` — wires the resolution-cache invalidator.
  *
  * Every binding that holds state for one request or job (the resolvers, the
  * policy store, the resolved tenant, the resolution cache, the last decision
@@ -124,8 +121,6 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
         (new GateRegistrar($this->app))->register();
 
-        (new EventListenerRegistrar($this->app))->register();
-
         $this->registerRouteMiddleware();
 
         (new BladeDirectiveRegistrar($this->app))->register();
@@ -182,6 +177,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
         /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\SubjectResolver> $class */
         $class = $this->app['config']->get('authorization.subject_resolver', AuthGuardSubjectResolver::class);
 
+        $this->forgetResolutionsOnRebinding(SubjectResolver::class);
         $this->bindScopedDefault(SubjectResolver::class, $class);
     }
 
@@ -194,6 +190,8 @@ final class AuthorizationServiceProvider extends ServiceProvider
      */
     protected function registerResolvedTenant(): void
     {
+        $this->forgetResolutionsOnRebinding(ResolvedTenant::class);
+
         $this->app->scoped(ResolvedTenant::class, static function (Application $app): ResolvedTenant {
             /** @var \SineMacula\Laravel\Authorization\Contracts\SubjectResolver $resolver */
             $resolver = $app->make(SubjectResolver::class);
@@ -235,7 +233,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
             /** @var string|null $storeName */
             $storeName = $app['config']->get('authorization.cache.store');
             /** @var int $ttl */
-            $ttl = (int) $app['config']->get('authorization.cache.ttl', 0);
+            $ttl = (int) $app['config']->get('authorization.cache.ttl', 300);
             /** @var string $prefix */
             $prefix = (string) $app['config']->get('authorization.cache.prefix', 'authorization');
 
@@ -254,25 +252,17 @@ final class AuthorizationServiceProvider extends ServiceProvider
     /**
      * Bind the policy resolver — the internal policy-gathering seam the manager
      * consults on every evaluation. The default implementation unions an
-     * optional `PolicyStore` with the principal's own attached policies; the
-     * caching decorator wraps it so the `ResolutionCache` memoises the result.
-     * Bound as the default, scoped to the request or job with the cache it
-     * holds.
+     * optional `PolicyStore`, asked on every check, with the principal's own
+     * attached policies, which the identity reads through the resolution cache.
+     * Bound as the default, scoped to the request or job.
      *
      * @return void
      */
     protected function registerPolicyResolver(): void
     {
-        $this->bindScopedDefault(PolicyResolver::class, static function (Application $app): PolicyResolver {
-            $default = new DefaultPolicyResolver(
-                store: $app->bound(PolicyStore::class) ? $app->make(PolicyStore::class) : null,
-            );
-
-            return new CachingPolicyResolver(
-                inner: $default,
-                cache: $app->make(ResolutionCache::class),
-            );
-        });
+        $this->bindScopedDefault(PolicyResolver::class, static fn (Application $app): PolicyResolver => new DefaultPolicyResolver(
+            store: $app->bound(PolicyStore::class) ? $app->make(PolicyStore::class) : null,
+        ));
     }
 
     /**
@@ -411,6 +401,30 @@ final class AuthorizationServiceProvider extends ServiceProvider
         foreach ([RoleService::class, PermissionService::class, PolicyService::class, GrantService::class] as $service) {
             $this->app->singleton($service);
         }
+    }
+
+    /**
+     * Empty the resolution cache's memo whenever the abstract is rebound, as
+     * replacing the subject resolver or the held tenant changes the tenant the
+     * memo's entries were resolved under.
+     *
+     * Registered once, before the abstract is first bound: `rebinding()`
+     * resolves an abstract that is already bound, and nothing may be resolved
+     * while the provider registers.
+     *
+     * @param  string  $abstract
+     * @return void
+     */
+    private function forgetResolutionsOnRebinding(string $abstract): void
+    {
+        if ($this->app->bound($abstract)) {
+            return;
+        }
+
+        // @phpstan-ignore staticMethod.dynamicCall
+        $this->app->rebinding($abstract, static function (): void {
+            ResolutionCache::instance()?->tenantChanged();
+        });
     }
 
     /**

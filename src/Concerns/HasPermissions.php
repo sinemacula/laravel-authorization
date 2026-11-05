@@ -5,11 +5,12 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Concerns;
 
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
+use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
-use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
+use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePermissionPivot;
-use SineMacula\Laravel\Authorization\Support\RoleGraph;
+use SineMacula\Laravel\Authorization\Resolvers\GrantResolver;
 
 /**
  * Direct permission trait for authorizable models.
@@ -169,47 +170,25 @@ trait HasPermissions // @phpstan-ignore trait.unused
     }
 
     /**
-     * Return the union of direct and role-inherited permission names.
+     * Return the union of direct and role-inherited permission names, with the
+     * permissions of each role's ancestors when the hierarchy is enabled.
      *
-     * The persistent-tier TTL is bounded by the nearest upcoming `expires_at`
-     * across both the identity's direct permission pivot and its role pivot, so
-     * temporal grants on either side invalidate the entry at the moment they
-     * lapse. The role IDs are tagged into the entry so a
-     * `RolePermissionGranted` / `RolePermissionRevoked` event flushes every
-     * principal carrying the mutated role on tag-capable stores. Once the
-     * in-memory entry has lapsed both relations are reloaded, so a reused
-     * instance does not rebuild the entry from the grants it loaded before.
+     * The names are read through the resolution cache: memoised for the request
+     * or job, and kept in the persistent store when one is configured, for no
+     * longer than the nearest grant expiry or the configured maximum. A grant,
+     * revocation or change to a held role, its ancestors or a held permission
+     * takes effect on the next check. A miss takes five queries however many
+     * roles the identity holds and however deep they sit.
      *
      * @return array<int, string>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
      */
     public function getPermissions(): array
     {
-        $cache = ResolutionCache::instance();
+        $resolve = fn (ResolutionPins $pins): Resolution => GrantResolver::permissions($this->permissions(), $this->roles(), $pins);
 
-        if ($cache instanceof ResolutionCache) {
-            if ($cache->lapsed('permissions', $this)) {
-                $this->unsetRelation('permissions');
-                $this->unsetRelation('roles');
-            }
-
-            /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission> $direct */
-            $direct = $this->authorizationLoadedGrants('permissions');
-
-            /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
-            $roles   = $this->authorizationLoadedGrants('roles');
-            $roleIds = self::authorizationCollectModelIds($roles);
-
-            $nearest = self::authorizationNearestPivotExpirySeconds($direct);
-            $nearest = self::authorizationMinNullable($nearest, self::authorizationNearestPivotExpirySeconds($roles));
-
-            return $cache->rememberPermissions(
-                $this,
-                fn (): array => $this->computePermissions(),
-                new ResolutionCacheContext(maxTtl: $nearest, roleIds: $roleIds),
-            );
-        }
-
-        return $this->computePermissions();
+        return ResolutionCache::instance()?->rememberPermissions($this, $resolve) ?? $resolve(new ResolutionPins)->value;
     }
 
     // ------------------------------------------------------------------
@@ -257,26 +236,5 @@ trait HasPermissions // @phpstan-ignore trait.unused
     public function getPermissionNames(): array
     {
         return $this->getPermissions();
-    }
-
-    /**
-     * Compute the deduplicated permission-name list from the direct-grant
-     * relation and every role-inherited permission.
-     *
-     * The roles' permissions, and their ancestors', are read together in a
-     * fixed number of queries however many roles the identity holds.
-     *
-     * @return array<int, string>
-     */
-    private function computePermissions(): array
-    {
-        /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission> $direct */
-        $direct = $this->authorizationLoadedGrants('permissions');
-        $names  = $direct->map(static fn (Permission $p): string => $p->name)->all();
-
-        /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
-        $roles = $this->authorizationLoadedGrants('roles');
-
-        return \array_values(\array_unique([...$names, ...RoleGraph::permissionNamesHeldBy($roles->values()->all())]));
     }
 }
