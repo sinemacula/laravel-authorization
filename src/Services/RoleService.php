@@ -14,10 +14,12 @@ use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionGranted as RolePermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked as RolePermissionRevoked;
+use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
+use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -127,6 +129,23 @@ final class RoleService
     public function delete(Role|string $role, Model|Reference|null $actor = null): void
     {
         RecordWriter::delete($actor, static fn (): Role => self::resolve($role));
+    }
+
+    /**
+     * Find the role the name answers under the guard (the package default when
+     * none is given), in the order `GuardScopedLookup` ranks the rows: the
+     * current tenant's before the platform's, then a guard-specific row before
+     * a guard-agnostic one, then the lowest primary key.
+     *
+     * @param  string  $name
+     * @param  string|null  $guard
+     * @return \SineMacula\Laravel\Authorization\Models\Role
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
+     */
+    public function find(string $name, ?string $guard = null): Role
+    {
+        return self::lookup($name, $guard);
     }
 
     /**
@@ -383,6 +402,27 @@ final class RoleService
     }
 
     /**
+     * Find the role the name answers under the guard, through the class
+     * `authorization.models.role` configures.
+     *
+     * @param  string  $name
+     * @param  string|null  $guard
+     * @return \SineMacula\Laravel\Authorization\Models\Role
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
+     */
+    private static function lookup(string $name, ?string $guard = null): Role
+    {
+        $model = GuardScopedLookup::findForGuard(self::roleClass(), $name, $guard);
+
+        if (!$model instanceof Role) {
+            throw new UnknownRoleException($name);
+        }
+
+        return $model;
+    }
+
+    /**
      * Resolve a role: a name through the configured role class, under the given
      * guard or the package default; a model once it is known to be saved, so a
      * change never creates a role and an unsaved parent never clears one.
@@ -396,7 +436,7 @@ final class RoleService
      */
     private static function resolve(Role|string $role, ?string $guard = null): Role
     {
-        return $role instanceof Role ? RecordWriter::existing('role', $role) : self::roleClass()::resolveByName($role, $guard);
+        return $role instanceof Role ? RecordWriter::existing('role', $role) : self::lookup($role, $guard);
     }
 
     /**

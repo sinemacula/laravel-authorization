@@ -6,7 +6,6 @@ namespace SineMacula\Laravel\Authorization\Models;
 
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Attributes\ScopedBy;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -15,11 +14,9 @@ use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Concerns\ValidatesAuthorizationName;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPermissionProtectedException;
-use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
 use SineMacula\Laravel\Authorization\Observers\PermissionObserver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
-use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 
 /**
  * Eloquent model for permission rows.
@@ -102,8 +99,8 @@ class Permission extends Model
         return AuthorizationConnection::resolve(parent::getConnectionName());
     }
 
-    // ------------------------------------------------------------------
-    // Tenant ownership
+    // ------------------------------------------------------------------ Tenant
+    // ownership
     // ------------------------------------------------------------------
 
     /**
@@ -118,67 +115,8 @@ class Permission extends Model
         return $this->morphTo('tenant');
     }
 
-    /**
-     * Determine whether this permission is global (not owned by any tenant).
-     *
-     * @return bool
-     */
-    public function isGlobal(): bool
-    {
-        return $this->tenant_type === null;
-    }
-
-    /**
-     * Determine whether this permission is owned by a tenant.
-     *
-     * @return bool
-     */
-    public function isTenantOwned(): bool
-    {
-        return $this->tenant_type !== null;
-    }
-
-    /**
-     * Scope the query to rows owned by the given tenant.
-     *
-     * Delegates morph-pair extraction to `TenantScope::extractTenantPair()` so
-     * the global scope and this local scope share a single owner for the
-     * acceptance rules — refuses any tenant that is neither a Model nor an
-     * `AuthorizableTenant` implementer with a typed exception.
-     *
-     * @param  \Illuminate\Database\Eloquent\Builder<static>  $query
-     * @param  object  $tenant
-     * @return \Illuminate\Database\Eloquent\Builder<static>
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
-     */
-    public function scopeForTenant(Builder $query, object $tenant): Builder
-    {
-        [$morphType, $morphId] = TenantScope::extractTenantPair($tenant);
-
-        return $query->where($this->getTable() . '.tenant_type', $morphType)
-            ->where($this->getTable() . '.tenant_id', $morphId);
-    }
-
-    /**
-     * Scope the query to global rows only (tenant columns are null).
-     *
-     * @param  \Illuminate\Database\Eloquent\Builder<static>  $query
-     * @return \Illuminate\Database\Eloquent\Builder<static>
-     */
-    public function scopeGlobalOnly(Builder $query): Builder
-    {
-        // `whereNull` is declared as `@method static` on the Eloquent Builder
-        // docblock; PHPStan flags the dynamic instance call as
-        // `staticMethod.dynamicCall` even though runtime dispatch is genuinely
-        // dynamic. The same pattern is used in `GuardScopedLookup` — a
-        // docblock-soup artefact, not an unsafe call.
-        // @phpstan-ignore staticMethod.dynamicCall
-        return $query->whereNull($this->getTable() . '.tenant_type');
-    }
-
-    // ------------------------------------------------------------------
-    // Role relation
+    // ------------------------------------------------------------------ Role
+    // relation
     // ------------------------------------------------------------------
 
     /**
@@ -214,38 +152,6 @@ class Permission extends Model
             foreignPivotKey: 'permission_id',
             relatedPivotKey: 'role_id',
         )->using(RolePermission::class);
-    }
-
-    /**
-     * Resolve a permission by name under the supplied guard, in the order
-     * `GuardScopedLookup` ranks the rows that answer it: the current tenant's
-     * row before the platform's, then a guard-specific row before a
-     * guard-agnostic one, then the lowest primary key.
-     *
-     * Delegates to `GuardScopedLookup`, the precedence query `GrantTarget` also
-     * resolves a granted permission's name through, so the matching rules have
-     * one owner. `PermissionService` resolves a permission named by a string
-     * here, through the class `authorization.models.permission` configures, and
-     * late static binding gives a swapped model its own rows.
-     *
-     * @param  string  $name
-     * @param  string|null  $guard
-     * @return self
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
-     */
-    public static function resolveByName(string $name, ?string $guard = null): self
-    {
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
-        $class = config('authorization.models.permission', static::class);
-
-        $model = GuardScopedLookup::findForGuard($class, $name, $guard);
-
-        if (!$model instanceof self) {
-            throw new UnknownPermissionException($name);
-        }
-
-        return $model;
     }
 
     /**

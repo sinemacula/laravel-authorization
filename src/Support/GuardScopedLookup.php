@@ -11,12 +11,12 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 /**
  * Shared owner- and guard-precedence query builder.
  *
- * Both `Role::resolveByName()` and `Permission::resolveByName()` need an
- * identical query that finds a row by name under a guard. A name is unique
- * within its owner and guard, not globally, so up to four rows can answer: the
- * current tenant's and the platform's, each for the guard or guard-agnostic.
- * This helper owns the single copy of the precedence between them so the two
- * models delegate here instead of carrying duplicated private methods.
+ * `RoleService::find()`, `PermissionService::find()` and the grant service's
+ * name lookups need an identical query that finds a row by name under a guard.
+ * A name is unique within its owner and guard, not globally, so up to four rows
+ * can answer: the current tenant's and the platform's, each for the guard or
+ * guard-agnostic. This helper owns the single copy of the precedence between
+ * them.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPolicyProtectedException;
 use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
+use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 
 /**
  * Eloquent model for policy rows.
@@ -47,9 +48,6 @@ use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
 class Policy extends Model
 {
     use HasSystemProtection, HasUuids;
-
-    /** @var string Placeholder used when exception context lacks a policy name. */
-    private const string UNNAMED_PLACEHOLDER = '[unnamed]';
 
     /** @var list<string> Attributes that are mass assignable. */
     protected $fillable = [
@@ -112,25 +110,6 @@ class Policy extends Model
     }
 
     /**
-     * Hydrate the policy into an evaluation-ready value object.
-     *
-     * @return \SineMacula\Laravel\Authorization\Evaluation\Policy
-     *
-     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
-     */
-    public function toEvaluationPolicy(): EvaluationPolicy
-    {
-        $document = $this->normaliseDocument($this->document);
-        $document = $this->withName($document, true);
-
-        try {
-            return EvaluationPolicy::fromArray($document);
-        } catch (\Throwable $exception) {
-            throw new InvalidPolicyDocumentException(policyName: $this->resolveName(), reason: $exception->getMessage(), previous: $exception);
-        }
-    }
-
-    /**
      * The attribute cast map.
      *
      * @return array<string, string>
@@ -161,13 +140,13 @@ class Policy extends Model
         return Attribute::make(
             set: function (mixed $value): string {
 
-                $document = $this->normaliseDocument($value);
-                $document = $this->withName($document);
+                $name     = PolicyDocument::nameOf($this->getAttribute('name'));
+                $document = PolicyDocument::named(PolicyDocument::decode($value, $name), $this->getAttribute('name'));
 
                 try {
                     EvaluationPolicy::fromArray($document);
                 } catch (\InvalidArgumentException $exception) {
-                    throw new InvalidPolicyDocumentException(policyName: $this->resolveName(), reason: $exception->getMessage(), previous: $exception);
+                    throw new InvalidPolicyDocumentException(policyName: $name, reason: $exception->getMessage(), previous: $exception);
                 }
 
                 $encoded = \json_encode($document);
@@ -179,7 +158,7 @@ class Policy extends Model
                 // so reaching this branch requires a resource type or a
                 // circular reference smuggled past the factory validator.
                 if ($encoded === false) {
-                    throw new InvalidPolicyDocumentException(policyName: $this->resolveName(), reason: 'policy document is not JSON-encodable.');
+                    throw new InvalidPolicyDocumentException(policyName: $name, reason: 'policy document is not JSON-encodable.');
                 }
                 // @codeCoverageIgnoreEnd
                 return $encoded;
@@ -198,68 +177,5 @@ class Policy extends Model
     protected function systemProtectionException(string $operation): \Throwable
     {
         return new SystemPolicyProtectedException(policyName: $this->systemProtectedName(), operation: $operation);
-    }
-
-    /**
-     * Coerce a raw document value into an associative array.
-     *
-     * @param  mixed  $value
-     * @return array<string, mixed>
-     *
-     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
-     */
-    private function normaliseDocument(mixed $value): array
-    {
-        if (\is_array($value)) {
-            /** @var array<string, mixed> $value */
-            return $value;
-        }
-
-        if (\is_string($value) && $value !== '') {
-            $decoded = \json_decode($value, true);
-
-            if (\is_array($decoded)) {
-                /** @var array<string, mixed> $decoded */
-                return $decoded;
-            }
-        }
-
-        throw new InvalidPolicyDocumentException(policyName: $this->resolveName(), reason: 'policy document must be a JSON object or array.');
-    }
-
-    /**
-     * Resolve the policy name used in exception context.
-     *
-     * @return string
-     */
-    private function resolveName(): string
-    {
-        $name = $this->name ?? ($this->attributes['name'] ?? null);
-
-        return \is_string($name) && $name !== '' ? $name : self::UNNAMED_PLACEHOLDER;
-    }
-
-    /**
-     * Ensure the document body carries the model's name.
-     *
-     * On hydration the model's name always wins over the document's own, so
-     * traces and decisions name the stored policy and a document cannot claim
-     * another policy's name.
-     *
-     * @param  array<string, mixed>  $document
-     * @param  bool  $override
-     * @return array<string, mixed>
-     */
-    private function withName(array $document, bool $override = false): array
-    {
-        if ($override || !isset($document['name']) || !\is_string($document['name']) || $document['name'] === '') {
-            $name = $this->name ?? ($this->attributes['name'] ?? null);
-
-            if (\is_string($name) && $name !== '') {
-                $document['name'] = $name;
-            }
-        }
-
-        return $document;
     }
 }

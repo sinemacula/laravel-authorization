@@ -15,15 +15,16 @@ use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use Tests\TestCase;
 
 /**
- * Feature coverage for `Role::resolveByName()`.
+ * Feature coverage for `RoleService::find()`.
  *
- * Mirrors the guard-precedence query centralised in
- * `Permission::resolveByName()` — guard-specific rows outrank guard-agnostic
- * rows, and an unknown name raises `UnknownRoleException`.
+ * Mirrors the guard-precedence query centralised in `PermissionService::find()`
+ * — guard-specific rows outrank guard-agnostic rows, and an unknown name raises
+ * `UnknownRoleException`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -44,8 +45,8 @@ use Tests\TestCase;
 final class RoleResolveByNameTest extends TestCase
 {
     /**
-     * `resolveByName` returns the guard-specific row when both guard-specific
-     * and guard-agnostic rows exist.
+     * `RoleService::find()` returns the guard-specific row when both
+     * guard-specific and guard-agnostic rows exist.
      *
      * @return void
      */
@@ -63,13 +64,13 @@ final class RoleResolveByNameTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $resolved = Role::resolveByName('admin', 'web');
+        $resolved = app(RoleService::class)->find('admin', 'web');
 
         self::assertSame($specific->getKey(), $resolved->getKey());
     }
 
     /**
-     * `resolveByName` falls back to the guard-agnostic row when no
+     * `RoleService::find()` falls back to the guard-agnostic row when no
      * guard-specific match exists.
      *
      * @return void
@@ -82,13 +83,14 @@ final class RoleResolveByNameTest extends TestCase
             'guard' => null,
         ]);
 
-        $resolved = Role::resolveByName('viewer', 'web');
+        $resolved = app(RoleService::class)->find('viewer', 'web');
 
         self::assertSame($agnostic->getKey(), $resolved->getKey());
     }
 
     /**
-     * `resolveByName` with a null guard uses the configured default guard.
+     * `RoleService::find()` with a null guard uses the configured default
+     * guard.
      *
      * @return void
      */
@@ -100,13 +102,13 @@ final class RoleResolveByNameTest extends TestCase
             'guard' => 'web',
         ]);
 
-        $resolved = Role::resolveByName('editor');
+        $resolved = app(RoleService::class)->find('editor');
 
         self::assertSame($role->getKey(), $resolved->getKey());
     }
 
     /**
-     * `resolveByName` throws `UnknownRoleException` when no matching row
+     * `RoleService::find()` throws `UnknownRoleException` when no matching row
      * exists.
      *
      * @return void
@@ -115,6 +117,6 @@ final class RoleResolveByNameTest extends TestCase
     {
         $this->expectException(UnknownRoleException::class);
 
-        Role::resolveByName('non-existent-role', 'web');
+        app(RoleService::class)->find('non-existent-role', 'web');
     }
 }

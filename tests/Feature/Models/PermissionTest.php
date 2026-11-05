@@ -11,6 +11,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
+use SineMacula\Laravel\Authorization\Services\PermissionService;
 use Tests\Feature\Stubs\CustomRole;
 
 /**
@@ -104,7 +105,7 @@ final class PermissionTest extends StringCastsTestCase
         Permission::query()->create(['name' => 'posts:edit', 'guard' => 'web']);
         $api = Permission::query()->create(['name' => 'posts:edit', 'guard' => 'api']);
 
-        self::assertSame($api->id, Permission::resolveByName('posts:edit')->id);
+        self::assertSame($api->id, app(PermissionService::class)->find('posts:edit')->id);
     }
 
     /**

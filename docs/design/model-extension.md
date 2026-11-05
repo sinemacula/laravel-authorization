@@ -85,7 +85,7 @@ return new class extends Migration {
 ],
 ```
 
-Once registered, every package-internal query (`resolveByName`, `HasRoles` trait methods, cache invalidation listeners)
+Once registered, every package-internal query (`RoleService::find()`, the `HasRoles` trait methods, the resolution cache)
 instantiates the consumer's `App\Models\Role` and benefits from the `SoftDeletes` trait automatically.
 
 ## Applying the Same Pattern to Permission and Policy
