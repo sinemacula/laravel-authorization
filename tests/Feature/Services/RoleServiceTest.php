@@ -56,6 +56,25 @@ final class RoleServiceTest extends TestCase
     use ActsAsTenant, AssertsTransactions, ComparesReferences, ReadsDispatchedEvents, RecordsRowLocks, UsesAnAuthorizationConnection;
 
     /**
+     * A name finds the role the lookup ranks first under the guard, and an
+     * unknown name is refused.
+     *
+     * @return void
+     */
+    public function testFindsARoleByName(): void
+    {
+        $agnostic = Role::query()->create(['name' => 'editor']);
+        $web      = Role::query()->create(['name' => 'editor', 'guard' => 'web']);
+
+        self::assertSame($web->id, self::service()->find('editor', 'web')->id);
+        self::assertSame($agnostic->id, self::service()->find('editor', 'api')->id);
+
+        $this->expectException(UnknownRoleException::class);
+
+        self::service()->find('ghost');
+    }
+
+    /**
      * The service is bound once in the container.
      *
      * @return void

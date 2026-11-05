@@ -36,3 +36,13 @@ parameters:
             paths:
                 - '*/src/Models/*'
                 - '*/tests/*'
+
+        # The documented, Spatie-style API the models take from the package's
+        # traits (`givePermission()`, `ancestors()`, `outranks()`, `forceSystem()`
+        # and the rest) stays on the models: each delegates to a service or to
+        # `RoleGraph`. The models' own behaviour lives in services (D17).
+        -
+            identifier: sineMaculaLaravel.modelBehaviour
+            message: '#imported from a trait#'
+            paths:
+                - '*/src/Models/*'

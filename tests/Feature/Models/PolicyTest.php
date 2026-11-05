@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use Tests\Feature\Stubs\StubTenant;
 
 /**
@@ -61,7 +62,7 @@ final class PolicyTest extends StringCastsTestCase
 
         self::assertNotNull($fresh);
         self::assertSame('document-name', $fresh->document['name'] ?? null);
-        self::assertSame('stored-name', $fresh->toEvaluationPolicy()->name);
+        self::assertSame('stored-name', PolicyDocument::hydrate($fresh)->name);
     }
 
     /**
@@ -82,7 +83,7 @@ final class PolicyTest extends StringCastsTestCase
 
             $policy->setRawAttributes($attributes + ['document' => $document]);
 
-            self::assertSame('document-name', $policy->toEvaluationPolicy()->name, $label);
+            self::assertSame('document-name', PolicyDocument::hydrate($policy)->name, $label);
         }
     }
 
@@ -100,7 +101,7 @@ final class PolicyTest extends StringCastsTestCase
         $policy->setRawAttributes(['document' => \json_encode(['statements' => 'not-a-list'])]);
 
         try {
-            $policy->toEvaluationPolicy();
+            PolicyDocument::hydrate($policy);
 
             self::fail('A malformed document must raise an invalid policy document exception.');
         } catch (InvalidPolicyDocumentException $exception) {

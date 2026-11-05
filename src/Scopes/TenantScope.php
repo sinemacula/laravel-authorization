@@ -112,8 +112,8 @@ final class TenantScope implements Scope
      * returning an empty string) is refused as well: its pair would be
      * `tenant_id = ''`, which matches no row it owns.
      *
-     * Shared by the global scope and the `scopeForTenant` local scope on `Role`
-     * / `Permission` so the acceptance rules have a single owner.
+     * Shared by the global scope, the grant service and the current tenant's
+     * lookup so the acceptance rules have a single owner.
      *
      * @param  object  $tenant
      * @return array{0: string, 1: string}

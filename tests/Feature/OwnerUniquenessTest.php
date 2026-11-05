@@ -12,6 +12,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\RoleService;
 use Tests\Concerns\ActsAsTenant;
 use Tests\TestCase;
 
@@ -153,10 +154,10 @@ final class OwnerUniquenessTest extends TestCase
         $roleB = Role::query()->create(['name' => 'manager', 'guard' => 'web'] + self::ownedBy($tenantB));
 
         $this->actAsTenant($tenantA);
-        self::assertSame($roleA->id, Role::resolveByName('manager', 'web')->id);
+        self::assertSame($roleA->id, app(RoleService::class)->find('manager', 'web')->id);
 
         $this->actAsTenant($tenantB);
-        self::assertSame($roleB->id, Role::resolveByName('manager', 'web')->id);
+        self::assertSame($roleB->id, app(RoleService::class)->find('manager', 'web')->id);
     }
 
     /**

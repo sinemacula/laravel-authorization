@@ -9,6 +9,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
+use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use Tests\TestCase;
 
 /**
@@ -49,7 +50,7 @@ final class PolicyModelTest extends TestCase
         $fresh = $policy->fresh();
         self::assertNotNull($fresh);
 
-        $evaluation = $fresh->toEvaluationPolicy();
+        $evaluation = PolicyDocument::hydrate($fresh);
         self::assertSame('full-round-trip', $evaluation->name);
         self::assertCount(1, $evaluation->statements);
         self::assertSame(PolicyEffect::ALLOW, $evaluation->statements[0]->effect);
@@ -89,6 +90,6 @@ final class PolicyModelTest extends TestCase
             'document' => $json,
         ]);
 
-        self::assertCount(1, $policy->toEvaluationPolicy()->statements);
+        self::assertCount(1, PolicyDocument::hydrate($policy)->statements);
     }
 }

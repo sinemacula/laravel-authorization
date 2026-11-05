@@ -18,6 +18,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Support\DocumentDigest;
+use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\UsesAnAuthorizationConnection;
@@ -69,7 +70,7 @@ final class PolicyServiceTest extends TestCase
 
         self::assertInstanceOf(CustomPolicy::class, $policy);
         self::assertSame(['readers', 'Reads posts'], [$policy->fresh()?->name, $policy->fresh()?->description]);
-        self::assertSame(['posts:read'], $policy->toEvaluationPolicy()->statements[0]->actions);
+        self::assertSame(['posts:read'], PolicyDocument::hydrate($policy)->statements[0]->actions);
         Event::assertDispatched(PolicyCreated::class);
     }
 
@@ -118,10 +119,10 @@ final class PolicyServiceTest extends TestCase
         self::service()->describe($policy, 'Edits posts');
         self::service()->rewrite($policy, ['statements' => [['effect' => 'allow', 'actions' => ['posts:edit'], 'resources' => ['*']]]]);
 
-        $fresh = $policy->fresh();
+        $fresh = Policy::query()->whereKey($policy->id)->firstOrFail();
 
-        self::assertSame(['editors', 'Edits posts'], [$fresh?->name, $fresh?->description]);
-        self::assertSame(['posts:edit'], $fresh?->toEvaluationPolicy()->statements[0]->actions);
+        self::assertSame(['editors', 'Edits posts'], [$fresh->name, $fresh->description]);
+        self::assertSame(['posts:edit'], PolicyDocument::hydrate($fresh)->statements[0]->actions);
     }
 
     /**

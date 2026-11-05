@@ -12,9 +12,8 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
  * or tenant-owned (both columns non-null). A half-set pair belongs to neither
  * the platform nor a tenant, for a role, a permission or a policy alike; for
  * roles and permissions it would also be invisible to the `TenantScope::apply`
- * global filter and to the `scopeForTenant` / `scopeGlobalOnly` local scopes,
- * orphaned data from the caller's point of view. The model `saving` hook raises
- * this exception before the row reaches the database.
+ * global filter, orphaned data from the caller's point of view. The model
+ * `saving` hook raises this exception before the row reaches the database.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

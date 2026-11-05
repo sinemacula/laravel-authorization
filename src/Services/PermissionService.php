@@ -7,8 +7,10 @@ namespace SineMacula\Laravel\Authorization\Services;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
+use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
@@ -113,6 +115,23 @@ final class PermissionService
     }
 
     /**
+     * Find the permission the name answers under the guard (the package default
+     * when none is given), in the order `GuardScopedLookup` ranks the rows: the
+     * current tenant's before the platform's, then a guard-specific row before
+     * a guard-agnostic one, then the lowest primary key.
+     *
+     * @param  string  $name
+     * @param  string|null  $guard
+     * @return \SineMacula\Laravel\Authorization\Models\Permission
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
+     */
+    public function find(string $name, ?string $guard = null): Permission
+    {
+        return self::lookup($name, $guard);
+    }
+
+    /**
      * List the permissions the tenant scope shows, by name; with a guard, only
      * those of that guard or guard-agnostic.
      *
@@ -130,6 +149,27 @@ final class PermissionService
     }
 
     /**
+     * Find the permission the name answers under the guard, through the class
+     * `authorization.models.permission` configures.
+     *
+     * @param  string  $name
+     * @param  string|null  $guard
+     * @return \SineMacula\Laravel\Authorization\Models\Permission
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
+     */
+    private static function lookup(string $name, ?string $guard = null): Permission
+    {
+        $model = GuardScopedLookup::findForGuard(self::permissionClass(), $name, $guard);
+
+        if (!$model instanceof Permission) {
+            throw new UnknownPermissionException($name);
+        }
+
+        return $model;
+    }
+
+    /**
      * Resolve a permission: a name through the configured permission class,
      * under the package's default guard; a model once it is known to be saved.
      *
@@ -141,7 +181,7 @@ final class PermissionService
      */
     private static function resolve(Permission|string $permission): Permission
     {
-        return $permission instanceof Permission ? RecordWriter::existing('permission', $permission) : self::permissionClass()::resolveByName($permission);
+        return $permission instanceof Permission ? RecordWriter::existing('permission', $permission) : self::lookup($permission);
     }
 
     /**

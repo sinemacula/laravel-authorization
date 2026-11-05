@@ -6,7 +6,6 @@ namespace SineMacula\Laravel\Authorization\Models;
 
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Attributes\ScopedBy;
-use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
@@ -16,10 +15,8 @@ use SineMacula\Laravel\Authorization\Concerns\ManagesPermissions;
 use SineMacula\Laravel\Authorization\Concerns\ValidatesAuthorizationName;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException;
-use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
-use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 
 /**
  * Eloquent model for role rows — named buckets of permissions shared across
@@ -99,38 +96,6 @@ class Role extends Model
     }
 
     /**
-     * Resolve a role by name under the supplied guard, in the order
-     * `GuardScopedLookup` ranks the rows that answer it: the current tenant's
-     * row before the platform's, then a guard-specific row before a
-     * guard-agnostic one, then the lowest primary key.
-     *
-     * Delegates to `GuardScopedLookup`, the precedence query `GrantTarget` also
-     * resolves a granted role's name through, so the matching rules have one
-     * owner. `RoleService` resolves a role named by a string here, through the
-     * class `authorization.models.role` configures, and late static binding
-     * gives a swapped model its own rows.
-     *
-     * @param  string  $name
-     * @param  string|null  $guard
-     * @return self
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
-     */
-    public static function resolveByName(string $name, ?string $guard = null): self
-    {
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
-        $class = config('authorization.models.role', static::class);
-
-        $model = GuardScopedLookup::findForGuard($class, $name, $guard);
-
-        if (!$model instanceof self) {
-            throw new UnknownRoleException($name);
-        }
-
-        return $model;
-    }
-
-    /**
      * The tenant that owns this role.
      *
      * A null morph pair marks the role as global (platform-level).
@@ -140,65 +105,6 @@ class Role extends Model
     public function tenant(): MorphTo
     {
         return $this->morphTo('tenant');
-    }
-
-    /**
-     * Determine whether this role is global (not owned by any tenant).
-     *
-     * @return bool
-     */
-    public function isGlobal(): bool
-    {
-        return $this->tenant_type === null;
-    }
-
-    /**
-     * Determine whether this role is owned by a tenant.
-     *
-     * @return bool
-     */
-    public function isTenantOwned(): bool
-    {
-        return $this->tenant_type !== null;
-    }
-
-    /**
-     * Scope the query to rows owned by the given tenant.
-     *
-     * Delegates morph-pair extraction to `TenantScope::extractTenantPair()` so
-     * the global scope and this local scope share a single owner for the
-     * acceptance rules — refuses any tenant that is neither a Model nor an
-     * `AuthorizableTenant` implementer with a typed exception.
-     *
-     * @param  \Illuminate\Database\Eloquent\Builder<static>  $query
-     * @param  object  $tenant
-     * @return \Illuminate\Database\Eloquent\Builder<static>
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
-     */
-    public function scopeForTenant(Builder $query, object $tenant): Builder
-    {
-        [$morphType, $morphId] = TenantScope::extractTenantPair($tenant);
-
-        return $query->where($this->getTable() . '.tenant_type', $morphType)
-            ->where($this->getTable() . '.tenant_id', $morphId);
-    }
-
-    /**
-     * Scope the query to global rows only (tenant columns are null).
-     *
-     * @param  \Illuminate\Database\Eloquent\Builder<static>  $query
-     * @return \Illuminate\Database\Eloquent\Builder<static>
-     */
-    public function scopeGlobalOnly(Builder $query): Builder
-    {
-        // `whereNull` is declared as `@method static` on the Eloquent Builder
-        // docblock; PHPStan flags the dynamic instance call as
-        // `staticMethod.dynamicCall` even though runtime dispatch is genuinely
-        // dynamic. The same pattern is used in `GuardScopedLookup` — a
-        // docblock-soup artefact, not an unsafe call.
-        // @phpstan-ignore staticMethod.dynamicCall
-        return $query->whereNull($this->getTable() . '.tenant_type');
     }
 
     /**

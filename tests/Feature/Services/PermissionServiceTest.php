@@ -43,6 +43,25 @@ final class PermissionServiceTest extends TestCase
     use ComparesReferences, UsesAnAuthorizationConnection;
 
     /**
+     * A name finds the permission the lookup ranks first under the guard, and
+     * an unknown name is refused.
+     *
+     * @return void
+     */
+    public function testFindsAPermissionByName(): void
+    {
+        $agnostic = Permission::query()->create(['name' => 'posts:edit']);
+        $web      = Permission::query()->create(['name' => 'posts:edit', 'guard' => 'web']);
+
+        self::assertSame($web->id, self::service()->find('posts:edit', 'web')->id);
+        self::assertSame($agnostic->id, self::service()->find('posts:edit', 'api')->id);
+
+        $this->expectException(UnknownPermissionException::class);
+
+        self::service()->find('ghost');
+    }
+
+    /**
      * The service is bound once in the container.
      *
      * @return void

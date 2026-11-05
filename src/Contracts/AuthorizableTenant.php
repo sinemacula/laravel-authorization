@@ -13,12 +13,12 @@ namespace SineMacula\Laravel\Authorization\Contracts;
  * Eloquent Model satisfies the contract's shape by construction; non-Model
  * tenants implement the same pair explicitly.
  *
- * The `TenantScope` global scope and the `scopeForTenant` local scope on `Role`
- * / `Permission` need two stable values to build a morph-pair predicate: a
- * persistent identifier and a type string. Non-Model tenants without this
- * contract are refused at the scope boundary via `InvalidTenantException` —
- * there is no `spl_object_hash` fallback, which would produce request-scoped
- * hashes that do not match previously-persisted rows.
+ * The `TenantScope` global scope and the grant service need two stable values
+ * to build a morph-pair predicate: a persistent identifier and a type string.
+ * Non-Model tenants without this contract are refused at the scope boundary via
+ * `InvalidTenantException` — there is no `spl_object_hash` fallback, which
+ * would produce request-scoped hashes that do not match previously-persisted
+ * rows.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

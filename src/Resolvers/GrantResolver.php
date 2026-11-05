@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
+use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
 
 /**
@@ -191,7 +192,7 @@ final class GrantResolver
     private static function hydrate(Policy $policy): \SineMacula\Laravel\Authorization\Evaluation\Policy
     {
         try {
-            return $policy->toEvaluationPolicy();
+            return PolicyDocument::hydrate($policy);
         } catch (InvalidPolicyDocumentException $exception) {
             AuthorizationLog::warning(
                 "Authorization: malformed policy '{$policy->id}' denies every check for its holder: " . $exception->getMessage(),

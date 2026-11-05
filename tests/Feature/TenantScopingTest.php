@@ -14,6 +14,9 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\PermissionObserver;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Services\PermissionService;
+use SineMacula\Laravel\Authorization\Services\RoleService;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
@@ -224,9 +227,9 @@ final class TenantScopingTest extends TestCase
 
         $this->bindSubjectInTenant($tenantA);
 
-        $resolved = Role::resolveByName('editor', 'web');
+        $resolved = app(RoleService::class)->find('editor', 'web');
 
-        self::assertTrue($resolved->isTenantOwned());
+        self::assertNotNull(Reference::tenantOf($resolved));
         self::assertSame((string) $tenantA->getKey(), $resolved->tenant_id); // @phpstan-ignore cast.string
     }
 
@@ -250,9 +253,9 @@ final class TenantScopingTest extends TestCase
 
         $this->bindSubjectInTenant($tenantA);
 
-        $resolved = Permission::resolveByName('posts:edit', 'web');
+        $resolved = app(PermissionService::class)->find('posts:edit', 'web');
 
-        self::assertTrue($resolved->isTenantOwned());
+        self::assertNotNull(Reference::tenantOf($resolved));
         self::assertSame((string) $tenantA->getKey(), $resolved->tenant_id); // @phpstan-ignore cast.string
     }
 
@@ -300,188 +303,6 @@ final class TenantScopingTest extends TestCase
 
         self::assertSame($tenantA->getMorphClass(), $permission->tenant_type);
         self::assertSame((string) $tenantA->getKey(), $permission->tenant_id); // @phpstan-ignore cast.string
-    }
-
-    /**
-     * `isGlobal` returns true for a role with no tenant owner.
-     *
-     * @return void
-     */
-    public function testIsGlobalReturnsTrueForGlobalRole(): void
-    {
-        $role = Role::create(['name' => 'global', 'guard' => 'web']);
-
-        self::assertTrue($role->isGlobal());
-        self::assertFalse($role->isTenantOwned());
-    }
-
-    /**
-     * `isTenantOwned` returns true for a tenant-owned role.
-     *
-     * @return void
-     */
-    public function testIsTenantOwnedReturnsTrueForTenantRole(): void
-    {
-        $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
-
-        $role = Role::create([
-            'name'        => 'editor',
-            'guard'       => 'web',
-            'tenant_type' => $tenantA->getMorphClass(),
-            'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
-        ]);
-
-        self::assertTrue($role->isTenantOwned());
-        self::assertFalse($role->isGlobal());
-    }
-
-    /**
-     * `isGlobal` returns true for a permission with no tenant owner.
-     *
-     * @return void
-     */
-    public function testIsGlobalReturnsTrueForGlobalPermission(): void
-    {
-        $permission = Permission::create(['name' => 'global-perm', 'guard' => 'web']);
-
-        self::assertTrue($permission->isGlobal());
-        self::assertFalse($permission->isTenantOwned());
-    }
-
-    /**
-     * `isTenantOwned` returns true for a tenant-owned permission.
-     *
-     * @return void
-     */
-    public function testIsTenantOwnedReturnsTrueForTenantPermission(): void
-    {
-        $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
-
-        $permission = Permission::create([
-            'name'        => 'posts:edit',
-            'guard'       => 'web',
-            'tenant_type' => $tenantA->getMorphClass(),
-            'tenant_id'   => (string) $tenantA->getKey(), // @phpstan-ignore cast.string
-        ]);
-
-        self::assertTrue($permission->isTenantOwned());
-        self::assertFalse($permission->isGlobal());
-    }
-
-    /**
-     * `forTenant` scope filters roles to the given tenant.
-     *
-     * @return void
-     */
-    public function testScopeForTenantFiltersRolesByTenant(): void
-    {
-        $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
-        $tenantB = StubTenant::create(['id' => 'tenant-b', 'name' => 'Tenant B']);
-
-        Role::create(['name' => 'global', 'guard' => 'web']);
-        Role::create([
-            'name'        => 'role-a',
-            'guard'       => 'web',
-            'tenant_type' => $tenantA->getMorphClass(),
-            // @phpstan-ignore-next-line cast.string
-            'tenant_id' => (string) $tenantA->getKey(),
-        ]);
-        Role::create([
-            'name'        => 'role-b',
-            'guard'       => 'web',
-            'tenant_type' => $tenantB->getMorphClass(),
-            // @phpstan-ignore-next-line cast.string
-            'tenant_id' => (string) $tenantB->getKey(),
-        ]);
-
-        $this->bindSubjectInTenant($tenantA);
-
-        $roles = Role::forTenant($tenantA)->get();
-
-        self::assertCount(1, $roles);
-        self::assertSame('role-a', $roles->first()->name); // @phpstan-ignore property.nonObject
-    }
-
-    /**
-     * `globalOnly` scope returns only tenant-less roles.
-     *
-     * @return void
-     */
-    public function testScopeGlobalOnlyFiltersRoles(): void
-    {
-        $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
-
-        Role::create(['name' => 'global', 'guard' => 'web']);
-        Role::create([
-            'name'        => 'role-a',
-            'guard'       => 'web',
-            'tenant_type' => $tenantA->getMorphClass(),
-            // @phpstan-ignore-next-line cast.string
-            'tenant_id' => (string) $tenantA->getKey(),
-        ]);
-
-        $roles = Role::globalOnly()->get();
-
-        self::assertCount(1, $roles);
-        self::assertSame('global', $roles->first()->name); // @phpstan-ignore property.nonObject
-    }
-
-    /**
-     * `forTenant` scope filters permissions to the given tenant.
-     *
-     * @return void
-     */
-    public function testScopeForTenantFiltersPermissionsByTenant(): void
-    {
-        $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
-        $tenantB = StubTenant::create(['id' => 'tenant-b', 'name' => 'Tenant B']);
-
-        Permission::create(['name' => 'global-perm', 'guard' => 'web']);
-        Permission::create([
-            'name'        => 'perm-a',
-            'guard'       => 'web',
-            'tenant_type' => $tenantA->getMorphClass(),
-            // @phpstan-ignore-next-line cast.string
-            'tenant_id' => (string) $tenantA->getKey(),
-        ]);
-        Permission::create([
-            'name'        => 'perm-b',
-            'guard'       => 'web',
-            'tenant_type' => $tenantB->getMorphClass(),
-            // @phpstan-ignore-next-line cast.string
-            'tenant_id' => (string) $tenantB->getKey(),
-        ]);
-
-        $this->bindSubjectInTenant($tenantA);
-
-        $perms = Permission::forTenant($tenantA)->get();
-
-        self::assertCount(1, $perms);
-        self::assertSame('perm-a', $perms->first()->name); // @phpstan-ignore property.nonObject
-    }
-
-    /**
-     * `globalOnly` scope returns only tenant-less permissions.
-     *
-     * @return void
-     */
-    public function testScopeGlobalOnlyFiltersPermissions(): void
-    {
-        $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
-
-        Permission::create(['name' => 'global-perm', 'guard' => 'web']);
-        Permission::create([
-            'name'        => 'perm-a',
-            'guard'       => 'web',
-            'tenant_type' => $tenantA->getMorphClass(),
-            // @phpstan-ignore-next-line cast.string
-            'tenant_id' => (string) $tenantA->getKey(),
-        ]);
-
-        $perms = Permission::globalOnly()->get();
-
-        self::assertCount(1, $perms);
-        self::assertSame('global-perm', $perms->first()->name); // @phpstan-ignore property.nonObject
     }
 
     /**

@@ -314,19 +314,6 @@ final class TenantScopeTest extends TestCase
     }
 
     /**
-     * A keyless tenant passed to the `forTenant` local scope is refused too.
-     *
-     * @return void
-     */
-    public function testForTenantRefusesKeylessTenant(): void
-    {
-        $this->expectException(InvalidTenantException::class);
-        $this->expectExceptionMessage('has no key');
-
-        Role::query()->withoutGlobalScope(TenantScope::class)->forTenant(new StubTenant)->get();
-    }
-
-    /**
      * An object that is neither a model nor an `AuthorizableTenant` is refused.
      *
      * @return void

@@ -13,13 +13,14 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\PermissionObserver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use Tests\TestCase;
 
 /**
- * Coverage for the `Permission` model's reverse-role relation and the
- * `resolveByName()` unknown-name branch that is not otherwise reached from the
- * role-scoped test suites.
+ * Coverage for the `Permission` model's reverse-role relation and the `find()`
+ * unknown-name branch that is not otherwise reached from the role-scoped test
+ * suites.
  *
  * The `roles()` accessor drives reverse navigation — consumers who have a
  * permission in hand and want to know which roles carry it — and its binding
@@ -71,7 +72,7 @@ final class PermissionModelRelationsTest extends TestCase
     }
 
     /**
-     * `Permission::resolveByName()` raises `UnknownPermissionException` when no
+     * `PermissionService::find()` raises `UnknownPermissionException` when no
      * row matches — the typed failure surface documented for the shared
      * resolution helper.
      *
@@ -81,6 +82,6 @@ final class PermissionModelRelationsTest extends TestCase
     {
         $this->expectException(UnknownPermissionException::class);
 
-        Permission::resolveByName('does:not-exist', 'web');
+        app(PermissionService::class)->find('does:not-exist', 'web');
     }
 }
