@@ -8,17 +8,22 @@ identity.
 
 ## Invariants
 
-1. **`for()` returns a clone, not a mutation.** The method clones the manager, pins the supplied principal on the clone,
+1. **`for()` returns a clone, not a mutation.** The method clones the manager, pins the supplied subject on the clone,
    and returns it. The root manager instance (the request-scoped instance behind the `Authorization` facade) is never
    mutated. Two concurrent `for()` calls produce two independent scopes that cannot interfere with each other or with
    the ambient resolution path.
 
-2. **`for()` does NOT change `$request->user()`.** The scoped manager only affects authorization evaluation -- it
-   overrides `currentPrincipal()` on the clone. The Laravel auth guard, `$request->user()`, session state, and any
-   other authentication-layer concept remain unchanged. This is a deliberate boundary: impersonation at the auth layer
-   is a separate concern with its own security implications.
+2. **`for()` keeps the request's tenant and application.** The subject named replaces the request's subject only: the
+   tenant, application and guard stay the ones the subject resolver reports for the request (none when it resolves no
+   subject). A check never takes its tenant from the caller here; naming a tenant explicitly is for the administration
+   and preview API.
 
-3. **The scoped clone composes with `withPolicies()`.** Callers can chain `for($user)->withPolicies($policies)` to
+3. **`for()` does NOT change `$request->user()`.** The scoped manager only affects authorization evaluation -- it
+   overrides `currentSubject()` on the clone. The Laravel auth guard, `$request->user()`, session state, and any other
+   authentication-layer concept remain unchanged. This is a deliberate boundary: impersonation at the auth layer is a
+   separate concern with its own security implications.
+
+4. **The scoped clone composes with `withPolicies()`.** Callers can chain `for($user)->withPolicies($policies)` to
    evaluate a hypothetical policy set against a specific principal. Each method returns a fresh clone, so the chain
    produces a scope with both overrides active and no mutation of intermediaries.
 
@@ -57,8 +62,10 @@ $result = Authorization::for($targetUser)
 
 ## Scoped Clone Semantics
 
-`for()` clones the manager and pins the supplied principal on the clone. The clone inherits the evaluator, policy
-resolver, last-decision store, and event dispatcher by reference -- only the principal override is clone-local.
+`for()` clones the manager and pins the supplied subject on the clone. The clone inherits the evaluator, policy
+resolver, last-decision store, and event dispatcher by reference -- only the subject override is clone-local.
+`forUser()` scopes the same way, to the subject the resolver translates a user into; Laravel's Gate uses it for the user
+it hands over.
 
 - **No cross-request leak.** The scoped clone is a local variable -- it is garbage-collected when the calling scope
   exits. Long-running workers (Octane, queue) are safe.
@@ -79,13 +86,16 @@ resolver, last-decision store, and event dispatcher by reference -- only the pri
 
 - `AuthorizationManager::for()` -- the scoped-clone factory.
 - `AuthorizationManager::withPolicies()` -- the policy-override clone.
-- `AuthorizationManager::currentPrincipal()` -- the override-aware resolution method.
+- `AuthorizationManager::forUser()` -- the scoped clone for a user the subject resolver translates.
+- `AuthorizationManager::currentSubject()` -- the override-aware resolution method.
 - `AuthorizationManager::effectivePermissions()` -- the full permission map used for UI rendering.
 
 ## Authoritative Tests
 
 - `AuthorizationManagerTest::testForOverridesResolver` (Unit) -- `for()` bypasses the bound resolver.
 - `AuthorizationManagerTest::testForReturnsCloneNotSelf` (Unit) -- `for()` returns a distinct instance.
+- `AuthorizationManagerTest::testForKeepsTheRequestsTenantApplicationAndGuard` (Unit) -- `for()` keeps the request's
+  tenant, application and guard.
 - `EffectivePermissionsTest::testDirectGrantShowsTrueInEffectiveMap` -- direct grant appears in the map.
 - `EffectivePermissionsTest::testExplicitDenyPolicyOverridesDirectGrant` -- deny policy wins over RBAC in the map.
 - `EffectivePermissionsTest::testAnonymousPrincipalReturnsAllFalse` -- null principal yields all-false.
@@ -93,6 +103,6 @@ resolver, last-decision store, and event dispatcher by reference -- only the pri
 ## Change Triggers
 
 - Adding a dedicated impersonation event requires a new event class and a dispatch call inside `for()` or
-  `currentPrincipal()`.
+  `currentSubject()`.
 - Introducing a "caller context" that preserves the original principal alongside the target would require a second
   field on the scoped clone and a contract change on the `DecisionEvaluated` event.

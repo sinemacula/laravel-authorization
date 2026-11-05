@@ -20,8 +20,9 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
   instead of being skipped.
 - `polymorphic-identity-pivots.md`: why role, permission, and policy pivots use plain `string`
   `authorizable_type`/`authorizable_id` columns so that integer, UUID, and ULID identities all work.
-- `principal-resolver-contract.md`: the standalone vs. plug-and-play boundary with `sinemacula/laravel-authentication`;
-  why the shipped default resolver returns `null` (anonymous-safe) and how the umbrella package wires a real resolver.
+- `subject-resolver-contract.md`: the one seam with `sinemacula/laravel-authentication` for the subject, its tenant
+  and its application; the shipped default (Laravel's signed-in user, no tenant), the Gate's translation of its user,
+  and how the umbrella package wires its own resolver.
 - `wildcard-and-condition-semantics.md`: fnmatch semantics and escaping, resource-less checks, the four match outcomes
   (matches, does not match, undecidable, invalid), `${…}` interpolation, the write-time refusals, and the condition
   operator catalogue (`eq`, `neq`, `in`, `not_in`, `null`, `not_null`, `cidr`, `starts_with`, `ends_with`,

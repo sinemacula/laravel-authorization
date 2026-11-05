@@ -85,8 +85,8 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 
 ## Failure / Edge Cases
 
-- **Null principal**: the manager short-circuits to `ImplicitDeny` without consulting the evaluator. This covers
-  anonymous requests and misconfigured principal resolvers.
+- **No subject**: the manager short-circuits to `ImplicitDeny` without consulting the evaluator. This covers
+  anonymous requests and a subject resolver that resolves no subject.
 - **Malformed policy document**: writes are refused -- the `Policy` model validates the document on assignment, and
   `Statement::fromArray()` refuses unknown keys, an empty resource list, an empty operator map, a non-string operator
   key, an unknown operator, a malformed literal operand (including an empty string for `starts_with`, `ends_with` or
