@@ -61,6 +61,7 @@ final class ConfigValidator
         self::validateSubjectResolver($config['subject_resolver'] ?? null);
         self::validatePolicyStore($config['policy_store'] ?? null);
         self::validateCacheStore($config['cache']['store'] ?? null, $container);
+        self::validateCacheTtl($config['cache']['ttl'] ?? 300);
     }
 
     /**
@@ -365,6 +366,25 @@ final class ConfigValidator
         } catch (\Throwable $exception) {
             throw new InvalidAuthorizationConfigException('authorization.cache.store', "cache store '{$value}' is not configured: " . $exception->getMessage());
         }
+    }
+
+    /**
+     * Validate that `cache.ttl`, the longest an entry lives, is a whole number
+     * of seconds of at least 1. There is no "forever": an entry that missed an
+     * invalidation would otherwise never heal.
+     *
+     * @param  mixed  $value
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    private static function validateCacheTtl(mixed $value): void
+    {
+        if (\is_int($value) && $value >= 1) {
+            return;
+        }
+
+        throw new InvalidAuthorizationConfigException('authorization.cache.ttl', 'expected a whole number of seconds of at least 1, got ' . self::describe($value) . '.');
     }
 
     /**

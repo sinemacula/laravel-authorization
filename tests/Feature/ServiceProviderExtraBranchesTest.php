@@ -11,7 +11,6 @@ use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
-use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubPolicyStore;
@@ -36,7 +35,6 @@ use Tests\TestCase;
 #[CoversClass(AuthorizationServiceProvider::class)]
 #[CoversClass(GateRegistrar::class)]
 #[CoversClass(BladeDirectiveRegistrar::class)]
-#[CoversClass(EventListenerRegistrar::class)]
 final class ServiceProviderExtraBranchesTest extends TestCase
 {
     /** @var string Permission name mirrored by the stub enum case. */

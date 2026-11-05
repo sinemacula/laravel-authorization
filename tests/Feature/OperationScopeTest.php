@@ -4,15 +4,23 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Cache\ArrayStore;
+use Illuminate\Cache\Repository;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use SineMacula\Laravel\Authorization\Cache\VersionedStore;
+use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\SystemOverrideUsed;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\UsesAnAuthorizationConnection;
+use Tests\Feature\Stubs\FailingCacheStore;
+use Tests\Feature\Stubs\RecordingLogger;
 use Tests\TestCase;
 
 /**
@@ -259,6 +267,84 @@ final class OperationScopeTest extends TestCase
         });
 
         Event::assertDispatchedTimes(SystemOverrideUsed::class, 1);
+    }
+
+    /**
+     * Inside a write's transaction the resolution cache is invalidated before
+     * the commit, and a store that fails then rolls the write back, so it never
+     * commits with entries that still allow what it took away.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAFailedInvalidationRollsTheWriteBack(): void
+    {
+        $this->app?->instance('log', new RecordingLogger);
+        $this->app?->instance(ResolutionCache::class, new ResolutionCache(new Repository(new FailingCacheStore)));
+
+        try {
+            OperationScope::run(Operation::begin(), static function (): void {
+                $role = Role::query()->create(['name' => 'editor']);
+
+                OperationScope::dispatch(new RoleAssigned(Operation::begin(), new Reference('user', 'user-1'), Reference::of($role), 'editor', GrantScope::platform(), null));
+            });
+            self::fail('The failed invalidation was not thrown.');
+        } catch (\RuntimeException $exception) {
+            self::assertSame('cache unavailable', $exception->getMessage());
+        }
+
+        self::assertSame(0, Role::query()->count());
+        Event::assertNotDispatched(SystemOverrideUsed::class);
+    }
+
+    /**
+     * Once the write commits, the versions are bumped again before any listener
+     * runs, so an entry stored from the rows before the commit never holds.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheVersionsAreBumpedAgainOnceTheWriteCommits(): void
+    {
+        $store    = new VersionedStore($repository = new Repository(new ArrayStore), 'authorization');
+        $key      = $store->granteeKey(new Reference('user', 'user-1'));
+        $event    = new RoleAssigned(Operation::begin(), new Reference('user', 'user-1'), new Reference('role', 'role-1'), 'editor', GrantScope::platform(), null);
+        $tokens   = [];
+        $listened = null;
+
+        $this->app?->instance(ResolutionCache::class, new ResolutionCache($repository));
+
+        Event::listen(RoleAssigned::class, static function () use ($store, $key, &$listened): void {
+            $listened = $store->tokens([$key])[$key] ?? null;
+        });
+
+        OperationScope::run($event->operation, static function () use ($event, $store, $key, &$tokens): void {
+            OperationScope::dispatch($event);
+
+            $tokens[] = $store->tokens([$key])[$key] ?? null;
+        });
+
+        self::assertIsString($tokens[0]);
+        self::assertIsString($listened);
+        self::assertNotSame($tokens[0], $listened);
+    }
+
+    /**
+     * A write made with no transaction open has already committed, so a store
+     * that fails to invalidate it is thrown at once.
+     *
+     * @return void
+     */
+    public function testAFailedInvalidationWithoutATransactionIsThrown(): void
+    {
+        $this->app?->instance('log', new RecordingLogger);
+        $this->app?->instance(ResolutionCache::class, new ResolutionCache(new Repository(new FailingCacheStore)));
+
+        $this->expectExceptionObject(new \RuntimeException('cache unavailable'));
+
+        OperationScope::dispatch(new RoleAssigned(Operation::begin(), new Reference('user', 'user-1'), new Reference('role', 'role-1'), 'editor', GrantScope::platform(), null));
     }
 
     /**

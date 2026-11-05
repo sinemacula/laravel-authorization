@@ -5,11 +5,13 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Concerns;
 
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
+use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
-use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
+use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizableRolePivot;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Resolvers\GrantResolver;
 
 /**
  * Role membership trait for authorizable models.
@@ -163,55 +165,32 @@ trait HasRoles // @phpstan-ignore trait.unused
     /**
      * Return the names of every role assigned to this identity.
      *
-     * When the resolution cache is bound in the container, the result is
-     * memoised per-request and optionally persisted cross-request. Cache
-     * entries are invalidated by the `InvalidateResolutionCache` listener on
-     * `IdentityRoleAssigned` / `IdentityRoleRevoked` (and — on a tag-capable
-     * persistent store — on `RolePermissionGranted` / `RolePermissionRevoked`
-     * via role tags). The persistent-tier TTL is additionally bounded by the
-     * nearest upcoming `expires_at` across the relation's pivot rows so
-     * temporal grants invalidate themselves at the exact moment they lapse.
-     * Once the in-memory entry has lapsed the relation is reloaded, so a reused
-     * instance does not rebuild the entry from the roles it loaded before.
+     * The names are read through the resolution cache: memoised for the request
+     * or job, and kept in the persistent store when one is configured, for no
+     * longer than the nearest grant expiry or the configured maximum. A grant,
+     * revocation or change to a held role takes effect on the next check.
      *
      * @return array<int, string>
      */
     public function getRoles(): array
     {
-        $cache = ResolutionCache::instance();
+        $resolve = fn (ResolutionPins $pins): Resolution => GrantResolver::roles($this->roles(), $pins);
 
-        if ($cache instanceof ResolutionCache) {
-            if ($cache->lapsed('roles', $this)) {
-                $this->unsetRelation('roles');
-            }
-
-            /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
-            $roles   = $this->authorizationLoadedGrants('roles');
-            $roleIds = self::authorizationCollectModelIds($roles);
-            $maxTtl  = self::authorizationNearestPivotExpirySeconds($roles);
-
-            return $cache->rememberRoles(
-                $this,
-                fn (): array => $this->computeRoles(),
-                new ResolutionCacheContext(maxTtl: $maxTtl, roleIds: $roleIds),
-            );
-        }
-
-        return $this->computeRoles();
+        return ResolutionCache::instance()?->rememberRoles($this, $resolve) ?? $resolve(new ResolutionPins)->value;
     }
 
-    // ------------------------------------------------------------------
-    // Rank helpers
+    // ------------------------------------------------------------------ Rank
+    // helpers
     // ------------------------------------------------------------------
 
     /**
      * Determine whether this identity can act on the given target based on role
      * rank seniority.
      *
-     * Both `$this` and `$target` must implement `SupportsRoles`;
-     * returns false otherwise. When `authorization.rank.enabled` is false the
-     * check is bypassed and the method returns true unconditionally (rank
-     * feature disabled).
+     * Both `$this` and `$target` must implement `SupportsRoles`; returns false
+     * otherwise. When `authorization.rank.enabled` is false the check is
+     * bypassed and the method returns true unconditionally (rank feature
+     * disabled).
      *
      * Semantics:
      * - Actor has no ranked roles -> false (cannot assert rank authority).
@@ -266,21 +245,6 @@ trait HasRoles // @phpstan-ignore trait.unused
     public function getRoleNames(): array
     {
         return $this->getRoles();
-    }
-
-    /**
-     * Compute the role-name list directly from the relation.
-     *
-     * @return array<int, string>
-     */
-    private function computeRoles(): array
-    {
-        /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
-        $roles = $this->authorizationLoadedGrants('roles');
-
-        $names = $roles->map(static fn (Role $role): string => $role->name)->all();
-
-        return \array_values($names);
     }
 
     /**

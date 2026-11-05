@@ -7,9 +7,9 @@ namespace Tests\Performance;
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\Repository as CacheRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
-use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
-use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
+use Tests\TestCase;
 
 /**
  * Performance budget for `ResolutionCache` memo-tier reads.
@@ -19,9 +19,9 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
  * with check count, so the suite codifies a loose wall-clock bound on 10,000
  * memo-hit lookups — catches a 10× regression, tolerates CI variance.
  *
- * A second subject verifies that the persistent-tier entry's TTL is bounded
- * below the configured `ttl` when a temporal-grant `maxTtl` is supplied — a
- * correctness-adjacent budget that guards the critical self-invalidation path.
+ * A second subject verifies that an entry bounded by a grant's expiry is still
+ * written to the persistent tier and read back — a correctness-adjacent budget
+ * that guards the self-invalidation path.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -49,9 +49,9 @@ final class ResolutionCacheBudgetTest extends TestCase
      */
     public function testMemoTierReadOverheadStaysBounded(): void
     {
-        $cache     = new ResolutionCache(store: null, ttl: 0, prefix: 'budget');
+        $cache     = new ResolutionCache(store: null, prefix: 'budget');
         $principal = self::principal();
-        $resolver  = static fn (): array => [self::PERMISSION, self::PERMISSION_READ, 'posts:update'];
+        $resolver  = static fn (): Resolution => new Resolution([self::PERMISSION, self::PERMISSION_READ, 'posts:update']);
 
         // Prime the memo so the measured calls all hit the memo tier.
         $cache->rememberPermissions($principal, $resolver);
@@ -72,12 +72,10 @@ final class ResolutionCacheBudgetTest extends TestCase
     }
 
     /**
-     * A temporal-grant `maxTtl` must bound the persistent-tier entry's lifetime
-     * — `resolveTtl()` returns `min(ttl, maxTtl) - 1`. The budget here is
-     * correctness-adjacent: a re-read of the same slot must round-trip the
-     * value even when `maxTtl` is the only lifetime input (`ttl = 0`,
-     * "forever"), proving the bounded-TTL write path executed rather than the
-     * short-circuit no-op (which triggers when the computed seconds ≤ 0).
+     * A grant's expiry bounds the persistent-tier entry's lifetime to a second
+     * before it, under the configured maximum. A re-read of the same slot from
+     * another instance must round-trip the value, proving the bounded write
+     * executed rather than being skipped as already lapsed.
      *
      * @return void
      */
@@ -86,25 +84,21 @@ final class ResolutionCacheBudgetTest extends TestCase
         $arrayStore      = new ArrayStore;
         $cacheRepository = new CacheRepository($arrayStore);
 
-        // ttl = 0 (forever) but maxTtl = 30s → entry must store
-        // with a 29s lifetime, not forever. A separate cache instance reads
-        // through the same store so the memo tier cannot mask a missing
-        // persistent-tier write.
-        $writer    = new ResolutionCache(store: $cacheRepository, ttl: 0, prefix: 'budget');
-        $reader    = new ResolutionCache(store: $cacheRepository, ttl: 0, prefix: 'budget');
+        // A grant expiring in 30 seconds bounds the entry to 29, under the
+        // 300-second maximum. A separate cache instance reads through the same
+        // store so the memo tier cannot mask a missing persistent-tier write.
+        $writer    = new ResolutionCache(store: $cacheRepository, prefix: 'budget');
+        $reader    = new ResolutionCache(store: $cacheRepository, prefix: 'budget');
         $principal = self::principal();
-        $context   = new ResolutionCacheContext(maxTtl: 30);
 
         $writer->rememberPermissions(
             $principal,
-            static fn (): array => [self::PERMISSION, self::PERMISSION_READ],
-            $context,
+            static fn (): Resolution => new Resolution([self::PERMISSION, self::PERMISSION_READ], 30),
         );
 
         $roundTrip = $reader->rememberPermissions(
             $principal,
-            static fn (): array => ['should-not-be-called'],
-            $context,
+            static fn (): Resolution => new Resolution(['should-not-be-called']),
         );
 
         self::assertSame(

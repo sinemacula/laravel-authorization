@@ -11,7 +11,6 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use PHPUnit\Framework\Attributes\DataProvider;
-use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
 use SineMacula\Laravel\Authorization\Concerns\HasRoleHierarchy;
 use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Concerns\ManagesPermissions;
@@ -62,7 +61,6 @@ use Tests\TestCase;
 #[CoversClass(PolicyObserver::class)]
 #[CoversClass(SystemPolicyProtectedException::class)]
 #[CoversClass(TenantScope::class)]
-#[CoversClass(ResolutionCacheContext::class)]
 #[CoversClass(InvalidTenantException::class)]
 #[CoversClass(InvalidTenantColumnsException::class)]
 #[CoversClass(GuardScopedLookup::class)]

@@ -4,12 +4,17 @@ declare(strict_types = 1);
 
 namespace Benchmarks\Runtime;
 
+use Benchmarks\Support\BenchmarkCase;
 use Benchmarks\Support\BenchmarkFixtures;
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\Repository as CacheRepository;
 use PhpBench\Attributes as Bench;
+use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
-use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
+use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * PHPBench micro-benchmark for `ResolutionCache`.
@@ -20,131 +25,75 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
  *
  * - `rememberRoles()` memo-tier hit after prime;
  * - `rememberPermissions()` memo-tier hit after prime;
- * - `rememberPolicies()` persistent-tier hit (memo miss → store read);
- * - `forget()` on a tag-capable store — the listener path that fires on
- *   `IdentityRoleAssigned` and friends.
+ * - `rememberPolicies()` persistent-tier hit (memo miss, then the entry and its
+ *   versions read from the store);
+ * - invalidating a grantee, as every write does: its version keys worked out
+ *   from the event, then bumped.
  *
- * The bench constructs the cache directly (no Laravel boot) and uses the array
- * store as a stand-in for a tag-capable production store; this is the same
- * driver the resolution-cache test tier exercises, so behaviour and capability
- * flag match production.
+ * The array store stands in for a production store. The application is booted
+ * because entry keys carry the tenant the tenant scope applies.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
- *
- * @SuppressWarnings("php:S1192")
  */
-#[Bench\OutputTimeUnit('microseconds')]
-final class ResolutionCacheBench
+final class ResolutionCacheBench extends BenchmarkCase
 {
-    /** @var \SineMacula\Laravel\Authorization\Cache\ResolutionCache cache instance used for the memo-tier subjects (no persistent store). */
-    private ResolutionCache $memoOnly; // @phpstan-ignore property.uninitialized, missingType.callable
+    /** @var \SineMacula\Laravel\Authorization\Cache\ResolutionCache A cache with the memo only, primed. */
+    private ResolutionCache $memoOnly; // @phpstan-ignore property.uninitialized
 
-    /** @var \SineMacula\Laravel\Authorization\Cache\ResolutionCache cache instance used for the persistent-tier subjects (array-store-backed). */
-    private ResolutionCache $persisted; // @phpstan-ignore property.uninitialized, missingType.callable
+    /** @var \SineMacula\Laravel\Authorization\Cache\ResolutionCache A cache over the array store, primed. */
+    private ResolutionCache $persisted; // @phpstan-ignore property.uninitialized
 
-    /** @var \SineMacula\Laravel\Authorization\Cache\ResolutionCache cache instance used for the `forget()` subject — reprimed between reps via `setUpForget()`. */
-    private ResolutionCache $forgetTarget; // @phpstan-ignore property.uninitialized, missingType.callable
+    /** @var \SineMacula\Laravel\Authorization\Support\Reference The grantee every subject resolves for. */
+    private Reference $principal; // @phpstan-ignore property.uninitialized
 
-    /** @var object principal stand-in — primitive object keyed by a stable hash. */
-    private object $principal; // @phpstan-ignore property.uninitialized, missingType.callable
+    /** @var \Closure(): \SineMacula\Laravel\Authorization\Cache\Resolution<string> The roles resolution. */
+    private \Closure $roleResolver; // @phpstan-ignore property.uninitialized
 
-    /** @var \Closure resolved role list primed into the cache before memo / persistent reads. */
-    private \Closure $roleResolver; // @phpstan-ignore property.uninitialized, missingType.callable
+    /** @var \Closure(): \SineMacula\Laravel\Authorization\Cache\Resolution<string> The permissions resolution. */
+    private \Closure $permissionResolver; // @phpstan-ignore property.uninitialized
 
-    /** @var \Closure resolved permission list primed into the cache before memo reads. */
-    private \Closure $permissionResolver; // @phpstan-ignore property.uninitialized, missingType.callable
+    /** @var \Closure(): \SineMacula\Laravel\Authorization\Cache\Resolution<\SineMacula\Laravel\Authorization\Evaluation\Policy> The policies resolution. */
+    private \Closure $policyResolver; // @phpstan-ignore property.uninitialized
 
-    /** @var \Closure policy list primed into the persistent tier before policy reads. */
-    private \Closure $policyResolver; // @phpstan-ignore property.uninitialized, missingType.callable
+    /** @var list<\SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent> The events of one grant. */
+    private array $events; // @phpstan-ignore property.uninitialized
 
     /**
-     * Bench setUp — prime every subject's fixtures so revolutions measure the
-     * target path (memo hit, store read, forget).
+     * Bench setUp — boot the application, prime a memo-only cache, and prime a
+     * persistent cache whose memo is then dropped so every revolution reads the
+     * store.
      *
      * @return void
      */
     public function setUp(): void
     {
-        $this->principal = new class {
-            /**
-             * Create the stub principal keyed for the cache.
-             *
-             * @param  string  $id
-             */
-            public function __construct(
+        $this->boot();
 
-                /** @var string Stable principal identifier for the cache key. */
-                public readonly string $id = 'bench-principal',
-            ) {}
-
-            /**
-             * Return the identity key.
-             *
-             * @return string
-             */
-            public function getKey(): string
-            {
-                return $this->id;
-            }
-
-            /**
-             * Return the morph class name.
-             *
-             * @return string
-             */
-            public function getMorphClass(): string
-            {
-                return 'bench_identity';
-            }
-        };
+        $this->principal = new Reference('bench_identity', 'bench-principal');
 
         $permissions = BenchmarkFixtures::permissionNames();
         $roles       = [BenchmarkFixtures::roleName()];
         $policies    = [BenchmarkFixtures::policy()];
 
-        $this->roleResolver       = static fn (): array => $roles;
-        $this->permissionResolver = static fn (): array => $permissions;
-        $this->policyResolver     = static fn (): array => $policies;
+        $this->roleResolver       = static fn (): Resolution => new Resolution($roles);
+        $this->permissionResolver = static fn (): Resolution => new Resolution($permissions);
+        $this->policyResolver     = static fn (): Resolution => new Resolution($policies);
 
-        // Memo-only cache — the `store` parameter is null so reads never drop
-        // past the memo tier.
-        $this->memoOnly = new ResolutionCache(store: null, ttl: 0, prefix: 'bench-memo');
+        $this->memoOnly = new ResolutionCache(store: null, prefix: 'bench-memo');
         $this->memoOnly->rememberRoles($this->principal, $this->roleResolver);
         $this->memoOnly->rememberPermissions($this->principal, $this->permissionResolver);
 
-        // Persistent-tier cache — array store stands in for a tag-capable
-        // production store. Prime the entries, then flush the memo so every
-        // revolution exercises the persistent-tier read path.
-        $arrayStore      = new ArrayStore;
-        $repository      = new CacheRepository($arrayStore);
-        $this->persisted = new ResolutionCache(store: $repository, ttl: 0, prefix: 'bench-persisted');
-
-        $this->persisted->rememberRoles($this->principal, $this->roleResolver);
-        $this->persisted->rememberPermissions($this->principal, $this->permissionResolver);
+        $this->persisted = new ResolutionCache(store: new CacheRepository(new ArrayStore), prefix: 'bench-persisted');
         $this->persisted->rememberPolicies($this->principal, $this->policyResolver);
-        $this->persisted->flush();
 
-        $this->forgetTarget = $this->newForgetTarget();
+        $this->events = [new RoleAssigned(Operation::begin(), $this->principal, new Reference('role', 'role-1'), 'editor', GrantScope::platform(), null)];
     }
 
     /**
-     * Per-revolution setUp for the forget subject — a fresh cache + prime so
-     * each rep flushes a populated store instead of an already-empty one.
-     *
-     * @return void
-     */
-    public function setUpForget(): void
-    {
-        $this->setUp();
-        $this->forgetTarget = $this->newForgetTarget();
-    }
-
-    /**
-     * Benchmark: memo-tier hit on `rememberRoles()` — the in-memory lookup
-     * every second `can()` on the same principal pays.
+     * A memo hit for the roles.
      *
      * @return void
      */
@@ -157,7 +106,7 @@ final class ResolutionCacheBench
     }
 
     /**
-     * Benchmark: memo-tier hit on `rememberPermissions()`.
+     * A memo hit for the permissions.
      *
      * @return void
      */
@@ -170,8 +119,8 @@ final class ResolutionCacheBench
     }
 
     /**
-     * Benchmark: persistent-tier hit on `rememberPolicies()` — memo miss +
-     * array-store read + `Policy::fromArray()` rehydration.
+     * A store hit for the policies: the entry and its versions read, and the
+     * documents hydrated.
      *
      * @return void
      */
@@ -180,43 +129,23 @@ final class ResolutionCacheBench
     #[Bench\Revs(2000)]
     public function benchRememberPoliciesPersistentHit(): void
     {
-        // Flush the memo each rev so the read drops to the store — otherwise
-        // the memo shortcut masks the persistent-tier cost.
-        $this->persisted->flush();
+        // Empty the memo each rev so the read drops to the store; otherwise the
+        // memo masks the persistent-tier cost.
+        $this->persisted->invalidate([]);
         $this->persisted->rememberPolicies($this->principal, $this->policyResolver);
     }
 
     /**
-     * Benchmark: tag-based invalidation via `forget()`. Each rev flushes the
-     * memo + tag-group for the principal through the shared array store.
+     * Invalidating a grantee, as every write does: its version keys worked out
+     * from the event, then bumped.
      *
      * @return void
      */
-    #[Bench\BeforeMethods('setUpForget')]
+    #[Bench\BeforeMethods('setUp')]
     #[Bench\Iterations(3)]
     #[Bench\Revs(2000)]
-    public function benchForgetTaggedPrincipal(): void
+    public function benchInvalidateAGrantee(): void
     {
-        $this->forgetTarget->forget($this->principal);
-    }
-
-    /**
-     * Build + prime a fresh cache for the forget benchmark.
-     *
-     * @return \SineMacula\Laravel\Authorization\Cache\ResolutionCache
-     */
-    private function newForgetTarget(): ResolutionCache
-    {
-        $arrayStore = new ArrayStore;
-        $repository = new CacheRepository($arrayStore);
-        $cache      = new ResolutionCache(store: $repository, ttl: 0, prefix: 'bench-forget');
-
-        $context = new ResolutionCacheContext(roleIds: ['role-1']);
-
-        $cache->rememberRoles($this->principal, $this->roleResolver, $context);
-        $cache->rememberPermissions($this->principal, $this->permissionResolver, $context);
-        $cache->rememberPolicies($this->principal, $this->policyResolver, $context);
-
-        return $cache;
+        $this->persisted->invalidate($this->persisted->versionKeys($this->events));
     }
 }

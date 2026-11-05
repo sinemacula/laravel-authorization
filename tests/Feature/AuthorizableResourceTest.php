@@ -14,7 +14,6 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableResource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
-use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubIdentity;
@@ -35,7 +34,6 @@ use Tests\TestCase;
 #[CoversClass(AuthorizationServiceProvider::class)]
 #[CoversClass(GateRegistrar::class)]
 #[CoversClass(BladeDirectiveRegistrar::class)]
-#[CoversClass(EventListenerRegistrar::class)]
 #[CoversClass(AuthorizationManager::class)]
 final class AuthorizableResourceTest extends TestCase
 {

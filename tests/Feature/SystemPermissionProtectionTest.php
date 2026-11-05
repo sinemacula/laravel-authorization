@@ -6,7 +6,6 @@ namespace Tests\Feature;
 
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
-use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPermissionProtectedException;
@@ -35,7 +34,6 @@ use Tests\TestCase;
 #[CoversClass(PermissionObserver::class)]
 #[CoversClass(SystemPermissionProtectedException::class)]
 #[CoversClass(TenantScope::class)]
-#[CoversClass(ResolutionCacheContext::class)]
 #[CoversClass(InvalidTenantException::class)]
 #[CoversClass(InvalidTenantColumnsException::class)]
 #[CoversClass(GuardScopedLookup::class)]

@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Support;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Event;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 
@@ -27,6 +28,16 @@ use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
  * rolls back. A write made while that connection has no transaction open has
  * already committed, so its events are dispatched straight away, even while
  * another connection's transaction is open.
+ *
+ * `dispatch()` also invalidates the resolution cache for what the events say
+ * changed, twice. Inside the transaction, a failure of the cache store is
+ * thrown, so the write rolls back rather than commit with entries that still
+ * allow what it took away. Once it has committed, before any listener runs, the
+ * versions are bumped again so an entry a concurrent check stored from the rows
+ * before the commit never holds; a failure then is written to the log channel,
+ * since the write cannot be undone. A write made with no transaction open has
+ * already committed: it is invalidated the same way, and a failure of the first
+ * bump is thrown.
  *
  * @managed-static
  *
@@ -104,8 +115,9 @@ final class OperationScope
     }
 
     /**
-     * Dispatch the events once the package connection's transaction commits, or
-     * straight away when it has none open.
+     * Invalidate the resolution cache for the events and dispatch them once the
+     * package connection's transaction commits, or straight away when it has
+     * none open.
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent  ...$events
      * @return void
@@ -113,7 +125,14 @@ final class OperationScope
     public static function dispatch(AuthorizationEvent ...$events): void
     {
         $connection = AuthorizationConnection::connection();
-        $send       = static function () use ($events): void {
+        $cache      = ResolutionCache::instance();
+        $keys       = $cache?->versionKeys($events) ?? [];
+
+        $cache?->invalidate($keys);
+
+        $send = static function () use ($cache, $keys, $events): void {
+            $cache?->invalidateQuietly($keys);
+
             foreach ($events as $event) {
                 Event::dispatch($event);
             }

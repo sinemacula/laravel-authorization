@@ -11,7 +11,6 @@ use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
-use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use Tests\Feature\Stubs\StubPermissionProvider;
 use Tests\TestCase;
@@ -30,7 +29,6 @@ use Tests\TestCase;
 #[CoversClass(AuthorizationServiceProvider::class)]
 #[CoversClass(GateRegistrar::class)]
 #[CoversClass(BladeDirectiveRegistrar::class)]
-#[CoversClass(EventListenerRegistrar::class)]
 #[CoversClass(ConfigValidator::class)]
 final class PermissionProviderTest extends TestCase
 {

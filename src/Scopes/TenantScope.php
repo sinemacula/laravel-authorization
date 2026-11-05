@@ -8,6 +8,7 @@ use Illuminate\Container\Container;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Scope;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
@@ -57,7 +58,7 @@ final class TenantScope implements Scope
     {
         $typeColumn = $model->getTable() . '.tenant_type';
         $idColumn   = $model->getTable() . '.tenant_id';
-        $tenant     = self::resolveTenant();
+        $tenant     = self::currentTenant();
 
         // `whereNull` / `orWhere` are declared as `@method static` on the
         // Eloquent Builder docblock; PHPStan flags dynamic instance calls as
@@ -71,7 +72,7 @@ final class TenantScope implements Scope
             return;
         }
 
-        [$morphType, $morphId] = self::extractTenantPair($tenant);
+        [$morphType, $morphId] = $tenant;
 
         // @phpstan-ignore staticMethod.dynamicCall
         $builder->where(function ($q) use ($typeColumn, $idColumn, $morphType, $morphId): void {
@@ -82,6 +83,24 @@ final class TenantScope implements Scope
                         ->where($idColumn, $morphId);
                 });
         });
+    }
+
+    /**
+     * Return the morph type and key of the tenant the scope limits rows to, or
+     * null when it limits them to the platform's.
+     *
+     * The resolution cache keys its entries by it, since the roles and
+     * permissions an identity resolves to depend on it.
+     *
+     * @return array{0: string, 1: string}|null
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
+     */
+    public static function currentTenant(): ?array
+    {
+        $tenant = self::resolveTenant();
+
+        return $tenant === null ? null : self::extractTenantPair($tenant);
     }
 
     /**
@@ -121,13 +140,16 @@ final class TenantScope implements Scope
      * Drop the tenant resolved for the current request or job, so the next
      * query asks the resolver again. Exposed for consumers that pivot the
      * current tenant mid-request (for example an admin console that switches
-     * context) without rebinding the resolver.
+     * context) without rebinding the resolver. The resolution cache's memo,
+     * resolved under the dropped tenant, is emptied with it.
      *
      * @return void
      */
     public function flushResolvedTenant(): void
     {
         Container::getInstance()->forgetInstance(ResolvedTenant::class);
+
+        ResolutionCache::instance()?->tenantChanged();
     }
 
     /**

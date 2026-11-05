@@ -20,6 +20,7 @@ use Illuminate\Translation\Translator;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
+use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
@@ -33,7 +34,6 @@ use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
-use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
@@ -42,6 +42,7 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\CustomRoleMiddlewareDouble;
@@ -74,7 +75,6 @@ use Tests\TestCase;
 #[CoversClass(AuthorizationServiceProvider::class)]
 #[CoversClass(GateRegistrar::class)]
 #[CoversClass(BladeDirectiveRegistrar::class)]
-#[CoversClass(EventListenerRegistrar::class)]
 #[CoversClass(TenantScope::class)]
 #[CoversClass(ResolvedTenant::class)]
 #[CoversClass(ResolutionCache::class)]
@@ -216,6 +216,98 @@ final class AuthorizationServiceProviderTest extends TestCase
 
         self::assertSame($bound[SubjectResolver::class], (new \ReflectionProperty($manager, 'subjectResolver'))->getValue($manager));
         self::assertSame($bound[PolicyResolver::class], (new \ReflectionProperty($manager, 'policyResolver'))->getValue($manager));
+    }
+
+    /**
+     * Rebinding the subject resolver or the held tenant empties the resolution
+     * cache's memo, since its entries were resolved under the tenant they gave.
+     *
+     * @return void
+     */
+    public function testRebindingTheTenantEmptiesTheResolutionMemo(): void
+    {
+        $app         = $this->app;
+        $resolutions = 0;
+        $resolve     = static function () use (&$resolutions): Resolution {
+            $resolutions++;
+
+            return new Resolution(['posts:read']);
+        };
+
+        self::assertNotNull($app);
+
+        $cache   = $app->make(ResolutionCache::class);
+        $grantee = new Reference('user', 'user-1');
+
+        $cache->rememberPermissions($grantee, $resolve);
+        $cache->rememberPermissions($grantee, $resolve);
+        $app->instance(SubjectResolver::class, new StubSubjectResolver(null));
+        $cache->rememberPermissions($grantee, $resolve);
+        $app->instance(ResolvedTenant::class, ResolvedTenant::from(new StubSubjectResolver(null)));
+        $cache->rememberPermissions($grantee, $resolve);
+
+        self::assertSame(3, $resolutions);
+    }
+
+    /**
+     * Registering the provider again resolves nothing, though the tenant
+     * bindings it watches are already bound.
+     *
+     * @return void
+     */
+    public function testRegisteringAgainResolvesNothing(): void
+    {
+        $app = $this->app;
+
+        self::assertNotNull($app);
+
+        $app->forgetInstance(ResolvedTenant::class);
+        $resolved = 0;
+
+        $app->resolving(ResolvedTenant::class, static function () use (&$resolved): void {
+            $resolved++;
+        });
+
+        (new AuthorizationServiceProvider($app))->register();
+
+        self::assertSame(0, $resolved);
+    }
+
+    /**
+     * Without a configured lifetime, entries live five minutes.
+     *
+     * @return void
+     */
+    public function testEntriesLiveFiveMinutesByDefault(): void
+    {
+        $app = $this->app;
+
+        self::assertNotNull($app);
+
+        config(['authorization.cache' => ['store' => null]]);
+        $app->forgetInstance(ResolutionCache::class);
+
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        $cache       = $app->make(ResolutionCache::class);
+        $resolutions = 0;
+        $resolve     = static function () use (&$resolutions): Resolution {
+            $resolutions++;
+
+            return new Resolution(['posts:read']);
+        };
+
+        $cache->rememberPermissions(new Reference('user', 'user-1'), $resolve);
+
+        Carbon::setTestNow('2026-07-01 12:04:59');
+        $cache->rememberPermissions(new Reference('user', 'user-1'), $resolve);
+
+        Carbon::setTestNow('2026-07-01 12:05:00');
+        $cache->rememberPermissions(new Reference('user', 'user-1'), $resolve);
+
+        Carbon::setTestNow();
+
+        self::assertSame(2, $resolutions);
     }
 
     /**

@@ -70,7 +70,8 @@ principal's role and permission grants, and anything left is denied.
   system override, for each decision, and when `authorize()` refuses. All implement one marker interface; the change
   events are snapshots of plain values that carry the actor the caller named, and are dispatched only once the write
   commits.
-- **Resolution cache** for role and permission lookups, in memory and optionally in a cache store.
+- **Resolution cache** for roles, permissions and policies, in memory and optionally in any cache store, versioned so
+  every write takes effect on the next check in every worker, and falling back to the database when the store fails.
 - **Swappable everything**: models, table names, the database connection, the subject resolver and the policy store.
 - **Spatie import**: `authorization:migrate-spatie` copies roles, permissions and grants from
   `spatie/laravel-permission` through the management services (its `guard_name` becomes `guard`), reporting and

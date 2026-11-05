@@ -55,8 +55,9 @@ events themselves are described in [Events](events.md).
    connection, at the outermost commit when the call runs inside an application transaction, and never when that
    transaction rolls back. Only a write that changed something is reported: granting what is held, revoking what is
    not held and a sync that changes nothing dispatch nothing. A re-armed grant or a changed expiry dispatches the
-   granted event as well as the expiry-changed one, so the resolution cache, which listens for the former, is
-   cleared. Record writes go through the models, so their observers report them, as part of the call's operation.
+   granted event as well as the expiry-changed one. Every dispatched event bumps the resolution cache versions it
+   affects, so the change takes effect on the next check. Record writes go through the models, so their observers
+   report them, as part of the call's operation.
 
 7. **The hierarchy is checked under a lock.** `setParent()` locks the role and the parent, in key order, then the
    observer walks the parent's ancestors, each locked for update and read outside the tenant scope. Reaching the role

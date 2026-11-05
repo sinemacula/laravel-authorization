@@ -12,7 +12,6 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
-use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
 use Tests\Concerns\ChecksAccess;
@@ -35,7 +34,6 @@ use Tests\TestCase;
 #[CoversClass(AuthorizationServiceProvider::class)]
 #[CoversClass(GateRegistrar::class)]
 #[CoversClass(BladeDirectiveRegistrar::class)]
-#[CoversClass(EventListenerRegistrar::class)]
 final class BladeDirectiveRegistrarTest extends TestCase
 {
     use ChecksAccess;

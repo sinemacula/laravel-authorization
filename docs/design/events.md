@@ -94,9 +94,10 @@ app(GrantService::class)->grantRole($user, 'editor', actor: $admin);
   still carry the principal object, the context and the result as they were evaluated, and are dispatched when the
   decision is made, not after a commit: a denial is a fact even if the surrounding transaction rolls back. Their
   payload is redesigned with the decision trace.
-- **The resolution cache is invalidated after commit.** `InvalidateResolutionCache` listens for the grant and role
-  permission events, so it runs after the commit too and never ahead of the change. A check made inside the enclosing
-  transaction after the write may still read the cached answer until that transaction commits.
+- **The resolution cache is invalidated around the commit.** `OperationScope::dispatch()` bumps the versions the
+  events affect inside the transaction, so a store that fails rolls the write back, and again once it commits, before
+  any listener runs, so an entry a concurrent check stored from the rows before the commit never holds (see
+  `Cache\Invalidation`).
 - **Raw writes report nothing.** A pivot written through a relation (`$role->permissions()->attach()`), a query builder
   update or delete, and `saveQuietly()` or `deleteQuietly()` dispatch no event.
 - **A delete outside a transaction** reads its grantees and removes the row in separate statements; through the
@@ -125,7 +126,8 @@ app(GrantService::class)->grantRole($user, 'editor', actor: $admin);
 - `RoleObserverTest`, `PermissionObserverTest`, `PolicyObserverTest`, `RecordChangesTest`: the payloads, the deleted
   grantees and the digests.
 - `HasSystemProtectionTest`: the override event.
-- `InvalidateResolutionCacheTest`: invalidation after commit and none for a rollback.
+- `InvalidationTest`, `OperationScopeTest`: the versions each write bumps, before and after its commit, and a rollback
+  when the cache store fails.
 - `ActorOptionTest`, `GrantRoleCommandTest`, `RevokeRoleCommandTest`, `SyncPermissionsCommandTest`: `--actor`.
 
 ## Change Triggers
@@ -134,4 +136,3 @@ app(GrantService::class)->grantRole($user, 'editor', actor: $admin);
   depended on.
 - Scoped grants: the grant events report the tenant and application written.
 - Grant expiry, boundaries, guardrails and break-glass: their events join the set.
-- The resolution cache versions: invalidation by version bump instead of tags.

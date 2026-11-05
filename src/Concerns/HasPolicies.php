@@ -5,10 +5,12 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Concerns;
 
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
-use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
+use SineMacula\Laravel\Authorization\Cache\Resolution;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePolicyPivot;
 use SineMacula\Laravel\Authorization\Models\Policy;
-use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
+use SineMacula\Laravel\Authorization\Resolvers\GrantResolver;
 
 /**
  * Policy attachment trait for authorizable models.
@@ -131,6 +133,12 @@ trait HasPolicies // @phpstan-ignore trait.unused
     /**
      * Return the evaluation-ready policies attached to this identity.
      *
+     * The policies are read through the resolution cache: memoised for the
+     * request or job, and kept in the persistent store when one is configured,
+     * for no longer than the nearest attachment expiry or the configured
+     * maximum. An attachment, detachment or change to an attached policy takes
+     * effect on the next check.
+     *
      * A row whose document cannot be read is never skipped, because skipping it
      * would also drop its denies. The row is logged and the exception is
      * rethrown; the authorization manager turns it into a denial of the check
@@ -143,66 +151,8 @@ trait HasPolicies // @phpstan-ignore trait.unused
      */
     public function getPolicies(): array
     {
-        /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Policy> $models */
-        $models = $this->authorizationLoadedGrants('policies');
+        $resolve = fn (ResolutionPins $pins): Resolution => GrantResolver::policies($this->policies(), $pins);
 
-        $hydrated = [];
-
-        foreach ($models as $policy) {
-            try {
-                $hydrated[] = $policy->toEvaluationPolicy();
-            } catch (InvalidPolicyDocumentException $exception) {
-                self::logMalformedPolicy($policy, $exception);
-
-                throw $exception;
-            }
-        }
-
-        return $hydrated;
-    }
-
-    /**
-     * Return the seconds until the nearest attached policy lapses, or null when
-     * none of them expires.
-     *
-     * The caching policy resolver bounds its entries by this, as `getRoles()`
-     * and `getPermissions()` bound theirs, so a temporary policy stops applying
-     * when it lapses. With `$reload`, which the resolver passes once its entry
-     * has lapsed, the attachments are read afresh rather than from the relation
-     * already loaded on this instance.
-     *
-     * @param  bool  $reload
-     * @return int|null
-     */
-    public function secondsUntilPolicyExpiry(bool $reload = false): ?int
-    {
-        if ($reload) {
-            $this->unsetRelation('policies');
-        }
-
-        /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Policy> $models */
-        $models = $this->authorizationLoadedGrants('policies');
-
-        return self::authorizationNearestPivotExpirySeconds($models);
-    }
-
-    /**
-     * Report a malformed policy row. Logging never raises; the caller rethrows
-     * so the check denies.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException  $exception
-     * @return void
-     */
-    private static function logMalformedPolicy(Policy $policy, InvalidPolicyDocumentException $exception): void
-    {
-        AuthorizationLog::warning(
-            "Authorization: malformed policy '{$policy->getKey()}' denies every check for its holder: " . $exception->getMessage(),
-            [
-                'policy_id'   => (string) $policy->getKey(),
-                'policy_name' => $policy->name ?? '',
-                'reason'      => $exception->getMessage(),
-            ],
-        );
+        return ResolutionCache::instance()?->rememberPolicies($this, $resolve) ?? $resolve(new ResolutionPins)->value;
     }
 }

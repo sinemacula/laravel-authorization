@@ -5,6 +5,8 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Cache\Resolution;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
@@ -12,6 +14,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
@@ -135,6 +138,50 @@ final class TenantScopeTest extends TestCase
         (new TenantScope)->flushResolvedTenant();
 
         self::assertSame(['b-role', 'platform-role'], $this->roleNames());
+    }
+
+    /**
+     * The current tenant is the morph type and key of the tenant the scope
+     * limits rows to, or null for the platform.
+     *
+     * @return void
+     */
+    public function testCurrentTenantIsTheTenantsMorphTypeAndKey(): void
+    {
+        [$tenantA] = $this->seedRows();
+
+        self::assertNull(TenantScope::currentTenant());
+
+        $this->useSwitchableResolver($tenantA);
+        (new TenantScope)->flushResolvedTenant();
+
+        self::assertSame([$tenantA->getMorphClass(), 'tenant-a'], TenantScope::currentTenant());
+    }
+
+    /**
+     * Flushing the resolved tenant empties the resolution cache's memo, whose
+     * entries were resolved under it.
+     *
+     * @return void
+     */
+    public function testFlushResolvedTenantEmptiesTheResolutionMemo(): void
+    {
+        $cache       = new ResolutionCache;
+        $resolutions = 0;
+        $resolve     = static function () use (&$resolutions): Resolution {
+            $resolutions++;
+
+            return new Resolution(['posts:read']);
+        };
+
+        $this->app?->instance(ResolutionCache::class, $cache);
+
+        $cache->rememberPermissions(new Reference('user', 'user-1'), $resolve);
+        $cache->rememberPermissions(new Reference('user', 'user-1'), $resolve);
+        (new TenantScope)->flushResolvedTenant();
+        $cache->rememberPermissions(new Reference('user', 'user-1'), $resolve);
+
+        self::assertSame(2, $resolutions);
     }
 
     /**

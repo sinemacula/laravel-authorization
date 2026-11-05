@@ -147,7 +147,7 @@ final class HasPermissionsTest extends TestCase
         DB::flushQueryLog();
         DB::enableQueryLog();
 
-        Carbon::setTestNow('2026-07-01 12:30:00');
+        Carbon::setTestNow('2026-07-01 12:04:00');
 
         self::assertSame(['posts:publish'], $user->getPermissions());
         self::assertSame([], DB::getQueryLog());
