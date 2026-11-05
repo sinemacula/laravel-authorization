@@ -203,7 +203,7 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
 
         return [
             'exists'     => true,
-            'expires_at' => self::authorizationCoerceGrantExpiry($row->expires_at ?? null),
+            'expires_at' => self::authorizationCoerceGrantExpiry($row->expires_at),
         ];
     }
 
