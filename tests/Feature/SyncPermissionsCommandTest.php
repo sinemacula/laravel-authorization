@@ -25,6 +25,7 @@ use Tests\Feature\Stubs\ConfigurablePermissionProvider;
 use Tests\Feature\Stubs\CustomPermission;
 use Tests\Feature\Stubs\Enums\CataloguePermission;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
+use Tests\Feature\Stubs\Enums\InvalidGuardsPermission;
 use Tests\Feature\Stubs\Enums\InvalidNamePermission;
 use Tests\TestCase;
 
@@ -141,6 +142,28 @@ final class SyncPermissionsCommandTest extends TestCase
         self::assertSame('Posts', $row->category);
 
         Event::assertDispatched(PermissionUpdated::class, static fn (PermissionUpdated $event): bool => $event->permission->is($row));
+    }
+
+    /**
+     * A declaration that drops its description and category clears both
+     * columns, so a second dry run finds nothing to change.
+     *
+     * @return void
+     */
+    public function testClearsTheDescriptionAndTheCategoryADeclarationDrops(): void
+    {
+        $row = Permission::create(['name' => 'posts:archive', 'description' => 'Old', 'category' => 'X']);
+
+        self::assertSame(0, Artisan::call(self::COMMAND));
+        self::assertMatchesRegularExpression('/\|\s+update\s+\|\s+posts:archive\s+\|\s+\(any\)\s+\|\s+\|\s+\|/', Artisan::output());
+
+        $row->refresh();
+
+        self::assertNull($row->description);
+        self::assertNull($row->category);
+
+        self::assertSame(0, Artisan::call(self::COMMAND, ['--dry-run' => true]));
+        self::assertMatchesRegularExpression('/\|\s+unchanged\s+\|\s+posts:archive\s+\|/', Artisan::output());
     }
 
     /**
@@ -315,6 +338,41 @@ final class SyncPermissionsCommandTest extends TestCase
     }
 
     /**
+     * The rows are listed by action, in the order add, update, stale or prune,
+     * protected, unchanged, then by name and guard within an action.
+     *
+     * @return void
+     */
+    public function testListsTheRowsByActionThenNameThenGuard(): void
+    {
+        Permission::create(['name' => 'posts:archive']);
+        Permission::create(['name' => 'posts.publish', 'guard' => 'web', 'description' => 'Publish posts', 'category' => 'Posts']);
+        Permission::create(['name' => 'posts:create', 'description' => 'Write posts', 'category' => 'Posts']);
+        Permission::create(['name' => 'posts:*', 'is_system' => true]);
+        Permission::create(['name' => 'posts:purge']);
+        Permission::create(['name' => 'posts:empty']);
+
+        $expected = [
+            ['add', 'posts.publish', 'api', 'Publish posts', 'Posts'],
+            ['update', 'posts:create', null, 'Create posts', 'Posts'],
+            ['prune', 'posts:empty', null, null, null],
+            ['prune', 'posts:purge', null, null, null],
+            ['protected', 'posts:*', null, null, null],
+            ['unchanged', 'posts.publish', 'web', 'Publish posts', 'Posts'],
+            ['unchanged', 'posts:archive', null, null, null],
+        ];
+
+        self::assertSame(1, Artisan::call(self::COMMAND, ['--format' => 'json', '--dry-run' => true, '--prune' => true]));
+        self::assertSame($expected, self::listedRows());
+
+        $expected[2][0] = 'stale';
+        $expected[3][0] = 'stale';
+
+        self::assertSame(1, Artisan::call(self::COMMAND, ['--format' => 'json', '--dry-run' => true]));
+        self::assertSame($expected, self::listedRows());
+    }
+
+    /**
      * JSON output of a writing run reports the mode it ran in.
      *
      * @return void
@@ -362,6 +420,25 @@ final class SyncPermissionsCommandTest extends TestCase
         self::assertSame(2, Artisan::call(self::COMMAND));
         self::assertStringContainsString(
             'Nothing was synced: Invalid permission declared by ' . InvalidNamePermission::class . '::SPACED: \'reports edit\' is not a valid permission name',
+            Artisan::output(),
+        );
+        self::assertSame([], self::platformRows());
+    }
+
+    /**
+     * A guard that is not a non-empty string is a fatal error naming the case,
+     * and nothing is written, not even the guard-agnostic row a null guard
+     * would otherwise read as.
+     *
+     * @return void
+     */
+    public function testRefusesAnInvalidGuardWithoutWritingAnything(): void
+    {
+        $this->configure('authorization.permission_enums', [CataloguePermission::class, InvalidGuardsPermission::class]);
+
+        self::assertSame(2, Artisan::call(self::COMMAND));
+        self::assertStringContainsString(
+            'Nothing was synced: Invalid permission declared by ' . InvalidGuardsPermission::class . '::NULL_GUARD: every guard must be a non-empty string, got null;',
             Artisan::output(),
         );
         self::assertSame([], self::platformRows());
@@ -457,6 +534,23 @@ final class SyncPermissionsCommandTest extends TestCase
         $config = $this->app?->make(ConfigRepository::class);
 
         $config->set($key, $value);
+    }
+
+    /**
+     * Return the rows the last JSON run listed, each as `[action, name, guard,
+     * description, category]`.
+     *
+     * @return list<array{string, string, string|null, string|null, string|null}>
+     */
+    private static function listedRows(): array
+    {
+        /** @var array{permissions: list<array{action: string, name: string, guard: string|null, description: string|null, category: string|null}>} $payload */
+        $payload = \json_decode(Artisan::output(), true, flags: \JSON_THROW_ON_ERROR);
+
+        return \array_map(
+            static fn (array $entry): array => [$entry['action'], $entry['name'], $entry['guard'], $entry['description'], $entry['category']],
+            $payload['permissions'],
+        );
     }
 
     /**

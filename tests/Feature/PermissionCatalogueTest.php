@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Support\PermissionMetadataReader;
 use Tests\Feature\Stubs\ConfigurablePermissionProvider;
 use Tests\Feature\Stubs\Enums\CataloguePermission;
 use Tests\Feature\Stubs\Enums\InvalidNamePermission;
+use Tests\Feature\Stubs\InjectedPermissionProvider;
 use Tests\Feature\Stubs\StubPermissionProvider;
 use Tests\TestCase;
 
@@ -68,6 +69,23 @@ final class PermissionCatalogueTest extends TestCase
             ],
             $this->catalogue()->definitions(),
         );
+    }
+
+    /**
+     * A provider is resolved through the container, so its constructor
+     * dependencies are injected.
+     *
+     * @return void
+     */
+    public function testResolvesEachProviderThroughTheContainer(): void
+    {
+        $definition = new PermissionDefinition(name: 'module:view', description: 'View the module', category: 'Module');
+
+        $this->app?->instance(PermissionDefinition::class, $definition);
+
+        $this->configure([], [InjectedPermissionProvider::class]);
+
+        self::assertSame([$definition], $this->catalogue()->definitions());
     }
 
     /**
