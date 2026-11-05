@@ -555,20 +555,25 @@ final class SyncPermissionsCommandTest extends TestCase
 
     /**
      * Return every platform permission row as `[name, guard, description,
-     * category, system]`, ordered by name and guard.
+     * category, system]`, ordered by name and guard by byte value, with the
+     * guard-agnostic row first.
      *
-     * @return array<int, array{string, string|null, string|null, string|null, bool}>
+     * The rows are sorted here rather than by the database, whose collation may
+     * ignore punctuation or place nulls last.
+     *
+     * @return list<array{string, string|null, string|null, string|null, bool}>
      */
     private static function platformRows(): array
     {
-        return Permission::query()
+        $rows = Permission::query()
             ->withoutGlobalScope(TenantScope::class)
             ->whereNull('tenant_type')
-            ->orderBy('name')
-            ->orderBy('guard')
             ->get()
             ->map(static fn (Permission $row): array => [$row->name, $row->guard, $row->description, $row->category, $row->is_system])
-            ->values()
             ->all();
+
+        \usort($rows, static fn (array $left, array $right): int => \strcmp($left[0], $right[0]) ?: \strcmp($left[1] ?? '', $right[1] ?? ''));
+
+        return $rows;
     }
 }
