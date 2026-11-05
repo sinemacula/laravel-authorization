@@ -81,18 +81,21 @@ final class RequireRoleTest extends TestCase
     }
 
     /**
-     * A list that names no role denies the request.
+     * A list that names no role is a mistake in the route, and is refused.
      *
      * @param  string  $list
      * @return void
      */
     #[TestWith([''])]
     #[TestWith([' | '])]
-    public function testAListNamingNoRoleIsDenied(string $list): void
+    public function testAListNamingNoRoleIsRefused(string $list): void
     {
         $this->actAs(self::identityHolding(roles: ['admin']));
 
-        self::assertSame(DecisionReason::IMPLICIT_DENY, self::denialOf(fn (): Response => $this->handle($list))->getReason());
+        $this->expectException(InvalidCheckArgumentException::class);
+        $this->expectExceptionMessage(RequireRole::class . ' names nothing to check. List one or more names, separated by \'|\'.');
+
+        $this->handle($list);
     }
 
     /**
@@ -165,6 +168,34 @@ final class RequireRoleTest extends TestCase
         $this->expectExceptionMessage('\'editor\' is not an authentication guard. A role check takes the roles, separated by \'|\', then an optional guard.');
 
         $this->handle('admin', 'editor');
+    }
+
+    /**
+     * A bare guard that is also the name of a role, of any tenant, is refused,
+     * since `role:editor,admin` may list a second role; with the prefix it is
+     * the guard.
+     *
+     * @return void
+     */
+    public function testAGuardNamingARoleIsRefusedUnlessPrefixed(): void
+    {
+        config(['auth.guards.admin' => ['driver' => 'session', 'provider' => 'users']]);
+
+        $tenant   = StubTenant::create(['id' => 'tenant-a', 'name' => 'A']);
+        $identity = StubIdentity::create(['id' => 'editor']);
+        $identity->assignRole(Role::create(['name' => 'editor', 'guard' => 'admin']));
+
+        Role::create(['name' => 'admin', 'guard' => 'web', 'tenant_type' => $tenant->getMorphClass(), 'tenant_id' => 'tenant-a']);
+
+        $this->actAs($identity);
+
+        self::assertSame(200, $this->handle('editor', 'guard=admin')->getStatusCode());
+        self::assertFalse($this->admits(RequireRole::class, self::request(), 'editor', 'guard=web'));
+
+        $this->expectException(InvalidCheckArgumentException::class);
+        $this->expectExceptionMessage('\'admin\' is both an authentication guard and a role. Separate several roles with \'|\', or write the guard as \'guard=admin\'.');
+
+        $this->handle('editor', 'admin');
     }
 
     /**

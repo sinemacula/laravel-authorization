@@ -69,4 +69,43 @@ final class InvalidCheckArgumentExceptionTest extends TestCase
             InvalidCheckArgumentException::tooManyArguments('App\Middleware', 3)->getMessage(),
         );
     }
+
+    /**
+     * An ambiguous guard names the guard and how to write it unambiguously.
+     *
+     * @return void
+     */
+    public function testAmbiguousGuardNamesTheGuardAndItsPrefixedForm(): void
+    {
+        self::assertSame(
+            '\'admin\' is both an authentication guard and a role. Separate several roles with \'|\', or write the guard as \'guard=admin\'.',
+            InvalidCheckArgumentException::ambiguousGuard('admin')->getMessage(),
+        );
+    }
+
+    /**
+     * Too many directive arguments names the directive and the count given.
+     *
+     * @return void
+     */
+    public function testTooManyDirectiveArgumentsNamesTheDirectiveAndTheCount(): void
+    {
+        self::assertSame(
+            '@role takes at most two arguments, 3 given. Separate several names with \'|\', not \',\'.',
+            InvalidCheckArgumentException::tooManyDirectiveArguments('role', 3)->getMessage(),
+        );
+    }
+
+    /**
+     * A list naming nothing names the middleware.
+     *
+     * @return void
+     */
+    public function testNoNamesNamesTheMiddleware(): void
+    {
+        self::assertSame(
+            'App\Middleware names nothing to check. List one or more names, separated by \'|\'.',
+            InvalidCheckArgumentException::noNames('App\Middleware')->getMessage(),
+        );
+    }
 }

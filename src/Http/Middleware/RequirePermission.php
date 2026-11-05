@@ -31,7 +31,7 @@ final class RequirePermission extends AbstractAuthorizationMiddleware
      * Admit the request when any listed action is allowed.
      *
      * @param  \Illuminate\Http\Request  $request
-     * @param  string  $names
+     * @param  non-empty-list<string>  $names
      * @param  string|null  $option
      * @return void
      *
@@ -40,11 +40,11 @@ final class RequirePermission extends AbstractAuthorizationMiddleware
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
      */
     #[\Override]
-    protected function authorize(Request $request, string $names, ?string $option): void
+    protected function authorize(Request $request, array $names, ?string $option): void
     {
         CheckArguments::refuseGuard('permission', $option);
 
         $this->subject();
-        $this->authorizeAny(CheckArguments::names($names), null);
+        $this->authorizeAny($names, null);
     }
 }

@@ -7,7 +7,9 @@ namespace Tests\Feature;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\TestWith;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
+use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\CheckArguments;
+use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
 /**
@@ -52,6 +54,42 @@ final class CheckArgumentsTest extends TestCase
     {
         self::assertNull(CheckArguments::guard(null));
         self::assertSame('web', CheckArguments::guard('web'));
+    }
+
+    /**
+     * A prefixed guard is the guard after the prefix, and must still be an
+     * authentication guard.
+     *
+     * @return void
+     */
+    public function testGuardReadsThePrefixedForm(): void
+    {
+        self::assertSame('web', CheckArguments::guard('guard=web'));
+
+        $this->expectException(InvalidCheckArgumentException::class);
+        $this->expectExceptionMessage('\'editor\' is not an authentication guard.');
+
+        CheckArguments::guard('guard=editor');
+    }
+
+    /**
+     * A bare guard is refused when a role of any tenant has its name, since it
+     * may be a second role, while the prefixed form is still the guard.
+     *
+     * @return void
+     */
+    public function testGuardRefusesABareGuardNamingARole(): void
+    {
+        $tenant = StubTenant::create(['id' => 'tenant-a', 'name' => 'A']);
+
+        Role::create(['name' => 'web', 'guard' => 'web', 'tenant_type' => $tenant->getMorphClass(), 'tenant_id' => 'tenant-a']);
+
+        self::assertSame('web', CheckArguments::guard('guard=web'));
+
+        $this->expectException(InvalidCheckArgumentException::class);
+        $this->expectExceptionMessage('\'web\' is both an authentication guard and a role.');
+
+        CheckArguments::guard('web');
     }
 
     /**

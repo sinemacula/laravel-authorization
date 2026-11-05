@@ -119,16 +119,23 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
     }
 
     /**
-     * With no arguments nothing is named, and the request is denied.
+     * With no arguments nothing is named, which is a mistake in the route, and
+     * every middleware refuses it, even without a subject.
      *
+     * @param  class-string<\SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware>  $middleware
      * @return void
      */
-    public function testNoArgumentsDeny(): void
+    #[TestWith([RequireRole::class])]
+    #[TestWith([RequirePermission::class])]
+    #[TestWith([AuthorizeAction::class])]
+    public function testNoArgumentsAreRefused(string $middleware): void
     {
-        $this->actingAs($this->seedGrantedUser());
+        $this->actAs(null);
 
-        self::assertFalse($this->admits(RequireRole::class, self::request()));
-        self::assertFalse($this->admits(RequirePermission::class, self::request()));
+        $this->expectException(InvalidCheckArgumentException::class);
+        $this->expectExceptionMessage($middleware . ' names nothing to check. List one or more names, separated by \'|\'.');
+
+        $this->runMiddleware($middleware, self::request());
     }
 
     /**
@@ -169,7 +176,8 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
         $this->actingAs($this->seedGrantedUser());
 
         self::assertSame('Rôle requis.', self::denialOf(fn (): Response => $this->runMiddleware(RequireRole::class, self::request(), 'auditor'))->getMessage());
-        self::assertSame('Action non autorisée.', self::denialOf(fn (): Response => $this->runMiddleware(RequirePermission::class, self::request(), ''))->getMessage());
+        self::assertSame('Action non autorisée.', self::denialOf(fn (): Response => $this->runMiddleware(RequirePermission::class, self::request(), 'posts:delete'))->getMessage());
+        self::assertSame('Action non autorisée.', self::denialOf(fn (): Response => $this->runMiddleware(AuthorizeAction::class, self::request(), 'posts:delete'))->getMessage());
     }
 
     /**

@@ -568,6 +568,46 @@ final class BladeDirectiveRegistrarTest extends TestCase
     }
 
     /**
+     * Every directive refuses a third argument rather than dropping it, naming
+     * the directive and the count, even when the first two would admit.
+     *
+     * @return void
+     */
+    public function testEveryDirectiveRefusesAThirdArgument(): void
+    {
+        $this->actAs(self::identityHolding(roles: ['admin'], permissions: [self::PERMISSION]));
+
+        $directives = [
+            'role'              => '\'admin\', \'web\'',
+            'anyrole'           => '\'admin\', \'web\'',
+            'allroles'          => '\'admin\', \'web\'',
+            'hasrole'           => '\'admin\', \'web\'',
+            'hasanyrole'        => '\'admin\', \'web\'',
+            'hasallroles'       => '\'admin\', \'web\'',
+            'permission'        => '\'' . self::PERMISSION . '\', null',
+            'anypermission'     => '\'' . self::PERMISSION . '\', null',
+            'allpermissions'    => '\'' . self::PERMISSION . '\', null',
+            'haspermission'     => '\'' . self::PERMISSION . '\', null',
+            'hasanypermission'  => '\'' . self::PERMISSION . '\', null',
+            'hasallpermissions' => '\'' . self::PERMISSION . '\', null',
+        ];
+
+        foreach ($directives as $name => $arguments) {
+            self::assertSame('yes', $this->render("@{$name}({$arguments}) yes @end{$name}"), "@{$name} refused two arguments.");
+
+            try {
+                $this->render("@{$name}({$arguments}, 'extra', 'more') yes @end{$name}");
+                self::fail("@{$name} dropped the third argument.");
+            } catch (\Throwable $exception) {
+                $refusal = $exception->getPrevious() ?? $exception;
+
+                self::assertInstanceOf(InvalidCheckArgumentException::class, $refusal, "@{$name} did not refuse the third argument.");
+                self::assertSame("@{$name} takes at most two arguments, 4 given. Separate several names with '|', not ','.", $refusal->getMessage());
+            }
+        }
+    }
+
+    /**
      * Render a template and strip surrounding whitespace so the assertions read
      * cleanly.
      *

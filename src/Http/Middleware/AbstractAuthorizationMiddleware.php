@@ -13,15 +13,17 @@ use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\CheckArguments;
 
 /**
  * Shared template method for the shipped authorization middleware.
  *
  * Every middleware takes at most two arguments: the names to check, separated
- * by `|`, and one option (a guard, or a route parameter). A request without a
- * subject is unauthenticated (401); a denial throws the package's
- * `AuthorizationException`, which Laravel renders as a 403 with the reason code
- * and a translated message.
+ * by `|`, and one option (a guard, or a route parameter). A list that names
+ * nothing, or a third argument, is a mistake in the route and is refused. A
+ * request without a subject is unauthenticated (401); a denial throws the
+ * package's `AuthorizationException`, which Laravel renders as a 403 with the
+ * reason code and a translated message.
  *
  * Run it after authentication and after any step-up middleware, so a request
  * that is not signed in, or not signed in strongly enough, is answered by those
@@ -59,7 +61,7 @@ abstract class AbstractAuthorizationMiddleware
     {
         self::refuseExtraArguments($arguments);
 
-        $this->authorize($request, $arguments[0] ?? '', $arguments[1] ?? null);
+        $this->authorize($request, self::namesOf($arguments[0] ?? ''), $arguments[1] ?? null);
 
         return $next($request);
     }
@@ -68,7 +70,7 @@ abstract class AbstractAuthorizationMiddleware
      * Authorise the request, or throw when it is denied.
      *
      * @param  \Illuminate\Http\Request  $request
-     * @param  string  $names
+     * @param  non-empty-list<string>  $names
      * @param  string|null  $option
      * @return void
      *
@@ -76,7 +78,7 @@ abstract class AbstractAuthorizationMiddleware
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
      */
-    abstract protected function authorize(Request $request, string $names, ?string $option): void;
+    abstract protected function authorize(Request $request, array $names, ?string $option): void;
 
     /**
      * Return the subject the request is about, or throw when there is none.
@@ -96,9 +98,9 @@ abstract class AbstractAuthorizationMiddleware
      * Each action is decided in turn and the first one allowed admits the
      * request. The last is authorised, so its denial is recorded, fires the
      * `AuthorizationFailed` event and throws with its reason code, as
-     * `Authorization::authorize()` does. With no action, the request is denied.
+     * `Authorization::authorize()` does.
      *
-     * @param  list<string>  $actions
+     * @param  non-empty-list<string>  $actions
      * @param  string|null  $resource
      * @return void
      *
@@ -107,7 +109,7 @@ abstract class AbstractAuthorizationMiddleware
     protected function authorizeAny(array $actions, ?string $resource): void
     {
         $manager = self::manager();
-        $last    = \array_pop($actions) ?? throw $this->denial(DecisionReason::IMPLICIT_DENY);
+        $last    = \array_pop($actions);
 
         foreach ($actions as $action) {
             if ($manager->can($action, $resource)) {
@@ -139,6 +141,26 @@ abstract class AbstractAuthorizationMiddleware
     {
         /** @var \SineMacula\Laravel\Authorization\AuthorizationManager */
         return Authorization::getFacadeRoot();
+    }
+
+    /**
+     * Return the names the first argument lists, refusing a list that names
+     * none.
+     *
+     * @param  string  $names
+     * @return non-empty-list<string>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
+     */
+    private static function namesOf(string $names): array
+    {
+        $listed = CheckArguments::names($names);
+
+        if ($listed === []) {
+            throw InvalidCheckArgumentException::noNames(static::class);
+        }
+
+        return $listed;
     }
 
     /**

@@ -4,13 +4,16 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Contracts\Translation\Translator;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Translation\Translator as TranslatorImplementation;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware;
 use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
@@ -65,8 +68,11 @@ final class AuthorizeActionTest extends TestCase
         Route::middleware('authorize:' . self::ACTION . ',report')
             ->get('/reports/{report}', static fn (string $report): string => 'ok');
 
-        Route::middleware('authorize:' . self::ACTION . ',missing')
+        Route::middleware('authorize:posts:update|' . self::ACTION . ',missing')
             ->get('/unbound/{post}', static fn (string $post): string => 'ok');
+
+        Route::middleware(['authorize:' . self::ACTION . ',post', SubstituteBindings::class])
+            ->get('/early/{post}', static fn (StubTenant $post): string => 'ok');
 
         Route::middleware('authorize:' . self::ACTION)
             ->get('/posts', static fn (): string => 'ok');
@@ -76,7 +82,7 @@ final class AuthorizeActionTest extends TestCase
 
         Route::bind('draft', static fn (): StubTenant => new StubTenant);
 
-        Route::middleware([SubstituteBindings::class, 'authorize:' . self::ACTION . ',draft'])
+        Route::middleware([SubstituteBindings::class, 'authorize:posts:update|' . self::ACTION . ',draft'])
             ->get('/drafts/{draft}', static fn (StubTenant $draft): string => 'ok');
     }
 
@@ -160,40 +166,82 @@ final class AuthorizeActionTest extends TestCase
 
     /**
      * A value that cannot be identified (an unsaved model) denies, even when a
-     * policy allows the action on every resource, and the refusal is recorded
-     * as an implicit deny about no resource.
+     * policy allows the action on every resource. The refusal is recorded once,
+     * for the list's last action, as an implicit deny about no resource, and
+     * fires `AuthorizationFailed` once, as a denied list does.
      *
      * @return void
      */
     public function testAnUnidentifiableValueDenies(): void
     {
-        $this->allowEverySubject([self::ACTION]);
+        $this->allowEverySubject(['posts:update', self::ACTION]);
         $this->actAs(StubIdentity::create(['id' => 'drafter']));
 
-        Event::fake([DecisionEvaluated::class]);
-
-        $this->withoutExceptionHandling();
-
-        $denial = self::denialOf(fn () => $this->get('/drafts/new'));
-
-        self::assertSame(DecisionReason::IMPLICIT_DENY, $denial->getReason());
-        self::assertSame('This action is unauthorized.', $denial->getMessage());
-        Event::assertDispatchedTimes(DecisionEvaluated::class, 1);
-        Event::assertDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => $event->action === self::ACTION && $event->resource === null);
+        $this->assertRefusedOnce('/drafts/new');
     }
 
     /**
      * A parameter the route does not carry denies rather than turning the check
-     * into one about no resource.
+     * into one about no resource, and is refused as an unidentifiable value is.
      *
      * @return void
      */
     public function testAParameterTheRouteDoesNotCarryDenies(): void
     {
-        $this->allowEverySubject([self::ACTION]);
+        $this->allowEverySubject(['posts:update', self::ACTION]);
         $this->actAs(StubIdentity::create(['id' => 'misrouted']));
 
-        $this->getJson('/unbound/post-1')->assertForbidden();
+        $this->assertRefusedOnce('/unbound/post-1');
+    }
+
+    /**
+     * Declared before `SubstituteBindings`, the middleware still runs after it,
+     * so it decides on the bound model: an explicit deny on the model wins over
+     * a held permission, as the Gate decides.
+     *
+     * @return void
+     */
+    public function testTheMiddlewareRunsAfterBindingWhereverItIsDeclared(): void
+    {
+        $this->registerPermissionGates();
+
+        $post     = StubTenant::create(['id' => 'post-1']);
+        $identity = self::identityHolding(permissions: [self::ACTION]);
+        self::attachStatement($identity, 'deny', [self::ACTION], ['post:post-1']);
+
+        $this->actAs($identity);
+
+        self::assertFalse(Gate::forUser($identity)->allows(self::ACTION, $post));
+
+        $this->getJson('/early/post-1')->assertForbidden();
+
+        $this->withoutExceptionHandling();
+
+        self::assertSame(DecisionReason::EXPLICIT_DENY, self::denialOf(fn () => $this->get('/early/post-1'))->getReason());
+    }
+
+    /**
+     * Every denial is worded in the translator's current locale: a decided one
+     * on a bound model, an unidentifiable value and a missing parameter.
+     *
+     * @return void
+     */
+    public function testDenialsAreTranslatedInTheCurrentLocale(): void
+    {
+        $translator = $this->app?->make(Translator::class);
+        self::assertInstanceOf(TranslatorImplementation::class, $translator);
+
+        $translator->addLines(['authorization.denied' => 'Action non autorisée.'], 'fr', 'authorization');
+        $translator->setLocale('fr');
+
+        StubTenant::create(['id' => 'post-1']);
+
+        $this->allowEverySubject(['posts:update']);
+        $this->actAs(StubIdentity::create(['id' => 'francophone']));
+
+        foreach (['/posts/post-1', '/drafts/new', '/unbound/post-1'] as $uri) {
+            $this->getJson($uri)->assertForbidden()->assertJson(['message' => 'Action non autorisée.']);
+        }
     }
 
     /**
@@ -271,5 +319,33 @@ final class AuthorizeActionTest extends TestCase
             self::assertSame($expected, Gate::forUser($identity)->allows(self::ACTION, $post));
             $this->getJson('/posts/post-1')->assertStatus($expected ? 200 : 403);
         }
+    }
+
+    /**
+     * Assert the request is refused for an unidentifiable resource: an implicit
+     * deny recorded once, for the last action about no resource, and one
+     * `AuthorizationFailed` event.
+     *
+     * @param  string  $uri
+     * @return void
+     */
+    private function assertRefusedOnce(string $uri): void
+    {
+        Event::fake([DecisionEvaluated::class, AuthorizationFailed::class]);
+
+        $this->withoutExceptionHandling();
+
+        $denial = self::denialOf(fn () => $this->get($uri));
+
+        self::assertSame(DecisionReason::IMPLICIT_DENY, $denial->getReason());
+        self::assertSame('This action is unauthorized.', $denial->getMessage());
+        Event::assertDispatchedTimes(DecisionEvaluated::class, 1);
+        Event::assertDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => $event->action === self::ACTION && $event->resource === null);
+        Event::assertDispatchedTimes(AuthorizationFailed::class, 1);
+        Event::assertDispatched(AuthorizationFailed::class, static fn (AuthorizationFailed $event): bool => $event->action === self::ACTION
+            && $event->resource                                                                                            === null
+            && $event->context                                                                                             === []
+            && $event->principal instanceof StubIdentity
+            && $event->result->reason === DecisionReason::IMPLICIT_DENY);
     }
 }

@@ -7,8 +7,10 @@ namespace Tests\Feature;
 use Illuminate\Config\Repository as ConfigRepositoryImplementation;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Contracts\Http\Kernel as HttpKernelContract;
 use Illuminate\Events\Dispatcher;
 use Illuminate\Foundation\Application;
+use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Routing\Router;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
@@ -502,6 +504,44 @@ final class AuthorizationServiceProviderTest extends TestCase
         self::assertSame(RequireRole::class, $middleware['role'] ?? null);
         self::assertSame(RequirePermission::class, $middleware['permission'] ?? null);
         self::assertSame(AuthorizeAction::class, $middleware['authorize'] ?? null);
+    }
+
+    /**
+     * The `authorize` middleware is placed once, right after
+     * `SubstituteBindings`, in the router's middleware priority, however often
+     * the provider boots.
+     *
+     * @return void
+     */
+    public function testPlacesTheAuthorizeMiddlewareRightAfterBindingSubstitution(): void
+    {
+        (new AuthorizationServiceProvider($this->application()))->boot();
+
+        $priority = $this->router()->middlewarePriority;
+        $bindings = \array_search(SubstituteBindings::class, $priority, true);
+
+        self::assertIsInt($bindings);
+        self::assertSame(AuthorizeAction::class, $priority[$bindings + 1] ?? null);
+        self::assertCount(1, \array_keys($priority, AuthorizeAction::class, true));
+    }
+
+    /**
+     * Without an HTTP kernel there is no priority to extend, and the provider
+     * still registers the aliases.
+     *
+     * @return void
+     */
+    public function testBootsWithoutAnHttpKernel(): void
+    {
+        $router = new Router(new Dispatcher($this->application()), $this->application());
+
+        $this->application()->offsetUnset(HttpKernelContract::class);
+        $this->application()->instance('router', $router);
+
+        (new AuthorizationServiceProvider($this->application()))->boot();
+
+        self::assertSame([], $router->middlewarePriority);
+        self::assertSame(AuthorizeAction::class, $router->getMiddleware()['authorize'] ?? null);
     }
 
     /**

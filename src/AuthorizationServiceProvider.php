@@ -6,7 +6,10 @@ namespace SineMacula\Laravel\Authorization;
 
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Contracts\Http\Kernel as HttpKernelContract;
 use Illuminate\Contracts\Translation\Translator;
+use Illuminate\Foundation\Http\Kernel as HttpKernel;
+use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\ServiceProvider;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
@@ -315,6 +318,10 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * the same keys are respected — a consumer that has already wired their own
      * `role`, `permission` or `authorize` middleware keeps theirs untouched.
      *
+     * `AuthorizeAction` is also placed right after `SubstituteBindings` in the
+     * middleware priority, as Laravel places its own `can` middleware, so it
+     * decides on the bound model however the route orders its middleware.
+     *
      * @return void
      */
     protected function registerRouteMiddleware(): void
@@ -335,6 +342,27 @@ final class AuthorizationServiceProvider extends ServiceProvider
         foreach (\array_diff_key($aliases, $router->getMiddleware()) as $alias => $middleware) {
             $router->aliasMiddleware($alias, $middleware);
         }
+
+        $this->prioritiseAuthorizeAction();
+    }
+
+    /**
+     * Place `AuthorizeAction` right after `SubstituteBindings` in the HTTP
+     * kernel's middleware priority, which the kernel copies to the router.
+     *
+     * Without Laravel's HTTP kernel there is no priority to extend.
+     *
+     * @return void
+     */
+    protected function prioritiseAuthorizeAction(): void
+    {
+        $kernel = $this->app->bound(HttpKernelContract::class) ? $this->app->make(HttpKernelContract::class) : null;
+
+        if (!$kernel instanceof HttpKernel) {
+            return;
+        }
+
+        $kernel->addToMiddlewarePriorityAfter(SubstituteBindings::class, AuthorizeAction::class);
     }
 
     /**

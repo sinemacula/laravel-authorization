@@ -195,23 +195,23 @@ final class RequirePermissionTest extends TestCase
     }
 
     /**
-     * A list that names no action denies the request, even when every action
-     * would be allowed.
+     * A list that names no action is a mistake in the route, and is refused
+     * rather than decided, even when every action would be allowed.
      *
      * @param  string  $list
      * @return void
      */
     #[TestWith([''])]
     #[TestWith([' | '])]
-    public function testAListNamingNoActionIsDenied(string $list): void
+    public function testAListNamingNoActionIsRefused(string $list): void
     {
         $this->allowEverySubject(['*']);
         $this->actAs(self::identityHolding());
 
-        $denial = self::denialOf(fn (): Response => $this->handle($list));
+        $this->expectException(InvalidCheckArgumentException::class);
+        $this->expectExceptionMessage(RequirePermission::class . ' names nothing to check. List one or more names, separated by \'|\'.');
 
-        self::assertSame(DecisionReason::IMPLICIT_DENY, $denial->getReason());
-        self::assertSame('This action is unauthorized.', $denial->getMessage());
+        $this->handle($list);
     }
 
     /**

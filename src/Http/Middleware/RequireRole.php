@@ -23,7 +23,11 @@ use SineMacula\Laravel\Authorization\Support\CheckArguments;
  * several roles, chain the middleware:
  * `->middleware(['role:admin', 'role:oncall'])`.
  *
- * A subject that cannot hold roles holds none, and is denied.
+ * A subject that cannot hold roles holds none, and is denied. A denial carries
+ * the `implicit_deny` reason code and the `role_required` message; since no
+ * action was decided, it records no decision and fires no `AuthorizationFailed`
+ * event. A guard that is also the name of a role is refused, since
+ * `role:editor,admin` may mean either role; write it as `guard=admin`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -34,7 +38,7 @@ final class RequireRole extends AbstractAuthorizationMiddleware
      * Admit the request when the subject holds any listed role.
      *
      * @param  \Illuminate\Http\Request  $request
-     * @param  string  $names
+     * @param  non-empty-list<string>  $names
      * @param  string|null  $option
      * @return void
      *
@@ -43,13 +47,13 @@ final class RequireRole extends AbstractAuthorizationMiddleware
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
      */
     #[\Override]
-    protected function authorize(Request $request, string $names, ?string $option): void
+    protected function authorize(Request $request, array $names, ?string $option): void
     {
         $guard     = CheckArguments::guard($option);
         $principal = $this->subject()->subject;
 
         if ($principal instanceof SupportsRoles) {
-            foreach (CheckArguments::names($names) as $role) {
+            foreach ($names as $role) {
                 if ($principal->hasRole($role, $guard)) {
                     return;
                 }
