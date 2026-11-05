@@ -16,7 +16,7 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final class SystemPolicyProtectedException extends \RuntimeException
+final class SystemPolicyProtectedException extends SystemRecordProtectedException
 {
     /**
      * Create a new exception instance.
@@ -24,19 +24,9 @@ final class SystemPolicyProtectedException extends \RuntimeException
      * @param  string  $policyName
      * @param  string  $operation
      */
-    public function __construct(
-
-        /** Name of the policy whose mutation was refused. */
-        private readonly string $policyName,
-
-        /** Operation that was refused, such as "delete" or "modify". */
-        private readonly string $operation,
-    ) {
-        parent::__construct(
-            "Refusing to {$operation} system policy '{$policyName}'."
-                . ' Call `forceSystem()` on the model before the operation to override.',
-            403,
-        );
+    public function __construct(string $policyName, string $operation)
+    {
+        parent::__construct('policy', $policyName, $operation);
     }
 
     /**
@@ -46,16 +36,6 @@ final class SystemPolicyProtectedException extends \RuntimeException
      */
     public function getPolicyName(): string
     {
-        return $this->policyName;
-    }
-
-    /**
-     * Return the operation that was refused.
-     *
-     * @return string
-     */
-    public function getOperation(): string
-    {
-        return $this->operation;
+        return $this->getRecordName();
     }
 }

@@ -104,6 +104,24 @@ final class GuardScopedLookupTest extends TestCase
     }
 
     /**
+     * Without a guard the configured default guard is used; a given guard
+     * overrides it.
+     *
+     * @return void
+     */
+    public function testANullGuardMeansTheConfiguredDefault(): void
+    {
+        config(['authorization.defaults.guard' => 'api']);
+
+        $api = Role::create(['name' => 'editor', 'guard' => 'api']);
+        $web = Role::create(['name' => 'editor', 'guard' => 'web']);
+
+        self::assertSame($api->id, GuardScopedLookup::findForGuard(Role::class, 'editor')?->getKey());
+        self::assertSame($api->id, GuardScopedLookup::findForGuard(Role::class, 'editor', null)?->getKey());
+        self::assertSame($web->id, GuardScopedLookup::findForGuard(Role::class, 'editor', 'web')?->getKey());
+    }
+
+    /**
      * When rows tie on owner and guard, as they can on a table without the
      * tenant scope, the lowest primary key wins whatever order the rows were
      * written in.

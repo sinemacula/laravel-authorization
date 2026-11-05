@@ -118,11 +118,6 @@ class Role extends Model
      */
     public static function resolveByName(string $name, ?string $guard = null): self
     {
-        if ($guard === null) {
-            /** @var string $guard */
-            $guard = config('authorization.defaults.guard', 'web');
-        }
-
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
         $class = config('authorization.models.role', static::class);
 

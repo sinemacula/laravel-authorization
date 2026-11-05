@@ -4,7 +4,9 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Concerns;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Services\GrantService;
@@ -26,6 +28,47 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
  */
 trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
 {
+    /**
+     * Build the relation onto one kind of grant: polymorphic on the grantee,
+     * through the target's grant table and pivot class, with the expiry and
+     * timestamps on the pivot, and without grants that have expired.
+     *
+     * Shared by the roles, permissions and policies relations so the grant
+     * tables are always read the same way.
+     *
+     * @template TRelated of \Illuminate\Database\Eloquent\Model
+     * @template TPivot of \Illuminate\Database\Eloquent\Relations\MorphPivot
+     *
+     * @param  class-string<TRelated>  $related
+     * @param  string  $table
+     * @param  string  $relatedKey
+     * @param  class-string<TPivot>  $pivotClass
+     * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<TRelated, $this, TPivot, 'pivot'>
+     */
+    private function authorizationGrantRelation(string $related, string $table, string $relatedKey, string $pivotClass): MorphToMany
+    {
+        // The `where(...)` and inner `whereNull()/orWhere()` calls are resolved
+        // by PHPStan to static methods on Eloquent's Builder via Laravel's
+        // annotation soup — the underlying dispatch is instance-level. Same
+        // pattern, same justification, as `GuardScopedLookup`.
+        // @phpstan-ignore staticMethod.dynamicCall
+        return $this->morphToMany(
+            related: $related,
+            name: 'authorizable',
+            table: $table,
+            foreignPivotKey: 'authorizable_id',
+            relatedPivotKey: $relatedKey,
+        )
+            ->using($pivotClass)
+            ->withPivot('expires_at')
+            ->withTimestamps()
+            ->where(static function (Builder $query) use ($table): void {
+                // @phpstan-ignore staticMethod.dynamicCall
+                $query->whereNull($table . '.expires_at')
+                    ->orWhere($table . '.expires_at', '>', Carbon::now('UTC'));
+            });
+    }
+
     /**
      * Gather the primary keys of the supplied models — feeds the role-tag list
      * for tag-capable cache invalidation. Keys that are neither string nor int

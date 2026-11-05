@@ -110,6 +110,22 @@ final class HasRolesTest extends TestCase
     }
 
     /**
+     * The roles relation can be queried from outside the identity, and its
+     * pivot carries each assignment's expiry.
+     *
+     * @return void
+     */
+    public function testRolesRelationIsQueryable(): void
+    {
+        $user = $this->identityWithRoleUntil('2026-07-01 13:00:00');
+
+        $role = $user->roles()->sole();
+
+        self::assertSame('on-call', $role->name);
+        self::assertSame('2026-07-01 13:00:00', Carbon::parse((string) $role->pivot->expires_at)->format('Y-m-d H:i:s')); // @phpstan-ignore property.notFound
+    }
+
+    /**
      * A role model matches only that row: a tenant's role that shares the name
      * and guard of a platform role does not pass a check for the platform's,
      * while a check by name is met by either.
