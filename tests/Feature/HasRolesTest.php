@@ -4,14 +4,18 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Concerns\HasRoles;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
+use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\Role;
 use Tests\Concerns\ChecksGrantExpiry;
+use Tests\Concerns\ChecksGrantsByName;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -29,7 +33,7 @@ use Tests\TestCase;
 #[CoversTrait(HasRoles::class)]
 final class HasRolesTest extends TestCase
 {
-    use ChecksGrantExpiry;
+    use ChecksGrantExpiry, ChecksGrantsByName;
 
     /**
      * Reset the clock.
@@ -103,6 +107,30 @@ final class HasRolesTest extends TestCase
     }
 
     /**
+     * A role model matches only that row: a tenant's role that shares the name
+     * and guard of a platform role does not pass a check for the platform's,
+     * while a check by name is met by either.
+     *
+     * @return void
+     */
+    public function testHasRoleWithAModelMatchesOnlyThatRow(): void
+    {
+        $tenant   = self::createTenant('tenant-a');
+        $platform = Role::create(['name' => 'manager', 'guard' => 'web']);
+        $owned    = Role::create(['name' => 'manager', 'guard' => 'web'] + self::ownedBy($tenant));
+        $user     = StubIdentity::create(['id' => (string) Str::uuid()]);
+
+        $this->actAsTenant($tenant);
+
+        $user->assignRole($owned);
+
+        self::assertFalse($user->hasRole($platform));
+        self::assertTrue($user->hasRole($owned));
+        self::assertTrue($user->hasRole('manager'));
+        self::assertFalse($user->hasRole('director'));
+    }
+
+    /**
      * Return the grant table the expiry check reads.
      *
      * @return string
@@ -159,6 +187,116 @@ final class HasRolesTest extends TestCase
     {
         /** @var list<string> */
         return $identity->roles->pluck('name')->all();
+    }
+
+    /**
+     * Return the column of the grant table that names the granted row.
+     *
+     * @return string
+     */
+    #[\Override]
+    protected static function targetColumn(): string
+    {
+        return 'role_id';
+    }
+
+    /**
+     * Return the exception a name no row answers raises.
+     *
+     * @return class-string<\Throwable>
+     */
+    #[\Override]
+    protected static function unknownNameException(): string
+    {
+        return UnknownRoleException::class;
+    }
+
+    /**
+     * Return the event a revocation dispatches.
+     *
+     * @return class-string
+     */
+    #[\Override]
+    protected static function revokedEvent(): string
+    {
+        return RoleRevoked::class;
+    }
+
+    /**
+     * Create a role with the given name and owner, for the `web` guard.
+     *
+     * @param  string  $name
+     * @param  array{tenant_type: string|null, tenant_id: string|null}  $owner
+     * @return \Illuminate\Database\Eloquent\Model
+     */
+    #[\Override]
+    protected static function createNamed(string $name, array $owner): Model
+    {
+        return Role::query()->create(['name' => $name, 'guard' => 'web'] + $owner);
+    }
+
+    /**
+     * Grant the role to the identity.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Illuminate\Database\Eloquent\Model  $row
+     * @param  \DateTimeInterface|null  $expiresAt
+     * @return void
+     */
+    #[\Override]
+    protected function grantTo(StubIdentity $identity, Model $row, ?\DateTimeInterface $expiresAt = null): void
+    {
+        \assert($row instanceof Role);
+
+        $identity->assignRole($row, $expiresAt);
+    }
+
+    /**
+     * Revoke the role, or the role name, from the identity.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Illuminate\Database\Eloquent\Model|string  $grant
+     * @return void
+     */
+    #[\Override]
+    protected function revokeFrom(StubIdentity $identity, Model|string $grant): void
+    {
+        \assert(\is_string($grant) || $grant instanceof Role);
+
+        $identity->revokeRole($grant);
+    }
+
+    /**
+     * Synchronise the identity's roles to the given roles and names.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  list<\Illuminate\Database\Eloquent\Model|string>  $grants
+     * @return void
+     */
+    #[\Override]
+    protected function syncTo(StubIdentity $identity, array $grants): void
+    {
+        $typed = [];
+
+        foreach ($grants as $grant) {
+            \assert(\is_string($grant) || $grant instanceof Role);
+
+            $typed[] = $grant;
+        }
+
+        $identity->syncRoles($typed);
+    }
+
+    /**
+     * Return the role a revocation event reports.
+     *
+     * @param  object  $event
+     * @return \Illuminate\Database\Eloquent\Model|null
+     */
+    #[\Override]
+    protected static function revokedRow(object $event): ?Model
+    {
+        return $event instanceof RoleRevoked ? $event->role : null;
     }
 
     /**

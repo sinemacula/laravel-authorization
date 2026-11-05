@@ -4,15 +4,19 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked;
+use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use Tests\Concerns\ChecksGrantExpiry;
+use Tests\Concerns\ChecksGrantsByName;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -30,7 +34,7 @@ use Tests\TestCase;
 #[CoversTrait(HasPermissions::class)]
 final class HasPermissionsTest extends TestCase
 {
-    use ChecksGrantExpiry;
+    use ChecksGrantExpiry, ChecksGrantsByName;
 
     /**
      * Reset the clock.
@@ -186,6 +190,116 @@ final class HasPermissionsTest extends TestCase
     {
         /** @var list<string> */
         return $identity->permissions->pluck('name')->all();
+    }
+
+    /**
+     * Return the column of the grant table that names the granted row.
+     *
+     * @return string
+     */
+    #[\Override]
+    protected static function targetColumn(): string
+    {
+        return 'permission_id';
+    }
+
+    /**
+     * Return the exception a name no row answers raises.
+     *
+     * @return class-string<\Throwable>
+     */
+    #[\Override]
+    protected static function unknownNameException(): string
+    {
+        return UnknownPermissionException::class;
+    }
+
+    /**
+     * Return the event a revocation dispatches.
+     *
+     * @return class-string
+     */
+    #[\Override]
+    protected static function revokedEvent(): string
+    {
+        return PermissionRevoked::class;
+    }
+
+    /**
+     * Create a permission with the given name and owner, for the `web` guard.
+     *
+     * @param  string  $name
+     * @param  array{tenant_type: string|null, tenant_id: string|null}  $owner
+     * @return \Illuminate\Database\Eloquent\Model
+     */
+    #[\Override]
+    protected static function createNamed(string $name, array $owner): Model
+    {
+        return Permission::query()->create(['name' => $name, 'guard' => 'web'] + $owner);
+    }
+
+    /**
+     * Grant the permission to the identity.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Illuminate\Database\Eloquent\Model  $row
+     * @param  \DateTimeInterface|null  $expiresAt
+     * @return void
+     */
+    #[\Override]
+    protected function grantTo(StubIdentity $identity, Model $row, ?\DateTimeInterface $expiresAt = null): void
+    {
+        \assert($row instanceof Permission);
+
+        $identity->givePermission($row, $expiresAt);
+    }
+
+    /**
+     * Revoke the permission, or the permission name, from the identity.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \Illuminate\Database\Eloquent\Model|string  $grant
+     * @return void
+     */
+    #[\Override]
+    protected function revokeFrom(StubIdentity $identity, Model|string $grant): void
+    {
+        \assert(\is_string($grant) || $grant instanceof Permission);
+
+        $identity->revokePermission($grant);
+    }
+
+    /**
+     * Synchronise the identity's permissions to the given ones and names.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  list<\Illuminate\Database\Eloquent\Model|string>  $grants
+     * @return void
+     */
+    #[\Override]
+    protected function syncTo(StubIdentity $identity, array $grants): void
+    {
+        $typed = [];
+
+        foreach ($grants as $grant) {
+            \assert(\is_string($grant) || $grant instanceof Permission);
+
+            $typed[] = $grant;
+        }
+
+        $identity->syncPermissions($typed);
+    }
+
+    /**
+     * Return the permission a revocation event reports.
+     *
+     * @param  object  $event
+     * @return \Illuminate\Database\Eloquent\Model|null
+     */
+    #[\Override]
+    protected static function revokedRow(object $event): ?Model
+    {
+        return $event instanceof PermissionRevoked ? $event->permission : null;
     }
 
     /**

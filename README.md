@@ -40,7 +40,9 @@ principal's role and permission grants, and anything left is denied.
 - **Roles and permissions** as Eloquent models with UUID keys, granted to any model through polymorphic pivots (integer,
   UUID and ULID keys all work), each grant with an optional expiry, stored in UTC whatever zone it is given in.
 - **Owned records**: a role, permission or policy belongs to the platform or to one tenant, and its name is unique
-  within its owner (and, for roles and permissions, its guard), so two tenants can each have their own `manager`.
+  within its owner (and, for roles and permissions, its guard), so two tenants can each have their own `manager`. A
+  tenant cannot take the name of a platform system role, revoking a name removes every held grant of it (the
+  platform's and the tenant's), and `hasRole()` given a role model matches only that row.
 - **Role and permission names** of letters, digits and `_ - : . *`, so `posts:edit`, `posts.edit` and
   `sso.connection.trust` are all valid; anything else is refused when the name is saved.
 - **Wildcard permissions** (`posts:*`, `posts.*`, `*:create`, and `*` for everything; `*:*` matches only names with a

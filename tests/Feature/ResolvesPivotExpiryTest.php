@@ -4,7 +4,10 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Config\Repository;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Query\Builder;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Concerns\ResolvesPivotExpiry;
@@ -14,7 +17,9 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the read of an existing grant that the grant methods use to
- * tell whether a re-grant changes the expiry.
+ * tell whether a re-grant changes the expiry, and for the lookups a revocation
+ * or synchronisation by name works from: every row that answers a name under
+ * the identity's guard, and which of them the identity holds.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -103,6 +108,96 @@ final class ResolvesPivotExpiryTest extends TestCase
     }
 
     /**
+     * The stored expiry is read as UTC, whatever the application's zone.
+     *
+     * @return void
+     */
+    public function testExistingGrantExpiryIsReadAsUtc(): void
+    {
+        $identity = self::identity(self::IDENTITY);
+        $role     = Role::query()->create(['name' => 'editor']);
+
+        $this->grant($identity, $role, '2030-01-02 03:04:05');
+
+        $zone = \date_default_timezone_get();
+
+        \date_default_timezone_set('Asia/Tokyo');
+
+        try {
+            $read = $this->read($identity, $role);
+        } finally {
+            \date_default_timezone_set($zone);
+        }
+
+        self::assertSame(Carbon::parse('2030-01-02 03:04:05', 'UTC')->getTimestamp(), $read['expires_at']?->getTimestamp());
+    }
+
+    /**
+     * Only the given models the identity holds are returned, in the order
+     * given, an expired grant included and another identity's grant not.
+     *
+     * @return void
+     */
+    public function testHeldAmongReturnsTheHeldModelsInTheOrderGiven(): void
+    {
+        $identity = self::identity(self::IDENTITY);
+        $first    = Role::query()->create(['name' => 'first']);
+        $second   = Role::query()->create(['name' => 'second']);
+        $third    = Role::query()->create(['name' => 'third']);
+
+        $this->grant($identity, $third, null);
+        $this->grant($identity, $first, '2000-01-01 00:00:00');
+        $this->grant(self::identity(self::OTHER_IDENTITY), $second, null);
+
+        $held = self::held($identity->roles()->newPivotQuery(), 'role_id', [$first, $second, $third]);
+
+        self::assertSame([$first->id, $third->id], \array_map(static fn (Model $model): mixed => $model->getKey(), $held));
+        self::assertSame([], self::held($identity->roles()->newPivotQuery(), 'role_id', []));
+    }
+
+    /**
+     * The rows that answer a name are those for the identity's own guard and
+     * the guard-agnostic ones, ranked guard-specific first.
+     *
+     * @return void
+     */
+    public function testAllNamedUsesTheIdentitysGuard(): void
+    {
+        $rows = $this->rolesForEveryGuard();
+
+        $identity = new class {
+            /**
+             * Return the guard the identity authenticates under.
+             *
+             * @return string
+             */
+            public function getAuthorizationGuard(): string
+            {
+                return 'api';
+            }
+        };
+
+        self::assertSame([$rows['api'], $rows['none']], $this->namedKeys($identity));
+    }
+
+    /**
+     * An identity that names no guard uses the configured default guard.
+     *
+     * @return void
+     */
+    public function testAllNamedUsesTheDefaultGuardWhenTheIdentityNamesNone(): void
+    {
+        $rows = $this->rolesForEveryGuard();
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make(Repository::class);
+
+        $config->set('authorization.defaults.guard', 'admin');
+
+        self::assertSame([$rows['admin'], $rows['none']], $this->namedKeys(self::identity(self::IDENTITY)));
+    }
+
+    /**
      * Create a stub identity with the given id.
      *
      * @param  string  $id
@@ -129,6 +224,99 @@ final class ResolvesPivotExpiryTest extends TestCase
             'authorizable_id'   => $identity->id,
             'expires_at'        => $expiresAt,
         ]);
+    }
+
+    /**
+     * Create a role named `editor` for each of three guards and one that is
+     * guard-agnostic, keyed by guard.
+     *
+     * @return array<string, string>
+     */
+    private function rolesForEveryGuard(): array
+    {
+        $keys = [];
+
+        foreach (['web' => 'web', 'api' => 'api', 'admin' => 'admin', 'none' => null] as $key => $guard) {
+            $keys[$key] = Role::query()->create(['name' => 'editor', 'guard' => $guard])->id;
+        }
+
+        return $keys;
+    }
+
+    /**
+     * Return the keys of every role named `editor` for the identity's guard, in
+     * the order the lookup ranks them.
+     *
+     * @param  object  $identity
+     * @return list<mixed>
+     */
+    private function namedKeys(object $identity): array
+    {
+        return \array_map(static fn (Model $model): mixed => $model->getKey(), self::named($identity, Role::class, 'editor'));
+    }
+
+    /**
+     * Return the models among the given ones the pivot query holds, through the
+     * trait.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $pivot
+     * @param  string  $column
+     * @param  list<\Illuminate\Database\Eloquent\Model>  $models
+     * @return list<\Illuminate\Database\Eloquent\Model>
+     */
+    private static function held(Builder $pivot, string $column, array $models): array
+    {
+        /** @phpstan-ignore-next-line class.missingExtends */
+        $probe = new class {
+            use ResolvesPivotExpiry;
+
+            /**
+             * Return the models among the given ones the pivot query holds.
+             *
+             * @param  \Illuminate\Database\Query\Builder  $pivot
+             * @param  string  $column
+             * @param  list<\Illuminate\Database\Eloquent\Model>  $models
+             * @return list<\Illuminate\Database\Eloquent\Model>
+             */
+            public function held(Builder $pivot, string $column, array $models): array
+            {
+                return self::authorizationHeldAmong($pivot, $column, $models);
+            }
+        };
+
+        return $probe->held($pivot, $column, $models);
+    }
+
+    /**
+     * Return every row of the class that answers the name under the identity's
+     * guard, through the trait.
+     *
+     * @param  object  $identity
+     * @param  class-string<\Illuminate\Database\Eloquent\Model>  $class
+     * @param  string  $name
+     * @return list<\Illuminate\Database\Eloquent\Model>
+     */
+    private static function named(object $identity, string $class, string $name): array
+    {
+        /** @phpstan-ignore-next-line class.missingExtends */
+        $probe = new class {
+            use ResolvesPivotExpiry;
+
+            /**
+             * Return every row of the class that answers the name.
+             *
+             * @param  object  $identity
+             * @param  class-string<\Illuminate\Database\Eloquent\Model>  $class
+             * @param  string  $name
+             * @return list<\Illuminate\Database\Eloquent\Model>
+             */
+            public function named(object $identity, string $class, string $name): array
+            {
+                return self::authorizationAllNamed($identity, $class, $name);
+            }
+        };
+
+        return $probe->named($identity, $class, $name);
     }
 
     /**

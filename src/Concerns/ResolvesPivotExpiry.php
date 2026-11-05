@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
+use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 
 /**
  * Shared helpers used by the authorizable-identity traits to feed the
@@ -214,6 +215,44 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
         }
 
         return $left->getTimestamp() === $right->getTimestamp();
+    }
+
+    /**
+     * Return every row of the given class that answers the name under the
+     * identity's guard (the package default when the identity names none), in
+     * the order the lookup ranks them. Shared by the role and permission
+     * traits, which revoke and synchronise by name from these.
+     *
+     * @param  object  $identity
+     * @param  class-string<\Illuminate\Database\Eloquent\Model>  $class
+     * @param  string  $name
+     * @return list<\Illuminate\Database\Eloquent\Model>
+     */
+    private static function authorizationAllNamed(object $identity, string $class, string $name): array
+    {
+        /** @var string $guard */
+        $guard = self::authorizationResolveGuard($identity) ?? config('authorization.defaults.guard', 'web');
+
+        return GuardScopedLookup::allForGuard($class, $name, $guard);
+    }
+
+    /**
+     * Return the models among the given ones the identity holds, read through
+     * the grant relation's pivot query on the column that names the granted
+     * row, so an expired grant counts as held. Shared by the role and
+     * permission traits.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $pivot
+     * @param  string  $column
+     * @param  list<\Illuminate\Database\Eloquent\Model>  $models
+     * @return list<\Illuminate\Database\Eloquent\Model>
+     */
+    private static function authorizationHeldAmong(Builder $pivot, string $column, array $models): array
+    {
+        $keys = \array_map(static fn (Model $model): string => (string) $model->getKey(), $models);
+        $held = \array_map(static fn (mixed $key): string => \is_scalar($key) ? (string) $key : '', $pivot->whereIn($column, $keys)->pluck($column)->all());
+
+        return \array_values(\array_filter($models, static fn (Model $model): bool => \in_array((string) $model->getKey(), $held, true)));
     }
 
     /**

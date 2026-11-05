@@ -14,10 +14,11 @@ use SineMacula\Laravel\Authorization\Console\Concerns\ResolvesIdentity;
  * name. Resolves the morph alias via the Eloquent morph map, validates the
  * `AuthorizableIdentity` contract, and delegates to `revokeRole()`.
  *
- * The role name is looked up within the tenant scope, like any other query: a
- * platform-wide role is always found, and a tenant-owned role only when the
- * application's tenant resolver resolves its tenant in the console. Without a
- * tenant, only platform-wide roles can be revoked.
+ * The role name is revoked from the roles the identity holds within the tenant
+ * scope, like any other query: every held role of that name is revoked, the
+ * platform-wide one and, when the application's tenant resolver resolves a
+ * tenant in the console, the tenant's own. Without a tenant, only platform-wide
+ * roles can be revoked.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

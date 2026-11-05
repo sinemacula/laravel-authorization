@@ -48,6 +48,39 @@ final class GuardScopedLookup
      */
     public static function findForGuard(string $class, string $name, string $guard): ?Model
     {
+        return self::queryForGuard($class, $name, $guard)->first();
+    }
+
+    /**
+     * Return every row that answers the name under the given guard, in the
+     * order `findForGuard()` ranks them.
+     *
+     * A revocation or synchronisation by name works from these, since an
+     * identity may hold the platform's row while the current tenant owns one of
+     * the same name that `findForGuard()` would pick.
+     *
+     * @param  class-string<\Illuminate\Database\Eloquent\Model>  $class
+     * @param  string  $name
+     * @param  string  $guard
+     * @return list<\Illuminate\Database\Eloquent\Model>
+     */
+    public static function allForGuard(string $class, string $name, string $guard): array
+    {
+        /** @var list<\Illuminate\Database\Eloquent\Model> */
+        return self::queryForGuard($class, $name, $guard)->get()->all();
+    }
+
+    /**
+     * Build the query for the rows that answer the name under the given guard,
+     * ordered by precedence.
+     *
+     * @param  class-string<\Illuminate\Database\Eloquent\Model>  $class
+     * @param  string  $name
+     * @param  string  $guard
+     * @return \Illuminate\Database\Eloquent\Builder<\Illuminate\Database\Eloquent\Model>
+     */
+    private static function queryForGuard(string $class, string $name, string $guard): Builder
+    {
         $instance = new $class;
         $grammar  = $instance->getConnection()->getQueryGrammar();
         $column   = static fn (string $column): string => $instance->qualifyColumn($column);
@@ -61,7 +94,6 @@ final class GuardScopedLookup
             })
             ->orderByRaw($grammar->wrap($column('tenant_type')) . ' IS NULL')
             ->orderByRaw($grammar->wrap($column('guard')) . ' IS NULL')
-            ->orderBy($instance->getQualifiedKeyName())
-            ->first();
+            ->orderBy($instance->getQualifiedKeyName());
     }
 }

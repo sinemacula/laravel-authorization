@@ -15,10 +15,10 @@ use Tests\Concerns\ActsAsTenant;
 use Tests\TestCase;
 
 /**
- * Feature tests for the precedence `GuardScopedLookup::findForGuard()` applies
- * when several rows answer a name: the current tenant's row over the
- * platform's, then a row for the guard over a guard-agnostic one, then the
- * primary key.
+ * Feature tests for the precedence `GuardScopedLookup::findForGuard()` and
+ * `allForGuard()` apply when several rows answer a name: the current tenant's
+ * row over the platform's, then a row for the guard over a guard-agnostic one,
+ * then the primary key.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -167,6 +167,10 @@ final class GuardScopedLookupTest extends TestCase
         ];
 
         $this->actAsTenant($tenant);
+
+        $ranked = \array_map(static fn (Model $row): mixed => $row->getKey(), GuardScopedLookup::allForGuard($class, 'editor', 'web'));
+
+        self::assertSame(\array_map(static fn (Model $row): mixed => $row->getKey(), \array_reverse($rows)), $ranked);
 
         foreach (\array_reverse($rows) as $expected) {
             self::assertSame($expected->getKey(), GuardScopedLookup::findForGuard($class, 'editor', 'web')?->getKey());

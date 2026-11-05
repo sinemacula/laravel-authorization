@@ -126,6 +126,13 @@ trait HasRoles // @phpstan-ignore trait.unused
     /**
      * Revoke the given role from this identity.
      *
+     * A name is revoked from the grants the identity holds, not from the one
+     * row a lookup would pick: every held role of that name for the identity's
+     * guard, or guard-agnostic, is detached, whether the current tenant or the
+     * platform owns it, so a tenant's role of the same name never hides the
+     * platform grant. `IdentityRoleRevoked` fires once for each role really
+     * detached, and not at all when the identity held none.
+     *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @return static
      *
@@ -133,15 +140,17 @@ trait HasRoles // @phpstan-ignore trait.unused
      */
     public function revokeRole(Role|string $role): static
     {
-        $model = $this->resolveRole($role);
+        $held = $this->heldRoles($role instanceof Role ? [$role] : $this->rolesNamed($role));
 
-        $this->roles()->detach($model->getKey());
+        $this->roles()->detach(\array_map(static fn (Role $model): mixed => $model->getKey(), $held));
 
         if (isset($this->relations['roles'])) {
             unset($this->relations['roles']);
         }
 
-        Event::dispatch(new IdentityRoleRevoked($this, $model));
+        foreach ($held as $model) {
+            Event::dispatch(new IdentityRoleRevoked($this, $model));
+        }
 
         return $this;
     }
@@ -155,6 +164,11 @@ trait HasRoles // @phpstan-ignore trait.unused
      * invalidation listener wired to those events keeps the resolution cache
      * coherent without a separate forget call in this method.
      *
+     * A name keeps every held role of that name, whether the current tenant or
+     * the platform owns it, and only when the identity holds none is the role
+     * the lookup ranks first attached, so a tenant's role of the same name
+     * never replaces a platform grant.
+     *
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Role|string>  $roles
      * @return static
      *
@@ -165,8 +179,9 @@ trait HasRoles // @phpstan-ignore trait.unused
         $resolved = [];
 
         foreach ($roles as $role) {
-            $model                               = $this->resolveRole($role);
-            $resolved[(string) $model->getKey()] = $model;
+            foreach ($this->rolesToKeep($role) as $model) {
+                $resolved[(string) $model->getKey()] = $model;
+            }
         }
 
         $ids    = \array_keys($resolved);
@@ -190,18 +205,23 @@ trait HasRoles // @phpstan-ignore trait.unused
     /**
      * Determine whether this identity has the given role.
      *
+     * A role model matches only that row, by primary key, so a tenant's role
+     * that shares the name of a platform role never passes a check for the
+     * platform's. A name matches any held role of that name the tenant scope
+     * shows, the platform's or the current tenant's; a tenant cannot take the
+     * name of a platform system role (see `RoleObserver`), so a name check for
+     * a system role is only ever met by the system role itself.
+     *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @return bool
      */
     public function hasRole(Role|string $role): bool
     {
-        $name = $role instanceof Role ? $role->name : $role;
-
         /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
         $roles = $this->roles;
 
         foreach ($roles as $existing) {
-            if ($existing->name === $name) {
+            if ($role instanceof Role ? $existing->is($role) : $existing->name === $role) {
                 return true;
             }
         }
@@ -341,6 +361,64 @@ trait HasRoles // @phpstan-ignore trait.unused
         $class = config('authorization.models.role', Role::class);
 
         return $class::resolveByName($role, self::authorizationResolveGuard($this));
+    }
+
+    /**
+     * Return every role that answers the name under this identity's guard, the
+     * one the lookup would pick first.
+     *
+     * @param  string  $name
+     * @return non-empty-list<\SineMacula\Laravel\Authorization\Models\Role>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
+     */
+    private function rolesNamed(string $name): array
+    {
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
+        $class = config('authorization.models.role', Role::class);
+
+        /** @var list<\SineMacula\Laravel\Authorization\Models\Role> $roles */
+        $roles = self::authorizationAllNamed($this, $class, $name);
+
+        if ($roles === []) {
+            throw new UnknownRoleException($name);
+        }
+
+        return $roles;
+    }
+
+    /**
+     * Return the roles among the given ones this identity holds, whether or not
+     * the grant has expired.
+     *
+     * @param  list<\SineMacula\Laravel\Authorization\Models\Role>  $roles
+     * @return list<\SineMacula\Laravel\Authorization\Models\Role>
+     */
+    private function heldRoles(array $roles): array
+    {
+        /** @var list<\SineMacula\Laravel\Authorization\Models\Role> */
+        return self::authorizationHeldAmong($this->roles()->newPivotQuery(), 'role_id', $roles);
+    }
+
+    /**
+     * Return the roles a sync keeps for one entry: a model as given; for a
+     * name, every held role of that name, else the one the lookup ranks first.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
+     * @return list<\SineMacula\Laravel\Authorization\Models\Role>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
+     */
+    private function rolesToKeep(Role|string $role): array
+    {
+        if ($role instanceof Role) {
+            return [$role];
+        }
+
+        $named = $this->rolesNamed($role);
+        $held  = $this->heldRoles($named);
+
+        return $held !== [] ? $held : [$named[0]];
     }
 
     /**
