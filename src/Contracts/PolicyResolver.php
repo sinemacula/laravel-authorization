@@ -37,8 +37,14 @@ interface PolicyResolver
      * re-orders via its own decision rules (`explicit deny` wins regardless of
      * position).
      *
+     * A policy that cannot be read must never be left out, since leaving it out
+     * would also drop its denies: throw an invalid policy document exception
+     * instead, and the manager denies the check as an invalid policy.
+     *
      * @param  object  $principal
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
      */
     public function policiesFor(object $principal): array;
 }

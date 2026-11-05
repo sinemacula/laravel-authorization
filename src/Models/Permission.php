@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Concerns\ValidatesAuthorizationName;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPermissionProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
+use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
 use SineMacula\Laravel\Authorization\Observers\PermissionObserver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
@@ -26,9 +27,10 @@ use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
  * identity or inherited via a role. The `guard_name` column is nullable: a null
  * value marks the permission as guard-agnostic (applies to every guard), a
  * concrete string scopes it to a single guard. The `is_system` flag marks
- * platform-shipped permissions as delete-protected: deletion or a rename of an
- * `is_system = true` row raises `SystemPermissionProtectedException` unless
- * `forceSystem()` is invoked to unlock the next operation on the instance.
+ * platform-shipped permissions as protected: deleting, editing or clearing the
+ * flag of a persisted `is_system = true` row raises
+ * `SystemPermissionProtectedException` unless `forceSystem()` is invoked to
+ * unlock the next operation on the instance.
  *
  * @property string $id
  * @property string $name
@@ -163,11 +165,21 @@ class Permission extends Model
     /**
      * Roles that carry this permission.
      *
+     * The inverse of `Role::permissions()`: the same pivot table, the same
+     * columns and the same `RolePermission` pivot model, so an `attach(...)` or
+     * `sync(...)` from the permission side runs through the pivot's `saving`
+     * hook and the guard-parity invariant it enforces.
+     *
+     * @phpcs:disable Generic.Files.LineLength.TooLong
+     *
      * @formatter:off
      *
-     * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany<\SineMacula\Laravel\Authorization\Models\Role, $this>
+     * @return \Illuminate\Database\Eloquent\Relations\BelongsToMany<\SineMacula\Laravel\Authorization\Models\Role, $this,
+     *     \SineMacula\Laravel\Authorization\Models\Pivots\RolePermission, 'pivot'>
      *
      * @formatter:on
+     *
+     * @phpcs:enable Generic.Files.LineLength.TooLong
      */
     public function roles(): BelongsToMany
     {
@@ -182,7 +194,7 @@ class Permission extends Model
             table: $pivot,
             foreignPivotKey: 'permission_id',
             relatedPivotKey: 'role_id',
-        );
+        )->using(RolePermission::class);
     }
 
     /**
@@ -252,19 +264,6 @@ class Permission extends Model
     }
 
     /**
-     * Return the attribute names whose dirty state triggers the
-     * system-protection guard on `updating`. For permissions, only `name`
-     * changes are protected.
-     *
-     * @return list<string>
-     */
-    #[\Override]
-    protected function systemProtectedFields(): array
-    {
-        return ['name'];
-    }
-
-    /**
      * Construct the per-model exception raised when a protected mutation on a
      * system permission is refused.
      *
@@ -274,13 +273,6 @@ class Permission extends Model
     #[\Override]
     protected function systemProtectionException(string $operation): \Throwable
     {
-        // Use the ORIGINAL name — on a rename, `getAttribute('name')` already
-        // reflects the mutated value. Audit consumers want "which permission
-        // was targeted" (the canonical persisted name), not "what the attempted
-        // rename would produce."
-        /** @var string $permissionName */
-        $permissionName = $this->getOriginal('name', $this->getAttribute('name'));
-
-        return new SystemPermissionProtectedException(permissionName: $permissionName, operation: $operation);
+        return new SystemPermissionProtectedException(permissionName: $this->systemProtectedName(), operation: $operation);
     }
 }

@@ -8,6 +8,9 @@ use Illuminate\Console\Command;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameException;
+use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
  * Migrate data from Spatie's `laravel-permission` tables into this package's
@@ -16,7 +19,10 @@ use Illuminate\Support\Str;
  * Reads Spatie's default table names (`roles`, `permissions`,
  * `model_has_roles`, `model_has_permissions`, `role_has_permissions`) and
  * copies rows into this package's tables, mapping column names and generating
- * UUIDs when Spatie used auto-increment IDs. Everything runs inside a
+ * UUIDs when Spatie used auto-increment IDs. Role and permission names are
+ * checked against the models' name rule before they are written; a name that
+ * fails it is reported and skipped together with its grants, as is a permission
+ * name containing `*`, because `*` is a wildcard here. Everything runs inside a
  * transaction; the `--dry-run` flag reports counts without writing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -189,7 +195,14 @@ final class MigrateSpatieCommand extends Command
         foreach ($rows as $row) {
             /** @var array{id: int|string, name: string, guard_name: string|null, created_at: string|null, updated_at: string|null} $roleRow */
             $roleRow = (array) $row;
-            $newId   = \is_int($roleRow['id']) ? (string) Str::orderedUuid() : $roleRow['id'];
+
+            if (!Role::isValidAuthorizationName($roleRow['name'])) {
+                $this->reportRefusedName('role', $roleRow['name']);
+
+                continue;
+            }
+
+            $newId = \is_int($roleRow['id']) ? Str::orderedUuid()->toString() : $roleRow['id'];
 
             $idMap[$roleRow['id']] = $newId;
 
@@ -229,7 +242,12 @@ final class MigrateSpatieCommand extends Command
         foreach ($rows as $row) {
             /** @var array{id: int|string, name: string, guard_name: string|null, created_at: string|null, updated_at: string|null} $permissionRow */
             $permissionRow = (array) $row;
-            $newId         = \is_int($permissionRow['id']) ? (string) Str::orderedUuid() : $permissionRow['id'];
+
+            if (!$this->isImportablePermissionName($permissionRow['name'])) {
+                continue;
+            }
+
+            $newId = \is_int($permissionRow['id']) ? Str::orderedUuid()->toString() : $permissionRow['id'];
 
             $idMap[$permissionRow['id']] = $newId;
 
@@ -247,6 +265,52 @@ final class MigrateSpatieCommand extends Command
         }
 
         return $idMap;
+    }
+
+    /**
+     * Determine whether a Spatie permission name can be imported.
+     *
+     * A name the package refuses is reported and skipped. A name containing `*`
+     * is reported and skipped as well: Spatie compares it literally unless its
+     * wildcard permissions are enabled, while here it would become a wildcard
+     * granting every permission its pattern matches.
+     *
+     * @param  string  $name
+     * @return bool
+     */
+    private function isImportablePermissionName(string $name): bool
+    {
+        if (!Permission::isValidAuthorizationName($name)) {
+            $this->reportRefusedName('permission', $name);
+
+            return false;
+        }
+
+        if (!\str_contains($name, '*')) {
+            return true;
+        }
+
+        $this->warn(
+            "Skipped: permission name '{$name}' contains '*', which is a wildcard here and would grant other "
+            . 'permissions. Its grants are not migrated.',
+        );
+
+        return false;
+    }
+
+    /**
+     * Report a Spatie role or permission whose name the package refuses, so it
+     * and every grant that references it are skipped visibly.
+     *
+     * @param  string  $kind
+     * @param  string  $name
+     * @return void
+     */
+    private function reportRefusedName(string $kind, string $name): void
+    {
+        $reason = (new InvalidAuthorizationNameException($kind, $name))->getMessage();
+
+        $this->warn("Skipped: {$reason} Its grants are not migrated.");
     }
 
     /**

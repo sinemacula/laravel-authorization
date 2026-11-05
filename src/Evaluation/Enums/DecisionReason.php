@@ -8,8 +8,9 @@ namespace SineMacula\Laravel\Authorization\Evaluation\Enums;
  * Decision-reason codes for the policy evaluator.
  *
  * Every evaluation result carries one of these cases, indicating which branch
- * of the four-step decision order produced the outcome. Backed by strings so
- * serialised audit-log entries remain human-readable while call-site
+ * of the four-step decision order produced the outcome, or that a policy could
+ * not be evaluated and the check was denied (`invalid_policy`). Backed by
+ * strings so serialised audit-log entries remain human-readable while call-site
  * comparisons gain exhaustive `match` coverage at PHPStan level 8.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -29,6 +30,9 @@ enum DecisionReason: string
     /** RBAC granted the allow after policies were indeterminate. */
     case RBAC_ALLOW = 'rbac_allow';
 
+    /** A policy could not be evaluated (malformed or unreadable); the check denies. */
+    case INVALID_POLICY = 'invalid_policy';
+
     /**
      * Return a human-readable explanation label for the reason.
      *
@@ -41,6 +45,7 @@ enum DecisionReason: string
             self::EXPLICIT_DENY  => 'explicit deny from a policy statement',
             self::RBAC_ALLOW     => 'RBAC grant (direct permission or role-inherited)',
             self::IMPLICIT_DENY  => 'implicit deny (no statement matched)',
+            self::INVALID_POLICY => 'invalid policy (a policy could not be evaluated)',
         };
     }
 }

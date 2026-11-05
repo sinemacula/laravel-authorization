@@ -220,14 +220,15 @@ trait HasPolicies // @phpstan-ignore trait.unused
     /**
      * Return the evaluation-ready policies attached to this identity.
      *
-     * A single malformed row must not short-circuit the entire evaluation —
-     * §12.3 mandates "fail closed (denied)" rather than "fail loud (500)". Each
-     * hydration runs inside its own try/catch: the offending row is logged
-     * through the `authorization` channel (or Laravel's default if the channel
-     * is unconfigured) and skipped. An excluded `ALLOW` cannot win, so the net
-     * decision stays deny-biased.
+     * A row whose document cannot be read is never skipped, because skipping it
+     * would also drop its denies. The row is logged and the exception is
+     * rethrown; the authorization manager turns it into a denial of the check
+     * with the `invalid_policy` reason, so every check for this identity denies
+     * until the document is fixed.
      *
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
      */
     public function getPolicies(): array
     {
@@ -241,6 +242,8 @@ trait HasPolicies // @phpstan-ignore trait.unused
                 $hydrated[] = $policy->toEvaluationPolicy();
             } catch (InvalidPolicyDocumentException $exception) {
                 self::logMalformedPolicy($policy, $exception);
+
+                throw $exception;
             }
         }
 
@@ -293,8 +296,8 @@ trait HasPolicies // @phpstan-ignore trait.unused
     }
 
     /**
-     * Report a malformed policy row without raising — the engine stays
-     * fail-closed because the bad row is excluded from the evaluation set.
+     * Report a malformed policy row. Logging never raises; the caller rethrows
+     * so the check denies.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @param  \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException  $exception
@@ -323,7 +326,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
             }
 
             $channel->warning(
-                "Authorization: skipping malformed policy '{$policy->getKey()}' — " . $exception->getMessage(),
+                "Authorization: malformed policy '{$policy->getKey()}' denies every check for its holder: " . $exception->getMessage(),
                 [
                     'policy_id'   => (string) $policy->getKey(),
                     'policy_name' => $policy->name ?? '',

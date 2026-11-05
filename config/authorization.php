@@ -18,7 +18,8 @@ return [
     | Eloquent classes that back the three first-class authorization entities.
     | Consumers may point any of these at their own subclass — the package
     | resolves models through config to avoid hard class references anywhere
-    | in the engine.
+    | in the engine. Each class must be the shipped model or a subclass of it;
+    | any other value is refused when the application boots.
     |
     */
 

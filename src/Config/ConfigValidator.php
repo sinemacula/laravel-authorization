@@ -12,6 +12,9 @@ use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
 use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
+use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
  * Boot-time validator for the shipped authorization config.
@@ -31,6 +34,13 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  */
 final class ConfigValidator
 {
+    /** @var array<string, class-string<\Illuminate\Database\Eloquent\Model>> The package model each `models.*` key must be or extend. */
+    private const array MODELS = [
+        'role'       => Role::class,
+        'permission' => Permission::class,
+        'policy'     => Policy::class,
+    ];
+
     /**
      * Validate the supplied authorization config. Throws on the first failure
      * encountered — consumers fix one key at a time.
@@ -43,6 +53,7 @@ final class ConfigValidator
      */
     public static function validate(array $config, Container $container): void
     {
+        self::validateModels($config['models'] ?? []);
         self::validatePermissionEnums($config['permission_enums'] ?? []);
         self::validatePermissionProviders($config['permission_providers'] ?? []);
         self::validateGateOnConflict($config['gate']['on_conflict'] ?? null);
@@ -50,6 +61,57 @@ final class ConfigValidator
         self::validateTenantResolver($config['tenant_resolver'] ?? null);
         self::validatePolicyStore($config['policy_store'] ?? null);
         self::validateCacheStore($config['cache']['store'] ?? null, $container);
+    }
+
+    /**
+     * Validate that every configured `models.*` entry names the package model
+     * or a subclass of it. A key left out falls back to the package model, so
+     * only the keys present are checked.
+     *
+     * @param  mixed  $value
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    private static function validateModels(mixed $value): void
+    {
+        if (!\is_array($value)) {
+            throw new InvalidAuthorizationConfigException('authorization.models', 'expected an array of model class names, got ' . self::describe($value) . '.');
+        }
+
+        foreach (self::MODELS as $key => $base) {
+            if (!\array_key_exists($key, $value)) {
+                continue;
+            }
+
+            self::validateModelEntry("authorization.models.{$key}", $value[$key], $base);
+        }
+    }
+
+    /**
+     * Validate that a single `models.*` entry is an existing class that is the
+     * supplied package model or extends it.
+     *
+     * @param  string  $configKey
+     * @param  mixed  $class
+     * @param  class-string<\Illuminate\Database\Eloquent\Model>  $base
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    private static function validateModelEntry(string $configKey, mixed $class, string $base): void
+    {
+        if (!\is_string($class) || $class === '') {
+            throw new InvalidAuthorizationConfigException($configKey, 'expected a class-string, got ' . self::describe($class) . '.');
+        }
+
+        if (!\class_exists($class)) {
+            throw new InvalidAuthorizationConfigException($configKey, "class '{$class}' does not exist.");
+        }
+
+        if (!\is_a($class, $base, allow_string: true)) {
+            throw new InvalidAuthorizationConfigException($configKey, "class '{$class}' is neither {$base} nor a subclass of it.");
+        }
     }
 
     /**

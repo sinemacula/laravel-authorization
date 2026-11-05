@@ -22,6 +22,7 @@ use SineMacula\Laravel\Authorization\Concerns\HasRoles;
 use SineMacula\Laravel\Authorization\Concerns\ResolvesPivotExpiry;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
+use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -704,8 +705,9 @@ final class UncoveredBranchesTest extends TestCase
 
     /**
      * When `logger()->channel('authorization')` throws, the malformed-policy
-     * logger falls back to the default channel. Targets lines 272-273 of
-     * `HasPolicies::logMalformedPolicy`.
+     * logger falls back to the default channel, and `getPolicies()` still
+     * rethrows the row's exception once it is logged. Targets the channel
+     * fallback in `HasPolicies::logMalformedPolicy`.
      *
      * @return void
      */
@@ -737,8 +739,17 @@ final class UncoveredBranchesTest extends TestCase
             ->where('id', $policyId)
             ->update(['document' => \json_encode(['version' => 'not-an-int'])]);
 
-        $results = $user->fresh()?->getPolicies() ?? [];
-        self::assertSame([], $results);
+        $thrown = null;
+
+        try {
+            $user->fresh()?->getPolicies();
+        } catch (InvalidPolicyDocumentException $exception) {
+            $thrown = $exception;
+        }
+
+        // The malformed row is rethrown after it is logged, never skipped.
+        self::assertInstanceOf(InvalidPolicyDocumentException::class, $thrown);
+        self::assertSame('malformed-fallback', $thrown->getPolicyName());
 
         // Confirm the fallback branch ran — `channel()` raised and the default
         // logger's `warning()` was used.
@@ -749,7 +760,7 @@ final class UncoveredBranchesTest extends TestCase
         // `logMalformedPolicy` stay honest against ConcatOperandRemoval /
         // ArrayItemRemoval / CastString mutations.
         self::assertNotNull($fakeLog->lastMessage);
-        self::assertStringStartsWith("Authorization: skipping malformed policy '{$policyId}' — ", $fakeLog->lastMessage);
+        self::assertSame("Authorization: malformed policy '{$policyId}' denies every check for its holder: " . $thrown->getMessage(), $fakeLog->lastMessage);
 
         self::assertIsArray($fakeLog->lastContext);
         self::assertArrayHasKey('policy_id', $fakeLog->lastContext);
@@ -757,20 +768,22 @@ final class UncoveredBranchesTest extends TestCase
         self::assertArrayHasKey('reason', $fakeLog->lastContext);
         self::assertSame($policyId, $fakeLog->lastContext['policy_id']);
         self::assertSame('malformed-fallback', $fakeLog->lastContext['policy_name']);
-        self::assertIsString($fakeLog->lastContext['reason']);
-        self::assertNotSame('', $fakeLog->lastContext['reason']);
+        self::assertSame($thrown->getMessage(), $fakeLog->lastContext['reason']);
     }
 
     /**
      * `logMalformedPolicy` also tolerates a logger that throws on the warning
-     * call itself. Targets line 284 of `HasPolicies::logMalformedPolicy`.
+     * call itself: the logging failure is swallowed and `getPolicies()`
+     * rethrows the malformed row's own exception. Targets the outer catch in
+     * `HasPolicies::logMalformedPolicy`.
      *
      * @return void
      */
     public function testLogMalformedPolicyTolerantOfLoggerWarningFailure(): void
     {
         // Rebind the logger to one whose `warning()` raises. The method
-        // swallows the failure so hydration still succeeds.
+        // swallows the failure, so the malformed row's own exception is the one
+        // that reaches the caller.
         // @phpstan-ignore-next-line method.nonObject
         $this->app->instance('log', new class extends AbstractLogger {
             // @phpstan-ignore method.nonObject
@@ -821,8 +834,10 @@ final class UncoveredBranchesTest extends TestCase
             ->where('id', $policy->getKey())
             ->update(['document' => \json_encode(['version' => 'not-an-int'])]);
 
-        $results = $user->fresh()?->getPolicies() ?? [];
-        self::assertSame([], $results);
+        $this->expectException(InvalidPolicyDocumentException::class);
+        $this->expectExceptionMessage('Invalid policy document \'malformed-warn\': Policy document requires a list of statements.');
+
+        $user->fresh()?->getPolicies();
     }
 
     /**

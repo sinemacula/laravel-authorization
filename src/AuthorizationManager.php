@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
+use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
@@ -23,10 +24,10 @@ use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
  * Authorization manager — the facade-facing entry point.
  *
  * Coordinates principal resolution, policy gathering, evaluation, and RBAC
- * fallback into a single API. The manager is deliberately small
- * and delegates the actual statement walking to the policy evaluator;
- * all four evaluation branches ultimately return an evaluation result, with the
- * reason code and trace recorded for audit consumers.
+ * fallback into a single API. The manager is deliberately small and delegates
+ * the actual statement walking to the policy evaluator; all four evaluation
+ * branches ultimately return an evaluation result, with the reason code and
+ * trace recorded for audit consumers.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -127,12 +128,25 @@ final class AuthorizationManager
     public function evaluate(string $action, ?string $resource = null, array $context = []): EvaluationResult
     {
         $principal = $this->currentPrincipal();
-        $result    = $this->evaluateFor($principal, $action, $resource, $context);
 
-        $this->lastDecisionStore->put($result);
-        $this->dispatch(new DecisionEvaluated($principal, $action, $resource, $context, $result));
+        return $this->record($principal, $action, $resource, $context, $this->evaluateFor($principal, $action, $resource, $context));
+    }
 
-        return $result;
+    /**
+     * Deny a check whose resource argument could not be identified (an unsaved
+     * model, a number, a list), recording the denial and dispatching the
+     * decision event as any other check does.
+     *
+     * The Gate calls this instead of evaluating a check without a resource,
+     * which a statement covering every resource would otherwise allow.
+     *
+     * @param  string  $action
+     * @param  array<string, mixed>  $context
+     * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult
+     */
+    public function refuseUnidentifiedResource(string $action, array $context = []): EvaluationResult
+    {
+        return $this->record($this->currentPrincipal(), $action, null, $context, EvaluationResult::implicitlyDenied());
     }
 
     /**
@@ -274,6 +288,10 @@ final class AuthorizationManager
     /**
      * Evaluate the action against the supplied principal.
      *
+     * RBAC is consulted only when no policy decided the check: an explicit
+     * allow or deny, or an invalid policy, stands. A policy document that
+     * cannot be read denies the check as an invalid policy.
+     *
      * @param  object|null  $principal
      * @param  string  $action
      * @param  string|null  $resource
@@ -286,16 +304,34 @@ final class AuthorizationManager
             return EvaluationResult::implicitlyDenied();
         }
 
-        $policies = $this->gatherPolicies($principal);
-        $result   = $this->evaluator->evaluate($policies, $action, $resource, $context, $principal);
-        $decisive = $result->reason === DecisionReason::EXPLICIT_DENY
-            || $result->reason      === DecisionReason::EXPLICIT_ALLOW;
+        $result = $this->evaluatePolicies($principal, $action, $resource, $context);
 
-        if (!$decisive && $principal instanceof AuthorizableIdentity && $principal->hasPermission($action)) {
+        if ($result->reason === DecisionReason::IMPLICIT_DENY && $principal instanceof AuthorizableIdentity && $principal->hasPermission($action)) {
             return EvaluationResult::rbacAllowed($result->trace);
         }
 
         return $result;
+    }
+
+    /**
+     * Evaluate the principal's policies. A policy document that cannot be read
+     * denies the check as an invalid policy.
+     *
+     * @param  object  $principal
+     * @param  string  $action
+     * @param  string|null  $resource
+     * @param  array<string, mixed>  $context
+     * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult
+     */
+    private function evaluatePolicies(object $principal, string $action, ?string $resource, array $context): EvaluationResult
+    {
+        try {
+            $policies = $this->gatherPolicies($principal);
+        } catch (InvalidPolicyDocumentException) {
+            return EvaluationResult::invalidPolicy();
+        }
+
+        return $this->evaluator->evaluate($policies, $action, $resource, $context, $principal);
     }
 
     /**
@@ -308,6 +344,8 @@ final class AuthorizationManager
      *
      * @param  object  $principal
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
      */
     private function gatherPolicies(object $principal): array
     {
@@ -329,6 +367,24 @@ final class AuthorizationManager
         $line = $this->translator?->get(AuthorizationException::MESSAGE_KEY);
 
         return \is_string($line) && $line !== AuthorizationException::MESSAGE_KEY ? $line : null;
+    }
+
+    /**
+     * Record the result as the last decision and dispatch its decision event.
+     *
+     * @param  object|null  $principal
+     * @param  string  $action
+     * @param  string|null  $resource
+     * @param  array<string, mixed>  $context
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult  $result
+     * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult
+     */
+    private function record(?object $principal, string $action, ?string $resource, array $context, EvaluationResult $result): EvaluationResult
+    {
+        $this->lastDecisionStore->put($result);
+        $this->dispatch(new DecisionEvaluated($principal, $action, $resource, $context, $result));
+
+        return $result;
     }
 
     /**

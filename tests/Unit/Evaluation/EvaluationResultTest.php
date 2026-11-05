@@ -71,6 +71,77 @@ final class EvaluationResultTest extends TestCase
     }
 
     /**
+     * invalidPolicy() returns a deny result with the invalid-policy reason, no
+     * matched statement and an empty trace by default.
+     *
+     * @return void
+     */
+    public function testInvalidPolicyFactory(): void
+    {
+        $decision = EvaluationResult::invalidPolicy();
+
+        self::assertFalse($decision->allowed);
+        self::assertSame(DecisionReason::INVALID_POLICY, $decision->reason);
+        self::assertNull($decision->matchedStatement);
+        self::assertSame([], $decision->trace);
+    }
+
+    /**
+     * invalidPolicy() keeps the supplied trace untouched.
+     *
+     * @return void
+     */
+    public function testInvalidPolicyFactoryKeepsTrace(): void
+    {
+        $trace = [
+            ['policy' => 'p', 'statement_index' => 0, 'decision' => TraceDecision::SKIPPED, 'reason' => 'action/resource did not match'],
+            ['policy' => 'p', 'statement_index' => 1, 'decision' => TraceDecision::MATCHED, 'reason' => 'invalid statement: unknown operator "nope"'],
+        ];
+
+        $decision = EvaluationResult::invalidPolicy($trace);
+
+        self::assertFalse($decision->allowed);
+        self::assertSame(DecisionReason::INVALID_POLICY, $decision->reason);
+        self::assertNull($decision->matchedStatement);
+        self::assertSame($trace, $decision->trace);
+    }
+
+    /**
+     * explain() renders an invalid-policy denial without a trace as a single
+     * summary line.
+     *
+     * @return void
+     */
+    public function testExplainInvalidPolicyWithoutTrace(): void
+    {
+        self::assertSame(
+            'DENY — invalid policy (a policy could not be evaluated).',
+            EvaluationResult::invalidPolicy()->explain(),
+        );
+    }
+
+    /**
+     * explain() renders an invalid-policy denial with its trace entries.
+     *
+     * @return void
+     */
+    public function testExplainInvalidPolicyWithTrace(): void
+    {
+        $trace = [
+            ['policy' => 'p', 'statement_index' => 0, 'decision' => TraceDecision::SKIPPED, 'reason' => 'action/resource did not match'],
+            ['policy' => 'q', 'statement_index' => 3, 'decision' => TraceDecision::MATCHED, 'reason' => 'invalid statement: bad operand'],
+        ];
+
+        self::assertSame(
+            "DENY — invalid policy (a policy could not be evaluated).\n"
+            . "Trace:\n"
+            . "  [skipped] p#0 — action/resource did not match\n"
+            . '  [matched] q#3 — invalid statement: bad operand',
+            EvaluationResult::invalidPolicy($trace)->explain(),
+        );
+    }
+
+    /**
      * rbacAllowed() returns an allow result with no matched statement.
      *
      * @return void
@@ -128,5 +199,6 @@ final class EvaluationResultTest extends TestCase
         self::assertStringContainsString('RBAC grant', EvaluationResult::rbacAllowed()->explain());
         self::assertStringContainsString('explicit deny', EvaluationResult::explicitlyDenied(new Statement(PolicyEffect::DENY, ['x']))->explain());
         self::assertStringContainsString('implicit deny', EvaluationResult::implicitlyDenied()->explain());
+        self::assertStringContainsString('invalid policy', EvaluationResult::invalidPolicy()->explain());
     }
 }

@@ -16,9 +16,9 @@ use SineMacula\Laravel\Authorization\Models\Role;
  *
  * Owning the pivot lets the guard-parity invariant live on the relationship
  * layer rather than on either primary entity — a direct
- * `$role->permissions()->attach(...)` or `sync(...)` goes through this model's
- * `saving` hook because the parent relation is wired with
- * `using(RolePermission::class)`.
+ * `$role->permissions()->attach(...)`, `$permission->roles()->attach(...)` or
+ * `sync(...)` from either side goes through this model's `saving` hook because
+ * both relations are wired with `using(RolePermission::class)`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -96,7 +96,9 @@ final class RolePermission extends Pivot
 
         $parent = $this->pivotParent;
 
-        if ($parent instanceof $roleClass && $parent->id === $roleId) {
+        // Any package role is accepted as the in-memory parent, so a shipped
+        // `Role` instance still counts when a subclass is configured.
+        if ($parent instanceof Role && $parent->id === $roleId) {
             return $parent;
         }
 
@@ -135,18 +137,13 @@ final class RolePermission extends Pivot
 
         $parent = $this->pivotParent;
 
-        // @codeCoverageIgnoreStart
-        // Defensive symmetry with resolveRoleParent(): pivotParent is only set
-        // by BelongsToMany traversal, and only Role's permissions() relation
-        // uses this pivot via `using()`. Reaching this branch requires a
-        // consumer-side `Permission::roles()` relation that opts into
-        // `->using(RolePermission::class)`, kept for forward symmetry when that
-        // override ships.
-        if ($parent instanceof $permissionClass && $parent->id === $permissionId) {
+        // The permission is the pivot parent when the row is built from the
+        // permission side, through `Permission::roles()`. Any package
+        // permission is accepted, as for the role side.
+        if ($parent instanceof Permission && $parent->id === $permissionId) {
             return $parent;
         }
 
-        // @codeCoverageIgnoreEnd
         if ($this->relationLoaded('permission')) {
             /** @var \SineMacula\Laravel\Authorization\Models\Permission|null $loaded */
             $loaded = $this->getRelation('permission');
@@ -172,14 +169,16 @@ final class RolePermission extends Pivot
      * Laravel populates the pivot's foreign / related keys via `setPivotKeys()`
      * when the row is instantiated through a `BelongsToMany` relation — that
      * path is preferred so a consumer who renames the FK on the relation
-     * definition still gets the invariant enforced. Direct instantiation (no
-     * parent relation) falls back to config, which defaults to `role_id`.
+     * definition still gets the invariant enforced. The role column is the
+     * foreign key from the role side and the related key from the permission
+     * side. Direct instantiation (no parent relation) falls back to config,
+     * which defaults to `role_id`.
      *
      * @return string
      */
     private function resolveRoleColumn(): string
     {
-        $key = $this->getForeignKey();
+        $key = $this->isPermissionSide() ? $this->getRelatedKey() : $this->getForeignKey();
 
         // The pivot's `$foreignKey` property is untyped on the upstream AsPivot
         // trait and defaults to null when a pivot is instantiated outside a
@@ -200,15 +199,16 @@ final class RolePermission extends Pivot
     /**
      * Resolve the pivot's permission-side column name.
      *
-     * Prefers the relation-supplied `relatedPivotKey` so a renamed FK on the
-     * relation definition still enforces the invariant. Falls back to config
+     * Prefers the relation-supplied key so a renamed FK on the relation
+     * definition still enforces the invariant: the related key from the role
+     * side and the foreign key from the permission side. Falls back to config
      * (default `permission_id`) on direct instantiation paths.
      *
      * @return string
      */
     private function resolvePermissionColumn(): string
     {
-        $key = $this->getRelatedKey();
+        $key = $this->isPermissionSide() ? $this->getForeignKey() : $this->getRelatedKey();
 
         // See `resolveRoleColumn()` — same upstream-trait null hazard on direct
         // instantiation paths.
@@ -222,5 +222,21 @@ final class RolePermission extends Pivot
         \assert(\is_string($column));
 
         return $column;
+    }
+
+    /**
+     * Determine whether the pivot was built from the permission side, through
+     * `Permission::roles()`, so its foreign key is the permission column and
+     * its related key is the role column.
+     *
+     * Detection uses the package `Permission` class rather than the configured
+     * one, so a shipped `Permission` instance is still recognised when a
+     * subclass is configured.
+     *
+     * @return bool
+     */
+    private function isPermissionSide(): bool
+    {
+        return $this->pivotParent instanceof Permission;
     }
 }

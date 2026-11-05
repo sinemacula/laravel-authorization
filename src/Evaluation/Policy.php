@@ -9,7 +9,9 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
  *
  * Represents a named collection of statements that travel together through the
  * evaluator. Policy documents are versioned so future schema changes can be
- * detected without a database migration; v1 documents default to `version = 1`.
+ * detected without a database migration; a document without a version is
+ * version 1, and a version this package does not know is refused, as is any key
+ * other than `version`, `name` and `statements`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -18,6 +20,9 @@ final readonly class Policy
 {
     /** @var int Current policy-document schema version. */
     public const int CURRENT_VERSION = 1;
+
+    /** @var list<string> The keys a policy document may carry. */
+    private const array KEYS = ['version', 'name', 'statements'];
 
     /**
      * Create a new policy instance.
@@ -48,6 +53,12 @@ final readonly class Policy
      */
     public static function fromArray(array $data): self
     {
+        $unknown = \array_diff(\array_keys($data), self::KEYS);
+
+        if ($unknown !== []) {
+            throw new \InvalidArgumentException('Policy document has unknown keys: ' . \implode(', ', $unknown) . '.');
+        }
+
         if (!isset($data['name']) || !\is_string($data['name']) || $data['name'] === '') {
             throw new \InvalidArgumentException('Policy document requires a non-empty name.');
         }
@@ -92,7 +103,7 @@ final readonly class Policy
 
     /**
      * Extract and validate the document version, defaulting to the current
-     * version when absent.
+     * version when absent and refusing a version this package does not know.
      *
      * @param  array<string, mixed>  $data
      * @return int
@@ -107,6 +118,10 @@ final readonly class Policy
 
         if (!\is_int($data['version']) || $data['version'] < 1) {
             throw new \InvalidArgumentException('Policy document version must be a positive integer.');
+        }
+
+        if ($data['version'] !== self::CURRENT_VERSION) {
+            throw new \InvalidArgumentException("Policy document version {$data['version']} is not supported.");
         }
 
         return $data['version'];

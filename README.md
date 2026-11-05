@@ -28,7 +28,7 @@ directives, console commands and test assertions.
 |----------------|---------------------------------------------------------------------------------------------------------------|
 | **Principal**  | Who a decision is about: any Eloquent model that implements `AuthorizableIdentity`, usually your user model.  |
 | **Role**       | A named set of permissions, granted as one. Roles can inherit from a parent role.                             |
-| **Permission** | A named action, such as `posts:update`, or a wildcard pattern of them, such as `posts:*`.                     |
+| **Permission** | A named action, such as `posts:update` or `posts.update`, or a wildcard pattern of them, such as `posts:*`.   |
 | **Policy**     | A JSON document of statements, each allowing or denying actions on resources, optionally under conditions.    |
 | **Decision**   | The answer to one check: allowed or not, with the reason and a trace of the statements that decided it.       |
 
@@ -39,16 +39,18 @@ principal's role and permission grants, and anything left is denied.
 
 - **Roles and permissions** as Eloquent models with UUID keys, granted to any model through polymorphic pivots (integer,
   UUID and ULID keys all work), each grant with an optional expiry.
-- **Wildcard permissions** (`posts:*`, `*:create`, `*:*`) and **role hierarchy**: a role inherits its parent's
-  permissions, with cycle checks on write.
-- **Policy documents** with `effect`, `actions`, `resources` and `conditions`, seventeen condition operators (equality,
-  set membership, prefix and suffix, CIDR, numeric and time comparisons, booleans and nulls) and `${…}` interpolation
-  from the check's context.
+- **Role and permission names** of letters, digits and `_ - : . *`, so `posts:edit`, `posts.edit` and
+  `sso.connection.trust` are all valid; anything else is refused when the name is saved.
+- **Wildcard permissions** (`posts:*`, `posts.*`, `*:create`, and `*` for everything; `*:*` matches only names with a
+  `:`) and **role hierarchy**: a role inherits its parent's permissions, with cycle checks on write.
+- **Policy documents** with `effect`, `actions`, `resources` and `conditions`, eighteen condition operators (equality,
+  set membership, prefix, suffix and glob, IPv4 and IPv6 CIDR, numeric and time comparisons, booleans and nulls) and
+  `${…}` interpolation from the check's context. Malformed documents are refused when they are saved.
 - **Gate auto-wiring**: every case of a configured permission enum is registered as a Gate ability, with a choice of
   what happens when an ability of the same name already exists.
 - **Route middleware and Blade directives** for roles and permissions, with `|` or `,` between alternatives.
-- **System records**: roles, permissions and policies flagged `is_system` are protected against renaming, rewriting
-  and deletion.
+- **System records**: roles, permissions and policies flagged `is_system` cannot be edited, deleted or have the flag
+  cleared unless `forceSystem()` unlocks the next change.
 - **Explanations**: `Authorization::explain()`, the last decision of the request, and `authorization:why-can` on the
   command line.
 - **Events** for every grant, revocation, expiry change and model change, for each decision, and when `authorize()`
@@ -57,7 +59,8 @@ principal's role and permission grants, and anything left is denied.
 - **Swappable everything**: models, table and pivot column names, the principal resolver, the tenant resolver and the
   policy store.
 - **Spatie import**: `authorization:migrate-spatie` copies roles, permissions and grants from
-  `spatie/laravel-permission`.
+  `spatie/laravel-permission`, reporting and skipping any role or permission whose name the package refuses, and any
+  permission whose name contains `*`, along with its grants.
 
 ## Installation
 
@@ -191,6 +194,11 @@ Authorization::for($user)->can('posts:delete', 'posts/42', ['ip' => request()->i
 Authorization::for($user)->explain('posts:delete', 'posts/42', ['ip' => request()->ip()]);
 ```
 
+Policies fail closed. A deny whose condition cannot be decided, such as a check made without `ip` in its context,
+still applies, while an allow in the same position does not. A check without a resource matches only statements whose
+resources include `*`. A stored policy that cannot be read denies every check for its holder, with the reason
+`invalid_policy`, until it is fixed.
+
 `Authorization::authorize()` throws `SineMacula\Laravel\Authorization\Exceptions\AuthorizationException` when the check
 is denied. It extends Laravel's `Illuminate\Auth\Access\AuthorizationException`, so Laravel's handler answers `403`. It
 carries the decision's reason code (`getReason()`) and nothing else: its message is the translated
@@ -226,7 +234,7 @@ The contracts behind the evaluator, for maintainers and reviewers, are in [docs/
 | Note                                                                                        | Covers                                                      |
 |---------------------------------------------------------------------------------------------|-------------------------------------------------------------|
 | [Evaluation order and deny precedence](docs/design/evaluation-order-and-deny-precedence.md) | The four-step decision order and why an explicit deny wins  |
-| [Wildcard and condition semantics](docs/design/wildcard-and-condition-semantics.md)         | Pattern matching, missing keys and the condition operators  |
+| [Wildcard and condition semantics](docs/design/wildcard-and-condition-semantics.md)         | Pattern matching, undecidable tests and condition operators |
 | [Polymorphic identity pivots](docs/design/polymorphic-identity-pivots.md)                   | Why grants work for integer, UUID and ULID keys             |
 | [Principal resolver contract](docs/design/principal-resolver-contract.md)                   | The default resolver and how an application binds its own   |
 | [Model extension](docs/design/model-extension.md)                                           | Swapping the shipped models for your own subclasses         |

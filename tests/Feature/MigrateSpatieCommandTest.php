@@ -10,6 +10,7 @@ use Illuminate\Foundation\Testing\RefreshDatabaseState;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Console\MigrateSpatieCommand;
 use Tests\TestCase;
@@ -33,6 +34,12 @@ use Tests\TestCase;
 #[CoversClass(MigrateSpatieCommand::class)]
 final class MigrateSpatieCommandTest extends TestCase
 {
+    /** @var string The Spatie role ID used by the string-keyed fixture. */
+    private const string STRING_ROLE_ID = '0192f0c4-3b1a-7d2e-9a4b-1c2d3e4f5a6b';
+
+    /** @var string The Spatie permission ID used by the string-keyed fixture. */
+    private const string STRING_PERMISSION_ID = '0192f0c4-3b1a-7d2e-9a4b-6b5a4f3e2d1c';
+
     /**
      * Create the Spatie and package tables, then seed Spatie data.
      *
@@ -157,15 +164,87 @@ final class MigrateSpatieCommandTest extends TestCase
     {
         Artisan::call('authorization:migrate-spatie');
 
-        $roleIds = DB::table('auth_roles')->pluck('id')->all();
+        $ids = [
+            ...DB::table('auth_roles')->pluck('id')->all(),
+            ...DB::table('auth_permissions')->pluck('id')->all(),
+        ];
 
-        foreach ($roleIds as $id) {
+        self::assertCount(5, $ids);
+        self::assertCount(5, \array_unique($ids));
+
+        foreach ($ids as $id) {
             self::assertIsString($id);
             self::assertMatchesRegularExpression(
                 '/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i',
                 $id,
             );
         }
+    }
+
+    /**
+     * The grants reference the generated role and permission UUIDs, not the
+     * Spatie auto-increment IDs.
+     *
+     * @return void
+     */
+    public function testGrantsReferenceTheGeneratedUuids(): void
+    {
+        Artisan::call('authorization:migrate-spatie');
+
+        $adminId  = DB::table('auth_roles')->where('name', 'admin')->value('id');
+        $createId = DB::table('auth_permissions')->where('name', 'posts:create')->value('id');
+        $editId   = DB::table('auth_permissions')->where('name', 'posts:edit')->value('id');
+        $deleteId = DB::table('auth_permissions')->where('name', 'posts:delete')->value('id');
+
+        self::assertIsString($adminId);
+        self::assertIsString($createId);
+        self::assertIsString($editId);
+        self::assertIsString($deleteId);
+        self::assertTrue(Str::isUuid($adminId));
+        self::assertTrue(Str::isUuid($createId));
+        self::assertTrue(Str::isUuid($editId));
+        self::assertTrue(Str::isUuid($deleteId));
+        self::assertSame([$adminId], DB::table('auth_authorizable_roles')->pluck('role_id')->all());
+        self::assertSame([$editId], DB::table('auth_authorizable_permissions')->pluck('permission_id')->all());
+        self::assertEqualsCanonicalizing(
+            [[$adminId, $createId], [$adminId, $deleteId]],
+            DB::table('auth_role_permissions')
+                ->get(['role_id', 'permission_id'])
+                ->map(static fn (object $row): array => [$row->role_id, $row->permission_id])
+                ->all(),
+        );
+    }
+
+    /**
+     * Spatie string IDs (a UUID-keyed Spatie install) are kept as they are, and
+     * the grants reference them unchanged.
+     *
+     * @return void
+     */
+    public function testStringIdsAreKeptAsTheyAre(): void
+    {
+        $this->recreateSpatieTablesWithStringIds();
+
+        $exitCode = Artisan::call('authorization:migrate-spatie');
+
+        self::assertSame(0, $exitCode);
+        self::assertSame(
+            [self::STRING_ROLE_ID => 'admin'],
+            DB::table('auth_roles')->pluck('name', 'id')->all(),
+        );
+        self::assertSame(
+            [self::STRING_PERMISSION_ID => 'posts:edit'],
+            DB::table('auth_permissions')->pluck('name', 'id')->all(),
+        );
+        self::assertSame(
+            [self::STRING_PERMISSION_ID => self::STRING_ROLE_ID],
+            DB::table('auth_role_permissions')->pluck('role_id', 'permission_id')->all(),
+        );
+        self::assertSame([self::STRING_ROLE_ID], DB::table('auth_authorizable_roles')->pluck('role_id')->all());
+        self::assertSame(
+            [self::STRING_PERMISSION_ID],
+            DB::table('auth_authorizable_permissions')->pluck('permission_id')->all(),
+        );
     }
 
     /**
@@ -215,6 +294,111 @@ final class MigrateSpatieCommandTest extends TestCase
     }
 
     /**
+     * Dotted names are valid package names and are migrated with their grants.
+     *
+     * @return void
+     */
+    public function testDottedNamesAreMigrated(): void
+    {
+        $this->seedNamesForValidation();
+
+        Artisan::call('authorization:migrate-spatie');
+
+        $managerId = DB::table('auth_roles')->where('name', 'content.manager')->value('id');
+        $publishId = DB::table('auth_permissions')->where('name', 'posts.publish')->value('id');
+
+        self::assertIsString($managerId);
+        self::assertIsString($publishId);
+        self::assertSame(
+            [$publishId],
+            DB::table('auth_role_permissions')->where('role_id', $managerId)->pluck('permission_id')->all(),
+        );
+    }
+
+    /**
+     * Role and permission names the package refuses are reported and skipped
+     * together with every grant that references them, while the rows after them
+     * are still migrated.
+     *
+     * @return void
+     */
+    public function testRefusedNamesAreReportedAndSkippedWithTheirGrants(): void
+    {
+        $this->seedNamesForValidation();
+
+        $exitCode = Artisan::call('authorization:migrate-spatie');
+        $output   = Artisan::output();
+
+        self::assertSame(0, $exitCode);
+        self::assertStringContainsString(self::refusalLine('role', 'has space'), $output);
+        self::assertStringContainsString(self::refusalLine('permission', 'posts?edit'), $output);
+        self::assertSame(
+            ['admin', 'content.manager', 'editor'],
+            DB::table('auth_roles')->pluck('name')->sort()->values()->all(),
+        );
+        self::assertSame(
+            ['posts.publish', 'posts:create', 'posts:delete', 'posts:edit'],
+            DB::table('auth_permissions')->pluck('name')->sort()->values()->all(),
+        );
+        self::assertSame(3, DB::table('auth_role_permissions')->count());
+        self::assertSame(1, DB::table('auth_authorizable_roles')->count());
+        self::assertSame(1, DB::table('auth_authorizable_permissions')->count());
+    }
+
+    /**
+     * A dry run reports the names it would refuse and excludes them from the
+     * summary counts.
+     *
+     * @return void
+     */
+    public function testDryRunReportsRefusedNames(): void
+    {
+        $this->seedNamesForValidation();
+
+        $exitCode = Artisan::call('authorization:migrate-spatie', ['--dry-run' => true]);
+        $output   = Artisan::output();
+
+        self::assertSame(0, $exitCode);
+        self::assertStringContainsString(self::refusalLine('role', 'has space'), $output);
+        self::assertStringContainsString(self::refusalLine('permission', 'posts?edit'), $output);
+        self::assertMatchesRegularExpression('/\|\s+roles\s+\|\s+3\s+\|/', $output);
+        self::assertMatchesRegularExpression('/\|\s+permissions\s+\|\s+4\s+\|/', $output);
+        self::assertMatchesRegularExpression('/\|\s+role_permissions\s+\|\s+3\s+\|/', $output);
+        self::assertSame(0, DB::table('auth_roles')->count());
+        self::assertSame(0, DB::table('auth_permissions')->count());
+    }
+
+    /**
+     * A permission name containing `*` is a wildcard here, so it is reported
+     * and skipped with its grants, while a role name containing `*` is compared
+     * literally and is migrated.
+     *
+     * @return void
+     */
+    public function testWildcardPermissionNamesAreReportedAndSkippedWithTheirGrants(): void
+    {
+        $this->seedWildcardNames();
+
+        $exitCode = Artisan::call('authorization:migrate-spatie');
+        $output   = Artisan::output();
+
+        self::assertSame(0, $exitCode);
+        self::assertStringContainsString(self::wildcardLine('*'), $output);
+        self::assertStringContainsString(self::wildcardLine('posts*'), $output);
+        self::assertSame(
+            ['admin', 'editor', 'ops.*'],
+            DB::table('auth_roles')->pluck('name')->sort()->values()->all(),
+        );
+        self::assertSame(
+            ['posts:create', 'posts:delete', 'posts:edit'],
+            DB::table('auth_permissions')->pluck('name')->sort()->values()->all(),
+        );
+        self::assertSame(2, DB::table('auth_role_permissions')->count());
+        self::assertSame(2, DB::table('auth_authorizable_roles')->count());
+        self::assertSame(1, DB::table('auth_authorizable_permissions')->count());
+    }
+
+    /**
      * Command fails when Spatie source tables do not exist.
      *
      * @return void
@@ -250,6 +434,164 @@ final class MigrateSpatieCommandTest extends TestCase
         $config->set('authorization.tables.authorizable_roles', 'auth_authorizable_roles');
         $config->set('authorization.tables.authorizable_permissions', 'auth_authorizable_permissions');
         $config->set('authorization.tables.authorizable_policies', 'auth_authorizable_policies');
+    }
+
+    /**
+     * Return the line the command prints for a refused name.
+     *
+     * @param  string  $kind
+     * @param  string  $name
+     * @return string
+     */
+    private static function refusalLine(string $kind, string $name): string
+    {
+        return "Skipped: Invalid {$kind} name '{$name}': allowed characters are letters, digits, '_', '-', ':', '.', "
+            . 'and \'*\'. Its grants are not migrated.';
+    }
+
+    /**
+     * Return the line the command prints for a skipped wildcard permission.
+     *
+     * @param  string  $name
+     * @return string
+     */
+    private static function wildcardLine(string $name): string
+    {
+        return "Skipped: permission name '{$name}' contains '*', which is a wildcard here and would grant other "
+            . 'permissions. Its grants are not migrated.';
+    }
+
+    /**
+     * Seed a role and two permissions whose names contain `*`, with grants that
+     * reference all three.
+     *
+     * @return void
+     */
+    private function seedWildcardNames(): void
+    {
+        DB::table('roles')->insert([
+            ['id' => 3, 'name' => 'ops.*', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
+        DB::table('permissions')->insert([
+            ['id' => 4, 'name' => '*', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 5, 'name' => 'posts*', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
+        DB::table('role_has_permissions')->insert([
+            ['permission_id' => 4, 'role_id' => 2],
+            ['permission_id' => 5, 'role_id' => 3],
+        ]);
+
+        DB::table('model_has_roles')->insert([
+            ['role_id' => 3, 'model_type' => 'App\Models\User', 'model_id' => 7],
+        ]);
+
+        DB::table('model_has_permissions')->insert([
+            ['permission_id' => 4, 'model_type' => 'App\Models\User', 'model_id' => 7],
+        ]);
+    }
+
+    /**
+     * Seed a refused role and permission, each followed by a valid dotted one,
+     * with grants that reference all four.
+     *
+     * @return void
+     */
+    private function seedNamesForValidation(): void
+    {
+        DB::table('roles')->insert([
+            ['id' => 3, 'name' => 'has space', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 4, 'name' => 'content.manager', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
+        DB::table('permissions')->insert([
+            ['id' => 4, 'name' => 'posts?edit', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+            ['id' => 5, 'name' => 'posts.publish', 'guard_name' => 'web', 'created_at' => now(), 'updated_at' => now()],
+        ]);
+
+        DB::table('role_has_permissions')->insert([
+            ['permission_id' => 4, 'role_id' => 1],
+            ['permission_id' => 1, 'role_id' => 3],
+            ['permission_id' => 5, 'role_id' => 4],
+        ]);
+
+        DB::table('model_has_roles')->insert([
+            ['role_id' => 3, 'model_type' => 'App\Models\User', 'model_id' => 7],
+        ]);
+
+        DB::table('model_has_permissions')->insert([
+            ['permission_id' => 4, 'model_type' => 'App\Models\User', 'model_id' => 7],
+        ]);
+    }
+
+    /**
+     * Replace the Spatie tables with string-keyed ones, as on a Spatie install
+     * that uses UUIDs, and seed one role, one permission and a grant of each
+     * kind.
+     *
+     * @return void
+     */
+    private function recreateSpatieTablesWithStringIds(): void
+    {
+        foreach (['model_has_permissions', 'model_has_roles', 'role_has_permissions', 'permissions', 'roles'] as $table) {
+            Schema::drop($table);
+        }
+
+        foreach (['roles', 'permissions'] as $table) {
+            Schema::create($table, static function (Blueprint $blueprint): void {
+                $blueprint->uuid('id')->primary();
+                $blueprint->string('name');
+                $blueprint->string('guard_name');
+                $blueprint->timestamps();
+            });
+        }
+
+        Schema::create('role_has_permissions', static function (Blueprint $table): void {
+            $table->uuid('permission_id');
+            $table->uuid('role_id');
+        });
+
+        foreach (['model_has_roles' => 'role_id', 'model_has_permissions' => 'permission_id'] as $table => $column) {
+            Schema::create($table, static function (Blueprint $blueprint) use ($column): void {
+                $blueprint->uuid($column);
+                $blueprint->string('model_type');
+                $blueprint->unsignedBigInteger('model_id');
+            });
+        }
+
+        DB::table('roles')->insert([
+            'id'         => self::STRING_ROLE_ID,
+            'name'       => 'admin',
+            'guard_name' => 'web',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('permissions')->insert([
+            'id'         => self::STRING_PERMISSION_ID,
+            'name'       => 'posts:edit',
+            'guard_name' => 'web',
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+
+        DB::table('role_has_permissions')->insert([
+            'permission_id' => self::STRING_PERMISSION_ID,
+            'role_id'       => self::STRING_ROLE_ID,
+        ]);
+
+        DB::table('model_has_roles')->insert([
+            'role_id'    => self::STRING_ROLE_ID,
+            'model_type' => 'App\Models\User',
+            'model_id'   => 42,
+        ]);
+
+        DB::table('model_has_permissions')->insert([
+            'permission_id' => self::STRING_PERMISSION_ID,
+            'model_type'    => 'App\Models\User',
+            'model_id'      => 42,
+        ]);
     }
 
     /**
