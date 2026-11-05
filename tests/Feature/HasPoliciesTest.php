@@ -128,7 +128,9 @@ final class HasPoliciesTest extends TestCase
             self::assertSame($reason, $exception->getMessage());
         }
 
-        self::assertSame(['authorization'], $logger->channels);
+        // A logger that is not Laravel's log manager is written to directly;
+        // channel selection is covered by AuthorizationLogTest.
+        self::assertSame([], $logger->channels);
         self::assertSame([
             [
                 'message' => "Authorization: malformed policy '{$badId}' denies every check for its holder: {$reason}",

@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\Events\Identity\PolicyDetached as IdentityP
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged as IdentityPolicyExpiryChanged;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePolicyPivot;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
 
 /**
  * Policy attachment trait for authorizable models.
@@ -305,36 +306,13 @@ trait HasPolicies // @phpstan-ignore trait.unused
      */
     private static function logMalformedPolicy(Policy $policy, InvalidPolicyDocumentException $exception): void
     {
-        // @codeCoverageIgnoreStart
-        // Defensive: the Laravel `logger()` helper is always present under a
-        // booted framework, so this fallback is reachable only from non-Laravel
-        // embeddings.
-        if (!\function_exists('logger')) {
-            return;
-        }
-
-        // @codeCoverageIgnoreEnd
-        try {
-            /** @var \Illuminate\Log\LogManager $logger */
-            $logger  = logger();
-            $channel = null;
-
-            try {
-                $channel = $logger->channel('authorization');
-            } catch (\Throwable) {
-                $channel = $logger;
-            }
-
-            $channel->warning(
-                "Authorization: malformed policy '{$policy->getKey()}' denies every check for its holder: " . $exception->getMessage(),
-                [
-                    'policy_id'   => (string) $policy->getKey(),
-                    'policy_name' => $policy->name ?? '',
-                    'reason'      => $exception->getMessage(),
-                ],
-            );
-        } catch (\Throwable) {
-            // Logging failures are not allowed to abort the check.
-        }
+        AuthorizationLog::warning(
+            "Authorization: malformed policy '{$policy->getKey()}' denies every check for its holder: " . $exception->getMessage(),
+            [
+                'policy_id'   => (string) $policy->getKey(),
+                'policy_name' => $policy->name ?? '',
+                'reason'      => $exception->getMessage(),
+            ],
+        );
     }
 }

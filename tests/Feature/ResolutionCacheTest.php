@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Assert;
 use PHPUnit\Framework\Attributes\CoversClass;
+use Psr\Log\LoggerInterface;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Cache\PrincipalCacheKey;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
@@ -1139,8 +1140,8 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
-     * `logCorruptCacheEntry` includes the cache key in the log message. Pins
-     * the ConcatOperandRemoval mutant on line 563.
+     * A cached policy entry that cannot be rebuilt is discarded with a warning
+     * naming its key and the reason, on the package's log channel.
      *
      * @return void
      */
@@ -1168,21 +1169,25 @@ final class ResolutionCacheTest extends TestCase
             }
         };
 
-        // Prime then corrupt.
-        $cache->rememberPermissions($principal, static fn (): array => ['a']);
-        $driver->put('logk:permissions:lg:1', new \stdClass, 60);
+        // Prime, then corrupt the cached policy documents so they cannot be
+        // rebuilt.
+        $cache->rememberPolicies($principal, static fn (): array => []);
+        $driver->put('logk:policies:lg:1', [['name' => 'broken', 'statements' => 'not-a-list']], 60);
 
-        // Capture log output.
-        Log::spy();
+        // Capture the warning written for the discarded entry.
+        $spy = \Mockery::spy(LoggerInterface::class);
+        Log::swap($spy);
 
         $fresh = new ResolutionCache(store: $store, ttl: 0, prefix: 'logk');
-        $fresh->rememberPermissions($principal, static fn (): array => ['b']);
 
-        // We cannot easily assert the exact log call through the authorization
-        // channel, but we can confirm the resolver ran (meaning the corrupt
-        // path was hit) and the result is correct.
-        $cachedEntries = $fresh->rememberPermissions($principal, static fn (): array => ['c']);
-        self::assertSame(['b'], $cachedEntries);
+        self::assertSame([], $fresh->rememberPolicies($principal, static fn (): array => []));
+
+        $reason = 'Policy document requires a list of statements.';
+
+        $spy->shouldHaveReceived('warning')->with(
+            "Authorization: discarding corrupt resolution-cache entry 'logk:policies:lg:1' — {$reason}",
+            ['cache_key' => 'logk:policies:lg:1', 'reason' => $reason],
+        )->once();
     }
 
     /**

@@ -7,12 +7,12 @@ namespace SineMacula\Laravel\Authorization\Registrars;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\Log;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableResource;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
 use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
 use SineMacula\Laravel\Authorization\Exceptions\GateConflictException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
+use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
 
 /**
  * Walk every configured permission enum and register a matching Laravel Gate.
@@ -235,14 +235,6 @@ final readonly class GateRegistrar
      */
     private function logGateConflict(string $permission): void
     {
-        try {
-            Log::channel('authorization')->warning(
-                "Authorization gate '{$permission}' already registered; existing Gate preserved.",
-            );
-        } catch (\Throwable) { // @phpstan-ignore catch.neverThrown
-            Log::warning(
-                "Authorization gate '{$permission}' already registered; existing Gate preserved.",
-            );
-        }
+        AuthorizationLog::warning("Authorization gate '{$permission}' already registered; existing Gate preserved.");
     }
 }

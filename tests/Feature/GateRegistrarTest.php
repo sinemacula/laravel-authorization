@@ -9,8 +9,10 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
+use Psr\Log\LoggerInterface;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableResource;
@@ -364,6 +366,31 @@ final class GateRegistrarTest extends TestCase
 
         self::assertTrue(Gate::allows('posts:create', [$resource]));
         self::assertSame(['arn:post:stringable'], $this->evaluatedResources());
+    }
+
+    /**
+     * In `log` mode a conflicting Gate is kept and the conflict is written as a
+     * warning on the package's log channel.
+     *
+     * @return void
+     */
+    public function testLogModeKeepsTheExistingGateAndWarns(): void
+    {
+        $spy = \Mockery::spy(LoggerInterface::class);
+        Log::swap($spy);
+
+        Gate::define('posts:create', static fn (?object $user = null): bool => true);
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config->set('authorization.gate.on_conflict', 'log');
+        $config->set('authorization.permission_enums', [PermissionEnum::class]);
+
+        (new AuthorizationServiceProvider($this->app))->boot(); // @phpstan-ignore argument.type
+
+        self::assertTrue(Gate::forUser((object) [])->allows('posts:create'));
+
+        $spy->shouldHaveReceived('warning')->with('Authorization gate \'posts:create\' already registered; existing Gate preserved.', [])->once();
     }
 
     /**

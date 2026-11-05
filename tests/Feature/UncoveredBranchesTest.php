@@ -29,7 +29,6 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
-use Tests\Feature\Stubs\ChannelThrowingLogger;
 use Tests\Feature\Stubs\NonTaggableCacheStore;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\ThrowingGetCacheStore;
@@ -704,74 +703,6 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * When `logger()->channel('authorization')` throws, the malformed-policy
-     * logger falls back to the default channel, and `getPolicies()` still
-     * rethrows the row's exception once it is logged. Targets the channel
-     * fallback in `HasPolicies::logMalformedPolicy`.
-     *
-     * @return void
-     */
-    public function testLogMalformedPolicyFallsBackWhenAuthorizationChannelFails(): void
-    {
-        // Rebind the logger to one whose `channel('authorization')` raises so
-        // the malformed-policy logger takes the default-channel fallback
-        // branch.
-        $fakeLog = new ChannelThrowingLogger;
-        $this->app->instance('log', $fakeLog); // @phpstan-ignore method.nonObject
-
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
-
-        $policy = Policy::create([
-            'id'       => (string) Str::uuid(),
-            'name'     => 'malformed-fallback',
-            'document' => ['statements' => [['effect' => 'allow', 'actions' => ['x']]]],
-        ]);
-        $user->attachPolicy($policy);
-
-        $policyId = (string) $policy->getKey(); // @phpstan-ignore cast.string
-
-        // Overwrite the stored document with a JSON-encoded array that lacks
-        // the required statements key — the Eloquent array cast yields a
-        // decoded value and `EvaluationPolicy::fromArray` then fails the schema
-        // validator, triggering the logger fallback path inside
-        // `logMalformedPolicy`.
-        DB::table((string) config('authorization.tables.policies', 'policies')) // @phpstan-ignore cast.string
-            ->where('id', $policyId)
-            ->update(['document' => \json_encode(['version' => 'not-an-int'])]);
-
-        $thrown = null;
-
-        try {
-            $user->fresh()?->getPolicies();
-        } catch (InvalidPolicyDocumentException $exception) {
-            $thrown = $exception;
-        }
-
-        // The malformed row is rethrown after it is logged, never skipped.
-        self::assertInstanceOf(InvalidPolicyDocumentException::class, $thrown);
-        self::assertSame('malformed-fallback', $thrown->getPolicyName());
-
-        // Confirm the fallback branch ran — `channel()` raised and the default
-        // logger's `warning()` was used.
-        self::assertGreaterThanOrEqual(1, $fakeLog->channelCalls, 'channel() should be attempted');
-        self::assertGreaterThanOrEqual(1, $fakeLog->warningCalls, 'warning() should land on the default logger');
-
-        // Pin the exact warning content so the concat and context array inside
-        // `logMalformedPolicy` stay honest against ConcatOperandRemoval /
-        // ArrayItemRemoval / CastString mutations.
-        self::assertNotNull($fakeLog->lastMessage);
-        self::assertSame("Authorization: malformed policy '{$policyId}' denies every check for its holder: " . $thrown->getMessage(), $fakeLog->lastMessage);
-
-        self::assertIsArray($fakeLog->lastContext);
-        self::assertArrayHasKey('policy_id', $fakeLog->lastContext);
-        self::assertArrayHasKey('policy_name', $fakeLog->lastContext);
-        self::assertArrayHasKey('reason', $fakeLog->lastContext);
-        self::assertSame($policyId, $fakeLog->lastContext['policy_id']);
-        self::assertSame('malformed-fallback', $fakeLog->lastContext['policy_name']);
-        self::assertSame($thrown->getMessage(), $fakeLog->lastContext['reason']);
-    }
-
-    /**
      * `logMalformedPolicy` also tolerates a logger that throws on the warning
      * call itself: the logging failure is swallowed and `getPolicies()`
      * rethrows the malformed row's own exception. Targets the outer catch in
@@ -838,51 +769,6 @@ final class UncoveredBranchesTest extends TestCase
         $this->expectExceptionMessage('Invalid policy document \'malformed-warn\': Policy document requires a list of statements.');
 
         $user->fresh()?->getPolicies();
-    }
-
-    /**
-     * A corrupt cache payload triggers the warning path on a misconfigured
-     * `authorization` channel — the cache falls back to the default channel.
-     * Targets lines 542-543 and 553 of `ResolutionCache::logCorruptCacheEntry`.
-     *
-     * @return void
-     */
-    public function testLogCorruptCacheEntryHandlesChannelMisconfiguration(): void
-    {
-        $fakeLog = new ChannelThrowingLogger;
-        $this->app->instance('log', $fakeLog); // @phpstan-ignore method.nonObject
-
-        $driver = self::makeNonTaggableDriver();
-        $store  = new Repository($driver);
-        $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
-
-        $principal = StubIdentity::create(['id' => (string) Str::uuid()]);
-
-        // Prime + corrupt the persistent entry so the read path raises and the
-        // logger branch fires. A non-array element inside the stored list trips
-        // `Policy::fromArray()`.
-        $cache->rememberPolicies($principal, static fn (): array => []);
-        $key                   = (string) \array_key_first($driver->storage); // @phpstan-ignore property.notFound
-        $driver->storage[$key] = ['not-an-array']; // @phpstan-ignore property.notFound
-
-        $fresh         = new ResolutionCache(store: $store, ttl: 0, prefix: 'authorization-test');
-        $cachedEntries = $fresh->rememberPolicies($principal, static fn (): array => []);
-
-        self::assertSame([], $cachedEntries);
-        self::assertGreaterThanOrEqual(1, $fakeLog->channelCalls, 'channel() should be attempted');
-        self::assertGreaterThanOrEqual(1, $fakeLog->warningCalls, 'warning() should land on the default logger');
-
-        // Pin the logged content — `cache_key` and `reason` must land in the
-        // context with the exact key the cache emitted.
-        self::assertNotNull($fakeLog->lastMessage);
-        self::assertStringStartsWith("Authorization: discarding corrupt resolution-cache entry '{$key}' — ", $fakeLog->lastMessage);
-
-        self::assertIsArray($fakeLog->lastContext);
-        self::assertArrayHasKey('cache_key', $fakeLog->lastContext);
-        self::assertArrayHasKey('reason', $fakeLog->lastContext);
-        self::assertSame($key, $fakeLog->lastContext['cache_key']);
-        self::assertIsString($fakeLog->lastContext['reason']);
-        self::assertNotSame('', $fakeLog->lastContext['reason']);
     }
 
     /**
