@@ -16,6 +16,18 @@ use SineMacula\Laravel\Authorization\Models\Permission;
  */
 final class ListPermissionsCommand extends ListCatalogueCommand
 {
+    /** @var string The `authorization.models` key of the listed model. */
+    protected const string MODEL = 'permission';
+
+    /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> The model listed when none is configured. */
+    protected const string DEFAULT_MODEL = Permission::class;
+
+    /** @var string The relation whose records are counted. */
+    protected const string COUNTED = 'roles';
+
+    /** @var string The plural name of the listed records. */
+    protected const string RECORDS = 'permissions';
+
     /** @var string The console command signature. */
     protected $signature = <<<'EOD'
         authorization:list-permissions
@@ -24,40 +36,4 @@ final class ListPermissionsCommand extends ListCatalogueCommand
 
     /** @var string The console command description. */
     protected $description = 'List every authorization permission, platform-wide and tenant-owned, with its owner';
-
-    /**
-     * The configured permission model class.
-     *
-     * @return class-string<\Illuminate\Database\Eloquent\Model>
-     */
-    #[\Override]
-    protected function modelClass(): string
-    {
-        // `config()` is typed mixed; the configuration validator has already
-        // refused a models.permission setting that is not a model class.
-        // @phpstan-ignore return.type
-        return config('authorization.models.permission', Permission::class);
-    }
-
-    /**
-     * Count each permission's roles.
-     *
-     * @return string
-     */
-    #[\Override]
-    protected function countedRelation(): string
-    {
-        return 'roles';
-    }
-
-    /**
-     * Name the listed records in the empty-listing message.
-     *
-     * @return string
-     */
-    #[\Override]
-    protected function recordName(): string
-    {
-        return 'permissions';
-    }
 }

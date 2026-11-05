@@ -24,6 +24,18 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  */
 abstract class ListCatalogueCommand extends Command
 {
+    /** @var string The `authorization.models` key of the listed model. */
+    protected const string MODEL = '';
+
+    /** @var class-string<\Illuminate\Database\Eloquent\Model> The model listed when none is configured. */
+    protected const string DEFAULT_MODEL = Model::class;
+
+    /** @var string The relation whose records are counted, also the plural of the related records. */
+    protected const string COUNTED = '';
+
+    /** @var string The plural name of the listed records, for the empty-listing message. */
+    protected const string RECORDS = '';
+
     /**
      * Execute the console command.
      *
@@ -31,9 +43,12 @@ abstract class ListCatalogueCommand extends Command
      */
     public function handle(): int
     {
-        $relation = $this->countedRelation();
+        $relation = static::COUNTED;
 
-        $query = $this->modelClass()::query()
+        /** @var class-string<\Illuminate\Database\Eloquent\Model> $class */
+        $class = config('authorization.models.' . static::MODEL, static::DEFAULT_MODEL);
+
+        $query = $class::query()
             ->withoutGlobalScope(TenantScope::class)
             ->withCount([$relation => static fn (Builder $related): Builder => $related->withoutGlobalScope(TenantScope::class)]);
 
@@ -49,7 +64,7 @@ abstract class ListCatalogueCommand extends Command
         $records = $query->orderBy('name')->get();
 
         if ($records->isEmpty()) {
-            $this->info("No {$this->recordName()} found.");
+            $this->info('No ' . static::RECORDS . ' found.');
 
             return self::SUCCESS;
         }
@@ -61,27 +76,6 @@ abstract class ListCatalogueCommand extends Command
 
         return self::SUCCESS;
     }
-
-    /**
-     * The configured model class whose records are listed.
-     *
-     * @return class-string<\Illuminate\Database\Eloquent\Model>
-     */
-    abstract protected function modelClass(): string;
-
-    /**
-     * The relation whose records are counted for each listed record.
-     *
-     * @return string
-     */
-    abstract protected function countedRelation(): string;
-
-    /**
-     * The plural name of the listed records, for the empty-listing message.
-     *
-     * @return string
-     */
-    abstract protected function recordName(): string;
 
     /**
      * Build the table row for one record.
