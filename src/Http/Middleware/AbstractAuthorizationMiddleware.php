@@ -12,8 +12,9 @@ use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 /**
  * Shared template method for the shipped authorization middleware. Concrete
  * subclasses supply the required capability contract, the per-needle check, and
- * the rejection message; everything else — the principal lookup,
- * anonymous/misconfig guards, and argument flattening — lives here.
+ * the rejection message; everything else — the subject lookup through the
+ * subject resolver, anonymous/misconfig guards, and argument flattening — lives
+ * here.
  *
  * @template TContract of object
  *
@@ -36,7 +37,7 @@ abstract class AbstractAuthorizationMiddleware
      */
     public function handle(Request $request, \Closure $next, string ...$needles): mixed
     {
-        $principal = Authorization::currentPrincipal();
+        $principal = Authorization::currentSubject()?->subject;
 
         if ($principal === null) {
             throw new AuthenticationException('Unauthenticated.');

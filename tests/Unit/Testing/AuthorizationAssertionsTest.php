@@ -12,8 +12,10 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Testing\Concerns\AuthorizationAssertions;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
 /**
@@ -172,6 +174,62 @@ final class AuthorizationAssertionsTest extends TestCase
 
         // After swap, the facade resolves the swapped principal.
         self::assertTrue(Authorization::can('docs:publish'));
+    }
+
+    /**
+     * `actingAsIdentity` makes the identity its own subject, in the tenant
+     * given or in none, and the tenant reaches the tenant scope.
+     *
+     * @return void
+     */
+    public function testActingAsIdentityCarriesTheTenant(): void
+    {
+        $tenant = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
+        $user   = StubIdentity::create(['id' => '0b7d3e1c-4f2a-4c8e-9a6b-1d2e3f4a5b6c']);
+
+        Role::create(['name' => 'platform', 'guard' => 'web']);
+        Role::create(['name' => 'owned', 'guard' => 'web', 'tenant_type' => $tenant->getMorphClass(), 'tenant_id' => 'tenant-a']);
+
+        $this->actingAsIdentity($user);
+
+        $subject = Authorization::currentSubject();
+
+        self::assertNotNull($subject);
+        self::assertSame($user, $subject->subject);
+        self::assertSame($user, $subject->identity);
+        self::assertNull($subject->tenant);
+        self::assertSame(['platform'], Role::query()->pluck('name')->all());
+
+        $this->actingAsIdentity($user, $tenant);
+
+        self::assertSame($tenant, Authorization::currentSubject()?->tenant);
+        self::assertSame(['owned', 'platform'], Role::query()->orderBy('name')->pluck('name')->all());
+    }
+
+    /**
+     * `actingAsSubject` resolves the subject given, and a user Laravel's Gate
+     * hands over is decided about in the subject's tenant and application.
+     *
+     * @return void
+     */
+    public function testActingAsSubjectTranslatesTheGatesUserIntoItsRequest(): void
+    {
+        $tenant  = new \stdClass;
+        $user    = StubIdentity::create(['id' => '6c5b4a3d-2e1f-4a0b-9c8d-7e6f5a4b3c2d']);
+        $subject = new Subject($user, null, $tenant, 'admin', 'web');
+
+        $this->actingAsSubject($subject);
+
+        self::assertSame($subject, Authorization::currentSubject());
+        self::assertSame($subject, Authorization::forUser($user)->currentSubject());
+
+        $other      = new \stdClass;
+        $translated = Authorization::forUser($other)->currentSubject();
+
+        self::assertNotNull($translated);
+        self::assertSame($other, $translated->subject);
+        self::assertSame($tenant, $translated->tenant);
+        self::assertSame('admin', $translated->application);
     }
 
     /**

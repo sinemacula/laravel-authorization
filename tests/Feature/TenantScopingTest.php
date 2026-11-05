@@ -5,10 +5,8 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use PHPUnit\Framework\Attributes\CoversClass;
-use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
-use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
-use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -17,14 +15,16 @@ use SineMacula\Laravel\Authorization\Observers\PermissionObserver;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
+use Tests\Performance\Support\CountingSubjectResolver;
 use Tests\TestCase;
 
 /**
  * Feature tests for row-level multi-tenant role and permission scoping.
  *
- * Verifies that the `TenantScope` global scope, `TenantResolver` contract, and
- * the tenant ownership helpers on `Role` and `Permission` behave correctly
+ * Verifies that the `TenantScope` global scope, the subject resolver's tenant,
+ * and the tenant ownership helpers on `Role` and `Permission` behave correctly
  * under various tenant contexts.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -42,8 +42,6 @@ use Tests\TestCase;
 #[CoversClass(PermissionObserver::class)]
 #[CoversClass(InvalidTenantException::class)]
 #[CoversClass(InvalidTenantColumnsException::class)]
-#[CoversClass(ConfigValidator::class)]
-#[CoversClass(InvalidAuthorizationConfigException::class)]
 final class TenantScopingTest extends TestCase
 {
     /**
@@ -116,7 +114,7 @@ final class TenantScopingTest extends TestCase
             'tenant_id' => (string) $tenantB->getKey(),
         ]);
 
-        $this->bindTenantResolver($tenantA);
+        $this->bindSubjectInTenant($tenantA);
 
         $roles = Role::all();
 
@@ -144,7 +142,7 @@ final class TenantScopingTest extends TestCase
             'tenant_id' => (string) $tenantB->getKey(),
         ]);
 
-        $this->bindTenantResolver($tenantA);
+        $this->bindSubjectInTenant($tenantA);
 
         self::assertCount(0, Role::all());
     }
@@ -160,7 +158,7 @@ final class TenantScopingTest extends TestCase
 
         Role::create(['name' => 'global-role', 'guard' => 'web']);
 
-        $this->bindTenantResolver($tenantA);
+        $this->bindSubjectInTenant($tenantA);
 
         $roles = Role::all();
 
@@ -194,7 +192,7 @@ final class TenantScopingTest extends TestCase
             'tenant_id' => (string) $tenantB->getKey(),
         ]);
 
-        $this->bindTenantResolver($tenantA);
+        $this->bindSubjectInTenant($tenantA);
 
         $perms = Permission::all();
 
@@ -224,7 +222,7 @@ final class TenantScopingTest extends TestCase
             'tenant_id' => (string) $tenantA->getKey(),
         ]);
 
-        $this->bindTenantResolver($tenantA);
+        $this->bindSubjectInTenant($tenantA);
 
         $resolved = Role::resolveByName('editor', 'web');
 
@@ -250,7 +248,7 @@ final class TenantScopingTest extends TestCase
             'tenant_id' => (string) $tenantA->getKey(),
         ]);
 
-        $this->bindTenantResolver($tenantA);
+        $this->bindSubjectInTenant($tenantA);
 
         $resolved = Permission::resolveByName('posts:edit', 'web');
 
@@ -396,7 +394,7 @@ final class TenantScopingTest extends TestCase
             'tenant_id' => (string) $tenantB->getKey(),
         ]);
 
-        $this->bindTenantResolver($tenantA);
+        $this->bindSubjectInTenant($tenantA);
 
         $roles = Role::forTenant($tenantA)->get();
 
@@ -454,7 +452,7 @@ final class TenantScopingTest extends TestCase
             'tenant_id' => (string) $tenantB->getKey(),
         ]);
 
-        $this->bindTenantResolver($tenantA);
+        $this->bindSubjectInTenant($tenantA);
 
         $perms = Permission::forTenant($tenantA)->get();
 
@@ -495,7 +493,7 @@ final class TenantScopingTest extends TestCase
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
-        $this->bindTenantResolver($tenantA);
+        $this->bindSubjectInTenant($tenantA);
 
         $role = Role::create([
             'name'        => 'editor',
@@ -577,49 +575,14 @@ final class TenantScopingTest extends TestCase
     }
 
     /**
-     * An invalid tenant-resolver config raises a validation exception.
-     *
-     * @return void
-     */
-    public function testInvalidTenantResolverConfigThrows(): void
-    {
-        $this->app['config']->set('authorization.tenant_resolver', 'NonExistent\Class'); // @phpstan-ignore offsetAccess.notFound, method.nonObject
-
-        $this->expectException(InvalidAuthorizationConfigException::class);
-        $this->expectExceptionMessageMatches('/tenant_resolver/');
-
-        /** @var array<string, mixed> $config */
-        $config = $this->app['config']->get('authorization', []); // @phpstan-ignore offsetAccess.notFound, method.nonObject
-
-        ConfigValidator::validate($config, $this->app);
-    }
-
-    /**
-     * A null tenant-resolver config passes validation.
-     *
-     * @return void
-     */
-    public function testNullTenantResolverConfigPassesValidation(): void
-    {
-        $this->app['config']->set('authorization.tenant_resolver', null); // @phpstan-ignore offsetAccess.notFound, method.nonObject
-
-        /** @var array<string, mixed> $config */
-        $config = $this->app['config']->get('authorization', []); // @phpstan-ignore offsetAccess.notFound, method.nonObject
-
-        ConfigValidator::validate($config, $this->app);
-
-        self::assertTrue(true);
-    }
-
-    /**
-     * The `TenantResolver` is consulted once per request or job — a spy
-     * resolver wrapping a concrete tenant records one `resolve()` invocation
+     * The subject resolver is consulted once per request or job for the tenant
+     * — a spy resolver wrapping a concrete tenant records one `resolve()` call
      * regardless of how many Eloquent queries the scope filters, on either
      * model.
      *
      * @return void
      */
-    public function testTenantResolverIsMemoisedAcrossQueries(): void
+    public function testSubjectsTenantIsMemoisedAcrossQueries(): void
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
@@ -639,45 +602,14 @@ final class TenantScopingTest extends TestCase
             'tenant_id' => (string) $tenantA->getKey(),
         ]);
 
-        /**
-         * Counting tenant resolver used to verify memoisation.
-         */
-        $spy = new class ($tenantA) implements TenantResolver {
-            /** @var int Number of times `resolve` was invoked. */
-            public int $calls = 0;
-
-            /**
-             * Create a new spy wrapping a fixed tenant.
-             *
-             * @param  object|null  $tenant
-             * @return void
-             */
-            public function __construct(
-
-                /** The tenant returned by every resolution call. */
-                private readonly ?object $tenant,
-            ) {}
-
-            /**
-             * Resolve the tenant and increment the call counter.
-             *
-             * @return object|null
-             */
-            #[\Override]
-            public function resolve(): ?object
-            {
-                $this->calls++;
-
-                return $this->tenant;
-            }
-        };
+        $spy = new CountingSubjectResolver($tenantA);
 
         /** @var \Illuminate\Foundation\Application $app */
         $app = $this->app;
 
         // Binding the spy drops the tenant resolved by the queries above, so
         // the spy is asked on the next query.
-        $app->instance(TenantResolver::class, $spy);
+        $app->instance(SubjectResolver::class, $spy);
 
         // Issue multiple queries against both scoped models — each one invokes
         // `TenantScope::apply`. Without memoisation the spy would record one
@@ -704,7 +636,7 @@ final class TenantScopingTest extends TestCase
     {
         $opaque = new \stdClass;
 
-        $this->bindTenantResolver($opaque);
+        $this->bindSubjectInTenant($opaque);
 
         $this->expectException(InvalidTenantException::class);
         $this->expectExceptionMessageMatches('/stdClass/');
@@ -749,7 +681,7 @@ final class TenantScopingTest extends TestCase
         ]);
         Role::create(['name' => 'global-role', 'guard' => 'web']);
 
-        $this->bindTenantResolver($customTenant);
+        $this->bindSubjectInTenant($customTenant);
 
         $roles = Role::all();
 
@@ -815,43 +747,14 @@ final class TenantScopingTest extends TestCase
     }
 
     /**
-     * Bind a custom tenant resolver that returns the given tenant.
+     * Bind a subject resolver whose subject carries the given tenant.
      *
      * @param  object|null  $tenant
      * @return void
      */
-    private function bindTenantResolver(?object $tenant): void
+    private function bindSubjectInTenant(?object $tenant): void
     {
         // @phpstan-ignore-next-line method.nonObject
-        $this->app->singleton(TenantResolver::class, static function () use ($tenant): TenantResolver {
-
-            /**
-             * Test resolver that returns the captured tenant verbatim.
-             */
-            return new class ($tenant) implements TenantResolver {
-                /**
-                 * Create a new resolver wrapping a fixed tenant.
-                 *
-                 * @param  object|null  $tenant
-                 * @return void
-                 */
-                public function __construct(
-
-                    /** The tenant returned by every resolution call. */
-                    private readonly ?object $tenant,
-                ) {}
-
-                /**
-                 * Resolve the current tenant.
-                 *
-                 * @return object|null
-                 */
-                #[\Override]
-                public function resolve(): ?object
-                {
-                    return $this->tenant;
-                }
-            };
-        });
+        $this->app->singleton(SubjectResolver::class, static fn (): SubjectResolver => new StubSubjectResolver(new \stdClass, $tenant));
     }
 }

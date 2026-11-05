@@ -12,11 +12,11 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
  * Runtime helpers that the shipped Blade directives compile into.
  *
  * The directives register thin callbacks that delegate here; every check
- * resolves the current principal through the wired `PrincipalResolver` so the
- * view layer stays consistent with Gate / facade evaluation in the same
- * request. Anonymous principals — or principals that do not implement the
- * matching narrow contract — evaluate as `false`, keeping the view layer
- * fail-closed by default.
+ * resolves the current subject through the bound `SubjectResolver` so the view
+ * layer stays consistent with Gate / facade evaluation in the same request. A
+ * request with no subject — or a subject that does not implement the matching
+ * narrow contract — evaluates as `false`, keeping the view layer fail-closed by
+ * default.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -24,23 +24,23 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 final class BladeHelpers
 {
     /**
-     * Return the currently resolved principal, or null when the manager cannot
-     * be constructed (tests that run without the service provider booted) or
-     * the resolver reports anonymous.
+     * Return the model the current subject is about, or null when the manager
+     * cannot be constructed (tests that run without the service provider
+     * booted) or the resolver reports no subject.
      *
-     * Delegates to `AuthorizationManager::currentPrincipal()` so the Blade
-     * surface resolves the same principal as the facade, Gate, and middleware
+     * Delegates to `AuthorizationManager::currentSubject()` so the Blade
+     * surface resolves the same subject as the facade, Gate, and middleware
      * paths.
      *
      * @return object|null
      */
-    public static function currentPrincipal(): ?object
+    public static function currentSubject(): ?object
     {
-        return AuthorizationManager::instance()?->currentPrincipal();
+        return AuthorizationManager::instance()?->currentSubject()?->subject;
     }
 
     /**
-     * Whether the current principal holds at least one of the supplied roles.
+     * Whether the current subject holds at least one of the supplied roles.
      * Accepts either a single role name or an array — the Blade directive
      * passes the user-supplied expression straight through.
      *
@@ -49,7 +49,7 @@ final class BladeHelpers
      */
     public static function hasRole(array|string $roles): bool
     {
-        $principal = self::currentPrincipal();
+        $principal = self::currentSubject();
 
         if (!$principal instanceof SupportsRoles) {
             return false;
@@ -65,14 +65,14 @@ final class BladeHelpers
     }
 
     /**
-     * Whether the current principal holds every supplied role.
+     * Whether the current subject holds every supplied role.
      *
      * @param  array<int, string>|string  $roles
      * @return bool
      */
     public static function hasAllRoles(array|string $roles): bool
     {
-        $principal = self::currentPrincipal();
+        $principal = self::currentSubject();
 
         if (!$principal instanceof SupportsRoles) {
             return false;
@@ -90,7 +90,7 @@ final class BladeHelpers
     }
 
     /**
-     * Whether the current principal holds at least one of the supplied
+     * Whether the current subject holds at least one of the supplied
      * permissions.
      *
      * @param  array<int, string>|string  $permissions
@@ -98,7 +98,7 @@ final class BladeHelpers
      */
     public static function hasPermission(array|string $permissions): bool
     {
-        $principal = self::currentPrincipal();
+        $principal = self::currentSubject();
 
         if (!$principal instanceof SupportsPermissions) {
             return false;
@@ -114,14 +114,14 @@ final class BladeHelpers
     }
 
     /**
-     * Whether the current principal holds every supplied permission.
+     * Whether the current subject holds every supplied permission.
      *
      * @param  array<int, string>|string  $permissions
      * @return bool
      */
     public static function hasAllPermissions(array|string $permissions): bool
     {
-        $principal = self::currentPrincipal();
+        $principal = self::currentSubject();
 
         if (!$principal instanceof SupportsPermissions) {
             return false;

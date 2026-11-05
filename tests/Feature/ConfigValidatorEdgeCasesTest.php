@@ -9,7 +9,7 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
-use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
+use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use Tests\TestCase;
 
 /**
@@ -113,24 +113,24 @@ final class ConfigValidatorEdgeCasesTest extends TestCase
         $container = new Container;
 
         ConfigValidator::validate([
-            'principal_resolver' => NullPrincipalResolver::class,
-            'cache'              => ['store' => 'redis'],
+            'subject_resolver' => AuthGuardSubjectResolver::class,
+            'cache'            => ['store' => 'redis'],
         ], $container);
 
         self::assertFalse($container->bound('cache'));
     }
 
     /**
-     * `principal_resolver` must be a class-string — a non-string value is
+     * `subject_resolver` must be a class-string — a non-string value is
      * rejected before `class_exists` is invoked.
      *
      * @return void
      */
-    public function testPrincipalResolverMustBeString(): void
+    public function testSubjectResolverMustBeString(): void
     {
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.principal_resolver', 123);
+        $config->set('authorization.subject_resolver', 123);
 
         $this->expectException(InvalidAuthorizationConfigException::class);
         $this->expectExceptionMessageMatches('/expected a class-string/');

@@ -6,9 +6,10 @@ namespace Tests\Feature;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
-use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
 use Tests\Feature\Stubs\RolesOnlyPrincipal;
+use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
 /**
@@ -38,34 +39,9 @@ final class BladeHelpersNarrowContractsTest extends TestCase
 
         $principal = new RolesOnlyPrincipal;
 
-        $resolver = new class ($principal) implements PrincipalResolver {
-            /**
-             * Create a new resolver wrapping a fixed principal.
-             *
-             * @param  \Tests\Feature\Stubs\RolesOnlyPrincipal  $principal
-             * @return void
-             */
-            public function __construct(
+        $resolver = new StubSubjectResolver($principal);
 
-                /** The principal returned by every resolution call. */
-                private readonly RolesOnlyPrincipal $principal,
-            ) {}
-
-            /**
-             * Resolve the current principal.
-             *
-             * @return object|null
-             *
-             * @phpstan-ignore-next-line return.unusedType
-             */
-            #[\Override]
-            public function resolve(): ?object
-            {
-                return $this->principal;
-            }
-        };
-
-        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject
+        $this->app->instance(SubjectResolver::class, $resolver); // @phpstan-ignore method.nonObject
         $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
         $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
     }

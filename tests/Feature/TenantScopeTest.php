@@ -6,20 +6,21 @@ namespace Tests\Feature;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
-use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
+use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
-use Tests\Feature\Stubs\SwitchableTenantResolver;
+use Tests\Feature\Stubs\SwitchableSubjectResolver;
 use Tests\TestCase;
 
 /**
- * Feature coverage for `TenantScope`: platform rows only without a tenant, the
- * tenant read from the request's resolved-tenant holder, and the refusal of
- * tenants that cannot be matched to the rows they own.
+ * Feature coverage for `TenantScope`: platform rows only without a subject or a
+ * tenant, the subject's tenant read from the request's resolved-tenant holder,
+ * and the refusal of tenants that cannot be matched to the rows they own.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,7 +42,7 @@ final class TenantScopeTest extends TestCase
     #[\Override]
     protected function tearDown(): void
     {
-        SwitchableTenantResolver::$tenant = null;
+        SwitchableSubjectResolver::$tenant = null;
 
         parent::tearDown();
     }
@@ -58,6 +59,42 @@ final class TenantScopeTest extends TestCase
 
         self::assertSame(['platform-role'], $this->roleNames());
         self::assertSame(['platform-permission'], $this->permissionNames());
+    }
+
+    /**
+     * With no subject, or a subject without a tenant, only platform-wide rows
+     * are visible: no tenant never means every tenant.
+     *
+     * @return void
+     */
+    public function testNoSubjectOrNoTenantMeansPlatformRowsOnly(): void
+    {
+        $this->seedRows();
+
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver);
+
+        self::assertSame(['platform-role'], $this->roleNames());
+        self::assertSame(['platform-permission'], $this->permissionNames());
+
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver(new \stdClass));
+
+        self::assertSame(['platform-role'], $this->roleNames());
+        self::assertSame(['platform-permission'], $this->permissionNames());
+    }
+
+    /**
+     * The tenant is the one the resolved subject carries.
+     *
+     * @return void
+     */
+    public function testTheTenantComesFromTheResolvedSubject(): void
+    {
+        [, $tenantB] = $this->seedRows();
+
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver(new \stdClass, $tenantB, 'admin', 'web'));
+
+        self::assertSame(['b-role', 'platform-role'], $this->roleNames());
+        self::assertSame(['b-permission', 'platform-permission'], $this->permissionNames());
     }
 
     /**
@@ -90,7 +127,7 @@ final class TenantScopeTest extends TestCase
 
         self::assertSame(['a-role', 'platform-role'], $this->roleNames());
 
-        SwitchableTenantResolver::$tenant = $tenantB;
+        SwitchableSubjectResolver::$tenant = $tenantB;
 
         self::assertSame(['a-role', 'platform-role'], $this->roleNames());
 
@@ -113,8 +150,8 @@ final class TenantScopeTest extends TestCase
 
         self::assertSame(['a-role', 'platform-role'], $this->roleNames());
 
-        $this->app?->instance(TenantResolver::class, new SwitchableTenantResolver);
-        SwitchableTenantResolver::$tenant = $tenantB;
+        $this->app?->instance(SubjectResolver::class, new SwitchableSubjectResolver);
+        SwitchableSubjectResolver::$tenant = $tenantB;
 
         self::assertSame(['b-role', 'platform-role'], $this->roleNames());
         self::assertSame(['b-permission', 'platform-permission'], $this->permissionNames());
@@ -216,16 +253,16 @@ final class TenantScopeTest extends TestCase
     }
 
     /**
-     * Bind the switchable tenant resolver, starting with the given tenant.
+     * Bind the switchable subject resolver, starting with the given tenant.
      *
      * @param  object|null  $tenant
      * @return void
      */
     private function useSwitchableResolver(?object $tenant): void
     {
-        SwitchableTenantResolver::$tenant = $tenant;
+        SwitchableSubjectResolver::$tenant = $tenant;
 
-        $this->app?->scoped(TenantResolver::class, SwitchableTenantResolver::class);
+        $this->app?->scoped(SubjectResolver::class, SwitchableSubjectResolver::class);
     }
 
     /**

@@ -7,10 +7,10 @@ namespace SineMacula\Laravel\Authorization\Contracts;
 /**
  * Internal policy-gathering contract.
  *
- * Sits alongside `PrincipalResolver` and answers the symmetric question —
- * `PrincipalResolver::resolve()` returns the principal in scope,
- * `PolicyResolver::policiesFor()` returns the policies in scope for that
- * principal.
+ * Sits alongside `SubjectResolver` and answers the symmetric question —
+ * `SubjectResolver::resolve()` returns the subject in scope,
+ * `PolicyResolver::policiesFor()` returns the policies in scope for the model
+ * that subject is about.
  *
  * `PolicyStore` models *external* sources (JWT-embedded policies,
  * config-shipped policies, remote APIs). `PolicyResolver` models the *internal

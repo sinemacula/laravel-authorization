@@ -15,7 +15,7 @@ use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
 use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
 use SineMacula\Laravel\Authorization\Concerns\HasRoles;
-use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision;
@@ -37,9 +37,11 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
 /**
@@ -633,19 +635,64 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * `Authorization::currentPrincipal()` returns the principal the resolver
+     * `Authorization::currentSubject()` returns the subject the resolver
      * currently reports — the single accessor every surface (middleware, Blade,
-     * future consumers) delegates to.
+     * future consumers) delegates to — or the one `for()` names.
      *
      * @return void
      */
-    public function testCurrentPrincipalExposesTheResolvedPrincipal(): void
+    public function testCurrentSubjectExposesTheResolvedSubject(): void
     {
-        self::assertNull(Authorization::currentPrincipal());
+        self::assertNull(Authorization::currentSubject());
 
         $user = StubIdentity::create(['id' => '1bf39684-eb97-4b99-8898-2971c1e19c35']);
 
-        self::assertSame($user, Authorization::for($user)->currentPrincipal());
+        self::assertSame($user, Authorization::for($user)->currentSubject()?->subject);
+    }
+
+    /**
+     * With the shipped resolver and no user signed in, there is no subject and
+     * every check denies.
+     *
+     * @return void
+     */
+    public function testNoSignedInUserMeansNoSubjectAndADenial(): void
+    {
+        Permission::create(['name' => 'posts:create', 'guard' => 'web']);
+
+        $user = AuthenticatableIdentity::create(['id' => 'c7d4e2a8-5b1f-4c3e-8d9a-0f1e2d3c4b5a']);
+        $user->givePermission('posts:create');
+
+        self::assertNull(Authorization::currentSubject());
+        self::assertFalse(Authorization::can('posts:create'));
+    }
+
+    /**
+     * With the shipped resolver, the user Laravel signed in is the subject and
+     * its identity, on the default guard, which is also the application, and
+     * checks decide about that user.
+     *
+     * @return void
+     */
+    public function testTheSignedInUserIsTheSubject(): void
+    {
+        Permission::create(['name' => 'posts:create', 'guard' => 'web']);
+
+        $user = AuthenticatableIdentity::create(['id' => '2f9e8d7c-6b5a-4c3d-9e1f-a0b1c2d3e4f5']);
+        $user->givePermission('posts:create');
+
+        $this->actingAs($user);
+
+        $subject = Authorization::currentSubject();
+
+        self::assertNotNull($subject);
+        self::assertSame($user, $subject->subject);
+        self::assertSame($user, $subject->identity);
+        self::assertNull($subject->tenant);
+        self::assertSame('web', $subject->guard);
+        self::assertSame('web', $subject->application);
+        self::assertTrue(Authorization::can('posts:create'));
+        self::assertFalse(Authorization::can('posts:delete'));
     }
 
     /**
@@ -676,42 +723,17 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * Swap the principal resolver for one that returns the supplied
-     * authorizable and refresh the manager so the next facade call picks it up.
+     * Swap the subject resolver for one that returns the supplied authorizable
+     * and refresh the manager so the next facade call picks it up.
      *
      * @param  \Tests\Feature\Stubs\StubIdentity  $user
      * @return void
      */
     private function resolvePrincipalAs(StubIdentity $user): void
     {
-        $resolver = new class ($user) implements PrincipalResolver {
-            /**
-             * Create a new resolver wrapping a fixed user.
-             *
-             * @param  object  $user
-             * @return void
-             */
-            public function __construct(
+        $resolver = new StubSubjectResolver($user);
 
-                /** The user returned by every resolution call. */
-                private readonly object $user,
-            ) {}
-
-            /**
-             * Resolve the current principal.
-             *
-             * @return object|null
-             *
-             * @phpstan-ignore-next-line return.unusedType
-             */
-            #[\Override]
-            public function resolve(): ?object
-            {
-                return $this->user;
-            }
-        };
-
-        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject
+        $this->app->instance(SubjectResolver::class, $resolver); // @phpstan-ignore method.nonObject
         $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
         $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
     }

@@ -11,7 +11,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
-use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
@@ -20,7 +20,8 @@ use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
-use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
+use SineMacula\Laravel\Authorization\Subject;
+use Tests\Feature\Stubs\StubSubjectResolver;
 
 /**
  * Unit tests for the authorization manager using stub principals and a real
@@ -59,7 +60,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
-            principalResolver: new NullPrincipalResolver,
+            subjectResolver: new StubSubjectResolver,
             policyResolver: new DefaultPolicyResolver,
             lastDecisionStore: new LastDecisionStore,
         );
@@ -78,7 +79,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
-            principalResolver: new NullPrincipalResolver,
+            subjectResolver: new StubSubjectResolver,
             policyResolver: new DefaultPolicyResolver,
             lastDecisionStore: new LastDecisionStore,
         );
@@ -97,7 +98,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
-            principalResolver: new NullPrincipalResolver,
+            subjectResolver: new StubSubjectResolver,
             policyResolver: new DefaultPolicyResolver,
             lastDecisionStore: new LastDecisionStore,
         );
@@ -119,7 +120,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
-            principalResolver: new NullPrincipalResolver,
+            subjectResolver: new StubSubjectResolver,
             policyResolver: new DefaultPolicyResolver,
             lastDecisionStore: new LastDecisionStore,
         );
@@ -147,7 +148,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
-            principalResolver: new NullPrincipalResolver,
+            subjectResolver: new StubSubjectResolver,
             policyResolver: new DefaultPolicyResolver,
             lastDecisionStore: new LastDecisionStore,
         );
@@ -174,7 +175,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
-            principalResolver: new NullPrincipalResolver,
+            subjectResolver: new StubSubjectResolver,
             policyResolver: new DefaultPolicyResolver,
             lastDecisionStore: new LastDecisionStore,
         );
@@ -207,7 +208,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
-            principalResolver: new NullPrincipalResolver,
+            subjectResolver: new StubSubjectResolver,
             policyResolver: new DefaultPolicyResolver,
             lastDecisionStore: new LastDecisionStore,
         );
@@ -244,7 +245,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
-            principalResolver: new NullPrincipalResolver,
+            subjectResolver: new StubSubjectResolver,
             policyResolver: new DefaultPolicyResolver,
             lastDecisionStore: new LastDecisionStore,
         );
@@ -267,7 +268,7 @@ final class AuthorizationManagerTest extends TestCase
 
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
-            principalResolver: new NullPrincipalResolver,
+            subjectResolver: new StubSubjectResolver,
             policyResolver: new DefaultPolicyResolver(store: $store),
             lastDecisionStore: new LastDecisionStore,
         );
@@ -311,7 +312,7 @@ final class AuthorizationManagerTest extends TestCase
 
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
-            principalResolver: new NullPrincipalResolver,
+            subjectResolver: new StubSubjectResolver,
             policyResolver: new DefaultPolicyResolver(store: $store),
             lastDecisionStore: new LastDecisionStore,
         );
@@ -333,7 +334,7 @@ final class AuthorizationManagerTest extends TestCase
 
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
-            principalResolver: new NullPrincipalResolver,
+            subjectResolver: new StubSubjectResolver,
             policyResolver: new DefaultPolicyResolver,
             lastDecisionStore: new LastDecisionStore,
             events: $events,
@@ -365,7 +366,7 @@ final class AuthorizationManagerTest extends TestCase
 
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
-            principalResolver: new NullPrincipalResolver,
+            subjectResolver: new StubSubjectResolver,
             policyResolver: new DefaultPolicyResolver,
             lastDecisionStore: new LastDecisionStore,
             events: $events,
@@ -385,7 +386,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
-            principalResolver: new NullPrincipalResolver,
+            subjectResolver: new StubSubjectResolver,
             policyResolver: new DefaultPolicyResolver,
             lastDecisionStore: new LastDecisionStore,
         );
@@ -406,8 +407,7 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * Resolver-provided principal is consumed when no for() override is in
-     * play.
+     * The resolver's subject is decided about when no for() scope is in play.
      *
      * @return void
      */
@@ -415,12 +415,12 @@ final class AuthorizationManagerTest extends TestCase
     {
         $principal = $this->stubAuthorizable(['from:resolver']);
 
-        $resolver = \Mockery::mock(PrincipalResolver::class);
-        $resolver->shouldReceive('resolve')->andReturn($principal);
+        $resolver = \Mockery::mock(SubjectResolver::class);
+        $resolver->shouldReceive('resolve')->andReturn(new Subject($principal));
 
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
-            principalResolver: $resolver,
+            subjectResolver: $resolver,
             policyResolver: new DefaultPolicyResolver,
             lastDecisionStore: new LastDecisionStore,
         );
@@ -437,7 +437,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
-            principalResolver: new NullPrincipalResolver,
+            subjectResolver: new StubSubjectResolver,
             policyResolver: new DefaultPolicyResolver,
             lastDecisionStore: new LastDecisionStore,
         );
@@ -458,7 +458,7 @@ final class AuthorizationManagerTest extends TestCase
         $store   = new LastDecisionStore;
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
-            principalResolver: new NullPrincipalResolver,
+            subjectResolver: new StubSubjectResolver,
             policyResolver: new DefaultPolicyResolver,
             lastDecisionStore: $store,
         );
@@ -481,7 +481,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
-            principalResolver: new NullPrincipalResolver,
+            subjectResolver: new StubSubjectResolver,
             policyResolver: new DefaultPolicyResolver,
             lastDecisionStore: new LastDecisionStore,
         );
@@ -510,7 +510,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
-            principalResolver: new NullPrincipalResolver,
+            subjectResolver: new StubSubjectResolver,
             policyResolver: new DefaultPolicyResolver,
             lastDecisionStore: new LastDecisionStore,
             events: null,
@@ -532,7 +532,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
-            principalResolver: new NullPrincipalResolver,
+            subjectResolver: new StubSubjectResolver,
             policyResolver: new DefaultPolicyResolver,
             lastDecisionStore: new LastDecisionStore,
         );
@@ -640,6 +640,167 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * The current subject is the resolver's, and null when the resolver has
+     * none.
+     *
+     * @return void
+     */
+    public function testCurrentSubjectIsTheResolversSubject(): void
+    {
+        $user   = new \stdClass;
+        $tenant = new \stdClass;
+
+        self::assertNull($this->managerResolving(new StubSubjectResolver)->currentSubject());
+
+        $subject = $this->managerResolving(new StubSubjectResolver($user, $tenant, 'admin', 'web'))->currentSubject();
+
+        self::assertNotNull($subject);
+        self::assertSame($user, $subject->subject);
+        self::assertSame($user, $subject->identity);
+        self::assertSame($tenant, $subject->tenant);
+        self::assertSame('admin', $subject->application);
+        self::assertSame('web', $subject->guard);
+    }
+
+    /**
+     * `for()` decides about the model named, in the request's tenant,
+     * application and guard, and leaves the manager it was called on deciding
+     * about the request's own subject.
+     *
+     * @return void
+     */
+    public function testForKeepsTheRequestsTenantApplicationAndGuard(): void
+    {
+        $user    = $this->stubAuthorizable();
+        $other   = $this->stubAuthorizable(['posts:create']);
+        $tenant  = new \stdClass;
+        $manager = $this->managerResolving(new StubSubjectResolver($user, $tenant, 'admin', 'web'));
+
+        $scoped  = $manager->for($other);
+        $subject = $scoped->currentSubject();
+
+        self::assertNotNull($subject);
+        self::assertSame($other, $subject->subject);
+        self::assertSame($other, $subject->identity);
+        self::assertSame($tenant, $subject->tenant);
+        self::assertSame('admin', $subject->application);
+        self::assertSame('web', $subject->guard);
+        self::assertTrue($scoped->can('posts:create'));
+        self::assertFalse($manager->can('posts:create'));
+        self::assertSame($user, $manager->currentSubject()?->subject);
+    }
+
+    /**
+     * `for()` with no request subject decides about the model named, as its own
+     * identity, in no tenant and on no application.
+     *
+     * @return void
+     */
+    public function testForWithoutARequestSubjectHasNoTenantOrApplication(): void
+    {
+        $other   = new \stdClass;
+        $subject = $this->managerResolving(new StubSubjectResolver)->for($other)->currentSubject();
+
+        self::assertNotNull($subject);
+        self::assertSame($other, $subject->subject);
+        self::assertSame($other, $subject->identity);
+        self::assertNull($subject->tenant);
+        self::assertNull($subject->application);
+        self::assertNull($subject->guard);
+    }
+
+    /**
+     * Naming the request's own subject keeps its identity, a second `for()`
+     * keeps the tenant the first one carried, and neither translates through
+     * `forUser()`.
+     *
+     * @return void
+     */
+    public function testForChainsKeepTheTenantAndTheRequestsIdentity(): void
+    {
+        $user     = new \stdClass;
+        $identity = new \stdClass;
+        $tenant   = new \stdClass;
+        $request  = new Subject($user, $identity, $tenant, 'admin', 'web');
+
+        $resolver = \Mockery::mock(SubjectResolver::class);
+        $resolver->shouldReceive('resolve')->twice()->andReturn($request);
+        $resolver->shouldNotReceive('forUser');
+
+        $manager = $this->managerResolving($resolver);
+
+        self::assertSame($request, $manager->for($user)->currentSubject());
+        self::assertSame($tenant, $manager->for($user)->for(new \stdClass)->currentSubject()?->tenant);
+    }
+
+    /**
+     * `forUser()` decides about the subject the resolver translates the user
+     * into, never about the user itself.
+     *
+     * @return void
+     */
+    public function testForUserDecidesAboutTheResolversTranslation(): void
+    {
+        $user      = new \stdClass;
+        $principal = $this->stubAuthorizable(['posts:create']);
+        $resolved  = new Subject($principal, $user);
+
+        $resolver = \Mockery::mock(SubjectResolver::class);
+        $resolver->shouldReceive('forUser')->once()->with($user)->andReturn($resolved);
+        $resolver->shouldReceive('resolve')->andReturnNull();
+
+        $manager = $this->managerResolving($resolver);
+        $scoped  = $manager->forUser($user);
+
+        self::assertNotSame($manager, $scoped);
+        self::assertSame($resolved, $scoped->currentSubject());
+        self::assertTrue($scoped->can('posts:create'));
+        self::assertNull($manager->currentSubject());
+    }
+
+    /**
+     * The decision events carry the model the subject is about.
+     *
+     * @return void
+     */
+    public function testDecisionEventsCarryTheSubjectsModel(): void
+    {
+        $user   = $this->stubAuthorizable();
+        $events = \Mockery::mock(Dispatcher::class);
+        $events->shouldReceive('dispatch')->with(\Mockery::on(static fn (object $event): bool => $event instanceof DecisionEvaluated && $event->principal === $user))->twice();
+        $events->shouldReceive('dispatch')->with(\Mockery::on(static fn (object $event): bool => $event instanceof AuthorizationFailed && $event->principal === $user))->once();
+
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator,
+            subjectResolver: new StubSubjectResolver($user),
+            policyResolver: new DefaultPolicyResolver,
+            lastDecisionStore: new LastDecisionStore,
+            events: $events,
+        );
+
+        $manager->evaluate('posts:create');
+        $exception = $this->denialOf($manager, 'posts:create');
+
+        self::assertSame(DecisionReason::IMPLICIT_DENY, $exception->getReason());
+    }
+
+    /**
+     * Build a manager resolving its subject through the supplied resolver.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Contracts\SubjectResolver  $resolver
+     * @return \SineMacula\Laravel\Authorization\AuthorizationManager
+     */
+    private function managerResolving(SubjectResolver $resolver): AuthorizationManager
+    {
+        return new AuthorizationManager(
+            evaluator: new PolicyEvaluator,
+            subjectResolver: $resolver,
+            policyResolver: new DefaultPolicyResolver,
+            lastDecisionStore: new LastDecisionStore,
+        );
+    }
+
+    /**
      * Build a manager with an anonymous resolver and the supplied translator.
      *
      * @param  \Illuminate\Contracts\Translation\Translator|null  $translator
@@ -649,7 +810,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         return new AuthorizationManager(
             evaluator: new PolicyEvaluator,
-            principalResolver: new NullPrincipalResolver,
+            subjectResolver: new StubSubjectResolver,
             policyResolver: new DefaultPolicyResolver,
             lastDecisionStore: new LastDecisionStore,
             translator: $translator,

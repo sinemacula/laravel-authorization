@@ -9,14 +9,14 @@ use Illuminate\Support\Facades\Gate;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
-use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Exceptions\GateConflictException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
-use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
+use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\TestCase;
 
@@ -48,7 +48,7 @@ final class ServiceProviderTest extends TestCase
     public function testBindsManagerEvaluatorAndResolver(): void
     {
         self::assertInstanceOf(PolicyEvaluator::class, $this->app->make(PolicyEvaluator::class)); // @phpstan-ignore method.nonObject
-        self::assertInstanceOf(NullPrincipalResolver::class, $this->app->make(PrincipalResolver::class)); // @phpstan-ignore method.nonObject
+        self::assertInstanceOf(AuthGuardSubjectResolver::class, $this->app->make(SubjectResolver::class)); // @phpstan-ignore method.nonObject
         self::assertInstanceOf(AuthorizationManager::class, $this->app->make('authorization')); // @phpstan-ignore method.nonObject
         /** @var \Illuminate\Foundation\Application $app */
         $app = $this->app;
@@ -67,7 +67,9 @@ final class ServiceProviderTest extends TestCase
 
         self::assertSame('web', $config->get('authorization.defaults.guard'));
         self::assertSame('throw', $config->get('authorization.gate.on_conflict'));
-        self::assertSame(NullPrincipalResolver::class, $config->get('authorization.principal_resolver'));
+        self::assertSame(AuthGuardSubjectResolver::class, $config->get('authorization.subject_resolver'));
+        self::assertFalse($config->has('authorization.principal_resolver'));
+        self::assertFalse($config->has('authorization.tenant_resolver'));
     }
 
     /**

@@ -10,7 +10,7 @@ use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
-use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
@@ -23,7 +23,7 @@ use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 /**
  * Authorization manager — the facade-facing entry point.
  *
- * Coordinates principal resolution, policy gathering, evaluation, and RBAC
+ * Coordinates subject resolution, policy gathering, evaluation, and RBAC
  * fallback into a single API. The manager is deliberately small and delegates
  * the actual statement walking to the policy evaluator; all four evaluation
  * branches ultimately return an evaluation result, with the reason code and
@@ -36,11 +36,8 @@ final class AuthorizationManager
 {
     use HasContainerInstance;
 
-    /** @var object|null Explicit principal supplied via `for()`; ignored unless the override flag is true. */
-    private ?object $principalOverride = null;
-
-    /** @var bool Whether `for()` has produced the current scope; false defers to the bound resolver. */
-    private bool $principalOverridden = false;
+    /** @var \SineMacula\Laravel\Authorization\Subject|null The subject named through `for()` or `forUser()`; null defers to the bound resolver. */
+    private ?Subject $subjectOverride = null;
 
     /** @var array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>|null  Per-call policy override supplied via `withPolicies()`. */
     private ?array $policyOverride = null;
@@ -49,7 +46,7 @@ final class AuthorizationManager
      * Create a new manager instance.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator  $evaluator
-     * @param  \SineMacula\Laravel\Authorization\Contracts\PrincipalResolver  $principalResolver
+     * @param  \SineMacula\Laravel\Authorization\Contracts\SubjectResolver  $subjectResolver
      * @param  \SineMacula\Laravel\Authorization\Contracts\PolicyResolver  $policyResolver
      * @param  \SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore  $lastDecisionStore
      * @param  \Illuminate\Contracts\Events\Dispatcher|null  $events
@@ -60,8 +57,8 @@ final class AuthorizationManager
         /** Policy evaluator used to walk statements for every check. */
         private readonly PolicyEvaluator $evaluator,
 
-        /** Bridge to the host application's concept of the current principal. */
-        private readonly PrincipalResolver $principalResolver,
+        /** Resolves the subject, tenant and application of the current request. */
+        private readonly SubjectResolver $subjectResolver,
 
         /** Gathers the policy set applicable to a principal per check. */
         private readonly PolicyResolver $policyResolver,
@@ -77,8 +74,8 @@ final class AuthorizationManager
     ) {}
 
     /**
-     * Determine whether the current principal is allowed to perform the
-     * supplied action.
+     * Determine whether the current subject is allowed to perform the supplied
+     * action.
      *
      * @param  string  $action
      * @param  string|null  $resource
@@ -91,7 +88,7 @@ final class AuthorizationManager
     }
 
     /**
-     * Authorize the current principal for the supplied action, raising an
+     * Authorize the current subject for the supplied action, raising an
      * authorization exception when denied.
      *
      * @param  string  $action
@@ -103,22 +100,22 @@ final class AuthorizationManager
      */
     public function authorize(string $action, ?string $resource = null, array $context = []): void
     {
-        $principal = $this->currentPrincipal();
-        $result    = $this->evaluateFor($principal, $action, $resource, $context);
+        $subject = $this->currentSubject();
+        $result  = $this->evaluateFor($subject, $action, $resource, $context);
 
         $this->lastDecisionStore->put($result);
-        $this->dispatch(new DecisionEvaluated($principal, $action, $resource, $context, $result));
+        $this->dispatch(new DecisionEvaluated($subject?->subject, $action, $resource, $context, $result));
 
         if (!$result->allowed) {
-            $this->dispatch(new AuthorizationFailed($principal, $action, $resource, $context, $result));
+            $this->dispatch(new AuthorizationFailed($subject?->subject, $action, $resource, $context, $result));
 
             throw new AuthorizationException($result->reason, $this->deniedMessage());
         }
     }
 
     /**
-     * Evaluate the supplied action for the current principal and return the
-     * full evaluation result.
+     * Evaluate the supplied action for the current subject and return the full
+     * evaluation result.
      *
      * @param  string  $action
      * @param  string|null  $resource
@@ -127,9 +124,9 @@ final class AuthorizationManager
      */
     public function evaluate(string $action, ?string $resource = null, array $context = []): EvaluationResult
     {
-        $principal = $this->currentPrincipal();
+        $subject = $this->currentSubject();
 
-        return $this->record($principal, $action, $resource, $context, $this->evaluateFor($principal, $action, $resource, $context));
+        return $this->record($subject, $action, $resource, $context, $this->evaluateFor($subject, $action, $resource, $context));
     }
 
     /**
@@ -146,7 +143,7 @@ final class AuthorizationManager
      */
     public function refuseUnidentifiedResource(string $action, array $context = []): EvaluationResult
     {
-        return $this->record($this->currentPrincipal(), $action, null, $context, EvaluationResult::implicitlyDenied());
+        return $this->record($this->currentSubject(), $action, null, $context, EvaluationResult::implicitlyDenied());
     }
 
     /**
@@ -194,12 +191,12 @@ final class AuthorizationManager
 
     /**
      * Return a map of every registered permission to its effective decision for
-     * the current principal.
+     * the current subject.
      *
      * Walks every case of every configured `PermissionEnum` and evaluates each
      * through the full 4-step evaluator (explicit deny, explicit allow, RBAC,
      * implicit deny). The result is an associative array keyed by permission
-     * string with boolean values indicating whether the principal is allowed.
+     * string with boolean values indicating whether the subject is allowed.
      *
      * Performance note: this method performs N evaluations where N is the total
      * number of registered enum cases. Callers should cache the result when
@@ -238,18 +235,30 @@ final class AuthorizationManager
     }
 
     /**
-     * Return a scoped manager bound to the supplied principal.
+     * Return a scoped manager deciding about the supplied subject.
      *
-     * @param  object  $principal
+     * The decisions keep the current request's tenant, application and guard,
+     * as the resolver reports them; with no subject resolved, they have none.
+     *
+     * @param  object  $subject
      * @return self
      */
-    public function for(object $principal): self
+    public function for(object $subject): self
     {
-        $scoped                      = clone $this;
-        $scoped->principalOverride   = $principal;
-        $scoped->principalOverridden = true;
+        return $this->scopedTo($this->currentSubject()?->withSubject($subject) ?? new Subject($subject, $subject));
+    }
 
-        return $scoped;
+    /**
+     * Return a scoped manager deciding about the subject the resolver
+     * translates the supplied user into: the user Laravel's Gate hands over,
+     * for example.
+     *
+     * @param  object  $user
+     * @return self
+     */
+    public function forUser(object $user): self
+    {
+        return $this->scopedTo($this->subjectResolver->forUser($user));
     }
 
     /**
@@ -269,44 +278,55 @@ final class AuthorizationManager
     }
 
     /**
-     * Resolve the principal in scope for this invocation.
+     * Resolve the subject in scope for this invocation.
      *
-     * Honours a `for()` override when active; otherwise defers to the bound
-     * `PrincipalResolver`. Public so every surface that needs the current
-     * principal — middleware, Blade helpers, custom Gates — can delegate here
-     * instead of re-implementing the override + resolver trio.
+     * Honours a `for()` or `forUser()` scope when active; otherwise defers to
+     * the bound `SubjectResolver`. Public so every surface that needs the
+     * current subject — middleware, Blade helpers, custom Gates — can delegate
+     * here instead of re-implementing the scope and resolver pair.
      *
-     * @return object|null
+     * @return \SineMacula\Laravel\Authorization\Subject|null
      */
-    public function currentPrincipal(): ?object
+    public function currentSubject(): ?Subject
     {
-        if ($this->principalOverridden) {
-            return $this->principalOverride;
-        }
-
-        return $this->principalResolver->resolve();
+        return $this->subjectOverride ?? $this->subjectResolver->resolve();
     }
 
     /**
-     * Evaluate the action against the supplied principal.
+     * Return a clone of this manager deciding about the supplied subject.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @return self
+     */
+    private function scopedTo(Subject $subject): self
+    {
+        $scoped                  = clone $this;
+        $scoped->subjectOverride = $subject;
+
+        return $scoped;
+    }
+
+    /**
+     * Evaluate the action against the supplied subject.
      *
      * RBAC is consulted only when no policy decided the check: an explicit
      * allow or deny, or an invalid policy, stands. A policy document that
      * cannot be read denies the check as an invalid policy.
      *
-     * @param  object|null  $principal
+     * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @param  string  $action
      * @param  string|null  $resource
      * @param  array<string, mixed>  $context
      * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult
      */
-    private function evaluateFor(?object $principal, string $action, ?string $resource, array $context): EvaluationResult
+    private function evaluateFor(?Subject $subject, string $action, ?string $resource, array $context): EvaluationResult
     {
-        if ($principal === null) {
+        if ($subject === null) {
             return EvaluationResult::implicitlyDenied();
         }
 
-        $result = $this->evaluatePolicies($principal, $action, $resource, $context);
+        $principal = $subject->subject;
+        $result    = $this->evaluatePolicies($principal, $action, $resource, $context);
 
         if ($result->reason === DecisionReason::IMPLICIT_DENY && $principal instanceof AuthorizableIdentity && $principal->hasPermission($action)) {
             return EvaluationResult::rbacAllowed($result->trace);
@@ -374,17 +394,17 @@ final class AuthorizationManager
     /**
      * Record the result as the last decision and dispatch its decision event.
      *
-     * @param  object|null  $principal
+     * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @param  string  $action
      * @param  string|null  $resource
      * @param  array<string, mixed>  $context
      * @param  \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult  $result
      * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult
      */
-    private function record(?object $principal, string $action, ?string $resource, array $context, EvaluationResult $result): EvaluationResult
+    private function record(?Subject $subject, string $action, ?string $resource, array $context, EvaluationResult $result): EvaluationResult
     {
         $this->lastDecisionStore->put($result);
-        $this->dispatch(new DecisionEvaluated($principal, $action, $resource, $context, $result));
+        $this->dispatch(new DecisionEvaluated($subject?->subject, $action, $resource, $context, $result));
 
         return $result;
     }

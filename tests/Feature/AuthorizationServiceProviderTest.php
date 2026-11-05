@@ -19,8 +19,7 @@ use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
-use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
-use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
@@ -29,15 +28,16 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
+use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
-use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
-use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
+use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubPolicyStore;
+use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
-use Tests\Feature\Stubs\SwitchableTenantResolver;
+use Tests\Feature\Stubs\SwitchableSubjectResolver;
 use Tests\TestCase;
 
 /**
@@ -71,7 +71,7 @@ use Tests\TestCase;
 final class AuthorizationServiceProviderTest extends TestCase
 {
     /**
-     * Configure the switchable tenant resolver, as an application configures
+     * Configure the switchable subject resolver, as an application configures
      * its own, and register the provider again so the binding uses it.
      *
      * @return void
@@ -85,7 +85,7 @@ final class AuthorizationServiceProviderTest extends TestCase
 
         /** @var \Illuminate\Config\Repository $config */
         $config = $app->make(ConfigRepository::class);
-        $config->set('authorization.tenant_resolver', SwitchableTenantResolver::class);
+        $config->set('authorization.subject_resolver', SwitchableSubjectResolver::class);
 
         (new AuthorizationServiceProvider($app))->register();
     }
@@ -98,7 +98,7 @@ final class AuthorizationServiceProviderTest extends TestCase
     #[\Override]
     protected function tearDown(): void
     {
-        SwitchableTenantResolver::$tenant = null;
+        SwitchableSubjectResolver::$tenant = null;
         Carbon::setTestNow();
 
         parent::tearDown();
@@ -114,8 +114,7 @@ final class AuthorizationServiceProviderTest extends TestCase
     {
         $app       = $this->application();
         $abstracts = [
-            PrincipalResolver::class,
-            TenantResolver::class,
+            SubjectResolver::class,
             ResolvedTenant::class,
             ResolutionCache::class,
             PolicyResolver::class,
@@ -186,10 +185,9 @@ final class AuthorizationServiceProviderTest extends TestCase
         (new AuthorizationServiceProvider($app))->register();
 
         $bound = [
-            PrincipalResolver::class => new NullPrincipalResolver,
-            TenantResolver::class    => new NullTenantResolver,
-            PolicyStore::class       => new StubPolicyStore,
-            PolicyResolver::class    => new DefaultPolicyResolver,
+            SubjectResolver::class => new StubSubjectResolver,
+            PolicyStore::class     => new StubPolicyStore,
+            PolicyResolver::class  => new DefaultPolicyResolver,
         ];
 
         foreach ($bound as $contract => $instance) {
@@ -204,7 +202,7 @@ final class AuthorizationServiceProviderTest extends TestCase
 
         $manager = $app->make(AuthorizationManager::class);
 
-        self::assertSame($bound[PrincipalResolver::class], (new \ReflectionProperty($manager, 'principalResolver'))->getValue($manager));
+        self::assertSame($bound[SubjectResolver::class], (new \ReflectionProperty($manager, 'subjectResolver'))->getValue($manager));
         self::assertSame($bound[PolicyResolver::class], (new \ReflectionProperty($manager, 'policyResolver'))->getValue($manager));
     }
 
@@ -224,60 +222,65 @@ final class AuthorizationServiceProviderTest extends TestCase
     }
 
     /**
-     * The configured tenant resolver class is the one bound.
+     * The configured subject resolver class is the one bound.
      *
      * @return void
      */
-    public function testConfiguredTenantResolverIsBound(): void
+    public function testConfiguredSubjectResolverIsBound(): void
     {
-        self::assertInstanceOf(SwitchableTenantResolver::class, $this->application()->make(TenantResolver::class));
+        self::assertInstanceOf(SwitchableSubjectResolver::class, $this->application()->make(SubjectResolver::class));
     }
 
     /**
-     * A null `tenant_resolver` means no tenant resolver and binds the null
-     * resolver, under which only platform-wide rows are visible.
+     * The shipped subject resolver has no tenant, so only platform-wide rows
+     * are visible, whether or not a user is signed in.
      *
      * @return void
      */
-    public function testNullTenantResolverConfigBindsTheNullResolver(): void
+    public function testTheShippedSubjectResolverSeesOnlyPlatformRows(): void
     {
         $app = $this->application();
 
         /** @var \Illuminate\Config\Repository $config */
         $config = $app->make(ConfigRepository::class);
-        $config->set('authorization.tenant_resolver', null);
+        $config->set('authorization.subject_resolver', AuthGuardSubjectResolver::class);
 
         (new AuthorizationServiceProvider($app))->register();
 
-        self::assertInstanceOf(NullTenantResolver::class, $app->make(TenantResolver::class));
+        self::assertInstanceOf(AuthGuardSubjectResolver::class, $app->make(SubjectResolver::class));
 
         Role::create(['name' => 'platform', 'guard' => 'web']);
         Role::create(['name' => 'owned', 'guard' => 'web', 'tenant_type' => 'tenant', 'tenant_id' => 't-1']);
 
         self::assertSame(['platform'], Role::query()->pluck('name')->all());
+
+        $this->actingAs(AuthenticatableIdentity::create(['id' => 'user-signed-in']));
+        $this->startNextJob();
+
+        self::assertSame(['platform'], Role::query()->pluck('name')->all());
     }
 
     /**
-     * Registering the provider binds the tenant resolver and the resolved
+     * Registering the provider binds the subject resolver and the resolved
      * tenant without building either, so no application resolver runs before
      * the first query.
      *
      * @return void
      */
-    public function testRegisteringDoesNotResolveTheTenantResolver(): void
+    public function testRegisteringDoesNotResolveTheSubjectResolver(): void
     {
         $app = new Application(\dirname(__DIR__, 2));
 
         try {
             $app->instance('config', new ConfigRepositoryImplementation([
-                'authorization' => ['tenant_resolver' => SwitchableTenantResolver::class],
+                'authorization' => ['subject_resolver' => SwitchableSubjectResolver::class],
             ]));
 
             (new AuthorizationServiceProvider($app))->register();
 
-            self::assertTrue($app->bound(TenantResolver::class));
+            self::assertTrue($app->bound(SubjectResolver::class));
             self::assertTrue($app->bound(ResolvedTenant::class));
-            self::assertFalse($app->resolved(TenantResolver::class));
+            self::assertFalse($app->resolved(SubjectResolver::class));
             self::assertFalse($app->resolved(ResolvedTenant::class));
         } finally {
             Container::setInstance($this->application());
@@ -285,45 +288,45 @@ final class AuthorizationServiceProviderTest extends TestCase
     }
 
     /**
-     * Rebinding the tenant resolver after a tenant was resolved is seen by the
-     * next query, which asks the new resolver.
+     * Rebinding the subject resolver after a tenant was resolved is seen by the
+     * next query, which reads the new resolver's tenant.
      *
      * @return void
      */
-    public function testRebindingTheTenantResolverIsSeenByTheNextQuery(): void
+    public function testRebindingTheSubjectResolverIsSeenByTheNextQuery(): void
     {
         [$tenantA, $tenantB] = $this->seedTwoTenants();
 
         $app = $this->application();
 
-        SwitchableTenantResolver::$tenant = $tenantA;
+        SwitchableSubjectResolver::$tenant = $tenantA;
 
         self::assertSame(['a-editor', 'global', 'on-call'], $this->visibleRoleNames());
 
-        $app->instance(TenantResolver::class, new class ($tenantB) implements TenantResolver {
-            /**
-             * Create a new resolver for a fixed tenant.
-             *
-             * @param  object  $tenant
-             */
-            public function __construct(
+        $app->instance(SubjectResolver::class, new StubSubjectResolver(new \stdClass, $tenantB));
 
-                /** The tenant this resolver returns. */
-                private readonly object $tenant,
-            ) {}
+        self::assertSame(['b-editor', 'global', 'on-call'], $this->visibleRoleNames());
+    }
 
-            /**
-             * Resolve the fixed tenant.
-             *
-             * @return object
-             */
-            #[\Override]
-            public function resolve(): object
-            {
-                return $this->tenant;
-            }
-        });
+    /**
+     * A subject resolver the application binds itself keeps reporting its
+     * tenant after the reset between jobs, and the tenant reaches the scope in
+     * the next job.
+     *
+     * @return void
+     */
+    public function testApplicationBoundSubjectResolverKeepsItsTenantAcrossJobs(): void
+    {
+        [, $tenantB] = $this->seedTwoTenants();
 
+        $resolver = new StubSubjectResolver(new \stdClass, $tenantB);
+        $this->application()->instance(SubjectResolver::class, $resolver);
+
+        self::assertSame(['b-editor', 'global', 'on-call'], $this->visibleRoleNames());
+
+        $this->startNextJob();
+
+        self::assertSame($resolver, $this->application()->make(SubjectResolver::class));
         self::assertSame(['b-editor', 'global', 'on-call'], $this->visibleRoleNames());
     }
 
@@ -339,7 +342,7 @@ final class AuthorizationServiceProviderTest extends TestCase
         [$tenantA, $tenantB, $userId] = $this->seedTwoTenants();
 
         // Job 1, for tenant A.
-        SwitchableTenantResolver::$tenant = $tenantA;
+        SwitchableSubjectResolver::$tenant = $tenantA;
 
         self::assertSame(['a-editor', 'global', 'on-call'], $this->visibleRoleNames());
         self::assertSame(['a-editor', 'on-call'], $this->rolesOf($userId));
@@ -353,7 +356,7 @@ final class AuthorizationServiceProviderTest extends TestCase
 
         // Job 2, for tenant B.
         $this->startNextJob();
-        SwitchableTenantResolver::$tenant = $tenantB;
+        SwitchableSubjectResolver::$tenant = $tenantB;
 
         self::assertSame(['b-editor', 'global', 'on-call'], $this->visibleRoleNames());
         self::assertSame(['b-editor'], $this->rolesOf($userId));
@@ -361,7 +364,7 @@ final class AuthorizationServiceProviderTest extends TestCase
 
         // Job 3, with no tenant: platform rows only.
         $this->startNextJob();
-        SwitchableTenantResolver::$tenant = null;
+        SwitchableSubjectResolver::$tenant = null;
 
         self::assertSame(['global', 'on-call'], $this->visibleRoleNames());
         self::assertSame([], $this->rolesOf($userId));
@@ -377,7 +380,7 @@ final class AuthorizationServiceProviderTest extends TestCase
     {
         [$tenantA, , $userId] = $this->seedTwoTenants();
 
-        SwitchableTenantResolver::$tenant = $tenantA;
+        SwitchableSubjectResolver::$tenant = $tenantA;
 
         self::assertSame(['a-editor', 'on-call'], $this->rolesOf($userId));
 
@@ -400,7 +403,7 @@ final class AuthorizationServiceProviderTest extends TestCase
         $base = $this->application();
 
         $first = $this->inSandbox($base, function () use ($tenantA, $userId): array {
-            SwitchableTenantResolver::$tenant = $tenantA;
+            SwitchableSubjectResolver::$tenant = $tenantA;
 
             Authorization::for($this->identity($userId))->evaluate('posts:read');
 
@@ -412,7 +415,7 @@ final class AuthorizationServiceProviderTest extends TestCase
         self::assertNotNull($first[2]);
 
         $second = $this->inSandbox($base, function () use ($tenantB, $userId): array {
-            SwitchableTenantResolver::$tenant = $tenantB;
+            SwitchableSubjectResolver::$tenant = $tenantB;
 
             return [$this->visibleRoleNames(), $this->rolesOf($userId), Authorization::lastDecision()];
         });

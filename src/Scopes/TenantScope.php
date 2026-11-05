@@ -9,18 +9,18 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Scope;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
-use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 
 /**
  * Global query scope for row-level multi-tenant filtering.
  *
- * When a `TenantResolver` returns a tenant, this scope restricts queries to
- * rows that are either platform-wide (null tenant columns) or owned by the
- * resolved tenant. When the resolver returns null (no tenant context), only
- * platform-wide rows remain visible: a missing tenant never makes every
- * tenant's rows visible.
+ * When the subject the `SubjectResolver` returns has a tenant, this scope
+ * restricts queries to rows that are either platform-wide (null tenant columns)
+ * or owned by that tenant. When there is no subject, or the subject has no
+ * tenant, only platform-wide rows remain visible: a missing tenant never makes
+ * every tenant's rows visible.
  *
  * The scope holds no state of its own. It reads the tenant from the
  * `ResolvedTenant` holder, which the service provider binds with `scoped()`, so
@@ -135,8 +135,8 @@ final class TenantScope implements Scope
     {
         $container = Container::getInstance();
 
-        /** @var \SineMacula\Laravel\Authorization\Contracts\TenantResolver $resolver */
-        $resolver = $container->make(TenantResolver::class);
+        /** @var \SineMacula\Laravel\Authorization\Contracts\SubjectResolver $resolver */
+        $resolver = $container->make(SubjectResolver::class);
 
         /** @var \SineMacula\Laravel\Authorization\Support\ResolvedTenant $resolved */
         $resolved = $container->make(ResolvedTenant::class);

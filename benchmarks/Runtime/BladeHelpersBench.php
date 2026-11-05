@@ -6,11 +6,11 @@ namespace Benchmarks\Runtime;
 
 use Benchmarks\Support\BenchmarkCase;
 use Benchmarks\Support\BenchmarkFixtures;
-use Benchmarks\Support\BenchmarkPrincipalResolver;
+use Benchmarks\Support\BenchmarkSubjectResolver;
 use Illuminate\Support\Str;
 use PhpBench\Attributes as Bench;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
-use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
@@ -20,7 +20,7 @@ use Tests\Fixtures\BenchmarkIdentity;
  * PHPBench micro-benchmark for the Blade runtime helpers.
  *
  * Blade directives compile into static calls on `BladeHelpers` that resolve the
- * current principal through the package `PrincipalResolver` on every render. A
+ * current subject through the package `SubjectResolver` on every render. A
  * single page renders one directive per permission-gated block, so the
  * per-directive cost scales with page complexity.
  *
@@ -49,8 +49,8 @@ final class BladeHelpersBench extends BenchmarkCase
 
     /**
      * Bench setUp — boot the application, seed a role that carries the fixture
-     * permissions, attach it to the principal, and bind a principal resolver
-     * slot.
+     * permissions, attach it to the principal, and bind a subject resolver
+     * returning it.
      *
      * @return void
      */
@@ -84,7 +84,7 @@ final class BladeHelpersBench extends BenchmarkCase
         $user = BenchmarkIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole($this->roleName);
 
-        $app->instance(PrincipalResolver::class, new BenchmarkPrincipalResolver($user));
+        $app->instance(SubjectResolver::class, new BenchmarkSubjectResolver($user));
         $app->forgetInstance(AuthorizationManager::class);
         $app->forgetInstance('authorization');
     }

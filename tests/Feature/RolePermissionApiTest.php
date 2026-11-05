@@ -19,7 +19,6 @@ use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
-use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use Tests\TestCase;
@@ -44,7 +43,6 @@ use Tests\TestCase;
 #[CoversClass(RolePermissionGranted::class)]
 #[CoversClass(RolePermissionRevoked::class)]
 #[CoversClass(TenantScope::class)]
-#[CoversClass(NullTenantResolver::class)]
 #[CoversClass(ResolutionCacheContext::class)]
 #[CoversClass(InvalidTenantException::class)]
 #[CoversClass(InvalidTenantColumnsException::class)]

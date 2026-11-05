@@ -9,21 +9,25 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use Tests\Feature\Stubs\Contracts\PermissionEnumInterface;
 use Tests\Feature\Stubs\CustomPermission;
 use Tests\Feature\Stubs\CustomPolicy;
 use Tests\Feature\Stubs\CustomRole;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
+use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
 /**
  * Feature tests for the boot-time validation of `authorization.models.*`, the
- * connection and the backing of `authorization.permission_enums`.
+ * connection, the backing of `authorization.permission_enums` and the subject
+ * resolver.
  *
  * Each model entry must name an existing class that is the shipped model or a
  * subclass of it, and each permission enum must be backed by strings; anything
@@ -305,6 +309,102 @@ final class ConfigValidatorTest extends TestCase
     public function testIdentifiesAStringBackedPermissionEnum(mixed $class, bool $expected): void
     {
         self::assertSame($expected, ConfigValidator::isStringBackedPermissionEnum($class));
+    }
+
+    /**
+     * The shipped subject resolver, and any class implementing the contract,
+     * pass validation.
+     *
+     * @return void
+     */
+    public function testSubjectResolverImplementingTheContractPasses(): void
+    {
+        $this->validateWithSubjectResolver(AuthGuardSubjectResolver::class);
+        $this->validateWithSubjectResolver(StubSubjectResolver::class);
+
+        $this->expectNotToPerformAssertions();
+    }
+
+    /**
+     * Invalid `subject_resolver` values with the reason each is refused for.
+     *
+     * @return iterable<string, array{mixed, string}>
+     */
+    public static function invalidSubjectResolverProvider(): iterable
+    {
+        yield 'null' => [null, 'a subject resolver class is required; set it to \\' . AuthGuardSubjectResolver::class . ' to decide about the user Laravel authenticated.'];
+        yield 'integer' => [42, 'expected a class-string, got 42 (int).'];
+        yield 'empty' => ['', 'expected a class-string, got \'\' (string).'];
+        yield 'missing class' => ['App\Resolvers\Missing', 'class \'App\Resolvers\Missing\' does not exist.'];
+        yield 'unrelated class' => [\stdClass::class, 'class \'stdClass\' does not implement ' . SubjectResolver::class . '.'];
+    }
+
+    /**
+     * Every invalid `subject_resolver` value, null included, is refused with
+     * its reason: no resolver never means no subject.
+     *
+     * @param  mixed  $resolver
+     * @param  string  $reason
+     * @return void
+     */
+    #[DataProvider('invalidSubjectResolverProvider')]
+    public function testInvalidSubjectResolverIsRejected(mixed $resolver, string $reason): void
+    {
+        $this->assertRejected(
+            fn () => $this->validateWithSubjectResolver($resolver),
+            'authorization.subject_resolver',
+            $reason,
+        );
+    }
+
+    /**
+     * A config without a `subject_resolver` key is refused as null is.
+     *
+     * @return void
+     */
+    public function testMissingSubjectResolverIsRejected(): void
+    {
+        $config = $this->authorizationConfig();
+        unset($config['subject_resolver']);
+
+        $this->assertRejected(
+            fn () => ConfigValidator::validate($config, $this->app),
+            'authorization.subject_resolver',
+            'a subject resolver class is required; set it to \\' . AuthGuardSubjectResolver::class . ' to decide about the user Laravel authenticated.',
+        );
+    }
+
+    /**
+     * A null `subject_resolver` fails the provider's boot.
+     *
+     * @return void
+     */
+    public function testNullSubjectResolverFailsBoot(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config->set('authorization.subject_resolver', null);
+
+        $this->assertRejected(
+            fn () => (new AuthorizationServiceProvider($this->app))->boot(),
+            'authorization.subject_resolver',
+            'a subject resolver class is required; set it to \\' . AuthGuardSubjectResolver::class . ' to decide about the user Laravel authenticated.',
+        );
+    }
+
+    /**
+     * Run the validator over the package config with the given
+     * `subject_resolver`.
+     *
+     * @param  mixed  $resolver
+     * @return void
+     */
+    private function validateWithSubjectResolver(mixed $resolver): void
+    {
+        $config                     = $this->authorizationConfig();
+        $config['subject_resolver'] = $resolver;
+
+        ConfigValidator::validate($config, $this->app);
     }
 
     /**

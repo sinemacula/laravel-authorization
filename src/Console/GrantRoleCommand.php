@@ -15,7 +15,7 @@ use SineMacula\Laravel\Authorization\Console\Concerns\ResolvesIdentity;
  * `AuthorizableIdentity` contract, and delegates to `assignRole()`.
  *
  * The role name is looked up within the tenant scope, like any other query: a
- * tenant-owned role is found only when the application's tenant resolver
+ * tenant-owned role is found only when the application's subject resolver
  * resolves its tenant in the console, and then ranks before a platform-wide
  * role of the same name, which is assigned only when the tenant owns none.
  * Without a tenant, only platform-wide roles can be assigned.

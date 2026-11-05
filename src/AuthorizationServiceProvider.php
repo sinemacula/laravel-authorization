@@ -19,8 +19,7 @@ use SineMacula\Laravel\Authorization\Console\SyncPermissionsCommand;
 use SineMacula\Laravel\Authorization\Console\WhyCanCommand;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
-use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
-use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
@@ -28,10 +27,9 @@ use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
+use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\CachingPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
-use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
-use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 
 /**
@@ -54,11 +52,11 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
  * request's sandbox. They are scoped together: a singleton holding a scoped
  * instance would keep the old instance alive.
  *
- * The contracts an application may bind itself (the principal and tenant
- * resolvers, the policy store and the policy resolver) resolve through a
- * package-owned key that holds the scoped default. An application's own binding
- * of the contract therefore replaces the default without being scoped itself,
- * and an instance it binds survives the reset between jobs.
+ * The contracts an application may bind itself (the subject resolver, the
+ * policy store and the policy resolver) resolve through a package-owned key
+ * that holds the scoped default. An application's own binding of the contract
+ * therefore replaces the default without being scoped itself, and an instance
+ * it binds survives the reset between jobs.
  *
  * Row-lifecycle behaviour for `Role` / `Permission` / `Policy` is attached via
  * the `#[ObservedBy]` attribute on each model; the service provider does not
@@ -88,8 +86,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
     {
         $this->mergeConfigFrom(__DIR__ . '/../config/authorization.php', 'authorization');
 
-        $this->registerPrincipalResolver();
-        $this->registerTenantResolver();
+        $this->registerSubjectResolver();
         $this->registerResolvedTenant();
         $this->registerPolicyStore();
         $this->registerResolutionCache();
@@ -163,46 +160,31 @@ final class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Bind the configured principal resolver as the default, scoped to the
+     * Bind the configured subject resolver as the default, scoped to the
      * request or job so any state it keeps does not reach the next one.
      *
      * @return void
      */
-    protected function registerPrincipalResolver(): void
+    protected function registerSubjectResolver(): void
     {
-        /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\PrincipalResolver> $class */
-        $class = $this->app['config']->get('authorization.principal_resolver', NullPrincipalResolver::class);
+        /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\SubjectResolver> $class */
+        $class = $this->app['config']->get('authorization.subject_resolver', AuthGuardSubjectResolver::class);
 
-        $this->bindScopedDefault(PrincipalResolver::class, $class);
+        $this->bindScopedDefault(SubjectResolver::class, $class);
     }
 
     /**
-     * Bind the configured tenant resolver as the default, scoped to the request
-     * or job. A null `tenant_resolver` means no tenant resolver and binds the
-     * null resolver, under which only platform-wide rows are visible.
-     *
-     * @return void
-     */
-    protected function registerTenantResolver(): void
-    {
-        /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\TenantResolver> $class */
-        $class = $this->app['config']->get('authorization.tenant_resolver') ?? NullTenantResolver::class;
-
-        $this->bindScopedDefault(TenantResolver::class, $class);
-    }
-
-    /**
-     * Bind the holder of the tenant resolved for the current request or job,
-     * which `TenantScope` reads. The holder remembers the resolver it came
-     * from, so a resolver bound after the first query is still honoured.
+     * Bind the holder of the subject's tenant resolved for the current request
+     * or job, which `TenantScope` reads. The holder remembers the resolver it
+     * came from, so a resolver bound after the first query is still honoured.
      *
      * @return void
      */
     protected function registerResolvedTenant(): void
     {
         $this->app->scoped(ResolvedTenant::class, static function (Application $app): ResolvedTenant {
-            /** @var \SineMacula\Laravel\Authorization\Contracts\TenantResolver $resolver */
-            $resolver = $app->make(TenantResolver::class);
+            /** @var \SineMacula\Laravel\Authorization\Contracts\SubjectResolver $resolver */
+            $resolver = $app->make(SubjectResolver::class);
 
             return ResolvedTenant::from($resolver);
         });
@@ -312,7 +294,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
     {
         $this->app->scoped('authorization', static fn (Application $app): AuthorizationManager => new AuthorizationManager(
             evaluator: $app->make(PolicyEvaluator::class),
-            principalResolver: $app->make(PrincipalResolver::class),
+            subjectResolver: $app->make(SubjectResolver::class),
             policyResolver: $app->make(PolicyResolver::class),
             lastDecisionStore: $app->make(LastDecisionStore::class),
             events: $app->bound(Dispatcher::class) ? $app->make(Dispatcher::class) : null,

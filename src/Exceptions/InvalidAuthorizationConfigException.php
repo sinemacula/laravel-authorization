@@ -7,7 +7,7 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
 /**
  * Thrown at boot time when the shipped `authorization` config is malformed — a
  * misspelled class name in `permission_enums`, a `gate.on_conflict` value
- * outside the three accepted sentinels, a `principal_resolver` that does not
+ * outside the three accepted sentinels, a `subject_resolver` that does not
  * implement the contract, a `cache.store` that the Laravel cache manager cannot
  * resolve, and so on.
  *

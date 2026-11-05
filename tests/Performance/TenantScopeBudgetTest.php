@@ -7,11 +7,11 @@ namespace Tests\Performance;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
-use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use Tests\Performance\Support\CountedBenchTenant;
-use Tests\Performance\Support\CountingTenantResolver;
+use Tests\Performance\Support\CountingSubjectResolver;
 use Tests\TestCase;
 
 /**
@@ -49,8 +49,8 @@ final class TenantScopeBudgetTest extends TestCase
         $app = $this->app;
         self::assertNotNull($app, 'Testbench application must be booted by setUp().');
 
-        $resolver = new CountingTenantResolver(new CountedBenchTenant);
-        $app->instance(TenantResolver::class, $resolver);
+        $resolver = new CountingSubjectResolver(new CountedBenchTenant);
+        $app->instance(SubjectResolver::class, $resolver);
 
         /** @var \Illuminate\Config\Repository $config */
         $config = $app->make(ConfigRepository::class);
@@ -73,7 +73,7 @@ final class TenantScopeBudgetTest extends TestCase
         self::assertSame(
             1,
             $resolver->calls,
-            "Tenant resolver invoked {$resolver->calls} times across 50 applies — memoisation contract violated.",
+            "Subject resolver invoked {$resolver->calls} times across 50 applies — memoisation contract violated.",
         );
     }
 
@@ -89,7 +89,7 @@ final class TenantScopeBudgetTest extends TestCase
         $app = $this->app;
         self::assertNotNull($app, 'Testbench application must be booted by setUp().');
 
-        $app->instance(TenantResolver::class, new CountingTenantResolver(new CountedBenchTenant));
+        $app->instance(SubjectResolver::class, new CountingSubjectResolver(new CountedBenchTenant));
 
         $role = Role::create([
             'id'          => (string) Str::uuid(),

@@ -6,10 +6,11 @@ namespace SineMacula\Laravel\Authorization\Testing\Concerns;
 
 use Illuminate\Container\Container;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
-use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
+use SineMacula\Laravel\Authorization\Subject;
 
 /**
  * PHPUnit assertion trait for consumer test suites.
@@ -17,10 +18,10 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
  * Provides convenience assertions that delegate to the authorization manager's
  * evaluation surface. The assertion methods require the using class to extend
  * `PHPUnit\Framework\TestCase`, which supplies the `assertTrue` / `assertFalse`
- * static entry points. The `actingAsIdentity` helper intentionally does not
- * depend on the TestCase base — it can be composed into any consumer utility
- * and falls back to the global `app()` helper when `$this->app` is not
- * available.
+ * static entry points. The `actingAsIdentity` and `actingAsSubject` helpers
+ * intentionally do not depend on the TestCase base — they can be composed into
+ * any consumer utility and fall back to the global container when `$this->app`
+ * is not available.
  *
  * @method static void assertTrue(bool $condition, string $message = '')
  * @method static void assertFalse(bool $condition, string $message = '')
@@ -124,40 +125,67 @@ trait AuthorizationAssertions
     }
 
     /**
-     * Swap the principal resolver for the duration of the test so that
-     * `Authorization::can(...)` (without `for()`) uses the supplied principal.
+     * Swap the subject resolver for the duration of the test so that
+     * `Authorization::can(...)` (without `for()`), the package's middleware and
+     * Blade directives decide about the supplied identity, in the supplied
+     * tenant or in none.
      *
      * Works with both Orchestra Testbench (`$this->app`) and bare Laravel
      * (`app()`).
      *
-     * @param  object  $principal
+     * @param  object  $identity
+     * @param  object|null  $tenant
      * @return void
      */
-    public function actingAsIdentity(object $principal): void
+    public function actingAsIdentity(object $identity, ?object $tenant = null): void
     {
-        $resolver = new class ($principal) implements PrincipalResolver {
+        $this->actingAsSubject(new Subject($identity, $identity, $tenant));
+    }
+
+    /**
+     * Swap the subject resolver for the duration of the test so that every
+     * check without a named subject is about the supplied subject, in its
+     * tenant and application. A user Laravel's Gate hands over is decided about
+     * in that same tenant and application.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @return void
+     */
+    public function actingAsSubject(Subject $subject): void
+    {
+        $resolver = new class ($subject) implements SubjectResolver {
             /**
-             * @param  object  $principal
+             * @param  \SineMacula\Laravel\Authorization\Subject  $subject
              */
             public function __construct(
 
-                /** The principal slotted for resolution. */
-                private readonly object $principal,
+                /** The subject slotted for resolution. */
+                private readonly Subject $subject,
             ) {}
 
             /**
-             * @return object|null
+             * @return \SineMacula\Laravel\Authorization\Subject
              */
             #[\Override]
-            public function resolve(): ?object
+            public function resolve(): Subject
             {
-                return $this->principal;
+                return $this->subject;
+            }
+
+            /**
+             * @param  object  $user
+             * @return \SineMacula\Laravel\Authorization\Subject
+             */
+            #[\Override]
+            public function forUser(object $user): Subject
+            {
+                return $this->subject->withSubject($user);
             }
         };
 
         $container = $this->resolveTestingContainer();
 
-        $container->instance(PrincipalResolver::class, $resolver);
+        $container->instance(SubjectResolver::class, $resolver);
 
         // Rebuild the manager so it picks up the new resolver. Forgetting both
         // the alias and the concrete class ensures the next resolve rebuilds
@@ -173,7 +201,7 @@ trait AuthorizationAssertions
     }
 
     /**
-     * Resolve the Laravel container to bind the test's principal resolver into.
+     * Resolve the Laravel container to bind the test's subject resolver into.
      * Prefers the `$app` property when the consuming class declares one
      * (Laravel/Testbench `TestCase`), falling back to the global container
      * singleton for bare consumers.

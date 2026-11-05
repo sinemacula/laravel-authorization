@@ -8,7 +8,7 @@ use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
-use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
@@ -16,6 +16,7 @@ use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
 /**
@@ -476,7 +477,7 @@ final class BladeDirectivesTest extends TestCase
     }
 
     /**
-     * Bind a principal resolver that returns the supplied user — equivalent to
+     * Bind a subject resolver that returns the supplied user — equivalent to
      * `actingAs()` for the purposes of the view layer, without needing an
      * auth-provider backing.
      *
@@ -485,32 +486,9 @@ final class BladeDirectivesTest extends TestCase
      */
     private function actAs(?object $principal): void
     {
-        $resolver = new class ($principal) implements PrincipalResolver {
-            /**
-             * Create a new resolver wrapping a fixed principal.
-             *
-             * @param  object|null  $principal
-             * @return void
-             */
-            public function __construct(
+        $resolver = new StubSubjectResolver($principal);
 
-                /** The principal returned by every resolution call. */
-                private readonly ?object $principal,
-            ) {}
-
-            /**
-             * Return the principal bound on this scoped resolver.
-             *
-             * @return object|null
-             */
-            #[\Override]
-            public function resolve(): ?object
-            {
-                return $this->principal;
-            }
-        };
-
-        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject
+        $this->app->instance(SubjectResolver::class, $resolver); // @phpstan-ignore method.nonObject
     }
 
     /**

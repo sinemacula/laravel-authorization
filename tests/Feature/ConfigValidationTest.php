@@ -14,7 +14,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
-use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
+use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\TestCase;
 
@@ -134,37 +134,37 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * A null `principal_resolver` is rejected — the package ships a safe
-     * default that consumers can fall back to explicitly.
+     * A null `subject_resolver` is rejected — the package ships a default that
+     * consumers can fall back to explicitly.
      *
      * @return void
      */
-    public function testNullPrincipalResolverIsRejected(): void
+    public function testNullSubjectResolverIsRejected(): void
     {
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.principal_resolver', null);
+        $config->set('authorization.subject_resolver', null);
 
         try {
             ConfigValidator::validate((array) $config->get('authorization'), $this->app);
             self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
         } catch (InvalidAuthorizationConfigException $exception) {
-            self::assertSame('authorization.principal_resolver', $exception->getConfigKey());
-            self::assertStringContainsString('NullPrincipalResolver', $exception->getReason());
+            self::assertSame('authorization.subject_resolver', $exception->getConfigKey());
+            self::assertStringContainsString('AuthGuardSubjectResolver', $exception->getReason());
         }
     }
 
     /**
-     * A `principal_resolver` value that does not implement the contract is
+     * A `subject_resolver` value that does not implement the contract is
      * rejected.
      *
      * @return void
      */
-    public function testPrincipalResolverWrongContractIsRejected(): void
+    public function testSubjectResolverWrongContractIsRejected(): void
     {
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.principal_resolver', \stdClass::class);
+        $config->set('authorization.subject_resolver', \stdClass::class);
 
         $this->expectException(InvalidAuthorizationConfigException::class);
 
@@ -172,15 +172,15 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * The shipped `NullPrincipalResolver` passes.
+     * The shipped `AuthGuardSubjectResolver` passes.
      *
      * @return void
      */
-    public function testShippedPrincipalResolverPasses(): void
+    public function testShippedSubjectResolverPasses(): void
     {
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.principal_resolver', NullPrincipalResolver::class);
+        $config->set('authorization.subject_resolver', AuthGuardSubjectResolver::class);
 
         ConfigValidator::validate((array) $config->get('authorization'), $this->app);
 
@@ -398,17 +398,17 @@ final class ConfigValidationTest extends TestCase
     }
 
     /**
-     * `principal_resolver` rejection message when passed a non-string. Kills
+     * `subject_resolver` rejection message when passed a non-string. Kills
      * Concat and ConcatOperandRemoval on line 157 (via assertImplementsContract
      * at line 262).
      *
      * @return void
      */
-    public function testPrincipalResolverNonStringMessageShape(): void
+    public function testSubjectResolverNonStringMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.principal_resolver', 42);
+        $config->set('authorization.subject_resolver', 42);
 
         try {
             ConfigValidator::validate((array) $config->get('authorization'), $this->app);
@@ -431,7 +431,7 @@ final class ConfigValidationTest extends TestCase
     {
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.principal_resolver', 'App\Does\Not\Exist');
+        $config->set('authorization.subject_resolver', 'App\Does\Not\Exist');
 
         try {
             ConfigValidator::validate((array) $config->get('authorization'), $this->app);
@@ -454,7 +454,7 @@ final class ConfigValidationTest extends TestCase
     {
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.principal_resolver', \stdClass::class);
+        $config->set('authorization.subject_resolver', \stdClass::class);
 
         try {
             ConfigValidator::validate((array) $config->get('authorization'), $this->app);
@@ -463,7 +463,7 @@ final class ConfigValidationTest extends TestCase
             $reason = $exception->getReason();
             self::assertStringContainsString(\stdClass::class, $reason);
             self::assertStringContainsString('does not implement', $reason);
-            self::assertStringContainsString('PrincipalResolver', $reason);
+            self::assertStringContainsString('SubjectResolver', $reason);
         }
     }
 
@@ -603,28 +603,5 @@ final class ConfigValidationTest extends TestCase
         $this->expectException(InvalidAuthorizationConfigException::class);
 
         ConfigValidator::validate((array) $config->get('authorization'), $this->app);
-    }
-
-    /**
-     * `tenant_resolver` with wrong contract is rejected. Kills the
-     * assertImplementsContract path for tenant_resolver.
-     *
-     * @return void
-     */
-    public function testTenantResolverWrongContractIsRejected(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.tenant_resolver', \stdClass::class);
-
-        try {
-            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
-            self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
-        } catch (InvalidAuthorizationConfigException $exception) {
-            $reason = $exception->getReason();
-            self::assertStringContainsString(\stdClass::class, $reason);
-            self::assertStringContainsString('does not implement', $reason);
-            self::assertStringContainsString('TenantResolver', $reason);
-        }
     }
 }

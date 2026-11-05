@@ -107,8 +107,8 @@ final class GateConflictModeTest extends TestCase
     public function testOverwriteModeReplacesExistingGate(): void
     {
         // Sentinel closure that would return true if preserved. The package's
-        // closure routes through the null principal resolver, so the
-        // overwritten Gate must return false.
+        // closure decides about the resolver's subject, and no user is signed
+        // in, so the overwritten Gate must return false.
         Gate::define(self::CONFLICTING_PERMISSION, static fn (): bool => true);
 
         $this->configureGate('overwrite');
@@ -118,7 +118,7 @@ final class GateConflictModeTest extends TestCase
         self::assertTrue(Gate::has(self::CONFLICTING_PERMISSION));
         self::assertFalse(
             Gate::allows(self::CONFLICTING_PERMISSION),
-            'Expected the overwritten Gate to defer to the null principal resolver and deny.',
+            'Expected the overwritten Gate to defer to the subject resolver and deny.',
         );
     }
 
