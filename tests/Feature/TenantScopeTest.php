@@ -6,20 +6,22 @@ namespace Tests\Feature;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
-use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
+use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
-use Tests\Feature\Stubs\SwitchableTenantResolver;
+use Tests\Feature\Stubs\SwitchableSubjectResolver;
 use Tests\TestCase;
 
 /**
- * Feature coverage for `TenantScope`: platform rows only without a tenant, the
- * tenant read from the request's resolved-tenant holder, and the refusal of
- * tenants that cannot be matched to the rows they own.
+ * Feature coverage for `TenantScope`: platform rows only without a subject or a
+ * tenant, the subject's tenant read from the request's resolved-tenant holder,
+ * and the refusal of tenants that cannot be matched to the rows they own.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,7 +43,7 @@ final class TenantScopeTest extends TestCase
     #[\Override]
     protected function tearDown(): void
     {
-        SwitchableTenantResolver::$tenant = null;
+        SwitchableSubjectResolver::$tenant = null;
 
         parent::tearDown();
     }
@@ -58,6 +60,42 @@ final class TenantScopeTest extends TestCase
 
         self::assertSame(['platform-role'], $this->roleNames());
         self::assertSame(['platform-permission'], $this->permissionNames());
+    }
+
+    /**
+     * With no subject, or a subject without a tenant, only platform-wide rows
+     * are visible: no tenant never means every tenant.
+     *
+     * @return void
+     */
+    public function testNoSubjectOrNoTenantMeansPlatformRowsOnly(): void
+    {
+        $this->seedRows();
+
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver);
+
+        self::assertSame(['platform-role'], $this->roleNames());
+        self::assertSame(['platform-permission'], $this->permissionNames());
+
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver(new \stdClass));
+
+        self::assertSame(['platform-role'], $this->roleNames());
+        self::assertSame(['platform-permission'], $this->permissionNames());
+    }
+
+    /**
+     * The tenant is the one the resolved subject carries.
+     *
+     * @return void
+     */
+    public function testTheTenantComesFromTheResolvedSubject(): void
+    {
+        [, $tenantB] = $this->seedRows();
+
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver(new \stdClass, $tenantB, 'admin', 'web'));
+
+        self::assertSame(['b-role', 'platform-role'], $this->roleNames());
+        self::assertSame(['b-permission', 'platform-permission'], $this->permissionNames());
     }
 
     /**
@@ -90,7 +128,7 @@ final class TenantScopeTest extends TestCase
 
         self::assertSame(['a-role', 'platform-role'], $this->roleNames());
 
-        SwitchableTenantResolver::$tenant = $tenantB;
+        SwitchableSubjectResolver::$tenant = $tenantB;
 
         self::assertSame(['a-role', 'platform-role'], $this->roleNames());
 
@@ -113,11 +151,88 @@ final class TenantScopeTest extends TestCase
 
         self::assertSame(['a-role', 'platform-role'], $this->roleNames());
 
-        $this->app?->instance(TenantResolver::class, new SwitchableTenantResolver);
-        SwitchableTenantResolver::$tenant = $tenantB;
+        $this->app?->instance(SubjectResolver::class, new SwitchableSubjectResolver);
+        SwitchableSubjectResolver::$tenant = $tenantB;
 
         self::assertSame(['b-role', 'platform-role'], $this->roleNames());
         self::assertSame(['b-permission', 'platform-permission'], $this->permissionNames());
+    }
+
+    /**
+     * A query on any scoped model the resolver runs while it resolves the
+     * subject (a user model that eager-loads its roles and permissions, say)
+     * sees platform rows only, so the resolver runs once instead of again for
+     * each model, and the tenant it returns then scopes every later query.
+     *
+     * @return void
+     */
+    public function testAQueryRunWhileResolvingSeesPlatformRowsOnly(): void
+    {
+        [, $tenantB] = $this->seedRows();
+
+        $resolver = new class ($tenantB) implements SubjectResolver {
+            /** @var list<string> The role names the resolver's own query saw. */
+            public array $seen = [];
+
+            /** @var list<string> The permission names the resolver's own query saw. */
+            public array $seenPermissions = [];
+
+            /** @var int How many times the subject was resolved. */
+            public int $resolutions = 0;
+
+            /**
+             * Create a new resolver for a fixed tenant.
+             *
+             * @param  object  $tenant
+             */
+            public function __construct(
+
+                /** The tenant of the resolved subject. */
+                private readonly object $tenant,
+            ) {}
+
+            /**
+             * Query the roles and permissions, as loading a user with both
+             * does, then resolve a subject in the tenant.
+             *
+             * @return \SineMacula\Laravel\Authorization\Subject
+             */
+            #[\Override]
+            public function resolve(): Subject
+            {
+                $this->resolutions++;
+
+                /** @var list<string> $names */
+                $names      = Role::query()->orderBy('name')->pluck('name')->all();
+                $this->seen = $names;
+
+                /** @var list<string> $permissions */
+                $permissions           = Permission::query()->orderBy('name')->pluck('name')->all();
+                $this->seenPermissions = $permissions;
+
+                return $this->forUser(new \stdClass);
+            }
+
+            /**
+             * Make the given user the subject, in the tenant.
+             *
+             * @param  object  $user
+             * @return \SineMacula\Laravel\Authorization\Subject
+             */
+            #[\Override]
+            public function forUser(object $user): Subject
+            {
+                return new Subject($user, $user, $this->tenant);
+            }
+        };
+
+        $this->app?->instance(SubjectResolver::class, $resolver);
+
+        self::assertSame(['b-role', 'platform-role'], $this->roleNames());
+        self::assertSame(['platform-role'], $resolver->seen);
+        self::assertSame(['platform-permission'], $resolver->seenPermissions);
+        self::assertSame(['b-permission', 'platform-permission'], $this->permissionNames());
+        self::assertSame(1, $resolver->resolutions);
     }
 
     /**
@@ -216,16 +331,16 @@ final class TenantScopeTest extends TestCase
     }
 
     /**
-     * Bind the switchable tenant resolver, starting with the given tenant.
+     * Bind the switchable subject resolver, starting with the given tenant.
      *
      * @param  object|null  $tenant
      * @return void
      */
     private function useSwitchableResolver(?object $tenant): void
     {
-        SwitchableTenantResolver::$tenant = $tenant;
+        SwitchableSubjectResolver::$tenant = $tenant;
 
-        $this->app?->scoped(TenantResolver::class, SwitchableTenantResolver::class);
+        $this->app?->scoped(SubjectResolver::class, SwitchableSubjectResolver::class);
     }
 
     /**

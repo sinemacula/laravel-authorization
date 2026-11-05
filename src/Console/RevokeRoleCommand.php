@@ -16,7 +16,7 @@ use SineMacula\Laravel\Authorization\Console\Concerns\ResolvesIdentity;
  *
  * The role name is revoked from the roles the identity holds within the tenant
  * scope, like any other query: every held role of that name is revoked, the
- * platform-wide one and, when the application's tenant resolver resolves a
+ * platform-wide one and, when the application's subject resolver resolves a
  * tenant in the console, the tenant's own. Without a tenant, only platform-wide
  * roles can be revoked.
  *

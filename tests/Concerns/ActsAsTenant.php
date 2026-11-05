@@ -5,10 +5,10 @@ declare(strict_types = 1);
 namespace Tests\Concerns;
 
 use PHPUnit\Framework\Attributes\After;
-use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Feature\Stubs\StubTenant;
-use Tests\Feature\Stubs\SwitchableTenantResolver;
+use Tests\Feature\Stubs\SwitchableSubjectResolver;
 
 /**
  * Sets the tenant the package resolves for the current test, and creates the
@@ -32,10 +32,10 @@ trait ActsAsTenant
      */
     protected function actAsTenant(?object $tenant): void
     {
-        $this->app?->instance(TenantResolver::class, new SwitchableTenantResolver);
+        $this->app?->instance(SubjectResolver::class, new SwitchableSubjectResolver);
         $this->app?->forgetInstance(ResolvedTenant::class);
 
-        SwitchableTenantResolver::$tenant = $tenant;
+        SwitchableSubjectResolver::$tenant = $tenant;
     }
 
     /**
@@ -76,6 +76,6 @@ trait ActsAsTenant
     #[After]
     protected function forgetActingTenant(): void
     {
-        SwitchableTenantResolver::$tenant = null;
+        SwitchableSubjectResolver::$tenant = null;
     }
 }

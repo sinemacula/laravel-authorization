@@ -244,21 +244,21 @@ final class ExceptionMessageKillersTest extends TestCase
     }
 
     /**
-     * `principal_resolver` non-string message names the offending type.
+     * `subject_resolver` non-string message names the offending type.
      *
      * @return void
      */
-    public function testPrincipalResolverNonStringMessageShape(): void
+    public function testSubjectResolverNonStringMessageShape(): void
     {
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.principal_resolver', 42);
+        $config->set('authorization.subject_resolver', 42);
 
         try {
             ConfigValidator::validate((array) $config->get('authorization'), $this->app);
             self::fail('Expected InvalidAuthorizationConfigException.');
         } catch (InvalidAuthorizationConfigException $exception) {
-            self::assertStringContainsString('authorization.principal_resolver', $exception->getMessage());
+            self::assertStringContainsString('authorization.subject_resolver', $exception->getMessage());
             self::assertStringContainsString('expected a class-string', $exception->getMessage());
             self::assertStringContainsString('int', $exception->getMessage());
         }

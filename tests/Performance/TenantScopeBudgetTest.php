@@ -5,13 +5,14 @@ declare(strict_types = 1);
 namespace Tests\Performance;
 
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
-use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use Tests\Performance\Support\CountedBenchTenant;
-use Tests\Performance\Support\CountingTenantResolver;
+use Tests\Performance\Support\CountingSubjectResolver;
 use Tests\TestCase;
 
 /**
@@ -49,8 +50,8 @@ final class TenantScopeBudgetTest extends TestCase
         $app = $this->app;
         self::assertNotNull($app, 'Testbench application must be booted by setUp().');
 
-        $resolver = new CountingTenantResolver(new CountedBenchTenant);
-        $app->instance(TenantResolver::class, $resolver);
+        $resolver = new CountingSubjectResolver(new CountedBenchTenant);
+        $app->instance(SubjectResolver::class, $resolver);
 
         /** @var \Illuminate\Config\Repository $config */
         $config = $app->make(ConfigRepository::class);
@@ -73,7 +74,7 @@ final class TenantScopeBudgetTest extends TestCase
         self::assertSame(
             1,
             $resolver->calls,
-            "Tenant resolver invoked {$resolver->calls} times across 50 applies — memoisation contract violated.",
+            "Subject resolver invoked {$resolver->calls} times across 50 applies — memoisation contract violated.",
         );
     }
 
@@ -89,7 +90,7 @@ final class TenantScopeBudgetTest extends TestCase
         $app = $this->app;
         self::assertNotNull($app, 'Testbench application must be booted by setUp().');
 
-        $app->instance(TenantResolver::class, new CountingTenantResolver(new CountedBenchTenant));
+        $app->instance(SubjectResolver::class, new CountingSubjectResolver(new CountedBenchTenant));
 
         $role = Role::create([
             'id'          => (string) Str::uuid(),
@@ -104,10 +105,14 @@ final class TenantScopeBudgetTest extends TestCase
         // Prime the memo so every measured call is a warm apply.
         $scope->apply(Role::query(), $role);
 
+        // Build the queries before the clock starts, so the budget measures the
+        // scope's apply and not model construction.
+        $queries = \array_map(static fn (): Builder => Role::query(), \range(1, 1000));
+
         $start = \microtime(true);
 
-        for ($i = 0; $i < 1000; $i++) {
-            $scope->apply(Role::query(), $role);
+        foreach ($queries as $query) {
+            $scope->apply($query, $role);
         }
 
         $elapsed = \microtime(true) - $start;

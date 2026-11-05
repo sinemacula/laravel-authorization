@@ -9,7 +9,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
-use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
@@ -18,6 +18,7 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Policy as PolicyModel;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
 /**
@@ -289,7 +290,7 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
     }
 
     /**
-     * Bind a principal resolver that returns a freshly-created StubIdentity so
+     * Bind a subject resolver that returns a freshly-created StubIdentity so
      * the facade picks it up via the configured resolver.
      *
      * @return \Tests\Feature\Stubs\StubIdentity
@@ -298,37 +299,9 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
     {
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        /**
-         * Anonymous principal resolver returning the captured user.
-         */
-        $resolver = new class ($user) implements PrincipalResolver {
-            /**
-             * Create a new resolver wrapping a fixed user.
-             *
-             * @param  object  $user
-             * @return void
-             */
-            public function __construct(
+        $resolver = new StubSubjectResolver($user);
 
-                /** The user returned by every resolution call. */
-                private readonly object $user,
-            ) {}
-
-            /**
-             * Resolve the current principal.
-             *
-             * @return object|null
-             *
-             * @phpstan-ignore-next-line return.unusedType
-             */
-            #[\Override]
-            public function resolve(): ?object
-            {
-                return $this->user;
-            }
-        };
-
-        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject
+        $this->app->instance(SubjectResolver::class, $resolver); // @phpstan-ignore method.nonObject
         $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
         $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
 

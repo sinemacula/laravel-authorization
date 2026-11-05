@@ -20,7 +20,7 @@ use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
 use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
 use SineMacula\Laravel\Authorization\Concerns\HasRoles;
 use SineMacula\Laravel\Authorization\Concerns\ResolvesPivotExpiry;
-use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
@@ -31,6 +31,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
 use Tests\Feature\Stubs\NonTaggableCacheStore;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\ThrowingGetCacheStore;
 use Tests\TestCase;
 
@@ -530,19 +531,8 @@ final class UncoveredBranchesTest extends TestCase
     public function testBladeHelpersHasAllRolesReturnsFalseForNonRoleSupportingPrincipal(): void
     {
         $this->app->instance( // @phpstan-ignore method.nonObject
-            PrincipalResolver::class,
-            new class implements PrincipalResolver {
-                /**
-                 * @return object|null
-                 *
-                 * @phpstan-ignore-next-line return.unusedType
-                 */
-                #[\Override]
-                public function resolve(): ?object
-                {
-                    return new \stdClass;
-                }
-            },
+            SubjectResolver::class,
+            new StubSubjectResolver(new \stdClass),
         );
 
         self::assertFalse(BladeHelpers::hasAllRoles(['admin']));

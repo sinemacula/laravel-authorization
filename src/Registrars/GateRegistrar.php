@@ -121,8 +121,10 @@ final readonly class GateRegistrar
             static function (?object $user = null, mixed ...$arguments) use ($permission): bool {
                 [$resource, $context] = self::translateGateArguments($arguments);
 
+                // The subject resolver translates the Gate's user into the
+                // subject; with no user, the request's own subject decides.
                 /** @var \SineMacula\Laravel\Authorization\AuthorizationManager $manager */
-                $manager = $user === null ? Authorization::getFacadeRoot() : Authorization::for($user);
+                $manager = $user === null ? Authorization::getFacadeRoot() : Authorization::forUser($user);
 
                 // An argument the evaluator cannot identify as a resource
                 // denies, rather than turning the check into one about no

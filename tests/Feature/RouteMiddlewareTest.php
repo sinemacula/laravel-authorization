@@ -12,7 +12,7 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
-use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware;
 use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizationMiddlewareMisconfiguredException;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
@@ -25,16 +25,17 @@ use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use Symfony\Component\HttpKernel\Exception\AccessDeniedHttpException;
 use Tests\Feature\Stubs\CustomRoleMiddlewareDouble;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
 /**
  * Feature coverage for the shipped route middleware.
  *
- * Each test binds a scoped `PrincipalResolver` that returns the chosen
- * principal, then invokes `handle()` directly — this verifies the middleware
- * resolves through the package's own resolver contract (not `$request->user()`)
- * and keeps the tests orthogonal to Laravel's auth-provider plumbing.
- * Service-provider aliasing is covered separately via the router binding.
+ * Each test binds a `SubjectResolver` that returns the chosen subject, then
+ * invokes `handle()` directly — this verifies the middleware resolves through
+ * the package's own resolver contract (not `$request->user()`) and keeps the
+ * tests orthogonal to Laravel's auth-provider plumbing. Service-provider
+ * aliasing is covered separately via the router binding.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -454,10 +455,10 @@ final class RouteMiddlewareTest extends TestCase
     }
 
     /**
-     * The middleware resolves the principal through the bound
-     * `PrincipalResolver`. A request carrying a `$request->user()` that does
-     * NOT match the resolver's answer must not leak in — the resolver is the
-     * single source of truth.
+     * The middleware resolves the subject through the bound `SubjectResolver`.
+     * A request carrying a `$request->user()` that does NOT match the
+     * resolver's answer must not leak in — the resolver is the single source of
+     * truth.
      *
      * @return void
      *
@@ -492,40 +493,17 @@ final class RouteMiddlewareTest extends TestCase
     }
 
     /**
-     * Bind a scoped `PrincipalResolver` that returns the supplied principal and
-     * drop the memoised manager so the next facade call picks it up.
+     * Bind a `SubjectResolver` that returns the supplied subject and drop the
+     * memoised manager so the next facade call picks it up.
      *
      * @param  object|null  $principal
      * @return void
      */
     private function actAs(?object $principal): void
     {
-        $resolver = new class ($principal) implements PrincipalResolver {
-            /**
-             * Create a new resolver wrapping a fixed principal.
-             *
-             * @param  object|null  $principal
-             * @return void
-             */
-            public function __construct(
+        $resolver = new StubSubjectResolver($principal);
 
-                /** The principal returned by every resolution call. */
-                private readonly ?object $principal,
-            ) {}
-
-            /**
-             * Return the principal bound on this scoped resolver.
-             *
-             * @return object|null
-             */
-            #[\Override]
-            public function resolve(): ?object
-            {
-                return $this->principal;
-            }
-        };
-
-        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject
+        $this->app->instance(SubjectResolver::class, $resolver); // @phpstan-ignore method.nonObject
         $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
         $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
     }

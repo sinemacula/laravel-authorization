@@ -5,10 +5,11 @@ declare(strict_types = 1);
 namespace Benchmarks\Runtime;
 
 use Benchmarks\Support\BenchmarkCase;
-use Benchmarks\Support\BenchmarkTenantResolver;
+use Benchmarks\Support\BenchmarkSubjectResolver;
+use Benchmarks\Support\BenchmarkTenant;
 use Illuminate\Support\Str;
 use PhpBench\Attributes as Bench;
-use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 
@@ -41,10 +42,9 @@ final class TenantScopeBench extends BenchmarkCase
     private Role $role; // @phpstan-ignore property.uninitialized
 
     /**
-     * Bench setUp — boot a Laravel application, bind one tenant resolver
-     * instance that returns a stable `AuthorizableTenant` implementation, and
-     * seed a role row so the builder the scope applies against has something to
-     * query.
+     * Bench setUp — boot a Laravel application, bind one subject resolver
+     * instance whose subject carries a stable `AuthorizableTenant`, and seed a
+     * role row so the builder the scope applies against has something to query.
      *
      * @return void
      */
@@ -52,7 +52,7 @@ final class TenantScopeBench extends BenchmarkCase
     {
         $app = $this->boot();
 
-        $app->instance(TenantResolver::class, new BenchmarkTenantResolver);
+        $app->instance(SubjectResolver::class, new BenchmarkSubjectResolver(new \stdClass, new BenchmarkTenant));
 
         Role::query()->delete();
 

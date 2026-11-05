@@ -8,13 +8,13 @@ use Illuminate\Contracts\Container\Container;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
 use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
-use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
-use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 
 /**
  * Boot-time validator for the shipped authorization config.
@@ -58,8 +58,7 @@ final class ConfigValidator
         self::validatePermissionEnums($config['permission_enums'] ?? []);
         self::validatePermissionProviders($config['permission_providers'] ?? []);
         self::validateGateOnConflict($config['gate']['on_conflict'] ?? null);
-        self::validatePrincipalResolver($config['principal_resolver'] ?? null);
-        self::validateTenantResolver($config['tenant_resolver'] ?? null);
+        self::validateSubjectResolver($config['subject_resolver'] ?? null);
         self::validatePolicyStore($config['policy_store'] ?? null);
         self::validateCacheStore($config['cache']['store'] ?? null, $container);
     }
@@ -288,50 +287,28 @@ final class ConfigValidator
     }
 
     /**
-     * Validate that `principal_resolver` resolves to a class implementing
-     * `PrincipalResolver`.
+     * Validate that `subject_resolver` resolves to a class implementing
+     * `SubjectResolver`. Null is refused rather than read as "no subject", so a
+     * missing resolver fails at boot instead of changing who checks are about.
      *
      * @param  mixed  $value
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
-    private static function validatePrincipalResolver(mixed $value): void
+    private static function validateSubjectResolver(mixed $value): void
     {
         if ($value === null) {
-            $reason = 'a principal resolver class is required; set it to'
-                . ' \SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver'
-                . ' to keep the package anonymous-safe.';
+            $reason = 'a subject resolver class is required; set it to \\' . AuthGuardSubjectResolver::class
+                . ' to decide about the user Laravel authenticated.';
 
-            throw new InvalidAuthorizationConfigException('authorization.principal_resolver', $reason);
+            throw new InvalidAuthorizationConfigException('authorization.subject_resolver', $reason);
         }
 
         self::assertImplementsContract(
             $value,
-            PrincipalResolver::class,
-            'authorization.principal_resolver',
-        );
-    }
-
-    /**
-     * Validate that `tenant_resolver`, when set, resolves to a class
-     * implementing `TenantResolver`.
-     *
-     * @param  mixed  $value
-     * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
-     */
-    private static function validateTenantResolver(mixed $value): void
-    {
-        if ($value === null) {
-            return;
-        }
-
-        self::assertImplementsContract(
-            $value,
-            TenantResolver::class,
-            'authorization.tenant_resolver',
+            SubjectResolver::class,
+            'authorization.subject_resolver',
         );
     }
 
@@ -391,7 +368,7 @@ final class ConfigValidator
     }
 
     /**
-     * Shared contract-implementation check for `principal_resolver` and
+     * Shared contract-implementation check for `subject_resolver` and
      * `policy_store`.
      *
      * @param  mixed  $value

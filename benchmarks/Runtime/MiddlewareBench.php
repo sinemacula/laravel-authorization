@@ -6,13 +6,13 @@ namespace Benchmarks\Runtime;
 
 use Benchmarks\Support\BenchmarkCase;
 use Benchmarks\Support\BenchmarkFixtures;
-use Benchmarks\Support\BenchmarkPrincipalResolver;
+use Benchmarks\Support\BenchmarkSubjectResolver;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
 use Illuminate\Support\Str;
 use PhpBench\Attributes as Bench;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
-use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -55,8 +55,8 @@ final class MiddlewareBench extends BenchmarkCase
 
     /**
      * Bench setUp — boot the Laravel application, seed a role that carries the
-     * fixture permissions, and bind a principal resolver that returns the
-     * seeded identity.
+     * fixture permissions, and bind a subject resolver that returns the seeded
+     * identity.
      *
      * @return void
      */
@@ -87,7 +87,7 @@ final class MiddlewareBench extends BenchmarkCase
         $user = BenchmarkIdentity::create(['id' => (string) Str::uuid()]);
         $user->assignRole(BenchmarkFixtures::roleName());
 
-        $app->instance(PrincipalResolver::class, new BenchmarkPrincipalResolver($user));
+        $app->instance(SubjectResolver::class, new BenchmarkSubjectResolver($user));
 
         $app->forgetInstance(AuthorizationManager::class);
         $app->forgetInstance('authorization');

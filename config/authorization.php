@@ -5,8 +5,7 @@ declare(strict_types = 1);
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
-use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
-use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
+use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 
 return [
 
@@ -72,9 +71,9 @@ return [
     |---------------------------------------------------------------------------
     |
     | The guard a role or permission lookup by name uses when the caller names
-    | none, and the auth guard `AuthGuardPrincipalResolver` reads by default.
-    | Rows record their own guard in the `guard` column; a null guard makes a
-    | row apply to every guard.
+    | none. Rows record their own guard in the `guard` column; a null guard
+    | makes a row apply to every guard. Who a check is about comes from the
+    | subject resolver below, not from this setting.
     |
     */
 
@@ -170,7 +169,7 @@ return [
     |---------------------------------------------------------------------------
     |
     | Optional class implementing `PolicyStore`. When set, the manager loads
-    | additional policies for the current principal from this source on every
+    | additional policies for the current subject from this source on every
     | check. Leave as null to rely solely on policies attached to identities.
     |
     */
@@ -179,34 +178,30 @@ return [
 
     /*
     |---------------------------------------------------------------------------
-    | Principal resolver
+    | Subject resolver
     |---------------------------------------------------------------------------
     |
-    | Bridges the engine to whatever concept of "current principal" the
-    | application uses. The shipped default returns null, making the package
-    | anonymous-safe and zero-dependency. The `sinemacula/laravel-iam`
-    | umbrella binds a resolver that delegates to `sinemacula/laravel-authentication`.
+    | A class implementing `SubjectResolver`, which answers who every check
+    | without a named subject is about, in which tenant and on which
+    | application. The shipped default decides about the user Laravel
+    | authenticated on its default guard, with no tenant (so only platform-wide
+    | roles and permissions are visible) and the guard's name as the
+    | application; a request with no user is denied. Laravel's Gate hands its
+    | user to the resolver's `forUser()`, so `@can` and `can:` decide about the
+    | same subject.
+    |
+    | An application with principals or tenants names its own resolver here or
+    | binds the contract directly; the `sinemacula/laravel-iam` umbrella binds
+    | one that delegates to `sinemacula/laravel-authentication`. Null or a class
+    | that does not implement the contract is refused at boot. A class named
+    | here, like the default, is built per request or job, so queue workers and
+    | Octane resolve it afresh, while a resolver bound directly on the contract
+    | (`instance()`, `singleton()` or `bind()`) is kept. The resolved tenant is
+    | held per request or job whichever resolver is bound.
     |
     */
 
-    'principal_resolver' => NullPrincipalResolver::class,
-
-    /*
-    |---------------------------------------------------------------------------
-    | Tenant resolver
-    |---------------------------------------------------------------------------
-    |
-    | Bridges the engine to whatever concept of "current tenant" the
-    | application uses. The shipped default (and null) resolves no tenant,
-    | under which only platform-wide roles and permissions are visible:
-    | tenant-owned rows never show without their tenant. Applications wire
-    | their own resolver through this key or by binding the contract
-    | directly. The resolver and the tenant it returns are bound per
-    | request or job, so queue workers and Octane resolve them afresh.
-    |
-    */
-
-    'tenant_resolver' => NullTenantResolver::class,
+    'subject_resolver' => AuthGuardSubjectResolver::class,
 
     /*
     |---------------------------------------------------------------------------

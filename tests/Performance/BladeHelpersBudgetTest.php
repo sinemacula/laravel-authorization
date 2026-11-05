@@ -7,11 +7,12 @@ namespace Tests\Performance;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
-use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
 /**
@@ -114,45 +115,20 @@ final class BladeHelpersBudgetTest extends TestCase
     }
 
     /**
-     * Bind a principal resolver that returns the supplied principal — mirrors
-     * the helper used by the feature suite.
+     * Bind a subject resolver that returns the supplied subject — mirrors the
+     * helper used by the feature suite.
      *
      * @param  object  $principal
      * @return void
      */
     private function actAs(object $principal): void
     {
-        $resolver = new class ($principal) implements PrincipalResolver {
-            /**
-             * Create a new resolver wrapping a fixed principal.
-             *
-             * @param  object  $principal
-             * @return void
-             */
-            public function __construct(
-
-                /** The principal returned by every resolution call. */
-                private readonly object $principal,
-            ) {}
-
-            /**
-             * Resolve the current principal.
-             *
-             * @return object|null
-             *
-             * @phpstan-ignore-next-line return.unusedType
-             */
-            #[\Override]
-            public function resolve(): ?object
-            {
-                return $this->principal;
-            }
-        };
+        $resolver = new StubSubjectResolver($principal);
 
         $app = $this->app;
         self::assertNotNull($app, 'Testbench application must be booted by setUp().');
 
-        $app->instance(PrincipalResolver::class, $resolver);
+        $app->instance(SubjectResolver::class, $resolver);
         $app->forgetInstance('authorization');
         $app->forgetInstance(AuthorizationManager::class);
     }

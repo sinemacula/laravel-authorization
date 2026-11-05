@@ -7,7 +7,7 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 
 /**
- * Thrown when a tenant resolver returns an object that the scope boundary
+ * Thrown when the subject resolver returns a tenant that the scope boundary
  * cannot map to a stable `(tenant_type, tenant_id)` pair.
  *
  * The scope accepts two shapes:

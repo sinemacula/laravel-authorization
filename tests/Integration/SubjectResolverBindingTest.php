@@ -6,15 +6,16 @@ namespace Tests\Integration;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
-use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
 /**
- * Integration coverage for custom `PrincipalResolver` bindings.
+ * Integration coverage for custom `SubjectResolver` bindings.
  *
  * Confirms that a host-application-supplied resolver flows through the facade
  * end-to-end: the manager consults it on every call, null resolution degrades
@@ -29,7 +30,7 @@ use Tests\TestCase;
  * @SuppressWarnings("php:S1192")
  */
 #[CoversClass(AuthorizationManager::class)]
-final class PrincipalResolverBindingTest extends TestCase
+final class SubjectResolverBindingTest extends TestCase
 {
     /** Permission string exercised by the happy-path / null-resolver scenarios. */
     private const string PUBLISH_PERMISSION = 'posts:publish';
@@ -99,44 +100,21 @@ final class PrincipalResolverBindingTest extends TestCase
     }
 
     /**
-     * Bind a resolver that returns the supplied principal and flush every
-     * cached handle to the manager so the next facade call reconstructs it
-     * against the new binding.
+     * Bind a resolver that returns the supplied subject and flush every cached
+     * handle to the manager so the next facade call reconstructs it against the
+     * new binding.
      *
-     * @param  object|null  $principal
+     * @param  object|null  $subject
      * @return void
      */
-    private function bindResolverReturning(?object $principal): void
+    private function bindResolverReturning(?object $subject): void
     {
-        $resolver = new class ($principal) implements PrincipalResolver {
-            /**
-             * Create a new resolver wrapping a fixed principal.
-             *
-             * @param  object|null  $principal
-             * @return void
-             */
-            public function __construct(
-
-                /** The principal returned by every resolution call. */
-                private readonly ?object $principal,
-            ) {}
-
-            /**
-             * Resolve the principal, which may be null.
-             *
-             * @return object|null
-             */
-            #[\Override]
-            public function resolve(): ?object
-            {
-                return $this->principal;
-            }
-        };
+        $resolver = new StubSubjectResolver($subject);
 
         /** @var \Illuminate\Foundation\Application $app */
         $app = $this->app;
 
-        $app->instance(PrincipalResolver::class, $resolver);
+        $app->instance(SubjectResolver::class, $resolver);
         $app->forgetInstance('authorization');
         $app->forgetInstance(AuthorizationManager::class);
         Authorization::clearResolvedInstance('authorization');

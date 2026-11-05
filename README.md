@@ -63,8 +63,7 @@ principal's role and permission grants, and anything left is denied.
 - **Events** for every grant, revocation, expiry change and model change, for each decision, and when `authorize()`
   refuses.
 - **Resolution cache** for role and permission lookups, in memory and optionally in a cache store.
-- **Swappable everything**: models, table names, the database connection, the principal resolver, the tenant resolver
-  and the policy store.
+- **Swappable everything**: models, table names, the database connection, the subject resolver and the policy store.
 - **Spatie import**: `authorization:migrate-spatie` copies roles, permissions and grants from
   `spatie/laravel-permission` (its `guard_name` becomes `guard`), reporting and skipping any role or permission whose
   name the package refuses, and any permission whose name contains `*`, along with its grants.
@@ -89,14 +88,19 @@ The tables live on the application's default connection. To keep them on another
 tables use, set `AUTHORIZATION_DB_CONNECTION` (or `connection` in `config/authorization.php`) before migrating: the
 migrations create the tables there, and the models read and write there.
 
-The package decides nothing about the current user until you tell it where to find one. The shipped principal
-resolver returns `null`, so checks made without a principal are denied. To check the user your auth guard
-authenticated, bind the shipped guard resolver in `config/authorization.php`:
+Every check that does not name its subject is about the subject the subject resolver returns. The shipped resolver,
+`AuthGuardSubjectResolver`, returns the user Laravel authenticated on its default guard, with no tenant and the guard's
+name as the application, so `Authorization::can()`, the `role:` and `permission:` middleware and the Blade directives
+decide about the signed-in user with no setup. A request with no user has no subject, and its checks are denied.
+Laravel's Gate hands its user to the same resolver, so `@can`, `can:` and `Gate::forUser($user)` decide about the
+subject the resolver translates that user into.
+
+An application with principals or tenants binds its own resolver, a class implementing
+`SineMacula\Laravel\Authorization\Contracts\SubjectResolver`, in `config/authorization.php`. The active tenant comes
+only from it: without a tenant, only platform-wide roles and permissions are visible.
 
 ```php
-use SineMacula\Laravel\Authorization\Resolvers\AuthGuardPrincipalResolver;
-
-'principal_resolver' => AuthGuardPrincipalResolver::class,
+'subject_resolver' => App\Authorization\CurrentSubject::class,
 ```
 
 List the enums whose cases should become Gate abilities and permissions, and any permission providers:
@@ -128,7 +132,7 @@ AUTHORIZATION_LOG_CHANNEL=stderr
 ```
 
 `config/authorization.php` documents every other option: models, tables, the default guard, permission providers, the
-Gate conflict mode, the policy store, the tenant resolver, the cache, and the role hierarchy and rank.
+Gate conflict mode, the policy store, the subject resolver, the cache, and the role hierarchy and rank.
 
 ## Usage
 
@@ -297,7 +301,10 @@ alike, and show each one's owner. `grant` and `revoke` look the role up within t
 tenant they find platform-wide roles only.
 
 In your tests, `SineMacula\Laravel\Authorization\Testing\Concerns\AuthorizationAssertions` adds `assertCan()`,
-`assertCannot()`, `assertHasRole()` and `assertHasPermission()`.
+`assertCannot()`, `assertHasRole()` and `assertHasPermission()`, and `actingAsIdentity($user, $tenant)` and
+`actingAsSubject($subject)`, which make every check without a named subject about that subject, in its tenant. When
+the Gate hands over the subject's principal or identity (for example after `actingAs($identity)`), `@can`, `can:` and
+`Gate::allows()` decide about the same subject.
 
 ### Design notes
 
@@ -308,7 +315,7 @@ The contracts behind the evaluator, for maintainers and reviewers, are in [docs/
 | [Evaluation order and deny precedence](docs/design/evaluation-order-and-deny-precedence.md) | The four-step decision order and why an explicit deny wins  |
 | [Wildcard and condition semantics](docs/design/wildcard-and-condition-semantics.md)         | Pattern matching, undecidable tests and condition operators |
 | [Polymorphic identity pivots](docs/design/polymorphic-identity-pivots.md)                   | Why grants work for integer, UUID and ULID keys             |
-| [Principal resolver contract](docs/design/principal-resolver-contract.md)                   | The default resolver and how an application binds its own   |
+| [Subject resolver contract](docs/design/subject-resolver-contract.md)                       | The default resolver and how an application binds its own   |
 | [Model extension](docs/design/model-extension.md)                                           | Swapping the shipped models for your own subclasses         |
 | [Impersonation](docs/design/impersonation.md)                                               | Checking as another principal                               |
 | [Spatie compatibility](docs/design/spatie-compatibility.md)                                 | The import from `spatie/laravel-permission` and its aliases |

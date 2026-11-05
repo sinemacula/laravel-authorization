@@ -10,7 +10,7 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
-use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -20,6 +20,7 @@ use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
 /**
@@ -140,42 +141,17 @@ final class GateArgumentEdgeCasesTest extends TestCase
     }
 
     /**
-     * Swap the principal resolver for one that returns the supplied
-     * authorizable and refresh the manager so the next facade call picks it up.
+     * Swap the subject resolver for one that returns the supplied authorizable
+     * and refresh the manager so the next facade call picks it up.
      *
      * @param  \Tests\Feature\Stubs\StubIdentity  $user
      * @return void
      */
     private function actAs(StubIdentity $user): void
     {
-        $resolver = new class ($user) implements PrincipalResolver {
-            /**
-             * Create a new resolver wrapping a fixed user.
-             *
-             * @param  object  $user
-             * @return void
-             */
-            public function __construct(
+        $resolver = new StubSubjectResolver($user);
 
-                /** The user returned by every resolution call. */
-                private readonly object $user,
-            ) {}
-
-            /**
-             * Resolve the current principal.
-             *
-             * @return object|null
-             *
-             * @phpstan-ignore-next-line return.unusedType
-             */
-            #[\Override]
-            public function resolve(): ?object
-            {
-                return $this->user;
-            }
-        };
-
-        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject
+        $this->app->instance(SubjectResolver::class, $resolver); // @phpstan-ignore method.nonObject
         $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
         $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
     }

@@ -16,16 +16,19 @@ use Psr\Log\LoggerInterface;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableResource;
-use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
+use SineMacula\Laravel\Authorization\Subject;
+use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
 /**
@@ -409,6 +412,89 @@ final class GateRegistrarTest extends TestCase
     }
 
     /**
+     * The Gate's user is translated through the subject resolver, and the check
+     * decides about the subject the resolver returns, not about the user.
+     *
+     * @return void
+     */
+    public function testTheGatesUserIsTranslatedIntoTheSubject(): void
+    {
+        $principal = $this->actAsFullyPermittedPrincipal();
+        $user      = StubIdentity::create(['id' => (string) Str::uuid()]);
+
+        $resolver = \Mockery::mock(SubjectResolver::class);
+        $resolver->shouldReceive('forUser')->with($user)->andReturn(new Subject($principal, $user));
+        $resolver->shouldReceive('resolve')->andReturnNull();
+
+        $this->app?->instance(SubjectResolver::class, $resolver);
+        $this->app?->forgetInstance('authorization');
+        Authorization::clearResolvedInstance('authorization');
+
+        self::assertTrue(Gate::forUser($user)->allows('posts:create'));
+        self::assertSame($principal, $this->decisions()[0]->principal);
+        self::assertFalse($user->hasPermission('posts:create'));
+    }
+
+    /**
+     * `Gate::forUser($other)` decides about the other user, not the subject of
+     * the request.
+     *
+     * @return void
+     */
+    public function testGateForAnotherUserDecidesAboutThatUser(): void
+    {
+        $this->actAsFullyPermittedPrincipal();
+
+        $other = StubIdentity::create(['id' => (string) Str::uuid()]);
+
+        self::assertTrue(Gate::allows('posts:create'));
+        self::assertFalse(Gate::forUser($other)->allows('posts:create'));
+        self::assertSame($other, $this->decisions()[1]->principal);
+    }
+
+    /**
+     * With no Gate user, the check decides about the resolver's subject, and
+     * denies when the resolver has none.
+     *
+     * @return void
+     */
+    public function testNoGateUserDecidesAboutTheResolversSubjectOrDenies(): void
+    {
+        $principal = $this->actAsFullyPermittedPrincipal();
+
+        self::assertTrue(Gate::allows('posts:create'));
+        self::assertSame($principal, $this->decisions()[0]->principal);
+
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver);
+        $this->app?->forgetInstance('authorization');
+        Authorization::clearResolvedInstance('authorization');
+
+        self::assertFalse(Gate::allows('posts:create'));
+        self::assertNull($this->decisions()[1]->principal);
+    }
+
+    /**
+     * With the shipped resolver, the user Laravel signed in is the Gate's user
+     * and the subject of the check.
+     *
+     * @return void
+     */
+    public function testTheSignedInUserIsTheGatesSubject(): void
+    {
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard' => 'web']);
+
+        $user = AuthenticatableIdentity::create(['id' => (string) Str::uuid()]);
+        $user->givePermission('posts:create');
+
+        self::assertFalse(Gate::allows('posts:create'));
+
+        $this->actingAs($user);
+
+        self::assertTrue(Gate::allows('posts:create'));
+        self::assertSame($user, $this->decisions()[1]->principal);
+    }
+
+    /**
      * The registrar reads the configured enums itself, so it skips an enum not
      * backed by strings, whose values name no permission, rather than fail with
      * a TypeError, and still registers the valid enums.
@@ -574,42 +660,17 @@ final class GateRegistrarTest extends TestCase
     }
 
     /**
-     * Swap the principal resolver for one that returns the supplied
-     * authorizable and refresh the manager so the next facade call picks it up.
+     * Swap the subject resolver for one that returns the supplied authorizable
+     * and refresh the manager so the next facade call picks it up.
      *
      * @param  \Tests\Feature\Stubs\StubIdentity  $user
      * @return void
      */
     private function actAs(StubIdentity $user): void
     {
-        $resolver = new class ($user) implements PrincipalResolver {
-            /**
-             * Create a new resolver wrapping a fixed user.
-             *
-             * @param  object  $user
-             * @return void
-             */
-            public function __construct(
+        $resolver = new StubSubjectResolver($user);
 
-                /** The user returned by every resolution call. */
-                private readonly object $user,
-            ) {}
-
-            /**
-             * Resolve the current principal.
-             *
-             * @return object|null
-             *
-             * @phpstan-ignore-next-line return.unusedType
-             */
-            #[\Override]
-            public function resolve(): ?object
-            {
-                return $this->user;
-            }
-        };
-
-        $this->app->instance(PrincipalResolver::class, $resolver); // @phpstan-ignore method.nonObject
+        $this->app->instance(SubjectResolver::class, $resolver); // @phpstan-ignore method.nonObject
         $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
         $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
     }

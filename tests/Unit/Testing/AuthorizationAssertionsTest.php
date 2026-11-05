@@ -4,16 +4,22 @@ declare(strict_types = 1);
 
 namespace Tests\Unit\Testing;
 
+use Illuminate\Support\Facades\Gate;
 use PHPUnit\Framework\AssertionFailedError;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Testing\Concerns\AuthorizationAssertions;
+use Tests\Feature\Stubs\AuthenticatableIdentity;
+use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
 /**
@@ -172,6 +178,92 @@ final class AuthorizationAssertionsTest extends TestCase
 
         // After swap, the facade resolves the swapped principal.
         self::assertTrue(Authorization::can('docs:publish'));
+    }
+
+    /**
+     * `actingAsIdentity` makes the identity its own subject, in the tenant
+     * given or in none, and the tenant reaches the tenant scope.
+     *
+     * @return void
+     */
+    public function testActingAsIdentityCarriesTheTenant(): void
+    {
+        $tenant = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
+        $user   = StubIdentity::create(['id' => '0b7d3e1c-4f2a-4c8e-9a6b-1d2e3f4a5b6c']);
+
+        Role::create(['name' => 'platform', 'guard' => 'web']);
+        Role::create(['name' => 'owned', 'guard' => 'web', 'tenant_type' => $tenant->getMorphClass(), 'tenant_id' => 'tenant-a']);
+
+        $this->actingAsIdentity($user);
+
+        $subject = Authorization::currentSubject();
+
+        self::assertNotNull($subject);
+        self::assertSame($user, $subject->subject);
+        self::assertSame($user, $subject->identity);
+        self::assertNull($subject->tenant);
+        self::assertSame(['platform'], Role::query()->pluck('name')->all());
+
+        $this->actingAsIdentity($user, $tenant);
+
+        self::assertSame($tenant, Authorization::currentSubject()?->tenant);
+        self::assertSame(['owned', 'platform'], Role::query()->orderBy('name')->pluck('name')->all());
+    }
+
+    /**
+     * `actingAsSubject` resolves the subject given, and a user Laravel's Gate
+     * hands over is decided about in the subject's tenant and application.
+     *
+     * @return void
+     */
+    public function testActingAsSubjectTranslatesTheGatesUserIntoItsRequest(): void
+    {
+        $tenant  = new \stdClass;
+        $user    = StubIdentity::create(['id' => '6c5b4a3d-2e1f-4a0b-9c8d-7e6f5a4b3c2d']);
+        $subject = new Subject($user, null, $tenant, 'admin', 'web');
+
+        $this->actingAsSubject($subject);
+
+        self::assertSame($subject, Authorization::currentSubject());
+        self::assertSame($subject, Authorization::forUser($user)->currentSubject());
+
+        $other      = new \stdClass;
+        $translated = Authorization::forUser($other)->currentSubject();
+
+        self::assertNotNull($translated);
+        self::assertSame($other, $translated->subject);
+        self::assertSame($tenant, $translated->tenant);
+        self::assertSame('admin', $translated->application);
+    }
+
+    /**
+     * When the Gate hands over the identity signed in behind the acting
+     * subject, it decides about the subject's principal, as the facade does,
+     * not about the identity.
+     *
+     * @return void
+     */
+    public function testTheGateDecidesAboutThePrincipalOfTheSignedInIdentity(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make('config');
+        $config->set('authorization.permission_enums', [PermissionEnum::class]);
+
+        (new AuthorizationServiceProvider($this->app))->boot(); // @phpstan-ignore argument.type
+
+        Permission::create(['name' => 'posts:create', 'guard' => 'web']);
+
+        $principal = StubIdentity::create(['id' => '3a8f1c2e-5b7d-4e9a-8c6f-2d1b0a9e8f7c']);
+        $identity  = AuthenticatableIdentity::create(['id' => '7e2d4c6b-9a1f-4b3e-8d5c-1f0e9a8b7c6d']);
+        $subject   = new Subject($principal, $identity, null, 'admin', 'web');
+
+        $principal->givePermission('posts:create');
+
+        $this->actingAsSubject($subject);
+
+        self::assertSame($subject, Authorization::forUser($identity)->currentSubject());
+        self::assertTrue(Gate::forUser($identity)->allows('posts:create'));
+        self::assertFalse($identity->hasPermission('posts:create'));
     }
 
     /**
