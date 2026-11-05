@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
@@ -154,6 +155,69 @@ final class TenantScopeTest extends TestCase
         SwitchableSubjectResolver::$tenant = $tenantB;
 
         self::assertSame(['b-role', 'platform-role'], $this->roleNames());
+        self::assertSame(['b-permission', 'platform-permission'], $this->permissionNames());
+    }
+
+    /**
+     * A query the resolver runs while it resolves the subject (a user model
+     * that eager-loads its roles, say) sees platform rows only, instead of
+     * asking the resolver again without end, and the tenant it returns then
+     * scopes every later query.
+     *
+     * @return void
+     */
+    public function testAQueryRunWhileResolvingSeesPlatformRowsOnly(): void
+    {
+        [, $tenantB] = $this->seedRows();
+
+        $resolver = new class ($tenantB) implements SubjectResolver {
+            /** @var list<string> The role names the resolver's own query saw. */
+            public array $seen = [];
+
+            /**
+             * Create a new resolver for a fixed tenant.
+             *
+             * @param  object  $tenant
+             */
+            public function __construct(
+
+                /** The tenant of the resolved subject. */
+                private readonly object $tenant,
+            ) {}
+
+            /**
+             * Query the roles, as loading a user with its roles does, then
+             * resolve a subject in the tenant.
+             *
+             * @return \SineMacula\Laravel\Authorization\Subject
+             */
+            #[\Override]
+            public function resolve(): Subject
+            {
+                /** @var list<string> $names */
+                $names      = Role::query()->orderBy('name')->pluck('name')->all();
+                $this->seen = $names;
+
+                return $this->forUser(new \stdClass);
+            }
+
+            /**
+             * Make the given user the subject, in the tenant.
+             *
+             * @param  object  $user
+             * @return \SineMacula\Laravel\Authorization\Subject
+             */
+            #[\Override]
+            public function forUser(object $user): Subject
+            {
+                return new Subject($user, $user, $this->tenant);
+            }
+        };
+
+        $this->app?->instance(SubjectResolver::class, $resolver);
+
+        self::assertSame(['b-role', 'platform-role'], $this->roleNames());
+        self::assertSame(['platform-role'], $resolver->seen);
         self::assertSame(['b-permission', 'platform-permission'], $this->permissionNames());
     }
 

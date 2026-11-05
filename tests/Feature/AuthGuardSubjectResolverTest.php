@@ -10,9 +10,11 @@ use Illuminate\Contracts\Auth\Guard;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Subject;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
+use Tests\Feature\Stubs\EagerRolesIdentity;
 use Tests\TestCase;
 
 /**
@@ -146,6 +148,41 @@ final class AuthGuardSubjectResolverTest extends TestCase
         $this->actingAs($user);
 
         $this->assertSubject($resolver->resolve(), $user, 'web');
+    }
+
+    /**
+     * A user the session guard loads with its roles is resolved once: the roles
+     * query run while loading it sees platform rows, instead of asking the
+     * resolver again without end.
+     *
+     * @return void
+     */
+    public function testAUserLoadedWithItsRolesFromTheSessionResolves(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make(ConfigRepository::class);
+        $config->set('auth.providers.users', ['driver' => 'eloquent', 'model' => EagerRolesIdentity::class]);
+
+        Role::create(['name' => 'admin', 'guard' => 'web']);
+
+        $user = EagerRolesIdentity::create(['id' => 'b8e2c4d6-1a3f-4e5b-8c7d-9f0a1b2c3d4e']);
+        $user->assignRole('admin');
+
+        /** @var \Illuminate\Auth\SessionGuard $guard */
+        $guard = $this->app?->make('auth')->guard('web');
+        $this->app?->make('session.store')->put($guard->getName(), $user->getKey());
+
+        // A new request: nothing is resolved, and its first roles query
+        // resolves the subject, which loads the user with its roles.
+        $this->app?->forgetScopedInstances();
+
+        self::assertSame(['admin'], Role::query()->pluck('name')->all());
+
+        $subject = $this->app?->make(SubjectResolver::class)->resolve();
+
+        self::assertInstanceOf(EagerRolesIdentity::class, $subject?->subject);
+        self::assertSame($user->getKey(), $subject->subject->getKey());
+        self::assertTrue($subject->subject->hasRole('admin'));
     }
 
     /**

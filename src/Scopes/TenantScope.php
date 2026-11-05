@@ -22,11 +22,12 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
  * tenant, only platform-wide rows remain visible: a missing tenant never makes
  * every tenant's rows visible.
  *
- * The scope holds no state of its own. It reads the tenant from the
+ * The scope keeps no tenant of its own. It reads the tenant from the
  * `ResolvedTenant` holder, which the service provider binds with `scoped()`, so
  * a single request or job (the `effectivePermissions()` enum sweep, relation
  * walks, cache-miss paths) pays the resolver cost once, and the next request or
- * job resolves its own tenant.
+ * job resolves its own tenant. The only state it holds is whether a resolution
+ * is under way, for the duration of that resolution.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -35,6 +36,9 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
  */
 final class TenantScope implements Scope
 {
+    /** @var bool Whether the subject's tenant is being resolved, so a query the resolver runs meanwhile sees platform rows only. */
+    private bool $resolving = false;
+
     /**
      * Apply the tenant scope to the given Eloquent builder.
      *
@@ -52,7 +56,7 @@ final class TenantScope implements Scope
     {
         $typeColumn = $model->getTable() . '.tenant_type';
         $idColumn   = $model->getTable() . '.tenant_id';
-        $tenant     = self::resolveTenant();
+        $tenant     = $this->resolveTenant();
 
         // `whereNull` / `orWhere` are declared as `@method static` on the
         // Eloquent Builder docblock; PHPStan flags dynamic instance calls as
@@ -126,12 +130,38 @@ final class TenantScope implements Scope
     }
 
     /**
+     * Return the tenant resolved for the current request or job, or null for a
+     * query run while the subject is being resolved.
+     *
+     * Resolving the subject can itself query a scoped model: the shipped
+     * resolver reads the signed-in user, and a user model that eager-loads its
+     * roles queries them. That query sees platform rows only, rather than
+     * asking the resolver again without end.
+     *
+     * @return object|null
+     */
+    private function resolveTenant(): ?object
+    {
+        if ($this->resolving) {
+            return null;
+        }
+
+        $this->resolving = true;
+
+        try {
+            return self::readResolvedTenant();
+        } finally {
+            $this->resolving = false;
+        }
+    }
+
+    /**
      * Return the tenant resolved for the current request or job, resolving it
      * again when the bound resolver is not the one it was read from.
      *
      * @return object|null
      */
-    private static function resolveTenant(): ?object
+    private static function readResolvedTenant(): ?object
     {
         $container = Container::getInstance();
 
