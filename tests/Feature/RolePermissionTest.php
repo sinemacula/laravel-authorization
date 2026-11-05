@@ -358,6 +358,68 @@ final class RolePermissionTest extends TestCase
     }
 
     /**
+     * A pivot built outside a relation reads the table's fixed `role_id` and
+     * `permission_id` columns, so guard parity still holds.
+     *
+     * @return void
+     */
+    public function testPivotWithoutARelationReadsTheFixedColumns(): void
+    {
+        $pivot = new RolePermission;
+        $pivot->setTable('role_permissions');
+        $pivot->setRawAttributes(['role_id' => $this->makeRole('web')->id, 'permission_id' => $this->makePermission('api')->id]);
+
+        $this->expectException(GuardMismatchException::class);
+
+        $pivot->save();
+    }
+
+    /**
+     * Keys a relation supplies win over the fixed columns on the role side,
+     * where the foreign key is the role column.
+     *
+     * @return void
+     */
+    public function testRelationSuppliedKeysAreReadOnTheRoleSide(): void
+    {
+        $role       = $this->makeRole('web');
+        $permission = $this->makePermission('api');
+
+        $pivot = new RolePermission;
+        $pivot->setTable('role_permissions');
+        $pivot->setPivotKeys('role_ref', 'permission_ref');
+        $pivot->setRawAttributes(['role_ref' => $role->id, 'permission_ref' => $permission->id]);
+
+        $this->expectException(GuardMismatchException::class);
+        $this->expectExceptionMessage(self::MISMATCH);
+
+        $pivot->save();
+    }
+
+    /**
+     * Keys a relation supplies win over the fixed columns on the permission
+     * side, where the foreign key is the permission column.
+     *
+     * @return void
+     */
+    public function testRelationSuppliedKeysAreReadOnThePermissionSide(): void
+    {
+        $role       = $this->makeRole('web');
+        $permission = $this->makePermission('api');
+
+        $pivot              = new RolePermission;
+        $pivot->pivotParent = $permission;
+        $pivot->setTable('role_permissions');
+        $pivot->setPivotKeys('permission_ref', 'role_ref');
+        $pivot->setRawAttributes(['role_ref' => $role->id, 'permission_ref' => $permission->id]);
+
+        $this->expectException(GuardMismatchException::class);
+        $this->expectExceptionMessage(self::MISMATCH);
+
+        $pivot->save();
+    }
+
+    /**
      * Create the pivot whose connection is checked.
      *
      * @return \Illuminate\Database\Eloquent\Model

@@ -194,8 +194,8 @@ final class RolePermission extends Pivot
      * path is preferred so a consumer who renames the FK on the relation
      * definition still gets the invariant enforced. The role column is the
      * foreign key from the role side and the related key from the permission
-     * side. Direct instantiation (no parent relation) falls back to config,
-     * which defaults to `role_id`.
+     * side. Direct instantiation (no parent relation) falls back to the table's
+     * `role_id` column.
      *
      * @return string
      */
@@ -208,15 +208,7 @@ final class RolePermission extends Pivot
         // relation — PHPStan trusts the docblocked string return; runtime does
         // not. Guard it.
         // @phpstan-ignore function.alreadyNarrowedType
-        if (\is_string($key) && $key !== '') {
-            return $key;
-        }
-
-        $column = config('authorization.pivots.role_permissions.role_column', 'role_id');
-
-        \assert(\is_string($column));
-
-        return $column;
+        return \is_string($key) && $key !== '' ? $key : 'role_id';
     }
 
     /**
@@ -224,8 +216,8 @@ final class RolePermission extends Pivot
      *
      * Prefers the relation-supplied key so a renamed FK on the relation
      * definition still enforces the invariant: the related key from the role
-     * side and the foreign key from the permission side. Falls back to config
-     * (default `permission_id`) on direct instantiation paths.
+     * side and the foreign key from the permission side. Falls back to the
+     * table's `permission_id` column on direct instantiation paths.
      *
      * @return string
      */
@@ -236,15 +228,7 @@ final class RolePermission extends Pivot
         // See `resolveRoleColumn()` — same upstream-trait null hazard on direct
         // instantiation paths.
         // @phpstan-ignore function.alreadyNarrowedType
-        if (\is_string($key) && $key !== '') {
-            return $key;
-        }
-
-        $column = config('authorization.pivots.role_permissions.permission_column', 'permission_id');
-
-        \assert(\is_string($column));
-
-        return $column;
+        return \is_string($key) && $key !== '' ? $key : 'permission_id';
     }
 
     /**

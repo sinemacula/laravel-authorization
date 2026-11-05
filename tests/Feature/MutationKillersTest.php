@@ -4,7 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
-use Illuminate\Contracts\Config\Repository;
+use Illuminate\Cache\Repository;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
@@ -589,78 +589,6 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `authorizationResolveGrantPivotColumns` reads the per-pivot column map
-     * from `authorization.pivots.<pivot>.<column>`. A custom override at each
-     * config path is applied — pins every concat operand in the prefix assembly
-     * (line 224) and each `$prefix . 'column'` call.
-     *
-     * @return void
-     */
-    public function testAuthorizationResolveGrantPivotColumnsHonoursPerPivotOverrides(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(Repository::class); // @phpstan-ignore method.nonObject
-
-        $config->set('authorization.pivots.authorizable_roles.authorizable_type_column', 'custom_type');
-        $config->set('authorization.pivots.authorizable_roles.authorizable_id_column', 'custom_id');
-        $config->set('authorization.pivots.authorizable_roles.role_column', 'custom_role_fk');
-        $config->set('authorization.pivots.authorizable_roles.expires_at_column', 'custom_expires_at');
-
-        /** @phpstan-ignore-next-line class.missingExtends */
-        $probe = new class {
-            use ResolvesPivotExpiry;
-
-            /**
-             * @return array<string, mixed>
-             */
-            public function columns(): array
-            {
-                return self::authorizationResolveGrantPivotColumns('authorizable_roles', 'role_column', 'role_id');
-            }
-        };
-
-        $columns = $probe->columns();
-
-        self::assertSame('custom_type', $columns['authorizable_type']);
-        self::assertSame('custom_id', $columns['authorizable_id']);
-        self::assertSame('custom_role_fk', $columns['target']);
-        self::assertSame('custom_expires_at', $columns['expires_at']);
-    }
-
-    /**
-     * Without an override, `authorizationResolveGrantPivotColumns` returns the
-     * package defaults for each column. Pins the default values passed as
-     * second argument to each `config()` call.
-     *
-     * @return void
-     */
-    public function testAuthorizationResolveGrantPivotColumnsDefaultsToPackageColumns(): void
-    {
-        /** @phpstan-ignore-next-line class.missingExtends */
-        $probe = new class {
-            use ResolvesPivotExpiry;
-
-            /**
-             * @param  string  $pivot
-             * @param  string  $targetKey
-             * @param  string  $defaultTarget
-             * @return array<string, mixed>
-             */
-            public function columns(string $pivot, string $targetKey, string $defaultTarget): array
-            {
-                return self::authorizationResolveGrantPivotColumns($pivot, $targetKey, $defaultTarget);
-            }
-        };
-
-        $columns = $probe->columns('some_new_pivot', 'custom_key', 'custom_default');
-
-        self::assertSame('authorizable_type', $columns['authorizable_type']);
-        self::assertSame('authorizable_id', $columns['authorizable_id']);
-        self::assertSame('custom_default', $columns['target']);
-        self::assertSame('expires_at', $columns['expires_at']);
-    }
-
-    /**
      * The cache key is built as `<prefix>:<kind>:<morph>:<id>` — targeted
      * assertions pin the exact shape so concat-removal and concat-reorder
      * mutations around `keyFor()` break.
@@ -670,7 +598,7 @@ final class MutationKillersTest extends TestCase
     public function testCacheKeyShapeIsPrefixKindMorphId(): void
     {
         $driver = new NonTaggableCacheStore;
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'km-test');
 
         // A principal exposing getMorphClass + getKey should key as
@@ -712,7 +640,7 @@ final class MutationKillersTest extends TestCase
     public function testCacheKeyShapeFallsBackToClassNameWhenMorphMissing(): void
     {
         $driver = new NonTaggableCacheStore;
-        $store  = new \Illuminate\Cache\Repository($driver);
+        $store  = new Repository($driver);
         $cache  = new ResolutionCache(store: $store, ttl: 0, prefix: 'km');
 
         $principal = new class {

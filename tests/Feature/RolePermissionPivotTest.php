@@ -4,10 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
-use Illuminate\Config\Repository as ConfigRepository;
-use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Enums\OrphanSide;
@@ -23,9 +20,8 @@ use Tests\TestCase;
  *
  * The existing feature tests drive the pivot through the Role API; this suite
  * instantiates the pivot directly and pins each branch of `ensureGuardParity()`
- * — the in-memory parent fast-path, the orphan-parent exception, and the
- * configurable column-name fallbacks. A future refactor of
- * `Role::permissions()` that stops routing through
+ * — the in-memory parent fast-path and the orphan-parent exception. A future
+ * refactor of `Role::permissions()` that stops routing through
  * `using(RolePermission::class)` would leave the feature tests green; this
  * suite is the safety net for the model-layer invariant.
  *
@@ -234,69 +230,6 @@ final class RolePermissionPivotTest extends TestCase
             self::assertSame(OrphanSide::PERMISSION, $exception->getSide());
             self::assertSame($pivot->getAttribute('permission_id'), $exception->getParentId());
         }
-    }
-
-    /**
-     * The pivot reads its column names from config when no relation supplies
-     * pivot keys — the default stays `role_id` / `permission_id` and
-     * guard-parity still fires.
-     *
-     * @return void
-     */
-    public function testDefaultColumnConfigIsApplied(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = app(ConfigRepository::class);
-
-        self::assertSame('role_id', $config->get('authorization.pivots.role_permissions.role_column'));
-        self::assertSame('permission_id', $config->get('authorization.pivots.role_permissions.permission_column'));
-
-        $role       = $this->makeRole(guard: 'web');
-        $permission = $this->makePermission(guard: 'api');
-
-        $pivot = $this->newPivot([
-            'role_id'       => $role->getKey(),
-            'permission_id' => $permission->getKey(),
-        ]);
-
-        $this->expectException(GuardMismatchException::class);
-
-        $pivot->save();
-    }
-
-    /**
-     * When the consumer overrides the pivot column names via config and ships a
-     * matching schema, the pivot's guard-parity check reads attributes from the
-     * new columns — a renamed schema does not silently disable the invariant.
-     *
-     * @return void
-     */
-    public function testOverriddenColumnConfigIsHonoured(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = app(ConfigRepository::class);
-
-        $config->set('authorization.pivots.role_permissions.role_column', 'role_uuid');
-        $config->set('authorization.pivots.role_permissions.permission_column', 'permission_uuid');
-
-        Schema::dropIfExists('role_permissions');
-        Schema::create('role_permissions', static function (Blueprint $table): void {
-            $table->uuid('role_uuid');
-            $table->uuid('permission_uuid');
-            $table->primary(['role_uuid', 'permission_uuid']);
-        });
-
-        $role       = $this->makeRole(guard: 'web');
-        $permission = $this->makePermission(guard: 'api');
-
-        $pivot = $this->newPivot([
-            'role_uuid'       => $role->getKey(),
-            'permission_uuid' => $permission->getKey(),
-        ]);
-
-        $this->expectException(GuardMismatchException::class);
-
-        $pivot->save();
     }
 
     /**

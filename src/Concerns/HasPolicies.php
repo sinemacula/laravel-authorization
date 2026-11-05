@@ -107,8 +107,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
      */
     public function attachPolicy(Model|Policy $policy, ?\DateTimeInterface $expiresAt = null): static
     {
-        $columns = self::authorizationResolveGrantPivotColumns('authorizable_policies', 'policy_column', 'policy_id');
-        $prior   = self::authorizationReadGrantPivot($this, $this->policies()->newPivotStatement(), $columns, (string) $policy->getKey());
+        $prior = self::authorizationReadGrantPivot($this, $this->policies()->newPivotStatement(), 'policy_id', (string) $policy->getKey());
 
         $this->policies()->syncWithoutDetaching([
             (string) $policy->getKey() => ['expires_at' => $expiresAt],
