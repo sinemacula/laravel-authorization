@@ -8,19 +8,22 @@ use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Events\Policy\Created as PolicyCreated;
 use SineMacula\Laravel\Authorization\Events\Policy\Deleted as PolicyDeleted;
 use SineMacula\Laravel\Authorization\Events\Policy\Updated as PolicyUpdated;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 
 /**
  * Row-lifecycle observer for the `Policy` model.
  *
  * Translates Eloquent's native `updating` / `created` / `updated` / `deleted`
- * events into the package's typed CRUD events. System-protection hooks
- * (`deleting`, `updating` guard, `saved` bypass reset) live in
+ * events into the package's typed CRUD events and enforces the tenant-columns
+ * both-or-neither invariant on save. System-protection hooks (`deleting`,
+ * `updating` guard, `saved` bypass reset) live in
  * `HasSystemProtection::bootHasSystemProtection()` and run independently of
  * this observer.
  *
- * Policies are not tenant-scoped — there is no `saving` hook or tenant-columns
- * invariant. Unlike `Role` and `Permission`, a policy row applies globally.
+ * A policy is owned by the platform (both tenant columns null) or by one tenant
+ * (both set), as roles and permissions are. Unlike theirs, policy reads are not
+ * yet filtered by the current tenant.
  *
  * Registered via `#[ObservedBy(PolicyObserver::class)]` on the `Policy` model.
  *
@@ -33,6 +36,25 @@ final class PolicyObserver
 {
     /** @var \WeakMap<\SineMacula\Laravel\Authorization\Models\Policy, array<string, mixed>>|null Pre-update snapshots keyed by model. */
     private static ?\WeakMap $snapshots = null;
+
+    /**
+     * Enforce the both-or-neither tenant ownership invariant before any
+     * persistence. A row with only one of `tenant_type` / `tenant_id` set would
+     * belong to neither the platform nor a tenant.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException
+     */
+    public function saving(Policy $policy): void
+    {
+        if (($policy->tenant_type === null) === ($policy->tenant_id === null)) {
+            return;
+        }
+
+        throw new InvalidTenantColumnsException(modelKind: 'policy', missingColumn: $policy->tenant_type === null ? 'tenant_type' : 'tenant_id');
+    }
 
     /**
      * Capture the pre-update attribute snapshot so the paired `updated` hook

@@ -492,7 +492,7 @@ final class MigrateSpatieCommandTest extends TestCase
     private static function refusalLine(string $kind, string $name): string
     {
         return "Skipped: Invalid {$kind} name '{$name}': allowed characters are letters, digits, '_', '-', ':', '.', "
-            . 'and \'*\'. Its grants are not migrated.';
+            . 'and \'*\', at most 191 of them. Its grants are not migrated.';
     }
 
     /**

@@ -21,8 +21,8 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
 final class InvalidTenantColumnsException extends \LogicException
 {
     /**
-     * Create a new exception instance describing the offending model kind (role
-     * / permission) and which column is missing.
+     * Create a new exception instance describing the offending model kind
+     * (role, permission or policy) and which column is missing.
      *
      * @param  string  $modelKind
      * @param  string  $missingColumn

@@ -213,9 +213,9 @@ final class TenantScopingTest extends TestCase
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
-        // Create a global role and a tenant-owned role with the same name but
-        // different guard to avoid the unique constraint.
-        Role::create(['name' => 'editor', 'guard' => null]);
+        // A platform role and a tenant-owned role may share a name and guard:
+        // the tenant's row wins for that tenant.
+        Role::create(['name' => 'editor', 'guard' => 'web']);
         Role::create([
             'name'        => 'editor',
             'guard'       => 'web',
@@ -241,7 +241,7 @@ final class TenantScopingTest extends TestCase
     {
         $tenantA = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
 
-        Permission::create(['name' => 'posts:edit', 'guard' => null]);
+        Permission::create(['name' => 'posts:edit', 'guard' => 'web']);
         Permission::create([
             'name'        => 'posts:edit',
             'guard'       => 'web',

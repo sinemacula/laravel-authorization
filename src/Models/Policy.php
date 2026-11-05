@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\MorphTo;
 use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
@@ -25,13 +26,17 @@ use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
  * platform-shipped policies as protected: deleting, editing or clearing the
  * flag of a persisted `is_system = true` row raises
  * `SystemPolicyProtectedException` unless `forceSystem()` is invoked to unlock
- * the next operation on the instance.
+ * the next operation on the instance. A policy is owned by the platform (both
+ * tenant columns null) or by one tenant (both set), and its name is unique
+ * within its owner.
  *
  * @property string $id
  * @property string $name
  * @property string|null $description
  * @property array<string, mixed> $document
  * @property bool $is_system
+ * @property string|null $tenant_type
+ * @property string|null $tenant_id
  *
  * @inheritable
  *
@@ -52,6 +57,8 @@ class Policy extends Model
         'description',
         'document',
         'is_system',
+        'tenant_type',
+        'tenant_id',
     ];
 
     /**
@@ -92,6 +99,18 @@ class Policy extends Model
     }
 
     /**
+     * The tenant that owns this policy.
+     *
+     * A null morph pair marks the policy as platform-wide.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\MorphTo<\Illuminate\Database\Eloquent\Model, $this>
+     */
+    public function tenant(): MorphTo
+    {
+        return $this->morphTo('tenant');
+    }
+
+    /**
      * Hydrate the policy into an evaluation-ready value object.
      *
      * @return \SineMacula\Laravel\Authorization\Evaluation\Policy
@@ -123,6 +142,8 @@ class Policy extends Model
             'description' => 'string',
             'document'    => 'array',
             'is_system'   => 'boolean',
+            'tenant_type' => 'string',
+            'tenant_id'   => 'string',
         ];
     }
 

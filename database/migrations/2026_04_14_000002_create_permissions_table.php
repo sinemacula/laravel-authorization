@@ -6,7 +6,9 @@
  * Permissions are atomic action strings that can be granted directly to an
  * identity or inherited via a role. The `guard` column is nullable: a null
  * value marks the permission as guard-agnostic (applies to every guard), a
- * concrete string scopes it to a single guard.
+ * concrete string scopes it to a single guard. A permission is owned by the
+ * platform (null tenant columns) or by one tenant, and its name is unique
+ * within its owner and guard.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -19,6 +21,7 @@ use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\MigrationCollisionGuard;
+use SineMacula\Laravel\Authorization\Database\NullFoldingUniqueIndex;
 
 return new class extends Migration {
     /**
@@ -36,8 +39,12 @@ return new class extends Migration {
 
         $schema->create($table, static function (Blueprint $blueprint) use ($table): void {
             $blueprint->uuid('id')->primary();
-            $blueprint->string('name');
-            $blueprint->string('guard')->nullable();
+
+            // Names, tenant types and tenant ids are bounded to 191 characters
+            // and guards to 64, so the unique key below stays within MySQL's
+            // 3072-byte InnoDB key limit under `utf8mb4`.
+            $blueprint->string('name', 191);
+            $blueprint->string('guard', 64)->nullable();
             $blueprint->string('description')->nullable();
 
             // Optional grouping key for admin UIs. Nullable so categorisation
@@ -54,32 +61,30 @@ return new class extends Migration {
             // The tenant that owns the permission. Both columns null mark the
             // permission as platform-wide; a concrete pair marks it as owned by
             // that tenant.
-            $blueprint->string('tenant_type')->nullable();
-            $blueprint->string('tenant_id')->nullable();
+            $blueprint->string('tenant_type', 191)->nullable();
+            $blueprint->string('tenant_id', 191)->nullable();
 
             $blueprint->timestamps();
 
             // Explicit lookup index on `(name, guard)`. Every
             // `resolvePermission()` / `hasPermission()` query filters on both
-            // columns; most engines back unique constraints with an index
-            // already but older MySQL storage engines and some managed
-            // databases do not. The explicit declaration is belt-and-braces
-            // insurance for the hot path.
+            // columns; the unique key below compares expressions, which a
+            // lookup by column cannot use.
             $blueprint->index(['name', 'guard'], $table . '_name_guard_index');
             $blueprint->index(['tenant_type', 'tenant_id'], $table . '_tenant_index');
         });
 
-        // Functional unique index on `(name, COALESCE(guard, ''))`. Ordinary
-        // UNIQUE(name, guard) would permit duplicate guard-agnostic rows
-        // because MySQL, PostgreSQL and SQLite all treat NULL as distinct
-        // inside unique indexes. COALESCE folds nulls to the empty string so
-        // the invariant "at most one row per (name, guard) pair, including the
-        // null-guard slot" is enforced at the data layer.
-        $schema->getConnection()->statement(sprintf(
-            'CREATE UNIQUE INDEX %s_name_guard_unique ON %s (name, (COALESCE(guard, \'\')))',
+        // A name is unique within its owner and guard: at most one row per
+        // name, guard and tenant, with a null guard (guard-agnostic) and null
+        // tenant columns (platform-wide) each counting as one value. A platform
+        // permission and a tenant's permission may share a name and guard, and
+        // two tenants may each have their own.
+        (new NullFoldingUniqueIndex($schema->getConnection()))->create(
             $table,
-            $table,
-        ));
+            $table . '_name_guard_owner_unique',
+            ['name'],
+            ['guard', 'tenant_type', 'tenant_id'],
+        );
     }
 
     /**

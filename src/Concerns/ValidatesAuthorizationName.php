@@ -15,8 +15,10 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameExceptio
  * so `posts.edit`, `posts:edit` and `posts.*` are all valid and `*` is the only
  * wildcard. Allowing the other glob metacharacters (`?`, `[`, `]`, `{`, `}`) or
  * whitespace would let a malformed name match unrelated permissions, so the
- * mutator enforces this character class at save time. The typed exception
- * surfaces immediately, before the row reaches the database.
+ * mutator enforces this character class at save time. A name is also at most
+ * 191 characters (bytes, since every allowed character is ASCII), the bound the
+ * `name` column and the suite's events share. The typed exception surfaces
+ * immediately, before the row reaches the database.
  *
  * Consumers set `$this->authorizationNameKind` (e.g. `'role'`, `'permission'`)
  * to control the label used in the raised exception; that is the only per-model
@@ -30,7 +32,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameExceptio
 trait ValidatesAuthorizationName // @phpstan-ignore trait.unused
 {
     /** @var string Pattern permitted in role and permission names. */
-    private const string NAME_PATTERN = '/^[A-Za-z0-9_\-:.*]+$/D';
+    private const string NAME_PATTERN = '/^[A-Za-z0-9_\-:.*]{1,191}$/D';
 
     /**
      * Determine whether the given value is a valid role or permission name.

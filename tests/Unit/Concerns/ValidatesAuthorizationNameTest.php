@@ -46,6 +46,7 @@ final class ValidatesAuthorizationNameTest extends TestCase
         yield 'leading-wildcard' => ['*:read'];
         yield 'bare-wildcard' => ['*'];
         yield 'every-character' => ['aZ09_-:.*'];
+        yield 'longest' => [\str_repeat('a', 191)];
     }
 
     /**
@@ -68,6 +69,7 @@ final class ValidatesAuthorizationNameTest extends TestCase
     public static function invalidNames(): iterable
     {
         yield 'empty' => [''];
+        yield 'too-long' => [\str_repeat('a', 192)];
         yield 'whitespace' => ['has space'];
         yield 'leading-whitespace' => [' posts.edit'];
         yield 'trailing-newline' => ["posts.edit\n"];

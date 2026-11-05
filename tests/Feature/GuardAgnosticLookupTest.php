@@ -22,7 +22,8 @@ use Tests\TestCase;
  * `hasPermission`) resolve against the configured default guard first and fall
  * back to the guard-agnostic row when no guard-specific match exists. The
  * uniqueness invariant for the null-guard slot is enforced by a functional
- * unique index on `(name, COALESCE(guard, ''))` at the data layer.
+ * unique index on the name, `COALESCE(guard, '')` and the folded owner at the
+ * data layer.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
