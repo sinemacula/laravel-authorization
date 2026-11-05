@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Support;
 
 use SineMacula\Laravel\Authorization\AuthorizationManager;
-use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 use SineMacula\Laravel\Authorization\Subject;
 
 /**
@@ -57,15 +56,15 @@ final class BladeHelpers
      */
     public static function hasRole(array|string $roles, ?string $guard = null): bool
     {
-        $guard     = CheckArguments::guard($guard);
-        $principal = self::currentSubject()?->subject;
+        $guard   = CheckArguments::guard($guard);
+        $subject = self::currentSubject();
 
-        if (!$principal instanceof SupportsRoles) {
+        if ($subject === null) {
             return false;
         }
 
         foreach (CheckArguments::names($roles) as $role) {
-            if ($principal->hasRole($role, $guard)) {
+            if (SubjectGrants::holdsRole($subject, $role, $guard)) {
                 return true;
             }
         }
@@ -84,16 +83,16 @@ final class BladeHelpers
      */
     public static function hasAllRoles(array|string $roles, ?string $guard = null): bool
     {
-        $guard     = CheckArguments::guard($guard);
-        $principal = self::currentSubject()?->subject;
-        $required  = CheckArguments::names($roles);
+        $guard    = CheckArguments::guard($guard);
+        $subject  = self::currentSubject();
+        $required = CheckArguments::names($roles);
 
-        if (!$principal instanceof SupportsRoles || $required === []) {
+        if ($subject === null || $required === []) {
             return false;
         }
 
         foreach ($required as $role) {
-            if (!$principal->hasRole($role, $guard)) {
+            if (!SubjectGrants::holdsRole($subject, $role, $guard)) {
                 return false;
             }
         }

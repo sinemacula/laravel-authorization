@@ -20,7 +20,21 @@ namespace SineMacula\Laravel\Authorization\Contracts;
  * The explicit `Identity` suffix avoids a name collision with Laravel's
  * built-in `Illuminate\Contracts\Auth\Access\Authorizable` contract.
  *
+ * A grantee also says whether it is active: one that is not, as the subject of
+ * a check or as the subject's identity, is denied everything.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-interface AuthorizableIdentity extends SupportsPermissions, SupportsPolicies, SupportsRoles {}
+interface AuthorizableIdentity extends SupportsPermissions, SupportsPolicies, SupportsRoles
+{
+    /**
+     * Determine whether the grantee is active.
+     *
+     * The `HasAuthorization` trait answers true; a model overrides it to report
+     * a suspended or disabled grantee.
+     *
+     * @return bool
+     */
+    public function isAuthorizationActive(): bool;
+}

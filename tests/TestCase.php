@@ -152,6 +152,14 @@ abstract class TestCase extends OrchestraTestCase
                 $schema->timestamps();
             });
         }
+
+        // An integer-keyed grantee that soft-deletes.
+        Schema::create('stub_numbered_identities', static function (Blueprint $schema): void {
+            $schema->increments('id');
+            $schema->string('name')->nullable();
+            $schema->timestamps();
+            $schema->softDeletes();
+        });
     }
 
     /**

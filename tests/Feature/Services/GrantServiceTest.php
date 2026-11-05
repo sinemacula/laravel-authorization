@@ -265,6 +265,52 @@ final class GrantServiceTest extends TestCase
     }
 
     /**
+     * Revoking everything removes every role, permission and policy the grantee
+     * holds, in one operation that reports each revocation with the actor, and
+     * leaves other grantees' grants alone.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRevokingEverythingRemovesEveryGrant(): void
+    {
+        $user   = self::user();
+        $other  = StubIdentity::create(['id' => 'user-2']);
+        $role   = Role::create(['name' => 'editor']);
+        $policy = Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]);
+        $actor  = new Reference('admin', 'admin-1');
+
+        self::service()->grantRole($user, $role);
+        self::service()->grantRole($other, $role);
+        self::service()->grantPermission($user, Permission::create(['name' => 'posts:edit']));
+        self::service()->attachPolicy($user, $policy);
+
+        Event::fake();
+
+        self::assertSame(3, self::service()->revokeAll($user, $actor));
+
+        self::assertSame(0, DB::table('authorizable_roles')->where('authorizable_id', $user->getKey())->count());
+        self::assertSame(0, DB::table('authorizable_permissions')->where('authorizable_id', $user->getKey())->count());
+        self::assertSame(0, DB::table('authorizable_policies')->where('authorizable_id', $user->getKey())->count());
+        self::assertSame(1, DB::table('authorizable_roles')->where('authorizable_id', 'user-2')->count());
+
+        Event::assertDispatched(
+            RoleRevoked::class,
+            static fn (RoleRevoked $event): bool => self::refersTo($event->grantee, $user) && self::refersTo($event->operation->actor, $actor),
+        );
+        Event::assertDispatched(PermissionRevoked::class, static fn (PermissionRevoked $event): bool => self::refersTo($event->grantee, $user));
+        Event::assertDispatched(PolicyDetached::class, static fn (PolicyDetached $event): bool => self::refersTo($event->grantee, $user));
+
+        $events     = [...self::dispatchedEvents(RoleRevoked::class), ...self::dispatchedEvents(PermissionRevoked::class), ...self::dispatchedEvents(PolicyDetached::class)];
+        $operations = \array_unique(\array_map(static fn (PermissionRevoked|PolicyDetached|RoleRevoked $event): string => $event->operation->id, $events));
+
+        self::assertCount(1, $operations);
+        self::assertSame([], $user->getRoles());
+        self::assertSame(0, self::service()->revokeAll($user));
+    }
+
+    /**
      * Each call runs in a transaction on the package's connection.
      *
      * @return void

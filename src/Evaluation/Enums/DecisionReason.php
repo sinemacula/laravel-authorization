@@ -33,6 +33,9 @@ enum DecisionReason: string
     /** A policy could not be evaluated (malformed or unreadable); the check denies. */
     case INVALID_POLICY = 'invalid_policy';
 
+    /** The subject, or the subject's identity, is inactive and is denied everything. */
+    case SUBJECT_INACTIVE = 'subject_inactive';
+
     /**
      * Return a human-readable explanation label for the reason.
      *
@@ -41,11 +44,12 @@ enum DecisionReason: string
     public function label(): string
     {
         return match ($this) {
-            self::EXPLICIT_ALLOW => 'explicit allow from a policy statement',
-            self::EXPLICIT_DENY  => 'explicit deny from a policy statement',
-            self::RBAC_ALLOW     => 'RBAC grant (direct permission or role-inherited)',
-            self::IMPLICIT_DENY  => 'implicit deny (no statement matched)',
-            self::INVALID_POLICY => 'invalid policy (a policy could not be evaluated)',
+            self::EXPLICIT_ALLOW   => 'explicit allow from a policy statement',
+            self::EXPLICIT_DENY    => 'explicit deny from a policy statement',
+            self::RBAC_ALLOW       => 'RBAC grant (direct permission or role-inherited)',
+            self::IMPLICIT_DENY    => 'implicit deny (no statement matched)',
+            self::INVALID_POLICY   => 'invalid policy (a policy could not be evaluated)',
+            self::SUBJECT_INACTIVE => 'subject inactive (the subject or its identity is inactive)',
         };
     }
 }

@@ -8,7 +8,6 @@ use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Translation\Translator;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
-use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
@@ -19,6 +18,7 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 
 /**
  * Authorization manager — the facade-facing entry point.
@@ -309,9 +309,12 @@ final class AuthorizationManager
     /**
      * Evaluate the action against the supplied subject.
      *
-     * RBAC is consulted only when no policy decided the check: an explicit
-     * allow or deny, or an invalid policy, stands. A policy document that
-     * cannot be read denies the check as an invalid policy.
+     * A subject that is inactive, or whose identity is, is denied everything
+     * before any policy is read. RBAC is consulted only when no policy decided
+     * the check: an explicit allow or deny, or an invalid policy, stands. A
+     * policy document that cannot be read denies the check as an invalid
+     * policy. The subject's identity, when it is another model, contributes its
+     * policies and its grants (see `SubjectGrants`).
      *
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @param  string  $action
@@ -325,10 +328,13 @@ final class AuthorizationManager
             return EvaluationResult::implicitlyDenied();
         }
 
-        $principal = $subject->subject;
-        $result    = $this->evaluatePolicies($principal, $action, $resource, $context);
+        if (SubjectGrants::isInactive($subject)) {
+            return EvaluationResult::subjectInactive();
+        }
 
-        if ($result->reason === DecisionReason::IMPLICIT_DENY && $principal instanceof AuthorizableIdentity && $principal->hasPermission($action)) {
+        $result = $this->evaluatePolicies($subject, $action, $resource, $context);
+
+        if ($result->reason === DecisionReason::IMPLICIT_DENY && SubjectGrants::holdsPermission($subject, $action)) {
             return EvaluationResult::rbacAllowed($result->trace);
         }
 
@@ -336,46 +342,47 @@ final class AuthorizationManager
     }
 
     /**
-     * Evaluate the principal's policies. A policy document that cannot be read
-     * denies the check as an invalid policy.
+     * Evaluate the subject's policies, and its identity's. A policy document
+     * that cannot be read denies the check as an invalid policy.
      *
-     * @param  object  $principal
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
      * @param  string|null  $resource
      * @param  array<string, mixed>  $context
      * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult
      */
-    private function evaluatePolicies(object $principal, string $action, ?string $resource, array $context): EvaluationResult
+    private function evaluatePolicies(Subject $subject, string $action, ?string $resource, array $context): EvaluationResult
     {
         try {
-            $policies = $this->gatherPolicies($principal);
+            $policies = $this->gatherPolicies($subject);
         } catch (InvalidPolicyDocumentException) {
             return EvaluationResult::invalidPolicy();
         }
 
-        return $this->evaluator->evaluate($policies, $action, $resource, $context, $principal);
+        return $this->evaluator->evaluate($policies, $action, $resource, $context, $subject->subject);
     }
 
     /**
-     * Gather the policies applicable to the supplied principal.
+     * Gather the policies applicable to the supplied subject.
      *
      * When a per-call override is in effect, it is returned verbatim. Otherwise
-     * the manager delegates to the bound `PolicyResolver` — consumers swap the
-     * resolver to introduce caching, tenant scoping, or other gathering
-     * strategies without touching the manager.
+     * the manager delegates to the bound `PolicyResolver` for the subject —
+     * consumers swap the resolver to introduce tenant scoping or other
+     * gathering strategies without touching the manager — and adds the policies
+     * attached to its identity when that is another model.
      *
-     * @param  object  $principal
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
      *
      * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
      */
-    private function gatherPolicies(object $principal): array
+    private function gatherPolicies(Subject $subject): array
     {
         if ($this->policyOverride !== null) {
             return $this->policyOverride;
         }
 
-        return $this->policyResolver->policiesFor($principal);
+        return [...$this->policyResolver->policiesFor($subject->subject), ...SubjectGrants::identityPolicies($subject)];
     }
 
     /**

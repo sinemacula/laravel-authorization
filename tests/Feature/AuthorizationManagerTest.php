@@ -37,11 +37,15 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Subject;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
+use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\Feature\Stubs\StubSubjectResolver;
+use Tests\Feature\Stubs\SuspendableIdentity;
 use Tests\TestCase;
 
 /**
@@ -61,6 +65,62 @@ use Tests\TestCase;
 #[CoversTrait(HasPolicies::class)]
 final class AuthorizationManagerTest extends TestCase
 {
+    /**
+     * A subject that is inactive, or whose identity is, is denied everything as
+     * `subject_inactive`, before any grant or policy is read.
+     *
+     * @return void
+     */
+    public function testAnInactiveSubjectOrIdentityIsDeniedEverything(): void
+    {
+        $principal = SuspendableIdentity::create(['id' => 'account-1']);
+        $identity  = SuspendableIdentity::create(['id' => 'person-1']);
+
+        $principal->givePermission(Permission::create(['name' => 'posts:edit']));
+        $this->app?->instance(SubjectResolver::class, new FixedSubjectResolver(new Subject($principal, $identity)));
+
+        $manager = $this->app?->make(AuthorizationManager::class);
+        self::assertNotNull($manager);
+        self::assertTrue($manager->can('posts:edit'));
+
+        $identity->suspended = true;
+
+        self::assertSame(DecisionReason::SUBJECT_INACTIVE, $manager->evaluate('posts:edit')->reason);
+
+        $identity->suspended  = false;
+        $principal->suspended = true;
+
+        $result = $manager->evaluate('posts:edit');
+
+        self::assertFalse($result->allowed);
+        self::assertSame(DecisionReason::SUBJECT_INACTIVE, $result->reason);
+    }
+
+    /**
+     * A decision about a principal counts its identity's grants and policies
+     * too: a permission the identity holds allows, and a deny the identity
+     * carries wins over the principal's grant.
+     *
+     * @return void
+     */
+    public function testTheIdentitysGrantsAndPoliciesCount(): void
+    {
+        $principal = SuspendableIdentity::create(['id' => 'account-1']);
+        $identity  = StubSecondIdentity::create(['id' => 'person-1']);
+
+        $principal->givePermission(Permission::create(['name' => 'posts:edit']));
+        $identity->givePermission(Permission::create(['name' => 'admin:read']));
+        $identity->attachPolicy(Policy::create(['name' => 'no-editing', 'document' => ['version' => 1, 'statements' => [['effect' => 'deny', 'actions' => ['posts:edit']]]]]));
+
+        $this->app?->instance(SubjectResolver::class, new FixedSubjectResolver(new Subject($principal, $identity)));
+
+        $manager = $this->app?->make(AuthorizationManager::class);
+        self::assertNotNull($manager);
+
+        self::assertSame(DecisionReason::RBAC_ALLOW, $manager->evaluate('admin:read')->reason);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $manager->evaluate('posts:edit')->reason);
+    }
+
     /**
      * Anonymous resolver yields implicit deny on can() and throws from
      * authorize().
