@@ -27,25 +27,27 @@ return new class extends Migration {
         /** @var string $rolesTable */
         $rolesTable = config('authorization.tables.roles', 'roles');
 
-        MigrationCollisionGuard::ensureNotExists($table);
+        $schema = Schema::connection($this->getConnection());
 
-        Schema::create($table, static function (Blueprint $table) use ($rolesTable): void {
-            $table->uuid('role_id');
-            $table->string('authorizable_type');
-            $table->string('authorizable_id');
+        (new MigrationCollisionGuard($schema))->ensureNotExists($table);
+
+        $schema->create($table, static function (Blueprint $blueprint) use ($rolesTable): void {
+            $blueprint->uuid('role_id');
+            $blueprint->string('authorizable_type');
+            $blueprint->string('authorizable_id');
 
             // Optional expiry for temporal grants — null means "forever". Rows
             // whose `expires_at` is in the past are filtered out of the
             // relation on read; pruning the expired rows is a
             // consumer-scheduled task. The authorization package does not ship
             // a sweeper in v1.0.0.
-            $table->timestamp('expires_at')->nullable();
+            $blueprint->timestamp('expires_at')->nullable();
 
-            $table->unique(['role_id', 'authorizable_type', 'authorizable_id'], 'authorizable_roles_unique');
-            $table->index(['authorizable_type', 'authorizable_id'], 'authorizable_roles_morph_index');
-            $table->index('expires_at', 'authorizable_roles_expires_at_index');
+            $blueprint->unique(['role_id', 'authorizable_type', 'authorizable_id'], 'authorizable_roles_unique');
+            $blueprint->index(['authorizable_type', 'authorizable_id'], 'authorizable_roles_morph_index');
+            $blueprint->index('expires_at', 'authorizable_roles_expires_at_index');
 
-            $table->foreign('role_id')->references('id')->on($rolesTable)->cascadeOnDelete();
+            $blueprint->foreign('role_id')->references('id')->on($rolesTable)->cascadeOnDelete();
         });
     }
 
@@ -59,6 +61,6 @@ return new class extends Migration {
         /** @var string $table */
         $table = config('authorization.tables.authorizable_roles', 'authorizable_roles');
 
-        Schema::dropIfExists($table);
+        Schema::connection($this->getConnection())->dropIfExists($table);
     }
 };

@@ -16,7 +16,6 @@ declare(strict_types = 1);
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use SineMacula\Laravel\Authorization\Database\MigrationCollisionGuard;
 
@@ -29,16 +28,35 @@ return new class extends Migration {
     public function up(): void
     {
         /** @var string $table */
-        $table = config('authorization.tables.permissions', 'permissions');
+        $table  = config('authorization.tables.permissions', 'permissions');
+        $schema = Schema::connection($this->getConnection());
 
-        MigrationCollisionGuard::ensureNotExists($table);
+        (new MigrationCollisionGuard($schema))->ensureNotExists($table);
 
-        Schema::create($table, static function (Blueprint $table): void {
-            $table->uuid('id')->primary();
-            $table->string('name');
-            $table->string('guard_name')->nullable();
-            $table->string('description')->nullable();
-            $table->timestamps();
+        $schema->create($table, static function (Blueprint $blueprint) use ($table): void {
+            $blueprint->uuid('id')->primary();
+            $blueprint->string('name');
+            $blueprint->string('guard_name')->nullable();
+            $blueprint->string('description')->nullable();
+
+            // Optional grouping key for admin UIs. Nullable so categorisation
+            // is opt-in.
+            $blueprint->string('category')->nullable();
+
+            // Platform-protection marker. Permissions flagged system refuse
+            // delete and every edit, clearing this flag included, unless the
+            // model-layer `forceSystem()` escape hatch is invoked, so a
+            // platform-shipped `*` super-admin permission cannot be casually
+            // removed or changed by a caller with raw Eloquent access.
+            $blueprint->boolean('is_system')->default(false);
+
+            // The tenant that owns the permission. Both columns null mark the
+            // permission as platform-wide; a concrete pair marks it as owned by
+            // that tenant.
+            $blueprint->string('tenant_type')->nullable();
+            $blueprint->string('tenant_id')->nullable();
+
+            $blueprint->timestamps();
 
             // Explicit lookup index on `(name, guard_name)`. Every
             // `resolvePermission()` / `hasPermission()` query filters on both
@@ -46,7 +64,8 @@ return new class extends Migration {
             // already but older MySQL storage engines and some managed
             // databases do not. The explicit declaration is belt-and-braces
             // insurance for the hot path.
-            $table->index(['name', 'guard_name'], 'permissions_name_guard_index');
+            $blueprint->index(['name', 'guard_name'], $table . '_name_guard_index');
+            $blueprint->index(['tenant_type', 'tenant_id'], $table . '_tenant_index');
         });
 
         // Functional unique index on `(name, COALESCE(guard_name, ''))`.
@@ -55,7 +74,7 @@ return new class extends Migration {
         // NULL as distinct inside unique indexes. COALESCE folds nulls to the
         // empty string so the invariant "at most one row per (name, guard)
         // pair, including the null-guard slot" is enforced at the data layer.
-        DB::statement(sprintf(
+        $schema->getConnection()->statement(sprintf(
             'CREATE UNIQUE INDEX %s_name_guard_unique ON %s (name, (COALESCE(guard_name, \'\')))',
             $table,
             $table,
@@ -72,6 +91,6 @@ return new class extends Migration {
         /** @var string $table */
         $table = config('authorization.tables.permissions', 'permissions');
 
-        Schema::dropIfExists($table);
+        Schema::connection($this->getConnection())->dropIfExists($table);
     }
 };

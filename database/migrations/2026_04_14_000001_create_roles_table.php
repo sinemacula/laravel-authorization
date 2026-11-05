@@ -17,7 +17,6 @@ declare(strict_types = 1);
 
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use SineMacula\Laravel\Authorization\Database\MigrationCollisionGuard;
 
@@ -30,22 +29,48 @@ return new class extends Migration {
     public function up(): void
     {
         /** @var string $table */
-        $table = config('authorization.tables.roles', 'roles');
+        $table  = config('authorization.tables.roles', 'roles');
+        $schema = Schema::connection($this->getConnection());
 
-        MigrationCollisionGuard::ensureNotExists($table);
+        (new MigrationCollisionGuard($schema))->ensureNotExists($table);
 
-        Schema::create($table, static function (Blueprint $table): void {
-            $table->uuid('id')->primary();
-            $table->string('name');
-            $table->string('guard_name')->nullable();
-            $table->string('description')->nullable();
+        $schema->create($table, static function (Blueprint $blueprint) use ($table): void {
+            $blueprint->uuid('id');
+            $blueprint->string('name');
+            $blueprint->string('guard_name')->nullable();
+            $blueprint->string('description')->nullable();
+
             // Platform-protection marker. Roles flagged system refuse delete
             // and every edit, clearing this flag included, unless the
             // model-layer `forceSystem()` escape hatch is invoked, so a
             // platform-shipped `super-admin` cannot be casually removed or
             // changed by a caller with raw Eloquent access.
-            $table->boolean('is_system')->default(false);
-            $table->timestamps();
+            $blueprint->boolean('is_system')->default(false);
+
+            // The parent role, for role hierarchy. A child role inherits every
+            // permission of its ancestors when
+            // `authorization.hierarchy.enabled` is true. Null marks the role as
+            // a root. Deleting a parent promotes its children to roots.
+            $blueprint->uuid('parent_id')->nullable();
+
+            // Role seniority. Lower values denote more senior roles (0 is the
+            // most senior, mirroring IAM conventions). Null means "unranked":
+            // the role is not subject to rank-based checks, so the feature is
+            // opt-in per role.
+            $blueprint->integer('rank')->nullable();
+
+            // The tenant that owns the role. Both columns null mark the role as
+            // platform-wide; a concrete pair marks it as owned by that tenant.
+            $blueprint->string('tenant_type')->nullable();
+            $blueprint->string('tenant_id')->nullable();
+
+            $blueprint->timestamps();
+
+            // The primary key is declared as a command rather than on the
+            // column, so it is created before the self-referencing key below
+            // that needs it: a key declared on the column is only added after
+            // every declared command.
+            $blueprint->primary('id');
 
             // Explicit lookup index on `(name, guard_name)`. Every
             // `resolveRole()` / `hasRole()` query filters on both columns; most
@@ -53,7 +78,14 @@ return new class extends Migration {
             // MySQL storage engines and some managed databases do not. The
             // explicit declaration is belt-and-braces insurance for the hot
             // path.
-            $table->index(['name', 'guard_name'], 'roles_name_guard_index');
+            $blueprint->index(['name', 'guard_name'], $table . '_name_guard_index');
+            $blueprint->index('parent_id', $table . '_parent_id_index');
+            $blueprint->index('rank', $table . '_rank_index');
+            $blueprint->index(['tenant_type', 'tenant_id'], $table . '_tenant_index');
+
+            // The self-referencing key is declared with the table, so it holds
+            // on every database, SQLite included.
+            $blueprint->foreign('parent_id')->references('id')->on($table)->nullOnDelete();
         });
 
         // Functional unique index on `(name, COALESCE(guard_name, ''))`.
@@ -62,7 +94,7 @@ return new class extends Migration {
         // NULL as distinct inside unique indexes. COALESCE folds nulls to the
         // empty string so the invariant "at most one row per (name, guard)
         // pair, including the null-guard slot" is enforced at the data layer.
-        DB::statement(sprintf(
+        $schema->getConnection()->statement(sprintf(
             'CREATE UNIQUE INDEX %s_name_guard_unique ON %s (name, (COALESCE(guard_name, \'\')))',
             $table,
             $table,
@@ -79,6 +111,6 @@ return new class extends Migration {
         /** @var string $table */
         $table = config('authorization.tables.roles', 'roles');
 
-        Schema::dropIfExists($table);
+        Schema::connection($this->getConnection())->dropIfExists($table);
     }
 };

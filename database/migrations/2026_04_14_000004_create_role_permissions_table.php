@@ -29,16 +29,18 @@ return new class extends Migration {
         /** @var string $permissionsTable */
         $permissionsTable = config('authorization.tables.permissions', 'permissions');
 
-        MigrationCollisionGuard::ensureNotExists($table);
+        $schema = Schema::connection($this->getConnection());
 
-        Schema::create($table, static function (Blueprint $table) use ($rolesTable, $permissionsTable): void {
-            $table->uuid('role_id');
-            $table->uuid('permission_id');
+        (new MigrationCollisionGuard($schema))->ensureNotExists($table);
 
-            $table->primary(['role_id', 'permission_id']);
+        $schema->create($table, static function (Blueprint $blueprint) use ($rolesTable, $permissionsTable): void {
+            $blueprint->uuid('role_id');
+            $blueprint->uuid('permission_id');
 
-            $table->foreign('role_id')->references('id')->on($rolesTable)->cascadeOnDelete();
-            $table->foreign('permission_id')->references('id')->on($permissionsTable)->cascadeOnDelete();
+            $blueprint->primary(['role_id', 'permission_id']);
+
+            $blueprint->foreign('role_id')->references('id')->on($rolesTable)->cascadeOnDelete();
+            $blueprint->foreign('permission_id')->references('id')->on($permissionsTable)->cascadeOnDelete();
         });
     }
 
@@ -52,6 +54,6 @@ return new class extends Migration {
         /** @var string $table */
         $table = config('authorization.tables.role_permissions', 'role_permissions');
 
-        Schema::dropIfExists($table);
+        Schema::connection($this->getConnection())->dropIfExists($table);
     }
 };
