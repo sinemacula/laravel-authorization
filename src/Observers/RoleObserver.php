@@ -10,6 +10,7 @@ use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
 use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
 use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\ReservedRoleNameException;
+use SineMacula\Laravel\Authorization\Exceptions\RoleHasChildrenException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\Support\RecordChanges;
@@ -124,14 +125,30 @@ final class RoleObserver
     }
 
     /**
-     * Read, before the row goes, every grantee that holds the role and every
-     * permission it carries, which the delete takes with it.
+     * Refuse to delete a role with children (D18), then read, before the row
+     * goes, every grantee that holds the role and every permission it carries,
+     * which the delete takes with it.
+     *
+     * The children are read outside the tenant scope, so a child the current
+     * tenant cannot see still holds the delete back.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHasChildrenException
      */
     public function deleting(Role $role): void
     {
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $roleClass */
+        $roleClass = config('authorization.models.role', Role::class);
+
+        /** @var list<string> $children */
+        $children = $roleClass::query()->withoutGlobalScope(TenantScope::class)->where('parent_id', $role->id)->orderBy('name')->pluck('name')->all();
+
+        if ($children !== []) {
+            throw new RoleHasChildrenException($role->name, $children);
+        }
+
         RecordChanges::hold($role, [
             'grantees'    => GrantTarget::ROLE->holders(Reference::of($role)->id),
             'permissions' => RecordChanges::linked($role->permissions()),

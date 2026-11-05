@@ -19,6 +19,7 @@ use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Exceptions\OwnerMismatchException;
+use SineMacula\Laravel\Authorization\Exceptions\RoleHasChildrenException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
@@ -54,6 +55,30 @@ use Tests\TestCase;
 final class RoleServiceTest extends TestCase
 {
     use ActsAsTenant, AssertsTransactions, ComparesReferences, ReadsDispatchedEvents, RecordsRowLocks, UsesAnAuthorizationConnection;
+
+    /**
+     * Deleting a role with children is refused through the service too, and
+     * leaves the role and its children as they were.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testDeletingARoleWithChildrenIsRefused(): void
+    {
+        $parent = self::role('parent');
+
+        self::role('child', ['parent_id' => $parent->id]);
+
+        try {
+            self::service()->delete($parent);
+            self::fail('A role with children was deleted.');
+        } catch (RoleHasChildrenException $exception) {
+            self::assertSame('parent', $exception->getRoleName());
+        }
+
+        self::assertSame(2, Role::query()->count());
+    }
 
     /**
      * A name finds the role the lookup ranks first under the guard, and an

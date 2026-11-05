@@ -18,11 +18,11 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the foreign keys the shipped migrations declare: the parent
- * role's self-referencing key, which clears a child's parent when the parent is
- * deleted, and the keys that delete a role's, permission's or policy's grants
- * and role-permission rows with it. The test connection enforces foreign keys
- * on every database, SQLite included, so each delete is the database's work,
- * not the package's.
+ * role's self-referencing key, which refuses to delete a parent with children,
+ * and the keys that delete a role's, permission's or policy's grants and
+ * role-permission rows with it. The test connection enforces foreign keys on
+ * every database, SQLite included, so each delete is the database's work, not
+ * the package's.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,7 +42,7 @@ final class ForeignKeysTest extends TestCase
      */
     public static function foreignKeys(): iterable
     {
-        yield 'parent role' => ['roles', 'parent_id', 'roles', 'set null'];
+        yield 'parent role' => ['roles', 'parent_id', 'roles', 'restrict'];
         yield 'role of a role permission' => ['role_permissions', 'role_id', 'roles', 'cascade'];
         yield 'permission of a role permission' => ['role_permissions', 'permission_id', 'permissions', 'cascade'];
         yield 'granted role' => ['authorizable_roles', 'role_id', 'roles', 'cascade'];
@@ -75,18 +75,24 @@ final class ForeignKeysTest extends TestCase
     }
 
     /**
-     * Deleting a parent role clears its children's parent.
+     * The database refuses to delete a parent role with children, however the
+     * delete is made (D18).
      *
      * @return void
+     *
+     * @throws \Throwable
      */
-    public function testDeletingAParentRoleClearsItsChildrensParent(): void
+    public function testDeletingAParentRoleWithChildrenIsRefused(): void
     {
         $parent = Role::query()->create(['name' => 'admin']);
         $child  = Role::query()->create(['name' => 'editor', 'parent_id' => $parent->id]);
 
-        DB::table('roles')->where('id', $parent->id)->delete();
-
-        self::assertNull(DB::table('roles')->where('id', $child->id)->value('parent_id'));
+        try {
+            DB::transaction(static fn (): int => DB::table('roles')->where('id', $parent->id)->delete());
+            self::fail('A parent with children was deleted.');
+        } catch (QueryException) {
+            self::assertSame($parent->id, DB::table('roles')->where('id', $child->id)->value('parent_id'));
+        }
     }
 
     /**

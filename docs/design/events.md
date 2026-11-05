@@ -102,8 +102,8 @@ app(GrantService::class)->grantRole($user, 'editor', actor: $admin);
   update or delete, and `saveQuietly()` or `deleteQuietly()` dispatch no event.
 - **A delete outside a transaction** reads its grantees and removes the row in separate statements; through the
   services both run in the call's transaction.
-- **A deleted role's children are not listed.** Their holders lose what the role passed down; they are found through
-  the role grants of the children.
+- **A role with children is never deleted** (D18), so no child's holders lose what a deleted role passed down; the
+  children are moved or deleted first, each reported as its own update or delete.
 - **Grants carry their scope.** Every grant event reports the tenant the grant holds in, or none for platform-wide;
   the application is always every application until applications are read.
 

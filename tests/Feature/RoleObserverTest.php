@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\OwnerMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\ParentGuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\ReservedRoleNameException;
+use SineMacula\Laravel\Authorization\Exceptions\RoleHasChildrenException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -68,6 +69,32 @@ final class RoleObserverTest extends TestCase
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.models.role', CustomRole::class);
+    }
+
+    /**
+     * A role with children is not deleted, even when the current tenant cannot
+     * see a child, and once its children are gone it is (D18).
+     *
+     * @return void
+     */
+    public function testARoleWithChildrenIsNotDeleted(): void
+    {
+        $tenant = self::createTenant('tenant-a');
+        $parent = Role::query()->create(['name' => 'parent']);
+        $mine   = Role::query()->create(['name' => 'mine', 'parent_id' => $parent->id]);
+
+        Role::query()->create(['name' => 'theirs', 'parent_id' => $parent->id, ...self::ownedBy($tenant)]);
+
+        $refusal = self::refusalOf(static fn (): ?bool => $parent->delete());
+
+        self::assertInstanceOf(RoleHasChildrenException::class, $refusal);
+        self::assertSame(['mine', 'theirs'], $refusal->getChildNames());
+        self::assertNotNull($parent->fresh());
+
+        $mine->delete();
+        Role::query()->withoutGlobalScopes()->where('name', 'theirs')->sole()->delete();
+
+        self::assertTrue($parent->delete());
     }
 
     /**
