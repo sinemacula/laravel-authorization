@@ -665,6 +665,11 @@ final class AuthorizationManagerTest extends TestCase
 
         self::assertNull(Authorization::currentSubject());
         self::assertFalse(Authorization::can('posts:create'));
+        self::assertFalse(Authorization::refuseUnidentifiedResource('posts:create')->allowed);
+
+        $this->expectException(AuthorizationException::class);
+
+        Authorization::authorize('posts:create');
     }
 
     /**

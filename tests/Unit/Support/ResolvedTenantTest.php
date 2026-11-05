@@ -54,7 +54,8 @@ final class ResolvedTenantTest extends TestCase
     }
 
     /**
-     * No subject means no tenant, never every tenant.
+     * No subject means no tenant, never every tenant, and reading it raises no
+     * warning.
      *
      * @return void
      */
@@ -63,7 +64,15 @@ final class ResolvedTenantTest extends TestCase
         $resolver = self::createStub(SubjectResolver::class);
         $resolver->method('resolve')->willReturn(null);
 
-        self::assertNull(ResolvedTenant::from($resolver)->tenant);
+        \set_error_handler(static function (int $level, string $message): never {
+            throw new \ErrorException($message, 0, $level);
+        });
+
+        try {
+            self::assertNull(ResolvedTenant::from($resolver)->tenant);
+        } finally {
+            \restore_error_handler();
+        }
     }
 
     /**
