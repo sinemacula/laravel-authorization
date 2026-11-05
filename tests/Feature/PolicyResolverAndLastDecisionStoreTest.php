@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\PrincipalResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
@@ -227,8 +228,8 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
     }
 
     /**
-     * `forgetLastDecision()` clears the store so long-running workers can reset
-     * between requests without a stale decision leaking through.
+     * `forgetLastDecision()` clears the store mid-request, so a later read does
+     * not see an earlier decision.
      *
      * @return void
      */
@@ -243,6 +244,23 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
         Authorization::forgetLastDecision();
 
         self::assertNull(Authorization::lastDecision());
+    }
+
+    /**
+     * The store's `reset()` alias clears the slot the same way `forget()` does.
+     *
+     * @return void
+     */
+    public function testResetClearsTheStore(): void
+    {
+        $store = new LastDecisionStore;
+        $store->put(EvaluationResult::rbacAllowed());
+
+        self::assertNotNull($store->get());
+
+        $store->reset();
+
+        self::assertNull($store->get());
     }
 
     /**

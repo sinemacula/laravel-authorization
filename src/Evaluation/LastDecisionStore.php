@@ -8,7 +8,8 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
  * Single-slot holder for the most recent evaluation result. Shared by reference
  * across cloned manager scopes so `Authorization::lastDecision()` observes
  * decisions made through `for($user)->can(...)` chains. Each `put()` replaces
- * the prior value; no history is retained.
+ * the prior value; no history is retained. The service provider binds it with
+ * `scoped()`, so the slot belongs to the current request or job.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,8 +32,9 @@ final class LastDecisionStore
     }
 
     /**
-     * Return the most recent evaluation result, or null when the process has
-     * not yet evaluated a decision (or the store was explicitly cleared).
+     * Return the most recent evaluation result, or null when the current
+     * request or job has not yet evaluated a decision (or the store was
+     * explicitly cleared).
      *
      * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult|null
      */
@@ -42,9 +44,7 @@ final class LastDecisionStore
     }
 
     /**
-     * Clear the recorded decision. Long-running workers (Octane, RoadRunner)
-     * call this between requests to prevent a stale decision from the previous
-     * request leaking into the next.
+     * Clear the recorded decision.
      *
      * @return void
      */
@@ -54,8 +54,7 @@ final class LastDecisionStore
     }
 
     /**
-     * Reset the slot. Semantic alias of `forget()` intended for the Octane /
-     * RoadRunner request-boundary listener wired by the service provider.
+     * Reset the slot. Semantic alias of `forget()`.
      *
      * @return void
      */

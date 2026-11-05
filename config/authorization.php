@@ -192,10 +192,12 @@ return [
     |---------------------------------------------------------------------------
     |
     | Bridges the engine to whatever concept of "current tenant" the
-    | application uses. The shipped default returns null, disabling tenant
-    | scoping entirely — all roles and permissions are visible regardless
-    | of ownership. Applications wire their own resolver through this key
-    | or by binding the contract directly.
+    | application uses. The shipped default (and null) resolves no tenant,
+    | under which only platform-wide roles and permissions are visible:
+    | tenant-owned rows never show without their tenant. Applications wire
+    | their own resolver through this key or by binding the contract
+    | directly. The resolver and the tenant it returns are bound per
+    | request or job, so queue workers and Octane resolve them afresh.
     |
     */
 
@@ -207,12 +209,13 @@ return [
     |---------------------------------------------------------------------------
     |
     | Two-tier cache for principal roles, permissions, and policies. The
-    | in-memory tier is always on and memoises results per-request. The
-    | optional persistent tier kicks in when `store` is set to one of the
-    | configured cache connections — results are written there with the
-    | supplied TTL (0 = forever) under a namespaced key prefix, and the
+    | in-memory tier is always on and memoises results per request or job.
+    | The optional persistent tier kicks in when `store` is set to one of
+    | the configured cache connections — results are written there with
+    | the supplied TTL (0 = forever) under a namespaced key prefix, and the
     | shipped `InvalidateResolutionCache` listener drops entries when the
-    | package's events fire.
+    | package's events fire. Entries in both tiers live no longer than the
+    | TTL and the nearest grant expiry.
     |
     */
 

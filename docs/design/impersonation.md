@@ -9,9 +9,9 @@ identity.
 ## Invariants
 
 1. **`for()` returns a clone, not a mutation.** The method clones the manager, pins the supplied principal on the clone,
-   and returns it. The root manager instance (the singleton behind the `Authorization` facade) is never mutated. Two
-   concurrent `for()` calls produce two independent scopes that cannot interfere with each other or with the ambient
-   resolution path.
+   and returns it. The root manager instance (the request-scoped instance behind the `Authorization` facade) is never
+   mutated. Two concurrent `for()` calls produce two independent scopes that cannot interfere with each other or with
+   the ambient resolution path.
 
 2. **`for()` does NOT change `$request->user()`.** The scoped manager only affects authorization evaluation -- it
    overrides `currentPrincipal()` on the clone. The Laravel auth guard, `$request->user()`, session state, and any

@@ -124,4 +124,30 @@ final class RevokeRoleCommandTest extends TestCase
         self::assertStringContainsString('rev-role', $output);
         self::assertStringContainsString($identity, $output);
     }
+
+    /**
+     * Without a resolved tenant the role is looked up among platform-wide roles
+     * only, so a tenant-owned role is not found.
+     *
+     * @return void
+     */
+    public function testTenantOwnedRoleIsNotFoundWithoutATenant(): void
+    {
+        Role::create([
+            'id'          => 'e3e3e3e3-0000-0000-0000-000000000001',
+            'name'        => 'owned-editor',
+            'guard_name'  => 'web',
+            'tenant_type' => 'tenant',
+            'tenant_id'   => 't-1',
+        ]);
+        StubIdentity::create(['id' => 'e4e4e4e4-0000-0000-0000-000000000001']);
+
+        $exitCode = Artisan::call('authorization:revoke', [
+            'identity' => StubIdentity::class . ':e4e4e4e4-0000-0000-0000-000000000001',
+            'role'     => 'owned-editor',
+        ]);
+
+        self::assertSame(1, $exitCode);
+        self::assertStringContainsString('owned-editor', Artisan::output());
+    }
 }

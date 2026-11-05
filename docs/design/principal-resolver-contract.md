@@ -78,9 +78,9 @@ independent scope. See `docs/design/impersonation.md` for the full impersonation
 ## Static Resolution Path
 
 Middleware and Blade directives cannot inject the manager via constructor injection. They reach it through
-`AuthorizationManager::instance()` (provided by the `HasContainerInstance` trait), which resolves the singleton from the
-container. Middleware calls `Authorization::currentPrincipal()` to get the ambient principal; Blade helpers call
-`AuthorizationManager::instance()?->currentPrincipal()`. This keeps the service-locator call in one auditable site.
+`AuthorizationManager::instance()` (provided by the `HasContainerInstance` trait), which resolves the request's manager
+from the container. Middleware calls `Authorization::currentPrincipal()` to get the ambient principal; Blade helpers
+call `AuthorizationManager::instance()?->currentPrincipal()`. This keeps the service-locator call in one auditable site.
 
 ## Trade-offs
 

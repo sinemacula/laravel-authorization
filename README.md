@@ -220,6 +220,10 @@ php artisan authorization:list-permissions
 php artisan authorization:why-can user:1 posts:delete posts/42
 ```
 
+The listing commands are administrative views: they list every role or permission, platform-wide and tenant-owned
+alike, and show each one's owner. `grant` and `revoke` look the role up within the tenant scope, so without a resolved
+tenant they find platform-wide roles only.
+
 In your tests, `SineMacula\Laravel\Authorization\Testing\Concerns\AuthorizationAssertions` adds `assertCan()`,
 `assertCannot()`, `assertHasRole()` and `assertHasPermission()`.
 

@@ -294,4 +294,31 @@ final class GrantRoleCommandTest extends TestCase
         self::assertSame(1, $exitCode);
         self::assertStringContainsString('missing-key-99', $output);
     }
+
+    /**
+     * Without a resolved tenant the role is looked up among platform-wide roles
+     * only, so a tenant-owned role is not found.
+     *
+     * @return void
+     */
+    public function testTenantOwnedRoleIsNotFoundWithoutATenant(): void
+    {
+        Role::create([
+            'id'          => 'e1e1e1e1-0000-0000-0000-000000000001',
+            'name'        => 'owned-editor',
+            'guard_name'  => 'web',
+            'tenant_type' => 'tenant',
+            'tenant_id'   => 't-1',
+        ]);
+        $user = StubIdentity::create(['id' => 'e2e2e2e2-0000-0000-0000-000000000001']);
+
+        $exitCode = Artisan::call('authorization:grant', [
+            'identity' => StubIdentity::class . ':e2e2e2e2-0000-0000-0000-000000000001',
+            'role'     => 'owned-editor',
+        ]);
+
+        self::assertSame(1, $exitCode);
+        self::assertStringContainsString('owned-editor', Artisan::output());
+        self::assertSame(0, $user->roles()->withoutGlobalScopes()->count());
+    }
 }

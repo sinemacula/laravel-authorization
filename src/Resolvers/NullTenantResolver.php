@@ -9,9 +9,9 @@ use SineMacula\Laravel\Authorization\Contracts\TenantResolver;
 /**
  * Single-tenant-safe default tenant resolver.
  *
- * Always returns null, which disables tenant scoping entirely — all role and
- * permission rows are visible regardless of ownership. Applications wire their
- * own resolver — typically one backed by a tenancy package or request
+ * Always returns null, so only platform-wide role and permission rows are
+ * visible; tenant-owned rows never show without their tenant. Applications wire
+ * their own resolver — typically one backed by a tenancy package or request
  * middleware — through the `authorization.tenant_resolver` config entry or by
  * binding the resolver contract directly.
  *

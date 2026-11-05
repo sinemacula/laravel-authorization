@@ -33,6 +33,7 @@ use SineMacula\Laravel\Authorization\Resolvers\CachingPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\NullPrincipalResolver;
 use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
+use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 
 /**
  * Service provider for the authorization package.
@@ -45,8 +46,20 @@ use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
  *   matching Laravel Gate.
  * - `BladeDirectiveRegistrar` — wires the `@role` / `@permission` directive
  *   quartet and Spatie-compat aliases.
- * - `EventListenerRegistrar` — wires the resolution-cache invalidator and the
- *   Octane request-boundary reset.
+ * - `EventListenerRegistrar` — wires the resolution-cache invalidator.
+ *
+ * Every binding that holds state for one request or job (the resolvers, the
+ * policy store, the resolved tenant, the resolution cache, the last decision
+ * and the manager that holds them) is registered with `scoped()`, so Laravel's
+ * queue worker drops it before each job and Octane builds it afresh on each
+ * request's sandbox. They are scoped together: a singleton holding a scoped
+ * instance would keep the old instance alive.
+ *
+ * The contracts an application may bind itself (the principal and tenant
+ * resolvers, the policy store and the policy resolver) resolve through a
+ * package-owned key that holds the scoped default. An application's own binding
+ * of the contract therefore replaces the default without being scoped itself,
+ * and an instance it binds survives the reset between jobs.
  *
  * Row-lifecycle behaviour for `Role` / `Permission` / `Policy` is attached via
  * the `#[ObservedBy]` attribute on each model; the service provider does not
@@ -57,6 +70,9 @@ use SineMacula\Laravel\Authorization\Resolvers\NullTenantResolver;
  */
 final class AuthorizationServiceProvider extends ServiceProvider
 {
+    /** @var string Prefix of the package-owned keys that hold each contract's scoped default. */
+    private const string DEFAULT_BINDING_PREFIX = 'authorization.default:';
+
     /**
      * Register container bindings.
      *
@@ -69,6 +85,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
         $this->registerPrincipalResolver();
         $this->registerTenantResolver();
+        $this->registerResolvedTenant();
         $this->registerPolicyStore();
         $this->registerResolutionCache();
         $this->registerPolicyResolver();
@@ -142,7 +159,8 @@ final class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Bind the principal resolver.
+     * Bind the configured principal resolver as the default, scoped to the
+     * request or job so any state it keeps does not reach the next one.
      *
      * @return void
      */
@@ -151,24 +169,45 @@ final class AuthorizationServiceProvider extends ServiceProvider
         /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\PrincipalResolver> $class */
         $class = $this->app['config']->get('authorization.principal_resolver', NullPrincipalResolver::class);
 
-        $this->app->singleton(PrincipalResolver::class, $class);
+        $this->bindScopedDefault(PrincipalResolver::class, $class);
     }
 
     /**
-     * Bind the tenant resolver.
+     * Bind the configured tenant resolver as the default, scoped to the request
+     * or job. A null `tenant_resolver` means no tenant resolver and binds the
+     * null resolver, under which only platform-wide rows are visible.
      *
      * @return void
      */
     protected function registerTenantResolver(): void
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\TenantResolver> $class */
-        $class = $this->app['config']->get('authorization.tenant_resolver', NullTenantResolver::class);
+        $class = $this->app['config']->get('authorization.tenant_resolver') ?? NullTenantResolver::class;
 
-        $this->app->singleton(TenantResolver::class, $class);
+        $this->bindScopedDefault(TenantResolver::class, $class);
     }
 
     /**
-     * Bind the optional policy store.
+     * Bind the holder of the tenant resolved for the current request or job,
+     * which `TenantScope` reads. The holder remembers the resolver it came
+     * from, so a resolver bound after the first query is still honoured.
+     *
+     * @return void
+     */
+    protected function registerResolvedTenant(): void
+    {
+        $this->app->scoped(ResolvedTenant::class, static function (Application $app): ResolvedTenant {
+            /** @var \SineMacula\Laravel\Authorization\Contracts\TenantResolver $resolver */
+            $resolver = $app->make(TenantResolver::class);
+
+            return ResolvedTenant::from($resolver);
+        });
+    }
+
+    /**
+     * Bind the configured policy store, when there is one, as the default,
+     * scoped to the request or job so any state it keeps does not reach the
+     * next one.
      *
      * @return void
      */
@@ -181,19 +220,20 @@ final class AuthorizationServiceProvider extends ServiceProvider
             return;
         }
 
-        $this->app->singleton(PolicyStore::class, $class);
+        $this->bindScopedDefault(PolicyStore::class, $class);
     }
 
     /**
      * Bind the resolution cache that memoises policy, permission, and role
-     * lookups per-principal. Always on for in-memory memoisation; consults
-     * `authorization.cache.store` for optional cross-request persistence.
+     * lookups per-principal. Always on for in-memory memoisation, scoped to the
+     * request or job; consults `authorization.cache.store` for optional
+     * cross-request persistence.
      *
      * @return void
      */
     protected function registerResolutionCache(): void
     {
-        $this->app->singleton(ResolutionCache::class, static function (Application $app): ResolutionCache {
+        $this->app->scoped(ResolutionCache::class, static function (Application $app): ResolutionCache {
             /** @var string|null $storeName */
             $storeName = $app['config']->get('authorization.cache.store');
             /** @var int $ttl */
@@ -218,12 +258,14 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * consults on every evaluation. The default implementation unions an
      * optional `PolicyStore` with the principal's own attached policies; the
      * caching decorator wraps it so the `ResolutionCache` memoises the result.
+     * Bound as the default, scoped to the request or job with the cache it
+     * holds.
      *
      * @return void
      */
     protected function registerPolicyResolver(): void
     {
-        $this->app->singleton(PolicyResolver::class, static function (Application $app): PolicyResolver {
+        $this->bindScopedDefault(PolicyResolver::class, static function (Application $app): PolicyResolver {
             $default = new DefaultPolicyResolver(
                 store: $app->bound(PolicyStore::class) ? $app->make(PolicyStore::class) : null,
             );
@@ -237,13 +279,13 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
     /**
      * Bind the single-slot store that holds the most recent evaluation result
-     * across every scoped clone of the manager.
+     * of the current request or job across every scoped clone of the manager.
      *
      * @return void
      */
     protected function registerLastDecisionStore(): void
     {
-        $this->app->singleton(LastDecisionStore::class);
+        $this->app->scoped(LastDecisionStore::class);
     }
 
     /**
@@ -253,17 +295,18 @@ final class AuthorizationServiceProvider extends ServiceProvider
      */
     protected function registerPolicyEvaluator(): void
     {
-        $this->app->singleton(PolicyEvaluator::class);
+        $this->app->scoped(PolicyEvaluator::class);
     }
 
     /**
-     * Bind the authorization manager.
+     * Bind the authorization manager, scoped to the request or job together
+     * with the resolvers and stores it holds.
      *
      * @return void
      */
     protected function registerAuthorizationManager(): void
     {
-        $this->app->singleton('authorization', static fn (Application $app): AuthorizationManager => new AuthorizationManager(
+        $this->app->scoped('authorization', static fn (Application $app): AuthorizationManager => new AuthorizationManager(
             evaluator: $app->make(PolicyEvaluator::class),
             principalResolver: $app->make(PrincipalResolver::class),
             policyResolver: $app->make(PolicyResolver::class),
@@ -394,5 +437,28 @@ final class AuthorizationServiceProvider extends ServiceProvider
                 ['name' => $permission, 'guard_name' => $guard],
             );
         }
+    }
+
+    /**
+     * Bind a contract an application may bind itself to the package's default,
+     * built once per request or job.
+     *
+     * The default is held under a package-owned key bound with `scoped()`, and
+     * the contract resolves through that key. Only the package-owned key is
+     * scoped, so an application that binds the contract itself (with
+     * `instance()`, `singleton()` or `bind()`) keeps its binding across the
+     * reset between jobs, while the package's default is still rebuilt for each
+     * one.
+     *
+     * @param  class-string  $contract
+     * @param  class-string|\Closure(\Illuminate\Contracts\Foundation\Application): object  $concrete
+     * @return void
+     */
+    private function bindScopedDefault(string $contract, \Closure|string $concrete): void
+    {
+        $default = self::DEFAULT_BINDING_PREFIX . $contract;
+
+        $this->app->scoped($default, $concrete);
+        $this->app->bind($contract, static fn (Application $app): mixed => $app->make($default));
     }
 }
