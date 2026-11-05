@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Console\GrantRoleCommand;
@@ -344,5 +345,51 @@ final class GrantRoleCommandTest extends TestCase
         self::assertSame(0, $exitCode);
         self::assertSame("{$identity} already holds role 'editor'.", \trim(Artisan::output()));
         Event::assertNotDispatched(RoleAssigned::class);
+    }
+
+    /**
+     * `--actor` names the actor making the grant, which the grant's event
+     * carries and its row records; without it the grant records none.
+     *
+     * @return void
+     */
+    public function testRecordsTheActorTheOptionNames(): void
+    {
+        Event::fake([RoleAssigned::class]);
+
+        Role::create(['name' => 'editor', 'guard' => 'web']);
+        Role::create(['name' => 'author', 'guard' => 'web']);
+        StubIdentity::create(['id' => 'user-1']);
+        StubIdentity::create(['id' => 'admin-1']);
+
+        self::assertSame(
+            0,
+            Artisan::call('authorization:grant', ['identity' => StubIdentity::class . ':user-1', 'role' => 'editor', '--actor' => StubIdentity::class . ':admin-1']),
+        );
+        self::assertSame(0, Artisan::call('authorization:grant', ['identity' => StubIdentity::class . ':user-1', 'role' => 'author']));
+
+        self::assertEqualsCanonicalizing(
+            [[StubIdentity::class, 'admin-1'], [null, null]],
+            DB::table('authorizable_roles')->get(['granted_by_type', 'granted_by_id'])->map(static fn (object $row): array => \array_values((array) $row))->all(),
+        );
+        Event::assertDispatched(RoleAssigned::class, static fn (RoleAssigned $event): bool => $event->name === 'editor'
+            && $event->operation->actor?->type                                                             === StubIdentity::class
+            && $event->operation->actor->id                                                                === 'admin-1');
+        Event::assertDispatched(RoleAssigned::class, static fn (RoleAssigned $event): bool => $event->name === 'author' && $event->operation->actor === null);
+    }
+
+    /**
+     * An actor the option cannot resolve fails the command and grants nothing.
+     *
+     * @return void
+     */
+    public function testFailsOnAnActorItCannotResolve(): void
+    {
+        Role::create(['name' => 'editor', 'guard' => 'web']);
+        StubIdentity::create(['id' => 'user-1']);
+
+        self::assertSame(1, Artisan::call('authorization:grant', ['identity' => StubIdentity::class . ':user-1', 'role' => 'editor', '--actor' => 'nobody']));
+        self::assertStringContainsString('The actor must be in the format {morphType}:{key}', Artisan::output());
+        self::assertSame(0, DB::table('authorizable_roles')->count());
     }
 }

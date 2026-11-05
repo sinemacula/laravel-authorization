@@ -6,12 +6,16 @@ namespace SineMacula\Laravel\Authorization\Console;
 
 use Illuminate\Console\Command;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
+use SineMacula\Laravel\Authorization\Console\Support\ActorOption;
 use SineMacula\Laravel\Authorization\Console\Support\PermissionCatalogue;
 use SineMacula\Laravel\Authorization\Console\Support\PermissionDiff;
 use SineMacula\Laravel\Authorization\Console\Support\PermissionDiffBuilder;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Sync the platform's permission catalogue from the configured enums and
@@ -27,6 +31,11 @@ use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
  * marked system are deleted through the model. A system row is never changed:
  * when stale, or declared with different metadata, it is reported as protected.
  * Tenant-owned permissions are never read or changed.
+ *
+ * The sync is one operation: every event its writes dispatch shares one
+ * operation id and is dispatched once the transaction commits.
+ * `--actor={morphType}:{key}` names the actor making the change, which those
+ * events carry; without it the sync records no actor.
  *
  * Every row is listed with its action (`add`, `update`, `stale`, `prune`,
  * `protected` or `unchanged`), as a table or, with `--format=json`, as JSON.
@@ -59,6 +68,7 @@ final class SyncPermissionsCommand extends Command
                                     {--dry-run : Report what would change without writing}
                                     {--format=table : Output format: table or json}
                                     {--prune : Delete stale permissions that are not marked system}
+                                    {--actor= : The actor making the change, in morphType:key format (e.g. user:1); none for system work}
         EOD;
 
     /** @var string The console command description. */
@@ -87,7 +97,7 @@ final class SyncPermissionsCommand extends Command
 
             ConfigValidator::validate($config, $this->laravel);
 
-            $entries = $this->entries($this->reconcile($catalogue->definitions(), $builder));
+            $entries = $this->entries($this->reconcile($catalogue->definitions(), $builder, ActorOption::parse($this->option('actor'))));
         } catch (\Throwable $exception) {
             $this->error('Nothing was synced: ' . $exception->getMessage());
 
@@ -102,20 +112,21 @@ final class SyncPermissionsCommand extends Command
     /**
      * Compare the declared definitions with the platform rows and, unless this
      * is a dry run, apply the difference, all within one transaction on the
-     * permission model's connection.
+     * package's connection, as one operation for the given actor.
      *
      * @param  list<\SineMacula\Laravel\Authorization\Support\PermissionDefinition>  $definitions
      * @param  \SineMacula\Laravel\Authorization\Console\Support\PermissionDiffBuilder  $builder
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Console\Support\PermissionDiff
      *
      * @throws \Throwable
      */
-    private function reconcile(array $definitions, PermissionDiffBuilder $builder): PermissionDiff
+    private function reconcile(array $definitions, PermissionDiffBuilder $builder, ?Reference $actor): PermissionDiff
     {
         $model = $this->permissionModel();
 
         /** @var \SineMacula\Laravel\Authorization\Console\Support\PermissionDiff */
-        return $model->getConnection()->transaction(function () use ($definitions, $builder, $model): PermissionDiff {
+        return OperationScope::run(Operation::begin($actor), function () use ($definitions, $builder, $model): PermissionDiff {
             /** @var list<\SineMacula\Laravel\Authorization\Models\Permission> $rows */
             $rows = $model->newQueryWithoutScope(TenantScope::class)
                 ->whereNull('tenant_type')

@@ -5,11 +5,13 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Console\RevokeRoleCommand;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\GrantService;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -172,5 +174,52 @@ final class RevokeRoleCommandTest extends TestCase
         self::assertSame(0, $exitCode);
         self::assertSame("{$identity} does not hold role 'editor'.", \trim(Artisan::output()));
         Event::assertNotDispatched(RoleRevoked::class);
+    }
+
+    /**
+     * `--actor` names the actor making the revocation, which its event carries.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testReportsTheActorTheOptionNames(): void
+    {
+        $role = Role::create(['name' => 'editor', 'guard' => 'web']);
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        StubIdentity::create(['id' => 'admin-1']);
+        app(GrantService::class)->grantRole($user, $role);
+
+        Event::fake([RoleRevoked::class]);
+
+        self::assertSame(
+            0,
+            Artisan::call('authorization:revoke', ['identity' => StubIdentity::class . ':user-1', 'role' => 'editor', '--actor' => StubIdentity::class . ':admin-1']),
+        );
+
+        Event::assertDispatched(RoleRevoked::class, static fn (RoleRevoked $event): bool => $event->operation->actor?->type === StubIdentity::class
+            && $event->operation->actor->id                                                                                 === 'admin-1');
+    }
+
+    /**
+     * An actor the option cannot resolve fails the command and revokes nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testFailsOnAnActorItCannotResolve(): void
+    {
+        $role = Role::create(['name' => 'editor', 'guard' => 'web']);
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        app(GrantService::class)->grantRole($user, $role);
+
+        self::assertSame(
+            1,
+            Artisan::call('authorization:revoke', ['identity' => StubIdentity::class . ':user-1', 'role' => 'editor', '--actor' => StubIdentity::class . ':ghost']),
+        );
+        self::assertSame(1, DB::table('authorizable_roles')->count());
     }
 }
