@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Support;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
+use SineMacula\Laravel\Authorization\Subject;
 
 /**
  * Runtime helpers that the shipped Blade directives compile into.
@@ -24,19 +25,19 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 final class BladeHelpers
 {
     /**
-     * Return the model the current subject is about, or null when the manager
-     * cannot be constructed (tests that run without the service provider
-     * booted) or the resolver reports no subject.
+     * Return the current subject, or null when the manager cannot be
+     * constructed (tests that run without the service provider booted) or the
+     * resolver reports no subject. The helpers check the model it is about.
      *
      * Delegates to `AuthorizationManager::currentSubject()` so the Blade
      * surface resolves the same subject as the facade, Gate, and middleware
      * paths.
      *
-     * @return object|null
+     * @return \SineMacula\Laravel\Authorization\Subject|null
      */
-    public static function currentSubject(): ?object
+    public static function currentSubject(): ?Subject
     {
-        return AuthorizationManager::instance()?->currentSubject()?->subject;
+        return AuthorizationManager::instance()?->currentSubject();
     }
 
     /**
@@ -49,7 +50,7 @@ final class BladeHelpers
      */
     public static function hasRole(array|string $roles): bool
     {
-        $principal = self::currentSubject();
+        $principal = self::currentSubject()?->subject;
 
         if (!$principal instanceof SupportsRoles) {
             return false;
@@ -72,7 +73,7 @@ final class BladeHelpers
      */
     public static function hasAllRoles(array|string $roles): bool
     {
-        $principal = self::currentSubject();
+        $principal = self::currentSubject()?->subject;
 
         if (!$principal instanceof SupportsRoles) {
             return false;
@@ -98,7 +99,7 @@ final class BladeHelpers
      */
     public static function hasPermission(array|string $permissions): bool
     {
-        $principal = self::currentSubject();
+        $principal = self::currentSubject()?->subject;
 
         if (!$principal instanceof SupportsPermissions) {
             return false;
@@ -121,7 +122,7 @@ final class BladeHelpers
      */
     public static function hasAllPermissions(array|string $permissions): bool
     {
-        $principal = self::currentSubject();
+        $principal = self::currentSubject()?->subject;
 
         if (!$principal instanceof SupportsPermissions) {
             return false;

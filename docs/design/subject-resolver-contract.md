@@ -46,7 +46,7 @@ interface SubjectResolver
 | Property      | Meaning                                                                                 |
 |---------------|-----------------------------------------------------------------------------------------|
 | `subject`     | The model decisions are about: a principal, or the user in an application without them. |
-| `identity`    | The identity behind a principal, or the subject itself when there are no principals.    |
+| `identity`    | The identity behind a principal, the subject itself without principals, or `null`.      |
 | `tenant`      | The active tenant, or `null` for none.                                                  |
 | `application` | The application the request came in on, or `null`.                                      |
 | `guard`       | The authentication guard the subject was resolved from, or `null`.                      |
@@ -87,7 +87,8 @@ subject, or denies when there is none.
 
 Middleware and Blade directives cannot inject the manager. They reach it through `AuthorizationManager::instance()`,
 from the `HasContainerInstance` trait. Middleware calls `Authorization::currentSubject()`; Blade helpers call
-`BladeHelpers::currentSubject()`, which delegates to the manager. Both check the model the subject is about.
+`BladeHelpers::currentSubject()`, which delegates to the manager; both return the `Subject`, and both surfaces check the
+model it is about, `subject`.
 
 `TenantScope` reads the tenant from the `ResolvedTenant` holder, built once per request or job from the bound
 resolver, and builds a new holder when the resolver bound now is not the one it came from. Resolving the subject can

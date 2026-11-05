@@ -54,7 +54,7 @@ final class BladeHelpersTest extends TestCase
 
         $this->actingAs($user);
 
-        self::assertSame($user, BladeHelpers::currentSubject());
+        self::assertSame($user, BladeHelpers::currentSubject()?->subject);
         self::assertTrue(BladeHelpers::hasRole('admin'));
         self::assertTrue(BladeHelpers::hasAllRoles(['admin']));
         self::assertFalse(BladeHelpers::hasRole('auditor'));
