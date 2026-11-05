@@ -546,11 +546,14 @@ final class GrantTableTest extends TestCase
      */
     private static function grantors(): array
     {
+        // Sorted here rather than by the database, which orders nulls first on
+        // MySQL and SQLite but last on PostgreSQL.
         /** @var list<array{string, string|null, string|null}> */
         return DB::table('authorizable_roles')
-            ->orderBy('granted_by_id')
             ->get(['role_id', 'granted_by_type', 'granted_by_id'])
             ->map(static fn (object $row): array => \array_values((array) $row))
+            ->sortBy(static fn (array $row): string => (string) $row[2])
+            ->values()
             ->all();
     }
 
