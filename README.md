@@ -39,6 +39,8 @@ principal's role and permission grants, and anything left is denied.
 
 - **Roles and permissions** as Eloquent models with UUID keys, granted to any model through polymorphic pivots (integer,
   UUID and ULID keys all work), each grant with an optional expiry.
+- **Owned records**: a role, permission or policy belongs to the platform or to one tenant, and its name is unique
+  within its owner (and, for roles and permissions, its guard), so two tenants can each have their own `manager`.
 - **Role and permission names** of letters, digits and `_ - : . *`, so `posts:edit`, `posts.edit` and
   `sso.connection.trust` are all valid; anything else is refused when the name is saved.
 - **Wildcard permissions** (`posts:*`, `posts.*`, `*:create`, and `*` for everything; `*:*` matches only names with a
@@ -56,11 +58,11 @@ principal's role and permission grants, and anything left is denied.
 - **Events** for every grant, revocation, expiry change and model change, for each decision, and when `authorize()`
   refuses.
 - **Resolution cache** for role and permission lookups, in memory and optionally in a cache store.
-- **Swappable everything**: models, table and pivot column names, the principal resolver, the tenant resolver and the
-  policy store.
+- **Swappable everything**: models, table names, the database connection, the principal resolver, the tenant resolver
+  and the policy store.
 - **Spatie import**: `authorization:migrate-spatie` copies roles, permissions and grants from
-  `spatie/laravel-permission`, reporting and skipping any role or permission whose name the package refuses, and any
-  permission whose name contains `*`, along with its grants.
+  `spatie/laravel-permission` (its `guard_name` becomes `guard`), reporting and skipping any role or permission whose
+  name the package refuses, and any permission whose name contains `*`, along with its grants.
 
 ## Installation
 
@@ -77,6 +79,10 @@ php artisan vendor:publish --tag=authorization-config
 php artisan vendor:publish --tag=authorization-migrations
 php artisan migrate
 ```
+
+The tables live on the application's default connection. To keep them on another, such as the one your identity
+tables use, set `AUTHORIZATION_DB_CONNECTION` (or `connection` in `config/authorization.php`) before migrating: the
+migrations create the tables there, and the models read and write there.
 
 The package decides nothing about the current user until you tell it where to find one. The shipped principal
 resolver returns `null`, so checks made without a principal are denied. To check the user your auth guard
@@ -103,8 +109,8 @@ cannot be read) to your default log channel. To send them elsewhere, name a chan
 AUTHORIZATION_LOG_CHANNEL=stderr
 ```
 
-`config/authorization.php` documents every other option: models, tables and pivot columns, the default guard, permission
-providers, the Gate conflict mode, the policy store, the tenant resolver, the cache, and the role hierarchy and rank.
+`config/authorization.php` documents every other option: models, tables, the default guard, permission providers, the
+Gate conflict mode, the policy store, the tenant resolver, the cache, and the role hierarchy and rank.
 
 ## Usage
 

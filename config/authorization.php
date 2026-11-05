@@ -71,8 +71,10 @@ return [
     | Defaults
     |---------------------------------------------------------------------------
     |
-    | The default guard recorded on role and permission rows. Retained for
-    | migration compatibility with Spatie's `laravel-permission` package.
+    | The guard a role or permission lookup by name uses when the caller names
+    | none, and the auth guard `AuthGuardPrincipalResolver` reads by default.
+    | Rows record their own guard in the `guard` column; a null guard makes a
+    | row apply to every guard.
     |
     */
 

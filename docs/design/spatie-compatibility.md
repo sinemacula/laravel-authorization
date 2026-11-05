@@ -170,9 +170,11 @@ The package deliberately does **not** ship the following Spatie surface:
   `getAuthorizationGuard()` opt-in hook on the identity model, not by sniffing the active web/api guard at
   authorization time. Multi-guard deployments declare the guard on the model; there is no implicit request-scoped
   guard resolution.
-- **Teams / tenancy columns** — Spatie's optional `team_id` scoping column is not shipped. Tenancy is a consumer
-  concern; the `conditions` block of a policy document is the supported primitive for scoping decisions to a tenant,
-  resource owner, or any other attribute.
+- **Teams / tenancy columns** — Spatie's optional `team_id` scoping column is not shipped. Roles, permissions and
+  policies are owned by the platform or by one tenant through their own `tenant_type` / `tenant_id` columns, and each
+  grant carries a scope of its own; `authorization:migrate-spatie` imports Spatie's rows and grants platform-wide.
+- **`guard_name`** — the guard column is `guard`. `authorization:migrate-spatie` maps Spatie's `guard_name` onto it,
+  so code that reads `$role->guard_name` reads `$role->guard` instead.
 - **Wildcard permission classes** — Spatie's `WildcardPermission` helper is not needed; wildcard matching is the
   default behaviour of `hasPermission()` (fnmatch semantics, see `docs/design/wildcard-and-condition-semantics.md`
   when that note lands).

@@ -23,7 +23,7 @@ explains the extension path and walks through a concrete example: adding soft de
    guard-precedence query.
 
 4. **Schema changes are the consumer's responsibility.** The package ships migrations for its own columns. A subclass
-   that adds columns (e.g. `deleted_at`, `tenant_id`, `rank`) must ship its own migration -- either in the application's
+   that adds columns (e.g. `deleted_at`, `archived_at`) must ship its own migration -- either in the application's
    migration directory or via a separate package that depends on this one.
 
 ## Extension Path
@@ -104,3 +104,5 @@ column, and register the swap. The package treats all three entity models symmet
   `withTrashed()` scope can resolve at query time).
 - **The subclass must not change the table name.** The shipped migrations target the configured table name. A subclass
   that overrides `$table` must ensure its migrations target the same table or the schema will diverge.
+- **The connection is the package's.** Every shipped model and pivot names `authorization.connection` when it is set,
+  so a subclass's own `$connection` applies only while the setting is unset.
