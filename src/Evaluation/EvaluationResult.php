@@ -11,8 +11,9 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
  *
  * Captures the outcome of a single authorization check, including the statement
  * that decided the result (if any) and a reproducible trace of every statement
- * the evaluator considered. The trace is ordered, serialisable, and safe to
- * persist to an audit log.
+ * the evaluator considered. A check denied because a policy could not be
+ * evaluated carries the `invalid_policy` reason and no matched statement. The
+ * trace is ordered, serialisable, and safe to persist to an audit log.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,7 +42,7 @@ final readonly class EvaluationResult
         /** Reason code describing how the decision was reached. */
         public DecisionReason $reason,
 
-        /** Statement that produced the decision; null for implicit/RBAC. */
+        /** Statement that produced the decision; null for implicit, RBAC and invalid policy. */
         public ?Statement $matchedStatement = null,
 
         /** Ordered, serialisable trace of every statement considered. */
@@ -93,6 +94,22 @@ final readonly class EvaluationResult
         return new self(
             allowed: false,
             reason: DecisionReason::IMPLICIT_DENY,
+            trace: $trace,
+        );
+    }
+
+    /**
+     * Build a denial for a policy that could not be evaluated, because a
+     * statement is malformed or a stored document cannot be read.
+     *
+     * @param  list<EvaluationTraceEntry>  $trace
+     * @return self
+     */
+    public static function invalidPolicy(array $trace = []): self
+    {
+        return new self(
+            allowed: false,
+            reason: DecisionReason::INVALID_POLICY,
             trace: $trace,
         );
     }
