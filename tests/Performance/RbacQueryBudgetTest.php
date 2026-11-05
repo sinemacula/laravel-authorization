@@ -161,13 +161,14 @@ final class RbacQueryBudgetTest extends TestCase
      */
     private static function identityHolding(int $roles, int $depth): StubIdentity
     {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $id   = (string) Str::uuid();
+        $user = StubIdentity::create(['id' => $id]);
 
         for ($r = 0; $r < $roles; $r++) {
             $parent = null;
 
             for ($d = 0; $d < $depth; $d++) {
-                $name   = "chain-{$user->id}-{$r}-{$d}";
+                $name   = "chain-{$id}-{$r}-{$d}";
                 $parent = Role::create(['name' => $name, 'guard' => 'web', 'parent_id' => $parent?->getKey()]);
 
                 $parent->permissions()->attach(Permission::create(['name' => "{$name}:read", 'guard' => 'web'])->getKey());
@@ -190,7 +191,7 @@ final class RbacQueryBudgetTest extends TestCase
      */
     private static function resolutionQueries(StubIdentity $user): int
     {
-        $fresh = StubIdentity::query()->findOrFail($user->id);
+        $fresh = StubIdentity::query()->whereKey($user->getKey())->firstOrFail();
 
         DB::enableQueryLog();
         DB::flushQueryLog();
