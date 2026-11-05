@@ -50,6 +50,30 @@ final class HasPoliciesTest extends TestCase
     }
 
     /**
+     * An attachment records when it was made and when it last changed.
+     *
+     * @return void
+     */
+    public function testAttachmentKeepsItsTimestamps(): void
+    {
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        $user   = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $policy = Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]);
+
+        $user->attachPolicy($policy);
+
+        Carbon::setTestNow('2026-07-01 12:30:00');
+
+        $user->attachPolicy($policy, Carbon::parse('2026-07-01 14:00:00'));
+
+        $row = DB::table('authorizable_policies')->sole();
+
+        self::assertSame('2026-07-01 12:00:00', Carbon::parse((string) $row->created_at)->format('Y-m-d H:i:s'));
+        self::assertSame('2026-07-01 12:30:00', Carbon::parse((string) $row->updated_at)->format('Y-m-d H:i:s'));
+    }
+
+    /**
      * Every attached row with a valid document hydrates into an evaluation
      * policy named after the row.
      *

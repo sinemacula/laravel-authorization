@@ -41,7 +41,9 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * Filters out pivot rows whose `expires_at` is in the past — temporal
      * policy attachments disappear from the relation automatically at expiry
      * without requiring a sweeper run. The pivot's `expires_at` column is
-     * surfaced via `withPivot()`.
+     * surfaced via `withPivot()`, and the attachment's timestamps are kept. The
+     * scope columns keep their defaults: every attachment made here is
+     * platform-wide, for every application.
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
@@ -76,6 +78,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
         )
             ->using(AuthorizablePolicyPivot::class)
             ->withPivot('expires_at')
+            ->withTimestamps()
             ->where(static function (Builder $query) use ($pivot): void {
                 // @phpstan-ignore staticMethod.dynamicCall
                 $query->whereNull($pivot . '.expires_at')

@@ -371,7 +371,8 @@ final class MigrateSpatieCommand extends Command
     }
 
     /**
-     * Migrate `model_has_roles` to `authorizable_roles`.
+     * Migrate `model_has_roles` to `authorizable_roles`. Spatie's grants carry
+     * no scope, so each is imported platform-wide, for every application.
      *
      * @param  array<int|string, string>  $roleIdMap
      * @param  bool  $dryRun
@@ -399,6 +400,8 @@ final class MigrateSpatieCommand extends Command
                     'authorizable_type' => $modelRoleRow['model_type'],
                     'authorizable_id'   => (string) $modelRoleRow['model_id'],
                     'role_id'           => $mappedRoleId,
+                    'created_at'        => now(),
+                    'updated_at'        => now(),
                 ]);
             }
 
@@ -407,7 +410,9 @@ final class MigrateSpatieCommand extends Command
     }
 
     /**
-     * Migrate `model_has_permissions` to `authorizable_permissions`.
+     * Migrate `model_has_permissions` to `authorizable_permissions`. Spatie's
+     * grants carry no scope, so each is imported platform-wide, for every
+     * application.
      *
      * @param  array<int|string, string>  $permissionIdMap
      * @param  bool  $dryRun
@@ -435,6 +440,8 @@ final class MigrateSpatieCommand extends Command
                     'authorizable_type' => $modelPermissionRow['model_type'],
                     'authorizable_id'   => (string) $modelPermissionRow['model_id'],
                     'permission_id'     => $mappedPermissionId,
+                    'created_at'        => now(),
+                    'updated_at'        => now(),
                 ]);
             }
 

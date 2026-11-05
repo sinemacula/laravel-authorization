@@ -80,6 +80,25 @@ final class HasRolesTest extends TestCase
     }
 
     /**
+     * An assignment records when it was made and when it last changed.
+     *
+     * @return void
+     */
+    public function testAssignmentKeepsItsTimestamps(): void
+    {
+        $user = $this->identityWithRoleUntil('2026-07-01 13:00:00');
+
+        Carbon::setTestNow('2026-07-01 12:30:00');
+
+        $user->assignRole('on-call', Carbon::parse('2026-07-01 14:00:00'));
+
+        $row = DB::table('authorizable_roles')->sole();
+
+        self::assertSame('2026-07-01 12:00:00', Carbon::parse((string) $row->created_at)->format('Y-m-d H:i:s'));
+        self::assertSame('2026-07-01 12:30:00', Carbon::parse((string) $row->updated_at)->format('Y-m-d H:i:s'));
+    }
+
+    /**
      * Create an identity, at 12:00, holding a role until the given instant.
      *
      * @param  string  $expiresAt

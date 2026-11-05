@@ -44,7 +44,9 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * Filters out pivot rows whose `expires_at` is in the past — temporal
      * grants disappear from the relation automatically at expiry without
      * requiring a sweeper run. The pivot's `expires_at` column is surfaced via
-     * `withPivot()`.
+     * `withPivot()`, and the grant's timestamps are kept. The scope columns
+     * keep their defaults: every grant made here is platform-wide, for every
+     * application.
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
@@ -79,6 +81,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
         )
             ->using(AuthorizablePermissionPivot::class)
             ->withPivot('expires_at')
+            ->withTimestamps()
             ->where(static function (Builder $query) use ($pivot): void {
                 // @phpstan-ignore staticMethod.dynamicCall
                 $query->whereNull($pivot . '.expires_at')

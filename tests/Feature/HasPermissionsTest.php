@@ -42,6 +42,28 @@ final class HasPermissionsTest extends TestCase
     }
 
     /**
+     * A direct grant records when it was made and when it last changed.
+     *
+     * @return void
+     */
+    public function testGrantKeepsItsTimestamps(): void
+    {
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user->givePermission(Permission::create(['name' => 'posts:edit', 'guard' => 'web']));
+
+        Carbon::setTestNow('2026-07-01 12:30:00');
+
+        $user->givePermission('posts:edit', Carbon::parse('2026-07-01 14:00:00'));
+
+        $row = DB::table('authorizable_permissions')->sole();
+
+        self::assertSame('2026-07-01 12:00:00', Carbon::parse((string) $row->created_at)->format('Y-m-d H:i:s'));
+        self::assertSame('2026-07-01 12:30:00', Carbon::parse((string) $row->updated_at)->format('Y-m-d H:i:s'));
+    }
+
+    /**
      * A permission granted directly until 12:05 lapses at 12:05 for the same
      * identity instance.
      *

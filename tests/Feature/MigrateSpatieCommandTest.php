@@ -7,6 +7,7 @@ namespace Tests\Feature;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabaseState;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -104,6 +105,32 @@ final class MigrateSpatieCommandTest extends TestCase
         self::assertSame(2, DB::table('auth_role_permissions')->count());
         self::assertSame(1, DB::table('auth_authorizable_roles')->count());
         self::assertSame(1, DB::table('auth_authorizable_permissions')->count());
+    }
+
+    /**
+     * Spatie's grants carry no scope, so each is imported platform-wide, for
+     * every application, stamped with the time of the import.
+     *
+     * @return void
+     */
+    public function testImportedGrantsArePlatformWideAndStamped(): void
+    {
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        try {
+            Artisan::call('authorization:migrate-spatie');
+        } finally {
+            Carbon::setTestNow();
+        }
+
+        foreach (['auth_authorizable_roles', 'auth_authorizable_permissions'] as $table) {
+            $row = DB::table($table)->sole();
+
+            self::assertNull($row->tenant_type, $table);
+            self::assertNull($row->application, $table);
+            self::assertSame('2026-07-01 12:00:00', Carbon::parse((string) $row->created_at)->format('Y-m-d H:i:s'), $table);
+            self::assertSame('2026-07-01 12:00:00', Carbon::parse((string) $row->updated_at)->format('Y-m-d H:i:s'), $table);
+        }
     }
 
     /**
