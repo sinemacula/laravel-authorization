@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Carbon\Carbon;
-use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -23,7 +22,6 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
-use Tests\Feature\Stubs\NonTaggableCacheStore;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
@@ -398,16 +396,5 @@ final class UncoveredBranchesTest extends TestCase
         $this->expectExceptionMessage('Invalid policy document \'malformed-warn\': Policy document requires a list of statements.');
 
         $user->fresh()?->getPolicies();
-    }
-
-    /**
-     * Build a bare non-taggable `Store` — mirrors the helper used by
-     * `ResolutionCacheTest`.
-     *
-     * @return \Tests\Feature\Stubs\NonTaggableCacheStore
-     */
-    private static function makeNonTaggableDriver(): NonTaggableCacheStore
-    {
-        return new NonTaggableCacheStore;
     }
 }

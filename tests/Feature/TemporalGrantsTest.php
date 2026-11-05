@@ -83,7 +83,7 @@ final class TemporalGrantsTest extends TestCase
         self::assertTrue($user->fresh()?->hasRole('oncall'));
 
         $this->advanceClockTo('2026-01-01 13:30:00');
-        self::assertFalse($user->fresh()?->hasRole('oncall'));
+        self::assertFalse(self::reread($user)->hasRole('oncall'));
     }
 
     /**
@@ -108,7 +108,7 @@ final class TemporalGrantsTest extends TestCase
         self::assertTrue($user->fresh()?->hasPermission('emergency:publish'));
 
         $this->advanceClockTo('2026-02-01 11:00:00');
-        self::assertFalse($user->fresh()?->hasPermission('emergency:publish'));
+        self::assertFalse(self::reread($user)->hasPermission('emergency:publish'));
     }
 
     /**
@@ -135,7 +135,7 @@ final class TemporalGrantsTest extends TestCase
         self::assertCount(1, $user->fresh()?->getPolicies() ?? []);
 
         $this->advanceClockTo('2026-03-01 10:00:00');
-        self::assertCount(0, $user->fresh()?->getPolicies() ?? []);
+        self::assertCount(0, self::reread($user)->getPolicies());
     }
 
     /**
@@ -306,6 +306,17 @@ final class TemporalGrantsTest extends TestCase
         (new AuthorizationServiceProvider($this->app))->register();
 
         self::assertSame([], $fresh->getRoles());
+    }
+
+    /**
+     * Read the identity afresh, as a later request would.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @return \Tests\Feature\Stubs\StubIdentity
+     */
+    private static function reread(StubIdentity $user): StubIdentity
+    {
+        return StubIdentity::query()->whereKey($user->getKey())->firstOrFail();
     }
 
     /**

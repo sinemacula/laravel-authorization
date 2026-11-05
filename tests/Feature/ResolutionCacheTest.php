@@ -6,7 +6,6 @@ namespace Tests\Feature;
 
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\Repository;
-use Illuminate\Contracts\Cache\Store;
 use Illuminate\Support\Carbon;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Cache\PrincipalCacheKey;
