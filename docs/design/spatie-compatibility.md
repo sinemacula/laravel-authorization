@@ -48,7 +48,7 @@ Spatie's split between `hasPermissionTo` and `hasPermissionThroughRole` is folde
 
 ## Blade directives
 
-Source: `AuthorizationServiceProvider::registerBladeDirectives()`.
+Source: `BladeDirectiveRegistrar::register()` and `BladeHelpers`.
 
 The package registers both the canonical short-form directives (`@role`, `@permission`, `@anyrole`, `@allroles`,
 `@anypermission`, `@allpermissions`) and the Spatie-shaped `@has…` aliases in parallel. Both families support
@@ -63,9 +63,9 @@ Full directive list:
 | `@role`              | `@hasrole`            | Has any of the listed roles     |
 | `@anyrole`           | `@hasanyrole`         | Has any of the listed roles     |
 | `@allroles`          | `@hasallroles`        | Has every listed role           |
-| `@permission`        | `@haspermission`      | Has any of the listed perms     |
-| `@anypermission`     | `@hasanypermission`   | Has any of the listed perms     |
-| `@allpermissions`    | `@hasallpermissions`  | Has every listed perm           |
+| `@permission`        | `@haspermission`      | Allowed any of the listed perms |
+| `@anypermission`     | `@hasanypermission`   | Allowed any of the listed perms |
+| `@allpermissions`    | `@hasallpermissions`  | Allowed every listed perm       |
 
 Each of the twelve names above ships the full quartet (`@name`, `@unlessname`, `@elsename`, `@endname`) plus the
 Spatie-compatible close (`@endunlessname`).
@@ -92,18 +92,26 @@ Porting example:
 @endhasrole
 ```
 
-The directives accept an `array|string` — string inputs are split on the pipe (`|`) so Spatie's
-`@hasrole('admin|editor')` idiom is honoured, and array inputs (`@hasrole(['admin', 'editor'])`) are passed through
-unchanged.
+The directives accept an `array|string`, and every entry is split on the pipe (`|`), trimmed, and its empty names
+dropped, so Spatie's `@hasrole('admin|editor')` idiom is honoured, `@hasrole(['admin', 'editor'])` names the same two
+roles, and `@hasrole('')` admits no one.
+
+The permission directives differ from Spatie's on purpose: they decide each action on the package's full decision, as
+`@can` does, not on the permissions held alone. An explicit policy deny hides the block from a subject that holds the
+permission, and a policy allow shows it to one that does not. The role directives check role membership on the
+subject, as Spatie's do; a role is not an action, so policies do not apply to them.
+
+A second argument is a guard, as in Spatie's `@hasrole('admin', 'api')`. A role directive honours it: only roles of that
+authentication guard and guard-agnostic ones count, and a name that is not in `auth.guards` is refused. A permission
+directive refuses any guard with an `InvalidCheckArgumentException`, since no guard changes the decision it makes.
 
 ## Route middleware
 
 Source: `AuthorizationServiceProvider::registerRouteMiddleware()` and `src/Http/Middleware/`.
 
-The `role` and `permission` middleware aliases are registered automatically unless a consumer has already bound a
-middleware with the same key (existing bindings take precedence). Both aliases accept pipe (`|`) and comma (`,`)
-separators — the package flattens both before dispatching, so Spatie's pipe form and Laravel's native comma form
-behave identically:
+The `role` and `permission` middleware aliases, and the package's own `authorize` alias, are registered automatically
+unless a consumer has already bound a middleware with the same key (existing bindings take precedence). As in Spatie,
+the first argument lists alternatives separated by a pipe (`|`), and any one of them admits the request:
 
 ```php
 // Spatie
@@ -113,14 +121,22 @@ Route::get('/posts', [PostController::class, 'index'])
 Route::delete('/posts/{post}', [PostController::class, 'destroy'])
     ->middleware('permission:posts.delete|posts.purge');
 
-// Ours — the exact same declarations work verbatim,
-// and Laravel's native comma form is equally supported:
-Route::get('/posts', [PostController::class, 'index'])
-    ->middleware('role:admin,editor');
+Route::get('/api/posts', [PostController::class, 'index'])
+    ->middleware('role:admin|editor,api');
+
+// Ours — the exact same declarations work verbatim.
 ```
 
-Multiple middleware arguments are treated as an OR match: `role:admin,editor` authorises if the principal has *any*
-listed role. The "must have all" case is expressed via middleware chaining (`->middleware(['role:admin', 'role:editor'])`).
+A comma does not list alternatives: as in Spatie, the second argument is the guard. `role:` honours it, limiting the
+check to the roles of that authentication guard and the guard-agnostic ones, and refuses a name that is not in
+`auth.guards`, so `role:admin,editor` fails loudly instead of being read as a guard. `permission:` refuses a guard,
+because it decides each action on the package's full decision (policies, explicit denies, the permissions held and the
+subject's tenant), which no guard changes; an explicit deny wins over a held permission there, unlike Spatie. A third
+argument is refused. The "must have all" case is expressed via middleware chaining
+(`->middleware(['role:admin', 'role:editor'])`).
+
+`authorize:{action},{route parameter}` has no Spatie equivalent: it decides the action on the parameter's bound model,
+with the model as the resource, as `Gate::allows($action, $model)` decides it.
 
 ## Event names
 
