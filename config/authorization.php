@@ -93,6 +93,11 @@ return [
     | here is immediately callable via `Gate::allows(...)`, `$user->can(...)`,
     | `@can(...)`, and the `can:` route middleware.
     |
+    | The cases are also the permission catalogue: `authorization:sync` writes
+    | each one to the database, with the description, category and guards of
+    | the `#[Permission]` attribute on the case. Booting never writes them, so
+    | run the sync after `migrate` when you deploy.
+    |
     | **Required for Laravel's Gate surface.** The `Authorization` facade
     | (`Authorization::can(...)`, `Authorization::for($user)->can(...)`) works
     | out of the box, but Laravel's Gate never dispatches to an action it has
@@ -110,11 +115,12 @@ return [
     | Permission providers
     |---------------------------------------------------------------------------
     |
-    | Class-strings implementing `PermissionProvider`. Each provider contributes
-    | a list of permission strings and a guard scope, so modular packages can
-    | ship their own permission sets without the host application editing a
-    | central enum. The classes are validated at boot, but a provider is never
-    | read there: booting writes nothing to the database.
+    | Class-strings implementing `PermissionProvider`. Each provider returns
+    | `PermissionDefinition` objects, each a permission's name, description,
+    | category and guard, so modular packages can ship their own permission
+    | sets without the host application editing a central enum. The classes
+    | are validated at boot, but a provider is read only by
+    | `authorization:sync`, which writes its permissions alongside the enums'.
     |
     */
 

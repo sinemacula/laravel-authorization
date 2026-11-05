@@ -26,6 +26,8 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
   (matches, does not match, undecidable, invalid), `${…}` interpolation, the write-time refusals, and the condition
   operator catalogue (`eq`, `neq`, `in`, `not_in`, `null`, `not_null`, `cidr`, `starts_with`, `ends_with`,
   `string_like`, `before`, `after`, `between`, `gt`, `gte`, `lt`, `lte`, `bool`).
+- `permission-catalogue-sync.md`: declaring permissions in enums and providers, why booting never touches the
+  database, and what `authorization:sync` adds, updates, reports as stale or protected, and prunes.
 
 These documents are secondary to the code and tests, not a replacement for them. If a note and a cited test disagree,
 the test should be treated as authoritative until the mismatch is resolved.
