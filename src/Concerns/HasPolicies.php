@@ -144,7 +144,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
     public function getPolicies(): array
     {
         /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Policy> $models */
-        $models = $this->policies;
+        $models = $this->authorizationLoadedGrants('policies');
 
         $hydrated = [];
 
@@ -181,7 +181,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
         }
 
         /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Policy> $models */
-        $models = $this->policies;
+        $models = $this->authorizationLoadedGrants('policies');
 
         return self::authorizationNearestPivotExpirySeconds($models);
     }

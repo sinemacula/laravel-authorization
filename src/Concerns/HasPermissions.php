@@ -9,6 +9,7 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePermissionPivot;
+use SineMacula\Laravel\Authorization\Support\RoleGraph;
 
 /**
  * Direct permission trait for authorizable models.
@@ -192,10 +193,10 @@ trait HasPermissions // @phpstan-ignore trait.unused
             }
 
             /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission> $direct */
-            $direct = $this->permissions;
+            $direct = $this->authorizationLoadedGrants('permissions');
 
             /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
-            $roles   = $this->roles;
+            $roles   = $this->authorizationLoadedGrants('roles');
             $roleIds = self::authorizationCollectModelIds($roles);
 
             $nearest = self::authorizationNearestPivotExpirySeconds($direct);
@@ -262,23 +263,20 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * Compute the deduplicated permission-name list from the direct-grant
      * relation and every role-inherited permission.
      *
+     * The roles' permissions, and their ancestors', are read together in a
+     * fixed number of queries however many roles the identity holds.
+     *
      * @return array<int, string>
      */
     private function computePermissions(): array
     {
         /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission> $direct */
-        $direct = $this->permissions;
+        $direct = $this->authorizationLoadedGrants('permissions');
         $names  = $direct->map(static fn (Permission $p): string => $p->name)->all();
 
         /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
-        $roles = $this->roles;
+        $roles = $this->authorizationLoadedGrants('roles');
 
-        foreach ($roles as $role) {
-            foreach ($role->getPermissions() as $rolePerm) {
-                $names[] = $rolePerm;
-            }
-        }
-
-        return \array_values(\array_unique($names));
+        return \array_values(\array_unique([...$names, ...RoleGraph::permissionNamesHeldBy($roles->values()->all())]));
     }
 }

@@ -133,6 +133,78 @@ final class RbacQueryBudgetTest extends TestCase
     }
 
     /**
+     * Resolving an identity's permissions takes the same number of queries for
+     * one role one level deep as for four roles four levels deep: the grants,
+     * the hierarchy and the roles' permissions are each read once.
+     *
+     * @return void
+     */
+    public function testResolutionQueriesDoNotGrowWithRolesOrDepth(): void
+    {
+        $shallow = self::identityHolding(roles: 1, depth: 2);
+        $deep    = self::identityHolding(roles: 4, depth: 4);
+
+        $shallowQueries = self::resolutionQueries($shallow);
+        $deepQueries    = self::resolutionQueries($deep);
+
+        self::assertLessThanOrEqual(5, $deepQueries, 'Permission resolution exceeded its five-query budget.');
+        self::assertSame($shallowQueries, $deepQueries, 'Permission resolution grew with the number of roles or the depth of the hierarchy.');
+    }
+
+    /**
+     * Create an identity holding the given number of roles, each at the bottom
+     * of its own chain of the given depth with a permission at every level.
+     *
+     * @param  int  $roles
+     * @param  int  $depth
+     * @return \Tests\Feature\Stubs\StubIdentity
+     */
+    private static function identityHolding(int $roles, int $depth): StubIdentity
+    {
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+
+        for ($r = 0; $r < $roles; $r++) {
+            $parent = null;
+
+            for ($d = 0; $d < $depth; $d++) {
+                $name   = "chain-{$user->id}-{$r}-{$d}";
+                $parent = Role::create(['name' => $name, 'guard' => 'web', 'parent_id' => $parent?->getKey()]);
+
+                $parent->permissions()->attach(Permission::create(['name' => "{$name}:read", 'guard' => 'web'])->getKey());
+            }
+
+            \assert($parent instanceof Role);
+
+            $user->assignRole($parent);
+        }
+
+        return $user;
+    }
+
+    /**
+     * Count the queries resolving a fresh copy of the identity's permissions
+     * runs.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @return int
+     */
+    private static function resolutionQueries(StubIdentity $user): int
+    {
+        $fresh = StubIdentity::query()->findOrFail($user->id);
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        $fresh->getPermissions();
+
+        $count = \count(DB::getQueryLog());
+
+        DB::disableQueryLog();
+
+        return $count;
+    }
+
+    /**
      * Seed the `editor` role with five attached permissions and return a
      * `StubIdentity` assigned to that role.
      *

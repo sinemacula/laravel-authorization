@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
 use SineMacula\Laravel\Authorization\Services\RoleService;
+use SineMacula\Laravel\Authorization\Support\RoleGraph;
 
 /**
  * Role-side permission management API.
@@ -194,32 +195,16 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
      * When `authorization.hierarchy.enabled` is true (the default), this
      * includes the deduplicated union of the role's own direct permissions and
      * all permissions inherited from ancestor roles. When hierarchy is
-     * disabled, only directly attached permissions are returned.
+     * disabled, only directly attached permissions are returned. Either way
+     * they are read in a fixed number of queries, however deep the role sits.
      *
      * @return array<int, string>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
      */
     public function getPermissions(): array
     {
-        /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission> $permissions */
-        $permissions = $this->permissions;
-
-        $names = $permissions->map(static fn (Permission $permission): string => $permission->name)->all();
-
-        /** @var bool $hierarchyEnabled */
-        $hierarchyEnabled = config('authorization.hierarchy.enabled', true);
-
-        if ($hierarchyEnabled && $this->parent_id !== null) {
-            foreach ($this->ancestors() as $ancestor) {
-                /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission> $ancestorPermissions */
-                $ancestorPermissions = $ancestor->permissions;
-
-                foreach ($ancestorPermissions as $ancestorPermission) {
-                    $names[] = $ancestorPermission->name;
-                }
-            }
-        }
-
-        return \array_values(\array_unique($names));
+        return RoleGraph::permissionNamesHeldBy([$this]);
     }
 
     /**

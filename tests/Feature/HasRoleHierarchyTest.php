@@ -138,7 +138,9 @@ final class HasRoleHierarchyTest extends TestCase
             self::assertSame('admin', $exception->getProposedParentName());
         }
 
-        self::assertSame([CustomRole::class, CustomRole::class, CustomRole::class], $hydrated->getArrayCopy());
+        // The chain is loaded once: the two roles in the cycle, each as the
+        // configured class.
+        self::assertSame([CustomRole::class, CustomRole::class], $hydrated->getArrayCopy());
     }
 
     /**
