@@ -7,8 +7,8 @@ namespace SineMacula\Laravel\Authorization\Concerns;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
-use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Database\GrantRelation;
+use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 
@@ -56,23 +56,22 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
     {
         $instance = $this->newRelatedInstance($related);
 
-        // The `where(...)` and inner `whereNull()/orWhere()` calls are resolved
-        // by PHPStan to static methods on Eloquent's Builder via Laravel's
-        // annotation soup — the underlying dispatch is instance-level. Same
-        // pattern, same justification, as `GuardScopedLookup`.
+        // The `where(...)` call is resolved by PHPStan to a static method on
+        // Eloquent's Builder via Laravel's annotation soup — the underlying
+        // dispatch is instance-level. Same pattern, same justification, as
+        // `GuardScopedLookup`.
         // @phpstan-ignore staticMethod.dynamicCall
-        return (new GrantRelation($instance->newQuery(), $this, 'authorizable', $table, 'authorizable_id', $relatedKey, $this->getKeyName(), $instance->getKeyName()))
+        $relation = (new GrantRelation($instance->newQuery(), $this, 'authorizable', $table, 'authorizable_id', $relatedKey, $this->getKeyName(), $instance->getKeyName()))
             ->using($pivotClass)
             ->withPivot('expires_at')
             ->withTimestamps()
             ->where(static function (Builder $query) use ($table): void {
-                // @phpstan-ignore staticMethod.dynamicCall
-                $query->whereNull($table . '.expires_at')
-                    ->orWhere($table . '.expires_at', '>', Carbon::now('UTC'));
-            })
-            ->where(static function (Builder $query) use ($table): void {
                 self::authorizationInScope($query, $table, TenantScope::currentTenant());
             });
+
+        LiveGrants::only($relation->getQuery(), $table);
+
+        return $relation;
     }
 
     /**

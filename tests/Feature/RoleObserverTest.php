@@ -99,7 +99,8 @@ final class RoleObserverTest extends TestCase
 
     /**
      * Changing a role's guard re-checks its parent, its children and its
-     * permissions, and a change that leaves them compatible is saved.
+     * permissions, an expired grant included, and a change that leaves them
+     * compatible is saved.
      *
      * @return void
      */
@@ -110,7 +111,7 @@ final class RoleObserverTest extends TestCase
         $child  = Role::query()->create(['name' => 'child', 'guard' => 'api', 'parent_id' => $role->id]);
         $holder = Role::query()->create(['name' => 'holder']);
 
-        $holder->permissions()->attach(Permission::query()->create(['name' => 'posts:read', 'guard' => 'web'])->id);
+        $holder->permissions()->attach(Permission::query()->create(['name' => 'posts:read', 'guard' => 'web'])->id, ['expires_at' => '2000-01-01 00:00:00']);
 
         $refusals = [[$role, 'api', ParentGuardMismatchException::class], [$role, 'web', ParentGuardMismatchException::class], [$holder, 'api', GuardMismatchException::class]];
 

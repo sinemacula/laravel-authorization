@@ -8,7 +8,6 @@ use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
-use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
@@ -34,7 +33,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *
  * @internal
  */
-final readonly class GrantTable
+final readonly class GrantTable extends ExpiringGrants
 {
     /**
      * Create a new grant table writer.
@@ -70,60 +69,6 @@ final readonly class GrantTable
         /** The tenant the grants hold in; null for platform-wide. */
         private ?Reference $tenant = null,
     ) {}
-
-    /**
-     * Grant the given row with the given expiry.
-     *
-     * Granting what is held with the same expiry changes nothing. Any other
-     * expiry is written: a grant that had expired is re-armed, and a live
-     * grant's expiry is changed.
-     *
-     * @param  string  $id
-     * @param  \DateTimeInterface|null  $expiresAt
-     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange
-     */
-    public function grant(string $id, ?\DateTimeInterface $expiresAt): GrantChange
-    {
-        $expiresAt = UtcDateTime::toUtc($expiresAt);
-
-        if ($this->store($id, $expiresAt)) {
-            return new GrantChange(GrantOutcome::GRANTED);
-        }
-
-        $previous = $this->lockedExpiry($id);
-
-        if (self::isSameInstant($previous, $expiresAt)) {
-            return new GrantChange(GrantOutcome::UNCHANGED, $previous);
-        }
-
-        return $this->rewrite($id, $previous, $expiresAt);
-    }
-
-    /**
-     * Grant the given row with the given expiry unless the grantee holds it
-     * already: a live grant is left as it is, and only a grant that has expired
-     * is re-armed. Used by a sync, which keeps what the grantee holds.
-     *
-     * @param  string  $id
-     * @param  \DateTimeInterface|null  $expiresAt
-     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange
-     */
-    public function rearm(string $id, ?\DateTimeInterface $expiresAt): GrantChange
-    {
-        $expiresAt = UtcDateTime::toUtc($expiresAt);
-
-        if ($this->store($id, $expiresAt)) {
-            return new GrantChange(GrantOutcome::GRANTED);
-        }
-
-        $previous = $this->lockedExpiry($id);
-
-        if (!self::hasExpired($previous) || self::isSameInstant($previous, $expiresAt)) {
-            return new GrantChange(GrantOutcome::UNCHANGED, $previous);
-        }
-
-        return $this->rewrite($id, $previous, $expiresAt);
-    }
 
     /**
      * Return the keys of the rows the grantee holds in the scope, among the
@@ -187,7 +132,8 @@ final readonly class GrantTable
      * @param  \Illuminate\Support\Carbon|null  $expiresAt
      * @return bool
      */
-    private function store(string $id, ?Carbon $expiresAt): bool
+    #[\Override]
+    protected function store(string $id, ?Carbon $expiresAt): bool
     {
         $now = Carbon::now();
 
@@ -211,7 +157,8 @@ final readonly class GrantTable
      * @param  string  $id
      * @return \Illuminate\Support\Carbon|null
      */
-    private function lockedExpiry(string $id): ?Carbon
+    #[\Override]
+    protected function lockedExpiry(string $id): ?Carbon
     {
         $row = $this->inScope()->where($this->column, $id)->lockForUpdate()->sole(['expires_at']);
 
@@ -220,15 +167,14 @@ final readonly class GrantTable
 
     /**
      * Write the new expiry, and the actor making the grant again, to the row in
-     * the scope and report the change: a re-armed grant when the previous
-     * expiry had passed, else a changed one.
+     * the scope.
      *
      * @param  string  $id
-     * @param  \Illuminate\Support\Carbon|null  $previous
      * @param  \Illuminate\Support\Carbon|null  $expiresAt
-     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange
+     * @return void
      */
-    private function rewrite(string $id, ?Carbon $previous, ?Carbon $expiresAt): GrantChange
+    #[\Override]
+    protected function writeExpiry(string $id, ?Carbon $expiresAt): void
     {
         $this->inScope()->where($this->column, $id)->update([
             'expires_at'      => $expiresAt,
@@ -236,8 +182,6 @@ final readonly class GrantTable
             'granted_by_id'   => $this->grantedBy?->id,
             'updated_at'      => Carbon::now(),
         ]);
-
-        return new GrantChange(self::hasExpired($previous) ? GrantOutcome::REARMED : GrantOutcome::EXPIRY_CHANGED, $previous);
     }
 
     /**
@@ -284,30 +228,5 @@ final readonly class GrantTable
         return $this->connection->table($this->table)
             ->where('authorizable_type', $this->granteeType)
             ->where('authorizable_id', $this->granteeId);
-    }
-
-    /**
-     * Determine whether two expiries are the same instant, two nulls (forever)
-     * included.
-     *
-     * @param  \Illuminate\Support\Carbon|null  $left
-     * @param  \Illuminate\Support\Carbon|null  $right
-     * @return bool
-     */
-    private static function isSameInstant(?Carbon $left, ?Carbon $right): bool
-    {
-        return $left?->getTimestamp() === $right?->getTimestamp();
-    }
-
-    /**
-     * Determine whether an expiry has passed. A grant with no expiry never
-     * expires.
-     *
-     * @param  \Illuminate\Support\Carbon|null  $expiresAt
-     * @return bool
-     */
-    private static function hasExpired(?Carbon $expiresAt): bool
-    {
-        return $expiresAt !== null && !$expiresAt->isFuture();
     }
 }

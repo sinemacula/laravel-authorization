@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Models\Pivots;
 
 use Illuminate\Database\Eloquent\Relations\Pivot;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Enums\OrphanSide;
 use SineMacula\Laravel\Authorization\Exceptions\OrphanedRolePermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -21,6 +22,11 @@ use SineMacula\Laravel\Authorization\Support\RoleParity;
  * `$role->permissions()->attach(...)`, `$permission->roles()->attach(...)` or
  * `sync(...)` from either side goes through this model's `saving` hook because
  * both relations are wired with `using(RolePermission::class)`.
+ *
+ * The optional expiry is stored in UTC whatever zone it is given in, and read
+ * back as a UTC `Carbon`.
+ *
+ * @property \Illuminate\Support\Carbon|null $expires_at
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -49,6 +55,17 @@ final class RolePermission extends Pivot
     public function getConnectionName(): string
     {
         return AuthorizationConnection::resolve();
+    }
+
+    /**
+     * Return the attribute casts: the expiry is written and read in UTC.
+     *
+     * @return array<string, string>
+     */
+    #[\Override]
+    protected function casts(): array
+    {
+        return ['expires_at' => UtcDateTime::class];
     }
 
     /**

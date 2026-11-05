@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -28,6 +29,19 @@ use Tests\TestCase;
 final class RoleGraphTest extends TestCase
 {
     use ActsAsTenant;
+
+    /**
+     * Reset the clock.
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function tearDown(): void
+    {
+        Carbon::setTestNow();
+
+        parent::tearDown();
+    }
 
     /**
      * Each role's chain runs from the root down to its immediate parent, and a
@@ -184,6 +198,40 @@ final class RoleGraphTest extends TestCase
     }
 
     /**
+     * A role's grant of a permission counts until its expiry, its own or an
+     * ancestor's, and the nearest expiry still ahead is reported.
+     *
+     * @return void
+     */
+    public function testAnExpiredPermissionIsNotHeldAndTheNearestExpiryIsReported(): void
+    {
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        $parent = Role::create(['name' => 'reader']);
+        $role   = Role::create(['name' => 'editor', 'parent_id' => $parent->id]);
+
+        $role->givePermission(Permission::create(['name' => 'posts:edit']), Carbon::parse('2026-07-01 12:10:00'));
+        $role->givePermission(Permission::create(['name' => 'posts:list']));
+        $role->givePermission(Permission::create(['name' => 'posts:delete']), Carbon::parse('2026-07-01 11:00:00'));
+        $parent->givePermission(Permission::create(['name' => 'posts:read']), Carbon::parse('2026-07-01 12:05:00'));
+
+        $held   = RoleGraph::permissionsHeldBy([$role]);
+        $within = RoleGraph::permissionsWithin(RoleGraph::reach([$role->id]), [$role->id]);
+
+        self::assertEqualsCanonicalizing(['posts:edit', 'posts:list', 'posts:read'], $held->names);
+        self::assertSame(300, $held->expiresIn);
+        self::assertEqualsCanonicalizing(['posts:edit', 'posts:list', 'posts:read'], $within?->names);
+        self::assertSame(300, $within?->expiresIn);
+
+        Carbon::setTestNow('2026-07-01 12:05:00');
+
+        self::assertEqualsCanonicalizing(['posts:edit', 'posts:list'], RoleGraph::permissionNamesHeldBy([$role]));
+        self::assertSame(300, RoleGraph::permissionsHeldBy([$role])->expiresIn);
+        self::assertNull(RoleGraph::permissionsHeldBy([$parent])->expiresIn);
+        self::assertNull(RoleGraph::permissionsHeldBy([])->expiresIn);
+    }
+
+    /**
      * A tenant's own permissions held through its role count only in that
      * tenant; the platform's count everywhere.
      *
@@ -248,12 +296,12 @@ final class RoleGraphTest extends TestCase
         $missing = (string) Str::uuid();
         $reach   = RoleGraph::reach([$leaf->id, $missing]);
 
-        self::assertEqualsCanonicalizing(['posts:read', 'posts:edit'], RoleGraph::permissionNamesWithin($reach, [$leaf->id, $missing]));
-        self::assertSame([], RoleGraph::permissionNamesWithin(RoleGraph::reach([$other->id]), [$other->id]));
+        self::assertEqualsCanonicalizing(['posts:read', 'posts:edit'], RoleGraph::permissionsWithin($reach, [$leaf->id, $missing])?->names);
+        self::assertSame([], RoleGraph::permissionsWithin(RoleGraph::reach([$other->id]), [$other->id])?->names);
 
         config(['authorization.hierarchy.enabled' => false]);
 
-        self::assertSame(['posts:edit'], RoleGraph::permissionNamesWithin(RoleGraph::reach([$leaf->id]), [$leaf->id]));
+        self::assertSame(['posts:edit'], RoleGraph::permissionsWithin(RoleGraph::reach([$leaf->id]), [$leaf->id])?->names);
     }
 
     /**
@@ -271,17 +319,22 @@ final class RoleGraphTest extends TestCase
 
         DB::table('roles')->where('id', $leaf->id)->update(['parent_id' => $elsewhere->id]);
 
-        self::assertNull(RoleGraph::permissionNamesWithin($reach, [$leaf->id]));
+        $moved = RoleGraph::permissionsWithin($reach, [$leaf->id]);
+
+        self::assertNull($moved);
 
         DB::table('roles')->where('id', $leaf->id)->update(['parent_id' => $root->id]);
         DB::table('roles')->where('id', $root->id)->update(['parent_id' => null]);
 
-        self::assertSame([], RoleGraph::permissionNamesWithin($reach, [$leaf->id]));
+        $within = RoleGraph::permissionsWithin($reach, [$leaf->id]);
+
+        self::assertNotNull($within);
+        self::assertSame([], $within->names);
 
         config(['authorization.hierarchy.enabled' => false]);
         DB::table('roles')->where('id', $leaf->id)->update(['parent_id' => $elsewhere->id]);
 
-        self::assertSame([], RoleGraph::permissionNamesWithin(RoleGraph::reach([$leaf->id]), [$leaf->id]));
+        self::assertSame([], RoleGraph::permissionsWithin(RoleGraph::reach([$leaf->id]), [$leaf->id])?->names);
     }
 
     /**

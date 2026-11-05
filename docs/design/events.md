@@ -9,7 +9,8 @@ named and the operation they belong to, and are dispatched only once the write c
 - **Decision events.** `DecisionEvaluated` for every decision, `AuthorizationFailed` when `authorize()` refuses.
 - **Record events.** `Role\Created`, `Role\Updated`, `Role\Deleted`, and the same three under `Permission\` and
   `Policy\`.
-- **Role permission events.** `Role\PermissionGranted` and `Role\PermissionRevoked`.
+- **Role permission events.** `Role\PermissionGranted` (with the grant's expiry), `Role\PermissionRevoked` and
+  `Role\PermissionExpiryChanged`, and `Role\PermissionExpired` when `authorization:prune` removes an expired grant.
 - **Grant events.** Under `Identity\`: `RoleAssigned`, `RoleRevoked`, `RoleExpiryChanged`, `PermissionGranted`,
   `PermissionRevoked`, `PermissionExpiryChanged`, `PolicyAttached`, `PolicyDetached` and `PolicyExpiryChanged`. Each
   also implements `Contracts\IdentityEvent` and names its `grantee`.

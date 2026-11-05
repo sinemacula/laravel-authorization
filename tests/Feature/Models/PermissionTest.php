@@ -11,6 +11,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
+use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use Tests\Feature\Stubs\CustomRole;
 
@@ -28,6 +29,29 @@ use Tests\Feature\Stubs\CustomRole;
 #[CoversClass(Permission::class)]
 final class PermissionTest extends StringCastsTestCase
 {
+    /**
+     * The roles that carry the permission leave out a role whose grant has
+     * expired, and carry each grant's expiry.
+     *
+     * @return void
+     */
+    public function testRolesLeaveOutAnExpiredGrant(): void
+    {
+        $permission = Permission::query()->create(['name' => 'posts:edit']);
+        $live       = Role::query()->create(['name' => 'editor']);
+        $lapsed     = Role::query()->create(['name' => 'author']);
+
+        $live->permissions()->attach($permission->id, ['expires_at' => '2099-01-01 00:00:00']);
+        $lapsed->permissions()->attach($permission->id, ['expires_at' => '2000-01-01 00:00:00']);
+
+        $roles = $permission->roles()->get();
+        $pivot = $roles->sole()->getRelation('pivot');
+
+        self::assertSame(['editor'], $roles->pluck('name')->all());
+        self::assertInstanceOf(RolePermission::class, $pivot);
+        self::assertSame('2099-01-01 00:00:00', $pivot->expires_at?->format('Y-m-d H:i:s'));
+    }
+
     /**
      * `roles()` returns the role class configured under
      * `authorization.models.role`.

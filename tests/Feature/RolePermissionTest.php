@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
@@ -43,6 +44,26 @@ final class RolePermissionTest extends TestCase
     /** @var string The guard-mismatch message for the `editor` role and `posts:edit` permission. */
     private const string MISMATCH = 'Guard mismatch: role \'editor\' (guard \'web\') cannot carry permission \'posts:edit\' (guard \'api\').'
         . ' Scope one side to null for a guard-agnostic attachment, or match the guards.';
+
+    /**
+     * The expiry is written in UTC whatever zone it is given in, and read back
+     * as a UTC instant.
+     *
+     * @return void
+     */
+    public function testTheExpiryIsStoredAndReadInUtc(): void
+    {
+        $role       = Role::query()->create(['name' => 'editor']);
+        $permission = Permission::query()->create(['name' => 'posts:edit']);
+
+        $role->permissions()->attach($permission->id, ['expires_at' => Carbon::parse('2099-01-01 13:00:00', 'Europe/Paris')]);
+
+        $pivot = $role->permissions()->sole()->getRelation('pivot');
+
+        self::assertSame('2099-01-01 12:00:00', DB::table('role_permissions')->value('expires_at'));
+        self::assertInstanceOf(RolePermission::class, $pivot);
+        self::assertSame('2099-01-01 12:00:00 UTC', $pivot->expires_at?->format('Y-m-d H:i:s e'));
+    }
 
     /**
      * A role cannot carry a permission another tenant owns, nor, as a platform

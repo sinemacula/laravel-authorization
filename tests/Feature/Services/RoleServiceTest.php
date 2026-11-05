@@ -6,6 +6,7 @@ namespace Tests\Feature\Services;
 
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
@@ -13,6 +14,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
 use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
+use SineMacula\Laravel\Authorization\Events\Role\PermissionExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked;
 use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
@@ -416,6 +418,80 @@ final class RoleServiceTest extends TestCase
     }
 
     /**
+     * A permission is granted until an expiry, stored in UTC: the same expiry
+     * changes nothing, another changes it, and an expired grant is re-armed,
+     * each change reported with the expiry before and after.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testGrantsAPermissionUntilAnExpiry(): void
+    {
+        $role       = self::role('editor');
+        $permission = Permission::query()->create(['name' => 'posts:edit']);
+
+        Event::fake([PermissionGranted::class, PermissionExpiryChanged::class]);
+
+        self::assertSame(GrantOutcome::GRANTED, self::service()->grantPermission($role, $permission, Carbon::parse('2099-01-01 13:00:00', 'Europe/Paris')));
+        self::assertSame('2099-01-01 12:00:00', DB::table('role_permissions')->value('expires_at'));
+        self::assertSame(GrantOutcome::UNCHANGED, self::service()->grantPermission($role, $permission, Carbon::parse('2099-01-01 12:00:00', 'UTC')));
+        self::assertSame(GrantOutcome::EXPIRY_CHANGED, self::service()->grantPermission($role, $permission));
+        self::assertNull(DB::table('role_permissions')->value('expires_at'));
+
+        DB::table('role_permissions')->update(['expires_at' => '2000-01-01 00:00:00']);
+
+        self::assertSame(GrantOutcome::REARMED, self::service()->grantPermission($role, 'posts:edit', Carbon::parse('2099-06-01 00:00:00')));
+
+        $granted = self::dispatchedEvents(PermissionGranted::class);
+        $changed = self::dispatchedEvents(PermissionExpiryChanged::class);
+
+        $expiries = \array_map(static fn (PermissionGranted $event): ?string => $event->expiresAt?->format('Y-m-d H:i:s e'), $granted);
+        $changes  = \array_map(
+            static fn (PermissionExpiryChanged $event): array => [$event->previousExpiresAt?->format('Y-m-d H:i:s'), $event->expiresAt?->format('Y-m-d H:i:s')],
+            $changed,
+        );
+
+        self::assertSame(['2099-01-01 12:00:00 UTC', null, '2099-06-01 00:00:00 UTC'], $expiries);
+        self::assertSame([['2099-01-01 12:00:00', null], ['2000-01-01 00:00:00', '2099-06-01 00:00:00']], $changes);
+        self::assertTrue(self::refersTo($changed[0]->role, $role) && self::refersTo($changed[0]->permission, $permission));
+        self::assertSame(['editor', 'posts:edit', null], [$changed[0]->roleName, $changed[0]->permissionName, $changed[0]->tenant]);
+    }
+
+    /**
+     * A sync with an expiry grants what is missing until it, re-arms an expired
+     * grant with it, and leaves a live grant as it is.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASyncKeepsALiveGrantAndReArmsAnExpiredOne(): void
+    {
+        $role    = self::role('editor');
+        $live    = Permission::query()->create(['name' => 'posts:edit']);
+        $expired = Permission::query()->create(['name' => 'posts:read']);
+        $missing = Permission::query()->create(['name' => 'posts:create']);
+
+        self::service()->grantPermission($role, $live, Carbon::parse('2099-01-01 00:00:00'));
+        self::service()->grantPermission($role, $expired, Carbon::parse('2000-01-01 00:00:00'));
+
+        Event::fake([PermissionGranted::class, PermissionExpiryChanged::class, PermissionRevoked::class]);
+
+        $result = self::service()->syncPermissions($role, [$live, $expired, $missing], Carbon::parse('2099-06-01 00:00:00'));
+
+        self::assertSame([$missing->id], $result->granted);
+        self::assertSame([$expired->id], $result->rearmed);
+        self::assertSame([], $result->revoked);
+        self::assertSame('2099-01-01 00:00:00', DB::table('role_permissions')->where('permission_id', $live->id)->value('expires_at'));
+        self::assertSame('2099-06-01 00:00:00', DB::table('role_permissions')->where('permission_id', $expired->id)->value('expires_at'));
+        self::assertSame('2099-06-01 00:00:00', DB::table('role_permissions')->where('permission_id', $missing->id)->value('expires_at'));
+        Event::assertDispatchedTimes(PermissionGranted::class, 2);
+        Event::assertDispatchedTimes(PermissionExpiryChanged::class, 1);
+        Event::assertNotDispatched(PermissionRevoked::class);
+    }
+
+    /**
      * A concurrent duplicate written between the check and the attachment is
      * reported as unchanged rather than raising.
      *
@@ -710,7 +786,7 @@ final class RoleServiceTest extends TestCase
 
         Event::fake([PermissionGranted::class, PermissionRevoked::class]);
 
-        self::service()->syncPermissions($role, ['posts:edit', 'posts:create'], $actor);
+        self::service()->syncPermissions($role, ['posts:edit', 'posts:create'], actor: $actor);
 
         $events = [...self::dispatchedEvents(PermissionGranted::class), ...self::dispatchedEvents(PermissionRevoked::class)];
 
@@ -745,7 +821,7 @@ final class RoleServiceTest extends TestCase
 
         Event::fake([PermissionGranted::class, PermissionRevoked::class]);
 
-        self::service()->grantPermission($role, $permission, $actor);
+        self::service()->grantPermission($role, $permission, actor: $actor);
         self::service()->revokePermission($role, $permission, $actor);
 
         Event::assertDispatched(PermissionGranted::class, static fn (PermissionGranted $event): bool => self::refersTo($event->operation->actor, $actor)

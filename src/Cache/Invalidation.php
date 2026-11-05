@@ -12,6 +12,8 @@ use SineMacula\Laravel\Authorization\Events\Permission\Updated as PermissionUpda
 use SineMacula\Laravel\Authorization\Events\Policy\Deleted as PolicyDeleted;
 use SineMacula\Laravel\Authorization\Events\Policy\Updated as PolicyUpdated;
 use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
+use SineMacula\Laravel\Authorization\Events\Role\PermissionExpired as RolePermissionExpired;
+use SineMacula\Laravel\Authorization\Events\Role\PermissionExpiryChanged as RolePermissionExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionGranted as RolePermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked as RolePermissionRevoked;
 use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
@@ -21,10 +23,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * Which version tokens a write bumps, read from the events it dispatches.
  *
  * - A grantee's grant, revocation or expiry change bumps the grantee.
- * - A change to a role (its permissions, its parent, its name, its owner) or
- *   its deletion bumps the role. Entries record every role they were built
- *   from, ancestors included, so the bump reaches every identity that holds the
- *   role or a role below it.
+ * - A change to a role (its permissions or their expiry, its parent, its name,
+ *   its owner) or its deletion bumps the role. Entries record every role they
+ *   were built from, ancestors included, so the bump reaches every identity
+ *   that holds the role or a role below it.
  * - A change to a policy or its deletion bumps the policy.
  * - A deleted permission bumps the roles and grantees that held it, as the
  *   event carries them. A permission renamed or moved to another owner bumps
@@ -72,6 +74,8 @@ final class Invalidation
             $event instanceof IdentityEvent => [$store->granteeKey($event->grantee)], // @phpstan-ignore property.notFound
             $event instanceof RolePermissionGranted,
             $event instanceof RolePermissionRevoked,
+            $event instanceof RolePermissionExpiryChanged,
+            $event instanceof RolePermissionExpired,
             $event instanceof RoleUpdated,
             $event instanceof RoleDeleted => [$store->roleKey($event->role->id)],
             $event instanceof PolicyUpdated,

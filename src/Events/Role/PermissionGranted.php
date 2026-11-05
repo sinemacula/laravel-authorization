@@ -10,7 +10,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Dispatched once a permission is granted to a role, once for each permission a
- * grant or sync writes.
+ * grant or sync writes, with the expiry the grant carries. A grant that had
+ * expired and is re-armed dispatches it again, with `PermissionExpiryChanged`.
  *
  * Distinct from `Identity\PermissionGranted`, which reports a permission
  * granted to a grantee directly.
@@ -38,6 +39,7 @@ final readonly class PermissionGranted implements AuthorizationEvent
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $permission
      * @param  string  $permissionName
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  \DateTimeImmutable|null  $expiresAt
      */
     public function __construct(
 
@@ -58,5 +60,8 @@ final readonly class PermissionGranted implements AuthorizationEvent
 
         /** The tenant that owns the role; null for the platform. */
         public ?Reference $tenant,
+
+        /** When the grant expires, in UTC; null for forever. */
+        public ?\DateTimeImmutable $expiresAt,
     ) {}
 }

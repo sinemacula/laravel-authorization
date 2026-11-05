@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Support;
 
+use Illuminate\Support\Carbon;
+use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -74,6 +76,21 @@ final class RoleGraph
      */
     public static function permissionNamesHeldBy(array $roles): array
     {
+        return self::permissionsHeldBy($roles)->names;
+    }
+
+    /**
+     * Return the permissions the roles hold, with each role's ancestors' when
+     * the hierarchy is enabled, and the seconds until the nearest of those
+     * grants expires.
+     *
+     * @param  list<\SineMacula\Laravel\Authorization\Models\Role>  $roles
+     * @return \SineMacula\Laravel\Authorization\Support\InheritedPermissions
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
+     */
+    public static function permissionsHeldBy(array $roles): InheritedPermissions
+    {
         $keys = \array_map(static fn (Role $role): string => $role->id, $roles);
 
         if (self::isHierarchyEnabled()) {
@@ -84,7 +101,7 @@ final class RoleGraph
             }
         }
 
-        return self::permissionNames($keys);
+        return self::permissions($keys);
     }
 
     /**
@@ -94,7 +111,7 @@ final class RoleGraph
      * a query.
      *
      * The resolution cache pins the version of every role returned before it
-     * reads their permissions through `permissionNamesWithin()`.
+     * reads their permissions through `permissionsWithin()`.
      *
      * @param  list<string>  $keys
      * @return array<string, string|null>
@@ -105,18 +122,18 @@ final class RoleGraph
     }
 
     /**
-     * Return the names of every permission the held roles hold, with their
-     * ancestors' when the hierarchy is enabled, reading the roles `reach()`
-     * returned afresh; or null when a role now has a parent `reach()` did not
-     * return, because the hierarchy moved after it was read.
+     * Return the permissions the held roles hold, with their ancestors' when
+     * the hierarchy is enabled, reading the roles `reach()` returned afresh; or
+     * null when a role now has a parent `reach()` did not return, because the
+     * hierarchy moved after it was read.
      *
      * @param  array<string, string|null>  $reach
      * @param  list<string>  $held
-     * @return list<string>|null
+     * @return \SineMacula\Laravel\Authorization\Support\InheritedPermissions|null
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
      */
-    public static function permissionNamesWithin(array $reach, array $held): ?array
+    public static function permissionsWithin(array $reach, array $held): ?InheritedPermissions
     {
         $visible   = self::load(\array_keys($reach));
         $hierarchy = self::isHierarchyEnabled();
@@ -136,20 +153,21 @@ final class RoleGraph
             }
         }
 
-        return self::permissionNames($keys);
+        return self::permissions($keys);
     }
 
     /**
-     * Return the names of the permissions attached to the roles with the given
-     * keys, in one query through the permission model.
+     * Return the permissions the roles with the given keys still carry, and the
+     * seconds until the nearest of those grants expires, in one query through
+     * the permission model.
      *
      * @param  list<string>  $roleKeys
-     * @return list<string>
+     * @return \SineMacula\Laravel\Authorization\Support\InheritedPermissions
      */
-    private static function permissionNames(array $roleKeys): array
+    private static function permissions(array $roleKeys): InheritedPermissions
     {
         if ($roleKeys === []) {
-            return [];
+            return new InheritedPermissions([], null);
         }
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
@@ -158,15 +176,34 @@ final class RoleGraph
         /** @var string $pivot */
         $pivot = config('authorization.tables.role_permissions', 'role_permissions');
         $model = new $class;
-
-        /** @var list<string> */
-        return $class::query()
+        $query = $class::query()
             ->useWritePdo()
             ->join($pivot, $pivot . '.permission_id', '=', $model->getQualifiedKeyName())
-            ->whereIn($pivot . '.role_id', $roleKeys)
+            ->whereIn($pivot . '.role_id', $roleKeys);
+
+        /** @var list<array{name: string, expires_at: string|null}> $rows */
+        $rows = LiveGrants::only($query, $pivot)
+            ->toBase()
             ->distinct()
-            ->pluck($model->qualifyColumn('name'))
+            ->get([$model->qualifyColumn('name') . ' as name', $pivot . '.expires_at as expires_at'])
+            ->map(static fn (object $row): array => (array) $row)
             ->all();
+
+        $now     = Carbon::now()->getTimestamp();
+        $names   = [];
+        $nearest = null;
+
+        foreach ($rows as $row) {
+            $names[$row['name']] = $row['name'];
+
+            if ($row['expires_at'] === null) {
+                continue;
+            }
+
+            $nearest = \min($nearest ?? \PHP_INT_MAX, Carbon::parse($row['expires_at'], 'UTC')->getTimestamp() - $now);
+        }
+
+        return new InheritedPermissions(\array_values($names), $nearest);
     }
 
     /**
