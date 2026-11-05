@@ -92,7 +92,7 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   key, an unknown operator, a malformed literal operand (including an empty string for `starts_with`, `ends_with` or
   `string_like`, and `NAN` or an infinity for a numeric comparison) and a malformed `${…}` reference in a resource
   pattern or a condition. A row that still cannot be hydrated on read (one written around the model, or one an older
-  release accepted) is never skipped: `HasPolicies::getPolicies()` logs a warning through the `authorization` channel
+  release accepted) is never skipped: `HasPolicies::getPolicies()` logs a warning on the package's log channel (`authorization.log_channel`)
   (with `policy_id`, `policy_name` and `reason`) and rethrows, and the manager returns `InvalidPolicy`. Every check for
   that identity denies, whatever it holds, until the document is fixed. A custom `PolicyResolver` must do the same:
   throw `InvalidPolicyDocumentException` rather than leave a policy out.

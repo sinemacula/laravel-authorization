@@ -161,6 +161,21 @@ return [
 
     /*
     |---------------------------------------------------------------------------
+    | Log channel
+    |---------------------------------------------------------------------------
+    |
+    | The log channel the package writes its warnings and debug lines to: a
+    | Gate conflict under `log`, a discarded corrupt cache entry, a policy
+    | whose document cannot be read. Leave as null to use the application's
+    | default channel. A name that is not a channel in `logging.channels` falls
+    | back to the default channel.
+    |
+    */
+
+    'log_channel' => env('AUTHORIZATION_LOG_CHANNEL'),
+
+    /*
+    |---------------------------------------------------------------------------
     | Policy store
     |---------------------------------------------------------------------------
     |

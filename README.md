@@ -96,6 +96,13 @@ List the enums whose cases should become Gate abilities:
 ],
 ```
 
+The package writes its warnings (a Gate conflict under the `log` mode, a discarded cache entry, a policy whose document
+cannot be read) to your default log channel. To send them elsewhere, name a channel from `config/logging.php`:
+
+```dotenv
+AUTHORIZATION_LOG_CHANNEL=stderr
+```
+
 `config/authorization.php` documents every other option: models, tables and pivot columns, the default guard, permission
 providers, the Gate conflict mode, the policy store, the tenant resolver, the cache, and the role hierarchy and rank.
 

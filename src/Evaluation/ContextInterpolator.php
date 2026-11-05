@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Arr;
+use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
 
 /**
  * Resolve `${namespace.key}` tokens in policy statement strings.
@@ -376,19 +377,6 @@ final class ContextInterpolator
      */
     private static function logUnresolved(string $token): void
     {
-        // @codeCoverageIgnoreStart
-        // Defensive: Laravel's `logger()` helper is always loaded under a
-        // booted framework, so this is reachable only outside one.
-        if (!\function_exists('logger')) {
-            return;
-        }
-
-        // @codeCoverageIgnoreEnd
-        try {
-            // @phpstan-ignore-next-line function.notFound
-            logger()->debug("Unresolved interpolation token '\${{$token}}': the test is undecidable.");
-        } catch (\Throwable) { // @phpstan-ignore catch.neverThrown
-            // Intentional: mirrors ConditionEvaluator's logging guard.
-        }
+        AuthorizationLog::debug("Unresolved interpolation token '\${{$token}}': the test is undecidable.");
     }
 }

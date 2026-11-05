@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Cache;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
+use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
 
 /**
  * Two-tier cache (in-memory memo plus optional persistent store) for principal
@@ -271,7 +272,7 @@ final class ResolutionCache
             $policies = $this->hydrateCachedPolicies($raw);
         } catch (\Throwable $exception) {
             // Corrupt persistent-cache entry — forget the key, log through the
-            // `authorization` channel, and let the caller fall through to the
+            // package's log channel, and let the caller fall through to the
             // fresh-read path.
             $this->forgetFromStore($key, $principal, $roleIds);
             $this->logCorruptCacheEntry($key, $exception);
@@ -505,36 +506,13 @@ final class ResolutionCache
      */
     private function logCorruptCacheEntry(string $key, \Throwable $exception): void
     {
-        // @codeCoverageIgnoreStart
-        // Defensive: the Laravel `logger()` helper is always present under a
-        // booted framework, so this fallback is reachable only from non-Laravel
-        // embeddings.
-        if (!\function_exists('logger')) {
-            return;
-        }
-
-        // @codeCoverageIgnoreEnd
-        try {
-            /** @var \Illuminate\Log\LogManager $logger */
-            $logger  = logger();
-            $channel = null;
-
-            try {
-                $channel = $logger->channel('authorization');
-            } catch (\Throwable) { // @phpstan-ignore catch.neverThrown
-                $channel = $logger;
-            }
-
-            $channel->warning(
-                "Authorization: discarding corrupt resolution-cache entry '{$key}' — " . $exception->getMessage(),
-                [
-                    'cache_key' => $key,
-                    'reason'    => $exception->getMessage(),
-                ],
-            );
-        } catch (\Throwable) { // @phpstan-ignore catch.neverThrown
-            // Logging failures are not allowed to abort the check.
-        }
+        AuthorizationLog::warning(
+            "Authorization: discarding corrupt resolution-cache entry '{$key}' — " . $exception->getMessage(),
+            [
+                'cache_key' => $key,
+                'reason'    => $exception->getMessage(),
+            ],
+        );
     }
 
     /**

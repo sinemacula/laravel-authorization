@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
+use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
+
 /**
  * Internal helper evaluating the condition operators of a policy statement.
  *
@@ -129,35 +131,16 @@ final class ConditionEvaluator
     }
 
     /**
-     * Log an unknown-operator line at debug level.
-     *
-     * The logger call is wrapped in a try/catch by design: the condition
-     * evaluator sits on the authorization hot path and must not abort a check
-     * because an observability back-end is unavailable (pure-PHP contexts,
-     * container-less test runs, a failing logging driver). The check itself
-     * still fails closed: an unknown operator makes the statement invalid.
-     *
-     * @imperative
+     * Log an unknown-operator line at debug level on the package's log channel.
+     * Logging never aborts the check, which still fails closed: an unknown
+     * operator makes the statement invalid.
      *
      * @param  string  $operator
      * @return void
      */
     public static function logUnknownOperator(string $operator): void
     {
-        // @codeCoverageIgnoreStart
-        // Defensive: Laravel's `logger()` helper is always loaded under a
-        // booted framework, so this is reachable only outside one.
-        if (!\function_exists('logger')) {
-            return;
-        }
-
-        // @codeCoverageIgnoreEnd
-        try {
-            // @phpstan-ignore-next-line function.notFound
-            logger()->debug("Unknown authorization condition operator '{$operator}': the statement is invalid.");
-        } catch (\Throwable) { // @phpstan-ignore catch.neverThrown
-            // Intentional: see the method docblock above.
-        }
+        AuthorizationLog::debug("Unknown authorization condition operator '{$operator}': the statement is invalid.");
     }
 
     /**
