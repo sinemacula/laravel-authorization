@@ -98,8 +98,8 @@ final class ExpiryChangedEventsTest extends TestCase
         Event::assertDispatched(
             IdentityRoleExpiryChanged::class,
             static fn (IdentityRoleExpiryChanged $e): bool => $e->previousExpiresAt === null
-                && $e->newExpiresAt instanceof \DateTimeInterface
-                && $e->newExpiresAt->getTimestamp() === $expires->getTimestamp(),
+                && $e->expiresAt instanceof \DateTimeInterface
+                && $e->expiresAt->getTimestamp() === $expires->getTimestamp(),
         );
     }
 
@@ -129,7 +129,7 @@ final class ExpiryChangedEventsTest extends TestCase
             IdentityRoleExpiryChanged::class,
             static fn (IdentityRoleExpiryChanged $e): bool => $e->previousExpiresAt instanceof \DateTimeInterface
                 && $e->previousExpiresAt->getTimestamp() === $expires->getTimestamp()
-                && $e->newExpiresAt                      === null,
+                && $e->expiresAt                         === null,
         );
     }
 
@@ -208,8 +208,8 @@ final class ExpiryChangedEventsTest extends TestCase
         Event::assertDispatched(
             IdentityPermissionExpiryChanged::class,
             static fn (IdentityPermissionExpiryChanged $e): bool => $e->previousExpiresAt === null
-                && $e->newExpiresAt instanceof \DateTimeInterface
-                && $e->newExpiresAt->getTimestamp() === $expires->getTimestamp(),
+                && $e->expiresAt instanceof \DateTimeInterface
+                && $e->expiresAt->getTimestamp() === $expires->getTimestamp(),
         );
     }
 
@@ -239,7 +239,7 @@ final class ExpiryChangedEventsTest extends TestCase
             IdentityPermissionExpiryChanged::class,
             static fn (IdentityPermissionExpiryChanged $e): bool => $e->previousExpiresAt instanceof \DateTimeInterface
                 && $e->previousExpiresAt->getTimestamp() === $expires->getTimestamp()
-                && $e->newExpiresAt                      === null,
+                && $e->expiresAt                         === null,
         );
     }
 
@@ -294,8 +294,8 @@ final class ExpiryChangedEventsTest extends TestCase
         Event::assertDispatched(
             IdentityPolicyExpiryChanged::class,
             static fn (IdentityPolicyExpiryChanged $e): bool => $e->previousExpiresAt === null
-                && $e->newExpiresAt instanceof \DateTimeInterface
-                && $e->newExpiresAt->getTimestamp() === $expires->getTimestamp(),
+                && $e->expiresAt instanceof \DateTimeInterface
+                && $e->expiresAt->getTimestamp() === $expires->getTimestamp(),
         );
     }
 
@@ -325,7 +325,7 @@ final class ExpiryChangedEventsTest extends TestCase
             IdentityPolicyExpiryChanged::class,
             static fn (IdentityPolicyExpiryChanged $e): bool => $e->previousExpiresAt instanceof \DateTimeInterface
                 && $e->previousExpiresAt->getTimestamp() === $expires->getTimestamp()
-                && $e->newExpiresAt                      === null,
+                && $e->expiresAt                         === null,
         );
     }
 

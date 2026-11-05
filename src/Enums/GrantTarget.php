@@ -5,6 +5,9 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Enums;
 
 use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
+use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked;
@@ -21,7 +24,10 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * The kinds of row a grantee can be granted, each with its configured model,
@@ -192,13 +198,37 @@ enum GrantTarget: string
     }
 
     /**
+     * Return a reference to every grantee that holds the given row, in any
+     * scope and whether or not the grant has expired, read on the package's
+     * connection, for the event a delete of the row dispatches.
+     *
+     * @param  string  $id
+     * @return list<\SineMacula\Laravel\Authorization\Support\Reference>
+     */
+    public function holders(string $id): array
+    {
+        /** @var list<\stdClass> $rows */
+        $rows = AuthorizationConnection::connection()->table($this->table())
+            ->where($this->column(), $id)
+            ->distinct()
+            ->orderBy('authorizable_type')
+            ->orderBy('authorizable_id')
+            ->get(['authorizable_type', 'authorizable_id'])
+            ->all();
+
+        return \array_map(static fn (\stdClass $row): Reference => new Reference(self::text($row->authorizable_type), self::text($row->authorizable_id)), $rows);
+    }
+
+    /**
      * Build the event a new or re-armed grant dispatches.
      *
-     * @param  object  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \Illuminate\Database\Eloquent\Model  $target
-     * @return object
+     * @param  \DateTimeInterface|null  $expiresAt
+     * @return \SineMacula\Laravel\Authorization\Contracts\IdentityEvent
      */
-    public function grantedEvent(object $grantee, Model $target): object
+    public function grantedEvent(Operation $operation, Reference $grantee, Model $target, ?\DateTimeInterface $expiresAt): IdentityEvent
     {
         $event = match ($this) {
             self::ROLE       => RoleAssigned::class,
@@ -206,17 +236,18 @@ enum GrantTarget: string
             self::POLICY     => PolicyAttached::class,
         };
 
-        return new $event($grantee, $target);
+        return new $event($operation, $grantee, Reference::of($target), self::text($target->getAttribute('name')), GrantScope::platform(), self::immutable($expiresAt));
     }
 
     /**
      * Build the event a revocation dispatches.
      *
-     * @param  object  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \Illuminate\Database\Eloquent\Model  $target
-     * @return object
+     * @return \SineMacula\Laravel\Authorization\Contracts\IdentityEvent
      */
-    public function revokedEvent(object $grantee, Model $target): object
+    public function revokedEvent(Operation $operation, Reference $grantee, Model $target): IdentityEvent
     {
         $event = match ($this) {
             self::ROLE       => RoleRevoked::class,
@@ -224,19 +255,20 @@ enum GrantTarget: string
             self::POLICY     => PolicyDetached::class,
         };
 
-        return new $event($grantee, $target);
+        return new $event($operation, $grantee, Reference::of($target), self::text($target->getAttribute('name')), GrantScope::platform());
     }
 
     /**
      * Build the event a change of a held grant's expiry dispatches.
      *
-     * @param  object  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \Illuminate\Database\Eloquent\Model  $target
      * @param  \DateTimeInterface|null  $previous
      * @param  \DateTimeInterface|null  $next
-     * @return object
+     * @return \SineMacula\Laravel\Authorization\Contracts\IdentityEvent
      */
-    public function expiryChangedEvent(object $grantee, Model $target, ?\DateTimeInterface $previous, ?\DateTimeInterface $next): object
+    public function expiryChangedEvent(Operation $operation, Reference $grantee, Model $target, ?\DateTimeInterface $previous, ?\DateTimeInterface $next): IdentityEvent
     {
         $event = match ($this) {
             self::ROLE       => RoleExpiryChanged::class,
@@ -244,7 +276,38 @@ enum GrantTarget: string
             self::POLICY     => PolicyExpiryChanged::class,
         };
 
-        return new $event($grantee, $target, $previous, $next);
+        return new $event(
+            $operation,
+            $grantee,
+            Reference::of($target),
+            self::text($target->getAttribute('name')),
+            GrantScope::platform(),
+            self::immutable($previous),
+            self::immutable($next),
+        );
+    }
+
+    /**
+     * Return a value read from a row as a string: a scalar as itself, anything
+     * else as empty.
+     *
+     * @param  mixed  $value
+     * @return string
+     */
+    private static function text(mixed $value): string
+    {
+        return \is_scalar($value) ? (string) $value : '';
+    }
+
+    /**
+     * Return an expiry as an immutable instant in UTC.
+     *
+     * @param  \DateTimeInterface|null  $expiresAt
+     * @return \DateTimeImmutable|null
+     */
+    private static function immutable(?\DateTimeInterface $expiresAt): ?\DateTimeImmutable
+    {
+        return UtcDateTime::toUtc($expiresAt)?->toImmutable();
     }
 
     /**

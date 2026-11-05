@@ -5,6 +5,8 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
@@ -13,6 +15,10 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
 use SineMacula\Laravel\Authorization\Concerns\HasRoleHierarchy;
 use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Concerns\ManagesPermissions;
+use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
+use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
+use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
+use SineMacula\Laravel\Authorization\Events\SystemOverrideUsed;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPolicyProtectedException;
@@ -22,7 +28,10 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
+use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Fixtures\ExtendedRole;
 use Tests\Fixtures\QueryRecorder;
 use Tests\Fixtures\QueryRecordingRole;
@@ -35,6 +44,9 @@ use Tests\TestCase;
  * same update, or in memory before a delete, cannot lift the protection. Every
  * attribute of a system row other than the update timestamp is protected, and
  * the refused operation is labelled after the most significant change.
+ *
+ * Each change `forceSystem()` unlocks is reported with `SystemOverrideUsed`,
+ * once the write commits, for the operation the write belongs to.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -59,6 +71,8 @@ use Tests\TestCase;
 #[CoversTrait(ManagesPermissions::class)]
 final class HasSystemProtectionTest extends TestCase
 {
+    use ReadsDispatchedEvents;
+
     /**
      * Clean up the frozen clock after each test.
      *
@@ -394,6 +408,188 @@ final class HasSystemProtectionTest extends TestCase
         $exception = $this->captureRoleRefusal(static fn () => $role->delete());
 
         self::assertSame('delete', $exception->getOperation());
+    }
+
+    /**
+     * An override that is used is reported once the change is written: the
+     * record, its name before the change, its tenant and the change allowed,
+     * for the same operation as the record's own event.
+     *
+     * @return void
+     */
+    public function testAnOverrideThatIsUsedIsReported(): void
+    {
+        $role = $this->makeSystemRole('super-admin');
+
+        Event::fake([SystemOverrideUsed::class, RoleUpdated::class]);
+
+        $role->forceSystem()->update(['name' => 'renamed']);
+
+        Event::assertDispatchedTimes(SystemOverrideUsed::class, 1);
+        Event::assertDispatched(SystemOverrideUsed::class, static fn (SystemOverrideUsed $event): bool => $event->record->id === $role->id
+            && $event->record->type                                                                                          === $role->getMorphClass()
+            && $event->name                                                                                                  === 'super-admin'
+            && $event->tenant                                                                                                === null
+            && $event->protectedOperation                                                                                    === 'rename'
+            && $event->operation->actor                                                                                      === null);
+
+        self::assertSame(self::dispatchedEvents(SystemOverrideUsed::class)[0]->operation->id, self::dispatchedEvents(RoleUpdated::class)[0]->operation->id);
+    }
+
+    /**
+     * A forced delete of a tenant's system policy is reported as a delete,
+     * naming the tenant.
+     *
+     * @return void
+     */
+    public function testAForcedDeleteIsReported(): void
+    {
+        $policy = $this->makeSystemPolicy('root');
+
+        $policy->forceFill(['tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a'])->forceSystem()->save();
+
+        Event::fake([SystemOverrideUsed::class]);
+
+        $policy->forceSystem()->delete();
+
+        Event::assertDispatchedTimes(SystemOverrideUsed::class, 1);
+        Event::assertDispatched(SystemOverrideUsed::class, static fn (SystemOverrideUsed $event): bool => $event->protectedOperation === 'delete'
+            && $event->record->id                                                                                                    === $policy->id
+            && $event->tenant?->type                                                                                                 === 'stub_tenant'
+            && $event->tenant->id                                                                                                    === 'tenant-a');
+    }
+
+    /**
+     * An override used through a management service names the service call's
+     * actor.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnOverrideUsedThroughAServiceNamesTheActor(): void
+    {
+        $role  = $this->makeSystemRole('super-admin');
+        $actor = new Reference('user', 'admin-1');
+
+        Event::fake([SystemOverrideUsed::class]);
+
+        app(RoleService::class)->describe($role->forceSystem(), 'Forced.', $actor);
+
+        Event::assertDispatched(SystemOverrideUsed::class, static fn (SystemOverrideUsed $event): bool => $event->operation->actor === $actor
+            && $event->protectedOperation                                                                                          === 'modify');
+    }
+
+    /**
+     * An unlock that no change uses, a refused change and an edit of a record
+     * that is not system report nothing.
+     *
+     * @return void
+     */
+    public function testNothingIsReportedWhenNoOverrideIsUsed(): void
+    {
+        $role     = $this->makeSystemRole('super-admin');
+        $ordinary = Role::query()->create(['name' => 'editor']);
+
+        Event::fake([SystemOverrideUsed::class]);
+
+        $role->forceSystem()->touch();
+        $this->captureRoleRefusal(static fn () => $role->update(['description' => 'Refused.']));
+        $ordinary->forceSystem()->update(['description' => 'Edited.']);
+        $ordinary->delete();
+
+        Event::assertNotDispatched(SystemOverrideUsed::class);
+    }
+
+    /**
+     * An override whose write rolls back is never reported.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnOverrideRolledBackIsNeverReported(): void
+    {
+        $role = $this->makeSystemRole('super-admin');
+
+        Event::fake([SystemOverrideUsed::class]);
+
+        try {
+            DB::transaction(static function () use ($role): never {
+                $role->forceSystem()->delete();
+
+                throw new \RuntimeException('Rolled back.');
+            });
+        } catch (\RuntimeException) {
+            // The enclosing transaction rolled back.
+        }
+
+        Event::assertNotDispatched(SystemOverrideUsed::class);
+        self::assertTrue(Role::query()->whereKey($role->id)->exists());
+    }
+
+    /**
+     * An override a failed write consumed is not reported by a later save or
+     * delete of the record that used none.
+     *
+     * @return void
+     */
+    public function testAnOverrideAFailedWriteConsumedIsNotReportedLater(): void
+    {
+        $saved   = $this->makeSystemRole('super-admin');
+        $deleted = $this->makeSystemRole('auditor');
+        $failing = new \ArrayObject;
+
+        Role::updated(static function (Role $role) use ($failing): void {
+            if (!$failing->offsetExists($role->id)) {
+                return;
+            }
+
+            $failing->offsetUnset($role->id);
+
+            throw new \RuntimeException('The write failed.');
+        });
+
+        foreach ([$saved, $deleted] as $role) {
+            $failing->offsetSet($role->id, true);
+
+            rescue(static fn (): bool => $role->forceSystem()->update(['is_system' => false]), null, false);
+
+            self::assertFalse($failing->offsetExists($role->id));
+
+            $role->refresh();
+        }
+
+        Event::fake([SystemOverrideUsed::class]);
+
+        $saved->update(['description' => 'Edited.']);
+        $deleted->delete();
+
+        Event::assertNotDispatched(SystemOverrideUsed::class);
+    }
+
+    /**
+     * Outside a service call, each save or delete of a record is an operation
+     * of its own, though it is made on the same instance.
+     *
+     * @return void
+     */
+    public function testEachWriteOutsideACallIsAnOperationOfItsOwn(): void
+    {
+        Event::fake([RoleCreated::class, RoleUpdated::class, RoleDeleted::class]);
+
+        $role = Role::query()->create(['name' => 'editor']);
+
+        $role->update(['description' => 'Edited.']);
+        $role->delete();
+
+        $ids = [
+            self::dispatchedEvents(RoleCreated::class)[0]->operation->id,
+            self::dispatchedEvents(RoleUpdated::class)[0]->operation->id,
+            self::dispatchedEvents(RoleDeleted::class)[0]->operation->id,
+        ];
+
+        self::assertCount(3, \array_unique($ids));
     }
 
     /**

@@ -9,7 +9,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
-use SineMacula\Laravel\Authorization\Support\GranteeReference;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Unit tests for `InvalidGranteeException`, the programming error raised when a
@@ -35,7 +35,7 @@ final class InvalidGranteeExceptionTest extends TestCase
     {
         yield 'an unsaved model' => [static fn (): object => new User, self::PREFIX . 'an unsaved ' . User::class . '.'];
         yield 'a saved model' => [static fn (): object => self::savedUser(), self::PREFIX . 'an incomplete ' . User::class . '.'];
-        yield 'a reference' => [static fn (): object => new GranteeReference('', ''), self::PREFIX . 'an incomplete ' . GranteeReference::class . '.'];
+        yield 'a reference' => [static fn (): object => new Reference('', ''), self::PREFIX . 'an incomplete ' . Reference::class . '.'];
     }
 
     /**

@@ -5,11 +5,15 @@ declare(strict_types = 1);
 namespace Tests\Feature\Services;
 
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
+use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
 use SineMacula\Laravel\Authorization\Exceptions\ReservedRoleNameException;
 use SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\TestCase;
 
@@ -40,7 +44,7 @@ final class RecordWriterTest extends TestCase
         $base  = self::authorizationConnection()->transactionLevel();
         $level = null;
 
-        $role = RecordWriter::save(static function () use (&$level): Role {
+        $role = RecordWriter::save(null, static function () use (&$level): Role {
             $level = self::authorizationConnection()->transactionLevel();
 
             return new Role;
@@ -64,7 +68,7 @@ final class RecordWriterTest extends TestCase
         Role::query()->create(['name' => 'admin', 'is_system' => true]);
 
         try {
-            RecordWriter::save(static fn (): Role => new Role, ['name' => 'admin', 'tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a']);
+            RecordWriter::save(null, static fn (): Role => new Role, ['name' => 'admin', 'tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a']);
             self::fail('The save was not refused.');
         } catch (ReservedRoleNameException) {
             self::assertSame(1, DB::table('roles')->count());
@@ -82,7 +86,7 @@ final class RecordWriterTest extends TestCase
         $base  = DB::connection()->transactionLevel();
         $level = null;
 
-        RecordWriter::delete(static function () use (&$level, $role): Role {
+        RecordWriter::delete(null, static function () use (&$level, $role): Role {
             $level = DB::connection()->transactionLevel();
 
             return $role;
@@ -113,5 +117,27 @@ final class RecordWriterTest extends TestCase
             self::assertSame('permission', $exception->getKind());
             self::assertSame('The permission service takes a saved permission, not an unsaved ' . Role::class . '.', $exception->getMessage());
         }
+    }
+
+    /**
+     * The events a save and a delete dispatch carry the given actor, once the
+     * write commits.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheEventsCarryTheActor(): void
+    {
+        $actor = new Reference('user', 'admin-1');
+
+        Event::fake([RoleCreated::class, RoleDeleted::class]);
+
+        $role = RecordWriter::save($actor, static fn (): Role => new Role, ['name' => 'editor']);
+
+        RecordWriter::delete($actor, static fn (): Role => $role);
+
+        Event::assertDispatched(RoleCreated::class, static fn (RoleCreated $event): bool => $event->operation->actor === $actor);
+        Event::assertDispatched(RoleDeleted::class, static fn (RoleDeleted $event): bool => $event->operation->actor === $actor);
     }
 }

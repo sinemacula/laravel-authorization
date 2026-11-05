@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\RoleService;
+use Tests\Concerns\ComparesReferences;
 use Tests\TestCase;
 
 /**
@@ -27,6 +28,8 @@ use Tests\TestCase;
 #[CoversTrait(ManagesPermissions::class)]
 final class ManagesPermissionsTest extends TestCase
 {
+    use ComparesReferences;
+
     /**
      * The write methods go through the role service: granting what the role
      * carries dispatches nothing, and each returns the role.
@@ -71,8 +74,8 @@ final class ManagesPermissionsTest extends TestCase
         $role->syncPermissions([$kept, $joined]);
 
         self::assertEqualsCanonicalizing(['posts:create', 'posts:edit'], $role->getPermissions());
-        Event::assertDispatched(PermissionGranted::class, static fn (PermissionGranted $event): bool => $event->permission->is($joined));
-        Event::assertDispatched(PermissionRevoked::class, static fn (PermissionRevoked $event): bool => $event->permission->is($gone));
+        Event::assertDispatched(PermissionGranted::class, static fn (PermissionGranted $event): bool => self::refersTo($event->permission, $joined));
+        Event::assertDispatched(PermissionRevoked::class, static fn (PermissionRevoked $event): bool => self::refersTo($event->permission, $gone));
     }
 
     /**

@@ -30,6 +30,7 @@ use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
+use Tests\Concerns\ComparesReferences;
 use Tests\TestCase;
 
 /**
@@ -71,6 +72,8 @@ use Tests\TestCase;
 #[CoversTrait(ManagesPermissions::class)]
 final class LifecycleEventsTest extends TestCase
 {
+    use ComparesReferences;
+
     /** Canonical description used across the role before/after diff scenarios. */
     private const string EDITOR_ROLE_DESCRIPTION = 'Editor role';
 
@@ -91,7 +94,7 @@ final class LifecycleEventsTest extends TestCase
 
         Event::assertDispatched(
             RoleCreated::class,
-            static fn (RoleCreated $event): bool => $event->role->is($role),
+            static fn (RoleCreated $event): bool => self::refersTo($event->role, $role),
         );
     }
 
@@ -118,7 +121,7 @@ final class LifecycleEventsTest extends TestCase
 
         Event::assertDispatched(
             RoleUpdated::class,
-            static fn (RoleUpdated $event): bool => $event->role->is($role)
+            static fn (RoleUpdated $event): bool => self::refersTo($event->role, $role)
                 && ($event->changes['before']['description'] ?? null) === self::EDITOR_ROLE_DESCRIPTION
                 && ($event->changes['after']['description'] ?? null)  === 'Senior editor role',
         );
@@ -145,7 +148,7 @@ final class LifecycleEventsTest extends TestCase
 
         Event::assertDispatched(
             RoleUpdated::class,
-            static fn (RoleUpdated $event): bool => $event->role->is($role)
+            static fn (RoleUpdated $event): bool => self::refersTo($event->role, $role)
                 && \array_key_exists('description', $event->changes['before'])
                 && $event->changes['before']['description']          === null
                 && ($event->changes['after']['description'] ?? null) === self::EDITOR_ROLE_DESCRIPTION,
@@ -172,7 +175,7 @@ final class LifecycleEventsTest extends TestCase
         Event::assertDispatched(
             RoleDeleted::class,
             // @phpstan-ignore-next-line cast.string, cast.string
-            static fn (RoleDeleted $event): bool => (string) $event->role->getKey() === (string) $role->getKey(),
+            static fn (RoleDeleted $event): bool => self::refersTo($event->role, $role),
         );
     }
 
@@ -193,7 +196,7 @@ final class LifecycleEventsTest extends TestCase
 
         Event::assertDispatched(
             PermissionCreated::class,
-            static fn (PermissionCreated $event): bool => $event->permission->is($permission),
+            static fn (PermissionCreated $event): bool => self::refersTo($event->permission, $permission),
         );
     }
 
@@ -219,7 +222,7 @@ final class LifecycleEventsTest extends TestCase
 
         Event::assertDispatched(
             PermissionUpdated::class,
-            static fn (PermissionUpdated $event): bool => $event->permission->is($permission)
+            static fn (PermissionUpdated $event): bool => self::refersTo($event->permission, $permission)
                 && ($event->changes['before']['description'] ?? null) === 'Create posts'
                 && ($event->changes['after']['description'] ?? null)  === 'Create blog posts',
         );
@@ -246,7 +249,7 @@ final class LifecycleEventsTest extends TestCase
 
         Event::assertDispatched(
             PermissionUpdated::class,
-            static fn (PermissionUpdated $event): bool => $event->permission->is($permission)
+            static fn (PermissionUpdated $event): bool => self::refersTo($event->permission, $permission)
                 && \array_key_exists('description', $event->changes['before'])
                 && $event->changes['before']['description']          === null
                 && ($event->changes['after']['description'] ?? null) === 'Create posts',
@@ -273,7 +276,7 @@ final class LifecycleEventsTest extends TestCase
         Event::assertDispatched(
             PermissionDeleted::class,
             // @phpstan-ignore-next-line cast.string, cast.string
-            static fn (PermissionDeleted $event): bool => (string) $event->permission->getKey() === (string) $permission->getKey(),
+            static fn (PermissionDeleted $event): bool => self::refersTo($event->permission, $permission),
         );
     }
 
@@ -296,7 +299,7 @@ final class LifecycleEventsTest extends TestCase
 
         Event::assertDispatched(
             PolicyCreated::class,
-            static fn (PolicyCreated $event): bool => $event->policy->is($policy),
+            static fn (PolicyCreated $event): bool => self::refersTo($event->policy, $policy),
         );
     }
 
@@ -323,7 +326,7 @@ final class LifecycleEventsTest extends TestCase
 
         Event::assertDispatched(
             PolicyUpdated::class,
-            static fn (PolicyUpdated $event): bool => $event->policy->is($policy)
+            static fn (PolicyUpdated $event): bool => self::refersTo($event->policy, $policy)
                 && ($event->changes['before']['description'] ?? null) === 'Initial policy'
                 && ($event->changes['after']['description'] ?? null)  === 'Updated policy',
         );
@@ -352,7 +355,7 @@ final class LifecycleEventsTest extends TestCase
 
         Event::assertDispatched(
             PolicyUpdated::class,
-            static fn (PolicyUpdated $event): bool => $event->policy->is($policy)
+            static fn (PolicyUpdated $event): bool => self::refersTo($event->policy, $policy)
                 && \array_key_exists('description', $event->changes['before'])
                 && $event->changes['before']['description']          === null
                 && ($event->changes['after']['description'] ?? null) === 'Initial policy',
@@ -380,7 +383,7 @@ final class LifecycleEventsTest extends TestCase
 
         Event::assertDispatched(
             PolicyDeleted::class,
-            static fn (PolicyDeleted $event): bool => (string) $event->policy->getKey() === (string) $policy->getKey(), // @phpstan-ignore cast.string, cast.string
+            static fn (PolicyDeleted $event): bool => self::refersTo($event->policy, $policy),
         );
     }
 }

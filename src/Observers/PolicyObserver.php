@@ -4,22 +4,33 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Observers;
 
-use Illuminate\Support\Facades\Event;
+use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Events\Policy\Created as PolicyCreated;
 use SineMacula\Laravel\Authorization\Events\Policy\Deleted as PolicyDeleted;
 use SineMacula\Laravel\Authorization\Events\Policy\Updated as PolicyUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Observers\Support\RecordChanges;
+use SineMacula\Laravel\Authorization\Support\DocumentDigest;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Row-lifecycle observer for the `Policy` model.
  *
- * Translates Eloquent's native `updating` / `created` / `updated` / `deleted`
- * events into the package's typed CRUD events and enforces the tenant-columns
- * both-or-neither invariant on save. System-protection hooks (`deleting`,
- * `updating` guard, `saved` bypass reset) live in
+ * Translates Eloquent's native `updating` / `created` / `updated` / `deleting`
+ * / `deleted` events into the package's typed record events and enforces the
+ * tenant-columns both-or-neither invariant on save. System-protection hooks
+ * (`deleting`, `updating` guard, `saved` bypass reset) live in
  * `HasSystemProtection::bootHasSystemProtection()` and run independently of
  * this observer.
+ *
+ * The events are snapshots of plain values, dispatched once the write commits
+ * on the package's connection, and carry the operation the write belongs to:
+ * the management service call that made it, with its actor, or a write of its
+ * own with no actor. The document is reported by its version and digest, never
+ * its body, and a delete reads, before the row goes, every grantee the policy
+ * was attached to.
  *
  * A policy is owned by the platform (both tenant columns null) or by one tenant
  * (both set), as roles and permissions are. Unlike theirs, policy reads are not
@@ -27,16 +38,11 @@ use SineMacula\Laravel\Authorization\Models\Policy;
  *
  * Registered via `#[ObservedBy(PolicyObserver::class)]` on the `Policy` model.
  *
- * @managed-static
- *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
 final class PolicyObserver
 {
-    /** @var \WeakMap<\SineMacula\Laravel\Authorization\Models\Policy, array<string, mixed>>|null Pre-update snapshots keyed by model. */
-    private static ?\WeakMap $snapshots = null;
-
     /**
      * Enforce the both-or-neither tenant ownership invariant before any
      * persistence. A row with only one of `tenant_type` / `tenant_id` set would
@@ -57,72 +63,105 @@ final class PolicyObserver
     }
 
     /**
-     * Capture the pre-update attribute snapshot so the paired `updated` hook
-     * can emit a complete before/after diff.
+     * Capture the changed fields' values before the update, other than the
+     * document, and the digest of the document it replaces when it is
+     * rewritten, so the paired `updated` hook can report the change.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return void
      */
     public function updating(Policy $policy): void
     {
-        $snapshot = [];
-
-        foreach (\array_keys($policy->getDirty()) as $key) {
-            $snapshot[$key] = $policy->getOriginal($key);
-        }
-
-        self::snapshots()[$policy] = $snapshot;
+        RecordChanges::capture($policy, ['document']);
+        RecordChanges::hold($policy, [
+            'document' => $policy->isDirty('document') ? self::digest($policy->getOriginal('document')) : null,
+        ]);
     }
 
     /**
-     * Emit the typed `PolicyCreated` event.
+     * Report the policy created.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return void
      */
     public function created(Policy $policy): void
     {
-        Event::dispatch(new PolicyCreated($policy));
+        OperationScope::dispatch(new PolicyCreated(
+            OperationScope::current($policy),
+            Reference::of($policy),
+            $policy->name,
+            Reference::tenantOf($policy),
+            self::digest($policy->document),
+            $policy->getAttribute('is_system') === true,
+        ));
     }
 
     /**
-     * Emit the typed `PolicyUpdated` event with the before/after diff captured
-     * in the paired `updating` hook.
+     * Report the policy updated, with the before/after diff and the previous
+     * document's digest captured in the paired `updating` hook.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return void
      */
     public function updated(Policy $policy): void
     {
-        $snapshots = self::snapshots();
-        $before    = $snapshots[$policy] ?? [];
+        /** @var array{document?: \SineMacula\Laravel\Authorization\Support\DocumentDigest|null} $held */
+        $held = RecordChanges::release($policy);
 
-        Event::dispatch(new PolicyUpdated($policy, [
-            'before' => $before,
-            'after'  => $policy->getChanges(),
-        ]));
-
-        unset($snapshots[$policy]);
+        OperationScope::dispatch(new PolicyUpdated(
+            OperationScope::current($policy),
+            Reference::of($policy),
+            $policy->name,
+            Reference::tenantOf($policy),
+            RecordChanges::diff($policy),
+            self::digest($policy->document),
+            $held['document'] ?? null,
+        ));
     }
 
     /**
-     * Emit the typed `PolicyDeleted` event.
+     * Read, before the row goes, every grantee the policy is attached to, which
+     * the delete takes with it.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @return void
+     */
+    public function deleting(Policy $policy): void
+    {
+        RecordChanges::hold($policy, ['grantees' => GrantTarget::POLICY->holders(Reference::of($policy)->id)]);
+    }
+
+    /**
+     * Report the policy deleted, with the grantees read in the paired
+     * `deleting` hook.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return void
      */
     public function deleted(Policy $policy): void
     {
-        Event::dispatch(new PolicyDeleted($policy));
+        /** @var array{grantees?: list<\SineMacula\Laravel\Authorization\Support\Reference>} $held */
+        $held = RecordChanges::release($policy);
+
+        OperationScope::dispatch(new PolicyDeleted(
+            OperationScope::current($policy),
+            Reference::of($policy),
+            $policy->name,
+            Reference::tenantOf($policy),
+            self::digest($policy->document),
+            $held['grantees'] ?? [],
+        ));
     }
 
     /**
-     * Return the shared snapshot map, creating it on first access.
+     * Return the digest of a document as the model casts it: a decoded array,
+     * or anything else as an empty document.
      *
-     * @return \WeakMap<\SineMacula\Laravel\Authorization\Models\Policy, array<string, mixed>>
+     * @param  mixed  $document
+     * @return \SineMacula\Laravel\Authorization\Support\DocumentDigest
      */
-    private static function snapshots(): \WeakMap
+    private static function digest(mixed $document): DocumentDigest
     {
-        return self::$snapshots ??= new \WeakMap;
+        return DocumentDigest::of(\is_array($document) ? $document : []);
     }
 }

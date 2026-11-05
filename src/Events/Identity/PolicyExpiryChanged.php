@@ -5,18 +5,18 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Events\Identity;
 
 use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
-use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * Dispatched when an attachment or sync rewrites the expiry of a policy
- * attached to the identity.
+ * Dispatched when an attach or sync rewrites the expiry of a policy the grantee
+ * holds: a live attachment given another expiry, or an expired attachment
+ * re-armed. The grant service dispatches it alongside `PolicyAttached`.
  *
- * The grant service dispatches it alongside `PolicyAttached` when an attachment
- * changes a live policy's expiry, or when an attachment or sync re-arms a
- * policy whose attachment has expired, so audit consumers can render the expiry
- * change as its own row. Without it, attaching again a forever policy with an
- * expiry would shorten it (or extend an expiring attachment to forever) without
- * an audit trail.
+ * A snapshot of plain values (references, the name, the scope and times), never
+ * a model. It is dispatched once the write commits, on the package's
+ * connection, and never for a write that rolls back or changes nothing.
  *
  * Part of the SemVer-stable event API; breaking changes require a major version
  * bump.
@@ -31,23 +31,35 @@ final readonly class PolicyExpiryChanged implements IdentityEvent
     /**
      * Create a new event instance.
      *
-     * @param  object  $authorizable
-     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
-     * @param  \DateTimeInterface|null  $previousExpiresAt
-     * @param  \DateTimeInterface|null  $newExpiresAt
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $policy
+     * @param  string  $name
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
+     * @param  \DateTimeImmutable|null  $previousExpiresAt
+     * @param  \DateTimeImmutable|null  $expiresAt
      */
     public function __construct(
 
-        /** Authorizable identity whose policy attachment changed expiry. */
-        public object $authorizable,
+        /** The call that made the change: its id, actor and time. */
+        public Operation $operation,
 
-        /** Policy whose pivot row had its `expires_at` mutated. */
-        public Policy $policy,
+        /** The grantee whose grant changed. */
+        public Reference $grantee,
 
-        /** Pre-write `expires_at`; null indicates a forever grant. */
-        public ?\DateTimeInterface $previousExpiresAt,
+        /** The policy whose grant was re-dated. */
+        public Reference $policy,
 
-        /** Post-write `expires_at`; null indicates a forever grant. */
-        public ?\DateTimeInterface $newExpiresAt,
+        /** The policy's name. */
+        public string $name,
+
+        /** Where the grant holds: its tenant and application. */
+        public GrantScope $scope,
+
+        /** The expiry before the write, in UTC; null for forever. */
+        public ?\DateTimeImmutable $previousExpiresAt,
+
+        /** The expiry after the write, in UTC; null for forever. */
+        public ?\DateTimeImmutable $expiresAt,
     ) {}
 }

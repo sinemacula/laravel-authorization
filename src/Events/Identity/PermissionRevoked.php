@@ -5,10 +5,17 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Events\Identity;
 
 use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
-use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * Dispatched when a direct permission is revoked from an authorizable identity.
+ * Dispatched when a direct permission is revoked from a grantee, once for each
+ * permission a revocation by name removes.
+ *
+ * A snapshot of plain values (references, the name, the scope and times), never
+ * a model. It is dispatched once the write commits, on the package's
+ * connection, and never for a write that rolls back or changes nothing.
  *
  * Part of the SemVer-stable event API; breaking changes require a major version
  * bump.
@@ -23,15 +30,27 @@ final readonly class PermissionRevoked implements IdentityEvent
     /**
      * Create a new event instance.
      *
-     * @param  object  $authorizable
-     * @param  \SineMacula\Laravel\Authorization\Models\Permission  $permission
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $permission
+     * @param  string  $name
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
      */
     public function __construct(
 
-        /** Authorizable identity from which the permission was revoked. */
-        public object $authorizable,
+        /** The call that made the change: its id, actor and time. */
+        public Operation $operation,
 
-        /** Permission that was revoked from the identity. */
-        public Permission $permission,
+        /** The grantee whose grant changed. */
+        public Reference $grantee,
+
+        /** The permission revoked. */
+        public Reference $permission,
+
+        /** The permission's name. */
+        public string $name,
+
+        /** Where the grant holds: its tenant and application. */
+        public GrantScope $scope,
     ) {}
 }

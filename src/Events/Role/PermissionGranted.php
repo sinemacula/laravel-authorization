@@ -4,15 +4,20 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events\Role;
 
-use SineMacula\Laravel\Authorization\Models\Permission;
-use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * Dispatched when a permission is attached to a role.
+ * Dispatched once a permission is granted to a role, once for each permission a
+ * grant or sync writes.
  *
- * Distinct from `Identity\PermissionGranted`, which fires when a permission is
- * attached directly to an authorizable identity. Audit consumers use the event
- * class to distinguish role-catalogue mutations from identity-level grants.
+ * Distinct from `Identity\PermissionGranted`, which reports a permission
+ * granted to a grantee directly.
+ *
+ * A snapshot of plain values, never a model. It is dispatched once the write
+ * commits, on the package's connection, and never for a write that rolls back
+ * or changes nothing.
  *
  * Part of the SemVer-stable event API; breaking changes require a major version
  * bump.
@@ -22,20 +27,36 @@ use SineMacula\Laravel\Authorization\Models\Role;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class PermissionGranted
+final readonly class PermissionGranted implements AuthorizationEvent
 {
     /**
      * Create a new event instance.
      *
-     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
-     * @param  \SineMacula\Laravel\Authorization\Models\Permission  $permission
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $role
+     * @param  string  $roleName
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $permission
+     * @param  string  $permissionName
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      */
     public function __construct(
 
-        /** Role that received the permission attachment. */
-        public Role $role,
+        /** The call that made the change: its id, actor and time. */
+        public Operation $operation,
 
-        /** Permission that was attached to the role. */
-        public Permission $permission,
+        /** The role. */
+        public Reference $role,
+
+        /** The role's name. */
+        public string $roleName,
+
+        /** The permission granted. */
+        public Reference $permission,
+
+        /** The permission's name. */
+        public string $permissionName,
+
+        /** The tenant that owns the role; null for the platform. */
+        public ?Reference $tenant,
     ) {}
 }

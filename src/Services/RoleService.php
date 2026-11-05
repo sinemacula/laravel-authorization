@@ -6,8 +6,8 @@ namespace SineMacula\Laravel\Authorization\Services;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\UniqueConstraintViolationException;
-use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
@@ -18,6 +18,9 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Creates, renames, describes, re-parents, deletes and lists roles, and grants,
@@ -36,12 +39,14 @@ use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
  * through another tenant's role is refused as well.
  *
  * Granting a permission the role carries changes nothing, and a concurrent
- * duplicate never surfaces a unique-constraint violation. The role permission
- * events are dispatched once the transaction has returned, and only for a write
- * that changed something.
+ * duplicate never surfaces a unique-constraint violation. The role and role
+ * permission events are dispatched once the write commits, on the package's
+ * connection, and only for a write that changed something.
  *
- * Each method takes the acting subject as `$actor`, the reads as well as the
- * writes: null for console and system work.
+ * Each method takes the actor making the call as `$actor`, a model or a
+ * reference, the reads as well as the writes: null for console and system work.
+ * Every event a write dispatches carries it, with one operation id the call's
+ * events share; it is never read from the authenticated user.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -60,17 +65,17 @@ final class RoleService
      * @param  string|null  $description
      * @param  int|null  $rank
      * @param  string|null  $id
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Models\Role
      *
      * @throws \Throwable
      */
-    public function create(string $name, ?string $guard = null, ?string $description = null, ?int $rank = null, ?string $id = null, ?object $actor = null): Role
+    public function create(string $name, ?string $guard = null, ?string $description = null, ?int $rank = null, ?string $id = null, Model|Reference|null $actor = null): Role
     {
         $class = self::roleClass();
         $model = new $class;
 
-        return RecordWriter::save(static fn (): Role => $model, [
+        return RecordWriter::save($actor, static fn (): Role => $model, [
             $model->getKeyName() => $id,
             'name'               => $name,
             'guard'              => $guard,
@@ -84,14 +89,14 @@ final class RoleService
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  string  $name
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Models\Role
      *
      * @throws \Throwable
      */
-    public function rename(Role|string $role, string $name, ?object $actor = null): Role
+    public function rename(Role|string $role, string $name, Model|Reference|null $actor = null): Role
     {
-        return RecordWriter::save(static fn (): Role => self::resolve($role), ['name' => $name]);
+        return RecordWriter::save($actor, static fn (): Role => self::resolve($role), ['name' => $name]);
     }
 
     /**
@@ -99,28 +104,29 @@ final class RoleService
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  string|null  $description
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Models\Role
      *
      * @throws \Throwable
      */
-    public function describe(Role|string $role, ?string $description, ?object $actor = null): Role
+    public function describe(Role|string $role, ?string $description, Model|Reference|null $actor = null): Role
     {
-        return RecordWriter::save(static fn (): Role => self::resolve($role), ['description' => $description]);
+        return RecordWriter::save($actor, static fn (): Role => self::resolve($role), ['description' => $description]);
     }
 
     /**
-     * Delete a role, and with it every grant of it.
+     * Delete a role, and with it every grant of it. The deleted event lists
+     * every grantee that held it and every permission it carried.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return void
      *
      * @throws \Throwable
      */
-    public function delete(Role|string $role, ?object $actor = null): void
+    public function delete(Role|string $role, Model|Reference|null $actor = null): void
     {
-        RecordWriter::delete(static fn (): Role => self::resolve($role));
+        RecordWriter::delete($actor, static fn (): Role => self::resolve($role));
     }
 
     /**
@@ -128,10 +134,10 @@ final class RoleService
      * of that guard or guard-agnostic.
      *
      * @param  string|null  $guard
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role>
      */
-    public function list(?string $guard = null, ?object $actor = null): Collection
+    public function list(?string $guard = null, Model|Reference|null $actor = null): Collection
     {
         // @phpstan-ignore staticMethod.dynamicCall
         return self::roleClass()::query()
@@ -151,15 +157,15 @@ final class RoleService
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string|null  $parent
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Models\Role
      *
      * @throws \Throwable
      */
-    public function setParent(Role|string $role, Role|string|null $parent, ?object $actor = null): Role
+    public function setParent(Role|string $role, Role|string|null $parent, Model|Reference|null $actor = null): Role
     {
         /** @var \SineMacula\Laravel\Authorization\Models\Role */
-        return AuthorizationConnection::connection()->transaction(static function () use ($role, $parent): Role {
+        return OperationScope::run(Operation::begin($actor), static function () use ($role, $parent): Role {
             $model       = self::resolve($role);
             $parentModel = $parent === null ? null : self::resolve($parent, $model->guard);
 
@@ -183,24 +189,25 @@ final class RoleService
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Enums\GrantOutcome
      *
      * @throws \Throwable
      */
-    public function grantPermission(Role|string $role, Permission|string $permission, ?object $actor = null): GrantOutcome
+    public function grantPermission(Role|string $role, Permission|string $permission, Model|Reference|null $actor = null): GrantOutcome
     {
-        /** @var list<\SineMacula\Laravel\Authorization\Events\Role\PermissionGranted> $events */
-        $events = AuthorizationConnection::connection()->transaction(static function () use ($role, $permission): array {
+        return OperationScope::run(Operation::begin($actor), static function (Operation $operation) use ($role, $permission): GrantOutcome {
             $model  = self::resolve($role);
             $target = self::permissionFor($model, $permission);
 
-            return self::writeAttachment($model, $target) ? [new RolePermissionGranted($model, $target)] : [];
+            if (!self::writeAttachment($model, $target)) {
+                return GrantOutcome::UNCHANGED;
+            }
+
+            OperationScope::dispatch(self::event(RolePermissionGranted::class, $operation, $model, $target));
+
+            return GrantOutcome::GRANTED;
         });
-
-        self::dispatch($events);
-
-        return $events === [] ? GrantOutcome::UNCHANGED : GrantOutcome::GRANTED;
     }
 
     /**
@@ -212,15 +219,14 @@ final class RoleService
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return int
      *
      * @throws \Throwable
      */
-    public function revokePermission(Role|string $role, Permission|string $permission, ?object $actor = null): int
+    public function revokePermission(Role|string $role, Permission|string $permission, Model|Reference|null $actor = null): int
     {
-        /** @var list<\SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked> $events */
-        $events = AuthorizationConnection::connection()->transaction(static function () use ($role, $permission): array {
+        return OperationScope::run(Operation::begin($actor), static function (Operation $operation) use ($role, $permission): int {
             $model = self::resolve($role);
             $held  = self::heldPermissionIds($model);
 
@@ -231,12 +237,15 @@ final class RoleService
             $model->unsetRelation('permissions');
             $model->permissions()->detach(\array_map(static fn (Permission $target): string => $target->id, $revoked));
 
-            return \array_map(static fn (Permission $target): RolePermissionRevoked => new RolePermissionRevoked($model, $target), $revoked);
+            OperationScope::dispatch(...\array_map(static fn (Permission $target): RolePermissionRevoked => self::event(
+                RolePermissionRevoked::class,
+                $operation,
+                $model,
+                $target,
+            ), $revoked));
+
+            return \count($revoked);
         });
-
-        self::dispatch($events);
-
-        return \count($events);
     }
 
     /**
@@ -244,23 +253,22 @@ final class RoleService
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Permission|string>  $permissions
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Services\SyncResult
      *
      * @throws \Throwable
      */
-    public function syncPermissions(Role|string $role, array $permissions, ?object $actor = null): SyncResult
+    public function syncPermissions(Role|string $role, array $permissions, Model|Reference|null $actor = null): SyncResult
     {
-        $events = [];
-
-        /** @var \SineMacula\Laravel\Authorization\Services\SyncResult $result */
-        $result = AuthorizationConnection::connection()->transaction(static function () use ($role, $permissions, &$events): SyncResult {
+        /** @var \SineMacula\Laravel\Authorization\Services\SyncResult */
+        return OperationScope::run(Operation::begin($actor), static function (Operation $operation) use ($role, $permissions): SyncResult {
             $model    = self::resolve($role);
             $relation = $model->permissions();
             $held     = self::heldPermissionIds($model);
             $desired  = self::desired($model, $permissions, $held);
             $revoked  = \array_values(\array_diff($held, \array_map(static fn (Permission $target): string => $target->id, $desired)));
             $granted  = [];
+            $events   = [];
 
             $relation->detach($revoked);
 
@@ -270,19 +278,17 @@ final class RoleService
                 }
 
                 $granted[] = $target->id;
-                $events[]  = new RolePermissionGranted($model, $target);
+                $events[]  = self::event(RolePermissionGranted::class, $operation, $model, $target);
             }
 
             foreach ($relation->getRelated()->newQuery()->withoutGlobalScope(TenantScope::class)->whereKey($revoked)->get() as $target) {
-                $events[] = new RolePermissionRevoked($model, $target);
+                $events[] = self::event(RolePermissionRevoked::class, $operation, $model, $target);
             }
+
+            OperationScope::dispatch(...$events);
 
             return new SyncResult($granted, [], $revoked);
         });
-
-        self::dispatch($events);
-
-        return $result;
     }
 
     /**
@@ -394,16 +400,20 @@ final class RoleService
     }
 
     /**
-     * Dispatch the call's events, once its transaction has returned.
+     * Build a role permission event for the permission granted to or revoked
+     * from the role.
      *
-     * @param  list<object>  $events
-     * @return void
+     * @template TEvent of \SineMacula\Laravel\Authorization\Events\Role\PermissionGranted|\SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked
+     *
+     * @param  class-string<TEvent>  $event
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+     * @param  \SineMacula\Laravel\Authorization\Models\Permission  $permission
+     * @return TEvent
      */
-    private static function dispatch(array $events): void
+    private static function event(string $event, Operation $operation, Role $role, Permission $permission): RolePermissionGranted|RolePermissionRevoked
     {
-        foreach ($events as $event) {
-            Event::dispatch($event);
-        }
+        return new $event($operation, Reference::of($role), $role->name, Reference::of($permission), $permission->name, Reference::tenantOf($role));
     }
 
     /**

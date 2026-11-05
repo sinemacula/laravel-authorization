@@ -5,10 +5,17 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Events\Identity;
 
 use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
-use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * Dispatched when a policy is attached to an authorizable identity.
+ * Dispatched when a policy is attached to a grantee, or an attachment of it
+ * that had expired is re-armed.
+ *
+ * A snapshot of plain values (references, the name, the scope and times), never
+ * a model. It is dispatched once the write commits, on the package's
+ * connection, and never for a write that rolls back or changes nothing.
  *
  * Part of the SemVer-stable event API; breaking changes require a major version
  * bump.
@@ -23,15 +30,31 @@ final readonly class PolicyAttached implements IdentityEvent
     /**
      * Create a new event instance.
      *
-     * @param  object  $authorizable
-     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $policy
+     * @param  string  $name
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
+     * @param  \DateTimeImmutable|null  $expiresAt
      */
     public function __construct(
 
-        /** Authorizable identity that the policy was attached to. */
-        public object $authorizable,
+        /** The call that made the change: its id, actor and time. */
+        public Operation $operation,
 
-        /** Policy row that was attached to the identity. */
-        public Policy $policy,
+        /** The grantee whose grant changed. */
+        public Reference $grantee,
+
+        /** The policy attached. */
+        public Reference $policy,
+
+        /** The policy's name. */
+        public string $name,
+
+        /** Where the grant holds: its tenant and application. */
+        public GrantScope $scope,
+
+        /** When the grant expires, in UTC; null for a forever grant. */
+        public ?\DateTimeImmutable $expiresAt,
     ) {}
 }

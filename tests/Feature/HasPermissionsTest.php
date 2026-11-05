@@ -17,6 +17,7 @@ use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ChecksGrantExpiry;
 use Tests\Concerns\ChecksGrantsByName;
 use Tests\Feature\Stubs\StubIdentity;
@@ -323,10 +324,10 @@ final class HasPermissionsTest extends TestCase
      * Return the permission a revocation event reports.
      *
      * @param  object  $event
-     * @return \Illuminate\Database\Eloquent\Model|null
+     * @return \SineMacula\Laravel\Authorization\Support\Reference|null
      */
     #[\Override]
-    protected static function revokedRow(object $event): ?Model
+    protected static function revokedRow(object $event): ?Reference
     {
         return $event instanceof PermissionRevoked ? $event->permission : null;
     }

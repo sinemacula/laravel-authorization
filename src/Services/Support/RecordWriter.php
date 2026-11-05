@@ -5,8 +5,10 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Services\Support;
 
 use Illuminate\Database\Eloquent\Model;
-use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Saves and deletes role, permission and policy rows for the record services,
@@ -14,7 +16,9 @@ use SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException;
  * row up as well as writing it.
  *
  * The write goes through the model, so its observer, name validation and system
- * protection run as they do for any save.
+ * protection run as they do for any save, as one operation for the given actor:
+ * every event the write dispatches carries the actor and the operation's id,
+ * once the write commits.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -28,15 +32,16 @@ final class RecordWriter
      *
      * @template TModel of \Illuminate\Database\Eloquent\Model
      *
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @param  \Closure(): TModel  $model
      * @param  array<string, mixed>  $attributes
      * @return TModel
      *
      * @throws \Throwable
      */
-    public static function save(\Closure $model, array $attributes): Model
+    public static function save(Model|Reference|null $actor, \Closure $model, array $attributes): Model
     {
-        return AuthorizationConnection::connection()->transaction(static function () use ($model, $attributes): Model {
+        return OperationScope::run(Operation::begin($actor), static function () use ($model, $attributes): Model {
             $record = $model();
 
             $record->forceFill($attributes)->save();
@@ -48,14 +53,15 @@ final class RecordWriter
     /**
      * Delete the model the callback returns.
      *
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @param  \Closure(): \Illuminate\Database\Eloquent\Model  $model
      * @return void
      *
      * @throws \Throwable
      */
-    public static function delete(\Closure $model): void
+    public static function delete(Model|Reference|null $actor, \Closure $model): void
     {
-        AuthorizationConnection::connection()->transaction(static function () use ($model): void {
+        OperationScope::run(Operation::begin($actor), static function () use ($model): void {
             $model()->delete();
         });
     }

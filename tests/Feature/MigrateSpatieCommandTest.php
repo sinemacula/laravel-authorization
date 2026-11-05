@@ -21,7 +21,6 @@ use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\Permission\Created as PermissionCreated;
 use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionGranted as RolePermissionGranted;
-use SineMacula\Laravel\Authorization\Support\GranteeReference;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\TestCase;
 
@@ -165,10 +164,9 @@ final class MigrateSpatieCommandTest extends TestCase
         Event::assertDispatchedTimes(RoleCreated::class, 2);
         Event::assertDispatchedTimes(PermissionCreated::class, 3);
         Event::assertDispatchedTimes(RolePermissionGranted::class, 2);
-        Event::assertDispatched(RoleAssigned::class, static fn (RoleAssigned $event): bool => $event->authorizable instanceof GranteeReference
-            && $event->authorizable->type === 'App\Models\User'
-            && $event->authorizable->id   === '42'
-            && $event->role->name         === 'admin');
+        Event::assertDispatched(RoleAssigned::class, static fn (RoleAssigned $event): bool => $event->grantee->type === 'App\Models\User'
+            && $event->grantee->id                                                                                  === '42'
+            && $event->name                                                                                         === 'admin');
         Event::assertDispatchedTimes(PermissionGranted::class, 1);
     }
 

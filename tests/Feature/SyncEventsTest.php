@@ -94,15 +94,15 @@ final class SyncEventsTest extends TestCase
         Event::assertDispatchedTimes(IdentityRoleRevoked::class, 1);
         Event::assertDispatched(
             IdentityRoleAssigned::class,
-            static fn (IdentityRoleAssigned $e): bool => $e->role->name === 'b',
+            static fn (IdentityRoleAssigned $e): bool => $e->name === 'b',
         );
         Event::assertDispatched(
             IdentityRoleAssigned::class,
-            static fn (IdentityRoleAssigned $e): bool => $e->role->name === 'c',
+            static fn (IdentityRoleAssigned $e): bool => $e->name === 'c',
         );
         Event::assertDispatched(
             IdentityRoleRevoked::class,
-            static fn (IdentityRoleRevoked $e): bool => $e->role->name === 'a',
+            static fn (IdentityRoleRevoked $e): bool => $e->name === 'a',
         );
     }
 
@@ -151,15 +151,15 @@ final class SyncEventsTest extends TestCase
         Event::assertDispatchedTimes(IdentityPermissionRevoked::class, 1);
         Event::assertDispatched(
             IdentityPermissionGranted::class,
-            static fn (IdentityPermissionGranted $e): bool => $e->permission->name === 'b:do',
+            static fn (IdentityPermissionGranted $e): bool => $e->name === 'b:do',
         );
         Event::assertDispatched(
             IdentityPermissionGranted::class,
-            static fn (IdentityPermissionGranted $e): bool => $e->permission->name === 'c:do',
+            static fn (IdentityPermissionGranted $e): bool => $e->name === 'c:do',
         );
         Event::assertDispatched(
             IdentityPermissionRevoked::class,
-            static fn (IdentityPermissionRevoked $e): bool => $e->permission->name === 'a:do',
+            static fn (IdentityPermissionRevoked $e): bool => $e->name === 'a:do',
         );
     }
 
@@ -186,15 +186,15 @@ final class SyncEventsTest extends TestCase
         Event::assertDispatchedTimes(IdentityPolicyDetached::class, 1);
         Event::assertDispatched(
             IdentityPolicyAttached::class,
-            static fn (IdentityPolicyAttached $e): bool => $e->policy->name === 'b',
+            static fn (IdentityPolicyAttached $e): bool => $e->name === 'b',
         );
         Event::assertDispatched(
             IdentityPolicyAttached::class,
-            static fn (IdentityPolicyAttached $e): bool => $e->policy->name === 'c',
+            static fn (IdentityPolicyAttached $e): bool => $e->name === 'c',
         );
         Event::assertDispatched(
             IdentityPolicyDetached::class,
-            static fn (IdentityPolicyDetached $e): bool => $e->policy->name === 'a',
+            static fn (IdentityPolicyDetached $e): bool => $e->name === 'a',
         );
     }
 
@@ -226,15 +226,15 @@ final class SyncEventsTest extends TestCase
         Event::assertDispatchedTimes(RolePermissionRevoked::class, 1);
         Event::assertDispatched(
             RolePermissionGranted::class,
-            static fn (RolePermissionGranted $e): bool => $e->permission->name === 'b:do',
+            static fn (RolePermissionGranted $e): bool => $e->permissionName === 'b:do',
         );
         Event::assertDispatched(
             RolePermissionGranted::class,
-            static fn (RolePermissionGranted $e): bool => $e->permission->name === 'c:do',
+            static fn (RolePermissionGranted $e): bool => $e->permissionName === 'c:do',
         );
         Event::assertDispatched(
             RolePermissionRevoked::class,
-            static fn (RolePermissionRevoked $e): bool => $e->permission->name === 'a:do',
+            static fn (RolePermissionRevoked $e): bool => $e->permissionName === 'a:do',
         );
     }
 

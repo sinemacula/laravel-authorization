@@ -9,6 +9,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\StubIdentity;
 
 /**
@@ -50,7 +51,7 @@ trait ChecksGrantsByName
 
         self::assertSame(0, DB::table(static::grantTable())->count());
         Event::assertDispatchedTimes(static::revokedEvent(), 1);
-        Event::assertDispatched(static::revokedEvent(), static fn (object $event): bool => self::revokedRow($event)?->is($platform) === true);
+        Event::assertDispatched(static::revokedEvent(), static fn (object $event): bool => self::revokedRow($event)?->id === Reference::of($platform)->id);
     }
 
     /**
@@ -269,12 +270,12 @@ trait ChecksGrantsByName
     abstract protected function syncTo(StubIdentity $identity, array $grants): void;
 
     /**
-     * Return the row a revocation event reports.
+     * Return the reference to the row a revocation event reports.
      *
      * @param  object  $event
-     * @return \Illuminate\Database\Eloquent\Model|null
+     * @return \SineMacula\Laravel\Authorization\Support\Reference|null
      */
-    abstract protected static function revokedRow(object $event): ?Model;
+    abstract protected static function revokedRow(object $event): ?Reference;
 
     /**
      * Create an identity, a platform row named `editor` for the `web` guard and

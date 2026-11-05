@@ -4,11 +4,20 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Concerns;
 
+use SineMacula\Laravel\Authorization\Events\SystemOverrideUsed;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
+use SineMacula\Laravel\Authorization\Support\Reference;
+
 /**
  * Shared `is_system` row-protection hooks for the primitive authorization
  * models. Every change to a persisted system row, clearing the flag included,
  * is refused unless `forceSystem()` unlocks it; consumers supply the per-model
  * exception factory.
+ *
+ * Each use of the override is reported: once the change it unlocked has been
+ * saved or the row deleted, `SystemOverrideUsed` names the record, the change
+ * and the operation (with its actor) the write belongs to, and is dispatched
+ * once the write commits.
  *
  * The guard runs on the model's `updating` and `deleting` events, so writes
  * that fire no model events skip it: `saveQuietly()`, `deleteQuietly()`, and
@@ -27,6 +36,9 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
 
     /** @var bool Per-instance single-use bypass flag for the next protected mutation. */
     private bool $systemProtectionBypassed = false;
+
+    /** @var string|null The protected change the bypass allowed on the pending write, to report once it is written. */
+    private ?string $systemOverrideUsed = null;
 
     /**
      * Unlock the next protected mutation on this instance. The bypass is
@@ -62,7 +74,17 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
      */
     protected static function bootHasSystemProtection(): void
     {
+        static::saving(static function (self $model): void {
+            $model->systemOverrideUsed = null;
+
+            OperationScope::beginWrite($model);
+        });
+
         static::deleting(static function (self $model): void {
+            $model->systemOverrideUsed = null;
+
+            OperationScope::beginWrite($model);
+
             $model->assertSystemProtectionAllows('delete');
         });
 
@@ -84,6 +106,12 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
         // idempotent on that path.
         static::saved(static function (self $model): void {
             $model->systemProtectionBypassed = false;
+
+            $model->reportSystemOverride();
+        });
+
+        static::deleted(static function (self $model): void {
+            $model->reportSystemOverride();
         });
     }
 
@@ -105,11 +133,35 @@ trait HasSystemProtection // @phpstan-ignore trait.unused
 
         if ($this->systemProtectionBypassed) {
             $this->systemProtectionBypassed = false;
+            $this->systemOverrideUsed       = $operation;
 
             return;
         }
 
         throw $this->systemProtectionException($operation);
+    }
+
+    /**
+     * Report the override the written change used, if it used one, once the
+     * write commits.
+     *
+     * @return void
+     */
+    private function reportSystemOverride(): void
+    {
+        if ($this->systemOverrideUsed === null) {
+            return;
+        }
+
+        OperationScope::dispatch(new SystemOverrideUsed(
+            OperationScope::current($this),
+            Reference::of($this),
+            $this->systemProtectedName(),
+            Reference::tenantOf($this),
+            $this->systemOverrideUsed,
+        ));
+
+        $this->systemOverrideUsed = null;
     }
 
     /**

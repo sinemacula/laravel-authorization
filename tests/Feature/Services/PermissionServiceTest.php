@@ -10,12 +10,18 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Events\Permission\Created as PermissionCreated;
+use SineMacula\Laravel\Authorization\Events\Permission\Deleted as PermissionDeleted;
+use SineMacula\Laravel\Authorization\Events\Permission\Updated as PermissionUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameException;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPermissionProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException;
 use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
+use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\CustomPermission;
 use Tests\TestCase;
@@ -34,7 +40,7 @@ use Tests\TestCase;
 #[CoversClass(PermissionService::class)]
 final class PermissionServiceTest extends TestCase
 {
-    use UsesAnAuthorizationConnection;
+    use ComparesReferences, UsesAnAuthorizationConnection;
 
     /**
      * The service is bound once in the container.
@@ -207,6 +213,54 @@ final class PermissionServiceTest extends TestCase
 
         self::assertSame(['posts:audit', 'posts:edit', 'posts:view'], self::service()->list()->pluck('name')->all());
         self::assertSame(['posts:audit', 'posts:view'], self::service()->list('api')->pluck('name')->all());
+    }
+
+    /**
+     * A change made through the service carries the caller's actor.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAChangeCarriesTheActor(): void
+    {
+        $actor = new Reference('user', 'admin-1');
+
+        self::service()->create('posts:edit');
+
+        Event::fake([PermissionUpdated::class]);
+
+        self::service()->rename('posts:edit', 'posts:write', $actor);
+
+        Event::assertDispatched(PermissionUpdated::class, static fn (PermissionUpdated $event): bool => self::refersTo($event->operation->actor, $actor)
+            && $event->name === 'posts:write');
+    }
+
+    /**
+     * Deleting a permission through the service reports, with the caller's
+     * actor, every grantee that held it and every role that carried it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testDeletingAPermissionReportsWhoLostIt(): void
+    {
+        $permission = self::service()->create('posts:edit');
+        $role       = Role::query()->create(['name' => 'editor']);
+        $actor      = new Reference('user', 'admin-1');
+
+        $role->permissions()->attach($permission->id);
+        app(GrantService::class)->grantPermission(new Reference('user', '1'), $permission);
+
+        Event::fake([PermissionDeleted::class]);
+
+        self::service()->delete($permission, $actor);
+
+        Event::assertDispatchedTimes(PermissionDeleted::class, 1);
+        Event::assertDispatched(PermissionDeleted::class, static fn (PermissionDeleted $event): bool => self::refersTo($event->operation->actor, $actor)
+            && self::keysOf($event->grantees) === ['user:1']
+            && self::keysOf($event->roles)    === self::keysOf([Reference::of($role)]));
     }
 
     /**

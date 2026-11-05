@@ -9,6 +9,7 @@ use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * The rows one grantee holds in one grant table, read and written by the grant
@@ -23,6 +24,9 @@ use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
  * so a grant the grantee already holds, including one a concurrent transaction
  * has just written, never surfaces a unique-constraint violation. When the row
  * was there, it is read back under a row lock and its expiry compared.
+ *
+ * Every row the writer inserts or rewrites records the actor the call names in
+ * `granted_by_type` and `granted_by_id`, both null for console and system work.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -39,6 +43,7 @@ final readonly class GrantTable
      * @param  string  $column
      * @param  string  $granteeType
      * @param  string  $granteeId
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $grantedBy
      */
     public function __construct(
 
@@ -56,6 +61,9 @@ final readonly class GrantTable
 
         /** The grantee's key. */
         private string $granteeId,
+
+        /** Who makes the grants, recorded on each row written; null for none. */
+        private ?Reference $grantedBy = null,
     ) {}
 
     /**
@@ -160,6 +168,8 @@ final readonly class GrantTable
             'authorizable_type' => $this->granteeType,
             'authorizable_id'   => $this->granteeId,
             'expires_at'        => $expiresAt,
+            'granted_by_type'   => $this->grantedBy?->type,
+            'granted_by_id'     => $this->grantedBy?->id,
             'created_at'        => $now,
             'updated_at'        => $now,
         ]) === 1;
@@ -179,8 +189,9 @@ final readonly class GrantTable
     }
 
     /**
-     * Write the new expiry to the platform-wide row and report the change: a
-     * re-armed grant when the previous expiry had passed, else a changed one.
+     * Write the new expiry, and the actor making the grant again, to the
+     * platform-wide row and report the change: a re-armed grant when the
+     * previous expiry had passed, else a changed one.
      *
      * @param  string  $id
      * @param  \Illuminate\Support\Carbon|null  $previous
@@ -190,8 +201,10 @@ final readonly class GrantTable
     private function rewrite(string $id, ?Carbon $previous, ?Carbon $expiresAt): GrantChange
     {
         $this->platform($id)->update([
-            'expires_at' => $expiresAt,
-            'updated_at' => Carbon::now(),
+            'expires_at'      => $expiresAt,
+            'granted_by_type' => $this->grantedBy?->type,
+            'granted_by_id'   => $this->grantedBy?->id,
+            'updated_at'      => Carbon::now(),
         ]);
 
         return new GrantChange(self::hasExpired($previous) ? GrantOutcome::REARMED : GrantOutcome::EXPIRY_CHANGED, $previous);

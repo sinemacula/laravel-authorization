@@ -54,11 +54,11 @@ trait ChecksGrantExpiry
         $this->grantUntil($identity, $second);
 
         Event::assertDispatched(static::expiryChangedEvent(), static fn (object $event): bool => \property_exists($event, 'previousExpiresAt')
-            && \property_exists($event, 'newExpiresAt')
+            && \property_exists($event, 'expiresAt')
             && $event->previousExpiresAt instanceof \DateTimeInterface
-            && $event->newExpiresAt instanceof \DateTimeInterface
+            && $event->expiresAt instanceof \DateTimeInterface
             && $event->previousExpiresAt->getTimestamp() === $first->getTimestamp()
-            && $event->newExpiresAt->getTimestamp()      === $second->getTimestamp());
+            && $event->expiresAt->getTimestamp()         === $second->getTimestamp());
         self::assertSame(1, self::authorizationConnection()->table(static::grantTable())->count());
         self::assertSame(0, DB::table(static::grantTable())->count());
     }

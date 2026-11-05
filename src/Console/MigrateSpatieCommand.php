@@ -15,7 +15,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
-use SineMacula\Laravel\Authorization\Support\GranteeReference;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Migrate data from Spatie's `laravel-permission` tables into this package's
@@ -397,7 +397,7 @@ final class MigrateSpatieCommand extends Command
      * @param  string  $column
      * @param  array<int|string, TModel>  $idMap
      * @param  bool  $dryRun
-     * @param  \Closure(\SineMacula\Laravel\Authorization\Support\GranteeReference, TModel): mixed  $grant
+     * @param  \Closure(\SineMacula\Laravel\Authorization\Support\Reference, TModel): mixed  $grant
      * @return int
      */
     private function migrateGrants(string $source, string $column, array $idMap, bool $dryRun, \Closure $grant): int
@@ -414,7 +414,7 @@ final class MigrateSpatieCommand extends Command
             }
 
             if (!$dryRun) {
-                $grant(new GranteeReference((string) $spatieGrant['model_type'], (string) $spatieGrant['model_id']), $target);
+                $grant(new Reference((string) $spatieGrant['model_type'], (string) $spatieGrant['model_id']), $target);
             }
 
             $migrated++;
