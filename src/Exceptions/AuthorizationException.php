@@ -17,8 +17,11 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
  * else: the action, the resource, the matched statement and the trace stay out
  * of the exception, and the message is a translated line of the package's
  * `authorization` language file: `denied` for a decision, `role_required` for a
- * role the subject does not hold. A consumer that needs the full decision reads
- * it from the `AuthorizationFailed` event or the manager's last decision.
+ * role the subject does not hold. A denied decision, from `authorize()` or the
+ * `permission` and `authorize` middleware, is recorded as the manager's last
+ * decision and fires the `AuthorizationFailed` event first, so a consumer that
+ * needs the full decision reads it there. A missing role is not a decision: it
+ * carries `implicit_deny`, records nothing and fires no event.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

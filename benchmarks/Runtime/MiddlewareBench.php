@@ -26,8 +26,9 @@ use Tests\Fixtures\BenchmarkIdentity;
  * Every route decorated with `role:` or `permission:` routes a request through
  * one of these middleware before the controller runs. The bench measures the
  * admit path (the optimistic case that never throws) for both middlewares —
- * this covers principal resolution through the facade, contract checks, needle
- * expansion, and the per-needle `matches()` dispatch. A reject path is
+ * this covers subject resolution through the facade, argument parsing, and
+ * either the role-membership check through `hasRole()` or the full decision
+ * through the manager's `can()` and `authorize()`. A reject path is
  * deliberately not benched: throwing is the uncommon case and exception
  * construction dominates any regression signal.
  *
@@ -99,7 +100,7 @@ final class MiddlewareBench extends BenchmarkCase
     }
 
     /**
-     * Benchmark: `RequireRole::handle()` — admit path, single needle match.
+     * Benchmark: `RequireRole::handle()` — admit path, one role held.
      *
      * @return void
      *
@@ -115,8 +116,8 @@ final class MiddlewareBench extends BenchmarkCase
     }
 
     /**
-     * Benchmark: `RequirePermission::handle()` — admit path, single needle
-     * match via role-inherited permission.
+     * Benchmark: `RequirePermission::handle()` — admit path, one action allowed
+     * by the full decision through a role-inherited permission.
      *
      * @return void
      *

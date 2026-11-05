@@ -103,7 +103,8 @@ subject, as Spatie's do; a role is not an action, so policies do not apply to th
 
 A second argument is a guard, as in Spatie's `@hasrole('admin', 'api')`. A role directive honours it: only roles of that
 authentication guard and guard-agnostic ones count, and a name that is not in `auth.guards` is refused. A permission
-directive refuses any guard with an `InvalidCheckArgumentException`, since no guard changes the decision it makes.
+directive refuses any guard with an `InvalidCheckArgumentException`, since no guard changes the decision it makes. A
+third argument is refused too, rather than dropped.
 
 ## Route middleware
 
@@ -128,15 +129,19 @@ Route::get('/api/posts', [PostController::class, 'index'])
 ```
 
 A comma does not list alternatives: as in Spatie, the second argument is the guard. `role:` honours it, limiting the
-check to the roles of that authentication guard and the guard-agnostic ones, and refuses a name that is not in
-`auth.guards`, so `role:admin,editor` fails loudly instead of being read as a guard. `permission:` refuses a guard,
-because it decides each action on the package's full decision (policies, explicit denies, the permissions held and the
-subject's tenant), which no guard changes; an explicit deny wins over a held permission there, unlike Spatie. A third
-argument is refused. The "must have all" case is expressed via middleware chaining
+check to the roles of that authentication guard and the guard-agnostic ones. It refuses a name that is not in
+`auth.guards`, and a bare name that is also the name of a role, of any tenant, since `role:editor,admin` may be an old
+"editor or admin" list rather than the `admin` guard; written as `role:editor,guard=admin`, it is always the guard. So
+`role:admin,editor` fails loudly unless `editor` is a guard and no role is called `editor`. `permission:` refuses a
+guard, because it decides each action on the package's full decision (policies, explicit denies, the permissions held
+and the subject's tenant), which no guard changes; an explicit deny wins over a held permission there, unlike Spatie. A
+third argument, or a list that names nothing, is refused. The "must have all" case is expressed via middleware chaining
 (`->middleware(['role:admin', 'role:editor'])`).
 
 `authorize:{action},{route parameter}` has no Spatie equivalent: it decides the action on the parameter's bound model,
-with the model as the resource, as `Gate::allows($action, $model)` decides it.
+with the model as the resource, as `Gate::allows($action, $model)` decides it. Like Laravel's `can` middleware, it is
+placed right after `SubstituteBindings` in the middleware priority, so it sees the bound model however the route orders
+its middleware.
 
 ## Event names
 
@@ -157,7 +162,8 @@ cover the *catalogue* lifecycle — the role/permission/policy rows themselves �
 identity-level events. The `Events\Role\PermissionGranted` / `Events\Role\PermissionRevoked` pair fires when
 permissions are attached to or detached from a role, which Spatie does not emit as a distinct event.
 
-The package also ships `AuthorizationFailed` (hard-denial, fired from `authorize()` before the exception is thrown)
+The package also ships `AuthorizationFailed` (hard-denial, fired from `authorize()`, and from the `permission` and
+`authorize` middleware, before the exception is thrown; a `role` denial is not a decision and fires none)
 and `DecisionEvaluated` (every evaluation path, success or denial, including a Gate check whose argument cannot be
 identified as a resource, which is recorded as an implicit deny with a `null` resource) — Spatie has no equivalents;
 audit consumers subscribe to these to persist the decision trace.

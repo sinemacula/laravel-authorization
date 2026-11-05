@@ -56,7 +56,8 @@ principal's role and permission grants, and anything left is denied.
   its guards, and `authorization:sync` writes them to the database on deploy, reporting stale rows rather than
   deleting them. Booting never touches the database.
 - **Route middleware and Blade directives**: `permission:`, `authorize:` and the permission directives decide on the
-  same full decision as the Gate; `role:` and the role directives check role membership. `|` separates alternatives.
+  same full decision as the Gate; `role:` and the role directives check role membership. `|` separates the names of a
+  list: any one of them admits for the middleware and the any-of directives, every one is needed for the all-of ones.
 - **System records**: roles, permissions and policies flagged `is_system` cannot be edited, deleted or have the flag
   cleared unless `forceSystem()` unlocks the next change.
 - **Explanations**: `Authorization::explain()`, the last decision of the request, and `authorization:why-can` on the
@@ -290,18 +291,23 @@ Route::get('/api/admin', ApiAdmin::class)->middleware('role:admin,api');
 - `authorize:{action},{route parameter}` decides the action on the parameter's bound model, converted as the Gate
   converts its argument (`morphClass:key`, or the identifier of an `AuthorizableResource`), or on the parameter's value
   when nothing binds it. A value that cannot be identified, such as an unsaved model, or a parameter the route does not
-  carry, denies. Without a parameter, the check has no resource. Run it after Laravel's `SubstituteBindings` (part of
-  the `web` and `api` groups) so the model is bound.
+  carry, denies. Without a parameter, the check has no resource. Like Laravel's `can:`, it is placed right after
+  `SubstituteBindings` in the middleware priority, so it decides on the bound model wherever the route lists it.
 - `role:` checks role membership. A role is not an action, so policies never apply to it: it sees the roles the
   subject's `hasRole()` sees, the platform's and its tenant's. A second argument limits it to the roles of that
-  authentication guard and the guard-agnostic ones; a name that is not in `auth.guards` is refused.
+  authentication guard and the guard-agnostic ones. A name that is not in `auth.guards` is refused, and so is a bare
+  name that is also the name of a role, since `role:editor,admin` may mean "editor or admin"; write such a guard as
+  `role:editor,guard=admin`. Checking a bare guard against the roles costs one query.
 
 In each of them `|` separates alternatives, and any one admits the request; chain the middleware to require several. A
 comma does not list alternatives: the second argument is the guard of `role:` or the route parameter of `authorize:`,
-`permission:` refuses one (no guard changes a decision), and a third argument is refused. A request without a subject
-throws Laravel's `AuthenticationException` (`401`). A denial throws the package's `AuthorizationException` (`403`) with
-the decision's reason code and the translated `authorization::authorization.denied` line, or
-`authorization::authorization.role_required` for a missing role.
+`permission:` refuses one (no guard changes a decision), and a third argument, or a list that names nothing, is refused
+with an `InvalidCheckArgumentException`. A request without a subject throws Laravel's `AuthenticationException`
+(`401`). A denial throws the package's `AuthorizationException` (`403`) with the reason code and a translated message.
+A denial of `permission:` or `authorize:` is a decision: it is recorded as the last decision and fires
+`AuthorizationFailed` once, for the list's last action, before the `authorization::authorization.denied` line is
+thrown. A denial of `role:` is not a decision: it carries `implicit_deny` and the
+`authorization::authorization.role_required` line, and records nothing and fires no event.
 
 Run the package's middleware after authentication and after any step-up middleware, so a request that is not signed
 in, or not signed in strongly enough, is answered by those (a `401` or a step-up response) before it can be denied:
@@ -334,7 +340,10 @@ The Blade directives make the same checks on the same subject:
 The permission directives (`@permission`, `@anypermission`, `@allpermissions` and their Spatie-shaped `@has…` aliases)
 decide each action on the full decision, as `@can` does: the any forms need one allowed, the all forms every one. The
 role directives check membership as `role:` does and take a guard; a permission directive refuses one. Every directive
-takes a string or a list, with `|` between names in either. With no subject, every directive is false.
+takes a string or a list, with `|` between names in either, and refuses a third argument. With no subject, every
+directive is false.
+
+### Console commands
 
 From the command line, naming an identity as `{morph type}:{key}`, where the type is a morph map alias or a class:
 
@@ -349,6 +358,8 @@ php artisan authorization:why-can user:1 posts:delete posts/42
 The listing commands are administrative views: they list every role or permission, platform-wide and tenant-owned
 alike, and show each one's owner. `grant` and `revoke` look the role up within the tenant scope, so without a resolved
 tenant they find platform-wide roles only.
+
+### Testing assertions
 
 In your tests, `SineMacula\Laravel\Authorization\Testing\Concerns\AuthorizationAssertions` adds `assertCan()`,
 `assertCannot()`, `assertHasRole()` and `assertHasPermission()`, and `actingAsIdentity($user, $tenant)` and

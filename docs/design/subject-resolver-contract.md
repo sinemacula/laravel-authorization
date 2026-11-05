@@ -85,10 +85,15 @@ subject, or denies when there is none.
 
 ## Static Resolution Path
 
-Middleware and Blade directives cannot inject the manager. They reach it through `AuthorizationManager::instance()`,
-from the `HasContainerInstance` trait. Middleware calls `Authorization::currentSubject()`; Blade helpers call
-`BladeHelpers::currentSubject()`, which delegates to the manager; both return the `Subject`, and both surfaces check the
-model it is about, `subject`.
+Middleware and Blade directives do not have the manager injected. Middleware reaches it as the root of the
+`Authorization` facade; Blade helpers reach it through `AuthorizationManager::instance()`, from the
+`HasContainerInstance` trait. Both resolve the request's subject through the manager's `currentSubject()`, so they see
+the same `Subject` as the facade and the Gate.
+
+The permission checks (the `permission` and `authorize` middleware and the permission directives) decide each action
+through the manager's full decision, `can()` and `authorize()`, on that subject: policies, explicit denies, the
+permissions held and the subject's tenant. Only the role checks (the `role` middleware and the role directives) read the
+model the subject is about, `subject`, and call its `hasRole()`.
 
 `TenantScope` reads the tenant from the `ResolvedTenant` holder, built once per request or job from the bound
 resolver, and builds a new holder when the resolver bound now is not the one it came from. Resolving the subject can
