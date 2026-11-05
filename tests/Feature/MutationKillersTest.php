@@ -4,7 +4,6 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
@@ -383,39 +382,5 @@ final class MutationKillersTest extends TestCase
             self::assertInstanceOf($class, $exception);
             self::assertStringContainsString($message, $exception->getMessage());
         }
-    }
-
-    /**
-     * Build a throwaway Eloquent model whose `getKey()` returns the supplied
-     * value — fixture helper for the collect-ids test matrix (integer / string
-     * / duplicate / empty / non-scalar).
-     *
-     * @param  mixed  $key
-     * @return \Illuminate\Database\Eloquent\Model
-     */
-    private function makeModelWithKey(mixed $key): Model
-    {
-        $model = new class extends Model {
-            /** @var mixed */
-            public mixed $fixedKey = null;
-
-            /**
-             * A test double overriding the framework key accessor, not model
-             * behaviour.
-             *
-             * @return mixed
-             *
-             * @phpstan-ignore sineMaculaLaravel.modelBehaviour
-             */
-            #[\Override]
-            public function getKey(): mixed
-            {
-                return $this->fixedKey;
-            }
-        };
-
-        $model->fixedKey = $key;
-
-        return $model;
     }
 }
