@@ -287,8 +287,10 @@ grant that has expired re-arms it with the new expiry (`REARMED`), and a new exp
 `EXPIRY_CHANGED`. A sync re-arms a listed grant that has expired with the sync's expiry, or with none when it is given
 none, and leaves a live one as it is. The trait sync methods take no expiry, so a lapsed temporary grant they list comes
 back permanent; to re-arm it for a limited time, call `GrantService::syncRoles()` (or `syncPermissions()`,
-`syncPolicies()`) with an expiry. Setting a role's parent locks the roles involved and refuses a cycle, a cycle through
-another tenant's role included. A target of the wrong kind, such as a role in a policy sync, is refused with
+`syncPolicies()`) with an expiry. Setting a role's parent locks the roles involved and refuses a cycle. A role with
+children cannot be deleted (`RoleHasChildrenException`), so no one holding a child loses what it inherited by
+surprise: move the children to another parent or delete them first. A target of the wrong kind, such as a role in a
+policy sync, is refused with
 `InvalidGrantTargetException`; a grantee that is not a saved model with a key with `InvalidGranteeException`; and an
 unsaved role, permission or policy handed to its service, which would otherwise be created or clear a parent, with
 `UnsavedRecordException`.

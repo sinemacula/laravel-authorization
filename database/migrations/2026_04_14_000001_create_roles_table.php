@@ -56,7 +56,8 @@ return new class extends Migration {
             // The parent role, for role hierarchy. A child role inherits every
             // permission of its ancestors when
             // `authorization.hierarchy.enabled` is true. Null marks the role as
-            // a root. Deleting a parent promotes its children to roots.
+            // a root. A role with children cannot be deleted (D18): the role
+            // observer refuses it, and the foreign key restricts it.
             $blueprint->uuid('parent_id')->nullable();
 
             // Role seniority. Lower values denote more senior roles (0 is the
@@ -90,7 +91,7 @@ return new class extends Migration {
 
             // The self-referencing key is declared with the table, so it holds
             // on every database, SQLite included.
-            $blueprint->foreign('parent_id')->references('id')->on($table)->nullOnDelete();
+            $blueprint->foreign('parent_id')->references('id')->on($table)->restrictOnDelete();
         });
 
         // A name is unique within its owner and guard: at most one row per

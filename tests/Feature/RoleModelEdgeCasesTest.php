@@ -4,7 +4,6 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
-use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
@@ -100,38 +99,5 @@ final class RoleModelEdgeCasesTest extends TestCase
         $role->syncPermissions(['posts:create']);
 
         self::assertFalse($role->relationLoaded('permissions'));
-    }
-
-    /**
-     * When a role's `parent_id` points at a row that has been deleted out from
-     * under it (orphaned FK), `ancestors()` breaks the walk at the missing link
-     * rather than throwing. Protects consumers against a corrupted hierarchy
-     * surfacing as an exception during evaluation.
-     *
-     * @return void
-     */
-    public function testAncestorsStopsAtOrphanedParent(): void
-    {
-        $parent = Role::create([
-            'id'    => (string) Str::uuid(),
-            'name'  => 'orphan-parent',
-            'guard' => 'web',
-        ]);
-
-        $child = Role::create([
-            'id'        => (string) Str::uuid(),
-            'name'      => 'orphan-child',
-            'guard'     => 'web',
-            'parent_id' => $parent->getKey(),
-        ]);
-
-        // Simulate a detached parent row without running through the model's
-        // delete pipeline (which would nullify children).
-        DB::table('roles')->where('id', $parent->getKey())->delete();
-
-        $ancestors = $child->fresh()?->ancestors();
-
-        self::assertNotNull($ancestors);
-        self::assertCount(0, $ancestors);
     }
 }
