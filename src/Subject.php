@@ -11,9 +11,9 @@ namespace SineMacula\Laravel\Authorization;
  * subject is the model decisions are about: a principal, or in an application
  * without principals, the model checked (its user). The identity is the person
  * or machine behind a principal, or the subject itself when there are no
- * principals. The tenant is the active tenant, null for none, so only
- * platform-wide rows count. The application and the guard say where the request
- * came in.
+ * principals, and null when the resolver gives none. The tenant is the active
+ * tenant, null for none, so only platform-wide rows count. The application and
+ * the guard say where the request came in.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -34,7 +34,7 @@ final readonly class Subject
         /** The model decisions are about. */
         public object $subject,
 
-        /** The identity behind the subject, or the subject itself. */
+        /** The identity behind the subject (or itself), or null for none. */
         public ?object $identity = null,
 
         /** The active tenant, or null when no tenant is active. */

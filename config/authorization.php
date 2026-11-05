@@ -190,13 +190,14 @@ return [
     | user to the resolver's `forUser()`, so `@can` and `can:` decide about the
     | same subject.
     |
-    | An application with principals or tenants binds its own resolver here or
+    | An application with principals or tenants names its own resolver here or
     | binds the contract directly; the `sinemacula/laravel-iam` umbrella binds
     | one that delegates to `sinemacula/laravel-authentication`. Null or a class
-    | that does not implement the contract is refused at boot. The package's
-    | default and the tenant it returns are built per request or job, so queue
-    | workers and Octane resolve them afresh, while a resolver the application
-    | binds itself is kept.
+    | that does not implement the contract is refused at boot. A class named
+    | here, like the default, is built per request or job, so queue workers and
+    | Octane resolve it afresh, while a resolver bound directly on the contract
+    | (`instance()`, `singleton()` or `bind()`) is kept. The resolved tenant is
+    | held per request or job whichever resolver is bound.
     |
     */
 

@@ -92,7 +92,8 @@ it hands over.
 
 ## Authoritative Tests
 
-- `AuthorizationManagerTest::testForOverridesResolver` (Unit) -- `for()` bypasses the bound resolver.
+- `AuthorizationManagerTest::testForOverridesResolver` (Unit) -- `for()` decides about the model named instead of the
+  resolver's subject, reading the resolver once, when `for()` is called, to keep the tenant and application.
 - `AuthorizationManagerTest::testForReturnsCloneNotSelf` (Unit) -- `for()` returns a distinct instance.
 - `AuthorizationManagerTest::testForKeepsTheRequestsTenantApplicationAndGuard` (Unit) -- `for()` keeps the request's
   tenant, application and guard.
