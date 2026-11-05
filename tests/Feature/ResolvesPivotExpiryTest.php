@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -27,6 +28,8 @@ use Tests\TestCase;
 #[CoversTrait(ResolvesPivotExpiry::class)]
 final class ResolvesPivotExpiryTest extends TestCase
 {
+    use ActsAsTenant;
+
     /**
      * Allow lazy loading again.
      *
@@ -38,6 +41,39 @@ final class ResolvesPivotExpiryTest extends TestCase
         Model::preventLazyLoading(false);
 
         parent::tearDown();
+    }
+
+    /**
+     * A grant counts only in its scope: "admin in A, viewer in B" for one
+     * identity and two platform roles, while a platform-wide grant counts in
+     * every tenant and with none (AUTHZ-5.1, AUTHZ-5.7).
+     *
+     * @return void
+     */
+    public function testGrantsCountOnlyInTheirScope(): void
+    {
+        $tenantA = self::createTenant('tenant-a');
+        $tenantB = self::createTenant('tenant-b');
+        $user    = StubIdentity::query()->create(['id' => 'user-1']);
+
+        Role::query()->create(['name' => 'admin']);
+        Role::query()->create(['name' => 'viewer']);
+        Role::query()->create(['name' => 'member']);
+
+        $user->assignRole('admin', null, $tenantA);
+        $user->assignRole('viewer', null, $tenantB);
+        $user->assignRole('member');
+
+        $this->actAsTenant($tenantA);
+        self::assertEqualsCanonicalizing(['admin', 'member'], $user->getRoles());
+        self::assertTrue(self::reread($user)->hasRole('admin'));
+
+        $this->actAsTenant($tenantB);
+        self::assertEqualsCanonicalizing(['viewer', 'member'], $user->getRoles());
+        self::assertFalse(self::reread($user)->hasRole('admin'));
+
+        $this->actAsTenant(null);
+        self::assertSame(['member'], $user->getRoles());
     }
 
     /**
@@ -103,5 +139,16 @@ final class ResolvesPivotExpiryTest extends TestCase
         $this->expectExceptionObject(new \LogicException('The authorization grant service is not bound; register the package\'s service provider.'));
 
         $user->assignRole('editor');
+    }
+
+    /**
+     * Read the identity afresh, as a later request would.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @return \Tests\Feature\Stubs\StubIdentity
+     */
+    private static function reread(StubIdentity $user): StubIdentity
+    {
+        return StubIdentity::query()->whereKey($user->getKey())->firstOrFail();
     }
 }

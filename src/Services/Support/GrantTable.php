@@ -12,13 +12,14 @@ use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * The rows one grantee holds in one grant table, read and written by the grant
- * service inside its transaction.
+ * The rows one grantee holds in one grant table within one scope, read and
+ * written by the grant service inside its transaction.
  *
- * Every grant is written platform-wide, for every application: both tenant
- * columns and the application are null. Nothing reads a grant's scope yet, so a
- * row in a tenant or application scope would count everywhere; the service
- * therefore writes none.
+ * The scope is a tenant, or the platform when it is null; every row is written
+ * for every application (a null application). Grants, re-arms, reads of what is
+ * held and revocations stay within the scope, so a role held in one tenant and
+ * in another, or platform-wide, are separate grants. Only a grantee's deletion
+ * revokes in every scope.
  *
  * A grant inserts its row with insert-or-ignore against the table's unique key,
  * so a grant the grantee already holds, including one a concurrent transaction
@@ -44,6 +45,7 @@ final readonly class GrantTable
      * @param  string  $granteeType
      * @param  string  $granteeId
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $grantedBy
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      */
     public function __construct(
 
@@ -64,6 +66,9 @@ final readonly class GrantTable
 
         /** Who makes the grants, recorded on each row written; null for none. */
         private ?Reference $grantedBy = null,
+
+        /** The tenant the grants hold in; null for platform-wide. */
+        private ?Reference $tenant = null,
     ) {}
 
     /**
@@ -121,39 +126,62 @@ final readonly class GrantTable
     }
 
     /**
-     * Return the keys of the rows the grantee holds, among the given ones when
-     * a list is given, in any scope and whether or not the grant has expired.
+     * Return the keys of the rows the grantee holds in the scope, among the
+     * given ones when a list is given, whether or not the grant has expired.
      *
      * @param  list<string>|null  $ids
      * @return list<string>
      */
     public function held(?array $ids = null): array
     {
-        $query = $this->grantee()->distinct();
-
-        if ($ids !== null) {
-            $query->whereIn($this->column, $ids);
-        }
-
-        return \array_values(\array_map(static fn (mixed $key): string => \is_scalar($key) ? (string) $key : '', $query->pluck($this->column)->all()));
+        return self::keys($this->inScope()->distinct(), $this->column, $ids);
     }
 
     /**
-     * Delete the grantee's rows for the given keys, in every scope. Until a
-     * grant's scope is read, every row counts platform-wide, so a revocation
-     * removes each row a check would read as the grant.
+     * Delete the grantee's rows in the scope for the given keys.
      *
      * @param  list<string>  $ids
      * @return void
      */
     public function revoke(array $ids): void
     {
-        $this->grantee()->whereIn($this->column, $ids)->delete();
+        $this->inScope()->whereIn($this->column, $ids)->delete();
     }
 
     /**
-     * Insert the platform-wide row unless the table already holds it, and
-     * report whether it was inserted.
+     * Return every grant the grantee holds, in any scope, as its granted key
+     * and the tenant it holds in (null for platform-wide), for the revocation
+     * of everything a deleted grantee held.
+     *
+     * @return list<array{0: string, 1: \SineMacula\Laravel\Authorization\Support\Reference|null}>
+     */
+    public function grantsInEveryScope(): array
+    {
+        $grants = [];
+
+        foreach ($this->grantee()->get([$this->column, 'tenant_type', 'tenant_id']) as $row) {
+            /** @var array<string, scalar|null> $columns */
+            $columns  = (array) $row;
+            $type     = $columns['tenant_type'] ?? null;
+            $grants[] = [(string) $columns[$this->column], $type === null ? null : new Reference((string) $type, (string) $columns['tenant_id'])];
+        }
+
+        return $grants;
+    }
+
+    /**
+     * Delete every row the grantee holds, in every scope.
+     *
+     * @return void
+     */
+    public function revokeInEveryScope(): void
+    {
+        $this->grantee()->delete();
+    }
+
+    /**
+     * Insert the row in the scope unless the table already holds it, and report
+     * whether it was inserted.
      *
      * @param  string  $id
      * @param  \Illuminate\Support\Carbon|null  $expiresAt
@@ -167,6 +195,8 @@ final readonly class GrantTable
             $this->column       => $id,
             'authorizable_type' => $this->granteeType,
             'authorizable_id'   => $this->granteeId,
+            'tenant_type'       => $this->tenant?->type,
+            'tenant_id'         => $this->tenant?->id,
             'expires_at'        => $expiresAt,
             'granted_by_type'   => $this->grantedBy?->type,
             'granted_by_id'     => $this->grantedBy?->id,
@@ -176,22 +206,22 @@ final readonly class GrantTable
     }
 
     /**
-     * Read the expiry of the platform-wide row under a row lock.
+     * Read the expiry of the row in the scope under a row lock.
      *
      * @param  string  $id
      * @return \Illuminate\Support\Carbon|null
      */
     private function lockedExpiry(string $id): ?Carbon
     {
-        $row = $this->platform($id)->lockForUpdate()->sole(['expires_at']);
+        $row = $this->inScope()->where($this->column, $id)->lockForUpdate()->sole(['expires_at']);
 
         return UtcDateTime::toUtc($row->expires_at);
     }
 
     /**
-     * Write the new expiry, and the actor making the grant again, to the
-     * platform-wide row and report the change: a re-armed grant when the
-     * previous expiry had passed, else a changed one.
+     * Write the new expiry, and the actor making the grant again, to the row in
+     * the scope and report the change: a re-armed grant when the previous
+     * expiry had passed, else a changed one.
      *
      * @param  string  $id
      * @param  \Illuminate\Support\Carbon|null  $previous
@@ -200,7 +230,7 @@ final readonly class GrantTable
      */
     private function rewrite(string $id, ?Carbon $previous, ?Carbon $expiresAt): GrantChange
     {
-        $this->platform($id)->update([
+        $this->inScope()->where($this->column, $id)->update([
             'expires_at'      => $expiresAt,
             'granted_by_type' => $this->grantedBy?->type,
             'granted_by_id'   => $this->grantedBy?->id,
@@ -211,18 +241,37 @@ final readonly class GrantTable
     }
 
     /**
-     * Query the grantee's platform-wide row for the given key.
+     * Query the grantee's rows in the scope, for every application.
      *
-     * @param  string  $id
      * @return \Illuminate\Database\Query\Builder
      */
-    private function platform(string $id): Builder
+    private function inScope(): Builder
     {
-        return $this->grantee()
-            ->where($this->column, $id)
-            ->whereNull('tenant_type')
-            ->whereNull('tenant_id')
-            ->whereNull('application');
+        $query = $this->grantee()->whereNull('application');
+
+        if ($this->tenant === null) {
+            return $query->whereNull('tenant_type')->whereNull('tenant_id');
+        }
+
+        return $query->where('tenant_type', $this->tenant->type)->where('tenant_id', $this->tenant->id);
+    }
+
+    /**
+     * Return the granted keys the query reads, among the given ones when a list
+     * is given.
+     *
+     * @param  \Illuminate\Database\Query\Builder  $query
+     * @param  string  $column
+     * @param  list<string>|null  $ids
+     * @return list<string>
+     */
+    private static function keys(Builder $query, string $column, ?array $ids): array
+    {
+        if ($ids !== null) {
+            $query->whereIn($column, $ids);
+        }
+
+        return \array_values(\array_map(static fn (mixed $key): string => \is_scalar($key) ? (string) $key : '', $query->pluck($column)->all()));
     }
 
     /**

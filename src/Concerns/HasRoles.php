@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Concerns;
 
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
@@ -12,6 +13,7 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizableRolePivot;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\GrantResolver;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Role membership trait for authorizable models.
@@ -69,13 +71,14 @@ trait HasRoles // @phpstan-ignore trait.unused
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  \DateTimeInterface|null  $expiresAt
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @return static
      *
      * @throws \Throwable
      */
-    public function assignRole(Role|string $role, ?\DateTimeInterface $expiresAt = null): static
+    public function assignRole(Role|string $role, ?\DateTimeInterface $expiresAt = null, Model|Reference|null $tenant = null): static
     {
-        self::authorizationGrants()->grantRole($this, $role, $expiresAt);
+        self::authorizationGrants()->grantRole($this, $role, $expiresAt, null, $tenant);
 
         return $this;
     }
@@ -91,13 +94,14 @@ trait HasRoles // @phpstan-ignore trait.unused
      * detached, and not at all when the identity held none.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @return static
      *
      * @throws \Throwable
      */
-    public function revokeRole(Role|string $role): static
+    public function revokeRole(Role|string $role, Model|Reference|null $tenant = null): static
     {
-        self::authorizationGrants()->revokeRole($this, $role);
+        self::authorizationGrants()->revokeRole($this, $role, null, $tenant);
 
         return $this;
     }
@@ -120,13 +124,14 @@ trait HasRoles // @phpstan-ignore trait.unused
      * never replaces a platform grant.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Role|string>  $roles
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @return static
      *
      * @throws \Throwable
      */
-    public function syncRoles(array $roles): static
+    public function syncRoles(array $roles, Model|Reference|null $tenant = null): static
     {
-        self::authorizationGrants()->syncRoles($this, $roles);
+        self::authorizationGrants()->syncRoles($this, $roles, null, null, $tenant);
 
         return $this;
     }
@@ -141,6 +146,11 @@ trait HasRoles // @phpstan-ignore trait.unused
      * name of a platform system role (see `RoleObserver`), so a name check for
      * a system role is only ever met by the system role itself. With a guard,
      * only a held role of that guard or of no guard counts.
+     *
+     * Only roles granted in the current tenant, or platform-wide, count. They
+     * are read once per model instance, under the tenant current then, as
+     * Eloquent keeps any loaded relation; the tenant is held for a request or
+     * job, so a model read in that request or job sees its tenant.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  string|null  $guard

@@ -92,15 +92,16 @@ enum GrantTarget: string
      *
      * @param  mixed  $target
      * @param  string|null  $guard
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @return \Illuminate\Database\Eloquent\Model
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
      */
-    public function resolve(mixed $target, ?string $guard): Model
+    public function resolve(mixed $target, ?string $guard, ?Reference $tenant = null): Model
     {
-        return \is_string($target) ? $this->named($target, $guard)[0] : $this->assertTarget($target);
+        return \is_string($target) ? $this->named($target, $guard, $tenant)[0] : $this->assertTarget($target);
     }
 
     /**
@@ -110,13 +111,14 @@ enum GrantTarget: string
      *
      * @param  string  $name
      * @param  string|null  $guard
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @return non-empty-list<\Illuminate\Database\Eloquent\Model>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
      */
-    public function named(string $name, ?string $guard): array
+    public function named(string $name, ?string $guard, ?Reference $tenant = null): array
     {
         if ($this === self::POLICY) {
             throw new InvalidGrantTargetException($this->value, $name);
@@ -125,7 +127,7 @@ enum GrantTarget: string
         /** @var string $default */
         $default = config('authorization.defaults.guard', 'web');
 
-        $models = GuardScopedLookup::allForGuard($this->modelClass(), $name, $guard ?? $default);
+        $models = GuardScopedLookup::allForGuard($this->modelClass(), $name, $guard ?? $default, $tenant);
 
         if ($models === [] && $this === self::PERMISSION) {
             throw new UnknownPermissionException($name);
@@ -147,15 +149,16 @@ enum GrantTarget: string
      * @param  string  $name
      * @param  string|null  $guard
      * @param  list<string>  $held
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @return non-empty-list<\Illuminate\Database\Eloquent\Model>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
      */
-    public function heldOrFirst(string $name, ?string $guard, array $held): array
+    public function heldOrFirst(string $name, ?string $guard, array $held, ?Reference $tenant = null): array
     {
-        $named = $this->named($name, $guard);
+        $named = $this->named($name, $guard, $tenant);
         $kept  = \array_values(\array_filter($named, static function (Model $model) use ($held): bool {
             /** @var int|string $key */
             $key = $model->getKey();
@@ -225,10 +228,11 @@ enum GrantTarget: string
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \Illuminate\Database\Eloquent\Model  $target
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
      * @param  \DateTimeInterface|null  $expiresAt
      * @return \SineMacula\Laravel\Authorization\Contracts\IdentityEvent
      */
-    public function grantedEvent(Operation $operation, Reference $grantee, Model $target, ?\DateTimeInterface $expiresAt): IdentityEvent
+    public function grantedEvent(Operation $operation, Reference $grantee, Model $target, GrantScope $scope, ?\DateTimeInterface $expiresAt): IdentityEvent
     {
         $event = match ($this) {
             self::ROLE       => RoleAssigned::class,
@@ -236,7 +240,7 @@ enum GrantTarget: string
             self::POLICY     => PolicyAttached::class,
         };
 
-        return new $event($operation, $grantee, Reference::of($target), self::text($target->getAttribute('name')), GrantScope::platform(), self::immutable($expiresAt));
+        return new $event($operation, $grantee, Reference::of($target), self::text($target->getAttribute('name')), $scope, self::immutable($expiresAt));
     }
 
     /**
@@ -245,9 +249,10 @@ enum GrantTarget: string
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \Illuminate\Database\Eloquent\Model  $target
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
      * @return \SineMacula\Laravel\Authorization\Contracts\IdentityEvent
      */
-    public function revokedEvent(Operation $operation, Reference $grantee, Model $target): IdentityEvent
+    public function revokedEvent(Operation $operation, Reference $grantee, Model $target, GrantScope $scope): IdentityEvent
     {
         $event = match ($this) {
             self::ROLE       => RoleRevoked::class,
@@ -255,7 +260,7 @@ enum GrantTarget: string
             self::POLICY     => PolicyDetached::class,
         };
 
-        return new $event($operation, $grantee, Reference::of($target), self::text($target->getAttribute('name')), GrantScope::platform());
+        return new $event($operation, $grantee, Reference::of($target), self::text($target->getAttribute('name')), $scope);
     }
 
     /**
@@ -264,12 +269,19 @@ enum GrantTarget: string
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \Illuminate\Database\Eloquent\Model  $target
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
      * @param  \DateTimeInterface|null  $previous
      * @param  \DateTimeInterface|null  $next
      * @return \SineMacula\Laravel\Authorization\Contracts\IdentityEvent
      */
-    public function expiryChangedEvent(Operation $operation, Reference $grantee, Model $target, ?\DateTimeInterface $previous, ?\DateTimeInterface $next): IdentityEvent
-    {
+    public function expiryChangedEvent(
+        Operation $operation,
+        Reference $grantee,
+        Model $target,
+        GrantScope $scope,
+        ?\DateTimeInterface $previous,
+        ?\DateTimeInterface $next,
+    ): IdentityEvent {
         $event = match ($this) {
             self::ROLE       => RoleExpiryChanged::class,
             self::PERMISSION => PermissionExpiryChanged::class,
@@ -281,7 +293,7 @@ enum GrantTarget: string
             $grantee,
             Reference::of($target),
             self::text($target->getAttribute('name')),
-            GrantScope::platform(),
+            $scope,
             self::immutable($previous),
             self::immutable($next),
         );

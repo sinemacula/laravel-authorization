@@ -20,7 +20,9 @@ use Tests\Feature\Stubs\StubIdentity;
  * A lookup by name in the tenant's context ranks the tenant's row first, so
  * these pin that a revocation still removes a platform grant, that a
  * synchronisation keeps it, and that a revocation reports only the grants it
- * really removed.
+ * really removed. Each row is granted in the scope its owner fixes, so the
+ * platform's row and the tenant's are granted in different scopes unless the
+ * tenant is named.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -109,20 +111,21 @@ trait ChecksGrantsByName
     }
 
     /**
-     * In a tenant's context, synchronising a name keeps the platform grant the
-     * identity holds rather than replacing it with the tenant's row.
+     * In a tenant's context, synchronising a name works in the tenant, where
+     * the name answers the tenant's row: the platform grant the identity holds,
+     * in another scope, is kept.
      *
      * @return void
      */
     public function testSyncingANameInATenantKeepsThePlatformGrant(): void
     {
-        [$identity, $platform] = $this->platformAndTenantRows();
+        [$identity, $platform, $tenant] = $this->platformAndTenantRows();
 
         $this->grantTo($identity, $platform);
 
         $this->syncTo($identity, ['editor']);
 
-        self::assertSame([(string) $platform->getKey()], self::grantedKeys());
+        self::assertEqualsCanonicalizing([(string) $platform->getKey(), (string) $tenant->getKey()], self::grantedKeys());
     }
 
     /**
@@ -159,16 +162,16 @@ trait ChecksGrantsByName
     }
 
     /**
-     * Synchronising to a model keeps only that row, although the identity holds
-     * another of the same name.
+     * Synchronising to a model keeps only that row in its scope, although the
+     * identity holds another of the same name there.
      *
      * @return void
      */
     public function testSyncingAModelKeepsOnlyThatRow(): void
     {
-        [$identity, $platform, $tenant] = $this->platformAndTenantRows();
+        [$identity, $platform, $tenant, $owner] = $this->platformAndTenantRows();
 
-        $this->grantTo($identity, $platform);
+        $this->grantTo($identity, $platform, null, $owner);
         $this->grantTo($identity, $tenant);
 
         $this->syncTo($identity, [$tenant]);
@@ -247,9 +250,10 @@ trait ChecksGrantsByName
      * @param  \Tests\Feature\Stubs\StubIdentity  $identity
      * @param  \Illuminate\Database\Eloquent\Model  $row
      * @param  \DateTimeInterface|null  $expiresAt
+     * @param  \Illuminate\Database\Eloquent\Model|null  $tenant
      * @return void
      */
-    abstract protected function grantTo(StubIdentity $identity, Model $row, ?\DateTimeInterface $expiresAt = null): void;
+    abstract protected function grantTo(StubIdentity $identity, Model $row, ?\DateTimeInterface $expiresAt = null, ?Model $tenant = null): void;
 
     /**
      * Revoke the row, or the name, from the identity.
@@ -280,9 +284,9 @@ trait ChecksGrantsByName
     /**
      * Create an identity, a platform row named `editor` for the `web` guard and
      * a row of the same name and guard owned by a tenant, and act as that
-     * tenant.
+     * tenant, which is returned last.
      *
-     * @return array{\Tests\Feature\Stubs\StubIdentity, \Illuminate\Database\Eloquent\Model, \Illuminate\Database\Eloquent\Model}
+     * @return array{\Tests\Feature\Stubs\StubIdentity, \Illuminate\Database\Eloquent\Model, \Illuminate\Database\Eloquent\Model, \Tests\Feature\Stubs\StubTenant}
      */
     private function platformAndTenantRows(): array
     {
@@ -293,7 +297,7 @@ trait ChecksGrantsByName
 
         $this->actAsTenant($tenant);
 
-        return [$identity, $platform, $owned];
+        return [$identity, $platform, $owned, $tenant];
     }
 
     /**

@@ -297,8 +297,20 @@ unsaved role, permission or policy handed to its service, which would otherwise 
 through the permission model, in one transaction on the package's connection and as one operation, and will move onto
 `PermissionService` later.
 
-The services write platform-wide grants, for every application, only. The grant tables carry tenant and application
-columns, but nothing reads them yet, so the services take no tenant or application argument.
+Every grant holds in a scope: one tenant, or the whole platform. A role, permission or policy a tenant owns is granted
+in that tenant; one the platform owns is granted platform-wide unless you name a tenant, so one person can be admin in
+one organisation and viewer in another:
+
+```php
+$user->assignRole('admin', tenant: $organisationA);
+$user->assignRole('viewer', tenant: $organisationB);
+```
+
+A check counts the grants made platform-wide and those made in the current tenant; without a tenant, only
+platform-wide grants. Granting a tenant's own role in another tenant, or platform-wide, is refused with
+`GrantScopeMismatchException`. A revocation removes the grant in the same scope, and a sync replaces the grants of one
+scope: the tenant named, else the tenant that owns every target, else the platform. Every grant is for every
+application.
 
 The trait methods (`assignRole()`, `givePermission()`, `attachPolicy()`, `$role->givePermission()` and the others)
 still work and go through the same services, with no actor. A raw relation write such as

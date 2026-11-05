@@ -104,7 +104,8 @@ app(GrantService::class)->grantRole($user, 'editor', actor: $admin);
   services both run in the call's transaction.
 - **A deleted role's children are not listed.** Their holders lose what the role passed down; they are found through
   the role grants of the children.
-- **Grants are platform-wide today**, so every grant event's scope is `GrantScope::platform()`.
+- **Grants carry their scope.** Every grant event reports the tenant the grant holds in, or none for platform-wide;
+  the application is always every application until applications are read.
 
 ## Implementation Anchors
 
@@ -134,5 +135,5 @@ app(GrantService::class)->grantRole($user, 'editor', actor: $admin);
 
 - The decision payload: the subject as a reference, the deciding policy and statement, and the keys a decision
   depended on.
-- Scoped grants: the grant events report the tenant and application written.
+- Applications: the grant events report the application written.
 - Grant expiry, boundaries, guardrails and break-glass: their events join the set.

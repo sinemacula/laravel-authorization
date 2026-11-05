@@ -44,11 +44,13 @@ events themselves are described in [Events](events.md).
    re-arms a listed grant that has expired with the same expiry, leaves a live grant as it is, and revokes what is not
    listed. A sync given no expiry, as every trait sync is, re-arms a lapsed temporary grant as a permanent one.
 
-5. **Platform-wide only.** The grant tables carry tenant and application columns, but nothing reads them yet, so a
-   grant in a tenant or application scope would count everywhere. The services therefore take no tenant or
-   application argument and write platform-wide grants for every application only. A grant reads only the
-   platform-wide row as held, so a scoped row written by hand is never taken for it. A revocation removes the
-   grantee's rows for the target in every scope, since each of them counts platform-wide today.
+5. **One scope per grant.** A grant holds in one tenant or platform-wide (AUTHZ-5.1). The tenant that owns the
+   target fixes it, and naming another tenant is refused with `GrantScopeMismatchException`; a platform target is
+   granted in the tenant the call names as `$tenant`, else platform-wide (D15). A name is looked up among the rows
+   visible in the tenant named, else the current tenant. A grant, a re-arm, a read of what is held and a revocation
+   each stay in their scope, so a role held in two tenants is two grants; a sync replaces the grants of one scope,
+   the tenant named, else the tenant that owns every target, else the platform. Only a grantee's deletion revokes in
+   every scope. Every grant is for every application until applications are read (BL-25).
 
 6. **Reported once it commits, and nothing for a no-op.** Each call is one operation: every event it dispatches
    carries the same operation id and the caller's actor, and is dispatched once the write commits on the package's
@@ -120,7 +122,7 @@ working: each forwards to the matching service method with no actor.
 ## Implementation Anchors
 
 - `Services\GrantService`, `Services\RoleService`, `Services\PermissionService`, `Services\PolicyService`.
-- `Services\Support\GrantTable`: the platform-wide row writes, insert-or-ignore and the locked read-back.
+- `Services\Support\GrantTable`: the scoped row writes, insert-or-ignore and the locked read-back.
 - `Services\Support\RecordWriter`: the record saves and deletes, each in one transaction.
 - `Enums\GrantTarget`: each kind's configured model, grant table and events.
 - `Enums\GrantOutcome` and `Services\SyncResult`: what a call changed.

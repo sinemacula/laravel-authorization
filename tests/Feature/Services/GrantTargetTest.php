@@ -31,6 +31,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\CustomRole;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
 /**
@@ -159,6 +160,26 @@ final class GrantTargetTest extends TestCase
         $web      = Permission::query()->create(['name' => 'posts:edit', 'guard' => 'web']);
 
         self::assertSame([$web->id, $agnostic->id], \array_map(static fn ($model): mixed => $model->getKey(), GrantTarget::PERMISSION->named('posts:edit', 'web')));
+    }
+
+    /**
+     * Given a tenant, a name answers the rows visible there, the tenant's own
+     * first, and `heldOrFirst()` and `resolve()` read the same rows.
+     *
+     * @return void
+     */
+    public function testANameAnswersTheRowsOfTheTenantNamed(): void
+    {
+        $tenant   = StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'A']);
+        $platform = Role::query()->create(['name' => 'editor']);
+        $owned    = Role::query()->create(['name' => 'editor', 'tenant_type' => $tenant->getMorphClass(), 'tenant_id' => 'tenant-a']);
+        $scope    = new Reference($tenant->getMorphClass(), 'tenant-a');
+        $keys     = static fn (array $models): array => \array_map(static fn ($model): mixed => $model->getKey(), $models);
+
+        self::assertSame([$owned->id, $platform->id], $keys(GrantTarget::ROLE->named('editor', null, $scope)));
+        self::assertSame([$platform->id], $keys(GrantTarget::ROLE->named('editor', null)));
+        self::assertSame([$platform->id], $keys(GrantTarget::ROLE->heldOrFirst('editor', null, [$platform->id], $scope)));
+        self::assertSame($owned->id, GrantTarget::ROLE->resolve('editor', null, $scope)->getKey());
     }
 
     /**
@@ -304,7 +325,7 @@ final class GrantTargetTest extends TestCase
 
     /**
      * Each kind builds its own granted, revoked and expiry-changed events,
-     * carrying the grantee, the target and the expiries.
+     * carrying the grantee, the target, the scope and the expiries.
      *
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
      * @param  \Closure(): \Illuminate\Database\Eloquent\Model  $target
@@ -323,21 +344,22 @@ final class GrantTargetTest extends TestCase
         $next      = Carbon::parse('2026-08-01 12:00:00', 'UTC');
         $target    = Reference::of($model);
         $name      = $model->getAttribute('name');
+        $scope     = new GrantScope(new Reference('stub_tenant', 'tenant-a'));
 
-        $grantedEvent = $kind->grantedEvent($operation, $grantee, $model, $next);
-        $revokedEvent = $kind->revokedEvent($operation, $grantee, $model);
-        $changedEvent = $kind->expiryChangedEvent($operation, $grantee, $model, $previous, null);
+        $grantedEvent = $kind->grantedEvent($operation, $grantee, $model, $scope, $next);
+        $revokedEvent = $kind->revokedEvent($operation, $grantee, $model, $scope);
+        $changedEvent = $kind->expiryChangedEvent($operation, $grantee, $model, $scope, $previous, null);
 
         self::assertInstanceOf($granted, $grantedEvent);
         self::assertInstanceOf($revoked, $revokedEvent);
         self::assertInstanceOf($expiryChanged, $changedEvent);
         self::assertEquals(
-            [$operation, $grantee, $target, $name, GrantScope::platform(), new \DateTimeImmutable('2026-08-01 12:00:00', new \DateTimeZone('UTC'))],
+            [$operation, $grantee, $target, $name, $scope, new \DateTimeImmutable('2026-08-01 12:00:00', new \DateTimeZone('UTC'))],
             \array_values((array) $grantedEvent),
         );
-        self::assertEquals([$operation, $grantee, $target, $name, GrantScope::platform()], \array_values((array) $revokedEvent));
+        self::assertEquals([$operation, $grantee, $target, $name, $scope], \array_values((array) $revokedEvent));
         self::assertEquals(
-            [$operation, $grantee, $target, $name, GrantScope::platform(), new \DateTimeImmutable('2026-07-01 12:00:00', new \DateTimeZone('UTC')), null],
+            [$operation, $grantee, $target, $name, $scope, new \DateTimeImmutable('2026-07-01 12:00:00', new \DateTimeZone('UTC')), null],
             \array_values((array) $changedEvent),
         );
         self::assertSame('UTC', $changedEvent->previousExpiresAt?->getTimezone()->getName()); // @phpstan-ignore property.notFound

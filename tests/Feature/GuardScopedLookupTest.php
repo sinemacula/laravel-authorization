@@ -11,6 +11,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\TestCase;
 
@@ -72,6 +73,29 @@ final class GuardScopedLookupTest extends TestCase
         $this->actAsTenant($tenantA);
 
         self::assertSame($platform->id, GuardScopedLookup::findForGuard(Role::class, 'editor', 'web')?->getKey());
+    }
+
+    /**
+     * Given a tenant, the rows visible in that tenant answer, ranked as the
+     * tenant scope ranks them, whichever tenant is current.
+     *
+     * @return void
+     */
+    public function testATenantNamedReplacesTheCurrentOne(): void
+    {
+        $tenantA  = self::createTenant('tenant-a');
+        $tenantB  = self::createTenant('tenant-b');
+        $platform = Role::query()->create(['name' => 'editor', 'guard' => 'web']);
+        $owned    = Role::query()->create(['name' => 'editor', 'guard' => 'web'] + self::ownedBy($tenantA));
+
+        Role::query()->create(['name' => 'editor', 'guard' => 'web'] + self::ownedBy($tenantB));
+
+        $this->actAsTenant($tenantB);
+
+        $keys = static fn (array $models): array => \array_map(static fn (Model $model): mixed => $model->getKey(), $models);
+
+        self::assertSame([$owned->id, $platform->id], $keys(GuardScopedLookup::allForGuard(Role::class, 'editor', 'web', new Reference($tenantA->getMorphClass(), 'tenant-a'))));
+        self::assertCount(2, GuardScopedLookup::allForGuard(Role::class, 'editor', 'web'));
     }
 
     /**
