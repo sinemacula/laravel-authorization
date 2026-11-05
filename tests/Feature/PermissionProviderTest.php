@@ -13,12 +13,14 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\EventListenerRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
-use Tests\Feature\Stubs\StubNullGuardProvider;
 use Tests\Feature\Stubs\StubPermissionProvider;
 use Tests\TestCase;
 
 /**
- * Feature tests for the `PermissionProvider` boot-time registration.
+ * Feature tests for the boot-time handling of permission providers.
+ *
+ * A configured provider is validated at boot and never read there: booting
+ * writes no permission rows.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -33,11 +35,11 @@ use Tests\TestCase;
 final class PermissionProviderTest extends TestCase
 {
     /**
-     * A stub provider creates permission rows in the database on boot.
+     * Booting with a provider configured writes no permission rows.
      *
      * @return void
      */
-    public function testProviderCreatesPermissionRowsOnBoot(): void
+    public function testBootWritesNoPermissionRows(): void
     {
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
@@ -45,54 +47,7 @@ final class PermissionProviderTest extends TestCase
 
         (new AuthorizationServiceProvider($this->app))->boot();
 
-        self::assertNotNull(
-            Permission::where('name', 'media:upload')->where('guard', 'web')->first(),
-            'Expected media:upload permission to exist in the database.',
-        );
-
-        self::assertNotNull(
-            Permission::where('name', 'media:delete')->where('guard', 'web')->first(),
-            'Expected media:delete permission to exist in the database.',
-        );
-    }
-
-    /**
-     * Provider registration is idempotent — booting twice does not create
-     * duplicate rows.
-     *
-     * @return void
-     */
-    public function testProviderRegistrationIsIdempotent(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.permission_providers', [StubPermissionProvider::class]);
-
-        (new AuthorizationServiceProvider($this->app))->boot();
-        (new AuthorizationServiceProvider($this->app))->boot();
-
-        self::assertSame(
-            1,
-            Permission::where('name', 'media:upload')->where('guard', 'web')->count(), // @phpstan-ignore staticMethod.dynamicCall
-        );
-    }
-
-    /**
-     * A provider with a null guard creates guard-agnostic permission rows.
-     *
-     * @return void
-     */
-    public function testNullGuardProviderCreatesAgnosticPermissions(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.permission_providers', [StubNullGuardProvider::class]);
-
-        (new AuthorizationServiceProvider($this->app))->boot();
-
-        $permission = Permission::where('name', 'billing:view')->whereNull('guard')->first(); // @phpstan-ignore staticMethod.dynamicCall
-
-        self::assertNotNull($permission, 'Expected billing:view guard-agnostic permission to exist.');
+        self::assertSame(0, Permission::count());
     }
 
     /**
@@ -127,21 +82,5 @@ final class PermissionProviderTest extends TestCase
         $config->set('authorization.permission_providers', [\stdClass::class]);
 
         (new AuthorizationServiceProvider($this->app))->boot();
-    }
-
-    /**
-     * An empty providers array is a no-op.
-     *
-     * @return void
-     */
-    public function testEmptyProvidersArrayIsNoop(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.permission_providers', []);
-
-        (new AuthorizationServiceProvider($this->app))->boot();
-
-        self::assertSame(0, Permission::count());
     }
 }

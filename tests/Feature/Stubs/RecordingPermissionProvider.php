@@ -7,15 +7,19 @@ namespace Tests\Feature\Stubs;
 use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
 
 /**
- * Stub provider that contributes guard-agnostic permissions.
+ * Stub provider that counts how often its permissions are read, so a test can
+ * show that booting never reads them.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
  */
-final class StubNullGuardProvider implements PermissionProvider
+final class RecordingPermissionProvider implements PermissionProvider
 {
+    /** @var int How many times the permissions were read. */
+    public static int $reads = 0;
+
     /**
      * Return the permission strings this provider contributes.
      *
@@ -24,7 +28,9 @@ final class StubNullGuardProvider implements PermissionProvider
     #[\Override]
     public function permissions(): array
     {
-        return ['billing:view'];
+        self::$reads++;
+
+        return ['reports:export'];
     }
 
     /**

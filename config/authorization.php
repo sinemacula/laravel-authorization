@@ -111,10 +111,10 @@ return [
     |---------------------------------------------------------------------------
     |
     | Class-strings implementing `PermissionProvider`. Each provider contributes
-    | a list of permission strings and a guard scope. At boot the service
-    | provider walks every entry and creates `Permission` rows via
-    | `firstOrCreate`, so modular packages can ship their own permission sets
-    | without the host application editing a central enum.
+    | a list of permission strings and a guard scope, so modular packages can
+    | ship their own permission sets without the host application editing a
+    | central enum. The classes are validated at boot, but a provider is never
+    | read there: booting writes nothing to the database.
     |
     */
 
