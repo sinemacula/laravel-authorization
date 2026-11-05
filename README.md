@@ -28,7 +28,7 @@ directives, console commands and test assertions.
 |----------------|---------------------------------------------------------------------------------------------------------------|
 | **Principal**  | Who a decision is about: any Eloquent model that implements `AuthorizableIdentity`, usually your user model.  |
 | **Role**       | A named set of permissions, granted as one. Roles can inherit from a parent role.                             |
-| **Permission** | A named action, such as `posts:update`, or a wildcard pattern of them, such as `posts:*`.                     |
+| **Permission** | A named action, such as `posts:update` or `posts.update`, or a wildcard pattern of them, such as `posts:*`.   |
 | **Policy**     | A JSON document of statements, each allowing or denying actions on resources, optionally under conditions.    |
 | **Decision**   | The answer to one check: allowed or not, with the reason and a trace of the statements that decided it.       |
 
@@ -39,8 +39,10 @@ principal's role and permission grants, and anything left is denied.
 
 - **Roles and permissions** as Eloquent models with UUID keys, granted to any model through polymorphic pivots (integer,
   UUID and ULID keys all work), each grant with an optional expiry.
-- **Wildcard permissions** (`posts:*`, `*:create`, `*:*`) and **role hierarchy**: a role inherits its parent's
-  permissions, with cycle checks on write.
+- **Role and permission names** of letters, digits and `_ - : . *`, so `posts:edit`, `posts.edit` and
+  `sso.connection.trust` are all valid; anything else is refused when the name is saved.
+- **Wildcard permissions** (`posts:*`, `posts.*`, `*:create`, and `*` for everything; `*:*` matches only names with a
+  `:`) and **role hierarchy**: a role inherits its parent's permissions, with cycle checks on write.
 - **Policy documents** with `effect`, `actions`, `resources` and `conditions`, seventeen condition operators (equality,
   set membership, prefix and suffix, CIDR, numeric and time comparisons, booleans and nulls) and `${…}` interpolation
   from the check's context.
@@ -57,7 +59,8 @@ principal's role and permission grants, and anything left is denied.
 - **Swappable everything**: models, table and pivot column names, the principal resolver, the tenant resolver and the
   policy store.
 - **Spatie import**: `authorization:migrate-spatie` copies roles, permissions and grants from
-  `spatie/laravel-permission`.
+  `spatie/laravel-permission`, reporting and skipping any role or permission whose name the package refuses, and any
+  permission whose name contains `*`, along with its grants.
 
 ## Installation
 

@@ -181,7 +181,7 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
      *
      * A held permission name is treated as an `fnmatch` pattern against the
      * asked name — so a role that holds `posts:*` satisfies
-     * `hasPermission('posts:create')`, and a role that holds `*:*` satisfies
+     * `hasPermission('posts:create')`, and a role that holds `*` satisfies
      * every check. The reverse direction does not match: holding `posts:create`
      * does not satisfy an asked `posts:*`. Backslashes are compared literally
      * via `FNM_NOESCAPE`.

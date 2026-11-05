@@ -6,7 +6,7 @@
  * Mirrors the platform-protection marker that ships on the `roles` table: a
  * permission flagged system refuses delete and every edit, clearing the flag
  * included, unless the model-layer `forceSystem()` escape hatch is invoked, so
- * a platform-shipped `*:*` super-admin permission cannot be casually removed or
+ * a platform-shipped `*` super-admin permission cannot be casually removed or
  * changed by a caller with raw Eloquent access.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>

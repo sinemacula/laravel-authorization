@@ -202,7 +202,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
      *
      * A held permission name is treated as an `fnmatch` pattern against the
      * asked name — so an identity holding `posts:*` satisfies
-     * `hasPermission('posts:create')`, and an identity holding `*:*` satisfies
+     * `hasPermission('posts:create')`, and an identity holding `*` satisfies
      * every check (the super-admin path). The reverse direction does not match:
      * holding `posts:create` does not satisfy an asked `posts:*`. Backslashes
      * are compared literally via `FNM_NOESCAPE`.
