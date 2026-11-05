@@ -133,6 +133,34 @@ enum GrantTarget: string
     }
 
     /**
+     * Return the rows that answer the name under the guard and are among the
+     * held keys, else the one row the lookup ranks first, so a sync that names
+     * a row keeps every held row of the name rather than swapping one for
+     * another.
+     *
+     * @param  string  $name
+     * @param  string|null  $guard
+     * @param  list<string>  $held
+     * @return non-empty-list<\Illuminate\Database\Eloquent\Model>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
+     */
+    public function heldOrFirst(string $name, ?string $guard, array $held): array
+    {
+        $named = $this->named($name, $guard);
+        $kept  = \array_values(\array_filter($named, static function (Model $model) use ($held): bool {
+            /** @var int|string $key */
+            $key = $model->getKey();
+
+            return \in_array((string) $key, $held, true);
+        }));
+
+        return $kept !== [] ? $kept : [$named[0]];
+    }
+
+    /**
      * Return the target when it is a saved model of this kind, and refuse
      * anything else.
      *

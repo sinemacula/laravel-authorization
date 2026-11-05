@@ -158,6 +158,25 @@ final class GrantTargetTest extends TestCase
     }
 
     /**
+     * `heldOrFirst()` returns every held row of the name, in the order the
+     * lookup ranks them, and the first row only when none is held.
+     *
+     * @return void
+     */
+    public function testHeldOrFirstKeepsTheHeldRowsOfTheName(): void
+    {
+        $agnostic = Permission::query()->create(['name' => 'posts:edit']);
+        $web      = Permission::query()->create(['name' => 'posts:edit', 'guard' => 'web']);
+        $api      = Permission::query()->create(['name' => 'posts:edit', 'guard' => 'api']);
+        $keys     = static fn (array $models): array => \array_map(static fn ($model): mixed => $model->getKey(), $models);
+
+        self::assertSame([$agnostic->id], $keys(GrantTarget::PERMISSION->heldOrFirst('posts:edit', 'web', [$agnostic->id, $api->id])));
+        self::assertSame([$web->id, $agnostic->id], $keys(GrantTarget::PERMISSION->heldOrFirst('posts:edit', 'web', [$agnostic->id, $web->id])));
+        self::assertSame([$web->id], $keys(GrantTarget::PERMISSION->heldOrFirst('posts:edit', 'web', [$api->id])));
+        self::assertSame([$web->id], $keys(GrantTarget::PERMISSION->heldOrFirst('posts:edit', 'web', [])));
+    }
+
+    /**
      * An unknown role name throws `UnknownRoleException`.
      *
      * @return void

@@ -13,10 +13,12 @@ use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
  *
  * Every write runs in one transaction on the package's connection, through the
  * policy class `authorization.models.policy` configures, so the policy
- * observer, document validation and system protection apply.
+ * observer, document validation and system protection apply. A policy that has
+ * not been saved is refused with `UnsavedRecordException`, so a change never
+ * creates one outside `create()`.
  *
- * Each method takes the acting subject as `$actor`: null for console and system
- * work.
+ * Each method takes the acting subject as `$actor`, the reads as well as the
+ * writes: null for console and system work.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -60,7 +62,7 @@ final class PolicyService
      */
     public function rename(Policy $policy, string $name, ?object $actor = null): Policy
     {
-        return RecordWriter::save(static fn (): Policy => $policy, ['name' => $name]);
+        return RecordWriter::save(static fn (): Policy => RecordWriter::existing('policy', $policy), ['name' => $name]);
     }
 
     /**
@@ -75,7 +77,7 @@ final class PolicyService
      */
     public function describe(Policy $policy, ?string $description, ?object $actor = null): Policy
     {
-        return RecordWriter::save(static fn (): Policy => $policy, ['description' => $description]);
+        return RecordWriter::save(static fn (): Policy => RecordWriter::existing('policy', $policy), ['description' => $description]);
     }
 
     /**
@@ -90,7 +92,7 @@ final class PolicyService
      */
     public function rewrite(Policy $policy, array|string $document, ?object $actor = null): Policy
     {
-        return RecordWriter::save(static fn (): Policy => $policy, ['document' => $document]);
+        return RecordWriter::save(static fn (): Policy => RecordWriter::existing('policy', $policy), ['document' => $document]);
     }
 
     /**
@@ -104,15 +106,16 @@ final class PolicyService
      */
     public function delete(Policy $policy, ?object $actor = null): void
     {
-        RecordWriter::delete(static fn (): Policy => $policy);
+        RecordWriter::delete(static fn (): Policy => RecordWriter::existing('policy', $policy));
     }
 
     /**
      * List the policies, by name.
      *
+     * @param  object|null  $actor
      * @return \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Policy>
      */
-    public function list(): Collection
+    public function list(?object $actor = null): Collection
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
         $class = config('authorization.models.policy', Policy::class);

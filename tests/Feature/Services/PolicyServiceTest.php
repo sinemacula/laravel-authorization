@@ -11,6 +11,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Events\Policy\Created as PolicyCreated;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPolicyProtectedException;
+use SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use Tests\Concerns\UsesAnAuthorizationConnection;
@@ -139,6 +140,37 @@ final class PolicyServiceTest extends TestCase
     public function testDeletesAPolicy(): void
     {
         self::service()->delete(self::service()->create('readers', self::READ));
+
+        self::assertSame(0, Policy::query()->count());
+    }
+
+    /**
+     * An unsaved policy is refused by every change, so none creates a policy
+     * outside `create()`.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testChangesRefuseAnUnsavedPolicy(): void
+    {
+        $calls = [
+            'rename'   => static fn (PolicyService $service, Policy $policy): mixed => $service->rename($policy, 'editors'),
+            'describe' => static fn (PolicyService $service, Policy $policy): mixed => $service->describe($policy, 'Edits'),
+            'rewrite'  => static fn (PolicyService $service, Policy $policy): mixed => $service->rewrite($policy, self::READ),
+            'delete'   => static function (PolicyService $service, Policy $policy): void {
+                $service->delete($policy);
+            },
+        ];
+
+        foreach ($calls as $name => $call) {
+            try {
+                $call(self::service(), new Policy(['name' => 'readers', 'document' => self::READ]));
+                self::fail("The {$name} did not refuse the unsaved policy.");
+            } catch (UnsavedRecordException $exception) {
+                self::assertSame('policy', $exception->getKind());
+            }
+        }
 
         self::assertSame(0, Policy::query()->count());
     }

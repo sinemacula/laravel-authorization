@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Services\Support;
 
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException;
 
 /**
  * Saves and deletes role, permission and policy rows for the record services,
@@ -57,5 +58,26 @@ final class RecordWriter
         AuthorizationConnection::connection()->transaction(static function () use ($model): void {
             $model()->delete();
         });
+    }
+
+    /**
+     * Return the model once it is known to be saved, so a change to it never
+     * creates a record outside `create()`, and refuse an unsaved one.
+     *
+     * @template TModel of \Illuminate\Database\Eloquent\Model
+     *
+     * @param  string  $kind
+     * @param  TModel  $model
+     * @return TModel
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException
+     */
+    public static function existing(string $kind, Model $model): Model
+    {
+        if (!$model->exists) {
+            throw new UnsavedRecordException($kind, $model);
+        }
+
+        return $model;
     }
 }

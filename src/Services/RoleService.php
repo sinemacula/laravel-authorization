@@ -27,7 +27,8 @@ use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
  * role class `authorization.models.role` configures, so the role observer, name
  * validation and system protection apply. A role named by a string is looked up
  * under the package's default guard; a permission named by a string under the
- * role's own guard, else the default.
+ * role's own guard, else the default. A role model that has not been saved, as
+ * the role or as the parent, is refused with `UnsavedRecordException`.
  *
  * Setting a parent locks the role and the parent, and the observer walks the
  * parent's ancestors under the same lock and outside the tenant scope, so two
@@ -39,8 +40,8 @@ use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
  * events are dispatched once the transaction has returned, and only for a write
  * that changed something.
  *
- * Each method takes the acting subject as `$actor`: null for console and system
- * work.
+ * Each method takes the acting subject as `$actor`, the reads as well as the
+ * writes: null for console and system work.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -127,9 +128,10 @@ final class RoleService
      * of that guard or guard-agnostic.
      *
      * @param  string|null  $guard
+     * @param  object|null  $actor
      * @return \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role>
      */
-    public function list(?string $guard = null): Collection
+    public function list(?string $guard = null, ?object $actor = null): Collection
     {
         // @phpstan-ignore staticMethod.dynamicCall
         return self::roleClass()::query()
@@ -205,6 +207,9 @@ final class RoleService
      * Revoke a permission from a role, and return how many were revoked: none
      * when the role did not carry it.
      *
+     * A name revokes every permission of that name the role carries, under the
+     * role's guard or guard-agnostic, whichever tenant or the platform owns it.
+     *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @param  object|null  $actor
@@ -216,12 +221,17 @@ final class RoleService
     {
         /** @var list<\SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked> $events */
         $events = AuthorizationConnection::connection()->transaction(static function () use ($role, $permission): array {
-            $model  = self::resolve($role);
-            $target = self::permissionFor($model, $permission);
+            $model = self::resolve($role);
+            $held  = self::heldPermissionIds($model);
+
+            /** @var list<\SineMacula\Laravel\Authorization\Models\Permission> $candidates */
+            $candidates = \is_string($permission) ? GrantTarget::PERMISSION->named($permission, $model->guard) : [self::permissionFor($model, $permission)];
+            $revoked    = \array_values(\array_filter($candidates, static fn (Permission $target): bool => \in_array($target->id, $held, true)));
 
             $model->unsetRelation('permissions');
+            $model->permissions()->detach(\array_map(static fn (Permission $target): string => $target->id, $revoked));
 
-            return $model->permissions()->detach($target->id) > 0 ? [new RolePermissionRevoked($model, $target)] : [];
+            return \array_map(static fn (Permission $target): RolePermissionRevoked => new RolePermissionRevoked($model, $target), $revoked);
         });
 
         self::dispatch($events);
@@ -247,8 +257,8 @@ final class RoleService
         $result = AuthorizationConnection::connection()->transaction(static function () use ($role, $permissions, &$events): SyncResult {
             $model    = self::resolve($role);
             $relation = $model->permissions();
-            $desired  = self::desired($model, $permissions);
-            $held     = \array_map(static fn (mixed $key): string => \is_scalar($key) ? (string) $key : '', $relation->newPivotQuery()->pluck('permission_id')->all());
+            $held     = self::heldPermissionIds($model);
+            $desired  = self::desired($model, $permissions, $held);
             $revoked  = \array_values(\array_diff($held, \array_map(static fn (Permission $target): string => $target->id, $desired)));
             $granted  = [];
 
@@ -276,25 +286,46 @@ final class RoleService
     }
 
     /**
-     * Resolve the permissions a sync lists for the role, each once.
+     * Resolve the permissions a sync lists for the role, each once: a model as
+     * given; for a name, every permission of it the role carries, else the one
+     * the lookup ranks first.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @param  array<int, mixed>  $permissions
+     * @param  list<string>  $held
      * @return array<array-key, \SineMacula\Laravel\Authorization\Models\Permission>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
      */
-    private static function desired(Role $role, array $permissions): array
+    private static function desired(Role $role, array $permissions, array $held): array
     {
         $desired = [];
 
         foreach ($permissions as $permission) {
-            $target               = self::permissionFor($role, $permission);
-            $desired[$target->id] = $target;
+            /** @var list<\SineMacula\Laravel\Authorization\Models\Permission> $targets */
+            $targets = \is_string($permission) ? GrantTarget::PERMISSION->heldOrFirst($permission, $role->guard, $held) : [self::permissionFor($role, $permission)];
+
+            foreach ($targets as $target) {
+                $desired[$target->id] = $target;
+            }
         }
 
         return $desired;
+    }
+
+    /**
+     * Return the keys of the permissions the role carries, read from the role
+     * permission pivot.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+     * @return list<string>
+     */
+    private static function heldPermissionIds(Role $role): array
+    {
+        $keys = $role->permissions()->newPivotQuery()->pluck('permission_id')->all();
+
+        return \array_values(\array_map(static fn (mixed $key): string => \is_scalar($key) ? (string) $key : '', $keys));
     }
 
     /**
@@ -347,17 +378,19 @@ final class RoleService
 
     /**
      * Resolve a role: a name through the configured role class, under the given
-     * guard or the package default; a model as given.
+     * guard or the package default; a model once it is known to be saved, so a
+     * change never creates a role and an unsaved parent never clears one.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  string|null  $guard
      * @return \SineMacula\Laravel\Authorization\Models\Role
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException
      */
     private static function resolve(Role|string $role, ?string $guard = null): Role
     {
-        return $role instanceof Role ? $role : self::roleClass()::resolveByName($role, $guard);
+        return $role instanceof Role ? RecordWriter::existing('role', $role) : self::roleClass()::resolveByName($role, $guard);
     }
 
     /**

@@ -7,6 +7,7 @@ namespace Tests\Feature\Services;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Exceptions\ReservedRoleNameException;
+use SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
 use Tests\Concerns\UsesAnAuthorizationConnection;
@@ -89,5 +90,28 @@ final class RecordWriterTest extends TestCase
 
         self::assertSame($base + 1, $level);
         self::assertSame(0, Role::query()->count());
+    }
+
+    /**
+     * A saved model is returned as it is, and an unsaved one is refused with
+     * its kind.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testExistingRefusesAnUnsavedModel(): void
+    {
+        $role = Role::query()->create(['name' => 'editor']);
+
+        self::assertSame($role, RecordWriter::existing('role', $role));
+
+        try {
+            RecordWriter::existing('permission', new Role(['name' => 'ghost']));
+            self::fail('The unsaved model was not refused.');
+        } catch (UnsavedRecordException $exception) {
+            self::assertSame('permission', $exception->getKind());
+            self::assertSame('The permission service takes a saved permission, not an unsaved ' . Role::class . '.', $exception->getMessage());
+        }
     }
 }

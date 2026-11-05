@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Events\Permission\Created as PermissionCrea
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameException;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPermissionProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
+use SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use Tests\Concerns\UsesAnAuthorizationConnection;
@@ -160,6 +161,36 @@ final class PermissionServiceTest extends TestCase
         $this->expectExceptionObject(new UnknownPermissionException('ghost'));
 
         self::service()->delete('ghost');
+    }
+
+    /**
+     * An unsaved permission is refused by every change, so none creates a
+     * permission outside `create()`.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testChangesRefuseAnUnsavedPermission(): void
+    {
+        $calls = [
+            'rename'   => static fn (PermissionService $service, Permission $permission): mixed => $service->rename($permission, 'posts:update'),
+            'describe' => static fn (PermissionService $service, Permission $permission): mixed => $service->describe($permission, 'Edits'),
+            'delete'   => static function (PermissionService $service, Permission $permission): void {
+                $service->delete($permission);
+            },
+        ];
+
+        foreach ($calls as $name => $call) {
+            try {
+                $call(self::service(), new Permission(['name' => 'posts:edit']));
+                self::fail("The {$name} did not refuse the unsaved permission.");
+            } catch (UnsavedRecordException $exception) {
+                self::assertSame('permission', $exception->getKind());
+            }
+        }
+
+        self::assertSame(0, Permission::query()->count());
     }
 
     /**

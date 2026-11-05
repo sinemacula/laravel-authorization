@@ -15,10 +15,12 @@ use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
  * Every write runs in one transaction on the package's connection, through the
  * permission class `authorization.models.permission` configures, so the
  * permission observer, name validation and system protection apply. A
- * permission named by a string is looked up under the package's default guard.
+ * permission named by a string is looked up under the package's default guard;
+ * a permission model that has not been saved is refused with
+ * `UnsavedRecordException`, so a change never creates one outside `create()`.
  *
- * Each method takes the acting subject as `$actor`: null for console and system
- * work.
+ * Each method takes the acting subject as `$actor`, the reads as well as the
+ * writes: null for console and system work.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -103,9 +105,10 @@ final class PermissionService
      * those of that guard or guard-agnostic.
      *
      * @param  string|null  $guard
+     * @param  object|null  $actor
      * @return \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission>
      */
-    public function list(?string $guard = null): Collection
+    public function list(?string $guard = null, ?object $actor = null): Collection
     {
         // @phpstan-ignore staticMethod.dynamicCall
         return self::permissionClass()::query()
@@ -116,16 +119,17 @@ final class PermissionService
 
     /**
      * Resolve a permission: a name through the configured permission class,
-     * under the package's default guard; a model as given.
+     * under the package's default guard; a model once it is known to be saved.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return \SineMacula\Laravel\Authorization\Models\Permission
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException
      */
     private static function resolve(Permission|string $permission): Permission
     {
-        return $permission instanceof Permission ? $permission : self::permissionClass()::resolveByName($permission);
+        return $permission instanceof Permission ? RecordWriter::existing('permission', $permission) : self::permissionClass()::resolveByName($permission);
     }
 
     /**

@@ -20,10 +20,13 @@ use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
+use SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\AssertsTransactions;
+use Tests\Concerns\RecordsRowLocks;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\CustomPermission;
 use Tests\Feature\Stubs\CustomRole;
@@ -43,7 +46,7 @@ use Tests\TestCase;
 #[CoversClass(RoleService::class)]
 final class RoleServiceTest extends TestCase
 {
-    use ActsAsTenant, UsesAnAuthorizationConnection;
+    use ActsAsTenant, AssertsTransactions, RecordsRowLocks, UsesAnAuthorizationConnection;
 
     /**
      * The service is bound once in the container.
@@ -209,19 +212,91 @@ final class RoleServiceTest extends TestCase
 
         $this->actAsTenant(self::createTenant('tenant-a'));
 
-        $locks = [];
-
-        DB::listen(static function (QueryExecuted $query) use (&$locks): void {
-            if (!\str_contains($query->sql, 'order by')) {
-                return;
-            }
-
-            $locks[] = $query->bindings;
-        });
+        $locks = $this->recordRowLocks();
 
         self::service()->setParent($role, $parent);
 
-        self::assertSame([$ids], $locks);
+        self::assertSame([['roles', $ids], ['roles', [$parent->id]]], $locks->getArrayCopy());
+    }
+
+    /**
+     * Setting a parent runs in one transaction on the package's connection: the
+     * lookups and the locks as well as the save.
+     *
+     * @return void
+     */
+    public function testSettingAParentRunsInATransaction(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        $role   = self::role('editor');
+        $parent = self::role('author');
+
+        self::assertAllInATransaction(static fn (): Role => self::service()->setParent('editor', 'author'));
+        self::assertSame($parent->id, $role->fresh()?->parent_id);
+    }
+
+    /**
+     * An unsaved role, as the role or as the parent, is refused, and the
+     * hierarchy is left as it was.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testSettingAParentRefusesAnUnsavedRole(): void
+    {
+        $child  = self::role('child');
+        $parent = self::role('parent');
+
+        self::service()->setParent($child, $parent);
+
+        foreach ([[$child, new Role(['name' => 'ghost'])], [new Role(['name' => 'ghost']), $parent]] as [$role, $proposed]) {
+            try {
+                self::service()->setParent($role, $proposed);
+                self::fail('The unsaved role was not refused.');
+            } catch (UnsavedRecordException $exception) {
+                self::assertSame('The role service takes a saved role, not an unsaved ' . Role::class . '.', $exception->getMessage());
+            }
+        }
+
+        self::assertSame($parent->id, Role::query()->whereKey($child->id)->value('parent_id'));
+        self::assertSame(2, Role::query()->count());
+    }
+
+    /**
+     * An unsaved role is refused by every change, so none creates a role
+     * outside `create()`.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testChangesRefuseAnUnsavedRole(): void
+    {
+        $permission = Permission::query()->create(['name' => 'posts:edit']);
+        $calls      = [
+            'rename'   => static fn (RoleService $service, Role $role): mixed => $service->rename($role, 'b'),
+            'describe' => static fn (RoleService $service, Role $role): mixed => $service->describe($role, 'b'),
+            'delete'   => static function (RoleService $service, Role $role): void {
+                $service->delete($role);
+            },
+            'grantPermission'  => static fn (RoleService $service, Role $role): mixed => $service->grantPermission($role, $permission),
+            'revokePermission' => static fn (RoleService $service, Role $role): mixed => $service->revokePermission($role, $permission),
+            'syncPermissions'  => static fn (RoleService $service, Role $role): mixed => $service->syncPermissions($role, [$permission]),
+        ];
+
+        foreach ($calls as $name => $call) {
+            try {
+                $call(self::service(), new Role(['name' => 'a']));
+                self::fail("The {$name} did not refuse the unsaved role.");
+            } catch (UnsavedRecordException $exception) {
+                self::assertSame('role', $exception->getKind());
+            }
+        }
+
+        self::assertSame(0, Role::query()->count());
+        self::assertSame(0, DB::table('role_permissions')->count());
     }
 
     /**
@@ -356,6 +431,84 @@ final class RoleServiceTest extends TestCase
         self::assertSame(0, self::service()->revokePermission($role, $permission));
         self::assertSame(0, DB::table('role_permissions')->count());
         Event::assertDispatchedTimes(PermissionRevoked::class, 1);
+    }
+
+    /**
+     * Revoking a name revokes every permission of that name the role carries,
+     * including a platform permission when the tenant owns one of the same
+     * name, with one event each.
+     *
+     * @return void
+     */
+    public function testRevokingANameRevokesEveryHeldPermissionOfIt(): void
+    {
+        $tenant   = self::createTenant('tenant-a');
+        $role     = self::role('editor');
+        $platform = Permission::query()->create(['name' => 'posts:edit']);
+        $owned    = Permission::query()->create(['name' => 'posts:edit', ...self::ownedBy($tenant)]);
+        $other    = Permission::query()->create(['name' => 'posts:delete']);
+
+        self::service()->grantPermission($role, $platform);
+        self::service()->grantPermission($role, $other);
+
+        $this->actAsTenant($tenant);
+
+        Event::fake([PermissionRevoked::class]);
+
+        self::assertSame(1, self::service()->revokePermission($role, 'posts:edit'));
+        self::assertSame([$other->id], DB::table('role_permissions')->pluck('permission_id')->all());
+        Event::assertDispatchedTimes(PermissionRevoked::class, 1);
+        Event::assertDispatched(PermissionRevoked::class, static fn (PermissionRevoked $event): bool => $event->permission->is($platform));
+
+        self::service()->grantPermission($role, $platform);
+        self::service()->grantPermission($role, $owned);
+
+        self::assertSame(2, self::service()->revokePermission($role, 'posts:edit'));
+        self::assertSame([$other->id], DB::table('role_permissions')->pluck('permission_id')->all());
+        Event::assertDispatchedTimes(PermissionRevoked::class, 3);
+    }
+
+    /**
+     * A name in a sync keeps every permission of that name the role carries,
+     * and only when it carries none is the one the lookup ranks first granted.
+     *
+     * @return void
+     */
+    public function testASyncNameKeepsTheHeldPermissionsOfIt(): void
+    {
+        $tenant   = self::createTenant('tenant-a');
+        $role     = self::role('editor');
+        $platform = Permission::query()->create(['name' => 'posts:edit']);
+        $owned    = Permission::query()->create(['name' => 'posts:edit', ...self::ownedBy($tenant)]);
+
+        self::service()->grantPermission($role, $platform);
+
+        $this->actAsTenant($tenant);
+
+        self::assertFalse(self::service()->syncPermissions($role, ['posts:edit'])->isChange());
+        self::assertSame([$platform->id], DB::table('role_permissions')->pluck('permission_id')->all());
+
+        self::service()->syncPermissions($role, []);
+
+        self::assertSame([$owned->id], self::service()->syncPermissions($role, ['posts:edit'])->granted);
+    }
+
+    /**
+     * Granting and revoking a role's permission each run in one transaction on
+     * the package's connection: the lookups as well as the write.
+     *
+     * @return void
+     */
+    public function testGrantingAndRevokingAPermissionRunInATransaction(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        self::role('editor');
+        Permission::query()->create(['name' => 'posts:edit']);
+
+        self::assertSame(GrantOutcome::GRANTED, self::assertAllInATransaction(static fn (): GrantOutcome => self::service()->grantPermission('editor', 'posts:edit')));
+        self::assertSame(1, self::assertAllInATransaction(static fn (): int => self::service()->revokePermission('editor', 'posts:edit')));
+        self::assertSame(0, self::authorizationConnection()->table('role_permissions')->count());
     }
 
     /**

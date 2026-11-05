@@ -10,6 +10,7 @@ use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -43,10 +44,12 @@ use SineMacula\Laravel\Authorization\Support\GranteeReference;
  * cleared.
  *
  * Each method takes the acting subject as `$actor`: null for console and system
- * work. A role or permission name that answers no row throws
- * `UnknownRoleException` or `UnknownPermissionException`; a target that is not
- * a saved model of the kind granted, such as a policy sync handed another
- * model, throws `InvalidGrantTargetException`.
+ * work. A grantee that is not a saved model with a key, or a reference with a
+ * type and a key, throws `InvalidGranteeException` before anything is read. A
+ * role or permission name that answers no row throws `UnknownRoleException` or
+ * `UnknownPermissionException`; a target that is not a saved model of the kind
+ * granted, such as a policy sync handed another model, throws
+ * `InvalidGrantTargetException`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -229,12 +232,13 @@ final class GrantService
      */
     private function grant(GrantTarget $kind, GranteeReference|Model $grantee, mixed $target, ?\DateTimeInterface $expiresAt, ?object $actor): GrantOutcome
     {
+        $table  = self::table($kind, $grantee);
         $events = [];
 
         /** @var \SineMacula\Laravel\Authorization\Enums\GrantOutcome $outcome */
-        $outcome = AuthorizationConnection::connection()->transaction(static function () use ($kind, $grantee, $target, $expiresAt, &$events): GrantOutcome {
+        $outcome = AuthorizationConnection::connection()->transaction(static function () use ($kind, $grantee, $table, $target, $expiresAt, &$events): GrantOutcome {
             $model  = $kind->resolve($target, self::guard($grantee));
-            $change = self::table($kind, $grantee)->grant(self::key($model), $expiresAt);
+            $change = $table->grant(self::key($model), $expiresAt);
             $events = self::grantEvents($kind, $grantee, $model, $change, $expiresAt);
 
             return $change->outcome;
@@ -259,10 +263,11 @@ final class GrantService
      */
     private function revoke(GrantTarget $kind, GranteeReference|Model $grantee, mixed $target, ?object $actor): int
     {
+        $table = self::table($kind, $grantee);
+
         /** @var list<\Illuminate\Database\Eloquent\Model> $revoked */
-        $revoked = AuthorizationConnection::connection()->transaction(static function () use ($kind, $grantee, $target): array {
+        $revoked = AuthorizationConnection::connection()->transaction(static function () use ($kind, $grantee, $table, $target): array {
             $candidates = \is_string($target) ? $kind->named($target, self::guard($grantee)) : [$kind->assertTarget($target)];
-            $table      = self::table($kind, $grantee);
             $held       = $table->held(\array_map(self::key(...), $candidates));
 
             $table->revoke($held);
@@ -289,11 +294,11 @@ final class GrantService
      */
     private function sync(GrantTarget $kind, GranteeReference|Model $grantee, array $targets, ?\DateTimeInterface $expiresAt, ?object $actor): SyncResult
     {
+        $table  = self::table($kind, $grantee);
         $events = [];
 
         /** @var \SineMacula\Laravel\Authorization\Services\SyncResult $result */
-        $result = AuthorizationConnection::connection()->transaction(static function () use ($kind, $grantee, $targets, $expiresAt, &$events): SyncResult {
-            $table   = self::table($kind, $grantee);
+        $result = AuthorizationConnection::connection()->transaction(static function () use ($kind, $grantee, $table, $targets, $expiresAt, &$events): SyncResult {
             $held    = $table->held();
             $keep    = self::toKeep($kind, $grantee, $targets, $held);
             $revoked = \array_values(\array_diff($held, \array_map(self::key(...), $keep)));
@@ -337,7 +342,7 @@ final class GrantService
         $keep = [];
 
         foreach ($targets as $target) {
-            $models = \is_string($target) ? self::heldOrFirst($kind->named($target, self::guard($grantee)), $held) : [$kind->assertTarget($target)];
+            $models = \is_string($target) ? $kind->heldOrFirst($target, self::guard($grantee), $held) : [$kind->assertTarget($target)];
 
             foreach ($models as $model) {
                 $keep[self::key($model)] = $model;
@@ -345,20 +350,6 @@ final class GrantService
         }
 
         return $keep;
-    }
-
-    /**
-     * Return the named rows the grantee holds, else the first.
-     *
-     * @param  non-empty-list<\Illuminate\Database\Eloquent\Model>  $named
-     * @param  list<string>  $held
-     * @return list<\Illuminate\Database\Eloquent\Model>
-     */
-    private static function heldOrFirst(array $named, array $held): array
-    {
-        $kept = \array_values(\array_filter($named, static fn (Model $model): bool => \in_array(self::key($model), $held, true)));
-
-        return $kept !== [] ? $kept : [$named[0]];
     }
 
     /**
@@ -408,21 +399,27 @@ final class GrantService
     }
 
     /**
-     * Return the grant table writer for the grantee's rows of the given kind.
+     * Return the grant table writer for the grantee's rows of the given kind,
+     * before the call's transaction opens, once the grantee is known to be one
+     * a grant can be written for: a saved model with a key, or a reference with
+     * a type and a key.
      *
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\GranteeReference  $grantee
      * @return \SineMacula\Laravel\Authorization\Services\Support\GrantTable
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException
      */
     private static function table(GrantTarget $kind, GranteeReference|Model $grantee): GrantTable
     {
-        return new GrantTable(
-            AuthorizationConnection::connection(),
-            $kind->table(),
-            $kind->column(),
-            $grantee->getMorphClass(),
-            $grantee instanceof Model ? self::key($grantee) : $grantee->getKey(),
-        );
+        $type = $grantee->getMorphClass();
+        $id   = $grantee instanceof Model ? self::key($grantee) : $grantee->getKey();
+
+        if ($type === '' || $id === '' || ($grantee instanceof Model && !$grantee->exists)) {
+            throw new InvalidGranteeException($grantee);
+        }
+
+        return new GrantTable(AuthorizationConnection::connection(), $kind->table(), $kind->column(), $type, $id);
     }
 
     /**

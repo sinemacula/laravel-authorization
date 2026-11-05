@@ -11,6 +11,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted;
@@ -21,6 +22,7 @@ use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
@@ -31,6 +33,7 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\SyncResult;
 use SineMacula\Laravel\Authorization\Support\GranteeReference;
 use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\AssertsTransactions;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\ApiGuardedUser;
 use Tests\Feature\Stubs\CustomPermission;
@@ -53,7 +56,7 @@ use Tests\TestCase;
 #[CoversClass(SyncResult::class)]
 final class GrantServiceTest extends TestCase
 {
-    use ActsAsTenant, UsesAnAuthorizationConnection;
+    use ActsAsTenant, AssertsTransactions, UsesAnAuthorizationConnection;
 
     /** @var string The instant every test starts at. */
     private const string NOW = '2026-07-01 12:00:00';
@@ -288,6 +291,31 @@ final class GrantServiceTest extends TestCase
     }
 
     /**
+     * Each revocation runs in one transaction on the package's connection: the
+     * lookups as well as the delete.
+     *
+     * @return void
+     */
+    public function testRevocationsRunInATransactionOnThePackageConnection(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        $user   = self::user();
+        $policy = self::policy('audit');
+
+        self::role('editor');
+        Permission::query()->create(['name' => 'posts:edit']);
+
+        self::service()->grantRole($user, 'editor');
+        self::service()->grantPermission($user, 'posts:edit');
+        self::service()->attachPolicy($user, $policy);
+
+        self::assertSame(1, self::assertAllInATransaction(static fn (): int => self::service()->revokeRole($user, 'editor')));
+        self::assertSame(1, self::assertAllInATransaction(static fn (): int => self::service()->revokePermission($user, 'posts:edit')));
+        self::assertSame(1, self::assertAllInATransaction(static fn (): int => self::service()->detachPolicy($user, $policy)));
+    }
+
+    /**
      * A sync that fails part-way rolls back what it wrote before the failure:
      * the revoked grant is back.
      *
@@ -330,7 +358,7 @@ final class GrantServiceTest extends TestCase
     {
         self::role('editor');
         $api  = Role::query()->create(['name' => 'editor', 'guard' => 'api']);
-        $user = new ApiGuardedUser(['id' => 'api-user']);
+        $user = ApiGuardedUser::query()->create(['id' => 'api-user']);
 
         self::service()->grantRole($user, 'editor');
 
@@ -374,9 +402,73 @@ final class GrantServiceTest extends TestCase
             }
         };
 
+        $grantee->exists = true;
+
         self::service()->grantRole($grantee, 'editor');
 
         self::assertSame([$web->id], DB::table('authorizable_roles')->where('authorizable_id', 'hooked')->pluck('role_id')->all());
+    }
+
+    /**
+     * Grantees a grant cannot be written for: an unsaved model, a saved model
+     * with an empty key, and a reference with an empty type or key.
+     *
+     * @return iterable<string, array{\Closure(): (\Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\GranteeReference), string}>
+     */
+    public static function invalidGrantees(): iterable
+    {
+        yield 'an unsaved model' => [static fn (): StubIdentity => new StubIdentity(['name' => 'x']), 'an unsaved ' . StubIdentity::class];
+        yield 'an unsaved model with a key' => [static fn (): StubIdentity => new StubIdentity(['id' => 'user-1']), 'an unsaved ' . StubIdentity::class];
+        yield 'a saved model with an empty key' => [static function (): StubIdentity {
+            $identity         = new StubIdentity(['id' => '']);
+            $identity->exists = true;
+
+            return $identity;
+        }, 'an incomplete ' . StubIdentity::class];
+        yield 'a reference with an empty key' => [static fn (): GranteeReference => new GranteeReference('App\Models\User', ''), 'an incomplete ' . GranteeReference::class];
+        yield 'a reference with an empty type' => [static fn (): GranteeReference => new GranteeReference('', '42'), 'an incomplete ' . GranteeReference::class];
+    }
+
+    /**
+     * A grant, revocation or sync for a grantee a grant cannot be written for
+     * is refused before anything is read or written, and dispatches nothing.
+     *
+     * @param  \Closure(): (\Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\GranteeReference)  $grantee
+     * @param  string  $described
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    #[DataProvider('invalidGrantees')]
+    public function testRefusesAGranteeAGrantCannotBeWrittenFor(\Closure $grantee, string $described): void
+    {
+        $role    = self::role('editor');
+        $queries = 0;
+
+        Event::fake();
+
+        DB::listen(static function () use (&$queries): void {
+            $queries++;
+        });
+
+        $calls = [
+            'grant'  => static fn (GrantService $service): mixed => $service->grantRole($grantee(), $role),
+            'revoke' => static fn (GrantService $service): mixed => $service->revokeRole($grantee(), 'editor'),
+            'sync'   => static fn (GrantService $service): mixed => $service->syncRoles($grantee(), [$role]),
+        ];
+
+        foreach ($calls as $name => $call) {
+            try {
+                $call(self::service());
+                self::fail("The {$name} was not refused.");
+            } catch (InvalidGranteeException $exception) {
+                self::assertSame("A grant takes a saved grantee with a type and a key, not {$described}.", $exception->getMessage());
+            }
+        }
+
+        self::assertSame(0, $queries);
+        self::assertSame(0, DB::table('authorizable_roles')->count());
+        self::assertNoGrantEvents();
     }
 
     /**
