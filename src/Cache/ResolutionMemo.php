@@ -93,8 +93,8 @@ final class ResolutionMemo
 
     /**
      * Return the current Unix timestamp: the test clock when one is set,
-     * otherwise the system clock, which is far cheaper to read than Carbon on
-     * a path every memo hit takes.
+     * otherwise the system clock, which is far cheaper to read than Carbon on a
+     * path every memo hit takes.
      *
      * @return int
      */
