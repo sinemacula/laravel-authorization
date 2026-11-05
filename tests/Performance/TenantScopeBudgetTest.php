@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Performance;
 
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
@@ -104,10 +105,14 @@ final class TenantScopeBudgetTest extends TestCase
         // Prime the memo so every measured call is a warm apply.
         $scope->apply(Role::query(), $role);
 
+        // Build the queries before the clock starts, so the budget measures the
+        // scope's apply and not model construction.
+        $queries = \array_map(static fn (): Builder => Role::query(), \range(1, 1000));
+
         $start = \microtime(true);
 
-        for ($i = 0; $i < 1000; $i++) {
-            $scope->apply(Role::query(), $role);
+        foreach ($queries as $query) {
+            $scope->apply($query, $role);
         }
 
         $elapsed = \microtime(true) - $start;
