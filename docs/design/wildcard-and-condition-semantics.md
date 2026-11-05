@@ -32,17 +32,33 @@ a condition operator catalogue for context-sensitive decisions. This note docume
 
 ## Wildcard Matching
 
-Both RBAC permission checks and policy statement matching use PHP's `fnmatch` function. The matching supports the full
-glob pattern syntax:
+Both RBAC permission checks and policy statement matching use PHP's `fnmatch` function:
 
 | Pattern    | Matches                          | Does not match         |
 |------------|----------------------------------|------------------------|
 | `posts:*`  | `posts:create`, `posts:delete`   | `comments:create`      |
-| `*:*`      | Everything (super-admin path)    | --                     |
+| `posts.*`  | `posts.create`, `posts.delete`   | `comments.create`      |
+| `*`        | Everything (super-admin path)    | --                     |
+| `*:*`      | `posts:create`, `users:delete`   | `posts.edit`, `admin`  |
 | `posts:c*` | `posts:create`, `posts:clone`    | `posts:delete`         |
 | `*:create` | `posts:create`, `users:create`   | `posts:delete`         |
 
-The `*:*` pattern is the canonical super-admin wildcard -- it satisfies every `hasPermission()` check.
+A `.` in a pattern matches only itself, so `posts.*` does not match `postsXcreate`.
+
+The `*` pattern is the canonical super-admin wildcard -- it satisfies every `hasPermission()` check. `*:*` matches
+only names that contain a `:`, so it does not satisfy dotted names such as `posts.edit` or names with no separator such
+as `platform-admin`.
+
+### Names
+
+Role and permission names are strings of letters, digits and `_ - : . *`, so `posts:edit`, `posts.edit` and
+`sso.connection.trust` are all valid. `*` is the only wildcard a held permission can carry: whitespace and the other
+glob metacharacters (`?`, `[`, `]`, `{`, `}`) are refused with an `InvalidAuthorizationNameException` when the name is
+saved, so a malformed name cannot match unrelated permissions. `authorization:migrate-spatie` applies the same rule
+before it writes a row, and reports and skips any role or permission whose name fails it, along with its grants. It also
+reports and skips any permission whose name contains `*`, along with its grants: Spatie compares `*` literally unless its
+wildcard permissions are enabled, while here it would become a wildcard that grants other permissions. Role names are
+compared literally, so a role name containing `*` is migrated.
 
 ### RBAC interaction
 
@@ -114,7 +130,8 @@ This statement allows any `billing:*` action, but only when the context carries 
 
 - `WildcardPermissionTest::testHeldWildcardSatisfiesNarrowerAsk` -- `posts:*` satisfies `posts:create`.
 - `WildcardPermissionTest::testHeldConcreteDoesNotSatisfyWildcardAsk` -- `posts:create` does not satisfy `posts:*`.
-- `WildcardPermissionTest::testSuperAdminWildcardSatisfiesEverything` -- `*:*` satisfies any action.
+- `WildcardPermissionTest::testSuperAdminWildcardSatisfiesEverything` -- `*` satisfies any action.
+- `WildcardPermissionTest::testColonWildcardSatisfiesOnlyColonNames` -- `*:*` satisfies only names containing `:`.
 - `WildcardPermissionTest::testStatementMatchesBackslashBearingResourceLiterally` -- `FNM_NOESCAPE` preserves
   backslashes.
 - `WildcardPermissionTest::testIdentityInheritsRoleWildcard` -- role-inherited wildcard satisfies narrower ask.

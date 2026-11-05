@@ -23,7 +23,7 @@ use Tests\TestCase;
 /**
  * Feature coverage for the system-role protection flag.
  *
- * `is_system = true` blocks the next delete or rename on the instance unless
+ * `is_system = true` blocks the next delete or edit on the instance unless
  * `forceSystem()` is called first; the bypass is per-instance, in-memory, and
  * single-use — it does not persist across `$role->fresh()` hydrations and
  * re-arms on the next protected mutation.
@@ -140,12 +140,12 @@ final class SystemRoleProtectionTest extends TestCase
     }
 
     /**
-     * Non-rename updates — description, guard_name swap — pass without needing
-     * the escape hatch.
+     * Every field of a system role is protected, so a description update
+     * without the escape hatch is refused as a `modify`.
      *
      * @return void
      */
-    public function testDescriptionUpdateOnSystemRolePasses(): void
+    public function testDescriptionUpdateOnSystemRoleIsRefused(): void
     {
         $role = Role::create([
             'id'         => (string) Str::uuid(),
@@ -154,10 +154,97 @@ final class SystemRoleProtectionTest extends TestCase
             'is_system'  => true,
         ]);
 
-        $role->description = 'Super-admin — platform ownership.';
-        $role->save();
+        try {
+            $role->description = 'Super-admin — platform ownership.';
+            $role->save();
+            self::fail('Expected SystemRoleProtectedException was not thrown.');
+        } catch (SystemRoleProtectedException $exception) { // @phpstan-ignore catch.neverThrown
+            self::assertSame('super-admin', $exception->getRoleName());
+            self::assertSame('modify', $exception->getOperation());
+        }
 
-        self::assertSame('Super-admin — platform ownership.', $role->fresh()?->description);
+        self::assertNull($role->fresh()?->description); // @phpstan-ignore deadCode.unreachable
+    }
+
+    /**
+     * Clearing the system flag in the same mass-assigned update as a rename is
+     * refused as an `unprotect`: the guard reads the persisted flag, not the
+     * dirty one.
+     *
+     * @return void
+     */
+    public function testClearingSystemFlagThroughMassAssignmentIsRefused(): void
+    {
+        $role = Role::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => 'super-admin',
+            'guard_name' => 'web',
+            'is_system'  => true,
+        ]);
+
+        try {
+            $role->update(['is_system' => false, 'name' => 'renamed']);
+            self::fail('Expected SystemRoleProtectedException was not thrown.');
+        } catch (SystemRoleProtectedException $exception) { // @phpstan-ignore catch.neverThrown
+            self::assertSame('super-admin', $exception->getRoleName());
+            self::assertSame('unprotect', $exception->getOperation());
+        }
+
+        $fresh = $role->fresh(); // @phpstan-ignore deadCode.unreachable
+
+        self::assertSame('super-admin', $fresh?->name);
+        self::assertTrue($fresh?->is_system);
+    }
+
+    /**
+     * Clearing the system flag in memory and then deleting is refused, because
+     * the persisted flag still marks the row as system.
+     *
+     * @return void
+     */
+    public function testClearingSystemFlagThenDeletingIsRefused(): void
+    {
+        $role = Role::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => 'super-admin',
+            'guard_name' => 'web',
+            'is_system'  => true,
+        ]);
+
+        $role->is_system = false;
+
+        try {
+            $role->delete();
+            self::fail('Expected SystemRoleProtectedException was not thrown.');
+        } catch (SystemRoleProtectedException $exception) { // @phpstan-ignore catch.neverThrown
+            self::assertSame('delete', $exception->getOperation());
+        }
+
+        self::assertNotNull(Role::query()->find($role->getKey())); // @phpstan-ignore deadCode.unreachable
+    }
+
+    /**
+     * `forceSystem()` unlocks clearing the flag, after which the row is no
+     * longer protected and deletes freely.
+     *
+     * @return void
+     */
+    public function testForceSystemAllowsClearingSystemFlag(): void
+    {
+        $role = Role::create([
+            'id'         => (string) Str::uuid(),
+            'name'       => 'super-admin',
+            'guard_name' => 'web',
+            'is_system'  => true,
+        ]);
+
+        $role->forceSystem()->update(['is_system' => false]);
+
+        self::assertFalse($role->fresh()?->is_system);
+
+        $role->delete();
+
+        self::assertNull(Role::query()->find($role->getKey()));
     }
 
     /**
@@ -188,9 +275,9 @@ final class SystemRoleProtectionTest extends TestCase
     }
 
     /**
-     * `forceSystem()` is consumed by an intervening non-protected save (e.g. a
-     * description update), so a subsequent rename without re-arming the bypass
-     * is refused.
+     * `forceSystem()` is cleared by an intervening unprotected save (a
+     * `touch()`), so a subsequent rename without re-arming the bypass is
+     * refused.
      *
      * @return void
      */
@@ -203,11 +290,10 @@ final class SystemRoleProtectionTest extends TestCase
             'is_system'  => true,
         ]);
 
-        // Arm the bypass, then perform an unrelated save that would not consume
-        // the flag under the old behaviour.
+        // Arm the bypass, then perform a save the guard does not inspect, so
+        // `updating` never consumes the flag.
         $role->forceSystem();
-        $role->description = 'Updated description.';
-        $role->save();
+        $role->touch();
 
         // The bypass must be gone: a rename without a fresh `forceSystem()`
         // call must be refused.

@@ -217,19 +217,6 @@ class Role extends Model
     }
 
     /**
-     * Return the attribute names whose dirty state triggers the
-     * system-protection guard on `updating`. For roles, only `name` changes are
-     * protected.
-     *
-     * @return list<string>
-     */
-    #[\Override]
-    protected function systemProtectedFields(): array
-    {
-        return ['name'];
-    }
-
-    /**
      * Construct the per-model exception raised when a protected mutation on a
      * system role is refused.
      *
@@ -239,13 +226,6 @@ class Role extends Model
     #[\Override]
     protected function systemProtectionException(string $operation): \Throwable
     {
-        // Use the ORIGINAL name — on a rename, `getAttribute('name')` already
-        // reflects the mutated value. Audit consumers want "which role was
-        // targeted" (the canonical persisted name), not "what the attempted
-        // rename would produce."
-        /** @var string $roleName */
-        $roleName = $this->getOriginal('name', $this->getAttribute('name'));
-
-        return new SystemRoleProtectedException(roleName: $roleName, operation: $operation);
+        return new SystemRoleProtectedException(roleName: $this->systemProtectedName(), operation: $operation);
     }
 }

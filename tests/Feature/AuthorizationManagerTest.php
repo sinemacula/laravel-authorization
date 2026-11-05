@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -63,6 +64,28 @@ final class AuthorizationManagerTest extends TestCase
 
         $this->expectException(AuthorizationException::class);
         Authorization::authorize('posts:create');
+    }
+
+    /**
+     * Laravel's handler renders a denial from `authorize()` as a `403` whose
+     * body is the translated message alone, naming neither the action nor the
+     * resource.
+     *
+     * @return void
+     */
+    public function testDenialRendersAsForbidden(): void
+    {
+        $this->app->make(ConfigRepository::class)->set('app.debug', false); // @phpstan-ignore method.nonObject
+
+        /** @var \Illuminate\Routing\Router $router */
+        $router = $this->app->make('router'); // @phpstan-ignore method.nonObject
+        $router->get('/authorize', static function (): void {
+            Authorization::authorize('posts:delete', 'arn:posts:1');
+        });
+
+        $this->getJson('/authorize')
+            ->assertForbidden()
+            ->assertExactJson(['message' => 'This action is unauthorized.']);
     }
 
     /**
@@ -302,7 +325,7 @@ final class AuthorizationManagerTest extends TestCase
         Event::fake();
 
         try {
-            Authorization::authorize('nope');
+            $this->app->make(AuthorizationManager::class)->authorize('nope'); // @phpstan-ignore method.nonObject
         } catch (AuthorizationException) {
             // Expected.
         }

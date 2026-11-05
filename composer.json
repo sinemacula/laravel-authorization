@@ -1,7 +1,7 @@
 {
     "name": "sinemacula/laravel-authorization",
     "type": "library",
-    "description": "RBAC plus AWS IAM-style policy evaluation for Laravel 12 and 13. Standalone, enterprise-grade, and compatible with any Authenticatable identity.",
+    "description": "Role-based access control and IAM-style policy evaluation for Laravel",
     "keywords": [
         "sine macula",
         "laravel",

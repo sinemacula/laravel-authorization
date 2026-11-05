@@ -967,6 +967,8 @@ final class MutationKillersTest extends TestCase
      * (not evaluate).
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      */
     public function testAuthorizeWritesLastDecisionOnBothOutcomes(): void
     {

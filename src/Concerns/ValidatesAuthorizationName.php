@@ -11,11 +11,12 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameExceptio
  *
  * Role and permission names feed `fnmatch` during evaluation — the
  * holder-matches-asker walk in `HasPermissions::hasPermission()` and the action
- * / resource match in `Statement`. Allowing glob metacharacters (`?`, `[`, `]`,
- * `{`, `}`) or whitespace would let a malformed name match unrelated
- * permissions, so the mutator enforces a tight character class at save time.
- * The typed exception surfaces immediately, before the row reaches the
- * database.
+ * / resource match in `Statement`. Names are letters, digits and `_ - : . *`,
+ * so `posts.edit`, `posts:edit` and `posts.*` are all valid and `*` is the only
+ * wildcard. Allowing the other glob metacharacters (`?`, `[`, `]`, `{`, `}`) or
+ * whitespace would let a malformed name match unrelated permissions, so the
+ * mutator enforces this character class at save time. The typed exception
+ * surfaces immediately, before the row reaches the database.
  *
  * Consumers set `$this->authorizationNameKind` (e.g. `'role'`, `'permission'`)
  * to control the label used in the raised exception; that is the only per-model
@@ -29,7 +30,22 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameExceptio
 trait ValidatesAuthorizationName // @phpstan-ignore trait.unused
 {
     /** @var string Pattern permitted in role and permission names. */
-    private const string NAME_PATTERN = '/^[A-Za-z0-9_\-:*]+$/';
+    private const string NAME_PATTERN = '/^[A-Za-z0-9_\-:.*]+$/D';
+
+    /**
+     * Determine whether the given value is a valid role or permission name.
+     *
+     * Exposed statically so writers that bypass the attribute mutator (such as
+     * the Spatie import's raw inserts) apply the same rule before a row is
+     * written.
+     *
+     * @param  mixed  $value
+     * @return bool
+     */
+    public static function isValidAuthorizationName(mixed $value): bool
+    {
+        return \is_string($value) && \preg_match(self::NAME_PATTERN, $value) === 1;
+    }
 
     /**
      * Validate the `name` attribute before it is persisted.
@@ -41,7 +57,7 @@ trait ValidatesAuthorizationName // @phpstan-ignore trait.unused
      */
     public function setNameAttribute(mixed $value): void
     {
-        if (!\is_string($value) || $value === '' || \preg_match(self::NAME_PATTERN, $value) !== 1) {
+        if (!self::isValidAuthorizationName($value)) {
             throw new InvalidAuthorizationNameException($this->getAuthorizationNameKind(), \is_string($value) ? $value : '');
         }
 
