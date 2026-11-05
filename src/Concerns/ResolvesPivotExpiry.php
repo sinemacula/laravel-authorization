@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Concerns;
 
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
@@ -67,6 +68,24 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
                 $query->whereNull($table . '.expires_at')
                     ->orWhere($table . '.expires_at', '>', Carbon::now('UTC'));
             });
+    }
+
+    /**
+     * Return the grants of the given relation, loading them first when they are
+     * not loaded yet.
+     *
+     * Loading is explicit, never lazy, so an identity hydrated from a query of
+     * several rows resolves under `Model::preventLazyLoading()` as well.
+     *
+     * @param  string  $relation
+     * @return \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>
+     */
+    private function authorizationLoadedGrants(string $relation): EloquentCollection
+    {
+        $this->loadMissing($relation);
+
+        /** @var \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model> */
+        return $this->getRelation($relation);
     }
 
     /**

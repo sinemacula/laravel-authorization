@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Collection;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Support\RoleGraph;
 
 /**
  * Role hierarchy and rank-comparison behaviour.
@@ -56,11 +57,12 @@ trait HasRoleHierarchy // @phpstan-ignore trait.unused
     /**
      * Return all ancestor roles ordered from root to immediate parent.
      *
-     * Walks up the parent chain eagerly loading each level. Includes cycle
-     * detection — if a visited role is encountered a second time, the chain is
-     * broken and a `RoleHierarchyCycleException` is thrown carrying the
-     * offending role's name and the name of the parent that would close the
-     * cycle.
+     * The chain is read in two queries whatever its depth, through `RoleGraph`:
+     * a parent that is missing, or that the tenant scope hides, ends it there.
+     * Includes cycle detection — if a visited role is encountered a second
+     * time, the chain is broken and a `RoleHierarchyCycleException` is thrown
+     * carrying the offending role's name and the name of the parent that would
+     * close the cycle.
      *
      * @return \Illuminate\Support\Collection<int, \SineMacula\Laravel\Authorization\Models\Role>
      *
@@ -68,35 +70,7 @@ trait HasRoleHierarchy // @phpstan-ignore trait.unused
      */
     public function ancestors(): Collection
     {
-        $ancestors = new Collection;
-        $visited   = [];
-        $current   = $this;
-
-        while ($current->parent_id !== null) {
-            if (isset($visited[$current->parent_id])) {
-                /** @var \SineMacula\Laravel\Authorization\Models\Role|null $proposedParent */
-                $proposedParent = self::configuredRoleClass()::query()->find($current->parent_id);
-                /** @var string $parentId */
-                $parentId     = $current->parent_id;
-                $proposedName = $proposedParent === null ? $parentId : $proposedParent->name;
-
-                throw new RoleHierarchyCycleException(roleName: $this->name, proposedParentName: $proposedName);
-            }
-
-            $visited[$current->parent_id] = true;
-
-            /** @var \SineMacula\Laravel\Authorization\Models\Role|null $parent */
-            $parent = $current->parent;
-
-            if ($parent === null) {
-                break;
-            }
-
-            $ancestors->prepend($parent);
-            $current = $parent;
-        }
-
-        return $ancestors->values();
+        return new Collection(RoleGraph::ancestorsOf([$this])[$this->id]);
     }
 
     /**

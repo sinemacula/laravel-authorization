@@ -147,7 +147,7 @@ trait HasRoles // @phpstan-ignore trait.unused
     public function hasRole(Role|string $role, ?string $guard = null): bool
     {
         /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
-        $roles = $this->roles;
+        $roles = $this->authorizationLoadedGrants('roles');
 
         foreach ($roles as $existing) {
             $named = $role instanceof Role ? $existing->is($role) : $existing->name === $role;
@@ -186,7 +186,7 @@ trait HasRoles // @phpstan-ignore trait.unused
             }
 
             /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
-            $roles   = $this->roles;
+            $roles   = $this->authorizationLoadedGrants('roles');
             $roleIds = self::authorizationCollectModelIds($roles);
             $maxTtl  = self::authorizationNearestPivotExpirySeconds($roles);
 
@@ -276,7 +276,7 @@ trait HasRoles // @phpstan-ignore trait.unused
     private function computeRoles(): array
     {
         /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
-        $roles = $this->roles;
+        $roles = $this->authorizationLoadedGrants('roles');
 
         $names = $roles->map(static fn (Role $role): string => $role->name)->all();
 
@@ -294,7 +294,7 @@ trait HasRoles // @phpstan-ignore trait.unused
     private function highestRank(): ?int
     {
         /** @var \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role> $roles */
-        $roles = $this->roles;
+        $roles = $this->authorizationLoadedGrants('roles');
 
         return $this->computeHighestRank($roles);
     }
