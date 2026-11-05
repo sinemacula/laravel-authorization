@@ -217,13 +217,14 @@ class Permission extends Model
     }
 
     /**
-     * Resolve a permission by name under the supplied guard, favouring
-     * guard-specific rows over guard-agnostic rows.
+     * Resolve a permission by name under the supplied guard, in the order
+     * `GuardScopedLookup` ranks the rows that answer it: the current tenant's
+     * row before the platform's, then a guard-specific row before a
+     * guard-agnostic one, then the lowest primary key.
      *
-     * Centralises the guard-precedence query shared by
-     * `HasPermissions::resolvePermission()` and `Role::resolvePermission()` — a
-     * single owner for the guard-agnostic disjunction so evolution of the
-     * matching rules happens in one place. Consumers calling
+     * Delegates to the precedence query shared by
+     * `HasPermissions::resolvePermission()` and `Role::resolvePermission()`, so
+     * the matching rules have one owner. Consumers calling
      * `$class::resolveByName(...)` where `$class` is read from
      * `authorization.models.permission` get correct late-static-binding against
      * their swapped model.

@@ -79,8 +79,10 @@ return new class extends Migration {
             $blueprint->primary('id');
 
             // Explicit lookup index on `(name, guard)`. Every `resolveRole()` /
-            // `hasRole()` query filters on both columns; the unique key below
-            // compares expressions, which a lookup by column cannot use.
+            // `hasRole()` query filters on both columns. The unique key below
+            // can serve the `name` prefix but not the `guard` comparison, since
+            // it stores `COALESCE(guard, '')`, so this index serves the
+            // two-column lookup.
             $blueprint->index(['name', 'guard'], $table . '_name_guard_index');
             $blueprint->index('parent_id', $table . '_parent_id_index');
             $blueprint->index('rank', $table . '_rank_index');

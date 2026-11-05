@@ -99,15 +99,16 @@ class Role extends Model
     }
 
     /**
-     * Resolve a role by name under the supplied guard, favouring guard-specific
-     * rows over guard-agnostic rows.
+     * Resolve a role by name under the supplied guard, in the order
+     * `GuardScopedLookup` ranks the rows that answer it: the current tenant's
+     * row before the platform's, then a guard-specific row before a
+     * guard-agnostic one, then the lowest primary key.
      *
-     * Centralises the guard-precedence query shared by
-     * `HasRoles::resolveRole()` and any direct static caller — a single owner
-     * for the guard-agnostic disjunction so evolution of the matching rules
-     * happens in one place. Consumers calling `$class::resolveByName(...)`
-     * where `$class` is read from `authorization.models.role` get correct
-     * late-static-binding against their swapped model.
+     * Delegates to the precedence query shared by `HasRoles::resolveRole()` and
+     * any direct static caller, so the matching rules have one owner. Consumers
+     * calling `$class::resolveByName(...)` where `$class` is read from
+     * `authorization.models.role` get correct late-static-binding against their
+     * swapped model.
      *
      * @param  string  $name
      * @param  string|null  $guard

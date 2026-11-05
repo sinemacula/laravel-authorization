@@ -68,8 +68,9 @@ return new class extends Migration {
 
             // Explicit lookup index on `(name, guard)`. Every
             // `resolvePermission()` / `hasPermission()` query filters on both
-            // columns; the unique key below compares expressions, which a
-            // lookup by column cannot use.
+            // columns. The unique key below can serve the `name` prefix but not
+            // the `guard` comparison, since it stores `COALESCE(guard, '')`, so
+            // this index serves the two-column lookup.
             $blueprint->index(['name', 'guard'], $table . '_name_guard_index');
             $blueprint->index(['tenant_type', 'tenant_id'], $table . '_tenant_index');
         });
