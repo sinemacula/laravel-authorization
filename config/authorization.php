@@ -87,10 +87,11 @@ return [
     | Permission enums
     |---------------------------------------------------------------------------
     |
-    | Backed or unit enums implementing `PermissionEnum`. Every case is wired
-    | into a Laravel Gate on boot, so a permission defined here is immediately
-    | callable via `Gate::allows(...)`, `$user->can(...)`, `@can(...)`, and the
-    | `can:` route middleware.
+    | String-backed enums implementing `PermissionEnum`; each case's value is
+    | the permission name, and an enum backed by integers is refused at boot.
+    | Every case is wired into a Laravel Gate on boot, so a permission defined
+    | here is immediately callable via `Gate::allows(...)`, `$user->can(...)`,
+    | `@can(...)`, and the `can:` route middleware.
     |
     | **Required for Laravel's Gate surface.** The `Authorization` facade
     | (`Authorization::can(...)`, `Authorization::for($user)->can(...)`) works

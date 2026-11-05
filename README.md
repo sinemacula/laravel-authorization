@@ -131,7 +131,7 @@ class User extends Authenticatable implements AuthorizableIdentity
 }
 ```
 
-Define permissions as an enum:
+Define permissions as a string-backed enum. Each case's value is the permission name:
 
 ```php
 namespace App\Authorization;
@@ -142,11 +142,6 @@ enum PostPermission: string implements PermissionEnum
 {
     case UPDATE = 'posts:update';
     case DELETE = 'posts:delete';
-
-    public function toString(): string
-    {
-        return $this->value;
-    }
 }
 ```
 

@@ -93,7 +93,9 @@ final readonly class GateRegistrar
      */
     private function registerEnumGate(PermissionEnum $case, GateConflictMode $onConflict): void
     {
-        $permission = $case->toString();
+        // The config validation refuses an enum not backed by strings at boot.
+        /** @var string $permission */
+        $permission = $case->value;
 
         if (Gate::has($permission)) {
             // Exhaustive match over GateConflictMode: Throw short-circuits,

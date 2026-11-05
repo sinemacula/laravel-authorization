@@ -321,6 +321,29 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * `effectivePermissions()` keys its map by each case's value, the
+     * permission name.
+     *
+     * @return void
+     */
+    public function testEffectivePermissionsAreKeyedByCaseValue(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make('config'); // @phpstan-ignore method.nonObject
+        $config->set('authorization.permission_enums', [PermissionEnum::class]);
+
+        Permission::create(['id' => '0d4a3f0e-2f5e-4c39-9b0b-4f8ab2a1c5d1', 'name' => PermissionEnum::POSTS_CREATE->value, 'guard' => 'web']);
+
+        $user = StubIdentity::create(['id' => '7c3e9f12-55a4-4b8e-b0a7-2d1c6e8f9a03']);
+        $user->givePermission(PermissionEnum::POSTS_CREATE->value);
+
+        self::assertSame(
+            [PermissionEnum::POSTS_CREATE->value => true, PermissionEnum::POSTS_DELETE->value => false],
+            Authorization::for($user)->effectivePermissions(),
+        );
+    }
+
+    /**
      * authorize() fires AuthorizationFailed and DecisionEvaluated before
      * throwing.
      *

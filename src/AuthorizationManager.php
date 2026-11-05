@@ -227,7 +227,8 @@ final class AuthorizationManager
             $className = $enumClass;
 
             foreach ($className::cases() as $case) {
-                $action               = $case->toString();
+                /** @var string $action */
+                $action               = $case->value;
                 $permissions[$action] = $this->can($action, null, $context);
             }
         }

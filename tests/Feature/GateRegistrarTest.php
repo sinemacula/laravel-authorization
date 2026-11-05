@@ -89,6 +89,20 @@ final class GateRegistrarTest extends TestCase
     }
 
     /**
+     * Every case of a configured enum is registered as a Gate named by the
+     * case's value, which is the permission name.
+     *
+     * @return void
+     */
+    public function testRegistersAGateNamedByEachCaseValue(): void
+    {
+        foreach (PermissionEnum::cases() as $case) {
+            self::assertTrue(Gate::has($case->value));
+            self::assertFalse(Gate::has($case->name));
+        }
+    }
+
+    /**
      * An unsaved model has no key, so it cannot be identified as a resource and
      * the Gate refuses it with an implicit deny.
      *
