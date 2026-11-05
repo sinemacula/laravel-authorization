@@ -1,0 +1,518 @@
+<?php
+
+declare(strict_types = 1);
+
+namespace Tests\Feature\Services;
+
+use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Database\Events\QueryExecuted;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
+use Illuminate\Support\Str;
+use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
+use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
+use SineMacula\Laravel\Authorization\Events\Role\PermissionGranted;
+use SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked;
+use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
+use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
+use SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException;
+use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
+use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
+use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\RoleService;
+use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\UsesAnAuthorizationConnection;
+use Tests\Feature\Stubs\CustomPermission;
+use Tests\Feature\Stubs\CustomRole;
+use Tests\TestCase;
+
+/**
+ * Feature tests for `RoleService`, which creates, renames, describes,
+ * re-parents, deletes and lists roles and grants their permissions.
+ *
+ * @author      Ben Carey <bdmc@sinemacula.co.uk>
+ * @copyright   2026 Sine Macula Limited
+ *
+ * @internal
+ *
+ * @SuppressWarnings("php:S1192")
+ */
+#[CoversClass(RoleService::class)]
+final class RoleServiceTest extends TestCase
+{
+    use ActsAsTenant, UsesAnAuthorizationConnection;
+
+    /**
+     * The service is bound once in the container.
+     *
+     * @return void
+     */
+    public function testIsBoundAsASingleton(): void
+    {
+        self::assertSame(self::service(), self::service());
+    }
+
+    /**
+     * A role is created with its attributes, through the configured class, and
+     * reported by the observer.
+     *
+     * @return void
+     */
+    public function testCreatesARole(): void
+    {
+        $this->config()->set('authorization.models.role', CustomRole::class);
+
+        Event::fake([RoleCreated::class]);
+
+        $role = self::service()->create('editor', 'web', 'Edits posts', 3);
+
+        self::assertInstanceOf(CustomRole::class, $role);
+        self::assertTrue($role->exists);
+        self::assertTrue(Str::isUuid($role->id));
+        self::assertSame(
+            ['name' => 'editor', 'guard' => 'web', 'description' => 'Edits posts', 'rank' => 3],
+            Role::query()->whereKey($role->id)->sole()->only(['name', 'guard', 'description', 'rank']),
+        );
+        Event::assertDispatched(RoleCreated::class);
+    }
+
+    /**
+     * A role created with an id keeps it.
+     *
+     * @return void
+     */
+    public function testCreatesARoleWithTheGivenId(): void
+    {
+        $id = (string) Str::uuid();
+
+        self::assertSame($id, self::service()->create('editor', id: $id)->id);
+        self::assertTrue(Role::query()->whereKey($id)->exists());
+    }
+
+    /**
+     * A role is written on the package's connection.
+     *
+     * @return void
+     */
+    public function testCreatesTheRoleOnThePackageConnection(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        self::service()->create('editor');
+
+        self::assertSame(1, self::authorizationConnection()->table('roles')->count());
+        self::assertSame(0, DB::table('roles')->count());
+    }
+
+    /**
+     * A role is renamed and described by model or by name.
+     *
+     * @return void
+     */
+    public function testRenamesAndDescribesARole(): void
+    {
+        $role = self::role('editor');
+
+        self::assertSame('author', self::service()->rename('editor', 'author')->name);
+        self::assertSame('Writes posts', self::service()->describe($role, 'Writes posts')->description);
+        self::assertNull(self::service()->describe('author', null)->description);
+        $fresh = $role->fresh();
+
+        self::assertSame(['author', null], [$fresh?->name, $fresh?->description]);
+    }
+
+    /**
+     * A system role keeps its protection through the service.
+     *
+     * @return void
+     */
+    public function testASystemRoleCannotBeRenamed(): void
+    {
+        self::role('admin', ['is_system' => true]);
+
+        $this->expectException(SystemRoleProtectedException::class);
+
+        self::service()->rename('admin', 'owner');
+    }
+
+    /**
+     * A role is deleted by model or by name; an unknown name throws.
+     *
+     * @return void
+     */
+    public function testDeletesARole(): void
+    {
+        $role = self::role('editor');
+
+        self::role('viewer');
+
+        self::service()->delete($role);
+        self::service()->delete('viewer');
+
+        self::assertSame(0, Role::query()->count());
+
+        $this->expectExceptionObject(new UnknownRoleException('ghost'));
+
+        self::service()->delete('ghost');
+    }
+
+    /**
+     * The roles are listed by name; with a guard, those of that guard or
+     * guard-agnostic.
+     *
+     * @return void
+     */
+    public function testListsTheRoles(): void
+    {
+        self::role('viewer', ['guard' => 'api']);
+        self::role('editor', ['guard' => 'web']);
+        self::role('auditor');
+
+        self::assertSame(['auditor', 'editor', 'viewer'], self::service()->list()->pluck('name')->all());
+        self::assertSame(['auditor', 'viewer'], self::service()->list('api')->pluck('name')->all());
+    }
+
+    /**
+     * A parent is set, by model or by name under the role's guard, and cleared.
+     *
+     * @return void
+     */
+    public function testSetsAndClearsAParent(): void
+    {
+        $role = self::role('editor', ['guard' => 'api']);
+
+        self::role('author', ['guard' => 'web']);
+        $parent = self::role('author', ['guard' => 'api']);
+
+        self::assertSame($parent->id, self::service()->setParent($role, 'author')->parent_id);
+        self::assertSame($parent->id, Role::query()->whereKey($role->id)->value('parent_id'));
+        self::assertNull(self::service()->setParent($role, null)->parent_id);
+        self::assertNull(Role::query()->whereKey($role->id)->value('parent_id'));
+    }
+
+    /**
+     * Setting a parent locks the role and the parent first, in key order, and
+     * outside the tenant scope.
+     *
+     * @return void
+     */
+    public function testSettingAParentLocksTheRoleAndTheParentFirst(): void
+    {
+        $role   = self::role('editor');
+        $parent = self::role('author');
+        $ids    = [$role->id, $parent->id];
+
+        \sort($ids);
+
+        $this->actAsTenant(self::createTenant('tenant-a'));
+
+        $locks = [];
+
+        DB::listen(static function (QueryExecuted $query) use (&$locks): void {
+            if (!\str_contains($query->sql, 'order by')) {
+                return;
+            }
+
+            $locks[] = $query->bindings;
+        });
+
+        self::service()->setParent($role, $parent);
+
+        self::assertSame([$ids], $locks);
+    }
+
+    /**
+     * A parent that would close a cycle is refused, and nothing is written.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRefusesAParentThatClosesACycle(): void
+    {
+        $root  = self::role('root');
+        $child = self::role('child', ['parent_id' => $root->id]);
+
+        try {
+            self::service()->setParent($root, $child);
+            self::fail('The cycle was not refused.');
+        } catch (RoleHierarchyCycleException $exception) {
+            self::assertSame('child', $exception->getProposedParentName());
+        }
+
+        self::assertNull($root->fresh()?->parent_id);
+    }
+
+    /**
+     * A cycle through another tenant's role is refused too: the walk is not
+     * narrowed by the tenant scope.
+     *
+     * @return void
+     */
+    public function testRefusesACycleThroughAnotherTenantsRole(): void
+    {
+        $tenantA = self::createTenant('tenant-a');
+        $tenantB = self::createTenant('tenant-b');
+        $mine    = self::role('mine', self::ownedBy($tenantA));
+        $theirs  = self::role('theirs', [...self::ownedBy($tenantB), 'parent_id' => $mine->id]);
+        $middle  = self::role('middle', [...self::ownedBy($tenantA), 'parent_id' => $theirs->id]);
+
+        $this->actAsTenant($tenantA);
+
+        $this->expectException(RoleHierarchyCycleException::class);
+
+        self::service()->setParent($mine, $middle);
+    }
+
+    /**
+     * A permission is granted to a role by name under the role's guard, once:
+     * granting it again changes nothing and dispatches nothing.
+     *
+     * @return void
+     */
+    public function testGrantsAPermissionOnce(): void
+    {
+        $role = self::role('editor', ['guard' => 'api']);
+
+        Permission::query()->create(['name' => 'posts:edit', 'guard' => 'web']);
+        $permission = Permission::query()->create(['name' => 'posts:edit', 'guard' => 'api']);
+
+        Event::fake([PermissionGranted::class]);
+
+        self::assertCount(0, $role->permissions);
+        self::assertSame(GrantOutcome::GRANTED, self::service()->grantPermission($role, 'posts:edit'));
+        self::assertFalse($role->relationLoaded('permissions'));
+        self::assertSame(GrantOutcome::UNCHANGED, self::service()->grantPermission($role, $permission));
+        self::assertSame([$permission->id], DB::table('role_permissions')->pluck('permission_id')->all());
+        Event::assertDispatchedTimes(PermissionGranted::class, 1);
+        Event::assertDispatched(PermissionGranted::class, static fn (PermissionGranted $event): bool => $event->role === $role && $event->permission->is($permission));
+    }
+
+    /**
+     * A concurrent duplicate written between the check and the attachment is
+     * reported as unchanged rather than raising.
+     *
+     * @return void
+     */
+    public function testAConcurrentDuplicateIsUnchangedRatherThanRaising(): void
+    {
+        $role       = self::role('editor');
+        $permission = Permission::query()->create(['name' => 'posts:edit']);
+        $written    = false;
+
+        DB::listen(static function (QueryExecuted $query) use (&$written, $role, $permission): void {
+            if ($written || !\str_contains($query->sql, 'exists')) {
+                return;
+            }
+
+            $written = true;
+
+            DB::table('role_permissions')->insert(['role_id' => $role->id, 'permission_id' => $permission->id]);
+        });
+
+        Event::fake([PermissionGranted::class]);
+
+        self::assertSame(GrantOutcome::UNCHANGED, self::service()->grantPermission($role, $permission));
+        self::assertSame(1, DB::table('role_permissions')->count());
+        Event::assertNotDispatched(PermissionGranted::class);
+    }
+
+    /**
+     * Guard parity still holds through the service.
+     *
+     * @return void
+     */
+    public function testGuardParityHolds(): void
+    {
+        $role       = self::role('editor', ['guard' => 'web']);
+        $permission = Permission::query()->create(['name' => 'posts:edit', 'guard' => 'api']);
+
+        $this->expectException(GuardMismatchException::class);
+
+        self::service()->grantPermission($role, $permission);
+    }
+
+    /**
+     * A permission is revoked from a role once; revoking it again changes
+     * nothing and dispatches nothing.
+     *
+     * @return void
+     */
+    public function testRevokesAPermissionOnce(): void
+    {
+        $role       = self::role('editor');
+        $permission = Permission::query()->create(['name' => 'posts:edit']);
+
+        self::service()->grantPermission($role, $permission);
+
+        Event::fake([PermissionRevoked::class]);
+
+        self::assertCount(1, $role->permissions);
+        self::assertSame(1, self::service()->revokePermission($role, 'posts:edit'));
+        self::assertFalse($role->relationLoaded('permissions'));
+        self::assertSame(0, self::service()->revokePermission($role, $permission));
+        self::assertSame(0, DB::table('role_permissions')->count());
+        Event::assertDispatchedTimes(PermissionRevoked::class, 1);
+    }
+
+    /**
+     * An unknown permission name throws.
+     *
+     * @return void
+     */
+    public function testAnUnknownPermissionNameThrows(): void
+    {
+        self::role('editor');
+
+        $this->expectExceptionObject(new UnknownPermissionException('ghost'));
+
+        self::service()->grantPermission('editor', 'ghost');
+    }
+
+    /**
+     * A sync grants what is missing and revokes what is not listed, with one
+     * event per change, and reports both.
+     *
+     * @return void
+     */
+    public function testSyncsARolesPermissions(): void
+    {
+        $this->config()->set('authorization.models.permission', CustomPermission::class);
+
+        $role   = self::role('editor');
+        $kept   = Permission::query()->create(['name' => 'posts:edit']);
+        $gone   = Permission::query()->create(['name' => 'posts:delete']);
+        $joined = Permission::query()->create(['name' => 'posts:create']);
+
+        self::service()->grantPermission($role, $kept);
+        self::service()->grantPermission($role, $gone);
+
+        Event::fake([PermissionGranted::class, PermissionRevoked::class]);
+
+        $result = self::service()->syncPermissions($role, [$kept, 'posts:create']);
+
+        self::assertSame([$joined->id], $result->granted);
+        self::assertSame([], $result->rearmed);
+        self::assertSame([$gone->id], $result->revoked);
+        self::assertEqualsCanonicalizing([$kept->id, $joined->id], DB::table('role_permissions')->pluck('permission_id')->all());
+        Event::assertDispatchedTimes(PermissionGranted::class, 1);
+        Event::assertDispatched(PermissionGranted::class, static fn (PermissionGranted $event): bool => $event->permission instanceof CustomPermission
+            && $event->permission->is($joined));
+        Event::assertDispatchedTimes(PermissionRevoked::class, 1);
+        Event::assertDispatched(PermissionRevoked::class, static fn (PermissionRevoked $event): bool => $event->role->is($role) && $event->permission->is($gone));
+        self::assertFalse(self::service()->syncPermissions($role, [$kept, $joined])->isChange());
+    }
+
+    /**
+     * A sync reports a revoked permission another tenant owns.
+     *
+     * @return void
+     */
+    public function testASyncReportsARevokedPermissionOfAnotherTenant(): void
+    {
+        $role  = self::role('editor');
+        $other = Permission::query()->create(['name' => 'posts:edit', ...self::ownedBy(self::createTenant('tenant-a'))]);
+
+        self::service()->grantPermission($role, $other);
+
+        $this->actAsTenant(self::createTenant('tenant-b'));
+
+        Event::fake([PermissionRevoked::class]);
+
+        self::assertSame([$other->id], self::service()->syncPermissions($role, [])->revoked);
+        Event::assertDispatched(PermissionRevoked::class, static fn (PermissionRevoked $event): bool => $event->permission->is($other));
+    }
+
+    /**
+     * A sync refuses an entry that is not a permission and writes nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASyncRefusesAnEntryThatIsNotAPermission(): void
+    {
+        $role       = self::role('editor');
+        $permission = Permission::query()->create(['name' => 'posts:edit']);
+
+        self::service()->grantPermission($role, $permission);
+
+        try {
+            self::service()->syncPermissions($role, [self::role('viewer')]); // @phpstan-ignore argument.type
+            self::fail('The sync was not refused.');
+        } catch (InvalidGrantTargetException $exception) {
+            self::assertSame('permission', $exception->getKind());
+        }
+
+        self::assertSame([$permission->id], DB::table('role_permissions')->pluck('permission_id')->all());
+    }
+
+    /**
+     * A sync that fails part-way rolls back what it wrote before the failure.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASyncThatFailsPartWayRollsBack(): void
+    {
+        $role   = self::role('editor');
+        $kept   = Permission::query()->create(['name' => 'posts:edit']);
+        $listed = Permission::query()->create(['name' => 'posts:create']);
+
+        self::service()->grantPermission($role, $kept);
+
+        DB::listen(static function (QueryExecuted $query): void {
+            if (!\str_starts_with($query->sql, 'insert into') || !\str_contains($query->sql, 'role_permissions')) {
+                return;
+            }
+
+            throw new \RuntimeException('Write failed.');
+        });
+
+        try {
+            self::service()->syncPermissions($role, [$listed]);
+            self::fail('The sync did not fail.');
+        } catch (\RuntimeException $exception) {
+            self::assertSame('Write failed.', $exception->getMessage());
+        }
+
+        self::assertSame([$kept->id], DB::table('role_permissions')->pluck('permission_id')->all());
+    }
+
+    /**
+     * Return the role service.
+     *
+     * @return \SineMacula\Laravel\Authorization\Services\RoleService
+     */
+    private static function service(): RoleService
+    {
+        return app(RoleService::class);
+    }
+
+    /**
+     * Create a role.
+     *
+     * @param  string  $name
+     * @param  array<string, mixed>  $attributes
+     * @return \SineMacula\Laravel\Authorization\Models\Role
+     */
+    private static function role(string $name, array $attributes = []): Role
+    {
+        return Role::query()->create(['name' => $name, ...$attributes]);
+    }
+
+    /**
+     * Return the configuration repository.
+     *
+     * @return \Illuminate\Config\Repository
+     */
+    private function config(): ConfigRepository
+    {
+        /** @var \Illuminate\Config\Repository */
+        return $this->app?->make(ConfigRepository::class);
+    }
+}

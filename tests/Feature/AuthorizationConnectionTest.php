@@ -114,6 +114,21 @@ final class AuthorizationConnectionTest extends TestCase
     }
 
     /**
+     * The connection the package's pivots and transactions use is the
+     * configured connection, else the application's default.
+     *
+     * @return void
+     */
+    public function testConnectionIsTheConfiguredConnectionElseTheDefault(): void
+    {
+        self::assertSame(DB::connection(), AuthorizationConnection::connection());
+
+        $this->useAnAuthorizationConnection();
+
+        self::assertSame(self::authorizationConnection(), AuthorizationConnection::connection());
+    }
+
+    /**
      * The shipped migrations create every package table on the configured
      * connection.
      *

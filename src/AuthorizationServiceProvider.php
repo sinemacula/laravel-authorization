@@ -34,6 +34,10 @@ use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\CachingPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
+use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Services\PermissionService;
+use SineMacula\Laravel\Authorization\Services\PolicyService;
+use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 
 /**
@@ -55,6 +59,9 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
  * queue worker drops it before each job and Octane builds it afresh on each
  * request's sandbox. They are scoped together: a singleton holding a scoped
  * instance would keep the old instance alive.
+ *
+ * The management services (roles, permissions, policies and grants) hold no
+ * state and are bound as singletons.
  *
  * The contracts an application may bind itself (the subject resolver, the
  * policy store and the policy resolver) resolve through a package-owned key
@@ -98,6 +105,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
         $this->registerLastDecisionStore();
         $this->registerPolicyEvaluator();
         $this->registerAuthorizationManager();
+        $this->registerManagementServices();
     }
 
     /**
@@ -390,6 +398,19 @@ final class AuthorizationServiceProvider extends ServiceProvider
             [__DIR__ . '/../lang' => $this->app->langPath('vendor/authorization')],
             'authorization-lang',
         );
+    }
+
+    /**
+     * Bind the management services that own every write of a role, permission,
+     * policy or grant. They hold no state, so each is a singleton.
+     *
+     * @return void
+     */
+    private function registerManagementServices(): void
+    {
+        foreach ([RoleService::class, PermissionService::class, PolicyService::class, GrantService::class] as $service) {
+            $this->app->singleton($service);
+        }
     }
 
     /**
