@@ -158,4 +158,45 @@ final class ListPermissionsCommandTest extends TestCase
 
         self::assertSame(0, $exitCode);
     }
+
+    /**
+     * The listing bypasses the tenant scope: with no tenant resolved it lists
+     * tenant-owned permissions too, shows each permission's owner, and counts
+     * every role whatever its owner.
+     *
+     * @return void
+     */
+    public function testListsPermissionsOfEveryOwner(): void
+    {
+        Permission::create(['id' => 'd6d6d6d6-0000-0000-0000-000000000001', 'name' => 'platform:perm', 'guard_name' => 'web']);
+
+        $owned = Permission::create([
+            'id'          => 'd6d6d6d6-0000-0000-0000-000000000002',
+            'name'        => 'owned:perm',
+            'guard_name'  => 'web',
+            'tenant_type' => 'tenant',
+            'tenant_id'   => 't-1',
+        ]);
+
+        $platform = Role::create(['id' => 'd7d7d7d7-0000-0000-0000-000000000001', 'name' => 'own-r1', 'guard_name' => 'web']);
+        $tenant   = Role::create([
+            'id'          => 'd7d7d7d7-0000-0000-0000-000000000002',
+            'name'        => 'own-r2',
+            'guard_name'  => 'web',
+            'tenant_type' => 'tenant',
+            'tenant_id'   => 't-1',
+        ]);
+
+        $owned->roles()->attach([$platform->getKey(), $tenant->getKey()]);
+
+        self::assertSame(['platform:perm'], Permission::query()->pluck('name')->all());
+
+        $exitCode = Artisan::call('authorization:list-permissions');
+        $output   = Artisan::output();
+
+        self::assertSame(0, $exitCode);
+        self::assertStringContainsString('Owner', $output);
+        self::assertMatchesRegularExpression('/\|\s*platform:perm\s*\|\s*web\s*\|\s*platform\s*\|\s*No\s*\|\s*0\s*\|/', $output);
+        self::assertMatchesRegularExpression('/\|\s*owned:perm\s*\|\s*web\s*\|\s*tenant:t-1\s*\|\s*No\s*\|\s*2\s*\|/', $output);
+    }
 }

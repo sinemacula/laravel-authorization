@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Console\ListRolesCommand;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -157,5 +158,50 @@ final class ListRolesCommandTest extends TestCase
         $exitCode = Artisan::call('authorization:list-roles');
 
         self::assertSame(0, $exitCode);
+    }
+
+    /**
+     * The listing bypasses the tenant scope: with no tenant resolved it lists
+     * tenant-owned roles too, shows each role's owner, and counts every
+     * permission whatever its owner.
+     *
+     * @return void
+     */
+    public function testListsRolesOfEveryOwner(): void
+    {
+        Role::create(['id' => 'c6c6c6c6-0000-0000-0000-000000000001', 'name' => 'platform-role', 'guard_name' => 'web']);
+
+        $owned = Role::create([
+            'id'          => 'c6c6c6c6-0000-0000-0000-000000000002',
+            'name'        => 'owned-role',
+            'guard_name'  => 'web',
+            'tenant_type' => 'tenant',
+            'tenant_id'   => 't-1',
+        ]);
+
+        $platform = Permission::create(['id' => 'c7c7c7c7-0000-0000-0000-000000000001', 'name' => 'own:p1', 'guard_name' => 'web']);
+        $tenant   = Permission::create([
+            'id'          => 'c7c7c7c7-0000-0000-0000-000000000002',
+            'name'        => 'own:p2',
+            'guard_name'  => 'web',
+            'tenant_type' => 'tenant',
+            'tenant_id'   => 't-1',
+        ]);
+
+        // The pivot guard checks the permission within the tenant scope, so the
+        // tenant-owned permission is linked directly.
+        foreach ([$platform, $tenant] as $permission) {
+            DB::table('role_permissions')->insert(['role_id' => $owned->getKey(), 'permission_id' => $permission->getKey()]);
+        }
+
+        self::assertSame(['platform-role'], Role::query()->pluck('name')->all());
+
+        $exitCode = Artisan::call('authorization:list-roles');
+        $output   = Artisan::output();
+
+        self::assertSame(0, $exitCode);
+        self::assertStringContainsString('Owner', $output);
+        self::assertMatchesRegularExpression('/\|\s*platform-role\s*\|\s*web\s*\|\s*platform\s*\|\s*No\s*\|\s*0\s*\|/', $output);
+        self::assertMatchesRegularExpression('/\|\s*owned-role\s*\|\s*web\s*\|\s*tenant:t-1\s*\|\s*No\s*\|\s*2\s*\|/', $output);
     }
 }
