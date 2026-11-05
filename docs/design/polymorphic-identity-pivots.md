@@ -81,9 +81,9 @@ the instant it names whatever the caller's or the application's zone.
 
 Each grant has a scope: both tenant columns null grant platform-wide, a tenant pair grants within that tenant, and
 `include_subtree` (true by default) says whether the grant reaches the tenant's subtree. A null application grants in
-every application. The trait methods (`assignRole`, `givePermission`, `attachPolicy`) and the Spatie import write
-platform-wide grants for every application, and evaluation does not yet read the scope: scoped grants and applications
-are the next steps, and use these columns as they stand.
+every application. The grant service, which the trait methods (`assignRole`, `givePermission`, `attachPolicy`) and the
+Spatie import write through, writes platform-wide grants for every application only, and evaluation does not yet read
+the scope: scoped grants and applications are the next steps, and use these columns as they stand.
 
 ## Pivot Class Hierarchy
 
@@ -142,7 +142,8 @@ loaded on the identity, so the lapse holds when the same identity instance is re
 - `AuthorizableRolePivot`, `AuthorizablePermissionPivot`, `AuthorizablePolicyPivot` -- per-table leaf classes.
 - `HasRoles::roles()`, `HasPermissions::permissions()`, `HasPolicies::policies()` -- the `morphToMany` definitions
   with `->using(...)`, the grant timestamps and the expiry filter `where()` clause.
-- `ResolvesPivotExpiry` -- the shared trait that computes nearest-expiry TTL and reads raw pivot rows.
+- `ResolvesPivotExpiry` -- the shared trait that computes nearest-expiry TTL and resolves the grant service.
+- `Services\Support\GrantTable` -- the grant service's platform-wide row writes and locked read-back.
 - `NullFoldingUniqueIndex` -- the unique key in which a null counts as a value.
 
 ## Authoritative Tests

@@ -194,7 +194,8 @@ The package deliberately does **not** ship the following Spatie surface:
   guard resolution.
 - **Teams / tenancy columns** — Spatie's optional `team_id` scoping column is not shipped. Roles, permissions and
   policies are owned by the platform or by one tenant through their own `tenant_type` / `tenant_id` columns, and each
-  grant carries a scope of its own; `authorization:migrate-spatie` imports Spatie's rows and grants platform-wide.
+  grant carries a scope of its own; `authorization:migrate-spatie` imports Spatie's rows and grants platform-wide,
+  through the management services, so each is validated and reported as any other write is.
 - **`guard_name`** — the guard column is `guard`. `authorization:migrate-spatie` maps Spatie's `guard_name` onto it,
   so code that reads `$role->guard_name` reads `$role->guard` instead.
 - **Wildcard permission classes** — Spatie's `WildcardPermission` helper is not needed; wildcard matching is the
