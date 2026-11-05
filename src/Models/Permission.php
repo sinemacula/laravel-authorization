@@ -222,12 +222,11 @@ class Permission extends Model
      * row before the platform's, then a guard-specific row before a
      * guard-agnostic one, then the lowest primary key.
      *
-     * Delegates to the precedence query shared by
-     * `HasPermissions::resolvePermission()` and `Role::resolvePermission()`, so
-     * the matching rules have one owner. Consumers calling
-     * `$class::resolveByName(...)` where `$class` is read from
-     * `authorization.models.permission` get correct late-static-binding against
-     * their swapped model.
+     * Delegates to `GuardScopedLookup`, the precedence query `GrantTarget` also
+     * resolves a granted permission's name through, so the matching rules have
+     * one owner. `PermissionService` resolves a permission named by a string
+     * here, through the class `authorization.models.permission` configures, and
+     * late static binding gives a swapped model its own rows.
      *
      * @param  string  $name
      * @param  string|null  $guard

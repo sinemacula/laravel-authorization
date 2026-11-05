@@ -84,9 +84,8 @@ trait HasPolicies // @phpstan-ignore trait.unused
     /**
      * Attach the given policy to this identity, through the grant service.
      *
-     * Only a saved policy model, of the shipped class or the one
-     * `authorization.models.policy` configures, is attached; anything else is
-     * refused.
+     * Only a saved model of the shipped `Policy` class, or of any subclass of
+     * it, is attached; anything else is refused.
      *
      * An optional `$expiresAt` makes the attachment temporal — the row is
      * filtered out of `$user->policies` the moment the clock passes the
@@ -135,7 +134,8 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * `attachPolicy()` / `detachPolicy()`. The cache invalidation listener
      * wired to those events keeps the resolution cache coherent without a
      * separate forget call in this method. A listed policy whose attachment has
-     * expired is re-armed.
+     * expired is re-armed with no expiry; to re-arm it for a limited time, call
+     * `GrantService::syncPolicies()` with an expiry.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Policy>  $policies
      * @return static

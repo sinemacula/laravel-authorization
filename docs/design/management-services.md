@@ -2,7 +2,9 @@
 
 Every write of a role, permission, policy or grant goes through one of four injectable services, so each write runs
 in one transaction on the package's connection, reads the configured models and reports only what it changed. The
-identity traits, the role's permission helpers, the console commands and the Spatie import all delegate to them.
+identity traits, the role's permission helpers, the grant and revoke commands and the Spatie import all delegate to
+them. The one exception today is `authorization:sync`, which writes the permission catalogue through the permission
+model in its own transaction on the package's connection; it moves onto `PermissionService` later.
 
 ## Purpose
 
@@ -37,7 +39,8 @@ yet.
 
 4. **Expiry.** Re-granting a grant that has expired re-arms it with the new expiry (`REARMED`). A different expiry on
    a live grant is a change of its own (`EXPIRY_CHANGED`). A sync grants what is missing with the sync's expiry,
-   re-arms a listed grant that has expired, leaves a live grant as it is, and revokes what is not listed.
+   re-arms a listed grant that has expired with the same expiry, leaves a live grant as it is, and revokes what is not
+   listed. A sync given no expiry, as every trait sync is, re-arms a lapsed temporary grant as a permanent one.
 
 5. **Platform-wide only.** The grant tables carry tenant and application columns, but nothing reads them yet, so a
    grant in a tenant or application scope would count everywhere. The services therefore take no tenant or
@@ -60,6 +63,15 @@ yet.
 8. **The wrong target is refused.** A grant, revocation or sync handed anything that is not a saved model of its kind
    (a policy sync given a role, a role sync given a permission, a name for a policy, an unsaved role) throws
    `InvalidGrantTargetException` before anything is written. `attachPolicy()` and `detachPolicy()` take a `Policy`.
+   A grantee that is not a saved model with a key, or a `GranteeReference` with an empty type or key, throws
+   `InvalidGranteeException` before the transaction opens, so no grant is keyed to an empty identity. A role,
+   permission or policy model handed to its record service unsaved (to change, delete or re-parent, or as a parent)
+   throws `UnsavedRecordException`, so a change never creates a record outside `create()` and an unsaved parent never
+   clears a role's parent.
+
+9. **A name reaches every held row.** A role or permission name answers every row of it under the guard, the current
+   tenant's and the platform's alike. A revocation by name revokes each of them the grantee or role holds, and a sync
+   that names one keeps each held row of the name, granting the row the lookup ranks first only when none is held.
 
 ## Success Path
 
@@ -90,7 +102,12 @@ working: each forwards to the matching service method with no actor.
 - **A grantee whose class is not loadable** is named with `GranteeReference` (its morph type and key), as the Spatie
   import does for Spatie's `model_type` and `model_id`. A reference carries no guard.
 - **Without the service provider** the traits refuse to write (`LogicException`) rather than lose the write.
-- **List methods are reads** and run outside a transaction.
+- **List methods are reads** and run outside a transaction. They take the actor like every other method, so the
+  delegated administration checks can read it there too.
+- **`authorization:grant` gives no expiry**, so granting a role the identity holds on a temporary or expired grant makes
+  it permanent and is reported as granted; only a role already held with no expiry is reported as held.
+- **`authorization:sync` writes directly.** The permission catalogue sync saves and deletes through the permission
+  model, in its own transaction on the package's connection, rather than through `PermissionService`.
 
 ## Implementation Anchors
 
@@ -115,3 +132,4 @@ working: each forwards to the matching service method with no actor.
   names.
 - Events fit for audit: the actor, after-commit dispatch and snapshot payloads.
 - Delegated administration: the services check the actor before they write.
+- The permission catalogue sync moves onto `PermissionService`.

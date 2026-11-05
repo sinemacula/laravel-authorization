@@ -14,8 +14,9 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
  * Accepts the identity as `{morphType}:{key}` (e.g. `user:123`) and the role by
  * name. Resolves the morph alias via the Eloquent morph map, validates the
  * `AuthorizableIdentity` contract, and grants the role through the grant
- * service. A role the identity already holds is reported as held, and nothing
- * is written.
+ * service, with no expiry. A role the identity already holds with no expiry is
+ * reported as held, and nothing is written; a role it holds on a temporary or
+ * expired grant is made permanent and reported as granted.
  *
  * The role name is looked up within the tenant scope, like any other query: a
  * tenant-owned role is found only when the application's subject resolver

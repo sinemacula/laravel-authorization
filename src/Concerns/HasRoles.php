@@ -130,7 +130,8 @@ trait HasRoles // @phpstan-ignore trait.unused
      * signal they would for `assignRole()` / `revokeRole()` calls and the cache
      * invalidation listener wired to those events keeps the resolution cache
      * coherent without a separate forget call in this method. A listed role
-     * whose grant has expired is re-armed.
+     * whose grant has expired is re-armed with no expiry; to re-arm it for a
+     * limited time, call `GrantService::syncRoles()` with an expiry.
      *
      * A name keeps every held role of that name, whether the current tenant or
      * the platform owns it, and only when the identity holds none is the role

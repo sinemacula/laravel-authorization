@@ -64,7 +64,8 @@ principal's role and permission grants, and anything left is denied.
   command line.
 - **Management services** that own every write of a role, permission, policy or grant: each call runs in one
   transaction on the package's connection, through the configured models, and grants are idempotent under
-  concurrency. The traits, the console commands and the Spatie import write through them.
+  concurrency. The traits, the grant and revoke commands and the Spatie import write through them; only
+  `authorization:sync` still writes the permission catalogue through the permission model, in its own transaction.
 - **Events** for every grant, revocation, expiry change and model change that changes something, for each decision,
   and when `authorize()` refuses.
 - **Resolution cache** for role and permission lookups, in memory and optionally in a cache store.
@@ -263,9 +264,18 @@ $grants->revokeRole($user, 'editor', actor: $admin);                  // 1, the 
 Grants are idempotent: granting what the grantee holds, with the same expiry, changes nothing, dispatches no event and
 returns `GrantOutcome::UNCHANGED`, and a concurrent duplicate never raises a unique-constraint violation. Re-granting a
 grant that has expired re-arms it with the new expiry (`REARMED`), and a new expiry on a live grant is reported as
-`EXPIRY_CHANGED`. A sync re-arms a listed grant that has expired and leaves a live one as it is. Setting a role's
-parent locks the roles involved and refuses a cycle, a cycle through another tenant's role included. A target of the
-wrong kind, such as a role in a policy sync, is refused with `InvalidGrantTargetException`.
+`EXPIRY_CHANGED`. A sync re-arms a listed grant that has expired with the sync's expiry, or with none when it is given
+none, and leaves a live one as it is. The trait sync methods take no expiry, so a lapsed temporary grant they list comes
+back permanent; to re-arm it for a limited time, call `GrantService::syncRoles()` (or `syncPermissions()`,
+`syncPolicies()`) with an expiry. Setting a role's parent locks the roles involved and refuses a cycle, a cycle through
+another tenant's role included. A target of the wrong kind, such as a role in a policy sync, is refused with
+`InvalidGrantTargetException`; a grantee that is not a saved model with a key with `InvalidGranteeException`; and an
+unsaved role, permission or policy handed to its service, which would otherwise be created or clear a parent, with
+`UnsavedRecordException`.
+
+`authorization:sync` is the one writer that does not go through the services yet: it writes the permission catalogue
+through the permission model, in its own transaction on the package's connection, and will move onto
+`PermissionService` later.
 
 The services write platform-wide grants, for every application, only. The grant tables carry tenant and application
 columns, but nothing reads them yet, so the services take no tenant or application argument.
@@ -399,8 +409,9 @@ php artisan authorization:why-can user:1 posts:delete posts/42
 
 The listing commands are administrative views: they list every role or permission, platform-wide and tenant-owned
 alike, and show each one's owner. `grant` and `revoke` write through the grant service and look the role up within the
-tenant scope, so without a resolved tenant they find platform-wide roles only. A role the identity already holds, or
-does not hold, is reported as such and nothing is written.
+tenant scope, so without a resolved tenant they find platform-wide roles only. A role the identity already holds with
+no expiry, or does not hold, is reported as such and nothing is written. `grant` gives no expiry, so a role the
+identity holds on a temporary or expired grant is made permanent and reported as granted.
 
 ### Testing assertions
 
