@@ -12,10 +12,17 @@ use SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked as RolePermis
 /**
  * Event listener that keeps the resolution cache coherent.
  *
- * Principal-scoped identity events drop only that authorizable's cached lookups
- * via `ResolutionCache::forget()`. Role-pivot events flush every entry tagged
- * with the affected role on tag-capable stores (Redis, Memcached, array) and
+ * Principal-scoped identity events drop only that grantee's cached lookups via
+ * `ResolutionCache::forget()`, keyed by the grantee reference the event
+ * carries. Role-pivot events flush every entry tagged with the affected role,
+ * keyed by its reference, on tag-capable stores (Redis, Memcached, array) and
  * fall back to an in-memory flush elsewhere.
+ *
+ * The events are dispatched once their write commits, so the listener runs
+ * after the commit too: an invalidation never precedes the change it is for,
+ * and a write that rolls back invalidates nothing. A check made inside an
+ * enclosing transaction after the write may still read the cached answer until
+ * that transaction commits.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -34,17 +41,17 @@ final readonly class InvalidateResolutionCache
     ) {}
 
     /**
-     * Drop the cached entries belonging to the authorizable on the event.
+     * Drop the cached entries belonging to the grantee on the event.
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\IdentityEvent  $event
      * @return void
      */
     public function handlePrincipalMutation(IdentityEvent $event): void
     {
-        /** @var object $authorizable */
-        $authorizable = $event->authorizable; // @phpstan-ignore property.notFound
+        /** @var \SineMacula\Laravel\Authorization\Support\Reference $grantee */
+        $grantee = $event->grantee; // @phpstan-ignore property.notFound
 
-        $this->cache->forget($authorizable);
+        $this->cache->forget($grantee);
     }
 
     /**

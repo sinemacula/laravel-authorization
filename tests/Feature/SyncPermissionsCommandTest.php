@@ -20,6 +20,9 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use SineMacula\Laravel\Authorization\Support\PermissionMetadataReader;
+use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ComparesReferences;
+use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\ConfigurablePermissionProvider;
 use Tests\Feature\Stubs\CustomPermission;
@@ -27,6 +30,7 @@ use Tests\Feature\Stubs\Enums\CataloguePermission;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\InvalidGuardsPermission;
 use Tests\Feature\Stubs\Enums\InvalidNamePermission;
+use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
@@ -48,7 +52,7 @@ use Tests\TestCase;
 #[CoversClass(PermissionMetadataReader::class)]
 final class SyncPermissionsCommandTest extends TestCase
 {
-    use UsesAnAuthorizationConnection;
+    use ComparesReferences, ReadsDispatchedEvents, UsesAnAuthorizationConnection;
 
     /** @var string The command's name. */
     private const string COMMAND = 'authorization:sync';
@@ -141,7 +145,7 @@ final class SyncPermissionsCommandTest extends TestCase
         self::assertSame('Create posts', $row->description);
         self::assertSame('Posts', $row->category);
 
-        Event::assertDispatched(PermissionUpdated::class, static fn (PermissionUpdated $event): bool => $event->permission->is($row));
+        Event::assertDispatched(PermissionUpdated::class, static fn (PermissionUpdated $event): bool => self::refersTo($event->permission, $row));
     }
 
     /**
@@ -207,7 +211,7 @@ final class SyncPermissionsCommandTest extends TestCase
         self::assertTrue(Permission::query()->whereKey($system->getKey())->exists());
 
         Event::assertDispatchedTimes(PermissionDeleted::class, 1);
-        Event::assertDispatched(PermissionDeleted::class, static fn (PermissionDeleted $event): bool => $event->permission->is($stale));
+        Event::assertDispatched(PermissionDeleted::class, static fn (PermissionDeleted $event): bool => self::refersTo($event->permission, $stale));
     }
 
     /**
@@ -473,9 +477,9 @@ final class SyncPermissionsCommandTest extends TestCase
 
         self::assertSame(0, Artisan::call(self::COMMAND, ['--prune' => true]));
 
-        Event::assertDispatched(PermissionCreated::class, static fn (PermissionCreated $event): bool => $event->permission instanceof CustomPermission);
-        Event::assertNotDispatched(PermissionCreated::class, static fn (PermissionCreated $event): bool => !$event->permission instanceof CustomPermission);
-        Event::assertDispatched(PermissionDeleted::class, static fn (PermissionDeleted $event): bool => $event->permission instanceof CustomPermission);
+        Event::assertDispatched(PermissionCreated::class, static fn (PermissionCreated $event): bool => $event->permission->type === (new CustomPermission)->getMorphClass());
+        Event::assertNotDispatched(PermissionCreated::class, static fn (PermissionCreated $event): bool => $event->permission->type !== (new CustomPermission)->getMorphClass());
+        Event::assertDispatched(PermissionDeleted::class, static fn (PermissionDeleted $event): bool => $event->permission->type === (new CustomPermission)->getMorphClass());
     }
 
     /**
@@ -506,7 +510,7 @@ final class SyncPermissionsCommandTest extends TestCase
         $updated = Permission::create(['name' => 'posts:create', 'description' => 'Write posts']);
         $stale   = Permission::create(['name' => 'posts:purge']);
 
-        Event::listen(PermissionDeleted::class, static function (): never {
+        Permission::deleting(static function (): never {
             throw new \RuntimeException('The delete failed.');
         });
 
@@ -519,6 +523,53 @@ final class SyncPermissionsCommandTest extends TestCase
         );
         self::assertSame('Write posts', $updated->refresh()->description);
         self::assertTrue(Permission::query()->whereKey($stale->getKey())->exists());
+    }
+
+    /**
+     * A sync is one operation: every event its writes dispatch shares one
+     * operation id and carries the actor `--actor` names, once the sync
+     * commits; a second sync is an operation of its own, with no actor.
+     *
+     * @return void
+     */
+    public function testASyncIsOneOperationForTheActorTheOptionNames(): void
+    {
+        StubIdentity::query()->create(['id' => 'admin-1']);
+
+        Event::fake([PermissionCreated::class, PermissionDeleted::class]);
+
+        self::assertSame(0, Artisan::call(self::COMMAND, ['--actor' => StubIdentity::class . ':admin-1']));
+
+        $created = self::dispatchedEvents(PermissionCreated::class);
+
+        self::assertCount(4, $created);
+        self::assertCount(1, \array_unique(\array_map(static fn (PermissionCreated $event): string => $event->operation->id, $created)));
+
+        foreach ($created as $event) {
+            self::assertTrue(self::refersTo($event->operation->actor, new Reference(StubIdentity::class, 'admin-1')));
+        }
+
+        $this->configure('authorization.permission_enums', []);
+
+        self::assertSame(0, Artisan::call(self::COMMAND, ['--prune' => true]));
+
+        $deleted = self::dispatchedEvents(PermissionDeleted::class);
+
+        self::assertCount(4, $deleted);
+        self::assertNotContains($deleted[0]->operation->id, \array_map(static fn (PermissionCreated $event): string => $event->operation->id, $created));
+        self::assertNull($deleted[0]->operation->actor);
+    }
+
+    /**
+     * An actor the option cannot resolve fails the sync and writes nothing.
+     *
+     * @return void
+     */
+    public function testFailsOnAnActorItCannotResolve(): void
+    {
+        self::assertSame(2, Artisan::call(self::COMMAND, ['--actor' => StubIdentity::class . ':ghost']));
+        self::assertStringContainsString('Nothing was synced: No actor', Artisan::output());
+        self::assertSame([], self::platformRows());
     }
 
     /**

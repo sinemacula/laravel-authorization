@@ -21,6 +21,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
+use Tests\Concerns\ComparesReferences;
 use Tests\TestCase;
 
 /**
@@ -51,6 +52,8 @@ use Tests\TestCase;
 #[CoversTrait(ManagesPermissions::class)]
 final class RolePermissionApiTest extends TestCase
 {
+    use ComparesReferences;
+
     /** Canonical role name used across scenarios. */
     private const string ROLE_NAME = 'editor';
 
@@ -75,8 +78,8 @@ final class RolePermissionApiTest extends TestCase
         self::assertTrue($role->fresh()?->hasPermission(self::PERMISSION_NAME));
         Event::assertDispatched(
             RolePermissionGranted::class,
-            static fn (RolePermissionGranted $event): bool => $event->role->is($role)
-                && $event->permission->is($permission),
+            static fn (RolePermissionGranted $event): bool => self::refersTo($event->role, $role)
+                && self::refersTo($event->permission, $permission),
         );
     }
 
@@ -132,8 +135,8 @@ final class RolePermissionApiTest extends TestCase
         self::assertFalse($role->fresh()?->hasPermission(self::PERMISSION_NAME));
         Event::assertDispatched(
             RolePermissionRevoked::class,
-            static fn (RolePermissionRevoked $event): bool => $event->role->is($role)
-                && $event->permission->is($permission),
+            static fn (RolePermissionRevoked $event): bool => self::refersTo($event->role, $role)
+                && self::refersTo($event->permission, $permission),
         );
     }
 

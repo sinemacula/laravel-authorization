@@ -6,6 +6,7 @@ namespace Tests\Feature\Services;
 
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
@@ -24,6 +25,9 @@ use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\CustomRole;
 use Tests\Feature\Stubs\StubIdentity;
@@ -312,21 +316,65 @@ final class GrantTargetTest extends TestCase
     #[DataProvider('events')]
     public function testBuildsTheEventsOfItsKind(GrantTarget $kind, \Closure $target, string $granted, string $revoked, string $expiryChanged): void
     {
-        $model    = $target();
-        $grantee  = new StubIdentity(['id' => 'user-1']);
-        $previous = Carbon::parse('2026-07-01 12:00:00', 'UTC');
-        $next     = Carbon::parse('2026-08-01 12:00:00', 'UTC');
+        $model     = $target();
+        $operation = Operation::begin(new Reference('user', 'admin-1'));
+        $grantee   = new Reference('stub_identity', 'user-1');
+        $previous  = Carbon::parse('2026-07-01 14:00:00', 'Europe/Paris');
+        $next      = Carbon::parse('2026-08-01 12:00:00', 'UTC');
+        $target    = Reference::of($model);
+        $name      = $model->getAttribute('name');
 
-        $grantedEvent = $kind->grantedEvent($grantee, $model);
-        $revokedEvent = $kind->revokedEvent($grantee, $model);
-        $changedEvent = $kind->expiryChangedEvent($grantee, $model, $previous, $next);
+        $grantedEvent = $kind->grantedEvent($operation, $grantee, $model, $next);
+        $revokedEvent = $kind->revokedEvent($operation, $grantee, $model);
+        $changedEvent = $kind->expiryChangedEvent($operation, $grantee, $model, $previous, null);
 
         self::assertInstanceOf($granted, $grantedEvent);
         self::assertInstanceOf($revoked, $revokedEvent);
         self::assertInstanceOf($expiryChanged, $changedEvent);
-        self::assertEquals([$grantee, $model], \array_values((array) $grantedEvent));
-        self::assertEquals([$grantee, $model], \array_values((array) $revokedEvent));
-        self::assertEquals([$grantee, $model, $previous, $next], \array_values((array) $changedEvent));
+        self::assertEquals(
+            [$operation, $grantee, $target, $name, GrantScope::platform(), new \DateTimeImmutable('2026-08-01 12:00:00', new \DateTimeZone('UTC'))],
+            \array_values((array) $grantedEvent),
+        );
+        self::assertEquals([$operation, $grantee, $target, $name, GrantScope::platform()], \array_values((array) $revokedEvent));
+        self::assertEquals(
+            [$operation, $grantee, $target, $name, GrantScope::platform(), new \DateTimeImmutable('2026-07-01 12:00:00', new \DateTimeZone('UTC')), null],
+            \array_values((array) $changedEvent),
+        );
+        self::assertSame('UTC', $changedEvent->previousExpiresAt?->getTimezone()->getName()); // @phpstan-ignore property.notFound
+    }
+
+    /**
+     * The holders of a row are every grantee that holds it, once each, in any
+     * scope and whether or not the grant has expired, ordered by type and key.
+     *
+     * @return void
+     */
+    public function testListsEveryHolderOfARowOnceInOrder(): void
+    {
+        $role  = Role::query()->create(['name' => 'editor']);
+        $other = Role::query()->create(['name' => 'author']);
+        $rows  = [
+            ['user', '2', null, null],
+            ['user', '2', 'stub_tenant', 'tenant-a'],
+            ['admin', '1', null, null],
+            ['user', '10', null, null],
+        ];
+
+        foreach ($rows as [$type, $id, $tenantType, $tenantId]) {
+            DB::table('authorizable_roles')->insert([
+                'role_id'           => $role->id,
+                'authorizable_type' => $type,
+                'authorizable_id'   => $id,
+                'tenant_type'       => $tenantType,
+                'tenant_id'         => $tenantId,
+                'expires_at'        => '2020-01-01 00:00:00',
+            ]);
+        }
+
+        DB::table('authorizable_roles')->insert(['role_id' => $other->id, 'authorizable_type' => 'user', 'authorizable_id' => '3']);
+
+        self::assertEquals([new Reference('admin', '1'), new Reference('user', '10'), new Reference('user', '2')], GrantTarget::ROLE->holders($role->id));
+        self::assertSame([], GrantTarget::PERMISSION->holders($role->id));
     }
 
     /**

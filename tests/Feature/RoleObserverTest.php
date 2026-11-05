@@ -8,11 +8,19 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
+use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
+use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\ReservedRoleNameException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
+use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
+use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Services\RoleService;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Feature\Stubs\CustomRole;
 use Tests\TestCase;
@@ -23,7 +31,8 @@ use Tests\TestCase;
  *
  * With `authorization.models.role` pointed at an application subclass, the
  * proposed-parent lookup the observer runs before refusing a cycle hydrates
- * that subclass, never the shipped `Role`.
+ * that subclass, never the shipped `Role`. The events the observer builds are
+ * pinned too: what each carries, and the grantees a delete reports.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,7 +46,7 @@ use Tests\TestCase;
 #[CoversClass(ReservedRoleNameException::class)]
 final class RoleObserverTest extends TestCase
 {
-    use ActsAsTenant, RecordsRowLocks;
+    use ActsAsTenant, ComparesReferences, RecordsRowLocks;
 
     /** @var array{tenant_type: string, tenant_id: string} The owner columns of a tenant's role. */
     private const array TENANT = ['tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a'];
@@ -338,6 +347,99 @@ final class RoleObserverTest extends TestCase
         $tenantRole->save();
 
         self::assertSame('Edited', CustomRole::query()->withoutGlobalScopes()->whereKey($tenantRole->id)->value('description'));
+    }
+
+    /**
+     * Creating a role reports it as a snapshot: its reference, name, guard,
+     * tenant and system flag, for an operation of its own with no actor.
+     *
+     * @return void
+     */
+    public function testReportsTheRoleCreated(): void
+    {
+        Event::fake([RoleCreated::class]);
+
+        $role   = CustomRole::query()->create(['name' => 'editor', 'guard' => 'web'] + self::TENANT);
+        $system = CustomRole::query()->create(['name' => 'admin', 'is_system' => true]);
+
+        Event::assertDispatchedTimes(RoleCreated::class, 2);
+        Event::assertDispatched(RoleCreated::class, static fn (RoleCreated $event): bool => self::refersTo($event->role, $role)
+            && $event->name  === 'editor'
+            && $event->guard === 'web'
+            && self::refersTo($event->tenant, new Reference('stub_tenant', 'tenant-a'))
+            && !$event->isSystem
+            && $event->operation->actor === null);
+        Event::assertDispatched(RoleCreated::class, static fn (RoleCreated $event): bool => self::refersTo($event->role, $system)
+            && $event->guard  === null
+            && $event->tenant === null
+            && $event->isSystem);
+    }
+
+    /**
+     * Updating a role reports the fields it changed, before and after, and the
+     * role's name after the update.
+     *
+     * @return void
+     */
+    public function testReportsTheRoleUpdated(): void
+    {
+        $role = CustomRole::query()->create(['name' => 'editor', 'rank' => 1]);
+
+        Event::fake([RoleUpdated::class]);
+
+        $role->update(['name' => 'author', 'rank' => 2]);
+
+        Event::assertDispatchedTimes(RoleUpdated::class, 1);
+        Event::assertDispatched(RoleUpdated::class, static fn (RoleUpdated $event): bool => self::refersTo($event->role, $role)
+            && $event->name                                                                === 'author'
+            && \array_intersect_key($event->changes['before'], ['name' => 1, 'rank' => 1]) === ['name' => 'editor', 'rank' => 1]
+            && \array_intersect_key($event->changes['after'], ['name' => 1, 'rank' => 1])  === ['name' => 'author', 'rank' => 2]);
+    }
+
+    /**
+     * Deleting a role reports, in one event, every grantee that held it, in
+     * order, and every permission it carried.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testReportsTheRoleDeletedWithItsHoldersAndPermissions(): void
+    {
+        $role       = CustomRole::query()->create(['name' => 'editor']);
+        $permission = Permission::query()->create(['name' => 'posts:edit']);
+
+        $role->permissions()->attach($permission->id);
+
+        foreach ([new Reference('user', '2'), new Reference('admin', '1'), new Reference('user', '10')] as $grantee) {
+            app(GrantService::class)->grantRole($grantee, $role);
+        }
+
+        Event::fake([RoleDeleted::class]);
+
+        $role->delete();
+
+        Event::assertDispatchedTimes(RoleDeleted::class, 1);
+        Event::assertDispatched(RoleDeleted::class, static fn (RoleDeleted $event): bool => self::refersTo($event->role, $role)
+            && $event->name                      === 'editor'
+            && self::keysOf($event->grantees)    === ['admin:1', 'user:10', 'user:2']
+            && self::keysOf($event->permissions) === self::keysOf([Reference::of($permission)]));
+    }
+
+    /**
+     * A role written through the role service reports the service call's actor.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testReportsTheActorOfTheServiceCall(): void
+    {
+        Event::fake([RoleCreated::class]);
+
+        app(RoleService::class)->create('editor', actor: new Reference('user', 'admin-1'));
+
+        Event::assertDispatched(RoleCreated::class, static fn (RoleCreated $event): bool => self::refersTo($event->operation->actor, new Reference('user', 'admin-1')));
     }
 
     /**

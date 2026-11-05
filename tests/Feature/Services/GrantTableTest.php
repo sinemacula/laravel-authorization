@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChange;
 use SineMacula\Laravel\Authorization\Services\Support\GrantTable;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\TestCase;
 
@@ -485,14 +486,75 @@ final class GrantTableTest extends TestCase
     }
 
     /**
-     * Return a grant table writer for a stub identity's roles.
+     * A grant records the actor making it in the grantor columns, and none when
+     * the call names no actor.
+     *
+     * @return void
+     */
+    public function testAGrantRecordsItsActor(): void
+    {
+        $role  = self::role();
+        $other = self::role('author');
+
+        self::table(grantedBy: new Reference('user', 'admin-1'))->grant($role->id, null);
+        self::table()->grant($other->id, null);
+
+        self::assertSame([
+            [$other->id, null, null],
+            [$role->id, 'user', 'admin-1'],
+        ], self::grantors());
+    }
+
+    /**
+     * Rewriting a grant's expiry records the actor making the change, in place
+     * of the one that made the grant.
+     *
+     * @return void
+     */
+    public function testARewriteRecordsItsActor(): void
+    {
+        $role = self::role();
+
+        self::table(grantedBy: new Reference('user', 'admin-1'))->grant($role->id, Carbon::parse('2026-07-02 12:00:00', 'UTC'));
+        self::table(grantedBy: new Reference('user', 'admin-2'))->grant($role->id, Carbon::parse('2026-07-03 12:00:00', 'UTC'));
+
+        self::assertSame([[$role->id, 'user', 'admin-2']], self::grantors());
+
+        self::table()->grant($role->id, null);
+
+        self::assertSame([[$role->id, null, null]], self::grantors());
+    }
+
+    /**
+     * Return a grant table writer for a stub identity's roles, recording the
+     * given actor on the rows it writes.
      *
      * @param  string  $granteeId
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $grantedBy
      * @return \SineMacula\Laravel\Authorization\Services\Support\GrantTable
      */
-    private static function table(string $granteeId = 'user-1'): GrantTable
+    private static function table(string $granteeId = 'user-1', ?Reference $grantedBy = null): GrantTable
     {
-        return new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_identity', $granteeId);
+        return new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_identity', $granteeId, $grantedBy);
+    }
+
+    /**
+     * Return the role and grantor columns of every role grant row, ordered by
+     * the grantor.
+     *
+     * @return list<array{string, string|null, string|null}>
+     */
+    private static function grantors(): array
+    {
+        // Sorted here rather than by the database, which orders nulls first on
+        // MySQL and SQLite but last on PostgreSQL.
+        /** @var list<array{string, string|null, string|null}> */
+        return DB::table('authorizable_roles')
+            ->get(['role_id', 'granted_by_type', 'granted_by_id'])
+            ->map(static fn (object $row): array => \array_values((array) $row))
+            ->sortBy(static fn (array $row): string => (string) $row[2])
+            ->values()
+            ->all();
     }
 
     /**

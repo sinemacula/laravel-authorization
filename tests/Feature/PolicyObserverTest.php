@@ -4,16 +4,25 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Events\Policy\Created as PolicyCreated;
+use SineMacula\Laravel\Authorization\Events\Policy\Deleted as PolicyDeleted;
+use SineMacula\Laravel\Authorization\Events\Policy\Updated as PolicyUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
+use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Support\DocumentDigest;
+use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ComparesReferences;
 use Tests\TestCase;
 
 /**
  * Feature tests for the policy observer's tenant-columns invariant: a policy is
  * owned by the platform (both tenant columns null) or by one tenant (both set),
- * never half of each.
+ * never half of each. The events the observer builds are pinned too: each
+ * carries the digest of the document, never the document itself.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -25,6 +34,8 @@ use Tests\TestCase;
 #[CoversClass(PolicyObserver::class)]
 final class PolicyObserverTest extends TestCase
 {
+    use ComparesReferences;
+
     /**
      * A platform-wide policy saves.
      *
@@ -91,6 +102,131 @@ final class PolicyObserverTest extends TestCase
         $this->expectException(InvalidTenantColumnsException::class);
 
         $policy->update(['tenant_id' => null]);
+    }
+
+    /**
+     * Creating a policy reports its reference, name, tenant, system flag and
+     * the version and digest of its document, never the document.
+     *
+     * @return void
+     */
+    public function testReportsThePolicyCreatedWithTheDigestOfItsDocument(): void
+    {
+        Event::fake([PolicyCreated::class]);
+
+        $policy = Policy::query()->create(['name' => 'audit', 'document' => self::document(), 'tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a']);
+        $system = Policy::query()->create(['name' => 'root', 'document' => self::document(), 'is_system' => true]);
+
+        Event::assertDispatchedTimes(PolicyCreated::class, 2);
+        Event::assertDispatched(PolicyCreated::class, static fn (PolicyCreated $event): bool => self::refersTo($event->policy, $policy)
+            && $event->name === 'audit'
+            && self::refersTo($event->tenant, new Reference('stub_tenant', 'tenant-a'))
+            && $event->document->digest  === DocumentDigest::of($policy->document)->digest
+            && $event->document->version === 1
+            && !$event->isSystem
+            && $event->operation->actor === null);
+        Event::assertDispatched(PolicyCreated::class, static fn (PolicyCreated $event): bool => self::refersTo($event->policy, $system)
+            && $event->tenant === null
+            && $event->isSystem);
+    }
+
+    /**
+     * Rewriting a policy's document reports the digests of the document before
+     * and after, and leaves the document out of the changed fields.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testReportsADocumentRewriteByItsDigests(): void
+    {
+        $policy    = Policy::query()->create(['name' => 'audit', 'document' => self::document()]);
+        $rewritten = ['version' => 1, 'statements' => [['effect' => 'deny', 'actions' => ['posts:delete'], 'resources' => ['*']]]];
+
+        $before = DocumentDigest::of($policy->document)->digest;
+
+        Event::fake([PolicyUpdated::class]);
+
+        $policy->update(['document' => $rewritten, 'description' => 'Audit']);
+
+        $after = DocumentDigest::of($policy->document)->digest;
+
+        Event::assertDispatchedTimes(PolicyUpdated::class, 1);
+        Event::assertDispatched(PolicyUpdated::class, static fn (PolicyUpdated $event): bool => self::refersTo($event->policy, $policy)
+            && $event->name                      === 'audit'
+            && $event->document->digest          === $after
+            && $event->previousDocument?->digest === $before
+            && $before !== $after
+            && !\array_key_exists('document', $event->changes['before'])
+            && !\array_key_exists('document', $event->changes['after'])
+            && ($event->changes['after']['description'] ?? null) === 'Audit');
+    }
+
+    /**
+     * An update that leaves the document alone reports no previous document.
+     *
+     * @return void
+     *
+     * @throws \JsonException
+     */
+    public function testAnUpdateThatKeepsTheDocumentReportsNoPreviousDocument(): void
+    {
+        $policy = Policy::query()->create(['name' => 'audit', 'document' => self::document()]);
+
+        $digest = DocumentDigest::of($policy->document)->digest;
+
+        Event::fake([PolicyUpdated::class]);
+
+        $policy->update(['name' => 'audits']);
+
+        Event::assertDispatched(PolicyUpdated::class, static fn (PolicyUpdated $event): bool => $event->name === 'audits'
+            && $event->previousDocument                                                                      === null
+            && $event->document->digest                                                                      === $digest);
+    }
+
+    /**
+     * Deleting a policy reports, in one event, the digest of its document and
+     * every grantee it was attached to.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testReportsThePolicyDeletedWithItsHolders(): void
+    {
+        $policy = Policy::query()->create(['name' => 'audit', 'document' => self::document()]);
+
+        app(GrantService::class)->attachPolicy(new Reference('user', '2'), $policy);
+        app(GrantService::class)->attachPolicy(new Reference('admin', '9'), $policy);
+
+        $digest = DocumentDigest::of($policy->document)->digest;
+
+        Event::fake([PolicyDeleted::class]);
+
+        $policy->delete();
+
+        Event::assertDispatchedTimes(PolicyDeleted::class, 1);
+        Event::assertDispatched(PolicyDeleted::class, static fn (PolicyDeleted $event): bool => self::refersTo($event->policy, $policy)
+            && $event->name                   === 'audit'
+            && $event->document->digest       === $digest
+            && self::keysOf($event->grantees) === ['admin:9', 'user:2']);
+    }
+
+    /**
+     * A document that is not a decoded array is digested as an empty one.
+     *
+     * @return void
+     */
+    public function testAnUndecodedDocumentIsDigestedAsAnEmptyOne(): void
+    {
+        $policy = Policy::query()->create(['name' => 'audit', 'document' => self::document()]);
+
+        Event::fake([PolicyDeleted::class]);
+
+        $policy->setRawAttributes(['document' => 'null'] + $policy->getAttributes());
+        $policy->delete();
+
+        Event::assertDispatched(PolicyDeleted::class, static fn (PolicyDeleted $event): bool => $event->document->digest === DocumentDigest::of([])->digest);
     }
 
     /**

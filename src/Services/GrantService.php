@@ -5,8 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Services;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
+use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
@@ -16,7 +16,9 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChange;
 use SineMacula\Laravel\Authorization\Services\Support\GrantTable;
-use SineMacula\Laravel\Authorization\Support\GranteeReference;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Grants, revokes and syncs roles, permissions and policies to a grantee.
@@ -38,23 +40,26 @@ use SineMacula\Laravel\Authorization\Support\GranteeReference;
  *
  * The identity events (`RoleAssigned`, `PermissionGranted`, `PolicyAttached`,
  * their revoked and detached counterparts, and the expiry-changed events) are
- * dispatched once the transaction has returned, and only for a write that
- * changed something. A changed expiry dispatches the granted event as well as
- * the expiry-changed one, so the resolution cache listening for the former is
- * cleared.
+ * dispatched once the write commits, on the package's connection, and only for
+ * a write that changed something; a write that rolls back, alone or with an
+ * enclosing transaction, dispatches nothing. A changed expiry dispatches the
+ * granted event as well as the expiry-changed one, so the resolution cache
+ * listening for the former is cleared.
  *
- * Each method takes the acting subject as `$actor`: null for console and system
- * work. A grantee that is not a saved model with a key, or a reference with a
- * type and a key, throws `InvalidGranteeException` before anything is read. A
- * role or permission name that answers no row throws `UnknownRoleException` or
+ * Each method takes the actor making the call as `$actor`, a model or a
+ * reference: null for console and system work. Every event the call dispatches
+ * carries it, with one operation id the call's events share, and every grant
+ * row it writes records it in `granted_by_type` and `granted_by_id`. It is
+ * never read from the authenticated user. A grantee that is not a saved model
+ * with a key, or a reference with a type and a key, throws
+ * `InvalidGranteeException` before anything is read. A role or permission name
+ * that answers no row throws `UnknownRoleException` or
  * `UnknownPermissionException`; a target that is not a saved model of the kind
  * granted, such as a policy sync handed another model, throws
  * `InvalidGrantTargetException`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
- *
- * @SuppressWarnings("php:S1172")
  */
 final class GrantService
 {
@@ -63,15 +68,15 @@ final class GrantService
     /**
      * Grant a role to the grantee, until the given expiry or forever.
      *
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\GranteeReference  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  \DateTimeInterface|null  $expiresAt
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Enums\GrantOutcome
      *
      * @throws \Throwable
      */
-    public function grantRole(GranteeReference|Model $grantee, Role|string $role, ?\DateTimeInterface $expiresAt = null, ?object $actor = null): GrantOutcome
+    public function grantRole(Model|Reference $grantee, Role|string $role, ?\DateTimeInterface $expiresAt = null, Model|Reference|null $actor = null): GrantOutcome
     {
         return $this->grant(GrantTarget::ROLE, $grantee, $role, $expiresAt, $actor);
     }
@@ -83,14 +88,14 @@ final class GrantService
      * A name revokes every held role of that name under the grantee's guard, or
      * guard-agnostic, whichever tenant or the platform owns it.
      *
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\GranteeReference  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return int
      *
      * @throws \Throwable
      */
-    public function revokeRole(GranteeReference|Model $grantee, Role|string $role, ?object $actor = null): int
+    public function revokeRole(Model|Reference $grantee, Role|string $role, Model|Reference|null $actor = null): int
     {
         return $this->revoke(GrantTarget::ROLE, $grantee, $role, $actor);
     }
@@ -103,15 +108,15 @@ final class GrantService
      * grants, or re-arms because it had expired, carries the given expiry; a
      * live role is left as it is.
      *
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\GranteeReference  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Role|string>  $roles
      * @param  \DateTimeInterface|null  $expiresAt
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Services\SyncResult
      *
      * @throws \Throwable
      */
-    public function syncRoles(GranteeReference|Model $grantee, array $roles, ?\DateTimeInterface $expiresAt = null, ?object $actor = null): SyncResult
+    public function syncRoles(Model|Reference $grantee, array $roles, ?\DateTimeInterface $expiresAt = null, Model|Reference|null $actor = null): SyncResult
     {
         return $this->sync(GrantTarget::ROLE, $grantee, $roles, $expiresAt, $actor);
     }
@@ -120,16 +125,20 @@ final class GrantService
      * Grant a permission directly to the grantee, until the given expiry or
      * forever.
      *
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\GranteeReference  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @param  \DateTimeInterface|null  $expiresAt
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Enums\GrantOutcome
      *
      * @throws \Throwable
      */
-    public function grantPermission(GranteeReference|Model $grantee, Permission|string $permission, ?\DateTimeInterface $expiresAt = null, ?object $actor = null): GrantOutcome
-    {
+    public function grantPermission(
+        Model|Reference $grantee,
+        Permission|string $permission,
+        ?\DateTimeInterface $expiresAt = null,
+        Model|Reference|null $actor = null,
+    ): GrantOutcome {
         return $this->grant(GrantTarget::PERMISSION, $grantee, $permission, $expiresAt, $actor);
     }
 
@@ -140,14 +149,14 @@ final class GrantService
      * A name revokes every held permission of that name under the grantee's
      * guard, or guard-agnostic, whichever tenant or the platform owns it.
      *
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\GranteeReference  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return int
      *
      * @throws \Throwable
      */
-    public function revokePermission(GranteeReference|Model $grantee, Permission|string $permission, ?object $actor = null): int
+    public function revokePermission(Model|Reference $grantee, Permission|string $permission, Model|Reference|null $actor = null): int
     {
         return $this->revoke(GrantTarget::PERMISSION, $grantee, $permission, $actor);
     }
@@ -156,15 +165,15 @@ final class GrantService
      * Replace the grantee's direct permissions with the given ones, as
      * `syncRoles()` replaces its roles.
      *
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\GranteeReference  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Permission|string>  $permissions
      * @param  \DateTimeInterface|null  $expiresAt
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Services\SyncResult
      *
      * @throws \Throwable
      */
-    public function syncPermissions(GranteeReference|Model $grantee, array $permissions, ?\DateTimeInterface $expiresAt = null, ?object $actor = null): SyncResult
+    public function syncPermissions(Model|Reference $grantee, array $permissions, ?\DateTimeInterface $expiresAt = null, Model|Reference|null $actor = null): SyncResult
     {
         return $this->sync(GrantTarget::PERMISSION, $grantee, $permissions, $expiresAt, $actor);
     }
@@ -172,15 +181,15 @@ final class GrantService
     /**
      * Attach a policy to the grantee, until the given expiry or forever.
      *
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\GranteeReference  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @param  \DateTimeInterface|null  $expiresAt
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Enums\GrantOutcome
      *
      * @throws \Throwable
      */
-    public function attachPolicy(GranteeReference|Model $grantee, Policy $policy, ?\DateTimeInterface $expiresAt = null, ?object $actor = null): GrantOutcome
+    public function attachPolicy(Model|Reference $grantee, Policy $policy, ?\DateTimeInterface $expiresAt = null, Model|Reference|null $actor = null): GrantOutcome
     {
         return $this->grant(GrantTarget::POLICY, $grantee, $policy, $expiresAt, $actor);
     }
@@ -189,14 +198,14 @@ final class GrantService
      * Detach a policy from the grantee, and return how many were detached: none
      * when it was not attached.
      *
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\GranteeReference  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return int
      *
      * @throws \Throwable
      */
-    public function detachPolicy(GranteeReference|Model $grantee, Policy $policy, ?object $actor = null): int
+    public function detachPolicy(Model|Reference $grantee, Policy $policy, Model|Reference|null $actor = null): int
     {
         return $this->revoke(GrantTarget::POLICY, $grantee, $policy, $actor);
     }
@@ -205,15 +214,15 @@ final class GrantService
      * Replace the grantee's attached policies with the given ones, as
      * `syncRoles()` replaces its roles. Each entry must be a saved policy.
      *
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\GranteeReference  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Policy>  $policies
      * @param  \DateTimeInterface|null  $expiresAt
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Services\SyncResult
      *
      * @throws \Throwable
      */
-    public function syncPolicies(GranteeReference|Model $grantee, array $policies, ?\DateTimeInterface $expiresAt = null, ?object $actor = null): SyncResult
+    public function syncPolicies(Model|Reference $grantee, array $policies, ?\DateTimeInterface $expiresAt = null, Model|Reference|null $actor = null): SyncResult
     {
         return $this->sync(GrantTarget::POLICY, $grantee, $policies, $expiresAt, $actor);
     }
@@ -222,29 +231,31 @@ final class GrantService
      * Grant one row of the given kind in one transaction.
      *
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\GranteeReference  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  mixed  $target
      * @param  \DateTimeInterface|null  $expiresAt
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Enums\GrantOutcome
      *
      * @throws \Throwable
      */
-    private function grant(GrantTarget $kind, GranteeReference|Model $grantee, mixed $target, ?\DateTimeInterface $expiresAt, ?object $actor): GrantOutcome
+    private function grant(GrantTarget $kind, Model|Reference $grantee, mixed $target, ?\DateTimeInterface $expiresAt, Model|Reference|null $actor): GrantOutcome
     {
-        $table  = self::table($kind, $grantee);
-        $events = [];
+        $reference = self::grantee($grantee);
+        $operation = Operation::begin($actor);
+        $table     = self::table($kind, $reference, $operation);
 
         /** @var \SineMacula\Laravel\Authorization\Enums\GrantOutcome $outcome */
-        $outcome = AuthorizationConnection::connection()->transaction(static function () use ($kind, $grantee, $table, $target, $expiresAt, &$events): GrantOutcome {
+        $outcome = OperationScope::run($operation, static function (Operation $operation) use ($kind, $grantee, $reference, $table, $target, $expiresAt): GrantOutcome {
             $model  = $kind->resolve($target, self::guard($grantee));
             $change = $table->grant(self::key($model), $expiresAt);
-            $events = self::grantEvents($kind, $grantee, $model, $change, $expiresAt);
+
+            OperationScope::dispatch(...self::grantEvents($operation, $kind, $reference, $model, $change, $expiresAt));
 
             return $change->outcome;
         });
 
-        self::finish($kind, $grantee, $events, $actor);
+        self::forgetRelation($kind, $grantee);
 
         return $outcome;
     }
@@ -254,75 +265,82 @@ final class GrantService
      * transaction.
      *
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\GranteeReference  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  mixed  $target
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return int
      *
      * @throws \Throwable
      */
-    private function revoke(GrantTarget $kind, GranteeReference|Model $grantee, mixed $target, ?object $actor): int
+    private function revoke(GrantTarget $kind, Model|Reference $grantee, mixed $target, Model|Reference|null $actor): int
     {
-        $table = self::table($kind, $grantee);
+        $reference = self::grantee($grantee);
+        $operation = Operation::begin($actor);
+        $table     = self::table($kind, $reference, $operation);
 
-        /** @var list<\Illuminate\Database\Eloquent\Model> $revoked */
-        $revoked = AuthorizationConnection::connection()->transaction(static function () use ($kind, $grantee, $table, $target): array {
+        $revoked = OperationScope::run($operation, static function (Operation $operation) use ($kind, $grantee, $reference, $table, $target): int {
             $candidates = \is_string($target) ? $kind->named($target, self::guard($grantee)) : [$kind->assertTarget($target)];
             $held       = $table->held(\array_map(self::key(...), $candidates));
+            $revoked    = \array_filter($candidates, static fn (Model $model): bool => \in_array(self::key($model), $held, true));
 
             $table->revoke($held);
 
-            return \array_values(\array_filter($candidates, static fn (Model $model): bool => \in_array(self::key($model), $held, true)));
+            OperationScope::dispatch(...\array_map(static fn (Model $model): IdentityEvent => $kind->revokedEvent($operation, $reference, $model), $revoked));
+
+            return \count($revoked);
         });
 
-        self::finish($kind, $grantee, \array_map(static fn (Model $model): object => $kind->revokedEvent($grantee, $model), $revoked), $actor);
+        self::forgetRelation($kind, $grantee);
 
-        return \count($revoked);
+        return $revoked;
     }
 
     /**
      * Replace the grantee's rows of the given kind in one transaction.
      *
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\GranteeReference  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  array<int, mixed>  $targets
      * @param  \DateTimeInterface|null  $expiresAt
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Services\SyncResult
      *
      * @throws \Throwable
      */
-    private function sync(GrantTarget $kind, GranteeReference|Model $grantee, array $targets, ?\DateTimeInterface $expiresAt, ?object $actor): SyncResult
+    private function sync(GrantTarget $kind, Model|Reference $grantee, array $targets, ?\DateTimeInterface $expiresAt, Model|Reference|null $actor): SyncResult
     {
-        $table  = self::table($kind, $grantee);
-        $events = [];
+        $reference = self::grantee($grantee);
+        $operation = Operation::begin($actor);
+        $table     = self::table($kind, $reference, $operation);
 
         /** @var \SineMacula\Laravel\Authorization\Services\SyncResult $result */
-        $result = AuthorizationConnection::connection()->transaction(static function () use ($kind, $grantee, $table, $targets, $expiresAt, &$events): SyncResult {
+        $result = OperationScope::run($operation, static function (Operation $operation) use ($kind, $grantee, $reference, $table, $targets, $expiresAt): SyncResult {
             $held    = $table->held();
             $keep    = self::toKeep($kind, $grantee, $targets, $held);
             $revoked = \array_values(\array_diff($held, \array_map(self::key(...), $keep)));
+            $changed = [];
+            $events  = [];
 
             $table->revoke($revoked);
-
-            $changed = [];
 
             foreach ($keep as $model) {
                 $id     = self::key($model);
                 $change = $table->rearm($id, $expiresAt);
-                $events = [...$events, ...self::grantEvents($kind, $grantee, $model, $change, $expiresAt)];
+                $events = [...$events, ...self::grantEvents($operation, $kind, $reference, $model, $change, $expiresAt)];
 
                 $changed[$change->outcome->value][] = $id;
             }
 
             foreach ($kind->find($revoked) as $model) {
-                $events[] = $kind->revokedEvent($grantee, $model);
+                $events[] = $kind->revokedEvent($operation, $reference, $model);
             }
+
+            OperationScope::dispatch(...$events);
 
             return new SyncResult($changed[GrantOutcome::GRANTED->value] ?? [], $changed[GrantOutcome::REARMED->value] ?? [], $revoked);
         });
 
-        self::finish($kind, $grantee, $events, $actor);
+        self::forgetRelation($kind, $grantee);
 
         return $result;
     }
@@ -332,12 +350,12 @@ final class GrantService
      * held row of that name, else the one the lookup ranks first.
      *
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\GranteeReference  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  array<int, mixed>  $targets
      * @param  list<string>  $held
      * @return array<string, \Illuminate\Database\Eloquent\Model>
      */
-    private static function toKeep(GrantTarget $kind, GranteeReference|Model $grantee, array $targets, array $held): array
+    private static function toKeep(GrantTarget $kind, Model|Reference $grantee, array $targets, array $held): array
     {
         $keep = [];
 
@@ -357,69 +375,76 @@ final class GrantService
      * changed, the granted event for a new grant, and the granted and
      * expiry-changed events for a re-armed grant or a changed expiry.
      *
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\GranteeReference  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \Illuminate\Database\Eloquent\Model  $model
      * @param  \SineMacula\Laravel\Authorization\Services\Support\GrantChange  $change
      * @param  \DateTimeInterface|null  $expiresAt
-     * @return list<object>
+     * @return list<\SineMacula\Laravel\Authorization\Contracts\IdentityEvent>
      */
-    private static function grantEvents(GrantTarget $kind, GranteeReference|Model $grantee, Model $model, GrantChange $change, ?\DateTimeInterface $expiresAt): array
+    private static function grantEvents(Operation $operation, GrantTarget $kind, Reference $grantee, Model $model, GrantChange $change, ?\DateTimeInterface $expiresAt): array
     {
         return match ($change->outcome) {
             GrantOutcome::UNCHANGED => [],
-            GrantOutcome::GRANTED   => [$kind->grantedEvent($grantee, $model)],
+            GrantOutcome::GRANTED   => [$kind->grantedEvent($operation, $grantee, $model, $expiresAt)],
             default                 => [
-                $kind->grantedEvent($grantee, $model),
-                $kind->expiryChangedEvent($grantee, $model, $change->previousExpiresAt, $expiresAt),
+                $kind->grantedEvent($operation, $grantee, $model, $expiresAt),
+                $kind->expiryChangedEvent($operation, $grantee, $model, $change->previousExpiresAt, $expiresAt),
             ],
         };
     }
 
     /**
-     * Clear the grantee's loaded relation and dispatch the call's events, once
-     * its transaction has returned. The actor is the acting subject the call
-     * was made for; the events do not carry it yet.
+     * Clear the grantee's loaded relation onto the rows of the given kind, once
+     * the call's transaction has returned.
      *
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\GranteeReference  $grantee
-     * @param  list<object>  $events
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @return void
      */
-    private static function finish(GrantTarget $kind, GranteeReference|Model $grantee, array $events, ?object $actor): void
+    private static function forgetRelation(GrantTarget $kind, Model|Reference $grantee): void
     {
-        if ($grantee instanceof Model) {
-            $grantee->unsetRelation($kind->relation());
+        if (!$grantee instanceof Model) {
+            return;
         }
 
-        foreach ($events as $event) {
-            Event::dispatch($event);
+        $grantee->unsetRelation($kind->relation());
+    }
+
+    /**
+     * Return the reference to the grantee, before the call's transaction opens,
+     * once the grantee is known to be one a grant can be written for: a saved
+     * model with a key, or a reference with a type and a key.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @return \SineMacula\Laravel\Authorization\Support\Reference
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException
+     */
+    private static function grantee(Model|Reference $grantee): Reference
+    {
+        $reference = Reference::of($grantee);
+
+        if ($reference->type === '' || $reference->id === '' || ($grantee instanceof Model && !$grantee->exists)) {
+            throw new InvalidGranteeException($grantee);
         }
+
+        return $reference;
     }
 
     /**
      * Return the grant table writer for the grantee's rows of the given kind,
-     * before the call's transaction opens, once the grantee is known to be one
-     * a grant can be written for: a saved model with a key, or a reference with
-     * a type and a key.
+     * recording the operation's actor on every row it writes.
      *
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\GranteeReference  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
      * @return \SineMacula\Laravel\Authorization\Services\Support\GrantTable
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException
      */
-    private static function table(GrantTarget $kind, GranteeReference|Model $grantee): GrantTable
+    private static function table(GrantTarget $kind, Reference $grantee, Operation $operation): GrantTable
     {
-        $type = $grantee->getMorphClass();
-        $id   = $grantee instanceof Model ? self::key($grantee) : $grantee->getKey();
-
-        if ($type === '' || $id === '' || ($grantee instanceof Model && !$grantee->exists)) {
-            throw new InvalidGranteeException($grantee);
-        }
-
-        return new GrantTable(AuthorizationConnection::connection(), $kind->table(), $kind->column(), $type, $id);
+        return new GrantTable(AuthorizationConnection::connection(), $kind->table(), $kind->column(), $grantee->type, $grantee->id, $operation->actor);
     }
 
     /**
@@ -440,10 +465,10 @@ final class GrantService
      * Resolve the grantee's optional `getAuthorizationGuard()` hook. The hook
      * is duck-typed, so it is read through reflection.
      *
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\GranteeReference  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @return string|null
      */
-    private static function guard(GranteeReference|Model $grantee): ?string
+    private static function guard(Model|Reference $grantee): ?string
     {
         $reflection = new \ReflectionObject($grantee);
 

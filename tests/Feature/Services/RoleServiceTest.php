@@ -12,8 +12,10 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
+use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked;
+use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
@@ -23,9 +25,13 @@ use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\AssertsTransactions;
+use Tests\Concerns\ComparesReferences;
+use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\CustomPermission;
@@ -46,7 +52,7 @@ use Tests\TestCase;
 #[CoversClass(RoleService::class)]
 final class RoleServiceTest extends TestCase
 {
-    use ActsAsTenant, AssertsTransactions, RecordsRowLocks, UsesAnAuthorizationConnection;
+    use ActsAsTenant, AssertsTransactions, ComparesReferences, ReadsDispatchedEvents, RecordsRowLocks, UsesAnAuthorizationConnection;
 
     /**
      * The service is bound once in the container.
@@ -363,7 +369,10 @@ final class RoleServiceTest extends TestCase
         self::assertSame(GrantOutcome::UNCHANGED, self::service()->grantPermission($role, $permission));
         self::assertSame([$permission->id], DB::table('role_permissions')->pluck('permission_id')->all());
         Event::assertDispatchedTimes(PermissionGranted::class, 1);
-        Event::assertDispatched(PermissionGranted::class, static fn (PermissionGranted $event): bool => $event->role === $role && $event->permission->is($permission));
+        Event::assertDispatched(
+            PermissionGranted::class,
+            static fn (PermissionGranted $event): bool => self::refersTo($event->role, $role) && self::refersTo($event->permission, $permission),
+        );
     }
 
     /**
@@ -458,7 +467,7 @@ final class RoleServiceTest extends TestCase
         self::assertSame(1, self::service()->revokePermission($role, 'posts:edit'));
         self::assertSame([$other->id], DB::table('role_permissions')->pluck('permission_id')->all());
         Event::assertDispatchedTimes(PermissionRevoked::class, 1);
-        Event::assertDispatched(PermissionRevoked::class, static fn (PermissionRevoked $event): bool => $event->permission->is($platform));
+        Event::assertDispatched(PermissionRevoked::class, static fn (PermissionRevoked $event): bool => self::refersTo($event->permission, $platform));
 
         self::service()->grantPermission($role, $platform);
         self::service()->grantPermission($role, $owned);
@@ -552,10 +561,13 @@ final class RoleServiceTest extends TestCase
         self::assertSame([$gone->id], $result->revoked);
         self::assertEqualsCanonicalizing([$kept->id, $joined->id], DB::table('role_permissions')->pluck('permission_id')->all());
         Event::assertDispatchedTimes(PermissionGranted::class, 1);
-        Event::assertDispatched(PermissionGranted::class, static fn (PermissionGranted $event): bool => $event->permission instanceof CustomPermission
-            && $event->permission->is($joined));
+        Event::assertDispatched(PermissionGranted::class, static fn (PermissionGranted $event): bool => $event->permission->type === (new CustomPermission)->getMorphClass()
+            && $event->permission->id                                                                                            === $joined->id);
         Event::assertDispatchedTimes(PermissionRevoked::class, 1);
-        Event::assertDispatched(PermissionRevoked::class, static fn (PermissionRevoked $event): bool => $event->role->is($role) && $event->permission->is($gone));
+        Event::assertDispatched(
+            PermissionRevoked::class,
+            static fn (PermissionRevoked $event): bool => self::refersTo($event->role, $role) && $event->permission->id === $gone->id,
+        );
         self::assertFalse(self::service()->syncPermissions($role, [$kept, $joined])->isChange());
     }
 
@@ -576,7 +588,7 @@ final class RoleServiceTest extends TestCase
         Event::fake([PermissionRevoked::class]);
 
         self::assertSame([$other->id], self::service()->syncPermissions($role, [])->revoked);
-        Event::assertDispatched(PermissionRevoked::class, static fn (PermissionRevoked $event): bool => $event->permission->is($other));
+        Event::assertDispatched(PermissionRevoked::class, static fn (PermissionRevoked $event): bool => self::refersTo($event->permission, $other));
     }
 
     /**
@@ -634,6 +646,144 @@ final class RoleServiceTest extends TestCase
         }
 
         self::assertSame([$kept->id], DB::table('role_permissions')->pluck('permission_id')->all());
+    }
+
+    /**
+     * Every role permission event one sync dispatches carries the role and
+     * permission by reference and by name, the caller's actor and one operation
+     * id.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEveryEventOfOneSyncCarriesTheActorAndOneOperationId(): void
+    {
+        $role  = self::role('editor', ['tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a']);
+        $gone  = Permission::query()->create(['name' => 'posts:delete']);
+        $actor = new Reference('user', 'admin-1');
+
+        Permission::query()->create(['name' => 'posts:edit']);
+        Permission::query()->create(['name' => 'posts:create']);
+        self::service()->grantPermission($role, $gone);
+
+        Event::fake([PermissionGranted::class, PermissionRevoked::class]);
+
+        self::service()->syncPermissions($role, ['posts:edit', 'posts:create'], $actor);
+
+        $events = [...self::dispatchedEvents(PermissionGranted::class), ...self::dispatchedEvents(PermissionRevoked::class)];
+
+        self::assertCount(3, $events);
+        self::assertCount(1, \array_unique(\array_map(static fn (PermissionGranted|PermissionRevoked $event): string => $event->operation->id, $events)));
+
+        foreach ($events as $event) {
+            self::assertTrue(self::refersTo($event->operation->actor, $actor));
+            self::assertTrue(self::refersTo($event->role, $role));
+            self::assertSame('editor', $event->roleName);
+            self::assertTrue(self::refersTo($event->tenant, new Reference('stub_tenant', 'tenant-a')));
+        }
+
+        Event::assertDispatched(
+            PermissionRevoked::class,
+            static fn (PermissionRevoked $event): bool => self::refersTo($event->permission, $gone) && $event->permissionName === 'posts:delete',
+        );
+    }
+
+    /**
+     * A grant and a revocation carry the caller's actor.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGrantAndARevocationCarryTheActor(): void
+    {
+        $role       = self::role('editor');
+        $permission = Permission::query()->create(['name' => 'posts:edit']);
+        $actor      = new Reference('user', 'admin-1');
+
+        Event::fake([PermissionGranted::class, PermissionRevoked::class]);
+
+        self::service()->grantPermission($role, $permission, $actor);
+        self::service()->revokePermission($role, $permission, $actor);
+
+        Event::assertDispatched(PermissionGranted::class, static fn (PermissionGranted $event): bool => self::refersTo($event->operation->actor, $actor)
+            && self::refersTo($event->permission, $permission)
+            && $event->permissionName === 'posts:edit'
+            && $event->tenant         === null);
+        Event::assertDispatched(PermissionRevoked::class, static fn (PermissionRevoked $event): bool => self::refersTo($event->operation->actor, $actor));
+    }
+
+    /**
+     * Deleting a role through the service reports, with the caller's actor,
+     * every grantee that held it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testDeletingARoleReportsEveryGranteeThatHeldIt(): void
+    {
+        $role  = self::role('editor');
+        $actor = new Reference('user', 'admin-1');
+
+        app(GrantService::class)->grantRole(new Reference('user', '1'), $role);
+
+        Event::fake([RoleDeleted::class]);
+
+        self::service()->delete('editor', $actor);
+
+        Event::assertDispatchedTimes(RoleDeleted::class, 1);
+        Event::assertDispatched(RoleDeleted::class, static fn (RoleDeleted $event): bool => self::refersTo($event->operation->actor, $actor)
+            && self::keysOf($event->grantees) === ['user:1']);
+    }
+
+    /**
+     * Re-parenting a role reports the change with the caller's actor.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testReParentingReportsTheActor(): void
+    {
+        $parent = self::role('admin');
+        $actor  = new Reference('user', 'admin-1');
+
+        self::role('editor');
+
+        Event::fake([RoleUpdated::class]);
+
+        self::service()->setParent('editor', 'admin', $actor);
+
+        Event::assertDispatched(RoleUpdated::class, static fn (RoleUpdated $event): bool => self::refersTo($event->operation->actor, $actor)
+            && ($event->changes['after']['parent_id'] ?? null) === $parent->id);
+    }
+
+    /**
+     * A role created inside an enclosing transaction that rolls back is never
+     * reported.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testACreateRolledBackWithItsEnclosingTransactionIsNeverReported(): void
+    {
+        Event::fake([RoleCreated::class]);
+
+        try {
+            DB::transaction(static function (): never {
+                self::service()->create('editor');
+
+                throw new \RuntimeException('Rolled back.');
+            });
+        } catch (\RuntimeException) {
+            // The enclosing transaction rolled back.
+        }
+
+        self::assertSame(0, Role::query()->count());
+        Event::assertNotDispatched(RoleCreated::class);
     }
 
     /**

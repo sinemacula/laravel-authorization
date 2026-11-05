@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events;
 
+use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
 use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
 
 /**
@@ -17,6 +18,12 @@ use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
  * the separate `AuthorizationFailed` event covers the narrower hard-denial
  * signal that fires only when `authorize()` is about to throw.
  *
+ * It implements `AuthorizationEvent`, as every event the package dispatches
+ * does. Unlike the change events, it is dispatched when the decision is made,
+ * not after a commit, since a denial is a fact even if the surrounding
+ * transaction rolls back, and it still carries the principal object, the
+ * context and the result as they were evaluated.
+ *
  * Part of the SemVer-stable event API; breaking changes require a major version
  * bump.
  *
@@ -25,7 +32,7 @@ use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class DecisionEvaluated
+final readonly class DecisionEvaluated implements AuthorizationEvent
 {
     /**
      * Create a new event instance.

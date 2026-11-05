@@ -5,10 +5,20 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Events\Identity;
 
 use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
-use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * Dispatched when a permission is granted directly to an authorizable identity.
+ * Dispatched when a permission is granted directly to a grantee, or a direct
+ * grant of it that had expired is re-armed.
+ *
+ * Distinct from `Role\PermissionGranted`, which reports a permission granted to
+ * a role.
+ *
+ * A snapshot of plain values (references, the name, the scope and times), never
+ * a model. It is dispatched once the write commits, on the package's
+ * connection, and never for a write that rolls back or changes nothing.
  *
  * Part of the SemVer-stable event API; breaking changes require a major version
  * bump.
@@ -23,15 +33,31 @@ final readonly class PermissionGranted implements IdentityEvent
     /**
      * Create a new event instance.
      *
-     * @param  object  $authorizable
-     * @param  \SineMacula\Laravel\Authorization\Models\Permission  $permission
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $permission
+     * @param  string  $name
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
+     * @param  \DateTimeImmutable|null  $expiresAt
      */
     public function __construct(
 
-        /** Authorizable identity that received the direct permission grant. */
-        public object $authorizable,
+        /** The call that made the change: its id, actor and time. */
+        public Operation $operation,
 
-        /** Permission that was granted directly to the identity. */
-        public Permission $permission,
+        /** The grantee whose grant changed. */
+        public Reference $grantee,
+
+        /** The permission granted. */
+        public Reference $permission,
+
+        /** The permission's name. */
+        public string $name,
+
+        /** Where the grant holds: its tenant and application. */
+        public GrantScope $scope,
+
+        /** When the grant expires, in UTC; null for a forever grant. */
+        public ?\DateTimeImmutable $expiresAt,
     ) {}
 }

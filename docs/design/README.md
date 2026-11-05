@@ -31,6 +31,8 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
   database, and what `authorization:sync` adds, updates, reports as stale or protected, and prunes.
 - `management-services.md`: the services every role, permission, policy and grant write goes through, their
   transaction, idempotent grants, re-armed expiries, the locked hierarchy check, and why grants are platform-wide.
+- `events.md`: the one marker every event implements, the snapshot payloads, the actor the caller passes, one
+  operation id per call, dispatch after commit, the grantees a delete reports and the document digests.
 
 These documents are secondary to the code and tests, not a replacement for them. If a note and a cited test disagree,
 the test should be treated as authoritative until the mismatch is resolved.

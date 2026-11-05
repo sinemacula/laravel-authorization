@@ -5,8 +5,10 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Services;
 
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Creates, renames, describes, rewrites, deletes and lists policies.
@@ -17,8 +19,11 @@ use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
  * not been saved is refused with `UnsavedRecordException`, so a change never
  * creates one outside `create()`.
  *
- * Each method takes the acting subject as `$actor`, the reads as well as the
- * writes: null for console and system work.
+ * Each method takes the actor making the call as `$actor`, a model or a
+ * reference, the reads as well as the writes: null for console and system work.
+ * Every event a write dispatches carries it, with one operation id the call's
+ * events share, once the write commits; it is never read from the authenticated
+ * user.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -33,17 +38,17 @@ final class PolicyService
      * @param  string  $name
      * @param  array<array-key, mixed>|string  $document
      * @param  string|null  $description
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Models\Policy
      *
      * @throws \Throwable
      */
-    public function create(string $name, array|string $document, ?string $description = null, ?object $actor = null): Policy
+    public function create(string $name, array|string $document, ?string $description = null, Model|Reference|null $actor = null): Policy
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
         $class = config('authorization.models.policy', Policy::class);
 
-        return RecordWriter::save(static fn (): Policy => new $class, [
+        return RecordWriter::save($actor, static fn (): Policy => new $class, [
             'name'        => $name,
             'description' => $description,
             'document'    => $document,
@@ -55,14 +60,14 @@ final class PolicyService
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @param  string  $name
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Models\Policy
      *
      * @throws \Throwable
      */
-    public function rename(Policy $policy, string $name, ?object $actor = null): Policy
+    public function rename(Policy $policy, string $name, Model|Reference|null $actor = null): Policy
     {
-        return RecordWriter::save(static fn (): Policy => RecordWriter::existing('policy', $policy), ['name' => $name]);
+        return RecordWriter::save($actor, static fn (): Policy => RecordWriter::existing('policy', $policy), ['name' => $name]);
     }
 
     /**
@@ -70,52 +75,54 @@ final class PolicyService
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @param  string|null  $description
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Models\Policy
      *
      * @throws \Throwable
      */
-    public function describe(Policy $policy, ?string $description, ?object $actor = null): Policy
+    public function describe(Policy $policy, ?string $description, Model|Reference|null $actor = null): Policy
     {
-        return RecordWriter::save(static fn (): Policy => RecordWriter::existing('policy', $policy), ['description' => $description]);
+        return RecordWriter::save($actor, static fn (): Policy => RecordWriter::existing('policy', $policy), ['description' => $description]);
     }
 
     /**
-     * Replace a policy's document.
+     * Replace a policy's document. The updated event reports the version and
+     * digest of the document before and after, never the documents.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @param  array<array-key, mixed>|string  $document
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Models\Policy
      *
      * @throws \Throwable
      */
-    public function rewrite(Policy $policy, array|string $document, ?object $actor = null): Policy
+    public function rewrite(Policy $policy, array|string $document, Model|Reference|null $actor = null): Policy
     {
-        return RecordWriter::save(static fn (): Policy => RecordWriter::existing('policy', $policy), ['document' => $document]);
+        return RecordWriter::save($actor, static fn (): Policy => RecordWriter::existing('policy', $policy), ['document' => $document]);
     }
 
     /**
-     * Delete a policy, and with it every attachment of it.
+     * Delete a policy, and with it every attachment of it. The deleted event
+     * lists every grantee it was attached to.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return void
      *
      * @throws \Throwable
      */
-    public function delete(Policy $policy, ?object $actor = null): void
+    public function delete(Policy $policy, Model|Reference|null $actor = null): void
     {
-        RecordWriter::delete(static fn (): Policy => RecordWriter::existing('policy', $policy));
+        RecordWriter::delete($actor, static fn (): Policy => RecordWriter::existing('policy', $policy));
     }
 
     /**
      * List the policies, by name.
      *
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Policy>
      */
-    public function list(?object $actor = null): Collection
+    public function list(Model|Reference|null $actor = null): Collection
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
         $class = config('authorization.models.policy', Policy::class);

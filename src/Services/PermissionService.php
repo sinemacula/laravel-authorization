@@ -6,8 +6,10 @@ namespace SineMacula\Laravel\Authorization\Services;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Creates, renames, describes, deletes and lists permissions.
@@ -19,8 +21,11 @@ use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
  * a permission model that has not been saved is refused with
  * `UnsavedRecordException`, so a change never creates one outside `create()`.
  *
- * Each method takes the acting subject as `$actor`, the reads as well as the
- * writes: null for console and system work.
+ * Each method takes the actor making the call as `$actor`, a model or a
+ * reference, the reads as well as the writes: null for console and system work.
+ * Every event a write dispatches carries it, with one operation id the call's
+ * events share, once the write commits; it is never read from the authenticated
+ * user.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,17 +42,23 @@ final class PermissionService
      * @param  string|null  $description
      * @param  string|null  $category
      * @param  string|null  $id
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Models\Permission
      *
      * @throws \Throwable
      */
-    public function create(string $name, ?string $guard = null, ?string $description = null, ?string $category = null, ?string $id = null, ?object $actor = null): Permission
-    {
+    public function create(
+        string $name,
+        ?string $guard = null,
+        ?string $description = null,
+        ?string $category = null,
+        ?string $id = null,
+        Model|Reference|null $actor = null,
+    ): Permission {
         $class = self::permissionClass();
         $model = new $class;
 
-        return RecordWriter::save(static fn (): Permission => $model, [
+        return RecordWriter::save($actor, static fn (): Permission => $model, [
             $model->getKeyName() => $id,
             'name'               => $name,
             'guard'              => $guard,
@@ -61,14 +72,14 @@ final class PermissionService
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @param  string  $name
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Models\Permission
      *
      * @throws \Throwable
      */
-    public function rename(Permission|string $permission, string $name, ?object $actor = null): Permission
+    public function rename(Permission|string $permission, string $name, Model|Reference|null $actor = null): Permission
     {
-        return RecordWriter::save(static fn (): Permission => self::resolve($permission), ['name' => $name]);
+        return RecordWriter::save($actor, static fn (): Permission => self::resolve($permission), ['name' => $name]);
     }
 
     /**
@@ -76,28 +87,29 @@ final class PermissionService
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @param  string|null  $description
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Models\Permission
      *
      * @throws \Throwable
      */
-    public function describe(Permission|string $permission, ?string $description, ?object $actor = null): Permission
+    public function describe(Permission|string $permission, ?string $description, Model|Reference|null $actor = null): Permission
     {
-        return RecordWriter::save(static fn (): Permission => self::resolve($permission), ['description' => $description]);
+        return RecordWriter::save($actor, static fn (): Permission => self::resolve($permission), ['description' => $description]);
     }
 
     /**
-     * Delete a permission, and with it every grant of it.
+     * Delete a permission, and with it every grant of it. The deleted event
+     * lists every grantee that held it directly and every role that carried it.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return void
      *
      * @throws \Throwable
      */
-    public function delete(Permission|string $permission, ?object $actor = null): void
+    public function delete(Permission|string $permission, Model|Reference|null $actor = null): void
     {
-        RecordWriter::delete(static fn (): Permission => self::resolve($permission));
+        RecordWriter::delete($actor, static fn (): Permission => self::resolve($permission));
     }
 
     /**
@@ -105,10 +117,10 @@ final class PermissionService
      * those of that guard or guard-agnostic.
      *
      * @param  string|null  $guard
-     * @param  object|null  $actor
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Permission>
      */
-    public function list(?string $guard = null, ?object $actor = null): Collection
+    public function list(?string $guard = null, Model|Reference|null $actor = null): Collection
     {
         // @phpstan-ignore staticMethod.dynamicCall
         return self::permissionClass()::query()

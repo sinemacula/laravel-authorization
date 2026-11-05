@@ -5,17 +5,22 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Events\Identity;
 
 use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
-use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
- * Dispatched when a grant or sync rewrites the expiry of a role the identity
- * already holds.
+ * Dispatched when a grant or sync rewrites the expiry of a role the grantee
+ * holds: a live grant given another expiry, or an expired grant re-armed.
  *
- * The grant service dispatches it alongside `RoleAssigned` when a grant changes
- * a live role's expiry, or when a grant or sync re-arms a role whose grant has
- * expired, so audit consumers can render the expiry change as its own row.
- * Without it, granting again a forever role with an expiry would shorten it (or
- * extend an expiring role to forever) without an audit trail.
+ * The grant service dispatches it alongside `RoleAssigned`, so a listener can
+ * record the expiry change as its own row. Without it, granting a forever role
+ * again with an expiry would shorten it (or extend an expiring role to forever)
+ * with no trail.
+ *
+ * A snapshot of plain values (references, the name, the scope and times), never
+ * a model. It is dispatched once the write commits, on the package's
+ * connection, and never for a write that rolls back or changes nothing.
  *
  * Part of the SemVer-stable event API; breaking changes require a major version
  * bump.
@@ -30,23 +35,35 @@ final readonly class RoleExpiryChanged implements IdentityEvent
     /**
      * Create a new event instance.
      *
-     * @param  object  $authorizable
-     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
-     * @param  \DateTimeInterface|null  $previousExpiresAt
-     * @param  \DateTimeInterface|null  $newExpiresAt
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $role
+     * @param  string  $name
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
+     * @param  \DateTimeImmutable|null  $previousExpiresAt
+     * @param  \DateTimeImmutable|null  $expiresAt
      */
     public function __construct(
 
-        /** Authorizable identity whose role grant changed expiry. */
-        public object $authorizable,
+        /** The call that made the change: its id, actor and time. */
+        public Operation $operation,
 
-        /** Role whose pivot row had its `expires_at` mutated. */
-        public Role $role,
+        /** The grantee whose grant changed. */
+        public Reference $grantee,
 
-        /** Pre-write `expires_at`; null indicates a forever grant. */
-        public ?\DateTimeInterface $previousExpiresAt,
+        /** The role whose grant was re-dated. */
+        public Reference $role,
 
-        /** Post-write `expires_at`; null indicates a forever grant. */
-        public ?\DateTimeInterface $newExpiresAt,
+        /** The role's name. */
+        public string $name,
+
+        /** Where the grant holds: its tenant and application. */
+        public GrantScope $scope,
+
+        /** The expiry before the write, in UTC; null for forever. */
+        public ?\DateTimeImmutable $previousExpiresAt,
+
+        /** The expiry after the write, in UTC; null for forever. */
+        public ?\DateTimeImmutable $expiresAt,
     ) {}
 }

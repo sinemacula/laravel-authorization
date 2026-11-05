@@ -5,7 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Observers;
 
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Support\Facades\Event;
+use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
 use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
 use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
@@ -13,31 +13,36 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\ReservedRoleNameException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Observers\Support\RecordChanges;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Row-lifecycle observer for the `Role` model.
  *
  * Translates Eloquent's native `saving` / `updating` / `created` / `updated` /
- * `deleted` events into the package's typed CRUD events, enforces the
- * tenant-columns both-or-neither invariant and the reserved system role names
- * on save, and guards against hierarchy cycles before a `parent_id` change is
- * persisted. System-protection hooks (`deleting`, `updating` guard, `saved`
- * bypass reset) live in `HasSystemProtection::bootHasSystemProtection()` and
- * run independently of this observer.
+ * `deleting` / `deleted` events into the package's typed record events,
+ * enforces the tenant-columns both-or-neither invariant and the reserved system
+ * role names on save, and guards against hierarchy cycles before a `parent_id`
+ * change is persisted. System-protection hooks (`deleting`, `updating` guard,
+ * `saved` bypass reset) live in
+ * `HasSystemProtection::bootHasSystemProtection()` and run independently of
+ * this observer.
+ *
+ * The events are snapshots of plain values, dispatched once the write commits
+ * on the package's connection, and carry the operation the write belongs to:
+ * the management service call that made it, with its actor, or a write of its
+ * own with no actor. A delete reads, before the row goes, every grantee that
+ * held the role and every permission it carried.
  *
  * Registered via `#[ObservedBy(RoleObserver::class)]` on the `Role` model.
- *
- * @managed-static
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
 final class RoleObserver
 {
-    /** @var \WeakMap<\SineMacula\Laravel\Authorization\Models\Role, array<string, mixed>>|null Pre-update snapshots keyed by model. */
-    private static ?\WeakMap $snapshots = null;
-
     /**
      * Enforce the tenant-columns invariant, the reserved system role names and
      * the hierarchy cycle-detection guard before any persistence.
@@ -62,73 +67,90 @@ final class RoleObserver
     }
 
     /**
-     * Capture the pre-update attribute snapshot so the paired `updated` hook
-     * can emit a complete before/after diff.
+     * Capture the changed fields' values before the update, so the paired
+     * `updated` hook can report a complete before/after diff.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return void
      */
     public function updating(Role $role): void
     {
-        $snapshot = [];
-
-        foreach (\array_keys($role->getDirty()) as $key) {
-            $snapshot[$key] = $role->getOriginal($key);
-        }
-
-        self::snapshots()[$role] = $snapshot;
+        RecordChanges::capture($role);
     }
 
     /**
-     * Emit the typed `RoleCreated` event.
+     * Report the role created.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return void
      */
     public function created(Role $role): void
     {
-        Event::dispatch(new RoleCreated($role));
+        OperationScope::dispatch(new RoleCreated(
+            OperationScope::current($role),
+            Reference::of($role),
+            $role->name,
+            $role->guard,
+            Reference::tenantOf($role),
+            $role->getAttribute('is_system') === true,
+        ));
     }
 
     /**
-     * Emit the typed `RoleUpdated` event with the before/after diff captured in
-     * the paired `updating` hook.
+     * Report the role updated, with the before/after diff captured in the
+     * paired `updating` hook.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return void
      */
     public function updated(Role $role): void
     {
-        $snapshots = self::snapshots();
-        $before    = $snapshots[$role] ?? [];
-
-        Event::dispatch(new RoleUpdated($role, [
-            'before' => $before,
-            'after'  => $role->getChanges(),
-        ]));
-
-        unset($snapshots[$role]);
+        OperationScope::dispatch(new RoleUpdated(
+            OperationScope::current($role),
+            Reference::of($role),
+            $role->name,
+            $role->guard,
+            Reference::tenantOf($role),
+            RecordChanges::diff($role),
+        ));
     }
 
     /**
-     * Emit the typed `RoleDeleted` event.
+     * Read, before the row goes, every grantee that holds the role and every
+     * permission it carries, which the delete takes with it.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+     * @return void
+     */
+    public function deleting(Role $role): void
+    {
+        RecordChanges::hold($role, [
+            'grantees'    => GrantTarget::ROLE->holders(Reference::of($role)->id),
+            'permissions' => RecordChanges::linked($role->permissions()),
+        ]);
+    }
+
+    /**
+     * Report the role deleted, with the grantees and permissions read in the
+     * paired `deleting` hook.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return void
      */
     public function deleted(Role $role): void
     {
-        Event::dispatch(new RoleDeleted($role));
-    }
+        /** @var array{grantees?: list<\SineMacula\Laravel\Authorization\Support\Reference>, permissions?: list<\SineMacula\Laravel\Authorization\Support\Reference>} $held */
+        $held = RecordChanges::release($role);
 
-    /**
-     * Return the shared snapshot map, creating it on first access.
-     *
-     * @return \WeakMap<\SineMacula\Laravel\Authorization\Models\Role, array<string, mixed>>
-     */
-    private static function snapshots(): \WeakMap
-    {
-        return self::$snapshots ??= new \WeakMap;
+        OperationScope::dispatch(new RoleDeleted(
+            OperationScope::current($role),
+            Reference::of($role),
+            $role->name,
+            $role->guard,
+            Reference::tenantOf($role),
+            $held['grantees']    ?? [],
+            $held['permissions'] ?? [],
+        ));
     }
 
     /**

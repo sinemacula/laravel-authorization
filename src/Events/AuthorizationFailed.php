@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Events;
 
+use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
 use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
 
 /**
@@ -18,6 +19,11 @@ use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
  * split is intentional: hard-denial is rare and security-relevant; soft-denial
  * is routine and filterable.
  *
+ * It implements `AuthorizationEvent`, as every event the package dispatches
+ * does, and like `DecisionEvaluated` it is dispatched when the decision is
+ * made, not after a commit, and still carries the principal object, the context
+ * and the result as they were evaluated.
+ *
  * Part of the SemVer-stable event API; breaking changes require a major version
  * bump.
  *
@@ -26,7 +32,7 @@ use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class AuthorizationFailed
+final readonly class AuthorizationFailed implements AuthorizationEvent
 {
     /**
      * Create a new event instance.
