@@ -4,7 +4,6 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
-use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
@@ -53,29 +52,6 @@ use Tests\TestCase;
 #[CoversTrait(HasPermissions::class)]
 final class GuardRoutingTest extends TestCase
 {
-    /**
-     * Ensure the api-guard stub table exists whenever this suite runs. Needs to
-     * work regardless of whether `migrate:fresh` already ran in this process,
-     * so it's keyed off `Schema::hasTable` rather than the `DatabaseRefreshed`
-     * hook.
-     *
-     * @return void
-     */
-    #[\Override]
-    protected function setUp(): void
-    {
-        parent::setUp();
-
-        if (Schema::hasTable('api_guarded_users')) {
-            return;
-        }
-
-        Schema::create('api_guarded_users', static function ($table): void {
-            $table->string('id')->primary();
-            $table->timestamps();
-        });
-    }
-
     /**
      * An identity declaring `getAuthorizationGuard()` routes its role lookups
      * to the declared guard, not the package default.

@@ -8,16 +8,14 @@ use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
 use SineMacula\Laravel\Authorization\Models\Role;
 
 /**
- * Dispatched when an existing role assignment's expiry is mutated by a re-call
- * to `assignRole()`.
+ * Dispatched when a grant or sync rewrites the expiry of a role the identity
+ * already holds.
  *
- * `assignRole()` writes through `syncWithoutDetaching` and so silently
- * overwrites the prior pivot row's `expires_at`. Without a distinct signal a
- * consumer who re-assigns an existing forever grant with an expiry would
- * shorten it (or extend an expiring grant to forever) without an audit trail.
- * This event fires alongside `RoleAssigned` whenever the prior pivot's
- * `expires_at` differs from the supplied value, so audit consumers can render
- * the expiry mutation as its own row.
+ * The grant service dispatches it alongside `RoleAssigned` when a grant changes
+ * a live role's expiry, or when a grant or sync re-arms a role whose grant has
+ * expired, so audit consumers can render the expiry change as its own row.
+ * Without it, granting again a forever role with an expiry would shorten it (or
+ * extend an expiring role to forever) without an audit trail.
  *
  * Part of the SemVer-stable event API; breaking changes require a major version
  * bump.

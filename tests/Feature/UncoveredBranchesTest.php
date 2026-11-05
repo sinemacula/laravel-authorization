@@ -23,8 +23,6 @@ use SineMacula\Laravel\Authorization\Concerns\ResolvesPivotExpiry;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
-use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
-use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -297,42 +295,6 @@ final class UncoveredBranchesTest extends TestCase
         };
 
         self::assertFalse($user->fresh()?->canActOn($target));
-    }
-
-    /**
-     * `resolveRoleById()` throws when the ID is unknown. Targets `HasRoles`
-     * line 376 via `syncRoles()` detachment with a deleted row.
-     *
-     * @return void
-     */
-    public function testResolveRoleByIdThrowsWhenMissing(): void
-    {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
-
-        $reflection = new \ReflectionMethod($user, 'resolveRoleById');
-
-        $this->expectException(UnknownRoleException::class);
-
-        $reflection->invoke($user, '00000000-0000-4000-8000-ffffffffffff');
-    }
-
-    /**
-     * `resolvePermissionById()` throws when the ID is unknown. Targets
-     * `HasPermissions` line 351 — the private resolver invoked by
-     * `syncPermissions()` when the sync delta surfaces a detached ID whose row
-     * no longer exists.
-     *
-     * @return void
-     */
-    public function testResolvePermissionByIdThrowsWhenMissing(): void
-    {
-        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
-
-        $reflection = new \ReflectionMethod($user, 'resolvePermissionById');
-
-        $this->expectException(UnknownPermissionException::class);
-
-        $reflection->invoke($user, '00000000-0000-4000-8000-ffffffffffff');
     }
 
     /**

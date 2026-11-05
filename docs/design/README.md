@@ -29,6 +29,8 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
   `string_like`, `before`, `after`, `between`, `gt`, `gte`, `lt`, `lte`, `bool`).
 - `permission-catalogue-sync.md`: declaring permissions in enums and providers, why booting never touches the
   database, and what `authorization:sync` adds, updates, reports as stale or protected, and prunes.
+- `management-services.md`: the services every role, permission, policy and grant write goes through, their
+  transaction, idempotent grants, re-armed expiries, the locked hierarchy check, and why grants are platform-wide.
 
 These documents are secondary to the code and tests, not a replacement for them. If a note and a cited test disagree,
 the test should be treated as authoritative until the mismatch is resolved.

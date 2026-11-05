@@ -6,8 +6,10 @@ namespace Tests\Feature;
 
 use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Console\GrantRoleCommand;
+use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Models\Role;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
@@ -320,5 +322,27 @@ final class GrantRoleCommandTest extends TestCase
         self::assertSame(1, $exitCode);
         self::assertStringContainsString('owned-editor', Artisan::output());
         self::assertSame(0, $user->roles()->withoutGlobalScopes()->count());
+    }
+
+    /**
+     * Granting a role the identity already holds reports it as held, succeeds,
+     * writes nothing and dispatches nothing.
+     *
+     * @return void
+     */
+    public function testReportsARoleThatIsAlreadyHeld(): void
+    {
+        Role::query()->create(['name' => 'editor', 'guard' => 'web']);
+        $user = StubIdentity::create(['id' => 'a1a1a1a1-0000-0000-0000-000000000002']);
+        $user->assignRole('editor');
+
+        Event::fake([RoleAssigned::class]);
+
+        $identity = StubIdentity::class . ':a1a1a1a1-0000-0000-0000-000000000002';
+        $exitCode = Artisan::call('authorization:grant', ['identity' => $identity, 'role' => 'editor']);
+
+        self::assertSame(0, $exitCode);
+        self::assertSame("{$identity} already holds role 'editor'.", \trim(Artisan::output()));
+        Event::assertNotDispatched(RoleAssigned::class);
     }
 }

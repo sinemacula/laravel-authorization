@@ -5,12 +5,9 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Concerns;
 
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
-use Illuminate\Support\Facades\Event;
-use SineMacula\Laravel\Authorization\Events\Role\PermissionGranted as RolePermissionGranted;
-use SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked as RolePermissionRevoked;
-use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
+use SineMacula\Laravel\Authorization\Services\RoleService;
 
 /**
  * Role-side permission management API.
@@ -19,11 +16,15 @@ use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
  * get helper consumers call against a Role. Extracted from `Role` so the model
  * keeps to schema, relations, and lifecycle.
  *
- * Fires `RolePermissionGranted` on every attachment and `RolePermissionRevoked`
- * on every detachment so the cache invalidation listener keeps the resolution
- * cache coherent and audit consumers receive the same per-row signal regardless
- * of the entry point (`givePermission`, `revokePermission`, `syncPermissions`,
- * or a raw `$role->permissions()->attach()`).
+ * The write helpers (`givePermission`, `revokePermission`, `syncPermissions`)
+ * delegate to the role service, which writes in one transaction and fires
+ * `RolePermissionGranted` for each permission really attached and
+ * `RolePermissionRevoked` for each really detached, so the cache invalidation
+ * listener keeps the resolution cache coherent and audit consumers receive one
+ * signal per change. A raw relation write (`$role->permissions()->attach()`,
+ * `detach()` or `sync()`) bypasses the service: it fires none of those events
+ * and leaves the resolution cache stale, so it is unsupported for any change
+ * that must be audited.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,9 +37,10 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
      * Permissions attached to this role.
      *
      * The relation is bound to the `RolePermission` pivot so every attachment
-     * path — the typed Role API, a direct `$role->permissions()->attach(...)`,
-     * or a raw `sync(...)` — runs through the pivot's `saving` hook and the
-     * guard-parity invariant it enforces.
+     * path — the role service, a direct `$role->permissions()->attach(...)`, or
+     * a raw `sync(...)` — runs through the pivot's `saving` hook and the
+     * guard-parity invariant it enforces. Only the role service reports the
+     * change.
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
@@ -68,24 +70,17 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
     }
 
     /**
-     * Attach the given permission to this role.
+     * Attach the given permission to this role, through the role service. A
+     * permission the role carries already is left as it is, and no event fires.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return static
      *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
+     * @throws \Throwable
      */
     public function givePermission(Permission|string $permission): static
     {
-        $model = $this->resolvePermission($permission);
-
-        $this->permissions()->syncWithoutDetaching([$model->getKey()]);
-
-        if (isset($this->relations['permissions'])) {
-            unset($this->relations['permissions']);
-        }
-
-        Event::dispatch(new RolePermissionGranted($this, $model));
+        self::authorizationRoles()->grantPermission($this, $permission);
 
         return $this;
     }
@@ -95,6 +90,8 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return static
+     *
+     * @throws \Throwable
      */
     public function givePermissionTo(Permission|string $permission): static
     {
@@ -102,24 +99,19 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
     }
 
     /**
-     * Detach the given permission from this role.
+     * Detach the given permission from this role, through the role service.
+     * `RolePermissionRevoked` fires only when the role carried it. A name
+     * detaches every permission of that name the role carries, the current
+     * tenant's and the platform's alike.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return static
      *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
+     * @throws \Throwable
      */
     public function revokePermission(Permission|string $permission): static
     {
-        $model = $this->resolvePermission($permission);
-
-        $this->permissions()->detach($model->getKey());
-
-        if (isset($this->relations['permissions'])) {
-            unset($this->relations['permissions']);
-        }
-
-        Event::dispatch(new RolePermissionRevoked($this, $model));
+        self::authorizationRoles()->revokePermission($this, $permission);
 
         return $this;
     }
@@ -129,6 +121,8 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return static
+     *
+     * @throws \Throwable
      */
     public function revokePermissionTo(Permission|string $permission): static
     {
@@ -136,7 +130,8 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
     }
 
     /**
-     * Replace this role's permission set with the supplied list.
+     * Replace this role's permission set with the supplied list, through the
+     * role service.
      *
      * Each net attachment fires `RolePermissionGranted` and each net detachment
      * fires `RolePermissionRevoked`, so audit consumers receive the same
@@ -147,31 +142,11 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Permission|string>  $permissions
      * @return static
      *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
+     * @throws \Throwable
      */
     public function syncPermissions(array $permissions): static
     {
-        $resolved = [];
-
-        foreach ($permissions as $permission) {
-            $model                = $this->resolvePermission($permission);
-            $resolved[$model->id] = $model;
-        }
-
-        $ids    = \array_keys($resolved);
-        $result = $this->permissions()->sync($ids);
-
-        if (isset($this->relations['permissions'])) {
-            unset($this->relations['permissions']);
-        }
-
-        foreach ($result['attached'] as $id) {
-            Event::dispatch(new RolePermissionGranted($this, $resolved[(string) $id] ?? $this->resolvePermissionById((string) $id)));
-        }
-
-        foreach ($result['detached'] as $id) {
-            Event::dispatch(new RolePermissionRevoked($this, $this->resolvePermissionById((string) $id)));
-        }
+        self::authorizationRoles()->syncPermissions($this, $permissions);
 
         return $this;
     }
@@ -258,54 +233,15 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
     }
 
     /**
-     * Resolve a permission identifier to a model instance.
+     * Return the role service the write methods go through, as the container
+     * binds it.
      *
-     * Role rows carry their own `guard`; use it as the lookup scope so a
-     * web-scoped role resolves permissions against the web guard and an
-     * api-scoped role against the api guard. Falls back to the package default
-     * when the role itself is guard-agnostic (null `guard`). Delegates the
-     * query to `Permission::resolveByName()` so both sides share one
-     * implementation.
+     * @return \SineMacula\Laravel\Authorization\Services\RoleService
      *
-     * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
-     * @return \SineMacula\Laravel\Authorization\Models\Permission
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
+     * @throws \LogicException
      */
-    protected function resolvePermission(Permission|string $permission): Permission
+    private static function authorizationRoles(): RoleService
     {
-        if ($permission instanceof Permission) {
-            return $permission;
-        }
-
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
-        $class = config('authorization.models.permission', Permission::class);
-
-        return $class::resolveByName($permission, $this->guard);
-    }
-
-    /**
-     * Resolve a permission model by primary key, used by `syncPermissions()`
-     * when the sync delta surfaces an ID that was not part of the caller's
-     * input set (the detachment list).
-     *
-     * @param  string  $id
-     * @return \SineMacula\Laravel\Authorization\Models\Permission
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
-     */
-    private function resolvePermissionById(string $id): Permission
-    {
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
-        $class = config('authorization.models.permission', Permission::class);
-
-        /** @var \SineMacula\Laravel\Authorization\Models\Permission|null $model */
-        $model = $class::query()->whereKey($id)->first();
-
-        if ($model === null) {
-            throw new UnknownPermissionException($id);
-        }
-
-        return $model;
+        return RoleService::instance() ?? throw new \LogicException('The authorization role service is not bound; register the package\'s service provider.');
     }
 }

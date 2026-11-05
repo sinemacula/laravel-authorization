@@ -145,7 +145,7 @@ abstract class TestCase extends OrchestraTestCase
      */
     private function createStubIdentityTables(): void
     {
-        foreach (['stub_identities', 'stub_second_identities', 'stub_tenants'] as $table) {
+        foreach (['stub_identities', 'stub_second_identities', 'stub_tenants', 'api_guarded_users'] as $table) {
             Schema::create($table, static function (Blueprint $schema): void {
                 $schema->string('id')->primary();
                 $schema->string('name')->nullable();

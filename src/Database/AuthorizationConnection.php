@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Database;
 
+use Illuminate\Database\Connection;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -52,5 +53,17 @@ final class AuthorizationConnection
     public static function resolve(?string $instance = null): string
     {
         return self::name() ?? $instance ?? DB::getDefaultConnection();
+    }
+
+    /**
+     * Return the connection the package's pivots and transactions use: the
+     * configured connection, else the application's default.
+     *
+     * @return \Illuminate\Database\Connection
+     */
+    public static function connection(): Connection
+    {
+        /** @var \Illuminate\Database\Connection */
+        return DB::connection(self::resolve());
     }
 }

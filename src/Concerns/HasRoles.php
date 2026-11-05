@@ -7,14 +7,9 @@ namespace SineMacula\Laravel\Authorization\Concerns;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned as IdentityRoleAssigned;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged as IdentityRoleExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked as IdentityRoleRevoked;
-use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizableRolePivot;
 use SineMacula\Laravel\Authorization\Models\Role;
 
@@ -82,49 +77,30 @@ trait HasRoles // @phpstan-ignore trait.unused
     }
 
     /**
-     * Assign the given role to this identity.
+     * Assign the given role to this identity, through the grant service.
      *
      * An optional `$expiresAt` makes the grant temporal — the assignment is
      * filtered out of `$user->roles` automatically the moment the clock passes
      * the supplied instant, without requiring a sweeper run. Passing null (the
-     * default) creates a forever grant.
+     * default) creates a forever grant. Assigning a role the identity holds
+     * with the same expiry changes nothing and dispatches no event; a role
+     * whose grant has expired is re-armed with the new expiry.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  \DateTimeInterface|null  $expiresAt
      * @return static
      *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
+     * @throws \Throwable
      */
     public function assignRole(Role|string $role, ?\DateTimeInterface $expiresAt = null): static
     {
-        $model = $this->resolveRole($role);
-
-        $prior = self::authorizationReadGrantPivot($this, $this->roles()->newPivotStatement(), 'role_id', (string) $model->getKey());
-
-        $this->roles()->syncWithoutDetaching([
-            (string) $model->getKey() => ['expires_at' => $expiresAt],
-        ]);
-
-        if (isset($this->relations['roles'])) {
-            unset($this->relations['roles']);
-        }
-
-        Event::dispatch(new IdentityRoleAssigned($this, $model));
-
-        if ($prior['exists'] && !self::areAuthorizationGrantExpiriesEqual($prior['expires_at'], $expiresAt)) {
-            Event::dispatch(new IdentityRoleExpiryChanged(
-                $this,
-                $model,
-                $prior['expires_at'],
-                $expiresAt,
-            ));
-        }
+        self::authorizationGrants()->grantRole($this, $role, $expiresAt);
 
         return $this;
     }
 
     /**
-     * Revoke the given role from this identity.
+     * Revoke the given role from this identity, through the grant service.
      *
      * A name is revoked from the grants the identity holds, not from the one
      * row a lookup would pick: every held role of that name for the identity's
@@ -136,33 +112,26 @@ trait HasRoles // @phpstan-ignore trait.unused
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @return static
      *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
+     * @throws \Throwable
      */
     public function revokeRole(Role|string $role): static
     {
-        $held = $this->heldRoles($role instanceof Role ? [$role] : $this->rolesNamed($role));
-
-        $this->roles()->detach(\array_map(static fn (Role $model): mixed => $model->getKey(), $held));
-
-        if (isset($this->relations['roles'])) {
-            unset($this->relations['roles']);
-        }
-
-        foreach ($held as $model) {
-            Event::dispatch(new IdentityRoleRevoked($this, $model));
-        }
+        self::authorizationGrants()->revokeRole($this, $role);
 
         return $this;
     }
 
     /**
-     * Replace this identity's roles with the supplied set.
+     * Replace this identity's roles with the supplied set, through the grant
+     * service.
      *
      * Each net attachment fires `IdentityRoleAssigned` and each net detachment
      * fires `IdentityRoleRevoked`, so audit consumers receive the same per-row
      * signal they would for `assignRole()` / `revokeRole()` calls and the cache
      * invalidation listener wired to those events keeps the resolution cache
-     * coherent without a separate forget call in this method.
+     * coherent without a separate forget call in this method. A listed role
+     * whose grant has expired is re-armed with no expiry; to re-arm it for a
+     * limited time, call `GrantService::syncRoles()` with an expiry.
      *
      * A name keeps every held role of that name, whether the current tenant or
      * the platform owns it, and only when the identity holds none is the role
@@ -172,32 +141,11 @@ trait HasRoles // @phpstan-ignore trait.unused
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Role|string>  $roles
      * @return static
      *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
+     * @throws \Throwable
      */
     public function syncRoles(array $roles): static
     {
-        $resolved = [];
-
-        foreach ($roles as $role) {
-            foreach ($this->rolesToKeep($role) as $model) {
-                $resolved[(string) $model->getKey()] = $model;
-            }
-        }
-
-        $ids    = \array_keys($resolved);
-        $result = $this->roles()->sync($ids);
-
-        if (isset($this->relations['roles'])) {
-            unset($this->relations['roles']);
-        }
-
-        foreach ($result['attached'] as $id) {
-            Event::dispatch(new IdentityRoleAssigned($this, $resolved[(string) $id] ?? $this->resolveRoleById((string) $id)));
-        }
-
-        foreach ($result['detached'] as $id) {
-            Event::dispatch(new IdentityRoleRevoked($this, $this->resolveRoleById((string) $id)));
-        }
+        self::authorizationGrants()->syncRoles($this, $roles);
 
         return $this;
     }
@@ -339,115 +287,6 @@ trait HasRoles // @phpstan-ignore trait.unused
     public function getRoleNames(): array
     {
         return $this->getRoles();
-    }
-
-    /**
-     * Resolve a role identifier to a model instance.
-     *
-     * Honours `$this->getAuthorizationGuard()` when the identity model declares
-     * it — a user authenticated under a non-default guard routes its lookups
-     * against its own guard's rows instead of the package default. Delegates
-     * the actual query to `Role::resolveByName()` so both identity-side and any
-     * other caller share one implementation.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
-     * @return \SineMacula\Laravel\Authorization\Models\Role
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
-     */
-    protected function resolveRole(Role|string $role): Role
-    {
-        if ($role instanceof Role) {
-            return $role;
-        }
-
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
-        $class = config('authorization.models.role', Role::class);
-
-        return $class::resolveByName($role, self::authorizationResolveGuard($this));
-    }
-
-    /**
-     * Return every role that answers the name under this identity's guard, the
-     * one the lookup would pick first.
-     *
-     * @param  string  $name
-     * @return non-empty-list<\SineMacula\Laravel\Authorization\Models\Role>
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
-     */
-    private function rolesNamed(string $name): array
-    {
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
-        $class = config('authorization.models.role', Role::class);
-
-        /** @var list<\SineMacula\Laravel\Authorization\Models\Role> $roles */
-        $roles = self::authorizationAllNamed($this, $class, $name);
-
-        if ($roles === []) {
-            throw new UnknownRoleException($name);
-        }
-
-        return $roles;
-    }
-
-    /**
-     * Return the roles among the given ones this identity holds, whether or not
-     * the grant has expired.
-     *
-     * @param  list<\SineMacula\Laravel\Authorization\Models\Role>  $roles
-     * @return list<\SineMacula\Laravel\Authorization\Models\Role>
-     */
-    private function heldRoles(array $roles): array
-    {
-        /** @var list<\SineMacula\Laravel\Authorization\Models\Role> */
-        return self::authorizationHeldAmong($this->roles()->newPivotQuery(), 'role_id', $roles);
-    }
-
-    /**
-     * Return the roles a sync keeps for one entry: a model as given; for a
-     * name, every held role of that name, else the one the lookup ranks first.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
-     * @return list<\SineMacula\Laravel\Authorization\Models\Role>
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
-     */
-    private function rolesToKeep(Role|string $role): array
-    {
-        if ($role instanceof Role) {
-            return [$role];
-        }
-
-        $named = $this->rolesNamed($role);
-        $held  = $this->heldRoles($named);
-
-        return $held !== [] ? $held : [$named[0]];
-    }
-
-    /**
-     * Resolve a role model by primary key, used by `syncRoles()` when the sync
-     * delta surfaces an ID that was not part of the caller's input set (the
-     * detachment list).
-     *
-     * @param  string  $id
-     * @return \SineMacula\Laravel\Authorization\Models\Role
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException
-     */
-    private function resolveRoleById(string $id): Role
-    {
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $class */
-        $class = config('authorization.models.role', Role::class);
-
-        /** @var \SineMacula\Laravel\Authorization\Models\Role|null $model */
-        $model = $class::query()->whereKey($id)->first();
-
-        if ($model === null) {
-            throw new UnknownRoleException($id);
-        }
-
-        return $model;
     }
 
     /**

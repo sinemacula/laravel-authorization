@@ -38,6 +38,10 @@ use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Services\PermissionService;
+use SineMacula\Laravel\Authorization\Services\PolicyService;
+use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\CustomRoleMiddlewareDouble;
@@ -212,6 +216,20 @@ final class AuthorizationServiceProviderTest extends TestCase
 
         self::assertSame($bound[SubjectResolver::class], (new \ReflectionProperty($manager, 'subjectResolver'))->getValue($manager));
         self::assertSame($bound[PolicyResolver::class], (new \ReflectionProperty($manager, 'policyResolver'))->getValue($manager));
+    }
+
+    /**
+     * The management services are bound as singletons, since they hold no
+     * state.
+     *
+     * @return void
+     */
+    public function testBindsTheManagementServicesAsSingletons(): void
+    {
+        foreach ([RoleService::class, PermissionService::class, PolicyService::class, GrantService::class] as $service) {
+            self::assertTrue($this->app?->isShared($service), $service);
+            self::assertInstanceOf($service, $this->app->make($service));
+        }
     }
 
     /**

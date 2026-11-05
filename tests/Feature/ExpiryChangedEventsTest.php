@@ -27,13 +27,12 @@ use Tests\TestCase;
 /**
  * Feature coverage for the expiry-changed event family.
  *
- * `assignRole()` / `givePermission()` / `attachPolicy()` write through
- * `syncWithoutDetaching` and so silently overwrite an existing pivot row's
- * `expires_at`. The expiry-changed events give audit consumers a distinct
- * signal for the case where the pre-write `expires_at` differs from the
- * supplied value, fired alongside the existing `Assigned` / `Granted` /
- * `Attached` event. A fresh grant fires only the `Assigned` / `Granted` /
- * `Attached` event.
+ * Calling `assignRole()` / `givePermission()` / `attachPolicy()` again for a
+ * held grant with a different expiry, or for one that has expired, rewrites the
+ * grant's `expires_at` through the grant service. The expiry-changed events
+ * give audit consumers a distinct signal for that rewrite, dispatched alongside
+ * the `Assigned` / `Granted` / `Attached` event. A fresh grant dispatches only
+ * the `Assigned` / `Granted` / `Attached` event.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

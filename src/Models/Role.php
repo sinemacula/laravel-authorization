@@ -104,11 +104,11 @@ class Role extends Model
      * row before the platform's, then a guard-specific row before a
      * guard-agnostic one, then the lowest primary key.
      *
-     * Delegates to the precedence query shared by `HasRoles::resolveRole()` and
-     * any direct static caller, so the matching rules have one owner. Consumers
-     * calling `$class::resolveByName(...)` where `$class` is read from
-     * `authorization.models.role` get correct late-static-binding against their
-     * swapped model.
+     * Delegates to `GuardScopedLookup`, the precedence query `GrantTarget` also
+     * resolves a granted role's name through, so the matching rules have one
+     * owner. `RoleService` resolves a role named by a string here, through the
+     * class `authorization.models.role` configures, and late static binding
+     * gives a swapped model its own rows.
      *
      * @param  string  $name
      * @param  string|null  $guard

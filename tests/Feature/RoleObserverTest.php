@@ -12,6 +12,8 @@ use SineMacula\Laravel\Authorization\Exceptions\ReservedRoleNameException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
+use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\RecordsRowLocks;
 use Tests\Feature\Stubs\CustomRole;
 use Tests\TestCase;
 
@@ -35,6 +37,8 @@ use Tests\TestCase;
 #[CoversClass(ReservedRoleNameException::class)]
 final class RoleObserverTest extends TestCase
 {
+    use ActsAsTenant, RecordsRowLocks;
+
     /** @var array{tenant_type: string, tenant_id: string} The owner columns of a tenant's role. */
     private const array TENANT = ['tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a'];
 
@@ -74,8 +78,159 @@ final class RoleObserverTest extends TestCase
         } catch (RoleHierarchyCycleException $exception) { // @phpstan-ignore catch.neverThrown
             self::assertSame('admin', $exception->getRoleName());
             self::assertSame('editor', $exception->getProposedParentName());
-            self::assertSame([CustomRole::class, CustomRole::class], $hydrated->getArrayCopy());
+            self::assertSame([CustomRole::class], $hydrated->getArrayCopy());
         }
+    }
+
+    /**
+     * A role is refused as its own parent, named as its own proposed parent.
+     *
+     * @return void
+     */
+    public function testARoleCannotBeItsOwnParent(): void
+    {
+        $role = $this->makeRole('admin');
+
+        $role->parent_id = $role->id;
+
+        $this->expectExceptionObject(new RoleHierarchyCycleException(roleName: 'admin', proposedParentName: 'admin'));
+
+        $role->save();
+    }
+
+    /**
+     * A parent deeper below the role is refused too, named by the proposed
+     * parent rather than the role the walk reached.
+     *
+     * @return void
+     */
+    public function testAParentFurtherDownTheHierarchyIsRefused(): void
+    {
+        $root       = $this->makeRole('root');
+        $child      = $this->makeRole('child', $root->id);
+        $grandchild = $this->makeRole('grandchild', $child->id);
+
+        $root->parent_id = $grandchild->id;
+
+        $this->expectExceptionObject(new RoleHierarchyCycleException(roleName: 'root', proposedParentName: 'grandchild'));
+
+        $root->save();
+    }
+
+    /**
+     * The walk reads every ancestor outside the tenant scope, so a cycle
+     * through another tenant's role is refused.
+     *
+     * @return void
+     */
+    public function testACycleThroughAnotherTenantsRoleIsRefused(): void
+    {
+        $tenantA = self::createTenant('tenant-a');
+        $mine    = CustomRole::query()->create(['name' => 'mine', ...self::ownedBy($tenantA)]);
+        $theirs  = CustomRole::query()->create(['name' => 'theirs', ...self::ownedBy(self::createTenant('tenant-b')), 'parent_id' => $mine->id]);
+        $middle  = CustomRole::query()->create(['name' => 'middle', ...self::ownedBy($tenantA), 'parent_id' => $theirs->id]);
+
+        $this->actAsTenant($tenantA);
+
+        $mine->parent_id = $middle->id;
+
+        $this->expectExceptionObject(new RoleHierarchyCycleException(roleName: 'mine', proposedParentName: 'middle'));
+
+        $mine->save();
+    }
+
+    /**
+     * A chain above the proposed parent that loops without reaching the role is
+     * corrupt, and the parent is refused rather than walked forever.
+     *
+     * @return void
+     */
+    public function testAParentWhoseChainLoopsIsRefused(): void
+    {
+        $first  = $this->makeRole('first');
+        $second = $this->makeRole('second', $first->id);
+
+        Role::query()->whereKey($first->id)->update(['parent_id' => $second->id]);
+
+        $role = $this->makeRole('editor');
+
+        $role->parent_id = $first->id;
+
+        $this->expectExceptionObject(new RoleHierarchyCycleException(roleName: 'editor', proposedParentName: 'first'));
+
+        $role->save();
+    }
+
+    /**
+     * A role's parent may move to a role outside its descendants.
+     *
+     * @return void
+     */
+    public function testAParentOutsideTheRolesDescendantsIsAccepted(): void
+    {
+        $root    = $this->makeRole('root');
+        $child   = $this->makeRole('child', $root->id);
+        $another = $this->makeRole('another', $root->id);
+
+        $child->parent_id = $another->id;
+        $child->save();
+
+        self::assertSame($another->id, $child->fresh()?->parent_id);
+    }
+
+    /**
+     * The walk locks each ancestor it reads, in order up the chain.
+     *
+     * @return void
+     */
+    public function testTheWalkLocksEachAncestor(): void
+    {
+        $root   = $this->makeRole('root');
+        $parent = $this->makeRole('parent', $root->id);
+        $role   = $this->makeRole('editor');
+
+        $locks = $this->recordRowLocks();
+
+        $role->parent_id = $parent->id;
+        $role->save();
+
+        self::assertSame([['roles', [$parent->id]], ['roles', [$root->id]]], $locks->getArrayCopy());
+    }
+
+    /**
+     * A chain that names an ancestor no row answers, as a parent key written
+     * past the foreign key would, ends the walk there without an error.
+     *
+     * @return void
+     */
+    public function testAChainThatReachesAMissingAncestorEndsTheWalk(): void
+    {
+        $role            = $this->makeRole('editor');
+        $role->parent_id = '00000000-0000-4000-8000-000000000000';
+
+        $locks = $this->recordRowLocks();
+
+        (new RoleObserver)->saving($role);
+
+        self::assertSame([['roles', ['00000000-0000-4000-8000-000000000000']]], $locks->getArrayCopy());
+    }
+
+    /**
+     * A save that leaves the parent alone does not walk the hierarchy.
+     *
+     * @return void
+     */
+    public function testASaveThatLeavesTheParentAloneDoesNotWalk(): void
+    {
+        $root  = $this->makeRole('root');
+        $child = $this->makeRole('child', $root->id);
+
+        $hydrated = $this->recordHydratedRoleClasses();
+
+        $child->description = 'Changed';
+        $child->save();
+
+        self::assertSame([], $hydrated->getArrayCopy());
     }
 
     /**

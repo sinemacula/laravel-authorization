@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\ReservedRoleNameException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 
 /**
  * Row-lifecycle observer for the `Role` model.
@@ -198,9 +199,16 @@ final class RoleObserver
     }
 
     /**
-     * Guard the saving role against hierarchy cycles. Covers the
-     * self-referential case and the "proposed parent is already a descendant"
-     * case for existing rows whose `parent_id` changed.
+     * Guard the saving role against hierarchy cycles when its parent changes.
+     *
+     * Walks up from the proposed parent, locking each ancestor for update and
+     * reading it outside the tenant scope, until the chain ends. Reaching the
+     * role itself means the parent is the role or one of its descendants; a
+     * chain that loops without reaching the role is corrupt. Both are refused.
+     * Inside the role service's transaction, which has locked the role and the
+     * parent first, the locks hold until commit, so two concurrent
+     * re-parentings cannot close a cycle between them, and a cycle through
+     * another tenant's role is seen.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return void
@@ -209,23 +217,27 @@ final class RoleObserver
      */
     private function assertNoHierarchyCycle(Role $role): void
     {
-        if ($role->exists && $role->parent_id === $role->getKey()) {
-            throw new RoleHierarchyCycleException(roleName: $role->name, proposedParentName: $role->name);
-        }
-
-        if (!$role->exists || !$role->isDirty('parent_id')) {
+        if (!$role->isDirty('parent_id')) {
             return;
         }
 
-        foreach ($role->descendants() as $descendant) {
-            if ($descendant->getKey() === $role->parent_id) {
-                /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $roleClass */
-                $roleClass      = config('authorization.models.role', Role::class);
-                $proposedParent = $roleClass::query()->find($role->parent_id);
-                $proposedName   = $proposedParent !== null ? $proposedParent->name : $role->parent_id;
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $roleClass */
+        $roleClass = config('authorization.models.role', Role::class);
+        $current   = $role->parent_id;
+        $parent    = null;
+        $visited   = [];
 
-                throw new RoleHierarchyCycleException(roleName: $role->name, proposedParentName: $proposedName);
+        while ($current !== null) {
+            if ($current === $role->getKey() || isset($visited[$current])) {
+                throw new RoleHierarchyCycleException(roleName: $role->name, proposedParentName: $parent ?? $role->name);
             }
+
+            $visited[$current] = true;
+
+            /** @var \SineMacula\Laravel\Authorization\Models\Role|null $ancestor */
+            $ancestor = $roleClass::query()->withoutGlobalScope(TenantScope::class)->whereKey($current)->lockForUpdate()->first();
+            $parent ??= $ancestor?->name;
+            $current = $ancestor?->parent_id;
         }
     }
 }

@@ -90,6 +90,24 @@ final class PermissionTest extends StringCastsTestCase
     }
 
     /**
+     * A name resolved without a guard is looked up under the configured default
+     * guard.
+     *
+     * @return void
+     */
+    public function testResolvingANameWithoutAGuardUsesTheDefaultGuard(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config->set('authorization.defaults.guard', 'api');
+
+        Permission::query()->create(['name' => 'posts:edit', 'guard' => 'web']);
+        $api = Permission::query()->create(['name' => 'posts:edit', 'guard' => 'api']);
+
+        self::assertSame($api->id, Permission::resolveByName('posts:edit')->id);
+    }
+
+    /**
      * Create an instance of the model under test.
      *
      * @return \Illuminate\Database\Eloquent\Model

@@ -7,12 +7,16 @@ namespace Tests\Feature;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use Psr\Log\AbstractLogger;
 use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
+use SineMacula\Laravel\Authorization\Events\Identity\PolicyAttached;
+use SineMacula\Laravel\Authorization\Events\Identity\PolicyDetached;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use Tests\Concerns\ChecksGrantExpiry;
 use Tests\Feature\Stubs\StubIdentity;
@@ -245,6 +249,56 @@ final class HasPoliciesTest extends TestCase
 
         self::assertSame(300, $user->secondsUntilPolicyExpiry());
         self::assertSame(600, $user->secondsUntilPolicyExpiry(true));
+    }
+
+    /**
+     * The write methods go through the grant service: attaching what is
+     * attached dispatches nothing, and each returns the identity.
+     *
+     * @return void
+     */
+    public function testWritesGoThroughTheGrantService(): void
+    {
+        Event::fake([PolicyAttached::class, PolicyDetached::class]);
+
+        $user    = $this->identity();
+        $policy  = $this->policy('readers');
+        $expires = Carbon::parse('2026-07-02 12:00:00', 'UTC');
+
+        self::assertSame($user, $user->attachPolicy($policy, $expires));
+        self::assertSame($user, $user->attachPolicy($policy, $expires));
+        self::assertSame('2026-07-02 12:00:00', DB::table('authorizable_policies')->value('expires_at'));
+        self::assertSame($user, $user->syncPolicies([$policy]));
+        Event::assertDispatchedTimes(PolicyAttached::class, 1);
+
+        self::assertSame($user, $user->detachPolicy($policy));
+        self::assertSame($user, $user->detachPolicy($policy));
+        self::assertSame(0, DB::table('authorizable_policies')->count());
+        Event::assertDispatchedTimes(PolicyDetached::class, 1);
+    }
+
+    /**
+     * A sync refuses anything that is not a saved policy, and writes nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASyncRefusesAnythingButAPolicy(): void
+    {
+        $user   = $this->identity();
+        $policy = $this->policy('readers');
+
+        $user->attachPolicy($policy);
+
+        try {
+            $user->syncPolicies([$user]); // @phpstan-ignore argument.type
+            self::fail('The identity was not refused.');
+        } catch (InvalidGrantTargetException $exception) {
+            self::assertSame('policy', $exception->getKind());
+        }
+
+        self::assertSame([$policy->id], DB::table('authorizable_policies')->pluck('policy_id')->all());
     }
 
     /**

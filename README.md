@@ -62,13 +62,18 @@ principal's role and permission grants, and anything left is denied.
   cleared unless `forceSystem()` unlocks the next change.
 - **Explanations**: `Authorization::explain()`, the last decision of the request, and `authorization:why-can` on the
   command line.
-- **Events** for every grant, revocation, expiry change and model change, for each decision, and when `authorize()`
-  refuses.
+- **Management services** that own every write of a role, permission, policy or grant: each call runs in one
+  transaction on the package's connection, through the configured models, and grants are idempotent under
+  concurrency. The traits, the grant and revoke commands and the Spatie import write through them; only
+  `authorization:sync` still writes the permission catalogue through the permission model, in its own transaction.
+- **Events** for every grant, revocation, expiry change and model change that changes something, for each decision,
+  and when `authorize()` refuses.
 - **Resolution cache** for role and permission lookups, in memory and optionally in a cache store.
 - **Swappable everything**: models, table names, the database connection, the subject resolver and the policy store.
 - **Spatie import**: `authorization:migrate-spatie` copies roles, permissions and grants from
-  `spatie/laravel-permission` (its `guard_name` becomes `guard`), reporting and skipping any role or permission whose
-  name the package refuses, and any permission whose name contains `*`, along with its grants.
+  `spatie/laravel-permission` through the management services (its `guard_name` becomes `guard`), reporting and
+  skipping any role or permission whose name the package refuses, and any permission whose name contains `*`, along
+  with its grants.
 
 ## Installation
 
@@ -233,6 +238,53 @@ $user->hasPermission('posts:update');  // true, through the role
 Gate::forUser($user)->allows('posts:update');
 ```
 
+### Managing roles, permissions and grants
+
+Every write goes through four services, which you inject or resolve from the container: `RoleService`,
+`PermissionService` and `PolicyService` for the records, and `GrantService` for what a grantee holds. Each call runs in
+one transaction on the package's connection (`authorization.connection`), through the models `authorization.models`
+configures, and takes the acting subject as an optional `actor` (null for console and system work):
+
+```php
+use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Services\RoleService;
+
+$roles  = app(RoleService::class);
+$grants = app(GrantService::class);
+
+$editor = $roles->create('editor', 'web', 'Edits posts', actor: $admin);
+$roles->grantPermission($editor, 'posts:update', actor: $admin);
+$roles->setParent($editor, 'author', actor: $admin);
+
+$grants->grantRole($user, $editor, now()->addMonth(), actor: $admin); // GrantOutcome::GRANTED
+$grants->syncPermissions($user, ['posts:delete'], actor: $admin);     // SyncResult
+$grants->revokeRole($user, 'editor', actor: $admin);                  // 1, the roles revoked
+```
+
+Grants are idempotent: granting what the grantee holds, with the same expiry, changes nothing, dispatches no event and
+returns `GrantOutcome::UNCHANGED`, and a concurrent duplicate never raises a unique-constraint violation. Re-granting a
+grant that has expired re-arms it with the new expiry (`REARMED`), and a new expiry on a live grant is reported as
+`EXPIRY_CHANGED`. A sync re-arms a listed grant that has expired with the sync's expiry, or with none when it is given
+none, and leaves a live one as it is. The trait sync methods take no expiry, so a lapsed temporary grant they list comes
+back permanent; to re-arm it for a limited time, call `GrantService::syncRoles()` (or `syncPermissions()`,
+`syncPolicies()`) with an expiry. Setting a role's parent locks the roles involved and refuses a cycle, a cycle through
+another tenant's role included. A target of the wrong kind, such as a role in a policy sync, is refused with
+`InvalidGrantTargetException`; a grantee that is not a saved model with a key with `InvalidGranteeException`; and an
+unsaved role, permission or policy handed to its service, which would otherwise be created or clear a parent, with
+`UnsavedRecordException`.
+
+`authorization:sync` is the one writer that does not go through the services yet: it writes the permission catalogue
+through the permission model, in its own transaction on the package's connection, and will move onto
+`PermissionService` later.
+
+The services write platform-wide grants, for every application, only. The grant tables carry tenant and application
+columns, but nothing reads them yet, so the services take no tenant or application argument.
+
+The trait methods (`assignRole()`, `givePermission()`, `attachPolicy()`, `$role->givePermission()` and the others)
+still work and go through the same services, with no actor. A raw relation write such as
+`$role->permissions()->attach()` bypasses them: it dispatches no event and leaves the resolution cache stale, so it is
+unsupported for any change that must be audited.
+
 Attach a policy to refine what the grants allow. An explicit deny wins over any role:
 
 ```php
@@ -356,8 +408,10 @@ php artisan authorization:why-can user:1 posts:delete posts/42
 ```
 
 The listing commands are administrative views: they list every role or permission, platform-wide and tenant-owned
-alike, and show each one's owner. `grant` and `revoke` look the role up within the tenant scope, so without a resolved
-tenant they find platform-wide roles only.
+alike, and show each one's owner. `grant` and `revoke` write through the grant service and look the role up within the
+tenant scope, so without a resolved tenant they find platform-wide roles only. A role the identity already holds with
+no expiry, or does not hold, is reported as such and nothing is written. `grant` gives no expiry, so a role the
+identity holds on a temporary or expired grant is made permanent and reported as granted.
 
 ### Testing assertions
 
@@ -381,6 +435,7 @@ The contracts behind the evaluator, for maintainers and reviewers, are in [docs/
 | [Impersonation](docs/design/impersonation.md)                                               | Checking as another principal                               |
 | [Spatie compatibility](docs/design/spatie-compatibility.md)                                 | The import from `spatie/laravel-permission` and its aliases |
 | [Permission catalogue sync](docs/design/permission-catalogue-sync.md)                       | Declaring permissions in code and `authorization:sync`      |
+| [Management services](docs/design/management-services.md)                                   | The services every role, permission and grant write uses    |
 
 ## Requirements
 

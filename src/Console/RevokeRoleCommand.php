@@ -6,13 +6,15 @@ namespace SineMacula\Laravel\Authorization\Console;
 
 use Illuminate\Console\Command;
 use SineMacula\Laravel\Authorization\Console\Concerns\ResolvesIdentity;
+use SineMacula\Laravel\Authorization\Services\GrantService;
 
 /**
  * Revoke a role from an authorizable identity.
  *
  * Accepts the identity as `{morphType}:{key}` (e.g. `user:123`) and the role by
  * name. Resolves the morph alias via the Eloquent morph map, validates the
- * `AuthorizableIdentity` contract, and delegates to `revokeRole()`.
+ * `AuthorizableIdentity` contract, and revokes the role through the grant
+ * service. A role the identity does not hold is reported as not held.
  *
  * The role name is revoked from the roles the identity holds within the tenant
  * scope, like any other query: every held role of that name is revoked, the
@@ -40,9 +42,10 @@ final class RevokeRoleCommand extends Command
     /**
      * Execute the console command.
      *
+     * @param  \SineMacula\Laravel\Authorization\Services\GrantService  $grants
      * @return int
      */
-    public function handle(): int
+    public function handle(GrantService $grants): int
     {
         /** @var string $identityArg */
         $identityArg = $this->argument('identity');
@@ -57,14 +60,14 @@ final class RevokeRoleCommand extends Command
         }
 
         try {
-            $model->revokeRole($roleName);
-        } catch (\Throwable $e) { // @phpstan-ignore catch.neverThrown
+            $revoked = $grants->revokeRole($model, $roleName);
+        } catch (\Throwable $e) {
             $this->error($e->getMessage());
 
             return self::FAILURE;
         }
 
-        $this->info("Role '{$roleName}' revoked from {$identityArg}.");
+        $this->info($revoked > 0 ? "Role '{$roleName}' revoked from {$identityArg}." : "{$identityArg} does not hold role '{$roleName}'.");
 
         return self::SUCCESS;
     }

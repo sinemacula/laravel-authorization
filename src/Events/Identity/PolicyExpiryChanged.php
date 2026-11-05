@@ -8,16 +8,15 @@ use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
 use SineMacula\Laravel\Authorization\Models\Policy;
 
 /**
- * Dispatched when an existing policy attachment's expiry is mutated by a
- * re-call to `attachPolicy()`.
+ * Dispatched when an attachment or sync rewrites the expiry of a policy
+ * attached to the identity.
  *
- * `attachPolicy()` writes through `syncWithoutDetaching` and so silently
- * overwrites the prior pivot row's `expires_at`. Without a distinct signal a
- * consumer who re-attaches an existing forever policy with an expiry would
- * shorten it (or extend an expiring attachment to forever) without an audit
- * trail. This event fires alongside `IdentityPolicyAttached` whenever the prior
- * pivot's `expires_at` differs from the supplied value, so audit consumers can
- * render the expiry mutation as its own row.
+ * The grant service dispatches it alongside `PolicyAttached` when an attachment
+ * changes a live policy's expiry, or when an attachment or sync re-arms a
+ * policy whose attachment has expired, so audit consumers can render the expiry
+ * change as its own row. Without it, attaching again a forever policy with an
+ * expiry would shorten it (or extend an expiring attachment to forever) without
+ * an audit trail.
  *
  * Part of the SemVer-stable event API; breaking changes require a major version
  * bump.

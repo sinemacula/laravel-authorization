@@ -7,13 +7,8 @@ namespace SineMacula\Laravel\Authorization\Concerns;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCacheContext;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged as IdentityPermissionExpiryChanged;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted as IdentityPermissionGranted;
-use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked as IdentityPermissionRevoked;
-use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePermissionPivot;
 
@@ -90,49 +85,31 @@ trait HasPermissions // @phpstan-ignore trait.unused
     }
 
     /**
-     * Grant the given permission directly to this identity.
+     * Grant the given permission directly to this identity, through the grant
+     * service.
      *
      * An optional `$expiresAt` makes the grant temporal — the attachment is
      * filtered out of `$user->permissions` the moment the clock passes the
      * supplied instant, without requiring a sweeper run. Passing null (the
-     * default) creates a forever grant.
+     * default) creates a forever grant. Granting a permission the identity
+     * holds with the same expiry changes nothing and dispatches no event; a
+     * permission whose grant has expired is re-armed with the new expiry.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @param  \DateTimeInterface|null  $expiresAt
      * @return static
      *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
+     * @throws \Throwable
      */
     public function givePermission(Permission|string $permission, ?\DateTimeInterface $expiresAt = null): static
     {
-        $model = $this->resolvePermission($permission);
-
-        $prior = self::authorizationReadGrantPivot($this, $this->permissions()->newPivotStatement(), 'permission_id', (string) $model->getKey());
-
-        $this->permissions()->syncWithoutDetaching([
-            (string) $model->getKey() => ['expires_at' => $expiresAt],
-        ]);
-
-        if (isset($this->relations['permissions'])) {
-            unset($this->relations['permissions']);
-        }
-
-        Event::dispatch(new IdentityPermissionGranted($this, $model));
-
-        if ($prior['exists'] && !self::areAuthorizationGrantExpiriesEqual($prior['expires_at'], $expiresAt)) {
-            Event::dispatch(new IdentityPermissionExpiryChanged(
-                $this,
-                $model,
-                $prior['expires_at'],
-                $expiresAt,
-            ));
-        }
+        self::authorizationGrants()->grantPermission($this, $permission, $expiresAt);
 
         return $this;
     }
 
     /**
-     * Revoke a directly granted permission.
+     * Revoke a directly granted permission, through the grant service.
      *
      * A name is revoked from the grants the identity holds, not from the one
      * row a lookup would pick: every held permission of that name for the
@@ -145,34 +122,27 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return static
      *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
+     * @throws \Throwable
      */
     public function revokePermission(Permission|string $permission): static
     {
-        $held = $this->heldPermissions($permission instanceof Permission ? [$permission] : $this->permissionsNamed($permission));
-
-        $this->permissions()->detach(\array_map(static fn (Permission $model): mixed => $model->getKey(), $held));
-
-        if (isset($this->relations['permissions'])) {
-            unset($this->relations['permissions']);
-        }
-
-        foreach ($held as $model) {
-            Event::dispatch(new IdentityPermissionRevoked($this, $model));
-        }
+        self::authorizationGrants()->revokePermission($this, $permission);
 
         return $this;
     }
 
     /**
-     * Replace this identity's direct permissions with the supplied set.
+     * Replace this identity's direct permissions with the supplied set, through
+     * the grant service.
      *
      * Each net attachment fires `IdentityPermissionGranted` and each net
      * detachment fires `IdentityPermissionRevoked`, so audit consumers receive
      * the same per-row signal they would for `givePermission()` /
      * `revokePermission()` calls and the cache invalidation listener wired to
      * those events keeps the resolution cache coherent without a separate
-     * forget call in this method.
+     * forget call in this method. A listed permission whose grant has expired
+     * is re-armed with no expiry; to re-arm it for a limited time, call
+     * `GrantService::syncPermissions()` with an expiry.
      *
      * A name keeps every held permission of that name, whether the current
      * tenant or the platform owns it, and only when the identity holds none is
@@ -182,32 +152,11 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Permission|string>  $permissions
      * @return static
      *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
+     * @throws \Throwable
      */
     public function syncPermissions(array $permissions): static
     {
-        $resolved = [];
-
-        foreach ($permissions as $permission) {
-            foreach ($this->permissionsToKeep($permission) as $model) {
-                $resolved[(string) $model->getKey()] = $model;
-            }
-        }
-
-        $ids    = \array_keys($resolved);
-        $result = $this->permissions()->sync($ids);
-
-        if (isset($this->relations['permissions'])) {
-            unset($this->relations['permissions']);
-        }
-
-        foreach ($result['attached'] as $id) {
-            Event::dispatch(new IdentityPermissionGranted($this, $resolved[(string) $id] ?? $this->resolvePermissionById((string) $id)));
-        }
-
-        foreach ($result['detached'] as $id) {
-            Event::dispatch(new IdentityPermissionRevoked($this, $this->resolvePermissionById((string) $id)));
-        }
+        self::authorizationGrants()->syncPermissions($this, $permissions);
 
         return $this;
     }
@@ -328,116 +277,6 @@ trait HasPermissions // @phpstan-ignore trait.unused
     public function getPermissionNames(): array
     {
         return $this->getPermissions();
-    }
-
-    /**
-     * Resolve a permission identifier to a model instance.
-     *
-     * Honours `$this->getAuthorizationGuard()` when the identity model declares
-     * it — a user authenticated under a non-default guard routes its lookups
-     * against its own guard's rows instead of the package default. Delegates
-     * the actual query to `Permission::resolveByName()` so both identity-side
-     * and role-side lookups share one implementation.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
-     * @return \SineMacula\Laravel\Authorization\Models\Permission
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
-     */
-    protected function resolvePermission(Permission|string $permission): Permission
-    {
-        if ($permission instanceof Permission) {
-            return $permission;
-        }
-
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
-        $class = config('authorization.models.permission', Permission::class);
-
-        return $class::resolveByName($permission, self::authorizationResolveGuard($this));
-    }
-
-    /**
-     * Return every permission that answers the name under this identity's
-     * guard, the one the lookup would pick first.
-     *
-     * @param  string  $name
-     * @return non-empty-list<\SineMacula\Laravel\Authorization\Models\Permission>
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
-     */
-    private function permissionsNamed(string $name): array
-    {
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
-        $class = config('authorization.models.permission', Permission::class);
-
-        /** @var list<\SineMacula\Laravel\Authorization\Models\Permission> $permissions */
-        $permissions = self::authorizationAllNamed($this, $class, $name);
-
-        if ($permissions === []) {
-            throw new UnknownPermissionException($name);
-        }
-
-        return $permissions;
-    }
-
-    /**
-     * Return the permissions among the given ones this identity holds directly,
-     * whether or not the grant has expired.
-     *
-     * @param  list<\SineMacula\Laravel\Authorization\Models\Permission>  $permissions
-     * @return list<\SineMacula\Laravel\Authorization\Models\Permission>
-     */
-    private function heldPermissions(array $permissions): array
-    {
-        /** @var list<\SineMacula\Laravel\Authorization\Models\Permission> */
-        return self::authorizationHeldAmong($this->permissions()->newPivotQuery(), 'permission_id', $permissions);
-    }
-
-    /**
-     * Return the permissions a sync keeps for one entry: a model as given; for
-     * a name, every held permission of that name, else the one the lookup ranks
-     * first.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
-     * @return list<\SineMacula\Laravel\Authorization\Models\Permission>
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
-     */
-    private function permissionsToKeep(Permission|string $permission): array
-    {
-        if ($permission instanceof Permission) {
-            return [$permission];
-        }
-
-        $named = $this->permissionsNamed($permission);
-        $held  = $this->heldPermissions($named);
-
-        return $held !== [] ? $held : [$named[0]];
-    }
-
-    /**
-     * Resolve a permission model by primary key, used by `syncPermissions()`
-     * when the sync delta surfaces an ID that was not part of the caller's
-     * input set (the detachment list).
-     *
-     * @param  string  $id
-     * @return \SineMacula\Laravel\Authorization\Models\Permission
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException
-     */
-    private function resolvePermissionById(string $id): Permission
-    {
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Permission> $class */
-        $class = config('authorization.models.permission', Permission::class);
-
-        /** @var \SineMacula\Laravel\Authorization\Models\Permission|null $model */
-        $model = $class::query()->whereKey($id)->first();
-
-        if ($model === null) {
-            throw new UnknownPermissionException($id);
-        }
-
-        return $model;
     }
 
     /**
