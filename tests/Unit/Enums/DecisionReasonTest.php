@@ -35,13 +35,13 @@ final class DecisionReasonTest extends TestCase
 
     /**
      * The case count matches the four-step evaluation model plus the
-     * invalid-policy denial.
+     * invalid-policy and inactive-subject denials.
      *
      * @return void
      */
-    public function testExactlyFiveCases(): void
+    public function testExactlySixCases(): void
     {
-        self::assertCount(5, DecisionReason::cases());
+        self::assertCount(6, DecisionReason::cases());
     }
 
     /**
@@ -66,6 +66,7 @@ final class DecisionReasonTest extends TestCase
         self::assertSame('implicit deny (no statement matched)', DecisionReason::IMPLICIT_DENY->label());
         self::assertSame('RBAC grant (direct permission or role-inherited)', DecisionReason::RBAC_ALLOW->label());
         self::assertSame('invalid policy (a policy could not be evaluated)', DecisionReason::INVALID_POLICY->label());
+        self::assertSame('subject inactive (the subject or its identity is inactive)', DecisionReason::SUBJECT_INACTIVE->label());
     }
 
     /**
@@ -92,6 +93,7 @@ final class DecisionReasonTest extends TestCase
         self::assertSame(DecisionReason::IMPLICIT_DENY, DecisionReason::tryFrom('implicit_deny'));
         self::assertSame(DecisionReason::RBAC_ALLOW, DecisionReason::tryFrom('rbac_allow'));
         self::assertSame(DecisionReason::INVALID_POLICY, DecisionReason::tryFrom('invalid_policy'));
+        self::assertSame(DecisionReason::SUBJECT_INACTIVE, DecisionReason::tryFrom('subject_inactive'));
     }
 
     /**

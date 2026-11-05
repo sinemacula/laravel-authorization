@@ -608,8 +608,8 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * A translator without the package's line answers with the key itself;
-     * the denial keeps the English message rather than showing the key.
+     * A translator without the package's line answers with the key itself; the
+     * denial keeps the English message rather than showing the key.
      *
      * @return void
      */
@@ -853,6 +853,9 @@ final class AuthorizationManagerTest extends TestCase
 
         $principal->shouldReceive('getPolicies')
             ->andReturn($policies);
+
+        $principal->shouldReceive('isAuthorizationActive')
+            ->andReturnTrue();
 
         return $principal;
     }

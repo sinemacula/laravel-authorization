@@ -26,6 +26,22 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
 final class EvaluationResultTest extends TestCase
 {
     /**
+     * An inactive subject is denied with the `subject_inactive` reason, no
+     * statement and no trace.
+     *
+     * @return void
+     */
+    public function testSubjectInactiveDenies(): void
+    {
+        $result = EvaluationResult::subjectInactive();
+
+        self::assertFalse($result->allowed);
+        self::assertSame(DecisionReason::SUBJECT_INACTIVE, $result->reason);
+        self::assertNull($result->matchedStatement);
+        self::assertSame([], $result->trace);
+    }
+
+    /**
      * allowed() returns an explicit-allow result with the supplied statement.
      *
      * @return void

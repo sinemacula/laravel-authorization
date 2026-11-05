@@ -161,6 +161,21 @@ class User extends Authenticatable implements AuthorizableIdentity
 }
 ```
 
+Keys may be integers, UUIDs or ULIDs. Deleting the model removes its grants; a model that soft-deletes keeps them until
+it is force-deleted, so restoring it restores its access. To deny a suspended user everything, override
+`isAuthorizationActive()`:
+
+```php
+public function isAuthorizationActive(): bool
+{
+    return $this->suspended_at === null;
+}
+```
+
+A check about an inactive subject is denied with the `subject_inactive` reason before anything else is read. When the
+subject resolver returns a subject with a separate identity (an account belonging to a person, say), a check counts the
+grants and policies of both, and is denied if either is inactive.
+
 Define permissions as a string-backed enum. Each case's value is the permission name:
 
 ```php

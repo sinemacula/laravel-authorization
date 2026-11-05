@@ -8,14 +8,19 @@ use Illuminate\Auth\AuthenticationException;
 use Illuminate\Http\Response;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\TestWith;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
 use SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Subject;
 use Tests\Concerns\ChecksAccess;
+use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\Feature\Stubs\StubTenant;
+use Tests\Feature\Stubs\SuspendableIdentity;
 use Tests\TestCase;
 
 /**
@@ -34,6 +39,27 @@ use Tests\TestCase;
 final class RequireRoleTest extends TestCase
 {
     use ChecksAccess;
+
+    /**
+     * A role the subject's identity holds admits the request; a subject or
+     * identity that is inactive is denied as `subject_inactive`.
+     *
+     * @return void
+     */
+    public function testTheIdentitysRolesCountUnlessInactive(): void
+    {
+        $principal = SuspendableIdentity::create(['id' => 'account-1']);
+        $identity  = StubSecondIdentity::create(['id' => 'person-1']);
+
+        $identity->assignRole(Role::create(['name' => 'staff']));
+        $this->app?->instance(SubjectResolver::class, new FixedSubjectResolver(new Subject($principal, $identity)));
+
+        self::assertSame(200, $this->handle('staff')->getStatusCode());
+
+        $principal->suspended = true;
+
+        self::assertSame(DecisionReason::SUBJECT_INACTIVE, self::denialOf(fn (): Response => $this->handle('staff'))->getReason());
+    }
 
     /**
      * A held role admits the request.

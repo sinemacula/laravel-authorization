@@ -115,6 +115,19 @@ final readonly class EvaluationResult
     }
 
     /**
+     * Build a denial for a subject that is inactive, or whose identity is.
+     *
+     * @return self
+     */
+    public static function subjectInactive(): self
+    {
+        return new self(
+            allowed: false,
+            reason: DecisionReason::SUBJECT_INACTIVE,
+        );
+    }
+
+    /**
      * Build a result produced by an RBAC lookup.
      *
      * @param  list<EvaluationTraceEntry>  $trace

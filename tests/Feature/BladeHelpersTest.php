@@ -7,14 +7,19 @@ namespace Tests\Feature;
 use Illuminate\Container\Container;
 use Illuminate\Support\Facades\Gate;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\BladeHelpers;
 use Tests\Concerns\ChecksAccess;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
+use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\RolesOnlyPrincipal;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\SuspendableIdentity;
 use Tests\TestCase;
 
 /**
@@ -34,6 +39,31 @@ use Tests\TestCase;
 final class BladeHelpersTest extends TestCase
 {
     use ChecksAccess;
+
+    /**
+     * The role helpers count the roles the subject's identity holds, and none
+     * while the subject is inactive.
+     *
+     * @return void
+     */
+    public function testTheRoleHelpersCountTheIdentityUnlessInactive(): void
+    {
+        $principal = SuspendableIdentity::create(['id' => 'account-1']);
+        $identity  = StubSecondIdentity::create(['id' => 'person-1']);
+
+        $principal->assignRole(Role::create(['name' => 'editor']));
+        $identity->assignRole(Role::create(['name' => 'staff']));
+        $this->app?->instance(SubjectResolver::class, new FixedSubjectResolver(new Subject($principal, $identity)));
+
+        self::assertTrue(BladeHelpers::hasRole('staff'));
+        self::assertTrue(BladeHelpers::hasAllRoles(['editor', 'staff']));
+        self::assertFalse(BladeHelpers::hasAllRoles(['editor', 'owner']));
+
+        $principal->suspended = true;
+
+        self::assertFalse(BladeHelpers::hasRole('staff'));
+        self::assertFalse(BladeHelpers::hasAllRoles(['editor', 'staff']));
+    }
 
     /**
      * With no user signed in there is no subject, and every helper is false.

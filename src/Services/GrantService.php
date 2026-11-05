@@ -43,8 +43,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * dispatched once the write commits, on the package's connection, and only for
  * a write that changed something; a write that rolls back, alone or with an
  * enclosing transaction, dispatches nothing. A changed expiry dispatches the
- * granted event as well as the expiry-changed one, so the resolution cache
- * listening for the former is cleared.
+ * granted event as well as the expiry-changed one.
  *
  * Each method takes the actor making the call as `$actor`, a model or a
  * reference: null for console and system work. Every event the call dispatches
@@ -225,6 +224,52 @@ final class GrantService
     public function syncPolicies(Model|Reference $grantee, array $policies, ?\DateTimeInterface $expiresAt = null, Model|Reference|null $actor = null): SyncResult
     {
         return $this->sync(GrantTarget::POLICY, $grantee, $policies, $expiresAt, $actor);
+    }
+
+    /**
+     * Revoke every role, permission and policy the grantee holds, in one
+     * transaction and as one operation, dispatching a revoked or detached event
+     * for each. The `HasAuthorization` trait calls this once a grantee is
+     * deleted.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
+     * @return int
+     *
+     * @throws \Throwable
+     */
+    public function revokeAll(Model|Reference $grantee, Model|Reference|null $actor = null): int
+    {
+        $reference = self::grantee($grantee);
+        $operation = Operation::begin($actor);
+
+        $revoked = OperationScope::run($operation, static function (Operation $operation) use ($reference): int {
+            $count  = 0;
+            $events = [];
+
+            foreach (GrantTarget::cases() as $kind) {
+                $table = self::table($kind, $reference, $operation);
+                $held  = $table->held();
+
+                $table->revoke($held);
+
+                foreach ($kind->find($held) as $model) {
+                    $events[] = $kind->revokedEvent($operation, $reference, $model);
+                }
+
+                $count += \count($held);
+            }
+
+            OperationScope::dispatch(...$events);
+
+            return $count;
+        });
+
+        foreach (GrantTarget::cases() as $kind) {
+            self::forgetRelation($kind, $grantee);
+        }
+
+        return $revoked;
     }
 
     /**
