@@ -9,13 +9,20 @@ explains the extension path and walks through a concrete example: adding soft de
 
 1. **Every model reference is config-resolved.** The package never hard-codes `new Role` or `Role::query()` in
    production code. All instantiation and query paths read `config('authorization.models.role')` (and the equivalent for
-   `permission` and `policy`) so a consumer-registered subclass is used transparently.
+   `permission` and `policy`) so a consumer-registered subclass is used transparently. This covers the relations as well
+   as the lookups: `parent()`, `children()`, `Role::permissions()`, `Permission::roles()` and the observer's hierarchy
+   cycle check all use the configured class. Both sides of the role-permission relation use the `RolePermission` pivot,
+   so guard parity is enforced whichever side a permission is attached from.
 
-2. **Subclasses inherit all package behaviour.** Extending the shipped model and calling `parent::booted()` (or letting
+2. **The configured class is validated at boot.** Each `authorization.models.*` entry must name an existing class that is
+   the shipped model or a subclass of it. Anything else -- a class that does not exist, an unrelated model, an empty
+   value -- raises `InvalidAuthorizationConfigException` naming the offending key when the application boots.
+
+3. **Subclasses inherit all package behaviour.** Extending the shipped model and calling `parent::booted()` (or letting
    Laravel's trait-boot convention handle it) preserves lifecycle events, system protection, name validation, and the
    guard-precedence query.
 
-3. **Schema changes are the consumer's responsibility.** The package ships migrations for its own columns. A subclass
+4. **Schema changes are the consumer's responsibility.** The package ships migrations for its own columns. A subclass
    that adds columns (e.g. `deleted_at`, `tenant_id`, `rank`) must ship its own migration -- either in the application's
    migration directory or via a separate package that depends on this one.
 

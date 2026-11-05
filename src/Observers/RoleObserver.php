@@ -169,7 +169,9 @@ final class RoleObserver
 
         foreach ($role->descendants() as $descendant) {
             if ($descendant->getKey() === $role->parent_id) {
-                $proposedParent = Role::query()->find($role->parent_id);
+                /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $roleClass */
+                $roleClass      = config('authorization.models.role', Role::class);
+                $proposedParent = $roleClass::query()->find($role->parent_id);
                 $proposedName   = $proposedParent !== null ? $proposedParent->name : $role->parent_id;
 
                 throw new RoleHierarchyCycleException(roleName: $role->name, proposedParentName: $proposedName);
