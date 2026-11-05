@@ -145,8 +145,9 @@ trait AuthorizationAssertions
     /**
      * Swap the subject resolver for the duration of the test so that every
      * check without a named subject is about the supplied subject, in its
-     * tenant and application. A user Laravel's Gate hands over is decided about
-     * in that same tenant and application.
+     * tenant and application. When Laravel's Gate hands over the subject's
+     * principal or identity, it decides about the subject, as the facade does;
+     * any other user is decided about in that same tenant and application.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @return void
@@ -173,12 +174,20 @@ trait AuthorizationAssertions
             }
 
             /**
+             * Return the acting subject for its own principal or identity,
+             * since the Gate hands over the signed-in identity, and any other
+             * user as a subject of its own in the same request.
+             *
              * @param  object  $user
              * @return \SineMacula\Laravel\Authorization\Subject
              */
             #[\Override]
             public function forUser(object $user): Subject
             {
+                if ($user === $this->subject->identity) {
+                    return $this->subject;
+                }
+
                 return $this->subject->withSubject($user);
             }
         };

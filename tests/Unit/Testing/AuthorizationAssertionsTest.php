@@ -4,16 +4,20 @@ declare(strict_types = 1);
 
 namespace Tests\Unit\Testing;
 
+use Illuminate\Support\Facades\Gate;
 use PHPUnit\Framework\AssertionFailedError;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Testing\Concerns\AuthorizationAssertions;
+use Tests\Feature\Stubs\AuthenticatableIdentity;
+use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
@@ -230,6 +234,36 @@ final class AuthorizationAssertionsTest extends TestCase
         self::assertSame($other, $translated->subject);
         self::assertSame($tenant, $translated->tenant);
         self::assertSame('admin', $translated->application);
+    }
+
+    /**
+     * When the Gate hands over the identity signed in behind the acting
+     * subject, it decides about the subject's principal, as the facade does,
+     * not about the identity.
+     *
+     * @return void
+     */
+    public function testTheGateDecidesAboutThePrincipalOfTheSignedInIdentity(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make('config');
+        $config->set('authorization.permission_enums', [PermissionEnum::class]);
+
+        (new AuthorizationServiceProvider($this->app))->boot(); // @phpstan-ignore argument.type
+
+        Permission::create(['name' => 'posts:create', 'guard' => 'web']);
+
+        $principal = StubIdentity::create(['id' => '3a8f1c2e-5b7d-4e9a-8c6f-2d1b0a9e8f7c']);
+        $identity  = AuthenticatableIdentity::create(['id' => '7e2d4c6b-9a1f-4b3e-8d5c-1f0e9a8b7c6d']);
+        $subject   = new Subject($principal, $identity, null, 'admin', 'web');
+
+        $principal->givePermission('posts:create');
+
+        $this->actingAsSubject($subject);
+
+        self::assertSame($subject, Authorization::forUser($identity)->currentSubject());
+        self::assertTrue(Gate::forUser($identity)->allows('posts:create'));
+        self::assertFalse($identity->hasPermission('posts:create'));
     }
 
     /**

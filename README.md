@@ -302,7 +302,9 @@ tenant they find platform-wide roles only.
 
 In your tests, `SineMacula\Laravel\Authorization\Testing\Concerns\AuthorizationAssertions` adds `assertCan()`,
 `assertCannot()`, `assertHasRole()` and `assertHasPermission()`, and `actingAsIdentity($user, $tenant)` and
-`actingAsSubject($subject)`, which make every check without a named subject about that subject, in its tenant.
+`actingAsSubject($subject)`, which make every check without a named subject about that subject, in its tenant. When
+the Gate hands over the subject's principal or identity (for example after `actingAs($identity)`), `@can`, `can:` and
+`Gate::allows()` decide about the same subject.
 
 ### Design notes
 
