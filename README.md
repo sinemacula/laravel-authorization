@@ -66,8 +66,10 @@ principal's role and permission grants, and anything left is denied.
   transaction on the package's connection, through the configured models, and grants are idempotent under
   concurrency. The traits, the grant and revoke commands and the Spatie import write through them; only
   `authorization:sync` still writes the permission catalogue through the permission model, in its own transaction.
-- **Events** for every grant, revocation, expiry change and model change that changes something, for each decision,
-  and when `authorize()` refuses.
+- **Events** for every grant, revocation, expiry change and model change that changes something, for each use of the
+  system override, for each decision, and when `authorize()` refuses. All implement one marker interface; the change
+  events are snapshots of plain values that carry the actor the caller named, and are dispatched only once the write
+  commits.
 - **Resolution cache** for role and permission lookups, in memory and optionally in a cache store.
 - **Swappable everything**: models, table names, the database connection, the subject resolver and the policy store.
 - **Spatie import**: `authorization:migrate-spatie` copies roles, permissions and grants from
@@ -243,7 +245,9 @@ Gate::forUser($user)->allows('posts:update');
 Every write goes through four services, which you inject or resolve from the container: `RoleService`,
 `PermissionService` and `PolicyService` for the records, and `GrantService` for what a grantee holds. Each call runs in
 one transaction on the package's connection (`authorization.connection`), through the models `authorization.models`
-configures, and takes the acting subject as an optional `actor` (null for console and system work):
+configures, and takes the actor making the call as an optional `actor`, a model or a reference (null for console and
+system work). Every event the call dispatches carries it, and every grant row it writes records it in
+`granted_by_type` and `granted_by_id`; it is never read from the signed-in user:
 
 ```php
 use SineMacula\Laravel\Authorization\Services\GrantService;
@@ -274,7 +278,7 @@ unsaved role, permission or policy handed to its service, which would otherwise 
 `UnsavedRecordException`.
 
 `authorization:sync` is the one writer that does not go through the services yet: it writes the permission catalogue
-through the permission model, in its own transaction on the package's connection, and will move onto
+through the permission model, in one transaction on the package's connection and as one operation, and will move onto
 `PermissionService` later.
 
 The services write platform-wide grants, for every application, only. The grant tables carry tenant and application
@@ -324,6 +328,46 @@ locale, publish the language files:
 ```bash
 php artisan vendor:publish --tag=authorization-lang
 ```
+
+### Listening to events
+
+Every event the package dispatches implements `SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent`, so one
+listener, or one audit mapper registration, covers them all. The grant events also implement `IdentityEvent` and name
+their `grantee`:
+
+```php
+use Illuminate\Support\Facades\Event;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
+use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
+
+Event::listen(static function (AuthorizationEvent $event): void {
+    // Every role, permission, policy and grant change, every override and every decision.
+});
+
+Event::listen(static function (RoleDeleted $event): void {
+    $event->role;               // Reference: the role's morph type and key
+    $event->grantees;           // a Reference to every grantee that held it
+    $event->operation->actor;   // the actor the caller passed, or null
+    $event->operation->id;      // the same for every event of the call
+});
+```
+
+The change events (roles, permissions and policies created, updated and deleted; permissions granted to and revoked
+from a role; roles, permissions and policies granted to, revoked from and re-dated on a grantee; and
+`SystemOverrideUsed`) are `final readonly` snapshots of plain values: a record is a `Reference`, its morph class under
+your morph map and its key as a string, never a model, alongside names, the scope, expiries and times. An update
+carries the fields it changed, before and after. A policy event carries its document's version and SHA-256 digest,
+never the document. A delete lists every grantee that held the role, permission or policy, so the evidence says who
+lost access.
+
+Each is dispatched only once its write commits on the package's connection: inside your own transaction it waits for
+the outermost commit, and a transaction that rolls back dispatches nothing. Every event of one service call carries
+the same operation id and the call's actor; a write made through a model outside the services is an operation of its
+own with no actor. A change `forceSystem()` unlocked dispatches `SystemOverrideUsed`, naming the record, the change and
+the actor.
+
+`DecisionEvaluated` and `AuthorizationFailed` implement the marker too, but are dispatched when the decision is made,
+not after a commit, and still carry the principal, the context and the result as they were evaluated.
 
 ### Middleware and Blade
 
@@ -401,6 +445,7 @@ From the command line, naming an identity as `{morph type}:{key}`, where the typ
 
 ```bash
 php artisan authorization:grant user:1 editor
+php artisan authorization:grant user:1 editor --actor=user:7
 php artisan authorization:revoke user:1 editor
 php artisan authorization:list-roles
 php artisan authorization:list-permissions
@@ -411,7 +456,9 @@ The listing commands are administrative views: they list every role or permissio
 alike, and show each one's owner. `grant` and `revoke` write through the grant service and look the role up within the
 tenant scope, so without a resolved tenant they find platform-wide roles only. A role the identity already holds with
 no expiry, or does not hold, is reported as such and nothing is written. `grant` gives no expiry, so a role the
-identity holds on a temporary or expired grant is made permanent and reported as granted.
+identity holds on a temporary or expired grant is made permanent and reported as granted. `grant`, `revoke` and
+`authorization:sync` take `--actor={morph type}:{key}` to name who made the change, which their events carry and the
+grant rows record; it must name a row that exists, and without it they record no actor.
 
 ### Testing assertions
 
@@ -436,6 +483,7 @@ The contracts behind the evaluator, for maintainers and reviewers, are in [docs/
 | [Spatie compatibility](docs/design/spatie-compatibility.md)                                 | The import from `spatie/laravel-permission` and its aliases |
 | [Permission catalogue sync](docs/design/permission-catalogue-sync.md)                       | Declaring permissions in code and `authorization:sync`      |
 | [Management services](docs/design/management-services.md)                                   | The services every role, permission and grant write uses    |
+| [Events](docs/design/events.md)                                                             | The marker, the snapshots, the actor and after-commit       |
 
 ## Requirements
 

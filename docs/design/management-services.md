@@ -15,8 +15,10 @@ model in its own transaction on the package's connection; it moves onto `Permiss
 - `GrantService`: grant, revoke and sync roles, permissions and policies to a grantee, with an optional expiry.
 
 Each is a final class bound as a singleton (it holds no state), resolved from the container or injected. Every public
-method takes the acting subject as an optional `$actor`: null for console and system work. The events do not carry it
-yet.
+method takes the actor making the call as an optional `$actor`, a model or a `Support\Reference`: null for console and
+system work. Every event the call dispatches carries it, and every grant row it writes records it in
+`granted_by_type` and `granted_by_id`. It is never read from the authenticated user or the subject resolver. The
+events themselves are described in [Events](events.md).
 
 ## Invariants
 
@@ -48,11 +50,13 @@ yet.
    platform-wide row as held, so a scoped row written by hand is never taken for it. A revocation removes the
    grantee's rows for the target in every scope, since each of them counts platform-wide today.
 
-6. **Nothing reported for a no-op.** The existing events are dispatched once the call's transaction has returned, and
-   only for a write that changed something: granting what is held, revoking what is not held and a sync that changes
-   nothing dispatch nothing. A re-armed grant or a changed expiry dispatches the granted event as well as the
-   expiry-changed one, so the resolution cache, which listens for the former, is cleared. Record writes go through the
-   models, so their observers report them as before.
+6. **Reported once it commits, and nothing for a no-op.** Each call is one operation: every event it dispatches
+   carries the same operation id and the caller's actor, and is dispatched once the write commits on the package's
+   connection, at the outermost commit when the call runs inside an application transaction, and never when that
+   transaction rolls back. Only a write that changed something is reported: granting what is held, revoking what is
+   not held and a sync that changes nothing dispatch nothing. A re-armed grant or a changed expiry dispatches the
+   granted event as well as the expiry-changed one, so the resolution cache, which listens for the former, is
+   cleared. Record writes go through the models, so their observers report them, as part of the call's operation.
 
 7. **The hierarchy is checked under a lock.** `setParent()` locks the role and the parent, in key order, then the
    observer walks the parent's ancestors, each locked for update and read outside the tenant scope. Reaching the role
@@ -63,7 +67,7 @@ yet.
 8. **The wrong target is refused.** A grant, revocation or sync handed anything that is not a saved model of its kind
    (a policy sync given a role, a role sync given a permission, a name for a policy, an unsaved role) throws
    `InvalidGrantTargetException` before anything is written. `attachPolicy()` and `detachPolicy()` take a `Policy`.
-   A grantee that is not a saved model with a key, or a `GranteeReference` with an empty type or key, throws
+   A grantee that is not a saved model with a key, or a `Reference` with an empty type or key, throws
    `InvalidGranteeException` before the transaction opens, so no grant is keyed to an empty identity. A role,
    permission or policy model handed to its record service unsaved (to change, delete or re-parent, or as a parent)
    throws `UnsavedRecordException`, so a change never creates a record outside `create()` and an unsaved parent never
@@ -99,7 +103,7 @@ working: each forwards to the matching service method with no actor.
 - **Raw relation writes bypass the services.** `$user->roles()->attach()`, `$role->permissions()->sync()` and their
   kin write the pivot directly: no transaction, no idempotency, no event and a stale resolution cache. They are
   unsupported for any change that must be audited.
-- **A grantee whose class is not loadable** is named with `GranteeReference` (its morph type and key), as the Spatie
+- **A grantee whose class is not loadable** is named with `Reference` (its morph type and key), as the Spatie
   import does for Spatie's `model_type` and `model_id`. A reference carries no guard.
 - **Without the service provider** the traits refuse to write (`LogicException`) rather than lose the write.
 - **List methods are reads** and run outside a transaction. They take the actor like every other method, so the
@@ -107,7 +111,10 @@ working: each forwards to the matching service method with no actor.
 - **`authorization:grant` gives no expiry**, so granting a role the identity holds on a temporary or expired grant makes
   it permanent and is reported as granted; only a role already held with no expiry is reported as held.
 - **`authorization:sync` writes directly.** The permission catalogue sync saves and deletes through the permission
-  model, in its own transaction on the package's connection, rather than through `PermissionService`.
+  model, in one transaction on the package's connection and as one operation, rather than through
+  `PermissionService`.
+- **The commands name no actor by default.** `authorization:grant`, `authorization:revoke` and `authorization:sync`
+  take `--actor={morphType}:{key}`, which must name a row that exists; without it they record no actor.
 
 ## Implementation Anchors
 
@@ -130,6 +137,5 @@ working: each forwards to the matching service method with no actor.
 
 - Scoped grants (tenant and application): the services gain scope arguments, and revocation narrows to the scope it
   names.
-- Events fit for audit: the actor, after-commit dispatch and snapshot payloads.
 - Delegated administration: the services check the actor before they write.
 - The permission catalogue sync moves onto `PermissionService`.
