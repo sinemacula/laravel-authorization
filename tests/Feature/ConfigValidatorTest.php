@@ -275,6 +275,39 @@ final class ConfigValidatorTest extends TestCase
     }
 
     /**
+     * Provide `permission_enums` entries with whether each is a string-backed
+     * permission enum.
+     *
+     * @return iterable<string, array{mixed, bool}>
+     */
+    public static function permissionEnumEntryProvider(): iterable
+    {
+        yield 'string-backed enum' => [PermissionEnum::class, true];
+
+        yield 'integer-backed enum' => [IntBackedPermissionEnum::class, false];
+
+        yield 'contract interface' => [PermissionEnumInterface::class, false];
+
+        yield 'class not implementing the contract' => [\stdClass::class, false];
+
+        yield 'non-string entry' => [123, false];
+    }
+
+    /**
+     * Only a string-backed enum implementing the contract is a usable
+     * `permission_enums` entry for the code that reads the list at run time.
+     *
+     * @param  mixed  $class
+     * @param  bool  $expected
+     * @return void
+     */
+    #[DataProvider('permissionEnumEntryProvider')]
+    public function testIdentifiesAStringBackedPermissionEnum(mixed $class, bool $expected): void
+    {
+        self::assertSame($expected, ConfigValidator::isStringBackedPermissionEnum($class));
+    }
+
+    /**
      * Run the validator over the package config with the given
      * `permission_enums`.
      *

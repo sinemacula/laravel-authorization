@@ -65,6 +65,25 @@ final class ConfigValidator
     }
 
     /**
+     * Determine whether the given value names an enum that implements the
+     * `PermissionEnum` contract and is backed by strings: an entry of
+     * `permission_enums` the validation accepts.
+     *
+     * The Gate registrar and the manager read the configured enums at run time,
+     * after boot, so they skip an entry for which this is false rather than
+     * fail on it.
+     *
+     * @param  mixed  $class
+     * @return bool
+     */
+    public static function isStringBackedPermissionEnum(mixed $class): bool
+    {
+        return \is_string($class)
+            && \is_subclass_of($class, PermissionEnum::class)
+            && self::isStringBackedEnum($class);
+    }
+
+    /**
      * Validate that `connection`, when set, names a connection the application
      * configures under `database.connections`. Null or an empty name selects
      * the application's default connection.

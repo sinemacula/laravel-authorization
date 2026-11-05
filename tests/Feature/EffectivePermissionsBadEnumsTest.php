@@ -8,12 +8,13 @@ use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
+use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
  * Feature tests covering the `effectivePermissions()` filter branch that
- * rejects non-string or non-enum entries from the configured
+ * rejects non-string, non-enum or non-string-backed entries from the configured
  * `authorization.permission_enums` list. Guards the manager against
  * misconfigured arrays — booleans, integers, string class-names that are not
  * enums — without letting the call blow up at runtime.
@@ -29,9 +30,9 @@ use Tests\TestCase;
 final class EffectivePermissionsBadEnumsTest extends TestCase
 {
     /**
-     * Non-string and non-enum entries in the configured list are silently
-     * skipped so misconfiguration can never cascade into a TypeError
-     * mid-request.
+     * Non-string, non-enum and non-string-backed entries in the configured list
+     * are silently skipped so misconfiguration can never cascade into a
+     * TypeError mid-request.
      *
      * @return void
      */
@@ -44,6 +45,7 @@ final class EffectivePermissionsBadEnumsTest extends TestCase
             \stdClass::class,                // string but not a PermissionEnum subclass
             ['nested'],                      // non-scalar
             null,                            // null entry
+            IntBackedPermissionEnum::class,  // enum not backed by strings
         ]);
 
         $user = StubIdentity::create(['id' => 'ff985fd2-2a0a-4a27-82bd-dcd3ce983740']);

@@ -37,6 +37,7 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
@@ -339,6 +340,27 @@ final class AuthorizationManagerTest extends TestCase
 
         self::assertSame(
             [PermissionEnum::POSTS_CREATE->value => true, PermissionEnum::POSTS_DELETE->value => false],
+            Authorization::for($user)->effectivePermissions(),
+        );
+    }
+
+    /**
+     * `effectivePermissions()` reads the configured enums at call time, after
+     * the boot validation, so it skips an enum not backed by strings rather
+     * than fail with a TypeError mid-request.
+     *
+     * @return void
+     */
+    public function testEffectivePermissionsSkipAnEnumNotBackedByStrings(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make('config'); // @phpstan-ignore method.nonObject
+        $config->set('authorization.permission_enums', [IntBackedPermissionEnum::class, PermissionEnum::class]);
+
+        $user = StubIdentity::create(['id' => '5b0f6c1e-8d2a-4f3b-9e7c-1a4d2c6b8e90']);
+
+        self::assertSame(
+            [PermissionEnum::POSTS_CREATE->value => false, PermissionEnum::POSTS_DELETE->value => false],
             Authorization::for($user)->effectivePermissions(),
         );
     }
