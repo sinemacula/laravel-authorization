@@ -289,6 +289,51 @@ final class RolePermissionTest extends TestCase
     }
 
     /**
+     * A tenant-owned role is found as the stored parent when no tenant is
+     * resolved, which hides it from ordinary queries: whether the parent exists
+     * does not depend on the request's tenant.
+     *
+     * @return void
+     */
+    public function testTenantOwnedRoleIsFoundAsStoredParentWithoutTenant(): void
+    {
+        $role       = Role::query()->create(['name' => 'tenant-editor', 'guard_name' => 'web', 'tenant_type' => 'tenant', 'tenant_id' => 't-1']);
+        $permission = $this->makePermission('web');
+        $parent     = Permission::query()->create(['name' => 'posts:delete', 'guard_name' => 'web']);
+
+        self::assertNull(Role::query()->find($role->id));
+
+        $this->savePivot($parent, $role->id, $permission->id);
+
+        self::assertSame(
+            [['role_id' => $role->id, 'permission_id' => $permission->id]],
+            $this->pivotRows(),
+        );
+    }
+
+    /**
+     * A tenant-owned permission is found as the stored parent when no tenant is
+     * resolved, as for the role side.
+     *
+     * @return void
+     */
+    public function testTenantOwnedPermissionIsFoundAsStoredParentWithoutTenant(): void
+    {
+        $role       = $this->makeRole('web');
+        $permission = Permission::query()->create(['name' => 'tenant:read', 'guard_name' => 'web', 'tenant_type' => 'tenant', 'tenant_id' => 't-1']);
+        $parent     = Role::query()->create(['name' => 'author', 'guard_name' => 'web']);
+
+        self::assertNull(Permission::query()->find($permission->id));
+
+        $this->savePivot($parent, $role->id, $permission->id);
+
+        self::assertSame(
+            [['role_id' => $role->id, 'permission_id' => $permission->id]],
+            $this->pivotRows(),
+        );
+    }
+
+    /**
      * A parent that is not a permission is not the in-memory permission, even
      * when its id is the row's permission id.
      *

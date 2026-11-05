@@ -10,6 +10,7 @@ use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\OrphanedRolePermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 
 /**
  * Custom pivot model for the `role_permissions` table.
@@ -82,7 +83,8 @@ final class RolePermission extends Pivot
 
     /**
      * Resolve the role-side parent model, preferring an in-memory instance over
-     * a fresh database lookup.
+     * a fresh database lookup. The lookup ignores the tenant scope: whether the
+     * parent exists does not depend on the tenant of the current request.
      *
      * @param  string  $roleId
      * @return \SineMacula\Laravel\Authorization\Models\Role
@@ -112,7 +114,7 @@ final class RolePermission extends Pivot
         }
 
         /** @var \SineMacula\Laravel\Authorization\Models\Role|null $role */
-        $role = $roleClass::query()->find($roleId);
+        $role = $roleClass::query()->withoutGlobalScope(TenantScope::class)->find($roleId);
 
         if ($role === null) {
             throw new OrphanedRolePermissionException(side: OrphanSide::ROLE, parentId: $roleId);
@@ -123,7 +125,8 @@ final class RolePermission extends Pivot
 
     /**
      * Resolve the permission-side parent model, preferring an in-memory
-     * instance over a fresh database lookup.
+     * instance over a fresh database lookup. The lookup ignores the tenant
+     * scope, as for the role side.
      *
      * @param  string  $permissionId
      * @return \SineMacula\Laravel\Authorization\Models\Permission
@@ -154,7 +157,7 @@ final class RolePermission extends Pivot
         }
 
         /** @var \SineMacula\Laravel\Authorization\Models\Permission|null $permission */
-        $permission = $permissionClass::query()->find($permissionId);
+        $permission = $permissionClass::query()->withoutGlobalScope(TenantScope::class)->find($permissionId);
 
         if ($permission === null) {
             throw new OrphanedRolePermissionException(side: OrphanSide::PERMISSION, parentId: $permissionId);
