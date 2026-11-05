@@ -82,6 +82,25 @@ final class HasPoliciesTest extends TestCase
     }
 
     /**
+     * The policies relation can be queried from outside the identity, and its
+     * pivot carries each attachment's expiry.
+     *
+     * @return void
+     */
+    public function testPoliciesRelationIsQueryable(): void
+    {
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user->attachPolicy(Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]), Carbon::parse('2026-07-01 13:00:00'));
+
+        $policy = $user->policies()->sole();
+
+        self::assertSame('readers', $policy->name);
+        self::assertSame('2026-07-01 13:00:00', Carbon::parse((string) $policy->pivot->expires_at)->format('Y-m-d H:i:s')); // @phpstan-ignore property.notFound
+    }
+
+    /**
      * Every attached row with a valid document hydrates into an evaluation
      * policy named after the row.
      *

@@ -104,7 +104,8 @@ final class GuardScopedLookupTest extends TestCase
     }
 
     /**
-     * Without a guard the configured default guard is used.
+     * Without a guard the configured default guard is used; a given guard
+     * overrides it.
      *
      * @return void
      */
@@ -113,10 +114,11 @@ final class GuardScopedLookupTest extends TestCase
         config(['authorization.defaults.guard' => 'api']);
 
         $api = Role::create(['name' => 'editor', 'guard' => 'api']);
-        Role::create(['name' => 'editor', 'guard' => 'web']);
+        $web = Role::create(['name' => 'editor', 'guard' => 'web']);
 
         self::assertSame($api->id, GuardScopedLookup::findForGuard(Role::class, 'editor')?->getKey());
         self::assertSame($api->id, GuardScopedLookup::findForGuard(Role::class, 'editor', null)?->getKey());
+        self::assertSame($web->id, GuardScopedLookup::findForGuard(Role::class, 'editor', 'web')?->getKey());
     }
 
     /**

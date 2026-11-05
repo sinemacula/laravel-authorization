@@ -82,7 +82,7 @@ abstract class ListCatalogueCommand extends Command
      *
      * @param  \Illuminate\Database\Eloquent\Model  $record
      * @param  string  $relation
-     * @return list<string>
+     * @return list<mixed>
      */
     private static function row(Model $record, string $relation): array
     {
@@ -102,12 +102,12 @@ abstract class ListCatalogueCommand extends Command
         $guard = $record->getAttribute('guard');
 
         return [
-            (string) $record->getKey(), // @phpstan-ignore cast.string
+            $record->getKey(),
             $name,
             $guard ?? '(any)',
             $tenantType === null ? 'platform' : "{$tenantType}:{$tenantId}",
             $record->getAttribute('is_system') ? 'Yes' : 'No',
-            (string) $count,
+            $count,
         ];
     }
 }

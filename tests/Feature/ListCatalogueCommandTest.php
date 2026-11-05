@@ -11,6 +11,8 @@ use SineMacula\Laravel\Authorization\Console\ListPermissionsCommand;
 use SineMacula\Laravel\Authorization\Console\ListRolesCommand;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use Tests\Fixtures\QueryRecorder;
+use Tests\Fixtures\QueryRecordingRole;
 use Tests\TestCase;
 
 /**
@@ -111,6 +113,25 @@ final class ListCatalogueCommandTest extends TestCase
 
         self::assertStringContainsString('api-role', $unfiltered);
         self::assertStringContainsString('web-role', $unfiltered);
+    }
+
+    /**
+     * The listing reads through the model class `authorization.models`
+     * configures.
+     *
+     * @return void
+     */
+    public function testListingReadsThroughTheConfiguredModel(): void
+    {
+        config(['authorization.models.role' => QueryRecordingRole::class]);
+
+        Role::create(['name' => 'editor', 'guard' => 'web']);
+
+        QueryRecorder::reset();
+
+        self::assertSame(0, Artisan::call('authorization:list-roles'));
+        self::assertStringContainsString('editor', Artisan::output());
+        self::assertNotEmpty(QueryRecorder::recorded());
     }
 
     /**

@@ -75,6 +75,25 @@ final class HasPermissionsTest extends TestCase
     }
 
     /**
+     * The direct permissions relation can be queried from outside the identity,
+     * and its pivot carries each grant's expiry.
+     *
+     * @return void
+     */
+    public function testPermissionsRelationIsQueryable(): void
+    {
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user->givePermission(Permission::create(['name' => 'posts:edit', 'guard' => 'web']), Carbon::parse('2026-07-01 13:00:00'));
+
+        $permission = $user->permissions()->sole();
+
+        self::assertSame('posts:edit', $permission->name);
+        self::assertSame('2026-07-01 13:00:00', Carbon::parse((string) $permission->pivot->expires_at)->format('Y-m-d H:i:s')); // @phpstan-ignore property.notFound
+    }
+
+    /**
      * A permission granted directly until 12:05 lapses at 12:05 for the same
      * identity instance.
      *

@@ -28,29 +28,34 @@ use SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException;
 final class SystemRecordProtectedExceptionTest extends TestCase
 {
     /**
-     * One exception of each kind.
+     * One exception class of each kind, with the record it refuses.
      *
-     * @return iterable<string, array{0: \SineMacula\Laravel\Authorization\Exceptions\SystemRecordProtectedException, 1: string, 2: string}>
+     * The exceptions are built in the test, not here, so their construction is
+     * measured as the test's coverage.
+     *
+     * @return iterable<string, array{0: class-string<\SineMacula\Laravel\Authorization\Exceptions\SystemRecordProtectedException>, 1: string, 2: string}>
      */
     public static function exceptions(): iterable
     {
-        yield 'role' => [new SystemRoleProtectedException('owner', 'delete'), 'role', 'owner'];
-        yield 'permission' => [new SystemPermissionProtectedException('*', 'delete'), 'permission', '*'];
-        yield 'policy' => [new SystemPolicyProtectedException('break-glass', 'delete'), 'policy', 'break-glass'];
+        yield 'role' => [SystemRoleProtectedException::class, 'role', 'owner'];
+        yield 'permission' => [SystemPermissionProtectedException::class, 'permission', '*'];
+        yield 'policy' => [SystemPolicyProtectedException::class, 'policy', 'break-glass'];
     }
 
     /**
      * Each kind of record names itself in the message and exposes the record
      * name and the refused operation.
      *
-     * @param  \SineMacula\Laravel\Authorization\Exceptions\SystemRecordProtectedException  $exception
+     * @param  class-string<\SineMacula\Laravel\Authorization\Exceptions\SystemRecordProtectedException>  $class
      * @param  string  $kind
      * @param  string  $name
      * @return void
      */
     #[DataProvider('exceptions')]
-    public function testMessageCodeAndAccessors(SystemRecordProtectedException $exception, string $kind, string $name): void
+    public function testMessageCodeAndAccessors(string $class, string $kind, string $name): void
     {
+        $exception = new $class($name, 'delete');
+
         self::assertSame(
             "Refusing to delete system {$kind} '{$name}'. Call `forceSystem()` on the model before the operation to override.",
             $exception->getMessage(),
