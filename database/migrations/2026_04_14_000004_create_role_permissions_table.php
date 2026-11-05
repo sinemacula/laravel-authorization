@@ -12,6 +12,7 @@ declare(strict_types = 1);
 use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
+use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\MigrationCollisionGuard;
 
 return new class extends Migration {
@@ -55,5 +56,17 @@ return new class extends Migration {
         $table = config('authorization.tables.role_permissions', 'role_permissions');
 
         Schema::connection($this->getConnection())->dropIfExists($table);
+    }
+
+    /**
+     * The connection the table lives on, the one the package's models read and
+     * write it on: `authorization.connection`, or the default when unset.
+     *
+     * @return string|null
+     */
+    #[Override]
+    public function getConnection(): ?string
+    {
+        return AuthorizationConnection::name();
     }
 };

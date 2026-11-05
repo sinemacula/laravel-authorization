@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
+use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPolicyProtectedException;
@@ -71,6 +72,23 @@ class Policy extends Model
         /** @var string $table */
         $table       = config('authorization.tables.policies', 'policies');
         $this->table = $table;
+    }
+
+    /**
+     * Return the connection the policy table lives on: the configured
+     * `authorization.connection`, or Laravel's choice when it is unset.
+     *
+     * Naming the connection is schema, so this is a framework hook rather than
+     * model behaviour.
+     *
+     * @return string|null
+     *
+     * @phpstan-ignore sineMaculaLaravel.modelBehaviour
+     */
+    #[\Override]
+    public function getConnectionName(): ?string
+    {
+        return AuthorizationConnection::name() ?? parent::getConnectionName();
     }
 
     /**

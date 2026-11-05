@@ -31,6 +31,22 @@ return [
 
     /*
     |---------------------------------------------------------------------------
+    | Database connection
+    |---------------------------------------------------------------------------
+    |
+    | The connection the package's tables live on. Every package model and
+    | pivot reads and writes on it, the shipped migrations create and drop
+    | their tables on it, and the package's own transactions run on it. Point
+    | it at the connection the application keeps its identity tables on, so
+    | a transaction that creates a principal and its grants commits or rolls
+    | back as one. Null uses the application's default connection.
+    |
+    */
+
+    'connection' => env('AUTHORIZATION_DB_CONNECTION'),
+
+    /*
+    |---------------------------------------------------------------------------
     | Tables
     |---------------------------------------------------------------------------
     |

@@ -96,10 +96,8 @@ trait HasRoles // @phpstan-ignore trait.unused
     {
         $model = $this->resolveRole($role);
 
-        /** @var string $table */
-        $table   = config('authorization.tables.authorizable_roles', 'authorizable_roles');
         $columns = self::authorizationResolveGrantPivotColumns('authorizable_roles', 'role_column', 'role_id');
-        $prior   = self::authorizationReadGrantPivot($this, $table, $columns, (string) $model->getKey());
+        $prior   = self::authorizationReadGrantPivot($this, $this->roles()->newPivotStatement(), $columns, (string) $model->getKey());
 
         $this->roles()->syncWithoutDetaching([
             (string) $model->getKey() => ['expires_at' => $expiresAt],

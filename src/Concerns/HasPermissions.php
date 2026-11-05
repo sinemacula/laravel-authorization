@@ -104,10 +104,8 @@ trait HasPermissions // @phpstan-ignore trait.unused
     {
         $model = $this->resolvePermission($permission);
 
-        /** @var string $table */
-        $table   = config('authorization.tables.authorizable_permissions', 'authorizable_permissions');
         $columns = self::authorizationResolveGrantPivotColumns('authorizable_permissions', 'permission_column', 'permission_id');
-        $prior   = self::authorizationReadGrantPivot($this, $table, $columns, (string) $model->getKey());
+        $prior   = self::authorizationReadGrantPivot($this, $this->permissions()->newPivotStatement(), $columns, (string) $model->getKey());
 
         $this->permissions()->syncWithoutDetaching([
             (string) $model->getKey() => ['expires_at' => $expiresAt],

@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Models\Pivots;
 
 use Illuminate\Database\Eloquent\Relations\MorphPivot;
+use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 
 /**
  * Shared base pivot for the three temporal-grant tables.
@@ -32,4 +33,24 @@ abstract class AuthorizableGrantPivot extends MorphPivot
     protected $casts = [
         'expires_at' => 'datetime',
     ];
+
+    /**
+     * Return the connection the grant table lives on: the configured
+     * `authorization.connection`, or Laravel's choice when it is unset.
+     *
+     * Laravel hands a pivot the connection of the model the relation starts
+     * from, which for a grant is the grantee's, so without this a grant row
+     * would follow its grantee rather than the package's tables. Naming the
+     * connection is schema, so this is a framework hook rather than model
+     * behaviour.
+     *
+     * @return string|null
+     *
+     * @phpstan-ignore sineMaculaLaravel.modelBehaviour
+     */
+    #[\Override]
+    public function getConnectionName(): ?string
+    {
+        return AuthorizationConnection::name() ?? parent::getConnectionName();
+    }
 }

@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Concerns\ValidatesAuthorizationName;
+use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPermissionProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
@@ -81,6 +82,23 @@ class Permission extends Model
         /** @var string $table */
         $table       = config('authorization.tables.permissions', 'permissions');
         $this->table = $table;
+    }
+
+    /**
+     * Return the connection the permission table lives on: the configured
+     * `authorization.connection`, or Laravel's choice when it is unset.
+     *
+     * Naming the connection is schema, so this is a framework hook rather than
+     * model behaviour.
+     *
+     * @return string|null
+     *
+     * @phpstan-ignore sineMaculaLaravel.modelBehaviour
+     */
+    #[\Override]
+    public function getConnectionName(): ?string
+    {
+        return AuthorizationConnection::name() ?? parent::getConnectionName();
     }
 
     // ------------------------------------------------------------------

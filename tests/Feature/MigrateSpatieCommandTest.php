@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Console\MigrateSpatieCommand;
+use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\TestCase;
 
 /**
@@ -34,6 +35,8 @@ use Tests\TestCase;
 #[CoversClass(MigrateSpatieCommand::class)]
 final class MigrateSpatieCommandTest extends TestCase
 {
+    use UsesAnAuthorizationConnection;
+
     /** @var string The Spatie role ID used by the string-keyed fixture. */
     private const string STRING_ROLE_ID = '0192f0c4-3b1a-7d2e-9a4b-1c2d3e4f5a6b';
 
@@ -101,6 +104,49 @@ final class MigrateSpatieCommandTest extends TestCase
         self::assertSame(2, DB::table('auth_role_permissions')->count());
         self::assertSame(1, DB::table('auth_authorizable_roles')->count());
         self::assertSame(1, DB::table('auth_authorizable_permissions')->count());
+    }
+
+    /**
+     * With `authorization.connection` set, Spatie's tables are read on the
+     * default connection and every row is written on the package's connection,
+     * none on the default one.
+     *
+     * @return void
+     */
+    public function testWritesOnThePackageConnection(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        self::assertSame(0, Artisan::call('authorization:migrate-spatie'));
+
+        $counts = [
+            'auth_roles'                    => 2,
+            'auth_permissions'              => 3,
+            'auth_role_permissions'         => 2,
+            'auth_authorizable_roles'       => 1,
+            'auth_authorizable_permissions' => 1,
+        ];
+
+        foreach ($counts as $table => $count) {
+            self::assertSame($count, self::authorizationConnection()->table($table)->count(), $table);
+            self::assertSame(0, DB::table($table)->count(), $table);
+        }
+    }
+
+    /**
+     * The target tables are looked for on the package's connection: with it set
+     * to a connection that has none, the import stops before writing.
+     *
+     * @return void
+     */
+    public function testLooksForTheTargetTablesOnThePackageConnection(): void
+    {
+        $this->useAnAuthorizationConnection();
+        $this->reversePackageMigrations();
+
+        self::assertSame(1, Artisan::call('authorization:migrate-spatie'));
+        self::assertStringContainsString('Target table \'auth_roles\' does not exist', Artisan::output());
+        self::assertSame(0, DB::table('auth_roles')->count());
     }
 
     /**

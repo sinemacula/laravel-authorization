@@ -5,9 +5,11 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Console;
 
 use Illuminate\Console\Command;
+use Illuminate\Database\Connection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -22,8 +24,10 @@ use SineMacula\Laravel\Authorization\Models\Role;
  * UUIDs when Spatie used auto-increment IDs. Role and permission names are
  * checked against the models' name rule before they are written; a name that
  * fails it is reported and skipped together with its grants, as is a permission
- * name containing `*`, because `*` is a wildcard here. Everything runs inside a
- * transaction; the `--dry-run` flag reports counts without writing.
+ * name containing `*`, because `*` is a wildcard here. Spatie's tables are read
+ * on the application's default connection and this package's are written on its
+ * own (`authorization.connection`), inside one transaction there; the
+ * `--dry-run` flag reports counts without writing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -91,7 +95,7 @@ final class MigrateSpatieCommand extends Command
         if ($dryRun) {
             $callback();
         } else {
-            DB::transaction($callback);
+            $this->target()->transaction($callback);
         }
 
         $this->renderMigrationSummary($counts, $dryRun);
@@ -147,12 +151,14 @@ final class MigrateSpatieCommand extends Command
     }
 
     /**
-     * Verify that all target tables exist.
+     * Verify that all target tables exist on the package's connection.
      *
      * @return bool
      */
     private function verifyTargetSchema(): bool
     {
+        $schema = $this->target()->getSchemaBuilder();
+
         $targets = [
             'authorization.tables.roles'                    => 'roles',
             'authorization.tables.permissions'              => 'permissions',
@@ -165,7 +171,7 @@ final class MigrateSpatieCommand extends Command
             /** @var string $table */
             $table = config($configKey, $default);
 
-            if (!Schema::hasTable($table)) {
+            if (!$schema->hasTable($table)) {
                 $this->error("Target table '{$table}' does not exist. Run the package migrations first.");
 
                 return false;
@@ -173,6 +179,19 @@ final class MigrateSpatieCommand extends Command
         }
 
         return true;
+    }
+
+    /**
+     * Return the connection the package's tables live on, which the import
+     * writes to and runs its transaction on. Spatie's tables are read on the
+     * application's default connection.
+     *
+     * @return \Illuminate\Database\Connection
+     */
+    private function target(): Connection
+    {
+        /** @var \Illuminate\Database\Connection */
+        return DB::connection(AuthorizationConnection::name());
     }
 
     /**
@@ -207,7 +226,7 @@ final class MigrateSpatieCommand extends Command
             $idMap[$roleRow['id']] = $newId;
 
             if (!$dryRun) {
-                DB::table($targetTable)->insert([
+                $this->target()->table($targetTable)->insert([
                     'id'         => $newId,
                     'name'       => $roleRow['name'],
                     'guard_name' => $roleRow['guard_name'] ?? null,
@@ -252,7 +271,7 @@ final class MigrateSpatieCommand extends Command
             $idMap[$permissionRow['id']] = $newId;
 
             if (!$dryRun) {
-                DB::table($targetTable)->insert([
+                $this->target()->table($targetTable)->insert([
                     'id'         => $newId,
                     'name'       => $permissionRow['name'],
                     'guard_name' => $permissionRow['guard_name'] ?? null,
@@ -340,7 +359,7 @@ final class MigrateSpatieCommand extends Command
             }
 
             if (!$dryRun) {
-                DB::table($targetTable)->insert([
+                $this->target()->table($targetTable)->insert([
                     'role_id'       => $mappedRoleId,
                     'permission_id' => $mappedPermissionId,
                 ]);
@@ -375,7 +394,7 @@ final class MigrateSpatieCommand extends Command
             }
 
             if (!$dryRun) {
-                DB::table($targetTable)->insert([
+                $this->target()->table($targetTable)->insert([
                     'authorizable_type' => $modelRoleRow['model_type'],
                     'authorizable_id'   => (string) $modelRoleRow['model_id'],
                     'role_id'           => $mappedRoleId,
@@ -411,7 +430,7 @@ final class MigrateSpatieCommand extends Command
             }
 
             if (!$dryRun) {
-                DB::table($targetTable)->insert([
+                $this->target()->table($targetTable)->insert([
                     'authorizable_type' => $modelPermissionRow['model_type'],
                     'authorizable_id'   => (string) $modelPermissionRow['model_id'],
                     'permission_id'     => $mappedPermissionId,

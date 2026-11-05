@@ -53,6 +53,7 @@ final class ConfigValidator
      */
     public static function validate(array $config, Container $container): void
     {
+        self::validateConnection($config['connection'] ?? null, $container);
         self::validateModels($config['models'] ?? []);
         self::validatePermissionEnums($config['permission_enums'] ?? []);
         self::validatePermissionProviders($config['permission_providers'] ?? []);
@@ -61,6 +62,35 @@ final class ConfigValidator
         self::validateTenantResolver($config['tenant_resolver'] ?? null);
         self::validatePolicyStore($config['policy_store'] ?? null);
         self::validateCacheStore($config['cache']['store'] ?? null, $container);
+    }
+
+    /**
+     * Validate that `connection`, when set, names a connection the application
+     * configures under `database.connections`. Null or an empty name selects
+     * the application's default connection.
+     *
+     * @param  mixed  $value
+     * @param  \Illuminate\Contracts\Container\Container  $container
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    private static function validateConnection(mixed $value, Container $container): void
+    {
+        if ($value === null || $value === '') {
+            return;
+        }
+
+        if (!\is_string($value)) {
+            throw new InvalidAuthorizationConfigException('authorization.connection', 'expected a database connection name, got ' . self::describe($value) . '.');
+        }
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $container->make('config');
+
+        if (!\is_array($config->get('database.connections.' . $value))) {
+            throw new InvalidAuthorizationConfigException('authorization.connection', "database connection '{$value}' is not configured.");
+        }
     }
 
     /**

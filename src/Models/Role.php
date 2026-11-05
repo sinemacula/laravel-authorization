@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Concerns\HasRoleHierarchy;
 use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Concerns\ManagesPermissions;
 use SineMacula\Laravel\Authorization\Concerns\ValidatesAuthorizationName;
+use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
@@ -77,6 +78,23 @@ class Role extends Model
         /** @var string $table */
         $table       = config('authorization.tables.roles', 'roles');
         $this->table = $table;
+    }
+
+    /**
+     * Return the connection the role table lives on: the configured
+     * `authorization.connection`, or Laravel's choice when it is unset.
+     *
+     * Naming the connection is schema, so this is a framework hook rather than
+     * model behaviour.
+     *
+     * @return string|null
+     *
+     * @phpstan-ignore sineMaculaLaravel.modelBehaviour
+     */
+    #[\Override]
+    public function getConnectionName(): ?string
+    {
+        return AuthorizationConnection::name() ?? parent::getConnectionName();
     }
 
     /**

@@ -5,8 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Concerns;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\DB;
 
 /**
  * Shared helpers used by the authorizable-identity traits to feed the
@@ -168,12 +168,14 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
 
     /**
      * Read the existing pivot row for the authorizable-to-grant triplet
-     * `(type, id, $targetId)` against the supplied pivot table and return its
-     * existence and `expires_at` value. Returns
-     * `['exists' => false, 'expires_at' => null]` when no row exists. The query
-     * bypasses any relation-level expiry filter so it observes both live and
-     * expired pivot rows — both are candidates for an expiry mutation by a
-     * re-call to the surface-specific grant method.
+     * `(type, id, $targetId)` through the supplied query on the grant
+     * relation's pivot table and return its existence and `expires_at` value.
+     * Returns `['exists' => false, 'expires_at' => null]` when no row exists.
+     * The query bypasses any relation-level expiry filter so it observes both
+     * live and expired pivot rows — both are candidates for an expiry mutation
+     * by a re-call to the surface-specific grant method. A relation's pivot
+     * query runs on the relation's connection, the one the grant is then
+     * written on.
      *
      * Column names are supplied by the caller from the per-table
      * `authorization.pivots.*` config block so a consumer who swaps a pivot
@@ -184,14 +186,14 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      * detection machinery lives in one place.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $identity
-     * @param  string  $table
+     * @param  \Illuminate\Database\Query\Builder  $pivot
      * @param  array{authorizable_type: string, authorizable_id: string, target: string, expires_at: string}  $columns
      * @param  string  $targetId
      * @return array{exists: bool, expires_at: \DateTimeInterface|null}
      */
-    private static function authorizationReadGrantPivot(Model $identity, string $table, array $columns, string $targetId): array
+    private static function authorizationReadGrantPivot(Model $identity, Builder $pivot, array $columns, string $targetId): array
     {
-        $row = DB::table($table)
+        $row = $pivot
             ->where($columns['authorizable_type'], $identity->getMorphClass())
             ->where($columns['authorizable_id'], (string) $identity->getKey())
             ->where($columns['target'], $targetId)
@@ -265,12 +267,11 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
     }
 
     /**
-     * Compare two expiry values for equality. Two nulls are equal
-     * (forever vs. forever); a null and a concrete instant differ
-     * (forever vs. expiring); two concrete instants are compared
-     * by their UTC timestamp so DST and timezone normalisation do
-     * not produce spurious false positives. Shared by the three
-     * authorizable-identity traits.
+     * Compare two expiry values for equality. Two nulls are equal (forever vs.
+     * forever); a null and a concrete instant differ (forever vs. expiring);
+     * two concrete instants are compared by their UTC timestamp so DST and
+     * timezone normalisation do not produce spurious false positives. Shared by
+     * the three authorizable-identity traits.
      *
      * @param  \DateTimeInterface|null  $left
      * @param  \DateTimeInterface|null  $right

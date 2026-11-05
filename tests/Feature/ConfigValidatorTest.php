@@ -167,6 +167,64 @@ final class ConfigValidatorTest extends TestCase
     }
 
     /**
+     * An unset or empty connection, and a configured connection's name, pass
+     * validation.
+     *
+     * @return void
+     */
+    public function testUnsetEmptyAndConfiguredConnectionsPass(): void
+    {
+        foreach ([null, '', 'testing'] as $connection) {
+            $this->validateWithConnection($connection);
+        }
+
+        $this->expectNotToPerformAssertions();
+    }
+
+    /**
+     * A connection setting that is not a string is refused.
+     *
+     * @return void
+     */
+    public function testNonStringConnectionIsRejected(): void
+    {
+        $this->assertRejected(
+            fn () => $this->validateWithConnection(5),
+            'authorization.connection',
+            'expected a database connection name, got 5 (int).',
+        );
+    }
+
+    /**
+     * A connection the application does not configure is refused at boot,
+     * rather than on the first query.
+     *
+     * @return void
+     */
+    public function testUnknownConnectionIsRejected(): void
+    {
+        $this->assertRejected(
+            fn () => $this->validateWithConnection('missing'),
+            'authorization.connection',
+            'database connection \'missing\' is not configured.',
+        );
+    }
+
+    /**
+     * Run the validator over the package config with the given `connection`.
+     *
+     * @param  mixed  $connection
+     * @return void
+     */
+    private function validateWithConnection(mixed $connection): void
+    {
+        $config               = $this->authorizationConfig();
+        $config['connection'] = $connection;
+
+        ConfigValidator::validate($config, $this->app);
+    }
+
+    /**
      * Run the validator over the package config with the given `models` block.
      *
      * @param  array<string, mixed>  $models

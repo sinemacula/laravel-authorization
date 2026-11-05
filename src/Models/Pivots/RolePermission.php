@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Models\Pivots;
 
 use Illuminate\Database\Eloquent\Relations\Pivot;
+use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\OrphanSide;
 use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\OrphanedRolePermissionException;
@@ -28,6 +29,25 @@ final class RolePermission extends Pivot
 {
     /** @var bool Pivot tables do not auto-increment (composite PK). */
     public $incrementing = false;
+
+    /**
+     * Return the connection the pivot table lives on: the configured
+     * `authorization.connection`, or Laravel's choice when it is unset.
+     *
+     * Laravel hands a pivot the connection of the model the relation starts
+     * from, so without this a pivot row would follow its parent rather than the
+     * package's tables. Naming the connection is schema, so this is a framework
+     * hook rather than model behaviour.
+     *
+     * @return string|null
+     *
+     * @phpstan-ignore sineMaculaLaravel.modelBehaviour
+     */
+    #[\Override]
+    public function getConnectionName(): ?string
+    {
+        return AuthorizationConnection::name() ?? parent::getConnectionName();
+    }
 
     /**
      * Boot the pivot and register the guard-parity hook.

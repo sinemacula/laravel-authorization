@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use Tests\Concerns\ChecksTheConnectionName;
 use Tests\Feature\Stubs\CustomPermission;
 use Tests\Feature\Stubs\CustomRole;
 use Tests\TestCase;
@@ -35,6 +36,8 @@ use Tests\TestCase;
 #[CoversClass(GuardMismatchException::class)]
 final class RolePermissionTest extends TestCase
 {
+    use ChecksTheConnectionName;
+
     /** @var string The guard-mismatch message for the `editor` role and `posts:edit` permission. */
     private const string MISMATCH = 'Guard mismatch: role \'editor\' (guard \'web\') cannot carry permission \'posts:edit\' (guard \'api\').'
         . ' Scope one side to null for a guard-agnostic attachment, or match the guards.';
@@ -352,6 +355,17 @@ final class RolePermissionTest extends TestCase
             [['role_id' => $role->id, 'permission_id' => $permission->id]],
             $this->pivotRows(),
         );
+    }
+
+    /**
+     * Create the pivot whose connection is checked.
+     *
+     * @return \Illuminate\Database\Eloquent\Model
+     */
+    #[\Override]
+    protected static function newConnectionModel(): Model
+    {
+        return new RolePermission;
     }
 
     /**
