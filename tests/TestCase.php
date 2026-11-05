@@ -163,11 +163,14 @@ abstract class TestCase extends OrchestraTestCase
     {
         $driver = getenv('DB_CONNECTION') ?: 'sqlite';
 
+        // SQLite leaves foreign keys unenforced unless asked, so the connection
+        // turns them on, as MySQL and PostgreSQL always have them.
         if ($driver === 'sqlite') {
             return [
-                'driver'   => 'sqlite',
-                'database' => ':memory:',
-                'prefix'   => '',
+                'driver'                  => 'sqlite',
+                'database'                => ':memory:',
+                'prefix'                  => '',
+                'foreign_key_constraints' => true,
             ];
         }
 

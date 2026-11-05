@@ -120,7 +120,8 @@ final class GrantScopeColumnsTest extends TestCase
 
     /**
      * The same target may be granted to the same grantee once per scope: the
-     * platform, each tenant and each application.
+     * platform, each tenant and each application. Two tenants of different
+     * types that share an id are different scopes.
      *
      * @param  string  $table
      * @param  string  $target
@@ -134,12 +135,34 @@ final class GrantScopeColumnsTest extends TestCase
         DB::table($table)->insert([
             [$target => $id] + self::scope(null, null, null) + self::grantee(),
             [$target => $id] + self::scope('tenant', 'tenant-a', null) + self::grantee(),
+            [$target => $id] + self::scope('team', 'tenant-a', null) + self::grantee(),
             [$target => $id] + self::scope('tenant', 'tenant-b', null) + self::grantee(),
             [$target => $id] + self::scope(null, null, 'admin') + self::grantee(),
             [$target => $id] + self::scope('tenant', 'tenant-a', 'admin') + self::grantee(),
         ]);
 
-        self::assertSame(5, DB::table($table)->count());
+        self::assertSame(6, DB::table($table)->count());
+    }
+
+    /**
+     * The same target may be granted in the same scope to two grantees of
+     * different types that share an id.
+     *
+     * @param  string  $table
+     * @param  string  $target
+     * @return void
+     */
+    #[DataProvider('grantTables')]
+    public function testATargetMayBeGrantedToTwoGranteeTypesSharingAnId(string $table, string $target): void
+    {
+        $id = $this->targetFor($target);
+
+        DB::table($table)->insert([
+            [$target => $id] + self::scope(null, null, null) + self::grantee(),
+            [$target => $id] + self::scope(null, null, null) + self::grantee('stub_second_identity'),
+        ]);
+
+        self::assertSame(['stub_identity', 'stub_second_identity'], DB::table($table)->orderBy('authorizable_type')->pluck('authorizable_type')->all());
     }
 
     /**
@@ -200,11 +223,12 @@ final class GrantScopeColumnsTest extends TestCase
     /**
      * Return the grantee columns.
      *
+     * @param  string  $type
      * @return array{authorizable_type: string, authorizable_id: string}
      */
-    private static function grantee(): array
+    private static function grantee(string $type = 'stub_identity'): array
     {
-        return ['authorizable_type' => 'stub_identity', 'authorizable_id' => self::GRANTEE];
+        return ['authorizable_type' => $type, 'authorizable_id' => self::GRANTEE];
     }
 
     /**

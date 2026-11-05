@@ -60,6 +60,22 @@ final class OwnerUniquenessTest extends TestCase
     }
 
     /**
+     * Two tenants of different types that share an id are different owners, so
+     * each may own a row of the same name and guard.
+     *
+     * @param  class-string<\SineMacula\Laravel\Authorization\Models\Permission|\SineMacula\Laravel\Authorization\Models\Role>  $class
+     * @return void
+     */
+    #[DataProvider('guardedModels')]
+    public function testTenantsOfDifferentTypesSharingAnIdMayShareANameAndGuard(string $class): void
+    {
+        $class::query()->create(['name' => 'manager', 'guard' => 'web', 'tenant_type' => 'org', 'tenant_id' => '1']);
+        $class::query()->create(['name' => 'manager', 'guard' => 'web', 'tenant_type' => 'team', 'tenant_id' => '1']);
+
+        self::assertSame(2, self::rows($class));
+    }
+
+    /**
      * A platform row and a tenant's row may share a name and guard.
      *
      * @param  class-string<\SineMacula\Laravel\Authorization\Models\Permission|\SineMacula\Laravel\Authorization\Models\Role>  $class
@@ -156,6 +172,20 @@ final class OwnerUniquenessTest extends TestCase
         Policy::query()->create(['name' => 'readers', 'document' => self::document()] + self::ownedBy(self::createTenant('tenant-b')));
 
         self::assertSame(3, self::rows(Policy::class));
+    }
+
+    /**
+     * Two tenants of different types that share an id may each own a policy of
+     * one name.
+     *
+     * @return void
+     */
+    public function testTenantsOfDifferentTypesSharingAnIdMayShareAPolicyName(): void
+    {
+        Policy::query()->create(['name' => 'readers', 'document' => self::document(), 'tenant_type' => 'org', 'tenant_id' => '1']);
+        Policy::query()->create(['name' => 'readers', 'document' => self::document(), 'tenant_type' => 'team', 'tenant_id' => '1']);
+
+        self::assertSame(2, self::rows(Policy::class));
     }
 
     /**

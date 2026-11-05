@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Database\QueryException;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Foundation\Testing\RefreshDatabaseState;
 use Illuminate\Support\Carbon;
@@ -158,6 +159,32 @@ final class MigrateSpatieCommandTest extends TestCase
             self::assertSame($count, self::authorizationConnection()->table($table)->count(), $table);
             self::assertSame(0, DB::table($table)->count(), $table);
         }
+    }
+
+    /**
+     * The import runs in one transaction on the package's connection: when a
+     * write fails part-way, the rows written before it are rolled back there.
+     * The second role collides with a row the package's table already holds,
+     * after the first role has been written.
+     *
+     * @return void
+     */
+    public function testAFailedImportIsRolledBackOnThePackageConnection(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        self::authorizationConnection()->table('auth_roles')->insert(['id' => '0192f0c4-3b1a-7d2e-9a4b-000000000001', 'name' => 'editor', 'guard' => 'web']);
+
+        $failure = null;
+
+        try {
+            Artisan::call('authorization:migrate-spatie');
+        } catch (\Throwable $exception) {
+            $failure = $exception;
+        }
+
+        self::assertInstanceOf(QueryException::class, $failure);
+        self::assertSame(['editor'], self::authorizationConnection()->table('auth_roles')->pluck('name')->all());
     }
 
     /**
