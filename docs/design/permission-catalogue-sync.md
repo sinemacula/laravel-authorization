@@ -54,8 +54,10 @@ enum ApplicationPermission: string implements PermissionEnum
 ```
 
 A case without `guards` declares one guard-agnostic permission (a null `guard`); a list declares one permission per
-guard; an empty list declares nothing and is refused. A case without the attribute is a guard-agnostic permission with
-no description or category. The attribute shares its short name with the permission model, so applications alias it.
+guard; an empty list declares nothing and is refused, as is a guard that is not a non-empty string (`null` included). An
+attribute that cannot be instantiated, because it is repeated or given an argument of the wrong type, is refused too. A
+case without the attribute is a guard-agnostic permission with no description or category. The attribute shares its
+short name with the permission model, so applications alias it.
 
 A provider returns `PermissionDefinition` objects, each a name, description, category and guard:
 
@@ -74,8 +76,10 @@ final class BillingPermissions implements PermissionProvider
 }
 ```
 
-Providers are resolved through the container, so they can take dependencies. A permission declared twice for the same
-guard is kept once when both declarations agree, and refused when their description or category differ.
+Providers are resolved through the container, so they can take dependencies. A provider only feeds the catalogue: its
+permissions are not registered as Gate abilities and do not appear in `effectivePermissions()`, which read only the
+enums. A permission declared twice for the same guard is kept once when both declarations agree, and refused when their
+description or category differ.
 
 ## Sync Command
 
@@ -125,9 +129,9 @@ A stale row is drift only under `--prune`, since without it the sync would leave
 
 ## Failure / Edge Cases
 
-- A name outside the name rules, an empty guard list, an empty guard name, a provider returning anything but
-  definitions, or a conflicting duplicate fails with exit code 2 and an error naming the enum case or provider at
-  fault. Nothing is written.
+- A name outside the name rules, an empty guard list, a guard that is not a non-empty string, a `#[Permission]`
+  attribute that cannot be instantiated, a provider returning anything but definitions, or a conflicting duplicate
+  fails with exit code 2 and an error naming the enum case or provider at fault. Nothing is written.
 - A write that fails part-way (a database error, or an observer or listener that throws) rolls back the whole
   transaction and exits with 2.
 - Pruning deletes the row through the model; the grants of that permission go with it through the foreign keys. Until

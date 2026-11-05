@@ -179,7 +179,10 @@ enum PostPermission: string implements PermissionEnum
 }
 ```
 
-A module that ships its own permissions can declare them with a provider instead of an enum case:
+A module that ships its own permissions can declare them with a provider. A provider's permissions are written to the
+catalogue and can be checked through the `Authorization` facade and `hasPermission()`, but they are not registered as
+Gate abilities and do not appear in `effectivePermissions()`. Declare a permission as an enum case when it must work
+with `Gate`, `@can` or the `can:` middleware:
 
 ```php
 use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
@@ -200,9 +203,9 @@ final class MediaPermissions implements PermissionProvider
 that differ, in one transaction, through the configured permission model. A platform permission that no enum or
 provider declares is reported as `stale` and left alone; `--prune` deletes stale permissions, except system ones, which
 are reported as `protected` and never changed. Permissions owned by a tenant are never read or changed. Every row is
-listed with its action, as a table or, with `--format=json`, as JSON. A name outside the package's name rules, or an
-empty guard list, fails the sync with exit code `2` before anything is written. In CI, `--dry-run` exits with `1` when
-anything would be added, updated or pruned:
+listed with its action, as a table or, with `--format=json`, as JSON. A name outside the package's name rules, an empty
+guard list or a guard that is not a non-empty string fails the sync with exit code `2` before anything is written. In
+CI, `--dry-run` exits with `1` when anything would be added, updated or pruned:
 
 ```bash
 php artisan authorization:sync --dry-run --format=json

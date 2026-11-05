@@ -121,6 +121,11 @@ return [
     | sets without the host application editing a central enum. The classes
     | are validated at boot, but a provider is read only by
     | `authorization:sync`, which writes its permissions alongside the enums'.
+    | A provider's permissions can be checked through the `Authorization`
+    | facade and `hasPermission()`, but they are not registered as Gate
+    | abilities and do not appear in `effectivePermissions()`; declare a
+    | permission as an enum case when it must work with `Gate`, `@can` or the
+    | `can:` middleware.
     |
     */
 
