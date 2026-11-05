@@ -8,11 +8,14 @@ use Illuminate\Console\Command;
 use Illuminate\Database\Connection;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Support\Str;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Services\PermissionService;
+use SineMacula\Laravel\Authorization\Services\RoleService;
+use SineMacula\Laravel\Authorization\Support\GranteeReference;
 
 /**
  * Migrate data from Spatie's `laravel-permission` tables into this package's
@@ -20,15 +23,16 @@ use SineMacula\Laravel\Authorization\Models\Role;
  *
  * Reads Spatie's default table names (`roles`, `permissions`,
  * `model_has_roles`, `model_has_permissions`, `role_has_permissions`) and
- * copies rows into this package's tables, mapping column names (Spatie's
- * `guard_name` becomes `guard`) and generating UUIDs when Spatie used
- * auto-increment IDs. Role and permission names are checked against the models'
- * name rule before they are written; a name that fails it is reported and
- * skipped together with its grants, as is a permission name containing `*`,
- * because `*` is a wildcard here. Spatie's tables are read on the application's
- * default connection and this package's are written on its own
- * (`authorization.connection`), inside one transaction there; the `--dry-run`
- * flag reports counts without writing.
+ * writes each row through the management services, so every role, permission
+ * and grant is validated and reported as any other write here is, mapping
+ * column names (Spatie's `guard_name` becomes `guard`) and generating UUIDs
+ * when Spatie used auto-increment IDs. Role and permission names are checked
+ * against the models' name rule before they are written; a name that fails it
+ * is reported and skipped together with its grants, as is a permission name
+ * containing `*`, because `*` is a wildcard here. Spatie's tables are read on
+ * the application's default connection and this package's are written on its
+ * own (`authorization.connection`), inside one transaction there; the
+ * `--dry-run` flag reports counts without writing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -52,6 +56,27 @@ final class MigrateSpatieCommand extends Command
 
     /** @var string The console command description. */
     protected $description = 'Migrate data from Spatie laravel-permission tables into this package';
+
+    /**
+     * Create a new command instance.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Services\RoleService  $roles
+     * @param  \SineMacula\Laravel\Authorization\Services\PermissionService  $permissions
+     * @param  \SineMacula\Laravel\Authorization\Services\GrantService  $grants
+     */
+    public function __construct(
+
+        /** Creates the roles and grants their permissions. */
+        private readonly RoleService $roles,
+
+        /** Creates the permissions. */
+        private readonly PermissionService $permissions,
+
+        /** Grants the roles and permissions to their grantees. */
+        private readonly GrantService $grants,
+    ) {
+        parent::__construct();
+    }
 
     /**
      * Execute the console command.
@@ -89,8 +114,8 @@ final class MigrateSpatieCommand extends Command
             $roleIdMap       = $this->migrateRoles($dryRun, $counts);
             $permissionIdMap = $this->migratePermissions($dryRun, $counts);
             $this->migrateRolePermissions($roleIdMap, $permissionIdMap, $dryRun, $counts);
-            $counts['authorizable_roles']       = $this->migrateGrants('model_has_roles', 'role_id', 'authorizable_roles', $roleIdMap, $dryRun);
-            $counts['authorizable_permissions'] = $this->migrateGrants('model_has_permissions', 'permission_id', 'authorizable_permissions', $permissionIdMap, $dryRun);
+            $counts['authorizable_roles']       = $this->migrateGrants('model_has_roles', 'role_id', $roleIdMap, $dryRun, $this->grants->grantRole(...));
+            $counts['authorizable_permissions'] = $this->migrateGrants('model_has_permissions', 'permission_id', $permissionIdMap, $dryRun, $this->grants->grantPermission(...));
         };
 
         if ($dryRun) {
@@ -196,24 +221,23 @@ final class MigrateSpatieCommand extends Command
     }
 
     /**
-     * Migrate roles from Spatie's `roles` table.
+     * Migrate roles from Spatie's `roles` table through the role service, so
+     * each is validated and reported as any role created here is. A Spatie
+     * string id is kept; an auto-increment one is replaced by a UUID. A dry run
+     * builds each role without saving it.
      *
      * @param  bool  $dryRun
      * @param  array<string, int>  $counts
-     * @return array<int|string, string>
+     * @return array<int|string, \SineMacula\Laravel\Authorization\Models\Role>
+     *
+     * @throws \Throwable
      */
     private function migrateRoles(bool $dryRun, array &$counts): array
     {
-        /** @var string $targetTable */
-        $targetTable = config('authorization.tables.roles', 'roles');
-
-        /** @var array<int|string, string> $idMap */
         $idMap = [];
 
-        $rows = DB::table('roles')->get();
-
-        foreach ($rows as $row) {
-            /** @var array{id: int|string, name: string, guard_name: string|null, created_at: string|null, updated_at: string|null} $roleRow */
+        foreach (DB::table('roles')->get() as $row) {
+            /** @var array{id: int|string, name: string, guard_name?: string|null} $roleRow */
             $roleRow = (array) $row;
 
             if (!Role::isValidAuthorizationName($roleRow['name'])) {
@@ -222,19 +246,11 @@ final class MigrateSpatieCommand extends Command
                 continue;
             }
 
-            $newId = \is_int($roleRow['id']) ? Str::orderedUuid()->toString() : $roleRow['id'];
+            $guard = $roleRow['guard_name'] ?? null;
 
-            $idMap[$roleRow['id']] = $newId;
-
-            if (!$dryRun) {
-                $this->target()->table($targetTable)->insert([
-                    'id'         => $newId,
-                    'name'       => $roleRow['name'],
-                    'guard'      => $roleRow['guard_name'] ?? null,
-                    'created_at' => $roleRow['created_at'] ?? now(),
-                    'updated_at' => $roleRow['updated_at'] ?? now(),
-                ]);
-            }
+            $idMap[$roleRow['id']] = $dryRun
+                ? new Role(['name' => $roleRow['name'], 'guard' => $guard])
+                : $this->roles->create($roleRow['name'], $guard, id: self::keptId($roleRow['id']));
 
             $counts['roles']++;
         }
@@ -243,48 +259,50 @@ final class MigrateSpatieCommand extends Command
     }
 
     /**
-     * Migrate permissions from Spatie's `permissions` table.
+     * Migrate permissions from Spatie's `permissions` table through the
+     * permission service, keeping string ids as `migrateRoles()` does. A dry
+     * run builds each permission without saving it.
      *
      * @param  bool  $dryRun
      * @param  array<string, int>  $counts
-     * @return array<int|string, string>
+     * @return array<int|string, \SineMacula\Laravel\Authorization\Models\Permission>
+     *
+     * @throws \Throwable
      */
     private function migratePermissions(bool $dryRun, array &$counts): array
     {
-        /** @var string $targetTable */
-        $targetTable = config('authorization.tables.permissions', 'permissions');
-
-        /** @var array<int|string, string> $idMap */
         $idMap = [];
 
-        $rows = DB::table('permissions')->get();
-
-        foreach ($rows as $row) {
-            /** @var array{id: int|string, name: string, guard_name: string|null, created_at: string|null, updated_at: string|null} $permissionRow */
+        foreach (DB::table('permissions')->get() as $row) {
+            /** @var array{id: int|string, name: string, guard_name?: string|null} $permissionRow */
             $permissionRow = (array) $row;
 
             if (!$this->isImportablePermissionName($permissionRow['name'])) {
                 continue;
             }
 
-            $newId = \is_int($permissionRow['id']) ? Str::orderedUuid()->toString() : $permissionRow['id'];
+            $guard = $permissionRow['guard_name'] ?? null;
 
-            $idMap[$permissionRow['id']] = $newId;
-
-            if (!$dryRun) {
-                $this->target()->table($targetTable)->insert([
-                    'id'         => $newId,
-                    'name'       => $permissionRow['name'],
-                    'guard'      => $permissionRow['guard_name'] ?? null,
-                    'created_at' => $permissionRow['created_at'] ?? now(),
-                    'updated_at' => $permissionRow['updated_at'] ?? now(),
-                ]);
-            }
+            $idMap[$permissionRow['id']] = $dryRun
+                ? new Permission(['name' => $permissionRow['name'], 'guard' => $guard])
+                : $this->permissions->create($permissionRow['name'], $guard, id: self::keptId($permissionRow['id']));
 
             $counts['permissions']++;
         }
 
         return $idMap;
+    }
+
+    /**
+     * Return the id an imported row keeps: a Spatie string id as it is, else
+     * null, so the model is given a new UUID.
+     *
+     * @param  int|string  $id
+     * @return string|null
+     */
+    private static function keptId(int|string $id): ?string
+    {
+        return \is_string($id) ? $id : null;
     }
 
     /**
@@ -334,36 +352,31 @@ final class MigrateSpatieCommand extends Command
     }
 
     /**
-     * Migrate `role_has_permissions` to `role_permissions`.
+     * Migrate `role_has_permissions` to `role_permissions` through the role
+     * service, so guard parity is checked and each grant is reported.
      *
-     * @param  array<int|string, string>  $roleIdMap
-     * @param  array<int|string, string>  $permissionIdMap
+     * @param  array<int|string, \SineMacula\Laravel\Authorization\Models\Role>  $roleIdMap
+     * @param  array<int|string, \SineMacula\Laravel\Authorization\Models\Permission>  $permissionIdMap
      * @param  bool  $dryRun
      * @param  array<string, int>  $counts
      * @return void
+     *
+     * @throws \Throwable
      */
     private function migrateRolePermissions(array $roleIdMap, array $permissionIdMap, bool $dryRun, array &$counts): void
     {
-        /** @var string $targetTable */
-        $targetTable = config('authorization.tables.role_permissions', 'role_permissions');
+        foreach (DB::table('role_has_permissions')->get() as $row) {
+            /** @var array{role_id: int|string, permission_id: int|string} $rolePermissionRow */
+            $rolePermissionRow = (array) $row;
+            $role              = $roleIdMap[$rolePermissionRow['role_id']]             ?? null;
+            $permission        = $permissionIdMap[$rolePermissionRow['permission_id']] ?? null;
 
-        $rows = DB::table('role_has_permissions')->get();
-
-        foreach ($rows as $row) {
-            /** @var array{permission_id: int|string, role_id: int|string} $rolePermissionRow */
-            $rolePermissionRow  = (array) $row;
-            $mappedRoleId       = $roleIdMap[$rolePermissionRow['role_id']]             ?? null;
-            $mappedPermissionId = $permissionIdMap[$rolePermissionRow['permission_id']] ?? null;
-
-            if ($mappedRoleId === null || $mappedPermissionId === null) {
+            if ($role === null || $permission === null) {
                 continue;
             }
 
             if (!$dryRun) {
-                $this->target()->table($targetTable)->insert([
-                    'role_id'       => $mappedRoleId,
-                    'permission_id' => $mappedPermissionId,
-                ]);
+                $this->roles->grantPermission($role, $permission);
             }
 
             $counts['role_permissions']++;
@@ -372,41 +385,36 @@ final class MigrateSpatieCommand extends Command
 
     /**
      * Migrate one of Spatie's grant tables (`model_has_roles`,
-     * `model_has_permissions`) to the package's matching grant table and return
-     * the number of grants migrated. A grant whose role or permission was
-     * skipped is skipped with it. Spatie's grants carry no scope, so each is
-     * imported platform-wide, for every application.
+     * `model_has_permissions`) through the grant service and return the number
+     * of grants migrated. A grant whose role or permission was skipped is
+     * skipped with it. Spatie's grants carry no scope, so each is imported
+     * platform-wide, for every application. The grantee is named by Spatie's
+     * `model_type` and `model_id`, so its class need not be loadable.
+     *
+     * @template TModel of \Illuminate\Database\Eloquent\Model
      *
      * @param  string  $source
      * @param  string  $column
-     * @param  string  $target
-     * @param  array<int|string, string>  $idMap
+     * @param  array<int|string, TModel>  $idMap
      * @param  bool  $dryRun
+     * @param  \Closure(\SineMacula\Laravel\Authorization\Support\GranteeReference, TModel): mixed  $grant
      * @return int
      */
-    private function migrateGrants(string $source, string $column, string $target, array $idMap, bool $dryRun): int
+    private function migrateGrants(string $source, string $column, array $idMap, bool $dryRun, \Closure $grant): int
     {
-        /** @var string $targetTable */
-        $targetTable = config('authorization.tables.' . $target, $target);
-        $migrated    = 0;
+        $migrated = 0;
 
         foreach (DB::table($source)->get() as $row) {
-            /** @var array<string, int|string> $grant */
-            $grant    = (array) $row;
-            $mappedId = $idMap[$grant[$column]] ?? null;
+            /** @var array<string, int|string> $spatieGrant */
+            $spatieGrant = (array) $row;
+            $target      = $idMap[$spatieGrant[$column]] ?? null;
 
-            if ($mappedId === null) {
+            if ($target === null) {
                 continue;
             }
 
             if (!$dryRun) {
-                $this->target()->table($targetTable)->insert([
-                    'authorizable_type' => $grant['model_type'],
-                    'authorizable_id'   => (string) $grant['model_id'],
-                    $column             => $mappedId,
-                    'created_at'        => now(),
-                    'updated_at'        => now(),
-                ]);
+                $grant(new GranteeReference((string) $spatieGrant['model_type'], (string) $spatieGrant['model_id']), $target);
             }
 
             $migrated++;

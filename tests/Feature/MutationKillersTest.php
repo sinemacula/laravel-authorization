@@ -311,41 +311,6 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `areAuthorizationGrantExpiriesEqual` compares two DateTimes by UTC
-     * timestamp and treats two nulls as equal. Pins every equality branch
-     * against mutation.
-     *
-     * @return void
-     */
-    public function testGrantExpiriesEqualEveryBranch(): void
-    {
-        /** @phpstan-ignore-next-line class.missingExtends */
-        $probe = new class {
-            use ResolvesPivotExpiry;
-
-            /**
-             * @param  ?\DateTimeInterface  $l
-             * @param  ?\DateTimeInterface  $r
-             * @return bool
-             */
-            public function areEqual(?\DateTimeInterface $l, ?\DateTimeInterface $r): bool
-            {
-                return self::areAuthorizationGrantExpiriesEqual($l, $r);
-            }
-        };
-
-        $a = new \DateTimeImmutable('2026-06-01 12:00:00', new \DateTimeZone('UTC'));
-        $b = new \DateTimeImmutable('2026-06-01 12:00:00', new \DateTimeZone('UTC'));
-        $c = new \DateTimeImmutable('2026-06-01 12:00:01', new \DateTimeZone('UTC'));
-
-        self::assertTrue($probe->areEqual(null, null));
-        self::assertFalse($probe->areEqual($a, null));
-        self::assertFalse($probe->areEqual(null, $a));
-        self::assertTrue($probe->areEqual($a, $b));
-        self::assertFalse($probe->areEqual($a, $c));
-    }
-
-    /**
      * `ResolutionCache::resolveTtl` returns null for a forever-configured cache
      * with no `$maxTtl`, the TTL when just the config applies, and `min - 1`
      * when `$maxTtl` bounds the window. Pins the subtraction-of-1, min

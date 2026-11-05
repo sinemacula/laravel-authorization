@@ -5,14 +5,9 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Concerns;
 
 use Illuminate\Database\Eloquent\Builder;
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
-use Illuminate\Support\Facades\Event;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyAttached as IdentityPolicyAttached;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyDetached as IdentityPolicyDetached;
-use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged as IdentityPolicyExpiryChanged;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePolicyPivot;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
@@ -87,133 +82,69 @@ trait HasPolicies // @phpstan-ignore trait.unused
     }
 
     /**
-     * Attach the given policy to this identity.
+     * Attach the given policy to this identity, through the grant service.
      *
-     * Accepts a `Policy` instance or any Eloquent model — consumers who swap
-     * the policy model via `authorization.models.policy` may pass their own
-     * subclass (or a duck-typed model persisted in the same pivot) without
-     * jumping through inheritance hoops. The shipped `IdentityPolicyAttached`
-     * event expects a `Policy` instance, so non-Policy models are attached
-     * silently; use a Policy-shaped class when event wiring matters.
+     * Only a saved policy model, of the shipped class or the one
+     * `authorization.models.policy` configures, is attached; anything else is
+     * refused.
      *
      * An optional `$expiresAt` makes the attachment temporal — the row is
      * filtered out of `$user->policies` the moment the clock passes the
      * supplied instant, without requiring a sweeper run. Passing null (the
-     * default) creates a forever attachment.
+     * default) creates a forever attachment. Attaching a policy the identity
+     * holds with the same expiry changes nothing and dispatches no event; an
+     * attachment that has expired is re-armed with the new expiry.
      *
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @param  \DateTimeInterface|null  $expiresAt
      * @return static
+     *
+     * @throws \Throwable
      */
-    public function attachPolicy(Model|Policy $policy, ?\DateTimeInterface $expiresAt = null): static
+    public function attachPolicy(Policy $policy, ?\DateTimeInterface $expiresAt = null): static
     {
-        $prior = self::authorizationReadGrantPivot($this, $this->policies()->newPivotStatement(), 'policy_id', (string) $policy->getKey());
-
-        $this->policies()->syncWithoutDetaching([
-            (string) $policy->getKey() => ['expires_at' => $expiresAt],
-        ]);
-
-        if (isset($this->relations['policies'])) {
-            unset($this->relations['policies']);
-        }
-
-        if ($policy instanceof Policy) {
-            Event::dispatch(new IdentityPolicyAttached($this, $policy));
-
-            if ($prior['exists'] && !self::areAuthorizationGrantExpiriesEqual($prior['expires_at'], $expiresAt)) {
-                Event::dispatch(new IdentityPolicyExpiryChanged(
-                    $this,
-                    $policy,
-                    $prior['expires_at'],
-                    $expiresAt,
-                ));
-            }
-        }
+        self::authorizationGrants()->attachPolicy($this, $policy, $expiresAt);
 
         return $this;
     }
 
     /**
-     * Detach the given policy from this identity.
+     * Detach the given policy from this identity, through the grant service.
+     * `IdentityPolicyDetached` fires only when the policy was attached.
      *
-     * Accepts a `Policy` instance or any Eloquent model — same widened contract
-     * as `attachPolicy()`.
-     *
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return static
+     *
+     * @throws \Throwable
      */
-    public function detachPolicy(Model|Policy $policy): static
+    public function detachPolicy(Policy $policy): static
     {
-        $this->policies()->detach($policy->getKey());
-
-        if (isset($this->relations['policies'])) {
-            unset($this->relations['policies']);
-        }
-
-        if ($policy instanceof Policy) {
-            Event::dispatch(new IdentityPolicyDetached($this, $policy));
-        }
+        self::authorizationGrants()->detachPolicy($this, $policy);
 
         return $this;
     }
 
     /**
-     * Replace the identity's attached policies with the supplied set.
+     * Replace the identity's attached policies with the supplied set, through
+     * the grant service.
      *
-     * Accepts `Policy` instances or any Eloquent model — same widened contract
-     * as `attachPolicy()`.
+     * Each entry must be a saved policy model; anything else is refused with
+     * `InvalidGrantTargetException` before anything is written. Each net
+     * attachment fires `IdentityPolicyAttached` and each net detachment fires
+     * `IdentityPolicyDetached`, mirroring the per-row signal of
+     * `attachPolicy()` / `detachPolicy()`. The cache invalidation listener
+     * wired to those events keeps the resolution cache coherent without a
+     * separate forget call in this method. A listed policy whose attachment has
+     * expired is re-armed.
      *
-     * Each net attachment fires `IdentityPolicyAttached` and each net
-     * detachment fires `IdentityPolicyDetached` for Policy-shaped rows,
-     * mirroring the per-row signal of `attachPolicy()` / `detachPolicy()`. The
-     * cache invalidation listener wired to those events keeps the resolution
-     * cache coherent without a separate forget call in this method. Non-Policy
-     * models are still synced silently — the events carry a `Policy` instance
-     * by contract, so detached IDs that resolve to a non-Policy model (or
-     * nothing) are skipped without raising.
-     *
-     * @formatter:off
-     *
-     * @param  array<int, \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Models\Policy>  $policies
-     *
-     * @formatter:on
-     *
+     * @param  array<int, \SineMacula\Laravel\Authorization\Models\Policy>  $policies
      * @return static
+     *
+     * @throws \Throwable
      */
     public function syncPolicies(array $policies): static
     {
-        $resolved = [];
-
-        foreach ($policies as $policy) {
-            $resolved[(string) $policy->getKey()] = $policy;
-        }
-
-        $ids    = \array_keys($resolved);
-        $result = $this->policies()->sync($ids);
-
-        if (isset($this->relations['policies'])) {
-            unset($this->relations['policies']);
-        }
-
-        foreach ($result['attached'] as $id) {
-            $model = $resolved[(string) $id] ?? $this->lookupPolicyById((string) $id);
-
-            if (!($model instanceof Policy)) {
-                continue;
-            }
-
-            Event::dispatch(new IdentityPolicyAttached($this, $model));
-        }
-
-        foreach ($result['detached'] as $id) {
-            $model = $this->lookupPolicyById((string) $id);
-
-            if (!($model instanceof Policy)) {
-                continue;
-            }
-
-            Event::dispatch(new IdentityPolicyDetached($this, $model));
-        }
+        self::authorizationGrants()->syncPolicies($this, $policies);
 
         return $this;
     }
@@ -274,26 +205,6 @@ trait HasPolicies // @phpstan-ignore trait.unused
         $models = $this->policies;
 
         return self::authorizationNearestPivotExpirySeconds($models);
-    }
-
-    /**
-     * Look up a policy model by primary key, used by `syncPolicies()` when the
-     * sync delta surfaces an ID that was not part of the caller's input set
-     * (the detachment list). Returns null when the row no longer exists or
-     * resolves to a non-Policy model — both branches are handled by the caller
-     * as "skip the event.".
-     *
-     * @param  string  $id
-     * @return \SineMacula\Laravel\Authorization\Models\Policy|null
-     */
-    private function lookupPolicyById(string $id): ?Policy
-    {
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
-        $class = config('authorization.models.policy', Policy::class);
-
-        $model = $class::query()->whereKey($id)->first();
-
-        return $model instanceof Policy ? $model : null;
     }
 
     /**

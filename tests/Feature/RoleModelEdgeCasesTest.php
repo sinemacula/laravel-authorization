@@ -13,7 +13,6 @@ use SineMacula\Laravel\Authorization\Concerns\HasRoleHierarchy;
 use SineMacula\Laravel\Authorization\Concerns\ManagesPermissions;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
-use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
@@ -22,18 +21,12 @@ use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use Tests\TestCase;
 
 /**
- * Coverage for two `Role` model branches that the primary suites do not
- * exercise:
- *
- * - `givePermission()` and `syncPermissions()` clear the eager-loaded
- *   `permissions` relation when mutation occurs, so subsequent reads re-hydrate
- *   from the pivot. The clear branch only fires when the caller has in fact
- *   loaded the relation — the RBAC-heavy suites all mutate before loading, so
- *   the branch stays cold.
- * - `resolvePermissionById()` raises `UnknownPermissionException` when the sync
- *   delta surfaces a detached ID whose row has been deleted. This race can only
- *   happen under a concurrent DELETE between the sync call and the
- *   event-dispatch loop.
+ * Coverage for a `Role` model branch that the primary suites do not exercise:
+ * `givePermission()` and `syncPermissions()` clear the eager-loaded
+ * `permissions` relation when mutation occurs, so subsequent reads re-hydrate
+ * from the pivot. The clear branch only fires when the caller has in fact
+ * loaded the relation — the RBAC-heavy suites all mutate before loading, so the
+ * branch stays cold.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -142,31 +135,5 @@ final class RoleModelEdgeCasesTest extends TestCase
 
         self::assertNotNull($ancestors);
         self::assertCount(0, $ancestors);
-    }
-
-    /**
-     * `resolvePermissionById()` raises `UnknownPermissionException` when the
-     * supplied key does not resolve to a row. The public sync surface cannot
-     * reach this directly without a racing delete, so the test invokes the
-     * method via reflection against a key that does not exist.
-     *
-     * @return void
-     *
-     * @SuppressWarnings("php:S3011")
-     */
-    public function testResolvePermissionByIdThrowsOnMissingRow(): void
-    {
-        $role = Role::create([
-            'id'    => (string) Str::uuid(),
-            'name'  => 'editor-missing-perm',
-            'guard' => 'web',
-        ]);
-
-        $reflection = new \ReflectionMethod($role, 'resolvePermissionById');
-        $reflection->setAccessible(true);
-
-        $this->expectException(UnknownPermissionException::class);
-
-        $reflection->invoke($role, '00000000-0000-4000-8000-000000000000');
     }
 }

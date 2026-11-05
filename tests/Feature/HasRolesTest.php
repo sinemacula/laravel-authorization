@@ -7,9 +7,11 @@ namespace Tests\Feature;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Concerns\HasRoles;
+use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
@@ -153,6 +155,33 @@ final class HasRolesTest extends TestCase
         self::assertFalse($user->hasRole($api, 'web'));
         self::assertTrue($user->hasRole($any, 'web'));
         self::assertFalse($user->hasRole('director', 'api'));
+    }
+
+    /**
+     * The write methods go through the grant service: a grant of what is held
+     * dispatches nothing, and each returns the identity.
+     *
+     * @return void
+     */
+    public function testWritesGoThroughTheGrantService(): void
+    {
+        Carbon::setTestNow('2026-07-01 12:00:00');
+        Event::fake([RoleAssigned::class, RoleRevoked::class]);
+
+        $user    = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $role    = Role::query()->create(['name' => 'editor']);
+        $expires = Carbon::parse('2026-07-02 12:00:00', 'UTC');
+
+        self::assertSame($user, $user->assignRole($role, $expires));
+        self::assertSame($user, $user->assignRole('editor', $expires));
+        self::assertSame('2026-07-02 12:00:00', DB::table('authorizable_roles')->value('expires_at'));
+        self::assertSame($user, $user->syncRoles([$role]));
+        Event::assertDispatchedTimes(RoleAssigned::class, 1);
+
+        self::assertSame($user, $user->revokeRole($role));
+        self::assertSame($user, $user->removeRole('editor'));
+        self::assertSame(0, DB::table('authorizable_roles')->count());
+        Event::assertDispatchedTimes(RoleRevoked::class, 1);
     }
 
     /**

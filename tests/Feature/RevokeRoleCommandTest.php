@@ -5,8 +5,10 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Console\RevokeRoleCommand;
+use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
 use SineMacula\Laravel\Authorization\Models\Role;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
@@ -149,5 +151,26 @@ final class RevokeRoleCommandTest extends TestCase
 
         self::assertSame(1, $exitCode);
         self::assertStringContainsString('owned-editor', Artisan::output());
+    }
+
+    /**
+     * Revoking a role the identity does not hold reports it as not held,
+     * succeeds and dispatches nothing.
+     *
+     * @return void
+     */
+    public function testReportsARoleThatIsNotHeld(): void
+    {
+        Role::query()->create(['name' => 'editor', 'guard' => 'web']);
+        StubIdentity::create(['id' => 'b1b1b1b1-0000-0000-0000-000000000002']);
+
+        Event::fake([RoleRevoked::class]);
+
+        $identity = StubIdentity::class . ':b1b1b1b1-0000-0000-0000-000000000002';
+        $exitCode = Artisan::call('authorization:revoke', ['identity' => $identity, 'role' => 'editor']);
+
+        self::assertSame(0, $exitCode);
+        self::assertSame("{$identity} does not hold role 'editor'.", \trim(Artisan::output()));
+        Event::assertNotDispatched(RoleRevoked::class);
     }
 }

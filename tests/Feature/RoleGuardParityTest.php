@@ -162,6 +162,8 @@ final class RoleGuardParityTest extends TestCase
      * can report the offending pair without re-querying.
      *
      * @return void
+     *
+     * @throws \Throwable
      */
     public function testExceptionCarriesBothNamesAndGuards(): void
     {

@@ -7,10 +7,12 @@ namespace Tests\Feature;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
+use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -131,6 +133,33 @@ final class HasPermissionsTest extends TestCase
         self::assertSame([], DB::getQueryLog());
 
         DB::disableQueryLog();
+    }
+
+    /**
+     * The write methods go through the grant service: a grant of what is held
+     * dispatches nothing, and each returns the identity.
+     *
+     * @return void
+     */
+    public function testWritesGoThroughTheGrantService(): void
+    {
+        Carbon::setTestNow('2026-07-01 12:00:00');
+        Event::fake([PermissionGranted::class, PermissionRevoked::class]);
+
+        $user       = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $permission = Permission::query()->create(['name' => 'posts:edit']);
+        $expires    = Carbon::parse('2026-07-02 12:00:00', 'UTC');
+
+        self::assertSame($user, $user->givePermission($permission, $expires));
+        self::assertSame($user, $user->givePermission('posts:edit', $expires));
+        self::assertSame('2026-07-02 12:00:00', DB::table('authorizable_permissions')->value('expires_at'));
+        self::assertSame($user, $user->syncPermissions([$permission]));
+        Event::assertDispatchedTimes(PermissionGranted::class, 1);
+
+        self::assertSame($user, $user->revokePermission($permission));
+        self::assertSame($user, $user->revokePermissionTo('posts:edit'));
+        self::assertSame(0, DB::table('authorizable_permissions')->count());
+        Event::assertDispatchedTimes(PermissionRevoked::class, 1);
     }
 
     /**

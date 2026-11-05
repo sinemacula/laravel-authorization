@@ -11,10 +11,17 @@ use Illuminate\Foundation\Testing\RefreshDatabaseState;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Console\MigrateSpatieCommand;
+use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted;
+use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Permission\Created as PermissionCreated;
+use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
+use SineMacula\Laravel\Authorization\Events\Role\PermissionGranted as RolePermissionGranted;
+use SineMacula\Laravel\Authorization\Support\GranteeReference;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\TestCase;
 
@@ -132,6 +139,37 @@ final class MigrateSpatieCommandTest extends TestCase
             self::assertSame('2026-07-01 12:00:00', Carbon::parse((string) $row->created_at)->format('Y-m-d H:i:s'), $table);
             self::assertSame('2026-07-01 12:00:00', Carbon::parse((string) $row->updated_at)->format('Y-m-d H:i:s'), $table);
         }
+    }
+
+    /**
+     * Every row is written through the management services, so each role,
+     * permission and grant is reported as any other write is, the grantee by
+     * Spatie's type and id. A dry run reports nothing.
+     *
+     * @return void
+     */
+    public function testImportsThroughTheServices(): void
+    {
+        $events = [RoleCreated::class, PermissionCreated::class, RolePermissionGranted::class, RoleAssigned::class, PermissionGranted::class];
+
+        Event::fake($events);
+
+        Artisan::call('authorization:migrate-spatie', ['--dry-run' => true]);
+
+        foreach ($events as $event) {
+            Event::assertNotDispatched($event);
+        }
+
+        Artisan::call('authorization:migrate-spatie');
+
+        Event::assertDispatchedTimes(RoleCreated::class, 2);
+        Event::assertDispatchedTimes(PermissionCreated::class, 3);
+        Event::assertDispatchedTimes(RolePermissionGranted::class, 2);
+        Event::assertDispatched(RoleAssigned::class, static fn (RoleAssigned $event): bool => $event->authorizable instanceof GranteeReference
+            && $event->authorizable->type === 'App\Models\User'
+            && $event->authorizable->id   === '42'
+            && $event->role->name         === 'admin');
+        Event::assertDispatchedTimes(PermissionGranted::class, 1);
     }
 
     /**
