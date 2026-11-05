@@ -572,46 +572,6 @@ final class UncoveredBranchesTest extends TestCase
     }
 
     /**
-     * `ResolvesPivotExpiry::authorizationCoerceExpiresAt` returns null when the
-     * raw pivot value is an empty string. Targets line 139 of the trait.
-     *
-     * @return void
-     */
-    public function testCoerceExpiresAtReturnsNullForEmptyString(): void
-    {
-        // Direct invocation through a helper class that composes the trait —
-        // the public behaviour routes through
-        // `authorizationNearestPivotExpirySeconds` which calls
-        // `authorizationCoerceExpiresAt`. We invoke via reflection on a
-        // freshly-instantiated test-only composer.
-        /** @phpstan-ignore-next-line class.missingExtends */
-        $probe = new class {
-            use ResolvesPivotExpiry;
-
-            /**
-             * @param  mixed  $raw
-             * @return mixed
-             */
-            public function coerce(mixed $raw): mixed
-            {
-                return self::authorizationCoerceExpiresAt($raw);
-            }
-        };
-
-        self::assertNull($probe->coerce(''));
-        self::assertNull($probe->coerce(null));
-        self::assertNull($probe->coerce(42));
-
-        // Non-empty string — exercises the `Carbon::parse($raw)` branch.
-        $carbon = $probe->coerce('2026-01-01 00:00:00');
-        self::assertInstanceOf(\Illuminate\Support\Carbon::class, $carbon);
-
-        // DateTimeInterface — exercises the other branch.
-        $carbon = $probe->coerce(new \DateTimeImmutable('2026-01-01 00:00:00'));
-        self::assertInstanceOf(\Illuminate\Support\Carbon::class, $carbon);
-    }
-
-    /**
      * `ResolvesPivotExpiry::authorizationMinNullable` returns the smaller of
      * two non-null seconds. Targets line 160.
      *
@@ -639,40 +599,6 @@ final class UncoveredBranchesTest extends TestCase
         self::assertSame(5, $probe->min(null, 5));
         self::assertSame(5, $probe->min(5, null));
         self::assertNull($probe->min(null, null));
-    }
-
-    /**
-     * `ResolvesPivotExpiry::authorizationCoerceGrantExpiry` returns the
-     * DateTimeInterface unchanged, parses strings, and null-pads everything
-     * else. Targets lines 254-262.
-     *
-     * @return void
-     */
-    public function testAuthorizationCoerceGrantExpiryHandlesAllBranches(): void
-    {
-        /** @phpstan-ignore-next-line class.missingExtends */
-        $probe = new class {
-            use ResolvesPivotExpiry;
-
-            /**
-             * @param  mixed  $value
-             * @return mixed
-             */
-            public function coerce(mixed $value): mixed
-            {
-                return self::authorizationCoerceGrantExpiry($value);
-            }
-        };
-
-        $expiresAt = new \DateTimeImmutable('+1 hour');
-        self::assertSame($expiresAt, $probe->coerce($expiresAt));
-
-        $carbon = $probe->coerce('2026-01-01 00:00:00');
-        self::assertInstanceOf(\DateTimeInterface::class, $carbon);
-
-        self::assertNull($probe->coerce(null));
-        self::assertNull($probe->coerce(''));
-        self::assertNull($probe->coerce(42));
     }
 
     /**

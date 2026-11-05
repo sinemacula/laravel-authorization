@@ -12,7 +12,9 @@ use PHPUnit\Framework\Attributes\CoversTrait;
 use Psr\Log\AbstractLogger;
 use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
+use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use Tests\Concerns\ChecksGrantExpiry;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -36,6 +38,8 @@ use Tests\TestCase;
 #[CoversTrait(HasPolicies::class)]
 final class HasPoliciesTest extends TestCase
 {
+    use ChecksGrantExpiry;
+
     /**
      * Reset the clock.
      *
@@ -241,6 +245,65 @@ final class HasPoliciesTest extends TestCase
 
         self::assertSame(300, $user->secondsUntilPolicyExpiry());
         self::assertSame(600, $user->secondsUntilPolicyExpiry(true));
+    }
+
+    /**
+     * Return the grant table the expiry check reads.
+     *
+     * @return string
+     */
+    #[\Override]
+    protected static function grantTable(): string
+    {
+        return 'authorizable_policies';
+    }
+
+    /**
+     * Return the event a change of the grant's expiry dispatches.
+     *
+     * @return class-string
+     */
+    #[\Override]
+    protected static function expiryChangedEvent(): string
+    {
+        return PolicyExpiryChanged::class;
+    }
+
+    /**
+     * Return the name of the row the expiry check grants.
+     *
+     * @return string
+     */
+    #[\Override]
+    protected static function grantedName(): string
+    {
+        return 'readers';
+    }
+
+    /**
+     * Grant the identity the checked row until the given instant.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \DateTimeInterface  $expiresAt
+     * @return void
+     */
+    #[\Override]
+    protected function grantUntil(StubIdentity $identity, \DateTimeInterface $expiresAt): void
+    {
+        $identity->attachPolicy(Policy::query()->firstOrCreate(['name' => 'readers'], ['document' => ['version' => 1, 'statements' => []]]), $expiresAt);
+    }
+
+    /**
+     * Return the names of the rows the identity holds.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @return list<string>
+     */
+    #[\Override]
+    protected function heldNames(StubIdentity $identity): array
+    {
+        /** @var list<string> */
+        return $identity->policies->pluck('name')->all();
     }
 
     /**

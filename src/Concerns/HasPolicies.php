@@ -82,7 +82,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
             ->where(static function (Builder $query) use ($pivot): void {
                 // @phpstan-ignore staticMethod.dynamicCall
                 $query->whereNull($pivot . '.expires_at')
-                    ->orWhere($pivot . '.expires_at', '>', Carbon::now());
+                    ->orWhere($pivot . '.expires_at', '>', Carbon::now('UTC'));
             });
     }
 

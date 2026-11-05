@@ -268,45 +268,6 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * `authorizationCoerceExpiresAt` returns a Carbon for strings and DateTime
-     * values, null for everything else. Pins the string-not-empty and DateTime
-     * instanceof branches.
-     *
-     * @return void
-     */
-    public function testCoerceExpiresAtCoerciveBranches(): void
-    {
-        /** @phpstan-ignore-next-line class.missingExtends */
-        $probe = new class {
-            use ResolvesPivotExpiry;
-
-            /**
-             * @param  mixed  $raw
-             * @return mixed
-             */
-            public function coerce(mixed $raw): mixed
-            {
-                return self::authorizationCoerceExpiresAt($raw);
-            }
-        };
-
-        $timestamp = $probe->coerce('2026-06-01 12:00:00');
-        self::assertInstanceOf(Carbon::class, $timestamp);
-        self::assertSame('2026-06-01 12:00:00', $timestamp->toDateTimeString());
-
-        $source    = new \DateTimeImmutable('2025-01-01 00:00:00');
-        $timestamp = $probe->coerce($source);
-        self::assertInstanceOf(Carbon::class, $timestamp);
-        self::assertSame('2025-01-01 00:00:00', $timestamp->toDateTimeString());
-
-        self::assertNull($probe->coerce(null));
-        self::assertNull($probe->coerce(''));
-        self::assertNull($probe->coerce(0));
-        self::assertNull($probe->coerce(42));
-        self::assertNull($probe->coerce(new \stdClass));
-    }
-
-    /**
      * `authorizationSecondsUntilPivotExpiry` subtracts `nowTimestamp` from the
      * pivot expiry and returns null when the result is zero or negative. Pins
      * the `> 0` branch against `>= 0` mutants.

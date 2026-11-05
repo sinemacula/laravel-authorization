@@ -72,7 +72,10 @@ $schema->create($table, static function (Blueprint $blueprint) use ($table, $rol
 );
 ```
 
-The expiry is a `dateTime` in UTC rather than a `timestamp`, which stops at 2038 on MySQL.
+The expiry is a `dateTime` rather than a `timestamp`, which stops at 2038 on MySQL. A `dateTime` keeps no zone, so
+the expiry is stored in UTC: the grant pivots' `UtcDateTime` cast converts an expiry given in any zone to UTC before
+writing it and reads it back as UTC, and the relations compare it with the current time in UTC, so a grant lapses at
+the instant it names whatever the caller's or the application's zone.
 
 ## Scope
 
@@ -84,9 +87,10 @@ are the next steps, and use these columns as they stand.
 
 ## Pivot Class Hierarchy
 
-A shared abstract base, `AuthorizableGrantPivot`, extends Laravel's `MorphPivot` and casts `expires_at` to `datetime`
-so consumers inspecting `$role->pivot->expires_at` receive a `Carbon|null`. It also names the package's connection,
-since Laravel would otherwise hand a pivot the connection of the grantee the relation starts from. Three leaf subclasses
+A shared abstract base, `AuthorizableGrantPivot`, extends Laravel's `MorphPivot` and casts `expires_at` with
+`UtcDateTime`, so consumers inspecting `$role->pivot->expires_at` receive a UTC `Carbon|null`. It also names the
+package's connection (the application's default when `authorization.connection` is unset), since Laravel would
+otherwise hand a pivot the connection of the grantee the relation starts from. Three leaf subclasses
 exist -- one per table:
 
 - `AuthorizableRolePivot` -- bound via `->using(...)` on `HasRoles::roles()`.

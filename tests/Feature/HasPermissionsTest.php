@@ -9,8 +9,10 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
+use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use Tests\Concerns\ChecksGrantExpiry;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -28,6 +30,8 @@ use Tests\TestCase;
 #[CoversTrait(HasPermissions::class)]
 final class HasPermissionsTest extends TestCase
 {
+    use ChecksGrantExpiry;
+
     /**
      * Reset the clock.
      *
@@ -123,6 +127,65 @@ final class HasPermissionsTest extends TestCase
         self::assertSame([], DB::getQueryLog());
 
         DB::disableQueryLog();
+    }
+
+    /**
+     * Return the grant table the expiry check reads.
+     *
+     * @return string
+     */
+    #[\Override]
+    protected static function grantTable(): string
+    {
+        return 'authorizable_permissions';
+    }
+
+    /**
+     * Return the event a change of the grant's expiry dispatches.
+     *
+     * @return class-string
+     */
+    #[\Override]
+    protected static function expiryChangedEvent(): string
+    {
+        return PermissionExpiryChanged::class;
+    }
+
+    /**
+     * Return the name of the row the expiry check grants.
+     *
+     * @return string
+     */
+    #[\Override]
+    protected static function grantedName(): string
+    {
+        return 'posts:edit';
+    }
+
+    /**
+     * Grant the identity the checked row until the given instant.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @param  \DateTimeInterface  $expiresAt
+     * @return void
+     */
+    #[\Override]
+    protected function grantUntil(StubIdentity $identity, \DateTimeInterface $expiresAt): void
+    {
+        $identity->givePermission(Permission::query()->firstOrCreate(['name' => 'posts:edit']), $expiresAt);
+    }
+
+    /**
+     * Return the names of the rows the identity holds.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $identity
+     * @return list<string>
+     */
+    #[\Override]
+    protected function heldNames(StubIdentity $identity): array
+    {
+        /** @var list<string> */
+        return $identity->permissions->pluck('name')->all();
     }
 
     /**

@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Concerns;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
+use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 
 /**
  * Shared helpers used by the authorizable-identity traits to feed the
@@ -118,7 +119,7 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
         /** @var mixed $raw */
         $raw = $pivot->expires_at ?? null;
 
-        $expiresAt = self::authorizationCoerceExpiresAt($raw);
+        $expiresAt = UtcDateTime::toUtc($raw);
 
         if ($expiresAt === null) {
             return null;
@@ -127,22 +128,6 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
         $seconds = $expiresAt->getTimestamp() - $nowTimestamp;
 
         return $seconds > 0 ? $seconds : null;
-    }
-
-    /**
-     * Coerce a raw pivot `expires_at` value (string, Carbon,
-     * `DateTimeInterface`, or null) into a `Carbon` instance or null.
-     *
-     * @param  mixed  $raw
-     * @return \Illuminate\Support\Carbon|null
-     */
-    private static function authorizationCoerceExpiresAt(mixed $raw): ?Carbon
-    {
-        return match (true) {
-            $raw instanceof \DateTimeInterface => Carbon::instance(Carbon::parse($raw)),
-            \is_string($raw) && $raw !== ''    => Carbon::parse($raw),
-            default                            => null,
-        };
     }
 
     /**
@@ -203,29 +188,8 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
 
         return [
             'exists'     => true,
-            'expires_at' => self::authorizationCoerceGrantExpiry($row->expires_at),
+            'expires_at' => UtcDateTime::toUtc($row->expires_at),
         ];
-    }
-
-    /**
-     * Coerce a raw pivot `expires_at` value (string from a DB query, Carbon,
-     * `DateTimeInterface`, or null) into a `DateTimeInterface` or null. Shared
-     * by the three authorizable-identity traits.
-     *
-     * @param  mixed  $value
-     * @return \DateTimeInterface|null
-     */
-    private static function authorizationCoerceGrantExpiry(mixed $value): ?\DateTimeInterface
-    {
-        if ($value instanceof \DateTimeInterface) {
-            return $value;
-        }
-
-        if (\is_string($value) && $value !== '') {
-            return Carbon::parse($value);
-        }
-
-        return null;
     }
 
     /**

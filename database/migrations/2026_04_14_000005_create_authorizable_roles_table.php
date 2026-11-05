@@ -57,9 +57,11 @@ return new class extends Migration {
             $blueprint->string('application', 191)->nullable();
 
             // Optional expiry for temporal grants, in UTC; null means
-            // "forever". Rows whose `expires_at` is in the past are filtered
-            // out of the relation on read. A `dateTime` rather than a
-            // `timestamp`, which stops at 2038 on MySQL.
+            // "forever". The grant pivot converts every expiry to UTC before
+            // writing it and reads it back as UTC, since a `dateTime` keeps no
+            // zone. Rows whose `expires_at` is in the past are filtered out of
+            // the relation on read. A `dateTime` rather than a `timestamp`,
+            // which stops at 2038 on MySQL.
             $blueprint->dateTime('expires_at')->nullable();
 
             // Who made the grant, when the caller names them.
