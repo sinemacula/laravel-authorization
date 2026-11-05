@@ -221,7 +221,7 @@ final class ResolvesPivotExpiryTest extends TestCase
         DB::table('authorizable_roles')->insert([
             'role_id'           => $role->id,
             'authorizable_type' => $identity->getMorphClass(),
-            'authorizable_id'   => $identity->id,
+            'authorizable_id'   => $identity->getKey(),
             'expires_at'        => $expiresAt,
         ]);
     }
