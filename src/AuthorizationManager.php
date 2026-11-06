@@ -10,9 +10,11 @@ use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
+use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
@@ -59,6 +61,7 @@ final class AuthorizationManager
      * @param  \SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore  $lastDecisionStore
      * @param  \Illuminate\Contracts\Events\Dispatcher|null  $events
      * @param  \Illuminate\Contracts\Translation\Translator|null  $translator
+     * @param  \SineMacula\Laravel\Authorization\Context\CheckContextFactory|null  $contexts
      */
     public function __construct(
 
@@ -79,6 +82,9 @@ final class AuthorizationManager
 
         /** Translator that words a denial's message; null keeps English. */
         private readonly ?Translator $translator = null,
+
+        /** Makes each check's context from its sources; null gives a check only what the caller passes, under `input`. */
+        private readonly ?CheckContextFactory $contexts = null,
     ) {}
 
     /**
@@ -126,6 +132,12 @@ final class AuthorizationManager
      * other form adapts (D22): `can()` reads whether it is allowed and
      * `authorize()` throws when it is not. The decision is recorded as the last
      * decision and reported with `DecisionEvaluated`.
+     *
+     * The context is what the caller passes, which a policy reads under `input`
+     * (`['post' => ['status' => 'draft']]` is `input.post.status`) and never
+     * anywhere else: the `authentication`, `request` and `environment`
+     * namespaces, and those the application's sources add, come from their
+     * sources alone, built only when a statement of the check reads them.
      *
      * @param  string  $action
      * @param  mixed  $resource
@@ -372,7 +384,11 @@ final class AuthorizationManager
             return Decision::deny(DecisionReason::INVALID_POLICY, DecisionStage::DENY);
         }
 
-        $decision = $this->evaluator->evaluate($policies, $action, $resource, $context, $subject->subject);
+        // What the caller passes is held under `input` alone, never promoted
+        // into another namespace, so it cannot stand in for the request, the
+        // authentication or any source's values (N27).
+        $checkContext = $this->contexts?->make($context) ?? new CheckContext([CheckContextFactory::INPUT => $context]);
+        $decision     = $this->evaluator->evaluate($policies, $action, $resource, $checkContext, $subject->subject);
 
         return $decision->stage === DecisionStage::IMPLICIT ? $decision->withPermission(SubjectGrants::holdsPermission($subject, $action)) : $decision;
     }

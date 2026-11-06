@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use Illuminate\Contracts\Translation\Translator;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Http\Middleware\TrustProxies;
 use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
@@ -18,8 +19,10 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware;
 use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
+use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ChecksAccess;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
@@ -366,6 +369,46 @@ final class AuthorizeActionTest extends TestCase
 
         $this->getJson('/listed/post-1')->assertOk();
         $this->getJson('/listed/post-2')->assertForbidden();
+    }
+
+    /**
+     * In a routed request the `request` namespace is the request's: its address
+     * as the trusted proxies resolve it, its method and its route's name, never
+     * what the caller passes. Outside a routed request it is absent, so its
+     * keys are missing.
+     *
+     * @return void
+     */
+    public function testTheRequestNamespaceIsTheRoutedRequests(): void
+    {
+        Route::middleware('authorize:posts:update')->post('/drafts', static fn (): string => 'ok')->name('drafts.store');
+
+        $identity = StubIdentity::create(['id' => 'author']);
+
+        $identity->attachPolicy(Policy::create(['name' => 'from-the-office', 'document' => ['statements' => [
+            ['effect' => 'allow', 'actions' => ['posts:update'], 'conditions' => [
+                'ip_in' => ['request.ip' => '203.0.113.0/24'],
+                'eq'    => ['request.method' => 'POST', 'request.route' => 'drafts.store'],
+            ]],
+            ['effect' => 'allow', 'actions' => [self::ACTION], 'conditions' => ['null' => ['request.ip' => true, 'request.route' => true]]],
+        ]]]));
+
+        $this->actAs($identity);
+
+        self::assertFalse(Authorization::can('posts:update', null, ['request' => ['ip' => '203.0.113.7', 'method' => 'POST', 'route' => 'drafts.store']]));
+        self::assertTrue(Authorization::can(self::ACTION));
+
+        TrustProxies::at(['10.0.0.5']);
+
+        try {
+            $this->withServerVariables(['REMOTE_ADDR' => '10.0.0.5'])->withHeader('X-Forwarded-For', '203.0.113.7')->postJson('/drafts')->assertOk();
+            $this->withServerVariables(['REMOTE_ADDR' => '10.0.0.6'])->withHeader('X-Forwarded-For', '203.0.113.7')->postJson('/drafts')->assertForbidden();
+            $this->withServerVariables(['REMOTE_ADDR' => '10.0.0.6'])->postJson('/drafts', ['request' => ['ip' => '203.0.113.7']])->assertForbidden();
+        } finally {
+            TrustProxies::flushState();
+        }
+
+        $this->getJson('/posts')->assertForbidden();
     }
 
     /**

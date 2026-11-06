@@ -4,9 +4,11 @@ declare(strict_types = 1);
 
 namespace Tests\Unit\Evaluation;
 
+use Illuminate\Support\Arr;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
 use SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator;
 use SineMacula\Laravel\Authorization\Evaluation\ConditionOperands;
 use SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator;
@@ -50,6 +52,9 @@ final class StatementTest extends TestCase
     // Hydration and serialisation
     // ------------------------------------------------------------------
 
+    /** @var array<string, int> How many times each namespace has been built. */
+    private array $builds = [];
+
     /**
      * Provide documents that round-trip through fromArray() and toArray()
      * exactly, every key they were given and no other.
@@ -64,7 +69,7 @@ final class StatementTest extends TestCase
             'effect'     => 'allow',
             'actions'    => ['posts:read', 'posts:list'],
             'resources'  => ['post:*'],
-            'conditions' => ['eq' => ['tenant' => 'org-1'], 'ip_in_if_exists' => ['request.ip' => ['10.0.0.0/8']]],
+            'conditions' => ['eq' => ['input.tenant' => 'org-1'], 'ip_in_if_exists' => ['request.ip' => ['10.0.0.0/8']]],
         ]];
         yield 'negated lists' => [[
             'sid'           => 'deny.others:1',
@@ -248,43 +253,43 @@ final class StatementTest extends TestCase
         yield 'string_like' => [['string_like' => ['name' => 'admin*']], 'conditions have an unknown operator \'string_like\''];
         yield 'not_null' => [['not_null' => ['name' => true]], 'conditions have an unknown operator \'not_null\''];
         yield 'null_if_exists' => [['null_if_exists' => ['name' => true]], 'conditions have an unknown operator \'null_if_exists\''];
-        yield 'list of conditions' => [[['eq' => ['k' => 1]]], 'conditions must map operator names to key tests'];
+        yield 'list of conditions' => [[['eq' => ['input.k' => 1]]], 'conditions must map operator names to key tests'];
         yield 'operator without tests' => [['eq' => []], 'condition operator \'eq\' must map context keys to operands'];
         yield 'operator with a value' => [['eq' => 'org-1'], 'condition operator \'eq\' must map context keys to operands'];
-        yield 'eq list' => [['eq' => ['tenant' => ['org-1', 'org-2']]], 'condition \'tenant\' has an invalid operand for operator \'eq\''];
-        yield 'neq null' => [['neq' => ['tenant' => null]], 'condition \'tenant\' has an invalid operand for operator \'neq\''];
-        yield 'in string' => [['in' => ['role' => 'admin']], 'condition \'role\' has an invalid operand for operator \'in\''];
-        yield 'not_in empty' => [['not_in' => ['role' => []]], 'condition \'role\' has an invalid operand for operator \'not_in\''];
-        yield 'in null member' => [['in' => ['role' => ['admin', null]]], 'condition \'role\' has an invalid operand for operator \'in\''];
-        yield 'starts_with empty' => [['starts_with' => ['path' => '']], 'condition \'path\' has an invalid operand for operator \'starts_with\''];
-        yield 'ends_with list' => [['ends_with' => ['path' => ['.json']]], 'condition \'path\' has an invalid operand for operator \'ends_with\''];
-        yield 'like empty' => [['like' => ['name' => '']], 'condition \'name\' has an invalid operand for operator \'like\''];
-        yield 'like nul byte' => [['like' => ['ua' => "curl\0*"]], 'condition \'ua\' has an invalid operand for operator \'like\''];
-        yield 'starts_with nul byte' => [['starts_with' => ['path' => "/a\0"]], 'condition \'path\' has an invalid operand for operator \'starts_with\''];
+        yield 'eq list' => [['eq' => ['input.tenant' => ['org-1', 'org-2']]], 'condition \'input.tenant\' has an invalid operand for operator \'eq\''];
+        yield 'neq null' => [['neq' => ['input.tenant' => null]], 'condition \'input.tenant\' has an invalid operand for operator \'neq\''];
+        yield 'in string' => [['in' => ['input.role' => 'admin']], 'condition \'input.role\' has an invalid operand for operator \'in\''];
+        yield 'not_in empty' => [['not_in' => ['input.role' => []]], 'condition \'input.role\' has an invalid operand for operator \'not_in\''];
+        yield 'in null member' => [['in' => ['input.role' => ['admin', null]]], 'condition \'input.role\' has an invalid operand for operator \'in\''];
+        yield 'starts_with empty' => [['starts_with' => ['input.path' => '']], 'condition \'input.path\' has an invalid operand for operator \'starts_with\''];
+        yield 'ends_with list' => [['ends_with' => ['input.path' => ['.json']]], 'condition \'input.path\' has an invalid operand for operator \'ends_with\''];
+        yield 'like empty' => [['like' => ['input.name' => '']], 'condition \'input.name\' has an invalid operand for operator \'like\''];
+        yield 'like nul byte' => [['like' => ['input.ua' => "curl\0*"]], 'condition \'input.ua\' has an invalid operand for operator \'like\''];
+        yield 'starts_with nul byte' => [['starts_with' => ['input.path' => "/a\0"]], 'condition \'input.path\' has an invalid operand for operator \'starts_with\''];
         yield 'ends_with nul byte reference' => [
-            ['ends_with' => ['path' => "\${context.suffix}\0"]],
-            'condition \'path\' has an invalid operand for operator \'ends_with\'',
+            ['ends_with' => ['input.path' => "\${input.suffix}\0"]],
+            'condition \'input.path\' has an invalid operand for operator \'ends_with\'',
         ];
-        yield 'ip_in nul byte' => [['ip_in' => ['ip' => "10.0.0.0\0/8"]], 'condition \'ip\' has an invalid operand for operator \'ip_in\''];
-        yield 'ip_in zone id' => [['ip_in' => ['ip' => 'fe80::%en0/10']], 'condition \'ip\' has an invalid operand for operator \'ip_in\''];
-        yield 'ip_not_in leading zero' => [['ip_not_in' => ['ip' => '010.0.0.0/8']], 'condition \'ip\' has an invalid operand for operator \'ip_not_in\''];
-        yield 'gt word' => [['gt' => ['age' => 'abc']], 'condition \'age\' has an invalid operand for operator \'gt\''];
-        yield 'lte infinite' => [['lte' => ['age' => \INF]], 'condition \'age\' has an invalid operand for operator \'lte\''];
-        yield 'before unparseable' => [['before' => ['at' => 'not-a-date']], 'condition \'at\' has an invalid operand for operator \'before\''];
-        yield 'between one bound' => [['between' => ['at' => ['2026-04-10']]], 'condition \'at\' has an invalid operand for operator \'between\''];
-        yield 'bool yes' => [['bool' => ['flag' => 'yes']], 'condition \'flag\' has an invalid operand for operator \'bool\''];
-        yield 'null string' => [['null' => ['deleted_at' => 'true']], 'condition \'deleted_at\' has an invalid operand for operator \'null\''];
-        yield 'before nul byte' => [['before' => ['at' => "2026-04-15\0"]], 'condition \'at\' has an invalid operand for operator \'before\''];
-        yield 'between nul byte' => [['between' => ['at' => ["2026-04-10\0", '2026-04-15']]], 'condition \'at\' has an invalid operand for operator \'between\''];
-        yield 'ip_in bad range' => [['ip_in' => ['ip' => '10.0.0.0/33']], 'condition \'ip\' has an invalid operand for operator \'ip_in\''];
-        yield 'ip_not_in empty set' => [['ip_not_in' => ['ip' => []]], 'condition \'ip\' has an invalid operand for operator \'ip_not_in\''];
-        yield 'any_value_in nested' => [['any_value_in' => ['tags' => [['a']]]], 'condition \'tags\' has an invalid operand for operator \'any_value_in\''];
-        yield 'all_values_in string' => [['all_values_in' => ['tags' => 'a']], 'condition \'tags\' has an invalid operand for operator \'all_values_in\''];
-        yield 'suffixed operand' => [['eq_if_exists' => ['tenant' => ['org-1']]], 'condition \'tenant\' has an invalid operand for operator \'eq\''];
-        yield 'malformed reference' => [['eq' => ['tenant' => '${foo']], 'condition \'tenant\' has a malformed ${…} reference'];
-        yield 'malformed pattern reference' => [['like' => ['name' => 'admin-${context.tenant-id}*']], 'condition \'name\' has a malformed ${…} reference'];
+        yield 'ip_in nul byte' => [['ip_in' => ['input.ip' => "10.0.0.0\0/8"]], 'condition \'input.ip\' has an invalid operand for operator \'ip_in\''];
+        yield 'ip_in zone id' => [['ip_in' => ['input.ip' => 'fe80::%en0/10']], 'condition \'input.ip\' has an invalid operand for operator \'ip_in\''];
+        yield 'ip_not_in leading zero' => [['ip_not_in' => ['input.ip' => '010.0.0.0/8']], 'condition \'input.ip\' has an invalid operand for operator \'ip_not_in\''];
+        yield 'gt word' => [['gt' => ['input.age' => 'abc']], 'condition \'input.age\' has an invalid operand for operator \'gt\''];
+        yield 'lte infinite' => [['lte' => ['input.age' => \INF]], 'condition \'input.age\' has an invalid operand for operator \'lte\''];
+        yield 'before unparseable' => [['before' => ['input.at' => 'not-a-date']], 'condition \'input.at\' has an invalid operand for operator \'before\''];
+        yield 'between one bound' => [['between' => ['input.at' => ['2026-04-10']]], 'condition \'input.at\' has an invalid operand for operator \'between\''];
+        yield 'bool yes' => [['bool' => ['input.flag' => 'yes']], 'condition \'input.flag\' has an invalid operand for operator \'bool\''];
+        yield 'null string' => [['null' => ['input.deleted_at' => 'true']], 'condition \'input.deleted_at\' has an invalid operand for operator \'null\''];
+        yield 'before nul byte' => [['before' => ['input.at' => "2026-04-15\0"]], 'condition \'input.at\' has an invalid operand for operator \'before\''];
+        yield 'between nul byte' => [['between' => ['input.at' => ["2026-04-10\0", '2026-04-15']]], 'condition \'input.at\' has an invalid operand for operator \'between\''];
+        yield 'ip_in bad range' => [['ip_in' => ['input.ip' => '10.0.0.0/33']], 'condition \'input.ip\' has an invalid operand for operator \'ip_in\''];
+        yield 'ip_not_in empty set' => [['ip_not_in' => ['input.ip' => []]], 'condition \'input.ip\' has an invalid operand for operator \'ip_not_in\''];
+        yield 'any_value_in nested' => [['any_value_in' => ['input.tags' => [['a']]]], 'condition \'input.tags\' has an invalid operand for operator \'any_value_in\''];
+        yield 'all_values_in string' => [['all_values_in' => ['input.tags' => 'a']], 'condition \'input.tags\' has an invalid operand for operator \'all_values_in\''];
+        yield 'suffixed operand' => [['eq_if_exists' => ['input.tenant' => ['org-1']]], 'condition \'input.tenant\' has an invalid operand for operator \'eq\''];
+        yield 'malformed reference' => [['eq' => ['input.tenant' => '${foo']], 'condition \'input.tenant\' has a malformed ${…} reference'];
+        yield 'malformed pattern reference' => [['like' => ['input.name' => 'admin-${input.tenant-id}*']], 'condition \'input.name\' has a malformed ${…} reference'];
         yield 'first fault reported' => [
-            ['eq' => ['tenant' => ['x']], 'bogus' => ['k' => 1]],
+            ['eq' => ['input.tenant' => ['x']], 'bogus' => ['k' => 1]],
             'conditions have an unknown operator \'bogus\'',
         ];
     }
@@ -517,14 +522,14 @@ final class StatementTest extends TestCase
     {
         $interpolator = new ContextInterpolator;
         $byPrincipal  = self::allowOn('posts:${principal.id}:*');
-        $byContext    = self::allowOn('tenant:${context.tenant_id}:*');
+        $byContext    = self::allowOn('tenant:${input.tenant_id}:*');
         $byType       = self::allowOn('${resource.type}:*');
         $byName       = self::allowOn('folder:${principal.username}/*');
 
         self::assertTrue($byPrincipal->matches('posts:read', 'posts:42:draft', $interpolator, (object) ['id' => 42]));
         self::assertFalse($byPrincipal->matches('posts:read', 'posts:99:draft', $interpolator, (object) ['id' => 42]));
-        self::assertTrue($byContext->matches('posts:read', 'tenant:org-5:posts', $interpolator, null, ['tenant_id' => 'org-5']));
-        self::assertFalse($byContext->matches('posts:read', 'tenant:org-9:posts', $interpolator, null, ['tenant_id' => 'org-5']));
+        self::assertTrue($byContext->matches('posts:read', 'tenant:org-5:posts', $interpolator, null, ['input' => ['tenant_id' => 'org-5']]));
+        self::assertFalse($byContext->matches('posts:read', 'tenant:org-9:posts', $interpolator, null, ['input' => ['tenant_id' => 'org-5']]));
         self::assertTrue($byType->matches('posts:read', 'posts:42', $interpolator));
         self::assertFalse($byName->matches('posts:read', 'folder:alice/report', $interpolator, (object) ['username' => '*']));
         self::assertTrue($byName->matches('posts:read', 'folder:*/report', $interpolator, (object) ['username' => '*']));
@@ -544,13 +549,13 @@ final class StatementTest extends TestCase
         $interpolator = new ContextInterpolator;
         $unresolved   = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read'], 'resources' => ['posts:${principal.id}:*', 'arn:users:*']]);
         $fallback     = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read'], 'resources' => ['posts:${principal.id}:*', 'posts:*']]);
-        $malformed    = new Statement(PolicyEffect::DENY, ['posts:read'], ['posts:${context.tenant-id}']);
+        $malformed    = new Statement(PolicyEffect::DENY, ['posts:read'], ['posts:${input.tenant-id}']);
 
         self::assertResult(MatchOutcome::UNDECIDABLE, self::UNRESOLVED_RESOURCE, $unresolved->assess('posts:read', 'posts:42:draft', [], $interpolator));
         self::assertFalse($unresolved->matches('posts:read', 'posts:42:draft', $interpolator));
         self::assertResult(MatchOutcome::MATCHES, '', $fallback->assess('posts:read', 'posts:42:draft', [], $interpolator));
-        self::assertResult(MatchOutcome::UNDECIDABLE, self::UNRESOLVED_RESOURCE, $malformed->assess('posts:read', 'posts:1', ['tenant-id' => '1'], $interpolator));
-        self::assertResult(MatchOutcome::MATCHES, '', $malformed->assess('posts:read', 'posts:${context.tenant-id}'));
+        self::assertResult(MatchOutcome::UNDECIDABLE, self::UNRESOLVED_RESOURCE, $malformed->assess('posts:read', 'posts:1', ['input' => ['tenant-id' => '1']], $interpolator));
+        self::assertResult(MatchOutcome::MATCHES, '', $malformed->assess('posts:read', 'posts:${input.tenant-id}'));
     }
 
     /**
@@ -564,17 +569,17 @@ final class StatementTest extends TestCase
     public function testAResourcePatternHoldingANulByteIsUnresolved(): void
     {
         $interpolator = new ContextInterpolator;
-        $substituted  = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read'], 'resources' => ['posts:${context.tenant}:*']]);
-        $fallback     = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read'], 'resources' => ['posts:${context.tenant}:*', 'posts:*']]);
-        $negated      = Statement::fromArray(['effect' => 'allow', 'actions' => ['posts:read'], 'not_resources' => ['posts:${context.tenant}:*']]);
+        $substituted  = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read'], 'resources' => ['posts:${input.tenant}:*']]);
+        $fallback     = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read'], 'resources' => ['posts:${input.tenant}:*', 'posts:*']]);
+        $negated      = Statement::fromArray(['effect' => 'allow', 'actions' => ['posts:read'], 'not_resources' => ['posts:${input.tenant}:*']]);
         $literal      = new Statement(PolicyEffect::DENY, ['posts:read'], ["posts:\0*"]);
-        $context      = ['tenant' => "org\0"];
+        $context      = ['input' => ['tenant' => "org\0"]];
 
         self::assertResult(MatchOutcome::UNDECIDABLE, self::UNRESOLVED_RESOURCE, $substituted->assess('posts:read', 'posts:org:1', $context, $interpolator));
         self::assertResult(MatchOutcome::MATCHES, '', $fallback->assess('posts:read', 'posts:org:1', $context, $interpolator));
         self::assertResult(MatchOutcome::UNDECIDABLE, self::UNRESOLVED_RESOURCE, $negated->assess('posts:read', 'posts:org:1', $context, $interpolator));
         self::assertResult(MatchOutcome::UNDECIDABLE, self::UNRESOLVED_RESOURCE, $literal->assess('posts:read', 'posts:1'));
-        self::assertResult(MatchOutcome::MATCHES, '', $substituted->assess('posts:read', 'posts:org:1', ['tenant' => 'org'], $interpolator));
+        self::assertResult(MatchOutcome::MATCHES, '', $substituted->assess('posts:read', 'posts:org:1', ['input' => ['tenant' => 'org']], $interpolator));
     }
 
     // ------------------------------------------------------------------
@@ -638,7 +643,7 @@ final class StatementTest extends TestCase
                 continue;
             }
 
-            yield "{$operator} undecidable" => [$operator, $operand, $undecidable, MatchOutcome::UNDECIDABLE, "condition 'k': operator '{$operator}' {$details[$operator]}"];
+            yield "{$operator} undecidable" => [$operator, $operand, $undecidable, MatchOutcome::UNDECIDABLE, "condition 'input.k': operator '{$operator}' {$details[$operator]}"];
         }
     }
 
@@ -656,12 +661,12 @@ final class StatementTest extends TestCase
     #[DataProvider('operatorProvider')]
     public function testEveryOperator(string $operator, mixed $operand, mixed $actual, MatchOutcome $outcome, string $detail): void
     {
-        $statement = Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => [$operator => ['k' => $operand]]]);
-        $result    = $statement->assess('x', null, ['k' => $actual]);
+        $statement = Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => [$operator => ['input.k' => $operand]]]);
+        $result    = $statement->assess('x', null, ['input' => ['k' => $actual]]);
 
         self::assertResult($outcome, $detail, $result);
-        self::assertSame(['k' => $outcome === MatchOutcome::MATCHES], $result->conditions);
-        self::assertSame($outcome === MatchOutcome::MATCHES, $statement->conditionsSatisfiedBy(['k' => $actual]));
+        self::assertSame(['input.k' => $outcome === MatchOutcome::MATCHES], $result->conditions);
+        self::assertSame($outcome === MatchOutcome::MATCHES, $statement->conditionsSatisfiedBy(['input' => ['k' => $actual]]));
     }
 
     /**
@@ -676,28 +681,28 @@ final class StatementTest extends TestCase
             'effect'     => 'allow',
             'actions'    => ['posts:read'],
             'conditions' => [
-                'eq'    => ['tenant' => 'org-1', 'level' => 3],
-                'in'    => ['role' => ['admin', 'staff']],
-                'gte'   => ['level' => 2],
-                'ip_in' => ['ip' => '10.0.0.0/8'],
+                'eq'    => ['input.tenant' => 'org-1', 'input.level' => 3],
+                'in'    => ['input.role' => ['admin', 'staff']],
+                'gte'   => ['input.level' => 2],
+                'ip_in' => ['input.ip' => '10.0.0.0/8'],
             ],
         ]);
 
-        $context = ['tenant' => 'org-1', 'level' => 3, 'role' => 'admin', 'ip' => '10.1.1.1'];
+        $context = ['input' => ['tenant' => 'org-1', 'level' => 3, 'role' => 'admin', 'ip' => '10.1.1.1']];
         $matched = $statement->assess('posts:read', null, $context);
 
         self::assertResult(MatchOutcome::MATCHES, '', $matched);
-        self::assertSame(['tenant' => true, 'level' => true, 'role' => true, 'ip' => true], $matched->conditions);
+        self::assertSame(['input.tenant' => true, 'input.level' => true, 'input.role' => true, 'input.ip' => true], $matched->conditions);
 
-        $failed = $statement->assess('posts:read', null, ['level' => 2, 'role' => 'guest'] + $context);
+        $failed = $statement->assess('posts:read', null, ['input' => ['level' => 2, 'role' => 'guest'] + $context['input']]);
 
         self::assertSame(MatchOutcome::DOES_NOT_MATCH, $failed->outcome);
-        self::assertSame(['tenant' => true, 'level' => false, 'role' => false, 'ip' => true], $failed->conditions);
+        self::assertSame(['input.tenant' => true, 'input.level' => false, 'input.role' => false, 'input.ip' => true], $failed->conditions);
 
-        $missing = $statement->assess('posts:read', null, ['tenant' => 'org-1', 'level' => 3, 'role' => 'admin']);
+        $missing = $statement->assess('posts:read', null, ['input' => ['tenant' => 'org-1', 'level' => 3, 'role' => 'admin']]);
 
-        self::assertResult(MatchOutcome::UNDECIDABLE, 'key \'ip\' is missing from the context', $missing);
-        self::assertSame(['tenant' => true, 'level' => true, 'role' => true, 'ip' => false], $missing->conditions);
+        self::assertResult(MatchOutcome::UNDECIDABLE, 'key \'input.ip\' is missing from the context', $missing);
+        self::assertSame(['input.tenant' => true, 'input.level' => true, 'input.role' => true, 'input.ip' => false], $missing->conditions);
     }
 
     /**
@@ -708,11 +713,11 @@ final class StatementTest extends TestCase
      */
     public function testAKeyTestedTwiceHoldsOnlyWhenBothHold(): void
     {
-        $statement = Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => ['gt' => ['n' => 1], 'lt' => ['n' => 5]]]);
+        $statement = Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => ['gt' => ['input.n' => 1], 'lt' => ['input.n' => 5]]]);
 
-        self::assertSame(['n' => true], $statement->assess('x', null, ['n' => 3])->conditions);
-        self::assertSame(['n' => false], $statement->assess('x', null, ['n' => 0])->conditions);
-        self::assertSame(['n' => false], $statement->assess('x', null, ['n' => 9])->conditions);
+        self::assertSame(['input.n' => true], $statement->assess('x', null, ['input' => ['n' => 3]])->conditions);
+        self::assertSame(['input.n' => false], $statement->assess('x', null, ['input' => ['n' => 0]])->conditions);
+        self::assertSame(['input.n' => false], $statement->assess('x', null, ['input' => ['n' => 9]])->conditions);
     }
 
     /**
@@ -723,15 +728,20 @@ final class StatementTest extends TestCase
      */
     public function testAssessReportsConditionsOnlyForAStatementNamingTheCheck(): void
     {
-        $statement     = Statement::fromArray(['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['posts/1'], 'conditions' => ['eq' => ['tenant' => 'org-1']]]);
+        $statement = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['posts:read'],
+            'resources'  => ['posts/1'],
+            'conditions' => ['eq' => ['input.tenant' => 'org-1']],
+        ]);
         $unconditional = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read']]);
-        $context       = ['tenant' => 'org-1'];
+        $context       = ['input' => ['tenant' => 'org-1']];
 
         self::assertSame([], $unconditional->assess('posts:read')->conditions);
         self::assertNull($statement->assess('users:read', 'posts/1', $context)->conditions);
         self::assertNull($statement->assess('posts:read', 'posts/2', $context)->conditions);
         self::assertNull($statement->assess('posts:read', null, $context)->conditions);
-        self::assertSame(['tenant' => true], $statement->assess('posts:read', 'posts/1', $context)->conditions);
+        self::assertSame(['input.tenant' => true], $statement->assess('posts:read', 'posts/1', $context)->conditions);
     }
 
     /**
@@ -742,10 +752,10 @@ final class StatementTest extends TestCase
      */
     public function testAMissingKeyIsUndecidable(): void
     {
-        $statement = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['eq' => ['tenant' => 'org-1']]]);
+        $statement = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['eq' => ['input.tenant' => 'org-1']]]);
 
-        self::assertResult(MatchOutcome::UNDECIDABLE, 'key \'tenant\' is missing from the context', $statement->assess('x'));
-        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $statement->assess('x', null, ['tenant' => null]));
+        self::assertResult(MatchOutcome::UNDECIDABLE, 'key \'input.tenant\' is missing from the context', $statement->assess('x'));
+        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $statement->assess('x', null, ['input' => ['tenant' => null]]));
         self::assertFalse($statement->conditionsSatisfiedBy([]));
     }
 
@@ -757,13 +767,13 @@ final class StatementTest extends TestCase
     public static function nullProvider(): iterable
     {
         yield 'true, absent' => [true, [], MatchOutcome::MATCHES];
-        yield 'true, null' => [true, ['k' => null], MatchOutcome::MATCHES];
-        yield 'true, present' => [true, ['k' => 'x'], MatchOutcome::DOES_NOT_MATCH];
-        yield 'true, false' => [true, ['k' => false], MatchOutcome::DOES_NOT_MATCH];
+        yield 'true, null' => [true, ['input' => ['k' => null]], MatchOutcome::MATCHES];
+        yield 'true, present' => [true, ['input' => ['k' => 'x']], MatchOutcome::DOES_NOT_MATCH];
+        yield 'true, false' => [true, ['input' => ['k' => false]], MatchOutcome::DOES_NOT_MATCH];
         yield 'false, absent' => [false, [], MatchOutcome::DOES_NOT_MATCH];
-        yield 'false, null' => [false, ['k' => null], MatchOutcome::DOES_NOT_MATCH];
-        yield 'false, present' => [false, ['k' => 'x'], MatchOutcome::MATCHES];
-        yield 'false, empty string' => [false, ['k' => ''], MatchOutcome::MATCHES];
+        yield 'false, null' => [false, ['input' => ['k' => null]], MatchOutcome::DOES_NOT_MATCH];
+        yield 'false, present' => [false, ['input' => ['k' => 'x']], MatchOutcome::MATCHES];
+        yield 'false, empty string' => [false, ['input' => ['k' => '']], MatchOutcome::MATCHES];
     }
 
     /**
@@ -778,11 +788,11 @@ final class StatementTest extends TestCase
     #[DataProvider('nullProvider')]
     public function testNullOperator(bool $operand, array $context, MatchOutcome $outcome): void
     {
-        $statement = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['null' => ['k' => $operand]]]);
+        $statement = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['null' => ['input.k' => $operand]]]);
         $result    = $statement->assess('x', null, $context);
 
         self::assertResult($outcome, '', $result);
-        self::assertSame(['k' => $outcome === MatchOutcome::MATCHES], $result->conditions);
+        self::assertSame(['input.k' => $outcome === MatchOutcome::MATCHES], $result->conditions);
     }
 
     /**
@@ -792,18 +802,18 @@ final class StatementTest extends TestCase
      */
     public static function ifExistsProvider(): iterable
     {
-        $ip = ['ip_in_if_exists' => ['ip' => '10.0.0.0/8']];
-        $eq = ['eq_if_exists' => ['tenant' => 'org-1']];
+        $ip = ['ip_in_if_exists' => ['input.ip' => '10.0.0.0/8']];
+        $eq = ['eq_if_exists' => ['input.tenant' => 'org-1']];
 
         yield 'absent passes' => [$ip, [], MatchOutcome::MATCHES, ''];
-        yield 'present and within' => [$ip, ['ip' => '10.1.1.1'], MatchOutcome::MATCHES, ''];
-        yield 'present and outside' => [$ip, ['ip' => '11.1.1.1'], MatchOutcome::DOES_NOT_MATCH, ''];
-        yield 'present null' => [$ip, ['ip' => null], MatchOutcome::UNDECIDABLE, 'condition \'ip\': operator \'ip_in\' needs an IP address'];
-        yield 'present wrong type' => [$ip, ['ip' => 42], MatchOutcome::UNDECIDABLE, 'condition \'ip\': operator \'ip_in\' needs an IP address'];
+        yield 'present and within' => [$ip, ['input' => ['ip' => '10.1.1.1']], MatchOutcome::MATCHES, ''];
+        yield 'present and outside' => [$ip, ['input' => ['ip' => '11.1.1.1']], MatchOutcome::DOES_NOT_MATCH, ''];
+        yield 'present null' => [$ip, ['input' => ['ip' => null]], MatchOutcome::UNDECIDABLE, 'condition \'input.ip\': operator \'ip_in\' needs an IP address'];
+        yield 'present wrong type' => [$ip, ['input' => ['ip' => 42]], MatchOutcome::UNDECIDABLE, 'condition \'input.ip\': operator \'ip_in\' needs an IP address'];
         yield 'eq absent' => [$eq, [], MatchOutcome::MATCHES, ''];
-        yield 'eq present null' => [$eq, ['tenant' => null], MatchOutcome::DOES_NOT_MATCH, ''];
-        yield 'eq present' => [$eq, ['tenant' => 'org-1'], MatchOutcome::MATCHES, ''];
-        yield 'with another test missing' => [$eq + ['eq' => ['role' => 'admin']], [], MatchOutcome::UNDECIDABLE, 'key \'role\' is missing from the context'];
+        yield 'eq present null' => [$eq, ['input' => ['tenant' => null]], MatchOutcome::DOES_NOT_MATCH, ''];
+        yield 'eq present' => [$eq, ['input' => ['tenant' => 'org-1']], MatchOutcome::MATCHES, ''];
+        yield 'with another test missing' => [$eq + ['eq' => ['input.role' => 'admin']], [], MatchOutcome::UNDECIDABLE, 'key \'input.role\' is missing from the context'];
     }
 
     /**
@@ -833,17 +843,21 @@ final class StatementTest extends TestCase
      */
     public function testIfExistsDecidesFaultsAsWithoutTheSuffix(): void
     {
-        $malformed  = new Statement(PolicyEffect::DENY, ['x'], conditions: ['ip_in_if_exists' => ['ip' => '10.0.0.0/33']]);
-        $referenced = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['eq_if_exists' => ['owner' => '${principal.id}']]]);
+        $malformed  = new Statement(PolicyEffect::DENY, ['x'], conditions: ['ip_in_if_exists' => ['input.ip' => '10.0.0.0/33']]);
+        $referenced = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['eq_if_exists' => ['input.owner' => '${principal.id}']]]);
 
         $interpolator = new ContextInterpolator;
 
-        self::assertResult(MatchOutcome::INVALID, 'condition \'ip\' has an invalid operand for operator \'ip_in\'', $malformed->assess('x'));
-        self::assertResult(MatchOutcome::INVALID, 'condition \'ip\' has an invalid operand for operator \'ip_in\'', $malformed->assess('x', null, ['ip' => '10.0.0.1']));
+        self::assertResult(MatchOutcome::INVALID, 'condition \'input.ip\' has an invalid operand for operator \'ip_in\'', $malformed->assess('x'));
+        self::assertResult(
+            MatchOutcome::INVALID,
+            'condition \'input.ip\' has an invalid operand for operator \'ip_in\'',
+            $malformed->assess('x', null, ['input' => ['ip' => '10.0.0.1']]),
+        );
         self::assertResult(
             MatchOutcome::UNDECIDABLE,
-            'condition \'owner\' references a value that cannot be resolved',
-            $referenced->assess('x', null, ['owner' => '1'], $interpolator),
+            'condition \'input.owner\' references a value that cannot be resolved',
+            $referenced->assess('x', null, ['input' => ['owner' => '1']], $interpolator),
         );
         self::assertResult(MatchOutcome::MATCHES, '', $referenced->assess('x', null, [], $interpolator));
     }
@@ -861,9 +875,9 @@ final class StatementTest extends TestCase
         self::assertResult(
             MatchOutcome::UNDECIDABLE,
             'condition \'request.ip\': operator \'ip_not_in\' needs an IP address',
-            $statement->assess('x', null, ['request.ip' => 'unknown']),
+            $statement->assess('x', null, ['request' => ['ip' => 'unknown']]),
         );
-        self::assertResult(MatchOutcome::MATCHES, '', $statement->assess('x', null, ['request.ip' => '192.0.2.1']));
+        self::assertResult(MatchOutcome::MATCHES, '', $statement->assess('x', null, ['request' => ['ip' => '192.0.2.1']]));
     }
 
     /**
@@ -879,23 +893,23 @@ final class StatementTest extends TestCase
         $cases        = [
             'ip_in'       => ['request.ip', '1.2.3.0/24', "1.2.3.4\0", 'operator \'ip_in\' needs an IP address'],
             'ip_not_in'   => ['request.ip', '1.2.3.0/24', "9.9.9.9\0", 'operator \'ip_not_in\' needs an IP address'],
-            'like'        => ['ua', 'curl*', "curl\0", 'operator \'like\' cannot test a NUL byte'],
-            'starts_with' => ['ua', 'curl', "curl\0", 'operator \'starts_with\' cannot test a NUL byte'],
-            'ends_with'   => ['ua', 'curl', "\0curl", 'operator \'ends_with\' cannot test a NUL byte'],
+            'like'        => ['input.ua', 'curl*', "curl\0", 'operator \'like\' cannot test a NUL byte'],
+            'starts_with' => ['input.ua', 'curl', "curl\0", 'operator \'starts_with\' cannot test a NUL byte'],
+            'ends_with'   => ['input.ua', 'curl', "\0curl", 'operator \'ends_with\' cannot test a NUL byte'],
         ];
 
         foreach ($cases as $operator => [$key, $operand, $value, $detail]) {
             $statement = Statement::fromArray(['effect' => 'deny', 'actions' => ['a'], 'conditions' => [$operator => [$key => $operand]]]);
 
-            self::assertResult(MatchOutcome::UNDECIDABLE, "condition '{$key}': {$detail}", $statement->assess('a', null, [$key => $value]));
+            self::assertResult(MatchOutcome::UNDECIDABLE, "condition '{$key}': {$detail}", $statement->assess('a', null, Arr::undot([$key => $value])));
         }
 
-        $substituted = Statement::fromArray(['effect' => 'deny', 'actions' => ['a'], 'conditions' => ['like' => ['ua' => '${context.agent}*']]]);
+        $substituted = Statement::fromArray(['effect' => 'deny', 'actions' => ['a'], 'conditions' => ['like' => ['input.ua' => '${input.agent}*']]]);
 
         self::assertResult(
             MatchOutcome::UNDECIDABLE,
-            'condition \'ua\': operator \'like\' cannot test a NUL byte',
-            $substituted->assess('a', null, ['ua' => 'curl', 'agent' => "cu\0"], $interpolator),
+            'condition \'input.ua\': operator \'like\' cannot test a NUL byte',
+            $substituted->assess('a', null, ['input' => ['ua' => 'curl', 'agent' => "cu\0"]], $interpolator),
         );
     }
 
@@ -907,12 +921,16 @@ final class StatementTest extends TestCase
      */
     public function testValueSetsOnEmptyAndNonListValues(): void
     {
-        $all = Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => ['all_values_in' => ['tags' => ['a', 'b']]]]);
-        $any = Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => ['any_value_in' => ['tags' => ['a', 'b']]]]);
+        $all = Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => ['all_values_in' => ['input.tags' => ['a', 'b']]]]);
+        $any = Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => ['any_value_in' => ['input.tags' => ['a', 'b']]]]);
 
-        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $all->assess('x', null, ['tags' => []]));
-        self::assertResult(MatchOutcome::UNDECIDABLE, 'condition \'tags\': operator \'any_value_in\' needs a list of values', $any->assess('x', null, ['tags' => 'a']));
-        self::assertResult(MatchOutcome::MATCHES, '', $any->assess('x', null, ['tags' => ['b']]));
+        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $all->assess('x', null, ['input' => ['tags' => []]]));
+        self::assertResult(
+            MatchOutcome::UNDECIDABLE,
+            'condition \'input.tags\': operator \'any_value_in\' needs a list of values',
+            $any->assess('x', null, ['input' => ['tags' => 'a']]),
+        );
+        self::assertResult(MatchOutcome::MATCHES, '', $any->assess('x', null, ['input' => ['tags' => ['b']]]));
     }
 
     /**
@@ -925,11 +943,15 @@ final class StatementTest extends TestCase
     {
         yield 'unknown operator' => [['bogus' => ['tenant' => 'org-1']], 'conditions have an unknown operator \'bogus\'', []];
         yield 'key-first' => [['tenant' => ['eq' => 'org-1']], 'conditions have an unknown operator \'tenant\'', []];
-        yield 'list of conditions' => [[['eq' => ['tenant' => 'org-1']]], 'conditions must map operator names to key tests', []];
+        yield 'list of conditions' => [[['eq' => ['input.tenant' => 'org-1']]], 'conditions must map operator names to key tests', []];
         yield 'empty operator map' => [['eq' => []], 'condition operator \'eq\' must map context keys to operands', []];
-        yield 'invalid operand' => [['in' => ['tenant' => 'org-1']], 'condition \'tenant\' has an invalid operand for operator \'in\'', ['tenant' => false]];
-        yield 'empty string operand' => [['starts_with' => ['tenant' => '']], 'condition \'tenant\' has an invalid operand for operator \'starts_with\'', ['tenant' => false]];
-        yield 'malformed reference' => [['eq' => ['tenant' => '${foo']], 'condition \'tenant\' has a malformed ${…} reference', ['tenant' => false]];
+        yield 'invalid operand' => [['in' => ['input.tenant' => 'org-1']], 'condition \'input.tenant\' has an invalid operand for operator \'in\'', ['input.tenant' => false]];
+        yield 'empty string operand' => [
+            ['starts_with' => ['input.tenant' => '']],
+            'condition \'input.tenant\' has an invalid operand for operator \'starts_with\'',
+            ['input.tenant' => false],
+        ];
+        yield 'malformed reference' => [['eq' => ['input.tenant' => '${foo']], 'condition \'input.tenant\' has a malformed ${…} reference', ['input.tenant' => false]];
     }
 
     /**
@@ -947,7 +969,7 @@ final class StatementTest extends TestCase
         $statement    = new Statement(PolicyEffect::DENY, ['x'], conditions: $conditions);
         $interpolator = new ContextInterpolator;
 
-        foreach ([[], ['tenant' => 'org-1']] as $context) {
+        foreach ([[], ['input' => ['tenant' => 'org-1']]] as $context) {
             $result = $statement->assess('x', null, $context, $interpolator);
 
             self::assertResult(MatchOutcome::INVALID, $detail, $result);
@@ -964,24 +986,28 @@ final class StatementTest extends TestCase
      */
     public function testOutcomePrecedence(): void
     {
-        $invalidLast  = new Statement(PolicyEffect::DENY, ['x'], conditions: ['eq' => ['a' => 1, 'b' => 1], 'in' => ['c' => 'x']]);
-        $invalidFirst = new Statement(PolicyEffect::DENY, ['x'], conditions: ['in' => ['c' => 'x'], 'eq' => ['b' => 1, 'a' => 1]]);
-        $operatorLast = new Statement(PolicyEffect::DENY, ['x'], conditions: ['eq' => ['b' => 2], 'bogus' => ['c' => 1]]);
-        $invalid      = 'condition \'c\' has an invalid operand for operator \'in\'';
+        $invalidLast  = new Statement(PolicyEffect::DENY, ['x'], conditions: ['eq' => ['input.a' => 1, 'input.b' => 1], 'in' => ['input.c' => 'x']]);
+        $invalidFirst = new Statement(PolicyEffect::DENY, ['x'], conditions: ['in' => ['input.c' => 'x'], 'eq' => ['input.b' => 1, 'input.a' => 1]]);
+        $operatorLast = new Statement(PolicyEffect::DENY, ['x'], conditions: ['eq' => ['input.b' => 2], 'bogus' => ['input.c' => 1]]);
+        $invalid      = 'condition \'input.c\' has an invalid operand for operator \'in\'';
 
-        self::assertResult(MatchOutcome::INVALID, $invalid, $invalidLast->assess('x', null, ['b' => 2, 'c' => 1]));
-        self::assertResult(MatchOutcome::INVALID, $invalid, $invalidFirst->assess('x', null, ['b' => 2, 'c' => 1]));
-        self::assertResult(MatchOutcome::INVALID, 'conditions have an unknown operator \'bogus\'', $operatorLast->assess('x', null, ['b' => 3]));
+        self::assertResult(MatchOutcome::INVALID, $invalid, $invalidLast->assess('x', null, ['input' => ['b' => 2, 'c' => 1]]));
+        self::assertResult(MatchOutcome::INVALID, $invalid, $invalidFirst->assess('x', null, ['input' => ['b' => 2, 'c' => 1]]));
+        self::assertResult(MatchOutcome::INVALID, 'conditions have an unknown operator \'bogus\'', $operatorLast->assess('x', null, ['input' => ['b' => 3]]));
 
-        $undecidableFirst = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['eq' => ['a' => 1, 'b' => 2]]]);
-        $failingFirst     = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['eq' => ['b' => 2, 'a' => 1]]]);
-        $acrossOperators  = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['starts_with' => ['n' => 'a'], 'eq' => ['n' => 6]]]);
+        $undecidableFirst = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['eq' => ['input.a' => 1, 'input.b' => 2]]]);
+        $failingFirst     = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['eq' => ['input.b' => 2, 'input.a' => 1]]]);
+        $acrossOperators  = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['starts_with' => ['input.n' => 'a'], 'eq' => ['input.n' => 6]]]);
 
-        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $undecidableFirst->assess('x', null, ['b' => 3]));
-        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $failingFirst->assess('x', null, ['b' => 3]));
-        self::assertResult(MatchOutcome::UNDECIDABLE, 'key \'a\' is missing from the context', $undecidableFirst->assess('x'));
-        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $acrossOperators->assess('x', null, ['n' => 5]));
-        self::assertResult(MatchOutcome::UNDECIDABLE, 'condition \'n\': operator \'starts_with\' needs a string value', $acrossOperators->assess('x', null, ['n' => 6]));
+        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $undecidableFirst->assess('x', null, ['input' => ['b' => 3]]));
+        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $failingFirst->assess('x', null, ['input' => ['b' => 3]]));
+        self::assertResult(MatchOutcome::UNDECIDABLE, 'key \'input.a\' is missing from the context', $undecidableFirst->assess('x'));
+        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $acrossOperators->assess('x', null, ['input' => ['n' => 5]]));
+        self::assertResult(
+            MatchOutcome::UNDECIDABLE,
+            'condition \'input.n\': operator \'starts_with\' needs a string value',
+            $acrossOperators->assess('x', null, ['input' => ['n' => 6]]),
+        );
     }
 
     /**
@@ -993,16 +1019,16 @@ final class StatementTest extends TestCase
      */
     public function testTargetCombinesWithConditions(): void
     {
-        $statement    = new Statement(PolicyEffect::DENY, ['posts:read'], ['posts:${principal.id}'], ['eq' => ['tenant' => 'org-1']]);
+        $statement    = new Statement(PolicyEffect::DENY, ['posts:read'], ['posts:${principal.id}'], ['eq' => ['input.tenant' => 'org-1']]);
         $invalid      = new Statement(PolicyEffect::DENY, ['posts:read'], ['posts:${principal.id}'], ['bogus' => ['tenant' => 'org-1']]);
         $scoped       = new Statement(PolicyEffect::DENY, ['posts:read'], ['posts:1'], ['bogus' => ['tenant' => 'org-1']]);
         $interpolator = new ContextInterpolator;
 
-        $undecidable = $statement->assess('posts:read', 'posts:1', ['tenant' => 'org-1'], $interpolator);
+        $undecidable = $statement->assess('posts:read', 'posts:1', ['input' => ['tenant' => 'org-1']], $interpolator);
 
         self::assertResult(MatchOutcome::UNDECIDABLE, self::UNRESOLVED_RESOURCE, $undecidable);
-        self::assertSame(['tenant' => true], $undecidable->conditions);
-        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $statement->assess('posts:read', 'posts:1', ['tenant' => 'org-2'], $interpolator));
+        self::assertSame(['input.tenant' => true], $undecidable->conditions);
+        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $statement->assess('posts:read', 'posts:1', ['input' => ['tenant' => 'org-2']], $interpolator));
         self::assertResult(MatchOutcome::INVALID, 'conditions have an unknown operator \'bogus\'', $invalid->assess('posts:read', 'posts:1', [], $interpolator));
         self::assertResult(MatchOutcome::DOES_NOT_MATCH, self::TARGET_MISMATCH, $scoped->assess('users:read', 'posts:1'));
         self::assertResult(MatchOutcome::DOES_NOT_MATCH, self::TARGET_MISMATCH, $scoped->assess('posts:read', 'posts:2'));
@@ -1022,32 +1048,34 @@ final class StatementTest extends TestCase
     public function testInterpolatedOperandsAreResolved(): void
     {
         $conditions = [
-            'ip_in'  => ['ip' => '${context.range}'],
-            'before' => ['at' => '${context.deadline}'],
-            'after'  => ['at' => '${context.opens}'],
-            'gt'     => ['size' => '${context.minimum}'],
-            'lte'    => ['size' => '${context.maximum}'],
-            'bool'   => ['flag' => '${context.expected_flag}'],
-            'like'   => ['name' => '${context.prefix}*'],
-            'eq'     => ['owner' => '${principal.id}', 'post' => '${resource.id}'],
+            'ip_in'  => ['input.ip' => '${input.range}'],
+            'before' => ['input.at' => '${input.deadline}'],
+            'after'  => ['input.at' => '${input.opens}'],
+            'gt'     => ['input.size' => '${input.minimum}'],
+            'lte'    => ['input.size' => '${input.maximum}'],
+            'bool'   => ['input.flag' => '${input.expected_flag}'],
+            'like'   => ['input.name' => '${input.prefix}*'],
+            'eq'     => ['input.owner' => '${principal.id}', 'input.post' => '${resource.id}'],
         ];
 
         $statement = Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => $conditions]);
         $context   = [
-            'ip'            => '10.1.2.3',
-            'at'            => '2026-04-15',
-            'size'          => 5,
-            'flag'          => false,
-            'name'          => 'admin-user',
-            'owner'         => '42',
-            'post'          => '7',
-            'range'         => '10.0.0.0/8',
-            'deadline'      => '2026-04-20',
-            'opens'         => '2026-04-10',
-            'minimum'       => 1,
-            'maximum'       => 5,
-            'expected_flag' => false,
-            'prefix'        => 'admin',
+            'input' => [
+                'ip'            => '10.1.2.3',
+                'at'            => '2026-04-15',
+                'size'          => 5,
+                'flag'          => false,
+                'name'          => 'admin-user',
+                'owner'         => '42',
+                'post'          => '7',
+                'range'         => '10.0.0.0/8',
+                'deadline'      => '2026-04-20',
+                'opens'         => '2026-04-10',
+                'minimum'       => 1,
+                'maximum'       => 5,
+                'expected_flag' => false,
+                'prefix'        => 'admin',
+            ],
         ];
 
         $interpolator = new ContextInterpolator;
@@ -1055,8 +1083,10 @@ final class StatementTest extends TestCase
 
         self::assertSame($conditions, $statement->conditions);
         self::assertResult(MatchOutcome::MATCHES, '', $statement->assess('x', 'post:7', $context, $interpolator, $principal));
-        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $statement->assess('x', 'post:7', ['size' => 6] + $context, $interpolator, $principal));
-        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $statement->assess('x', 'post:7', ['prefix' => '*'] + $context, $interpolator, $principal));
+        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $statement->assess('x', 'post:7', ['input' => ['size' => 6] + $context['input']], $interpolator, $principal));
+        $wildcard = ['input' => ['prefix' => '*'] + $context['input']] + $context;
+
+        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $statement->assess('x', 'post:7', $wildcard, $interpolator, $principal));
         self::assertTrue($statement->conditionsSatisfiedBy($context, $interpolator, $principal, 'post:7'));
         self::assertFalse($statement->conditionsSatisfiedBy($context, $interpolator, $principal, 'post:8'));
     }
@@ -1088,11 +1118,11 @@ final class StatementTest extends TestCase
     #[DataProvider('interpolatedWrongTypeProvider')]
     public function testInterpolatedOperandOfTheWrongTypeIsUndecidable(string $operator, mixed $actual, string $substituted): void
     {
-        $context = ['k' => $actual, 'operand' => $substituted];
-        $detail  = "condition 'k': the substituted operand is an invalid operand for operator '{$operator}'";
+        $context = ['input' => ['k' => $actual, 'operand' => $substituted]];
+        $detail  = "condition 'input.k': the substituted operand is an invalid operand for operator '{$operator}'";
 
         foreach (['deny', 'allow'] as $effect) {
-            $statement = Statement::fromArray(['effect' => $effect, 'actions' => ['x'], 'conditions' => [$operator => ['k' => '${context.operand}']]]);
+            $statement = Statement::fromArray(['effect' => $effect, 'actions' => ['x'], 'conditions' => [$operator => ['input.k' => '${input.operand}']]]);
 
             self::assertResult(MatchOutcome::UNDECIDABLE, $detail, $statement->assess('x', null, $context, new ContextInterpolator));
         }
@@ -1107,27 +1137,158 @@ final class StatementTest extends TestCase
      */
     public function testUnresolvedAndLiteralOperands(): void
     {
-        $owner   = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['eq' => ['owner_id' => '${principal.id}']]]);
-        $pattern = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['like' => ['name' => '${context.pattern}']]]);
-        $classes = Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => ['like' => ['class' => 'App\Models\*']]]);
-        $path    = Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => ['eq' => ['path' => 'App\Models:${context.suffix}']]]);
+        $owner   = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['eq' => ['input.owner_id' => '${principal.id}']]]);
+        $pattern = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['like' => ['input.name' => '${input.pattern}']]]);
+        $classes = Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => ['like' => ['input.class' => 'App\Models\*']]]);
+        $path    = Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => ['eq' => ['input.path' => 'App\Models:${input.suffix}']]]);
 
         $interpolator = new ContextInterpolator;
 
         self::assertResult(
             MatchOutcome::UNDECIDABLE,
-            'condition \'owner_id\' references a value that cannot be resolved',
-            $owner->assess('x', null, ['owner_id' => ''], $interpolator),
+            'condition \'input.owner_id\' references a value that cannot be resolved',
+            $owner->assess('x', null, ['input' => ['owner_id' => '']], $interpolator),
         );
-        self::assertResult(MatchOutcome::MATCHES, '', $owner->assess('x', null, ['owner_id' => '${principal.id}']));
+        self::assertResult(MatchOutcome::MATCHES, '', $owner->assess('x', null, ['input' => ['owner_id' => '${principal.id}']]));
         self::assertResult(
             MatchOutcome::UNDECIDABLE,
-            'condition \'name\': operator \'like\' has an empty operand',
-            $pattern->assess('x', null, ['name' => 'a', 'pattern' => ''], $interpolator),
+            'condition \'input.name\': operator \'like\' has an empty operand',
+            $pattern->assess('x', null, ['input' => ['name' => 'a', 'pattern' => '']], $interpolator),
         );
-        self::assertResult(MatchOutcome::MATCHES, '', $classes->assess('x', null, ['class' => 'App\Models\Post']));
-        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $classes->assess('x', null, ['class' => 'AppModelsPost']));
-        self::assertResult(MatchOutcome::MATCHES, '', $path->assess('x', null, ['path' => 'App\Models:Po*', 'suffix' => 'Po*'], $interpolator));
+        self::assertResult(MatchOutcome::MATCHES, '', $classes->assess('x', null, ['input' => ['class' => 'App\Models\Post']]));
+        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $classes->assess('x', null, ['input' => ['class' => 'AppModelsPost']]));
+        self::assertResult(MatchOutcome::MATCHES, '', $path->assess('x', null, ['input' => ['path' => 'App\Models:Po*', 'suffix' => 'Po*']], $interpolator));
+    }
+
+    // ------------------------------------------------------------------
+    // Context paths
+    // ------------------------------------------------------------------
+
+    /**
+     * A condition key is a dot path read segment by segment through the
+     * namespaces of the context.
+     *
+     * @return void
+     */
+    public function testAConditionKeyIsADotPath(): void
+    {
+        $statement = Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => [
+            'eq'    => ['input.post.status' => 'draft'],
+            'ip_in' => ['request.ip' => '10.0.0.0/8'],
+        ]]);
+        $context = ['input' => ['post' => ['status' => 'draft']], 'request' => ['ip' => '10.0.0.1']];
+
+        self::assertResult(MatchOutcome::MATCHES, '', $statement->assess('x', null, $context));
+        self::assertSame(['input.post.status' => true, 'request.ip' => true], $statement->assess('x', null, $context)->conditions);
+        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $statement->assess('x', null, ['input' => ['post' => ['status' => 'published']]] + $context));
+        self::assertTrue($statement->conditionsSatisfiedBy(new CheckContext($context)));
+    }
+
+    /**
+     * Provide contexts in which a dot path is missing: a literal dotted key at
+     * the top level or within a namespace, a segment read through a value that
+     * is not an array, and an absent namespace.
+     *
+     * @return iterable<string, array{array<string, mixed>}>
+     */
+    public static function missingPathProvider(): iterable
+    {
+        yield 'literal dotted top-level key' => [['input.post.status' => 'draft']];
+        yield 'literal dotted key within the namespace' => [['input' => ['post.status' => 'draft']]];
+        yield 'through a scalar' => [['input' => ['post' => 'draft']]];
+        yield 'through a null' => [['input' => ['post' => null]]];
+        yield 'absent namespace' => [['request' => ['post' => ['status' => 'draft']]]];
+    }
+
+    /**
+     * A literal flat key never stands in for a dot path, and a path through a
+     * value that is not an array is missing: the test is undecidable, passes
+     * under `_if_exists`, and `null` decides it.
+     *
+     * @param  array<string, mixed>  $context
+     * @return void
+     */
+    #[DataProvider('missingPathProvider')]
+    public function testAPathThatIsNotThereIsMissing(array $context): void
+    {
+        $eq       = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['eq' => ['input.post.status' => 'draft']]]);
+        $optional = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['eq_if_exists' => ['input.post.status' => 'draft']]]);
+        $null     = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['null' => ['input.post.status' => true]]]);
+
+        self::assertResult(MatchOutcome::UNDECIDABLE, 'key \'input.post.status\' is missing from the context', $eq->assess('x', null, $context));
+        self::assertResult(MatchOutcome::MATCHES, '', $optional->assess('x', null, $context));
+        self::assertResult(MatchOutcome::MATCHES, '', $null->assess('x', null, $context));
+    }
+
+    /**
+     * A key present along a path with a null value is not missing: the operator
+     * tests the null, `_if_exists` included, and `null: false` does not hold.
+     *
+     * @return void
+     */
+    public function testAPresentNullAlongAPathIsNotMissing(): void
+    {
+        $context  = ['input' => ['post' => ['status' => null]]];
+        $eq       = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['eq' => ['input.post.status' => 'draft']]]);
+        $optional = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['ip_in_if_exists' => ['input.post.status' => '10.0.0.0/8']]]);
+        $isNull   = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['null' => ['input.post.status' => true]]]);
+        $notNull  = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['null' => ['input.post.status' => false]]]);
+
+        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $eq->assess('x', null, $context));
+        self::assertResult(MatchOutcome::UNDECIDABLE, 'condition \'input.post.status\': operator \'ip_in\' needs an IP address', $optional->assess('x', null, $context));
+        self::assertResult(MatchOutcome::MATCHES, '', $isNull->assess('x', null, $context));
+        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $notNull->assess('x', null, $context));
+        self::assertResult(MatchOutcome::MATCHES, '', $notNull->assess('x', null, ['input' => ['post' => ['status' => '']]]));
+    }
+
+    /**
+     * A statement builds only the namespaces it reads, through its condition
+     * keys and its references, and none at all when it does not name the action
+     * or its test is malformed.
+     *
+     * @return void
+     */
+    public function testAStatementBuildsOnlyTheNamespacesItReads(): void
+    {
+        $context   = $this->countingContext(['request' => ['ip' => '10.0.0.1'], 'tenant' => ['id' => 'org-1'], 'environment' => ['time' => 'now']]);
+        $statement = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['x'],
+            'resources'  => ['tenants/${tenant.id}/*'],
+            'conditions' => ['eq' => ['request.ip' => '10.0.0.1']],
+        ]);
+        $malformed = new Statement(PolicyEffect::DENY, ['x'], conditions: ['ip_in' => ['environment.time' => 5]]);
+
+        self::assertResult(MatchOutcome::DOES_NOT_MATCH, Statement::TARGET_MISMATCH, $statement->assess('y', 'tenants/org-1/posts', $context, new ContextInterpolator));
+        self::assertSame([], $this->builds);
+
+        self::assertResult(MatchOutcome::INVALID, 'condition \'environment.time\' has an invalid operand for operator \'ip_in\'', $malformed->assess('x', null, $context));
+        self::assertSame([], $this->builds);
+
+        self::assertResult(MatchOutcome::MATCHES, '', $statement->assess('x', 'tenants/org-1/posts', $context, new ContextInterpolator));
+        self::assertSame(['tenant' => 1, 'request' => 1], $this->builds);
+    }
+
+    /**
+     * Within one check a namespace is built once, however many tests and
+     * statements read it; a new check builds it again.
+     *
+     * @return void
+     */
+    public function testANamespaceIsBuiltOncePerCheck(): void
+    {
+        $values = ['request' => ['ip' => '10.0.0.1', 'method' => 'GET']];
+        $first  = Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => ['eq' => ['request.ip' => '10.0.0.1', 'request.method' => 'GET']]]);
+        $second = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['neq' => ['request.method' => '${request.ip}']]]);
+
+        $check = $this->countingContext($values);
+
+        $first->assess('x', null, $check);
+        $second->assess('x', null, $check, new ContextInterpolator);
+        self::assertSame(['request' => 1], $this->builds);
+
+        $first->assess('x', null, $this->countingContext($values));
+        self::assertSame(['request' => 2], $this->builds);
     }
 
     /**
@@ -1142,6 +1303,28 @@ final class StatementTest extends TestCase
     {
         self::assertSame($outcome, $result->outcome);
         self::assertSame($detail, $result->detail);
+    }
+
+    /**
+     * Build a check context whose namespaces are each built from the values
+     * given, counting each build.
+     *
+     * @param  array<string, array<string, mixed>>  $values
+     * @return \SineMacula\Laravel\Authorization\Evaluation\CheckContext
+     */
+    private function countingContext(array $values): CheckContext
+    {
+        $builders = [];
+
+        foreach ($values as $namespace => $namespaceValues) {
+            $builders[$namespace] = function () use ($namespace, $namespaceValues): array {
+                $this->builds[$namespace] = ($this->builds[$namespace] ?? 0) + 1;
+
+                return [$namespace => $namespaceValues];
+            };
+        }
+
+        return new CheckContext([], $builders);
     }
 
     /**

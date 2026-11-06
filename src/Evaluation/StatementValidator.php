@@ -18,7 +18,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
  * operator, an operand of the wrong type or a malformed `${…}` reference. It is
  * not part of the public API.
  *
- * @phpstan-type ConditionTest array{key: string, operator: string, isOptional: bool, operand: mixed, error: string|null}
+ * @phpstan-type ConditionTest array{key: string, path: list<string>, operator: string, isOptional: bool, operand: mixed, error: string|null}
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -235,9 +235,9 @@ final class StatementValidator
 
     /**
      * Return every key test of the well-formed operator entries, in order: its
-     * context key, the operator it tests with, whether the `_if_exists` suffix
-     * lets a missing key pass, the operand, and why it cannot be evaluated, or
-     * null when it can.
+     * context key, the key's dot path split into segments, the operator it
+     * tests with, whether the `_if_exists` suffix lets a missing key pass, the
+     * operand, and why it cannot be evaluated, or null when it can.
      *
      * @param  array<array-key, mixed>  $conditions
      * @return list<ConditionTest>
@@ -256,6 +256,7 @@ final class StatementValidator
             foreach ($keyTests as $key => $operand) {
                 $tests[] = [
                     'key'        => $key,
+                    'path'       => \explode('.', $key),
                     'operator'   => $operator,
                     'isOptional' => $operator !== $name,
                     'operand'    => $operand,

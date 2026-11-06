@@ -7,6 +7,8 @@ namespace Tests\Feature;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Context\DeclaredContextKeyCatalogue;
+use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
@@ -87,20 +89,22 @@ final class PolicyModelEdgeCasesTest extends TestCase
 
     /**
      * A write breaking several rules is refused with every reason, joined into
-     * one sentence.
+     * one sentence: here a pattern too long and a condition on a context key
+     * that is not declared.
      *
      * @return void
      */
     public function testAWriteIsRefusedWithEveryReason(): void
     {
         $this->config()->set('authorization.policies.limits.pattern_length', 3);
+        $this->app?->instance(ContextKeyCatalogue::class, new DeclaredContextKeyCatalogue);
 
         $this->expectExceptionMessage(
             'Invalid policy document \'many\': Policy statement #0 has 1 patterns or operands longer than the 3 characters allowed;'
-            . ' Policy statement #0 condition key \'9a\' must be',
+            . ' Policy statement #0 condition key \'input.a\' is not a declared context key;',
         );
 
-        Policy::create(['name' => 'many', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['abcd'], 'conditions' => ['eq' => ['9a' => 'x']]]]]]);
+        Policy::create(['name' => 'many', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['abcd'], 'conditions' => ['eq' => ['input.a' => 'x']]]]]]);
     }
 
     /**

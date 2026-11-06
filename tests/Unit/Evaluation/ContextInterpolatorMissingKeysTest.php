@@ -62,4 +62,22 @@ final class ContextInterpolatorMissingKeysTest extends TestCase
         self::assertNull($interpolator->interpolate('id:${principal.id}', $principal, null, []));
         self::assertNull($interpolator->interpolatePattern('id:${principal.id}', $principal, null, []));
     }
+
+    /**
+     * A context path whose namespace or key is missing, or whose value is a
+     * present null, leaves the token unresolved, so a request that was never
+     * routed never interpolates `${request.ip}` as an empty string.
+     *
+     * @return void
+     */
+    public function testMissingAndNullContextPathsAreUnresolved(): void
+    {
+        $interpolator = new ContextInterpolator;
+
+        self::assertNull($interpolator->interpolate('ip:${request.ip}', null, null, []));
+        self::assertNull($interpolator->interpolate('ip:${request.ip}', null, null, ['request' => []]));
+        self::assertNull($interpolator->interpolate('ip:${request.ip}', null, null, ['request' => ['ip' => null]]));
+        self::assertNull($interpolator->interpolatePattern('ip:${request.ip}', null, null, ['request.ip' => '10.0.0.1']));
+        self::assertSame('ip:10.0.0.1', $interpolator->interpolate('ip:${request.ip}', null, null, ['request' => ['ip' => '10.0.0.1']]));
+    }
 }

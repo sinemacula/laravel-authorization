@@ -53,8 +53,14 @@ denied.
   `not_resources`, and operator-first `conditions`: twenty operators (equality, set membership, prefix, suffix and glob,
   numeric and time comparisons, booleans, null tests, IPv4 and IPv6 ranges, and multi-valued keys), every one but
   `null` with an `_if_exists` form, and `${…}` interpolation from the check's context. A document is refused when it is
-  saved if it is malformed, over the configured limits, or names an action no declared permission matches, and
+  saved if it is malformed, over the configured limits, reads a context key nobody declared, tests a key with an
+  operator that does not suit its type, or names an action no declared permission matches, and
   `authorization:policy:validate` checks files or stored policies against the same rules.
+- **A namespaced context**: conditions read dot paths such as `request.ip`, `authentication.user_id`,
+  `environment.time` and `input.post.status`. The trusted namespaces come from their own sources, never from the caller,
+  whose values land under `input` alone; an application adds a namespace of its own with a `ContextSource`, and declares
+  every key a policy may read, with its type, in a key catalogue. A namespace is built only when a statement reads it,
+  and at most once a check.
 - **Gate auto-wiring**: every case of a configured permission enum is registered as a Gate ability, with a choice of
   what happens when an ability of the same name already exists.
 - **A permission catalogue in code**: enums and providers declare each permission with a description, a category and
@@ -150,8 +156,8 @@ AUTHORIZATION_LOG_CHANNEL=stderr
 ```
 
 `config/authorization.php` documents every other option: models, tables, the default guard, permission providers, the
-Gate conflict mode, the policy store, the policy limits, the subject resolver, the cache, and the role hierarchy and
-rank.
+Gate conflict mode, the policy store, the policy limits, the context keys and sources, the subject resolver, the cache,
+and the role hierarchy and rank.
 
 ## Usage
 
@@ -390,15 +396,18 @@ $user->attachPolicy(Policy::create([
                 'sid'        => 'deny-off-network',
                 'effect'     => 'deny',
                 'actions'    => ['posts:delete'],
-                'conditions' => ['ip_not_in' => ['ip' => ['10.0.0.0/8', '192.168.0.0/16']]],
+                'conditions' => ['ip_not_in' => ['request.ip' => ['10.0.0.0/8', '192.168.0.0/16']]],
             ],
         ],
     ],
 ]));
 
-Authorization::for($user)->can('posts:delete', 'posts/42', ['ip' => request()->ip()]);
-Authorization::for($user)->explain('posts:delete', 'posts/42', ['ip' => request()->ip()]);
+Authorization::for($user)->can('posts:delete', 'posts/42');
+Authorization::for($user)->explain('posts:delete', 'posts/42');
 ```
+
+`request.ip` is the address Laravel resolved for the current request, through its trusted proxies; the caller never
+supplies it (see [The check's context](#the-checks-context)).
 
 `Authorization::check()` returns the full `Decision`: `isAllowed()`, the denial's reason code (`reason`), the stage that
 decided it (`stage`), the statements that did (`statements`) and a trace of every step. `can()` and `authorize()` are
@@ -411,7 +420,7 @@ decision is the same whatever order the policies are read in, and the trace reco
 held, never their values:
 
 ```php
-$decision = Authorization::for($user)->check('posts:delete', 'posts/42', ['ip' => request()->ip()]);
+$decision = Authorization::for($user)->check('posts:delete', 'posts/42');
 
 $decision->isAllowed();        // false
 $decision->reason;             // DecisionReason::EXPLICIT_DENY
@@ -432,8 +441,9 @@ read, unless a platform-wide grant of the permission covers it. The default know
 is never given a tenant, so a tenant-owned resource that is not a model should implement `AuthorizableResource` and
 carry its tenant.
 
-Policies fail closed. A deny whose condition cannot be decided, such as a check made without `ip` in its context or with
-an `ip` that is not an address, still applies, while an allow in the same position does not. A check without a resource
+Policies fail closed. A deny whose condition cannot be decided, such as one on `request.ip` in a check made outside a
+routed request (a queued job, a console command), where the key is missing, still applies, while an allow in the same
+position does not. A check without a resource
 matches only statements with neither `resources` nor `not_resources`, or whose `resources` include `*`. A stored policy
 that cannot be read, or that is over a configured limit, denies every check for its holder, with the reason
 `invalid_policy`, until it is fixed.
@@ -461,21 +471,22 @@ A policy document is a `version` (1, the default) and a list of `statements`. Ea
 | `not_actions`   | Instead of `actions`: the statement names every action none of these patterns matches     |
 | `resources`     | Optional: the resource patterns the statement names                                       |
 | `not_resources` | Instead of `resources`: the statement names every resource none of these patterns matches |
-| `conditions`    | Optional: a map of operator to context key to operand, every test of which must hold      |
+| `conditions`    | Optional: a map of operator to context key path to operand, every test of which must hold |
 
 A statement takes exactly one of `actions` and `not_actions`, and at most one of `resources` and `not_resources`; each
 is a non-empty list of non-empty strings. Without either resource list a statement names every resource and a check that
 names none. `not_resources` still scopes the statement to resources, so it never covers a check without one. The `sid`
 names the statement in the decision and the trace, and never changes how it is evaluated.
 
-Conditions name the operator first, then each context key it tests:
+Conditions name the operator first, then each context key it tests, as a dot path into the check's context:
 
 ```php
 'conditions' => [
-    'ip_in'        => ['ip' => ['10.0.0.0/8', '2001:db8::/32']],
-    'eq'           => ['tenant' => '${principal.tenant_id}'],
-    'any_value_in' => ['groups' => ['editors', 'admins']],
-    'null'         => ['suspended_at' => true],
+    'ip_in'        => ['request.ip' => ['10.0.0.0/8', '2001:db8::/32']],
+    'eq'           => ['input.post.tenant' => '${principal.tenant_id}'],
+    'any_value_in' => ['input.groups' => ['editors', 'admins']],
+    'null'         => ['input.post.archived_at' => true],
+    'before'       => ['environment.time' => '2026-12-31T23:59:59Z'],
 ],
 ```
 
@@ -493,9 +504,9 @@ Conditions name the operator first, then each context key it tests:
 | `ip_in`, `ip_not_in`            | an address or range, or a list        | is an IPv4 or IPv6 address within any, or within none, of them |
 | `any_value_in`, `all_values_in` | a non-empty list of scalars           | is a list with some element, or only elements, in it           |
 
-- A condition key is one literal key of the context array, not a dot path into it as a `${context.…}` reference is:
-  `request.ip` tests `$context['request.ip']`, so a context of `['request' => ['ip' => '10.1.2.3']]` lacks it. Pass
-  each tested value under its full key.
+- A condition key is a dot path read one segment at a time, never a literal key: `input.post.status` reads the
+  `status` of the `post` of `input`, and a caller passing `['post.status' => 'draft']` supplies a key named
+  `post.status`, which the path never reaches.
 - A key the context lacks makes a test undecidable: an allow does not apply and a deny does. `null` decides a missing
   key instead, and any other operator takes the `_if_exists` suffix (`ip_in_if_exists`, `eq_if_exists`), under which a
   missing key passes; everything else is decided as without it.
@@ -508,13 +519,16 @@ Conditions name the operator first, then each context key it tests:
 - `any_value_in` and `all_values_in` need the context value to be a list, such as a token's scopes. An empty list never
   passes `all_values_in`.
 - `eq` and `neq` never take a list: use `in` or `not_in`. String operands may use `${…}` interpolation; list operands
-  are literal.
+  are literal. A reference reads the same dot paths a condition key does (`${request.ip}`, `${input.post.id}`,
+  `${environment.time}`), plus `${principal.…}` and `${resource.…}`; a missing, null or non-scalar value leaves it
+  unresolved, which makes the test undecidable.
 
 A policy is checked whenever it is saved, through the model or `PolicyService`, and refused with every limit,
-condition-key and catalogue reason at once, or, for a malformed document, the first structural fault found and any limit
-it breaks. The reasons are a malformed document; a condition key that is not a letter or `_`, then letters, digits and
-`_`, then any `.`-separated segments that may also hold `-`, at most 128 characters in all; an `actions` or
-`not_actions` pattern that matches no declared permission; or a document over the limits in `policies.limits`
+context-key and catalogue reason at once, or, for a malformed document, the first structural fault found and any limit
+it breaks. The reasons are a malformed document; a condition key, or a `${…}` reference other than to `principal` or
+`resource`, that the context key catalogue does not declare; a condition on a key that may not be tested; an operator
+that does not suit the key's type; an `actions` or `not_actions` pattern that matches no declared permission; or a
+document over the limits in `policies.limits`
 (`AUTHORIZATION_POLICY_DOCUMENT_BYTES`, `_STATEMENTS`, `_CONDITIONS` and `_PATTERN_LENGTH`: 64 KiB of JSON, 100
 statements, 50 key tests a statement and 512 characters a pattern or string operand). The limits are checked again when
 a stored policy is read, and the resolution cache keys cached policies by the limits they were checked under, so
@@ -527,6 +541,130 @@ php artisan authorization:policy:validate policies/
 ```
 
 The [condition semantics note](docs/design/wildcard-and-condition-semantics.md) has every operand and edge case.
+
+### The check's context
+
+A policy's conditions and `${…}` references read the check's context: nested namespaces, each key a dot path within
+one. A namespace is built only when a statement under evaluation reads it, through a condition key or a reference, and
+at most once a check, so a check whose policies read nothing of the request never looks at it.
+
+| Namespace        | Keys                            | Comes from                                                  |
+|------------------|---------------------------------|-------------------------------------------------------------|
+| `authentication` | `guard`, `user_id`, `user_type` | The bound `AuthenticationContext`                           |
+| `request`        | `ip`, `method`, `route`         | The bound `RequestContext`, only in a routed request        |
+| `environment`    | `time`                          | The bound `EnvironmentContext`                              |
+| `input`          | The keys you declare            | What the caller passes                                      |
+| Any other        | The keys its owner declares     | A `ContextSource` listed in `authorization.context.sources` |
+
+The shipped defaults supply what Laravel knows. `authentication` holds the default guard's name and, when someone is
+signed in on it, the user's key as a string and morph type (the morph alias, or the class name); with nobody signed in
+only `guard` is present. `request` holds Laravel's `ip()`, resolved through your trusted proxies, the method and the
+route's name, and only once the request has been routed: in a queued job or a console command the namespace is absent,
+so every `request` key is missing. `environment.time` is `now()` in UTC as `Y-m-d\TH:i:s\Z`, fixed the first time the
+check reads `environment`, then kept for the rest of the check, so `Carbon::setTestNow()` freezes it in tests.
+
+What the caller passes lands under `input`, and only there: the `$context` of `check()`, `can()`, `authorize()`,
+`explain()` and `effectivePermissions()`, the string-keyed and associative arguments of a Gate check, and the context
+of `assertCan()` and `assertCannot()`. A caller can never supply a trusted value:
+
+```php
+Authorization::can('posts:publish', $post, ['post' => ['status' => 'draft']]); // input.post.status
+Gate::allows('posts:publish', [$post, ['post' => ['status' => 'draft']]]);     // input.post.status
+Authorization::can('posts:delete', $post, ['request' => ['ip' => '10.0.0.1']]); // input.request.ip, never request.ip
+```
+
+Every key a policy reads must be declared in the context key catalogue, with a type, or the policy is refused when it
+is saved. The package declares its own seven keys; declare the rest, `input`'s included, in `config/authorization.php`,
+each path within its namespace:
+
+```php
+'context' => [
+    'keys' => [
+        'input'  => [
+            'post.status'      => 'string',
+            'post.tenant'      => 'string',
+            'post.archived_at' => 'time',
+            'groups'           => 'list',
+        ],
+        'tenant' => ['plan' => 'string', 'seats' => 'number'],
+    ],
+    'sources' => [App\Authorization\TenantContext::class],
+],
+```
+
+or register them from a service provider, which is how a package adds its namespace:
+
+```php
+use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
+use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
+
+public function boot(): void
+{
+    $keys = $this->app->make(ContextKeyCatalogue::class);
+
+    $keys->register('device', ['trusted' => 'bool', 'platform' => 'string']);
+    $keys->declare('device.enrolled_at', ContextKeyType::TIME);
+}
+```
+
+A key's type decides the operators a condition may test it with; `null` suits every type, and an `_if_exists` form
+follows its operator. A key may also be declared untestable (`declare($path, $type, isTestable: false)`), so that a
+reference may read it but no condition may test it. Declaring a key again with another type is refused, and so is a key
+under `principal`, `resource` or `subject`, which are not part of a check's context: `${principal.…}` and
+`${resource.…}` read the principal and the resource without declaring them. The type is checked when the policy is
+written; a value of the wrong type at evaluation is still undecidable.
+
+| Type     | Operators                                                       |
+|----------|-----------------------------------------------------------------|
+| `string` | `eq`, `neq`, `in`, `not_in`, `starts_with`, `ends_with`, `like` |
+| `number` | `eq`, `neq`, `in`, `not_in`, `gt`, `gte`, `lt`, `lte`           |
+| `bool`   | `eq`, `neq`, `bool`                                             |
+| `time`   | `before`, `after`, `between`                                    |
+| `ip`     | `eq`, `neq`, `in`, `not_in`, `ip_in`, `ip_not_in`               |
+| `list`   | `any_value_in`, `all_values_in`                                 |
+
+An application adds a namespace with a class implementing `SineMacula\Laravel\Authorization\Contracts\ContextSource`,
+listed in `authorization.context.sources` and resolved from the container. It names its namespace and returns its
+values, nested by key; an empty array leaves the namespace absent:
+
+```php
+use SineMacula\Laravel\Authorization\Contracts\ContextSource;
+
+final class TenantContext implements ContextSource
+{
+    public function __construct(private CurrentTenant $tenant) {}
+
+    public function namespace(): string
+    {
+        return 'tenant';
+    }
+
+    public function values(): array
+    {
+        $tenant = $this->tenant->get();
+
+        return $tenant === null ? [] : ['plan' => $tenant->plan, 'seats' => $tenant->seats];
+    }
+}
+```
+
+A source that does not implement the contract, one that claims a reserved namespace (`authentication`, `request`,
+`environment`, `input`, `principal`, `resource` or `subject`), two sources claiming one namespace, and a source claiming
+a namespace your `AuthenticationContext` adds are refused at boot. The trusted namespaces are replaced only by rebinding
+their own contracts. To supply `authentication` from your authentication layer, along with any namespace it adds
+beside it such as `mfa` or `sso`, bind your own `AuthenticationContext`. Its `namespaces()` lists every namespace it
+supplies and `values()` returns their values keyed by namespace; declare the keys of any namespace it adds in the
+catalogue. It is resolved at boot, which refuses a namespace it adds that is not a name, is reserved or is listed twice.
+Bind it in a service provider's `register()`:
+
+```php
+use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
+
+$this->app->scoped(AuthenticationContext::class, App\Authorization\SessionAuthenticationContext::class);
+```
+
+`RequestContext` and `EnvironmentContext` are rebound the same way. The defaults are built per request or job, so queue
+workers and Octane read the request and the user they are serving; a binding of your own is kept as you bound it.
 
 ### Listening to events
 

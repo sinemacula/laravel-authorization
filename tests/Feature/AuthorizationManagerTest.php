@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
@@ -51,6 +52,8 @@ use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\FixedSubjectResolver;
+use Tests\Feature\Stubs\PlanContextSource;
+use Tests\Feature\Stubs\ReservedContextSource;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\Feature\Stubs\StubSubjectResolver;
@@ -574,7 +577,7 @@ final class AuthorizationManagerTest extends TestCase
                 new Statement(
                     effect: PolicyEffect::ALLOW,
                     actions: ['posts:create'],
-                    conditions: ['eq' => ['tenant' => ['org-1']]],
+                    conditions: ['eq' => ['input.tenant' => ['org-1']]],
                 ),
             ],
         );
@@ -586,7 +589,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame(DecisionStage::ALLOW, $decision->stage);
         self::assertEquals([new StatementReference('broken-override', 0)], $decision->statements);
         self::assertEquals([
-            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::INVALID, new StatementReference('broken-override', 0), ['tenant' => false]),
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::INVALID, new StatementReference('broken-override', 0), ['input.tenant' => false]),
         ], $decision->trace);
         self::assertFalse(Authorization::for($user)->withPolicies([$invalid])->can('posts:create', null, ['tenant' => 'org-1']));
     }
@@ -674,11 +677,11 @@ final class AuthorizationManagerTest extends TestCase
 
         $allow = EvaluationPolicy::fromArray([
             'name'       => 'conditional-allow',
-            'statements' => [['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['tenant' => 'org-1']]]],
+            'statements' => [['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['input.tenant' => 'org-1']]]],
         ]);
         $deny = EvaluationPolicy::fromArray([
             'name'       => 'conditional-deny',
-            'statements' => [['effect' => 'deny', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['tenant' => 'org-1']]]],
+            'statements' => [['effect' => 'deny', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['input.tenant' => 'org-1']]]],
         ]);
 
         $skipped = Authorization::for($user)->withPolicies([$allow])->check('posts:create');
@@ -688,7 +691,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame(DecisionStage::ALLOW, $skipped->stage);
         self::assertSame([], $skipped->statements);
         self::assertEquals([
-            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::UNDECIDABLE, new StatementReference('conditional-allow', 0), ['tenant' => false]),
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::UNDECIDABLE, new StatementReference('conditional-allow', 0), ['input.tenant' => false]),
             new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD),
         ], $skipped->trace);
 
@@ -699,7 +702,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame(DecisionStage::DENY, $denied->stage);
         self::assertEquals([new StatementReference('conditional-deny', 0)], $denied->statements);
         self::assertEquals([
-            new TraceEntry(DecisionStage::DENY, TraceOutcome::UNDECIDABLE, new StatementReference('conditional-deny', 0), ['tenant' => false]),
+            new TraceEntry(DecisionStage::DENY, TraceOutcome::UNDECIDABLE, new StatementReference('conditional-deny', 0), ['input.tenant' => false]),
         ], $denied->trace);
     }
 
@@ -1019,6 +1022,161 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame('web', $subject->application);
         self::assertTrue(Authorization::can('posts:create'));
         self::assertFalse(Authorization::can('posts:delete'));
+    }
+
+    /**
+     * What the caller passes, through every form that adapts the check, is read
+     * under `input` alone: `['request' => ['ip' => …]]` supplies
+     * `input.request.ip`, never `request.ip`, which outside a routed request is
+     * missing.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testCallerValuesLandUnderInputAndNeverInTheRequest(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make(ConfigRepository::class);
+        $config->set('authorization.permission_enums', [PermissionEnum::class]);
+
+        $user = StubIdentity::create(['id' => 'caller']);
+
+        $user->attachPolicy(Policy::create(['name' => 'caller-values', 'document' => ['statements' => [
+            ['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['input.request.ip' => '10.0.0.1']]],
+            ['effect' => 'allow', 'actions' => ['posts:delete'], 'conditions' => ['eq' => ['request.ip' => '10.0.0.1']]],
+        ]]]));
+
+        $caller  = ['request' => ['ip' => '10.0.0.1']];
+        $manager = Authorization::for($user);
+
+        self::assertTrue($manager->can('posts:create', null, $caller));
+        self::assertTrue($manager->check('posts:create', null, $caller)->isAllowed());
+        self::assertStringContainsString('allow', $manager->explain('posts:create', null, $caller));
+        self::assertSame(['posts:create' => true, 'posts:delete' => false], $manager->effectivePermissions($caller));
+        self::assertFalse($manager->can('posts:delete', null, $caller));
+        self::assertFalse($manager->can('posts:delete', null, ['request.ip' => '10.0.0.1']));
+
+        $manager->authorize('posts:create', null, $caller);
+
+        $this->expectException(AuthorizationException::class);
+
+        $manager->authorize('posts:delete', null, $caller);
+    }
+
+    /**
+     * The `authentication` namespace is the default guard's name and the
+     * signed-in user's key and morph type; with nobody signed in, only the
+     * guard is present.
+     *
+     * @return void
+     */
+    public function testTheAuthenticationNamespaceIsTheGuardAndItsUser(): void
+    {
+        $user = AuthenticatableIdentity::create(['id' => 'signed-in']);
+
+        $user->attachPolicy(Policy::create(['name' => 'signed-in', 'document' => ['statements' => [
+            ['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => [
+                'authentication.guard'     => 'web',
+                'authentication.user_id'   => 'signed-in',
+                'authentication.user_type' => $user->getMorphClass(),
+            ]]],
+            ['effect' => 'allow', 'actions' => ['posts:delete'], 'conditions' => [
+                'eq'   => ['authentication.guard' => 'web'],
+                'null' => ['authentication.user_id' => true, 'authentication.user_type' => true],
+            ]],
+        ]]]));
+
+        self::assertFalse(Authorization::for($user)->can('posts:create'));
+        self::assertTrue(Authorization::for($user)->can('posts:delete'));
+
+        $this->actingAs($user);
+
+        self::assertTrue(Authorization::for($user)->can('posts:create'));
+        self::assertFalse(Authorization::for($user)->can('posts:delete'));
+    }
+
+    /**
+     * `environment.time` is Laravel's clock in UTC, so a frozen clock decides a
+     * time condition and a `${environment.time}` reference alike.
+     *
+     * @return void
+     */
+    public function testTheEnvironmentTimeIsTheFrozenClock(): void
+    {
+        $user = StubIdentity::create(['id' => 'clocked']);
+
+        $user->attachPolicy(Policy::create(['name' => 'office-hours', 'document' => ['statements' => [
+            ['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['between' => ['environment.time' => ['2026-03-01T09:00:00Z', '2026-03-01T17:00:00Z']]]],
+            ['effect' => 'allow', 'actions' => ['reports:read'], 'resources' => ['report:${environment.time}']],
+        ]]]));
+
+        try {
+            Carbon::setTestNow(Carbon::parse('2026-03-01 13:30:00', 'Europe/Paris'));
+
+            self::assertTrue(Authorization::for($user)->can('posts:create'));
+            self::assertTrue(Authorization::for($user)->can('reports:read', 'report:2026-03-01T12:30:00Z'));
+            self::assertFalse(Authorization::for($user)->can('reports:read', 'report:2026-03-01T13:30:00Z'));
+
+            Carbon::setTestNow(Carbon::parse('2026-03-01 18:00:00', 'UTC'));
+
+            self::assertFalse(Authorization::for($user)->can('posts:create'));
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    /**
+     * A source `authorization.context.sources` lists adds its namespace, built
+     * only for a check whose statements read it, and once for that check, while
+     * what the caller passes under the same name stays under `input`.
+     *
+     * @return void
+     */
+    public function testAnApplicationSourceAddsANamespace(): void
+    {
+        $source = new PlanContextSource;
+
+        $this->app?->instance(PlanContextSource::class, $source);
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make(ConfigRepository::class);
+        $config->set('authorization.context.sources', [PlanContextSource::class]);
+
+        $user = StubIdentity::create(['id' => 'subscriber']);
+
+        $user->attachPolicy(Policy::create(['name' => 'pro-only', 'document' => ['statements' => [
+            ['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['plan.tier' => 'pro'], 'in' => ['plan.tier' => ['pro', 'team']]]],
+            ['effect' => 'allow', 'actions' => ['posts:delete']],
+        ]]]));
+
+        self::assertTrue(Authorization::for($user)->can('posts:create', null, ['plan' => ['tier' => 'free']]));
+        self::assertSame(1, $source->reads);
+        self::assertTrue(Authorization::for($user)->can('posts:delete'));
+        self::assertSame(1, $source->reads);
+
+        $source->tier = 'free';
+
+        self::assertFalse(Authorization::for($user)->can('posts:create', null, ['plan' => ['tier' => 'pro']]));
+        self::assertSame(2, $source->reads);
+    }
+
+    /**
+     * A source claiming a reserved namespace is refused when the checks'
+     * context is first made, so it can never stand in for the request.
+     *
+     * @return void
+     */
+    public function testASourceClaimingAReservedNamespaceIsRefused(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make(ConfigRepository::class);
+        $config->set('authorization.context.sources', [ReservedContextSource::class]);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('cannot supply the namespace \'request\'');
+
+        Authorization::can('posts:create');
     }
 
     /**

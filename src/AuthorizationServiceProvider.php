@@ -22,7 +22,10 @@ use SineMacula\Laravel\Authorization\Console\RevokeRoleCommand;
 use SineMacula\Laravel\Authorization\Console\SyncPermissionsCommand;
 use SineMacula\Laravel\Authorization\Console\ValidatePolicyCommand;
 use SineMacula\Laravel\Authorization\Console\WhyCanCommand;
+use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
+use SineMacula\Laravel\Authorization\Context\ContextBindings;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
+use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
@@ -62,19 +65,24 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
  *
  * Every binding that holds state for one request or job (the resolvers, the
  * policy store, the resolved tenant, the resolution cache, the last decision,
- * the action catalogue and the manager that holds them) is registered with
- * `scoped()`, so Laravel's queue worker drops it before each job and Octane
- * builds it afresh on each request's sandbox. They are scoped together: a
- * singleton holding a scoped instance would keep the old instance alive.
+ * the action catalogue, the context sources and the check context factory, and
+ * the manager that holds them) is registered with `scoped()`, so Laravel's
+ * queue worker drops it before each job and Octane builds it afresh on each
+ * request's sandbox. They are scoped together: a singleton holding a scoped
+ * instance would keep the old instance alive.
  *
  * The management services (roles, permissions, policies and grants) hold no
  * state and are bound as singletons.
  *
+ * The context key catalogue is one per application, so the keys a service
+ * provider registers on it are kept for every request and job.
+ *
  * The contracts an application may bind itself (the subject resolver, the
- * policy store, the policy resolver and the action catalogue) resolve through a
- * package-owned key that holds the scoped default. An application's own binding
- * of the contract therefore replaces the default without being scoped itself,
- * and an instance it binds survives the reset between jobs.
+ * policy store, the policy resolver, the action catalogue and the trusted
+ * context sources) resolve through a package-owned key that holds the scoped
+ * default. An application's own binding of the contract therefore replaces the
+ * default without being scoped itself, and an instance it binds survives the
+ * reset between jobs.
  *
  * Row-lifecycle behaviour for `Role` / `Permission` / `Policy` is attached via
  * the `#[ObservedBy]` attribute on each model; the service provider does not
@@ -320,10 +328,19 @@ final class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Bind the policy evaluator, and the action catalogue a policy document's
-     * action patterns are checked against when it is written: by default the
-     * permissions the code declares, read once per request or job. The
-     * catalogue is bound as a default an application may replace.
+     * Bind the policy evaluator and what a policy is checked against and reads.
+     *
+     * The action catalogue a policy document's action patterns are checked
+     * against when it is written is by default the permissions the code
+     * declares, read once per request or job. The context key catalogue its
+     * condition keys and `${…}` references are checked against is one per
+     * application, so the keys a service provider registers on it stay
+     * registered across requests and jobs; it declares the package's keys and
+     * those of `authorization.context.keys`. The trusted context sources
+     * (authentication, request and environment) and the check context factory
+     * that holds them with the sources of `authorization.context.sources` are
+     * built per request or job. Each contract is bound as a default an
+     * application may replace.
      *
      * @return void
      */
@@ -331,7 +348,12 @@ final class AuthorizationServiceProvider extends ServiceProvider
     {
         $this->app->scoped(PolicyEvaluator::class);
 
-        $this->bindScopedDefault(ActionCatalogue::class, DeclaredActionCatalogue::class);
+        foreach ([ActionCatalogue::class => DeclaredActionCatalogue::class, ...ContextBindings::DEFAULTS] as $contract => $concrete) {
+            $this->bindScopedDefault($contract, $concrete);
+        }
+
+        $this->app->singleton(ContextKeyCatalogue::class, ContextBindings::catalogue(...));
+        $this->app->scoped(CheckContextFactory::class, ContextBindings::factory(...));
     }
 
     /**
@@ -349,6 +371,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
             lastDecisionStore: $app->make(LastDecisionStore::class),
             events: $app->bound(Dispatcher::class) ? $app->make(Dispatcher::class) : null,
             translator: $app->bound(Translator::class) ? $app->make(Translator::class) : null,
+            contexts: $app->make(CheckContextFactory::class),
         ));
 
         $this->app->alias('authorization', AuthorizationManager::class);

@@ -26,6 +26,7 @@ use Tests\Feature\Stubs\CustomRole;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
+use Tests\Feature\Stubs\ReservedContextSource;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
@@ -33,8 +34,8 @@ use Tests\TestCase;
 /**
  * Feature tests for the boot-time validation of `authorization.models.*`, the
  * connection, the backing of `authorization.permission_enums`, the subject
- * resolver, the tenant tree, the resource tenant resolver and the policy
- * limits.
+ * resolver, the tenant tree, the resource tenant resolver, the policy limits
+ * and the context.
  *
  * Each model entry must name an existing class that is the shipped model or a
  * subclass of it, and each permission enum must be backed by strings; anything
@@ -651,6 +652,28 @@ final class ConfigValidatorTest extends TestCase
             fn () => (new AuthorizationServiceProvider($this->app))->boot(),
             'authorization.resource_tenant_resolver',
             self::RESOURCE_TENANT_RESOLVER_REQUIRED,
+        );
+    }
+
+    /**
+     * The shipped `context` config passes, and the context config is checked at
+     * boot: a source claiming a reserved namespace fails it.
+     *
+     * @return void
+     */
+    public function testTheContextConfigIsValidatedAtBoot(): void
+    {
+        ConfigValidator::validate($this->authorizationConfig(), $this->app);
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config->set('authorization.context.sources', [ReservedContextSource::class]);
+
+        $this->assertRejected(
+            fn () => (new AuthorizationServiceProvider($this->app))->boot(),
+            'authorization.context.sources.0',
+            'source \'' . ReservedContextSource::class . '\' supplies the namespace \'request\', which is not a name or is reserved'
+                . ' (authentication, request, environment, input, principal, resource, subject).',
         );
     }
 

@@ -137,12 +137,15 @@ final readonly class GateRegistrar
     /**
      * Translate the arguments Laravel hands to a Gate callback into the
      * `(resource, context)` pair the authorization manager accepts. String keys
-     * and string-keyed arrays merge into the context map; every other argument
-     * names the resource. Laravel spreads an argument array, so
-     * `Gate::allows('posts:update', ['post', 42])` arrives as two arguments,
-     * which name the `(type, id)` pair they spell; one argument names the
-     * resource it is, and any other set of arguments names no resource the
-     * check can identify (false), so none is ever silently dropped.
+     * and string-keyed arrays merge into the caller's values, which the check
+     * holds under `input` and nowhere else (`Gate::allows('posts:update',
+     * [$post, 'request' => [...]])` supplies `input.request`, never `request`);
+     * every other argument names the resource. Laravel spreads an argument
+     * array, so `Gate::allows('posts:update', ['post', 42])` arrives as two
+     * arguments, which name the `(type, id)` pair they spell; one argument
+     * names the resource it is, and any other set of arguments names no
+     * resource the check can identify (false), so none is ever silently
+     * dropped.
      *
      * @param  array<int|string, mixed>  $arguments
      * @return array{0: false|\SineMacula\Laravel\Authorization\Support\ResourceReference|null, 1: array<string, mixed>}

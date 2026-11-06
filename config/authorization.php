@@ -220,6 +220,43 @@ return [
 
     /*
     |---------------------------------------------------------------------------
+    | Context
+    |---------------------------------------------------------------------------
+    |
+    | The context a policy's conditions and `${…}` references read is nested
+    | namespaces, each key a dot path: `authentication` (`guard`, `user_id`,
+    | `user_type`), `request` (`ip`, `method`, `route`, present only in a
+    | routed request), `environment` (`time`, UTC), `input` (what the caller
+    | passes to `check()`, `can()`, a Gate and the like, held there alone, so
+    | `['post' => ['status' => 'draft']]` is `input.post.status`) and any
+    | namespace a source below adds. Replace a trusted namespace by binding its
+    | contract (`AuthenticationContext`, `RequestContext`,
+    | `EnvironmentContext`).
+    |
+    | `keys` declares the keys a policy may read beyond the package's own, by
+    | namespace, each a dot path mapped to its type: `string`, `number`,
+    | `bool`, `time`, `ip` or `list`, for example
+    | `['input' => ['post.status' => 'string'], 'tenant' => ['plan' =>
+    | 'string']]`. A policy reading an undeclared key, or testing a key with an
+    | operator that does not suit its type, is refused when it is written. A
+    | service provider may also register keys on the `ContextKeyCatalogue`.
+    |
+    | `sources` lists classes implementing `ContextSource`, resolved from the
+    | container, each supplying one namespace of its own, built only when a
+    | statement reads it. A class that does not implement the contract, a
+    | reserved namespace (`authentication`, `request`, `environment`, `input`,
+    | `principal`, `resource`, `subject`) and a namespace two sources supply
+    | are refused at boot.
+    |
+    */
+
+    'context' => [
+        'keys'    => [],
+        'sources' => [],
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
     | Subject resolver
     |---------------------------------------------------------------------------
     |

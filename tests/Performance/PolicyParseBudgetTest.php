@@ -89,8 +89,8 @@ final class PolicyParseBudgetTest extends TestCase
                     "posts:resource_{$i}_c",
                 ],
                 'conditions' => [
-                    'eq' => ['tenant' => "tenant_{$i}"],
-                    'lt' => ['rank' => 100],
+                    'eq' => ['input.tenant' => "tenant_{$i}"],
+                    'lt' => ['input.rank' => 100],
                 ],
             ];
         }

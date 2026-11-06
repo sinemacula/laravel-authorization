@@ -151,11 +151,11 @@ final class ConditionEvaluatorBench
             effect: PolicyEffect::ALLOW,
             actions: ['*'],
             conditions: [
-                'eq'          => ['tenant' => 'tenant-99'],
-                'neq'         => ['role' => 'guest'],
-                'starts_with' => ['path' => '/admin'],
-                'ends_with'   => ['file' => '.json'],
-                'like'        => ['agent' => 'Mozilla/*'],
+                'eq'          => ['input.tenant' => 'tenant-99'],
+                'neq'         => ['input.role' => 'guest'],
+                'starts_with' => ['input.path' => '/admin'],
+                'ends_with'   => ['input.file' => '.json'],
+                'like'        => ['input.agent' => 'Mozilla/*'],
             ],
         );
     }
@@ -171,10 +171,10 @@ final class ConditionEvaluatorBench
             effect: PolicyEffect::ALLOW,
             actions: ['*'],
             conditions: [
-                'gt'  => ['age' => 17],
-                'gte' => ['quota' => 0],
-                'lt'  => ['strikes' => 3],
-                'lte' => ['priority' => 10],
+                'gt'  => ['input.age' => 17],
+                'gte' => ['input.quota' => 0],
+                'lt'  => ['input.strikes' => 3],
+                'lte' => ['input.priority' => 10],
             ],
         );
     }
@@ -190,9 +190,9 @@ final class ConditionEvaluatorBench
             effect: PolicyEffect::ALLOW,
             actions: ['*'],
             conditions: [
-                'before'  => ['scheduled_at' => '2099-01-01T00:00:00Z'],
-                'after'   => ['created_at' => '2000-01-01T00:00:00Z'],
-                'between' => ['window' => ['2000-01-01T00:00:00Z', '2099-01-01T00:00:00Z']],
+                'before'  => ['input.scheduled_at' => '2099-01-01T00:00:00Z'],
+                'after'   => ['input.created_at' => '2000-01-01T00:00:00Z'],
+                'between' => ['input.window' => ['2000-01-01T00:00:00Z', '2099-01-01T00:00:00Z']],
             ],
         );
     }
@@ -209,14 +209,14 @@ final class ConditionEvaluatorBench
             effect: PolicyEffect::ALLOW,
             actions: ['*'],
             conditions: [
-                'in'            => ['country' => ['US', 'GB', 'CA']],
-                'not_in'        => ['blocklist' => ['blocked', 'banned']],
-                'bool'          => ['verified' => true],
-                'null'          => ['deleted_at' => true, 'email' => false],
-                'ip_in'         => ['ip' => '10.0.0.0/8'],
-                'ip_not_in'     => ['ip' => ['192.168.0.0/16', '2001:db8::/32']],
-                'any_value_in'  => ['groups' => ['admins', 'editors']],
-                'all_values_in' => ['scopes' => ['posts:read', 'posts:write', 'posts:delete']],
+                'in'            => ['input.country' => ['US', 'GB', 'CA']],
+                'not_in'        => ['input.blocklist' => ['blocked', 'banned']],
+                'bool'          => ['input.verified' => true],
+                'null'          => ['input.deleted_at' => true, 'input.email' => false],
+                'ip_in'         => ['input.ip' => '10.0.0.0/8'],
+                'ip_not_in'     => ['input.ip' => ['192.168.0.0/16', '2001:db8::/32']],
+                'any_value_in'  => ['input.groups' => ['admins', 'editors']],
+                'all_values_in' => ['input.scopes' => ['posts:read', 'posts:write', 'posts:delete']],
             ],
         );
     }

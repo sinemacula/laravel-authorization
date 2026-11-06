@@ -15,7 +15,9 @@ use Orchestra\Testbench\TestCase as OrchestraTestCase;
 
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
+use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use Tests\Feature\Stubs\PermissiveActionCatalogue;
+use Tests\Feature\Stubs\PermissiveContextKeyCatalogue;
 
 // phpcs:enable PSR12.Files.FileHeader
 
@@ -74,8 +76,9 @@ abstract class TestCase extends OrchestraTestCase
         parent::setUp();
 
         // Extended rather than bound, so a test that registers the provider
-        // again keeps it; a test of the catalogue rule binds an instance.
+        // again keeps them; a test of a catalogue's rules binds an instance.
         $this->app?->extend(ActionCatalogue::class, static fn (): ActionCatalogue => new PermissiveActionCatalogue);
+        $this->app?->extend(ContextKeyCatalogue::class, static fn (ContextKeyCatalogue $catalogue): ContextKeyCatalogue => new PermissiveContextKeyCatalogue($catalogue));
     }
 
     /**

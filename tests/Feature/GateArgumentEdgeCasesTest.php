@@ -88,7 +88,7 @@ final class GateArgumentEdgeCasesTest extends TestCase
                 'statements' => [[
                     'effect'     => 'allow',
                     'actions'    => ['posts:create'],
-                    'conditions' => ['eq' => ['tenant' => 'org-7']],
+                    'conditions' => ['eq' => ['input.tenant' => 'org-7']],
                 ]],
             ],
         ]));

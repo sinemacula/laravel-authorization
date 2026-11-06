@@ -55,8 +55,8 @@ final class BenchmarkFixtures
                     "posts:resource_{$i}_c",
                 ],
                 'conditions' => [
-                    'eq' => ['tenant' => "tenant_{$i}"],
-                    'lt' => ['rank' => 100],
+                    'eq' => ['input.tenant' => "tenant_{$i}"],
+                    'lt' => ['input.rank' => 100],
                 ],
             ];
         }
@@ -107,18 +107,17 @@ final class BenchmarkFixtures
     }
 
     /**
-     * A realistic interpolation context — matches the shape callers pass
-     * through `can()`: a principal stand-in under `user`, request metadata, and
-     * a tenant scalar. Paired with the `interpolationPattern()` fixture so the
-     * 10-token parse path hits plain keys, dot-notation keys, and resource
-     * namespaces.
+     * A realistic check context: the caller's `input`, the request's metadata
+     * and the environment, as namespaces. Paired with the
+     * `interpolationPattern()` fixture so the 10-token parse path reads context
+     * paths alongside the principal and resource namespaces.
      *
      * @return array<string, mixed>
      */
     public static function interpolationContext(): array
     {
         return [
-            'tenant'  => 'tenant-99',
+            'input'   => ['tenant' => 'tenant-99'],
             'request' => [
                 'ip'         => '10.0.0.42',
                 'method'     => 'POST',
@@ -127,7 +126,7 @@ final class BenchmarkFixtures
                 'referrer'   => 'https://example.test/dashboard',
                 'user_agent' => 'Mozilla/5.0',
             ],
-            'environment' => 'production',
+            'environment' => ['tier' => 'production'],
         ];
     }
 
@@ -141,8 +140,8 @@ final class BenchmarkFixtures
     public static function interpolationPattern(): string
     {
         return '${principal.id}:${principal.type}:${resource.type}:${resource.id}'
-            . ':${context.tenant}:${context.request.ip}:${context.request.method}'
-            . ':${context.request.path}:${context.request.country}:${context.environment}';
+            . ':${input.tenant}:${request.ip}:${request.method}'
+            . ':${request.path}:${request.country}:${environment.tier}';
     }
 
     /**
@@ -169,58 +168,61 @@ final class BenchmarkFixtures
     public static function conditionChain(): array
     {
         return [
-            'eq'            => ['tenant' => 'tenant-99'],
-            'neq'           => ['role' => 'guest'],
-            'in'            => ['country' => ['US', 'GB', 'CA']],
-            'not_in'        => ['blocklist' => ['blocked', 'banned']],
-            'starts_with'   => ['path' => '/admin'],
-            'ends_with'     => ['file' => '.json'],
-            'like'          => ['agent' => 'Mozilla/*'],
-            'gt'            => ['age' => 17],
-            'gte'           => ['quota' => 0],
-            'lt'            => ['strikes' => 3],
-            'lte'           => ['priority' => 10],
-            'before'        => ['scheduled_at' => '2099-01-01T00:00:00Z'],
-            'after'         => ['created_at' => '2000-01-01T00:00:00Z'],
-            'between'       => ['window' => ['2000-01-01T00:00:00Z', '2099-01-01T00:00:00Z']],
-            'bool'          => ['verified' => true],
-            'null'          => ['deleted_at' => true, 'email' => false],
-            'ip_in'         => ['ip' => '10.0.0.0/8'],
-            'ip_not_in'     => ['ip' => ['192.168.0.0/16', '2001:db8::/32']],
-            'any_value_in'  => ['groups' => ['admins', 'editors']],
-            'all_values_in' => ['scopes' => ['posts:read', 'posts:write', 'posts:delete']],
+            'eq'            => ['input.tenant' => 'tenant-99'],
+            'neq'           => ['input.role' => 'guest'],
+            'in'            => ['input.country' => ['US', 'GB', 'CA']],
+            'not_in'        => ['input.blocklist' => ['blocked', 'banned']],
+            'starts_with'   => ['input.path' => '/admin'],
+            'ends_with'     => ['input.file' => '.json'],
+            'like'          => ['input.agent' => 'Mozilla/*'],
+            'gt'            => ['input.age' => 17],
+            'gte'           => ['input.quota' => 0],
+            'lt'            => ['input.strikes' => 3],
+            'lte'           => ['input.priority' => 10],
+            'before'        => ['input.scheduled_at' => '2099-01-01T00:00:00Z'],
+            'after'         => ['input.created_at' => '2000-01-01T00:00:00Z'],
+            'between'       => ['input.window' => ['2000-01-01T00:00:00Z', '2099-01-01T00:00:00Z']],
+            'bool'          => ['input.verified' => true],
+            'null'          => ['input.deleted_at' => true, 'input.email' => false],
+            'ip_in'         => ['input.ip' => '10.0.0.0/8'],
+            'ip_not_in'     => ['input.ip' => ['192.168.0.0/16', '2001:db8::/32']],
+            'any_value_in'  => ['input.groups' => ['admins', 'editors']],
+            'all_values_in' => ['input.scopes' => ['posts:read', 'posts:write', 'posts:delete']],
         ];
     }
 
     /**
-     * Context matching the 20-operator `conditionChain()` fixture — every key
-     * resolves to a value that makes its operator pass.
+     * Context matching the 20-operator `conditionChain()` fixture: the caller's
+     * values under `input`, where every key resolves to a value that makes its
+     * operator pass.
      *
      * @return array<string, mixed>
      */
     public static function conditionContext(): array
     {
         return [
-            'tenant'       => 'tenant-99',
-            'role'         => 'member',
-            'country'      => 'US',
-            'blocklist'    => 'allowed',
-            'ip'           => '10.0.0.42',
-            'path'         => '/admin/posts',
-            'file'         => 'report.json',
-            'scheduled_at' => '2026-06-01T00:00:00Z',
-            'created_at'   => '2026-01-01T00:00:00Z',
-            'window'       => '2026-06-01T00:00:00Z',
-            'agent'        => 'Mozilla/5.0',
-            'deleted_at'   => null,
-            'email'        => 'alice@example.test',
-            'age'          => 42,
-            'quota'        => 10,
-            'strikes'      => 0,
-            'priority'     => 5,
-            'verified'     => true,
-            'groups'       => ['members', 'editors'],
-            'scopes'       => ['posts:read', 'posts:write'],
+            'input' => [
+                'tenant'       => 'tenant-99',
+                'role'         => 'member',
+                'country'      => 'US',
+                'blocklist'    => 'allowed',
+                'ip'           => '10.0.0.42',
+                'path'         => '/admin/posts',
+                'file'         => 'report.json',
+                'scheduled_at' => '2026-06-01T00:00:00Z',
+                'created_at'   => '2026-01-01T00:00:00Z',
+                'window'       => '2026-06-01T00:00:00Z',
+                'agent'        => 'Mozilla/5.0',
+                'deleted_at'   => null,
+                'email'        => 'alice@example.test',
+                'age'          => 42,
+                'quota'        => 10,
+                'strikes'      => 0,
+                'priority'     => 5,
+                'verified'     => true,
+                'groups'       => ['members', 'editors'],
+                'scopes'       => ['posts:read', 'posts:write'],
+            ],
         ];
     }
 }
