@@ -30,7 +30,11 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  * and as `no_match` otherwise. A permission the subject holds is a further
  * allow source, which the manager consults when the statements allow nothing.
  *
- * @phpstan-type StatementEntry array{\SineMacula\Laravel\Authorization\Evaluation\StatementReference, \SineMacula\Laravel\Authorization\Evaluation\Statement}
+ * @phpstan-type StatementEntry array{
+ *     \SineMacula\Laravel\Authorization\Evaluation\StatementReference,
+ *     \SineMacula\Laravel\Authorization\Evaluation\Statement,
+ *     \SineMacula\Laravel\Authorization\Evaluation\TraceEntry
+ * }
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -56,6 +60,14 @@ final class PolicyEvaluator
     private ?ContextInterpolator $interpolator = null;
 
     /**
+     * Each policy's statements with their references, kept while the policy
+     * lives.
+     *
+     * @var \WeakMap<\SineMacula\Laravel\Authorization\Evaluation\Policy, array{deny: list<StatementEntry>, allow: list<StatementEntry>}>|null
+     */
+    private ?\WeakMap $entries = null;
+
+    /**
      * Decide the check from the policies' statements.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
@@ -67,7 +79,7 @@ final class PolicyEvaluator
      */
     public function evaluate(array $policies, string $action, ?string $resource = null, array $context = [], ?object $principal = null): Decision
     {
-        $statements = self::statementsOf($policies);
+        $statements = $this->statementsOf($policies);
         $trace      = [];
         $denies     = $this->assess($statements[self::DENY], DecisionStage::DENY, $action, $resource, $context, $principal, $trace);
 
@@ -100,7 +112,14 @@ final class PolicyEvaluator
     {
         $found = [self::DENY => [], self::INVALID => [], self::ALLOW => [], self::FAILED => [], self::NONE => []];
 
-        foreach ($statements as [$reference, $statement]) {
+        foreach ($statements as [$reference, $statement, $notApplicable]) {
+            // Most statements do not name the action, and decide nothing.
+            if (!$statement->coversAction($action)) {
+                $trace[] = $notApplicable;
+
+                continue;
+            }
+
             $assessment = $statement->assess($action, $resource, $context, $this->interpolator(), $principal);
             $outcome    = self::outcomeOf($assessment);
 
@@ -119,19 +138,51 @@ final class PolicyEvaluator
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
      * @return array{deny: list<StatementEntry>, allow: list<StatementEntry>}
      */
-    private static function statementsOf(array $policies): array
+    private function statementsOf(array $policies): array
     {
         \usort($policies, static fn (Policy $left, Policy $right): int => \strcmp(self::orderOf($left), self::orderOf($right)));
 
         $statements = [self::DENY => [], self::ALLOW => []];
 
         foreach ($policies as $policy) {
-            foreach ($policy->statements as $index => $statement) {
-                $statements[$statement->effect === PolicyEffect::DENY ? self::DENY : self::ALLOW][] = [new StatementReference($policy->name, $index, $policy->id), $statement];
+            foreach ($this->entriesOf($policy) as $effect => $entries) {
+                foreach ($entries as $entry) {
+                    $statements[$effect][] = $entry;
+                }
             }
         }
 
         return $statements;
+    }
+
+    /**
+     * Return a policy's statements, each with its reference and the trace entry
+     * it adds when it does not name the action, the deny statements and the
+     * allow statements apart, built once per policy.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $policy
+     * @return array{deny: list<StatementEntry>, allow: list<StatementEntry>}
+     */
+    private function entriesOf(Policy $policy): array
+    {
+        $this->entries ??= new \WeakMap;
+
+        if (!isset($this->entries[$policy])) {
+            $entries = [self::DENY => [], self::ALLOW => []];
+
+            foreach ($policy->statements as $index => $statement) {
+                $isDeny    = $statement->effect === PolicyEffect::DENY;
+                $reference = new StatementReference($policy->name, $index, $policy->id);
+
+                $stage = $isDeny ? DecisionStage::DENY : DecisionStage::ALLOW;
+
+                $entries[$isDeny ? self::DENY : self::ALLOW][] = [$reference, $statement, new TraceEntry($stage, TraceOutcome::NOT_APPLICABLE, $reference)];
+            }
+
+            $this->entries[$policy] = $entries;
+        }
+
+        return $this->entries[$policy];
     }
 
     /**

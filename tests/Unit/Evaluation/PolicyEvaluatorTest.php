@@ -922,6 +922,34 @@ final class PolicyEvaluatorTest extends TestCase
     }
 
     /**
+     * A policy's statement references and the trace entries of statements that
+     * do not name the action are built once and shared by the evaluator's every
+     * decision over that policy, while a statement that names it is assessed
+     * afresh.
+     *
+     * @return void
+     */
+    public function testPolicyStatementEntriesAreBuiltOnce(): void
+    {
+        $policy = Policy::fromArray([
+            'name'       => 'p',
+            'statements' => [
+                ['effect' => 'deny', 'actions' => ['posts:delete']],
+                ['effect' => 'allow', 'actions' => ['posts:read']],
+            ],
+        ]);
+
+        $evaluator = new PolicyEvaluator;
+        $first     = $evaluator->evaluate([$policy], 'posts:read');
+        $second    = $evaluator->evaluate([$policy], 'posts:read');
+
+        self::assertSame($first->trace[0], $second->trace[0]);
+        self::assertSame($first->statements[0], $second->statements[0]);
+        self::assertNotSame($first->trace[1], $second->trace[1]);
+        self::assertEquals(self::entry(DecisionStage::DENY, TraceOutcome::NOT_APPLICABLE, 'p', 0), $first->trace[0]);
+    }
+
+    /**
      * Return a reference to the statement at the index of the named policy,
      * carrying the policy's stored key when it has one.
      *
