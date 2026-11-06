@@ -19,6 +19,8 @@ final readonly class PruneResult
      * @param  int  $orphaned
      * @param  int  $inlinePolicies
      * @param  list<string>  $unresolvedTypes
+     * @param  int  $resourcePolicies
+     * @param  list<string>  $unresolvedResourceTypes
      */
     public function __construct(
 
@@ -33,5 +35,11 @@ final readonly class PruneResult
 
         /** The grantee types that name no model class, whose grants and inline policies were left. */
         public array $unresolvedTypes,
+
+        /** The resource policy attachments removed because the record they are attached to no longer exists. */
+        public int $resourcePolicies = 0,
+
+        /** The resource types that name no model class, whose records' attachments were left. */
+        public array $unresolvedResourceTypes = [],
     ) {}
 }

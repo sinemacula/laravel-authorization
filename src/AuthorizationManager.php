@@ -403,10 +403,11 @@ final class AuthorizationManager
      * nothing, a permission the subject holds. A resource policy's denies apply
      * to everyone, and its allows to the subjects their `principals` name, with
      * no permission held; by now the tenant stage has admitted the resource, so
-     * a resource policy never allows across tenants. A policy document that
-     * cannot be read denies the check as an invalid policy. The subject's
-     * identity, when it is another model, contributes its policies and its
-     * grants (see `SubjectGrants`).
+     * a resource policy never allows across tenants, and a deny attached to the
+     * resource in its own tenant applies even once the check falls back to
+     * platform scope. A policy document that cannot be read denies the check as
+     * an invalid policy. The subject's identity, when it is another model,
+     * contributes its policies and its grants (see `SubjectGrants`).
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action

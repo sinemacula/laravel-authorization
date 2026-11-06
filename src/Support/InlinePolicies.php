@@ -106,6 +106,7 @@ final class InlinePolicies
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\ResourcePolicyException
      */
     public static function assertAttachable(Model $target, Reference $grantee): void
     {
@@ -119,22 +120,19 @@ final class InlinePolicies
     /**
      * Refuse to attach a policy, as `stored()` read it, to any grantee but the
      * one it belongs to, and a policy naming `principals`, which only a
-     * resource policy does (see `PolicyPrincipals`). A managed policy naming
-     * none passes.
+     * resource policy does, with `ResourcePolicyException` (see
+     * `PolicyPrincipals`). A managed policy naming none passes.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $stored
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\ResourcePolicyException
      */
     public static function assertStoredAttachable(Policy $stored, Reference $grantee): void
     {
-        $owner = self::ownerOf($stored);
-
-        if ($owner !== null && ($owner->type !== $grantee->type || $owner->id !== $grantee->id)) {
-            throw new InlinePolicyAttachmentException(PolicyDocument::nameOf($stored->getAttribute('name')), $owner, $grantee);
-        }
+        self::assertOwnedBy($stored, $grantee);
 
         PolicyPrincipals::assertAttachableToGrantee($stored);
     }
@@ -232,6 +230,27 @@ final class InlinePolicies
     public static function countOwnedBy(Reference $owner): int
     {
         return self::ownedBy($owner)->count();
+    }
+
+    /**
+     * Refuse a policy, as `stored()` read it, that belongs to a grantee other
+     * than the given one. A managed policy belongs to none, and passes.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $stored
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException
+     */
+    private static function assertOwnedBy(Policy $stored, Reference $grantee): void
+    {
+        $owner = self::ownerOf($stored);
+
+        if ($owner === null || ($owner->type === $grantee->type && $owner->id === $grantee->id)) {
+            return;
+        }
+
+        throw new InlinePolicyAttachmentException(PolicyDocument::nameOf($stored->getAttribute('name')), $owner, $grantee);
     }
 
     /**

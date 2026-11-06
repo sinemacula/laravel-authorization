@@ -758,7 +758,7 @@ final class ResolutionCacheTest extends TestCase
         $resource = new Reference('posts', '7');
         $key      = 'authorization-test:resource-policies:posts:7:platform:every:limits:65536.100.50.512';
 
-        $this->request()->rememberResourcePolicies($resource, function (ResolutionPins $pins) use ($policy): Resolution {
+        $this->request()->rememberResourcePolicies('posts', '7', function (ResolutionPins $pins) use ($policy): Resolution {
             $pins->resourcePolicies('posts');
 
             return $this->resolve([$policy]);
@@ -770,7 +770,7 @@ final class ResolutionCacheTest extends TestCase
         self::assertSame([['id' => 'policy-key', 'document' => $policy->toArray(), 'resource' => 'posts:7']], $entry['value']);
         self::assertSame([$this->versions()->resourcePoliciesKey(), $this->versions()->resourcePoliciesKey('posts')], \array_keys($entry['versions']));
 
-        $read = $this->request()->rememberResourcePolicies($resource, fn (): Resolution => $this->resolve([]));
+        $read = $this->request()->rememberResourcePolicies('posts', '7', fn (): Resolution => $this->resolve([]));
 
         self::assertSame(1, $this->resolutions);
         self::assertEquals([$policy], $read);
@@ -786,12 +786,11 @@ final class ResolutionCacheTest extends TestCase
      */
     public function testAResourcePolicyEntryWithAMalformedResourceIsDiscarded(): void
     {
-        $logger   = $this->recordLogs();
-        $policy   = EvaluationPolicy::fromArray(['name' => 'sharing', 'statements' => []])->withResource('posts:*');
-        $resource = new Reference('posts', '*');
-        $key      = 'authorization-test:resource-policies:posts:*:platform:every:limits:65536.100.50.512';
+        $logger = $this->recordLogs();
+        $policy = EvaluationPolicy::fromArray(['name' => 'sharing', 'statements' => []])->withResource('posts:*');
+        $key    = 'authorization-test:resource-type-policies:posts:*:platform:every:limits:65536.100.50.512';
 
-        $this->request()->rememberResourcePolicies($resource, function (ResolutionPins $pins) use ($policy): Resolution {
+        $this->request()->rememberResourcePolicies('posts', null, function (ResolutionPins $pins) use ($policy): Resolution {
             $pins->resourcePolicies('posts');
 
             return $this->resolve([$policy]);
@@ -802,9 +801,57 @@ final class ResolutionCacheTest extends TestCase
 
         $this->store->put($key, [...$entry, 'value' => [['id' => null, 'document' => $policy->toArray(), 'resource' => 7]]], 60);
 
-        self::assertEquals([$policy], $this->request()->rememberResourcePolicies($resource, fn (): Resolution => $this->resolve([$policy])));
+        self::assertEquals([$policy], $this->request()->rememberResourcePolicies('posts', null, fn (): Resolution => $this->resolve([$policy])));
         self::assertSame(2, $this->resolutions);
         self::assertCount(1, $logger->messages());
+    }
+
+    /**
+     * A type alone is kept under a kind of its own, so no record's entry, not
+     * even one whose key is `*`, is ever the type's.
+     *
+     * @return void
+     */
+    public function testATypeAloneIsKeptApartFromEveryRecord(): void
+    {
+        $type   = EvaluationPolicy::fromArray(['name' => 'type', 'statements' => []])->withResource('posts:*');
+        $record = EvaluationPolicy::fromArray(['name' => 'record', 'statements' => []])->withResource('posts:*');
+
+        $cache   = $this->request();
+        $pinning = fn (array $policies): \Closure => function (ResolutionPins $pins) use ($policies): Resolution {
+            $pins->resourcePolicies('posts');
+
+            return $this->resolve($policies);
+        };
+
+        self::assertEquals([$type], $cache->rememberResourcePolicies('posts', null, $pinning([$type])));
+        self::assertEquals([$record], $cache->rememberResourcePolicies('posts', '*', $pinning([$record])));
+        self::assertEquals([$type], $this->request()->rememberResourcePolicies('posts', null, $pinning([])));
+        self::assertSame(2, $this->resolutions);
+        self::assertIsArray($this->store->get('authorization-test:resource-type-policies:posts:*:platform:every:limits:65536.100.50.512'));
+        self::assertIsArray($this->store->get('authorization-test:resource-policies:posts:*:platform:every:limits:65536.100.50.512'));
+    }
+
+    /**
+     * The keys of the roles a grantee reaches are kept for the grantee under
+     * its own kind, read back from the store in the next request without
+     * resolving, and pin the grantee's version.
+     *
+     * @return void
+     */
+    public function testAGranteesRoleKeysAreKeptForTheGrantee(): void
+    {
+        $grantee = new Reference('user', '1');
+
+        self::assertSame(['role-1', 'role-2'], $this->request()->rememberRoleKeys($grantee, fn (): Resolution => $this->resolve(['role-1', 'role-2'])));
+        self::assertSame(['role-1', 'role-2'], $this->request()->rememberRoleKeys($grantee, fn (): Resolution => $this->resolve([])));
+        self::assertSame([], $this->request()->rememberRoles($grantee, fn (): Resolution => $this->resolve([])));
+        self::assertSame(2, $this->resolutions);
+
+        $entry = $this->store->get('authorization-test:role-keys:user:1:platform:every');
+
+        self::assertIsArray($entry);
+        self::assertContains($this->versions()->granteeKey($grantee), \array_keys($entry['versions']));
     }
 
     /**

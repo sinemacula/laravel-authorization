@@ -36,17 +36,26 @@ return new class extends Migration {
         $policiesTable = config('authorization.tables.policies', 'policies');
 
         $schema = Schema::connection($this->getConnection());
+        $mysql  = $schema->getConnection()->getDriverName() === 'mysql';
 
         (new MigrationCollisionGuard($schema))->ensureNotExists($table);
 
-        $schema->create($table, static function (Blueprint $blueprint) use ($table, $policiesTable): void {
+        $schema->create($table, static function (Blueprint $blueprint) use ($table, $policiesTable, $mysql): void {
             $blueprint->uuid('policy_id');
 
             // The resource: its morph type, and its key, or null for every
             // record of the type and a check on the type alone. References are
-            // bounded to 191 characters, as the suite bounds them.
-            $blueprint->string('resource_type', 191);
-            $blueprint->string('resource_id', 191)->nullable();
+            // bounded to 191 characters, as the suite bounds them. On MySQL
+            // both compare as exact bytes, as the unique index's digest and the
+            // other databases do, so a key that differs only in case names
+            // another record.
+            $type = $blueprint->string('resource_type', 191);
+            $id   = $blueprint->string('resource_id', 191)->nullable();
+
+            if ($mysql) {
+                $type->collation('utf8mb4_bin');
+                $id->collation('utf8mb4_bin');
+            }
 
             // The scope: both tenant columns null attach platform-wide, a pair
             // attaches within that tenant, and its subtree unless

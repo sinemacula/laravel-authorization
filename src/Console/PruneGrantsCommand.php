@@ -8,8 +8,9 @@ use Illuminate\Console\Command;
 use SineMacula\Laravel\Authorization\Services\GrantPruner;
 
 /**
- * Removes the grants that no longer count: those that have expired, and those
- * whose grantee no longer exists (AUTHZ-17.6).
+ * Removes the grants that no longer count: those that have expired, those whose
+ * grantee no longer exists, and the resource policy attachments whose record no
+ * longer exists (AUTHZ-17.6).
  *
  * Schedulable, and shaped like Laravel's `model:prune`: `--pretend` reports
  * what would be removed without removing it, and `--chunk` sets how many rows
@@ -17,7 +18,9 @@ use SineMacula\Laravel\Authorization\Services\GrantPruner;
  * expiry, so pruning keeps the grant tables small rather than making checks
  * correct. The inline policies of a grantee that no longer exists are removed
  * too. A grantee type that names no model class is reported and its grants and
- * inline policies are left.
+ * inline policies are left; a resource type that names no model class is
+ * reported and its records' attachments are left. A whole type's attachments
+ * are never removed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,7 +35,7 @@ final class PruneGrantsCommand extends Command
         EOD;
 
     /** @var string The console command description. */
-    protected $description = 'Remove expired grants, and the grants and inline policies of grantees that no longer exist';
+    protected $description = 'Remove expired grants, the grants and inline policies of grantees that no longer exist, and the resource policies of records that no longer exist';
 
     /**
      * Execute the console command.
@@ -59,12 +62,18 @@ final class PruneGrantsCommand extends Command
             $this->warn("Grantee type '{$type}' names no model class; its grants and inline policies were left.");
         }
 
+        foreach ($result->unresolvedResourceTypes as $type) {
+            $this->warn("Resource type '{$type}' names no model class; the policies attached to its records were left.");
+        }
+
         $this->info(\sprintf(
-            '%s %d expired grant(s), %d grant(s) of grantees that no longer exist and %d inline polic(ies) of grantees that no longer exist.',
+            '%s %d expired grant(s), %d grant(s) of grantees that no longer exist, %d inline polic(ies) of grantees that no longer exist'
+                . ' and %d resource polic(ies) attached to records that no longer exist.',
             $pretend ? 'Would prune' : 'Pruned',
             $result->expired,
             $result->orphaned,
             $result->inlinePolicies,
+            $result->resourcePolicies,
         ));
 
         return self::SUCCESS;

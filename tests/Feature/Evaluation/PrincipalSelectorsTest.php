@@ -6,12 +6,14 @@ namespace Tests\Feature\Evaluation;
 
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Evaluation\PrincipalSelectors;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
+use Tests\Feature\Stubs\NumberedIdentity;
 use Tests\Feature\Stubs\RolesOnlyPrincipal;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSecondIdentity;
@@ -65,6 +67,28 @@ final class PrincipalSelectorsTest extends TestCase
         self::assertFalse((new PrincipalSelectors(new Subject(new \stdClass)))->isNamedByAny([\stdClass::class . ':1']));
         self::assertFalse((new PrincipalSelectors(new Subject(new StubIdentity)))->isNamedByAny([(new StubIdentity)->getMorphClass() . ':']));
         self::assertFalse((new PrincipalSelectors(new Subject(new Reference('', '7'))))->isNamedByAny([':7']));
+        self::assertFalse((new PrincipalSelectors(new Subject(new class {
+            /**
+             * Return the morph class.
+             *
+             * @return string
+             */
+            public function getMorphClass(): string
+            {
+                return 'x';
+            }
+        })))->isNamedByAny(['x:1']));
+        self::assertFalse((new PrincipalSelectors(new Subject(new class {
+            /**
+             * Return the key.
+             *
+             * @return string
+             */
+            public function getKey(): string
+            {
+                return '1';
+            }
+        })))->isNamedByAny(['x:1', ':1']));
     }
 
     /**
@@ -89,6 +113,7 @@ final class PrincipalSelectorsTest extends TestCase
 
         self::assertFalse(self::isNamed($subject, ['role:' . $editor->id]));
         self::assertTrue(TenantScope::within($tenant, null, static fn (): bool => self::isNamed($subject, ['role:' . $editor->id])));
+        self::assertTrue(TenantScope::within($tenant, null, static fn (): bool => self::isNamed($subject, ['other:1', 'role:' . $editor->id])));
         self::assertFalse(self::isNamed($subject, ['role:' . $viewer->id]));
         self::assertTrue(TenantScope::within(null, 'admin', static fn (): bool => self::isNamed($subject, ['role:missing', 'role:' . $viewer->id])));
         self::assertFalse(TenantScope::within($tenant, 'admin', static fn (): bool => self::isNamed($subject, ['role:missing', 'role:'])));
@@ -140,14 +165,17 @@ final class PrincipalSelectorsTest extends TestCase
     }
 
     /**
-     * The roles are read once for the check, and only when a role selector is
-     * reached before any selector names the subject by reference.
+     * The roles are read at most once for the check, and only when a role
+     * selector is reached before any selector names the subject by reference;
+     * the next check, through a new set of selectors, reads them from the
+     * resolution cache, running no query.
      *
      * @return void
      */
     public function testReadsTheRolesOnceAndOnlyWhenNeeded(): void
     {
-        $editor    = Role::create(['name' => 'editor']);
+        $author    = Role::create(['name' => 'author']);
+        $editor    = Role::create(['name' => 'editor', 'parent_id' => $author->id]);
         $user      = StubIdentity::create(['id' => 'user-1']);
         $selectors = new PrincipalSelectors(new Subject($user));
 
@@ -161,11 +189,72 @@ final class PrincipalSelectorsTest extends TestCase
 
         $before = \count(DB::getQueryLog());
 
-        self::assertTrue($selectors->isNamedByAny(['role:' . $editor->id]));
+        self::assertTrue($selectors->isNamedByAny(['role:' . $author->id]));
+
+        $read = \count(DB::getQueryLog());
+
         self::assertFalse($selectors->isNamedByAny(['role:other']));
-        self::assertSame([0, 1], [$before, \count(DB::getQueryLog())]);
+        self::assertTrue(self::isNamed(new Subject($user), ['role:' . $editor->id]));
+        self::assertSame([0, 3, 3], [$before, $read, \count(DB::getQueryLog())]);
 
         DB::disableQueryLog();
+    }
+
+    /**
+     * A subject with an integer key is named by its key; one whose key is
+     * neither a string nor an integer has no reference, nor does one with a
+     * morph class but no key, or a key but no morph class.
+     *
+     * @return void
+     */
+    public function testASubjectIsNamedByAnIntegerKeyAlone(): void
+    {
+        $numbered = NumberedIdentity::create(['name' => 'n']);
+        $float    = new class {
+            /**
+             * Return the morph class.
+             *
+             * @return string
+             */
+            public function getMorphClass(): string
+            {
+                return 'user';
+            }
+
+            /**
+             * Return the key, a float.
+             *
+             * @return float
+             */
+            public function getKey(): float
+            {
+                return 1.5;
+            }
+        };
+
+        self::assertIsInt($numbered->getKey());
+        self::assertTrue((new PrincipalSelectors(new Subject($numbered)))->isNamedByAny([$numbered->getMorphClass() . ':' . $numbered->getKey()]));
+        self::assertFalse((new PrincipalSelectors(new Subject($float)))->isNamedByAny(['user:1.5']));
+    }
+
+    /**
+     * Without a resolution cache bound, the roles are read straight from the
+     * database.
+     *
+     * @return void
+     */
+    public function testReadsTheRolesWithoutACache(): void
+    {
+        $editor = Role::create(['name' => 'editor']);
+        $user   = StubIdentity::create(['id' => 'user-1']);
+
+        $user->assignRole($editor);
+
+        $this->app?->forgetInstance(ResolutionCache::class);
+        $this->app?->offsetUnset(ResolutionCache::class);
+
+        self::assertTrue(self::isNamed(new Subject($user), ['role:' . $editor->id]));
+        self::assertFalse(self::isNamed(new Subject($user), ['role:other']));
     }
 
     /**

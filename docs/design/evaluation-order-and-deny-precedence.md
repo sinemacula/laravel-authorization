@@ -61,8 +61,9 @@ and leaves a resource-less `posts:delete` check alone. Only a statement without 
 
 ## Where Policies Come From
 
-A check's policies are gathered by the bound `PolicyResolver`, and then from the subject's identity when that is a
-separate model. The default resolver, `DefaultPolicyResolver`, unions three sources (AUTHZ-6.9, AUTHZ-7.2):
+A check's policies are gathered by the bound `PolicyResolver`, then from the subject's identity when that is a separate
+model, and then from the policies attached to the check's resource and its type. The default resolver,
+`DefaultPolicyResolver`, unions three sources (AUTHZ-6.9, AUTHZ-7.2):
 
 - **The policy store.** The `PolicyStore` bound as `policy_store`, asked on every check, for policies shipped in code
   or kept outside the package's tables.
@@ -85,9 +86,12 @@ rather than through it, so a custom resolver controls neither:
   role-attached policies, through `SubjectGrants::identityPolicies()`.
 - **The resource's policies (AUTHZ-7.3).** The managed policies attached through `resource_policies` to the check's
   record and to its type, through `ResourcePolicyResolver::policiesFor()`. A check on a type alone reads those attached
-  to the type; a check on an opaque identifier, or on no resource, reads none and runs no query. Only the attachments
-  that hold in the tenant and application the check is decided in count, as a grant's do, and a policy attached to the
-  record and to its type is listed once, as the record's. Each is hydrated with the resource it is attached to
+  to the type; a check on an opaque identifier, or on no resource, reads none and runs no query. A record whose key no
+  attachment can name (empty, `*`, holding a NUL byte or longer than the table stores) still reads its type's, its
+  denies included. Only the attachments that hold in the tenant and application the check is decided in count, as a
+  grant's do, and a policy attached to the record and to its type is listed once, as the record's. A check on a
+  tenant's resource that the tenant stage decides at platform scope also reads the denies attached in the resource's
+  own tenant (invariant 9). Each is hydrated with the resource it is attached to
   (`Policy::withResource()`, `type:id` or `type:*`), which makes it a resource policy (see [Resource
   Policies](#resource-policies)).
 
@@ -103,9 +107,10 @@ on: invariant 2 orders the policies within each stage, so a deny in a role's pol
 exactly as one attached to the identity, and wins over every allow and every permission.
 
 The resource's policies are read in one query, on the write connection, through the resolution cache, keyed by the
-resource and the policy limits. Attaching or detaching a policy refreshes the cached entries of the resource's type, and
-updating or deleting any policy refreshes every cached resource-policy entry, since one query reads the attachments and
-the documents together.
+resource, the tenant, the application and the policy limits; a type alone is kept under a kind of its own, so no
+record's entry is ever the type's. Attaching or detaching a policy refreshes the cached entries of the resource's type,
+and updating or deleting any policy refreshes every cached resource-policy entry, since one query reads the attachments
+and the documents together.
 
 ## Resource Policies
 
@@ -115,10 +120,13 @@ do, so its statements are read the other way round:
 
 - **Each allow names its principals.** `principals` is a non-empty list of selectors: `<morph type>:<id>`, the
   subject's principal or identity by morph class and key, or `role:<role id>`, whoever holds that role (by its key,
-  never its name) in the tenant and application the check is decided in, and, with the hierarchy enabled, whoever holds
-  a role below it, read through `RoleGraph` as the role's permissions and policies are. A selector is an exact name,
-  never a pattern.
-- **Each deny applies to everyone.** A deny takes no `principals`; it applies to every subject checking the resource.
+  never its name) in the tenant and application the check is decided in. `role:<id>` follows the role hierarchy: with
+  it enabled, it also names whoever holds a role below that role, read through `RoleGraph` as the role's permissions
+  and policies are; with it disabled, only whoever holds that role itself. A selector is an exact name, never a
+  pattern.
+- **Each deny applies to everyone.** A deny takes no `principals`; it applies to every subject checking the resource,
+  also one the tenant stage admits at platform scope through a platform-wide permission: a deny a tenant attaches to
+  its own resource holds across that fallback.
 - **The rule follows the attachment.** `PolicyValidator` refuses a malformed selector and `principals` on a deny when a
   policy is saved. A policy attached to a resource must name principals on every allow, and may not be inline; a policy
   attached to an identity or a role may name none. Each attachment is refused with `ResourcePolicyException` when the
@@ -211,8 +219,13 @@ do, so its statements are read the other way round:
    recorded as `principal_mismatch` before its resource and conditions are read, and counts for nothing: it is no
    `condition_failed` and no `insufficient_authentication` candidate. A resource policy's allow is reached only after
    the tenant stage and every deny, so it never admits a resource of another tenant (`tenant_scope` still decides that
-   first) and never beats a deny. The principals are judged lazily: a reference costs no query, and the subject's roles
-   are read once a check, only when a role selector is reached and no reference matched.
+   first) and never beats a deny. When the tenant stage admits a subject at platform scope, through a platform-wide
+   permission, to a resource of a tenant outside its own, the denies attached to the resource in its own tenant (and
+   above it, reaching down) still apply, read in that tenant's scope; that tenant's resource-policy allows do not, so
+   only the platform-wide attachments' allows and the subject's own grants decide what remains. The principals are
+   judged lazily: a reference costs no query, and the subject's roles are read at most once a check, only when a role
+   selector is reached and no reference matched, through the resolution cache as the grantee's roles are, so once warm
+   a check reads no role.
 
 ## Trace
 

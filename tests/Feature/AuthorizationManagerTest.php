@@ -1777,6 +1777,89 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * A deny a tenant attaches to its own record applies to everyone checking
+     * it, also to a subject the tenant stage admits at platform scope through a
+     * platform-wide permission, from another tenant or from none; the tenant's
+     * allows do not reach that subject there.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATenantsResourcePolicyDenyHoldsAcrossThePlatformFallback(): void
+    {
+        [$tenantA, $tenantB] = \array_map(static fn (string $id): StubTenant => StubTenant::query()->create(['id' => $id, 'name' => $id]), ['tenant-a', 'tenant-b']);
+
+        Permission::create(['name' => 'posts:delete']);
+        Permission::create(['name' => 'posts:read']);
+
+        $support = StubIdentity::create(['id' => 'support']);
+
+        $support->givePermission('posts:delete');
+        $support->givePermission('posts:read');
+
+        $lock = self::resourcePolicy('lock', [
+            ['sid' => 'lock', 'effect' => 'deny', 'actions' => ['posts:delete']],
+            ['sid' => 'share', 'effect' => 'allow', 'actions' => ['posts:read'], 'principals' => [$support->getMorphClass() . ':support']],
+        ]);
+
+        $service = ResourcePolicyService::instance();
+
+        self::assertInstanceOf(ResourcePolicyService::class, $service);
+
+        $service->attach($lock, ['posts', 7], $tenantB);
+
+        $post = ResourceReference::record('posts', '7', Reference::of($tenantB));
+
+        foreach ([$tenantA, null, $tenantB] as $tenant) {
+            $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($support, $tenant));
+            $this->app?->forgetInstance(ResolvedTenant::class);
+
+            $denied = Authorization::for($support)->check('posts:delete', $post);
+            $read   = Authorization::for($support)->check('posts:read', $post);
+
+            self::assertSame(DecisionReason::EXPLICIT_DENY, $denied->reason);
+            self::assertSame(['lock'], \array_map(static fn (StatementReference $statement): ?string => $statement->sid, $denied->statements));
+            self::assertTrue($read->isAllowed());
+            self::assertSame($tenant === $tenantB ? ['share'] : [], \array_map(static fn (StatementReference $statement): ?string => $statement->sid, $read->statements));
+        }
+    }
+
+    /**
+     * A check that a resource policy's role selector decides reads the roles
+     * once: the next check on the record runs no query of the roles or their
+     * hierarchy.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARoleSelectorReadsTheRolesOnceAcrossChecks(): void
+    {
+        $author = Role::create(['name' => 'author']);
+        $editor = Role::create(['name' => 'editor', 'parent_id' => $author->id]);
+        $user   = StubIdentity::create(['id' => 'user-1']);
+
+        $user->assignRole($editor);
+
+        self::attachToResource(self::resourcePolicy('authors', [['effect' => 'allow', 'actions' => ['posts:edit'], 'principals' => ['role:' . $author->id]]]), 'posts');
+
+        self::assertTrue(Authorization::for($user)->can('posts:edit', ['posts', 7]));
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        self::assertTrue(Authorization::for($user)->can('posts:edit', ['posts', 7]));
+        self::assertTrue(Authorization::for($user)->can('posts:edit', ['posts', 8]));
+
+        $roles = \array_filter(DB::getQueryLog(), static fn (array $query): bool => \str_contains($query['query'], 'roles'));
+
+        self::assertSame([], $roles);
+
+        DB::disableQueryLog();
+    }
+
+    /**
      * An attachment or detachment takes effect on the next check in the
      * request, and a per-call override evaluates only the policies it names.
      *

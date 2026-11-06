@@ -5,9 +5,12 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
+use SineMacula\Laravel\Authorization\Cache\Resolution;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
+use SineMacula\Laravel\Authorization\Resolvers\GrantResolver;
 use SineMacula\Laravel\Authorization\Subject;
-use SineMacula\Laravel\Authorization\Support\RoleGraph;
 
 /**
  * Tells whether a resource policy's `principals` selectors name the subject of
@@ -17,15 +20,17 @@ use SineMacula\Laravel\Authorization\Support\RoleGraph;
  * by reference (`<morph type>:<id>`, the morph class and key), or a role by its
  * key (`role:<role id>`) that the principal or identity holds in the scope the
  * check is decided in: the tenant and application the check runs under, read
- * through the grantee's `roles()` relation, as every other grant is, with the
- * roles above them when the hierarchy is enabled, read through `RoleGraph` as
- * the roles' permissions and policies are. A role is named by its key, never
- * its name, so a role of the same name owned by another tenant, or held for
- * another application, names no one. A selector of the type `role` always names
- * a role.
+ * through the grantee's `roles()` relation, as every other grant is. With the
+ * hierarchy enabled, a role selector also names whoever holds a role below that
+ * role, as the role's permissions and policies reach them; with it disabled,
+ * only whoever holds that role itself. A role is named by its key, never its
+ * name, so a role of the same name owned by another tenant, or held for another
+ * application, names no one. A selector of the type `role` always names a role.
  *
- * The roles are read once for the check, on the write connection, and only when
- * a selector names a role and no selector names the subject by reference; a
+ * The roles are read at most once for the check, and only when a selector names
+ * a role and no selector names the subject by reference, through the resolution
+ * cache, as the grantee's roles are (see
+ * `ResolutionCache::rememberRoleKeys()`): once warm, a check reads no role. A
  * grantee whose roles do not come through a `roles()` relation holds none here.
  * Build a new instance for every check.
  *
@@ -36,9 +41,6 @@ final class PrincipalSelectors
 {
     /** @var string What a role selector starts with. */
     private const string ROLE_PREFIX = StatementValidator::ROLE_SELECTOR . ':';
-
-    /** @var array<string, true>|null The subject's principal and identity, by reference, once read. */
-    private ?array $references = null;
 
     /** @var array<array-key, true>|null The keys of the roles held in the check's scope, with those above them, once read. */
     private ?array $roles = null;
@@ -64,9 +66,7 @@ final class PrincipalSelectors
      */
     public function isNamedByAny(array $selectors): bool
     {
-        $references = $this->references ??= $this->readReferences();
-
-        if (\array_intersect_key($references, \array_flip($selectors)) !== []) {
+        if (\array_intersect_key($this->readReferences(), \array_flip($selectors)) !== []) {
             return true;
         }
 
@@ -98,9 +98,15 @@ final class PrincipalSelectors
      */
     private function readRoles(): array
     {
-        $roles = \array_merge(...\array_map(static fn (object $grantee): array => self::rolesHeldBy($grantee), $this->grantees()));
+        $keys = [];
 
-        return \array_fill_keys(RoleGraph::keysHeldBy($roles), true);
+        foreach ($this->grantees() as $grantee) {
+            foreach (self::roleKeysHeldBy($grantee) as $key) {
+                $keys[$key] = true;
+            }
+        }
+
+        return $keys;
     }
 
     /**
@@ -125,13 +131,17 @@ final class PrincipalSelectors
     }
 
     /**
-     * Return the roles the grantee holds in the check's scope, read through its
-     * `roles()` relation, or none for a grantee without one.
+     * Return the keys of the roles the grantee holds in the check's scope, with
+     * the roles above them when the hierarchy is enabled, read through its
+     * `roles()` relation and the resolution cache, or none for a grantee
+     * without one.
      *
      * @param  object  $grantee
-     * @return list<\SineMacula\Laravel\Authorization\Models\Role>
+     * @return list<string>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
      */
-    private static function rolesHeldBy(object $grantee): array
+    private static function roleKeysHeldBy(object $grantee): array
     {
         $relation = $grantee instanceof SupportsRoles && \method_exists($grantee, 'roles') ? $grantee->roles() : null;
 
@@ -139,8 +149,10 @@ final class PrincipalSelectors
             return [];
         }
 
-        /** @var list<\SineMacula\Laravel\Authorization\Models\Role> */
-        return $relation->useWritePdo()->get()->all(); // @phpstan-ignore method.notFound
+        /** @var \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model> $relation */
+        $resolve = static fn (ResolutionPins $pins): Resolution => GrantResolver::roleKeys($relation, $pins);
+
+        return ResolutionCache::instance()?->rememberRoleKeys($grantee, $resolve) ?? $resolve(new ResolutionPins)->value;
     }
 
     /**

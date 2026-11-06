@@ -9,6 +9,7 @@ use Illuminate\Cache\Repository;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Cache\VersionedStore;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
@@ -222,6 +223,69 @@ final class GrantResolverTest extends TestCase
 
         self::assertEqualsCanonicalizing(['posts:read', 'posts:write'], $resolution->value);
         self::assertSame(120, $resolution->expiresIn);
+    }
+
+    /**
+     * The keys of the roles reached resolve to the roles held and, with the
+     * hierarchy enabled, those above them, each once, pinning every role
+     * reached, expiring with the nearest grant, in three queries.
+     *
+     * @return void
+     */
+    public function testRoleKeysComeThroughTheHierarchyAndPinEachRole(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $parent = Role::create(['name' => 'reader']);
+        $role   = Role::create(['name' => 'writer', 'parent_id' => $parent->id]);
+
+        $user->assignRole($role, Carbon::parse('2026-07-01 12:10:00'));
+        $user->assignRole($parent);
+
+        [$pins, $store] = self::pins();
+
+        $resolution = null;
+        $queries    = self::queriesFor(static function () use ($user, $pins, &$resolution): void {
+            $resolution = GrantResolver::roleKeys($user->roles(), $pins);
+        });
+
+        self::assertInstanceOf(Resolution::class, $resolution);
+        self::assertEqualsCanonicalizing([$role->id, $parent->id], $resolution->value);
+        self::assertCount(2, $resolution->value);
+        self::assertSame(600, $resolution->expiresIn);
+        self::assertTrue($resolution->stable);
+        self::assertSame(3, $queries);
+        self::assertEqualsCanonicalizing([$store->roleKey($role->id), $store->roleKey($parent->id)], \array_keys($pins->tokens()));
+
+        config()->set('authorization.hierarchy.enabled', false);
+
+        self::assertEqualsCanonicalizing([$role->id, $parent->id], GrantResolver::roleKeys($user->roles(), new ResolutionPins)->value);
+
+        $user->revokeRole($parent);
+
+        self::assertSame([$role->id], GrantResolver::roleKeys($user->roles(), new ResolutionPins)->value);
+    }
+
+    /**
+     * A role moved under a parent the resolution had not read still resolves to
+     * the parent's key, read afresh, but is marked unstable so it is not
+     * stored.
+     *
+     * @return void
+     */
+    public function testRoleKeysWhoseHierarchyMovesWhileResolvingAreUnstable(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $parent = Role::create(['name' => 'publisher']);
+        $role   = Role::create(['name' => 'editor']);
+
+        $user->assignRole($role);
+
+        $store = new VersionedStore(new Repository(self::onFirstPin(static fn () => DB::table('roles')->where('id', $role->id)->update(['parent_id' => $parent->id]))), 'authz');
+
+        $resolution = GrantResolver::roleKeys($user->roles(), new ResolutionPins($store));
+
+        self::assertFalse($resolution->stable);
+        self::assertEqualsCanonicalizing([$role->id, $parent->id], $resolution->value);
     }
 
     /**

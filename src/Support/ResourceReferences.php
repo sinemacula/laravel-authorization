@@ -64,6 +64,33 @@ final class ResourceReferences
     }
 
     /**
+     * Return the reference to the record a `(type, id)` pair names, without a
+     * tenant and without asking the bound resource tenant resolver, or false
+     * when it is not a type and a non-empty string or number, either holds a
+     * NUL byte, or it names an abstract model class. A model class names its
+     * type as the model's morph class, as the model itself would.
+     *
+     * The resource policy service names a record this way, since where an
+     * attachment holds comes from the call, not from the record's tenant.
+     *
+     * @param  array<mixed>  $pair
+     * @return false|\SineMacula\Laravel\Authorization\Support\ResourceReference
+     */
+    public static function recordOf(array $pair): false|ResourceReference
+    {
+        [$type, $id] = \array_is_list($pair) && \count($pair) === 2 ? $pair : [null, null];
+
+        $type = \is_string($type) && $type !== '' && !\str_contains($type, "\0") ? self::typeOf($type) : null;
+
+        if ($type === null || !self::isKey($id)) {
+            return false;
+        }
+
+        /** @var float|int|string $id */
+        return ResourceReference::record($type, (string) $id);
+    }
+
+    /**
      * Return the reference the resource's contract gives, handing on the
      * resource itself when it is a model and the contract names one record
      * without a model, so its type's resource attribute provider can read the
@@ -125,27 +152,25 @@ final class ResourceReferences
      * tenant the bound resource tenant resolver gives it, or false when it is
      * not a type and a non-empty string or number, either holds a NUL byte,
      * names an abstract model class, or the resolver cannot tell its tenant.
-     * The resolver is never asked about a type or id holding a NUL byte. A
-     * model class names its type as the model's morph class, as the model
-     * itself would.
+     * The resolver is never asked about a type or id holding a NUL byte.
      *
      * @param  array<mixed>  $pair
      * @return false|\SineMacula\Laravel\Authorization\Support\ResourceReference
      */
     private static function ofPair(array $pair): false|ResourceReference
     {
-        [$type, $id] = \array_is_list($pair) && \count($pair) === 2 ? $pair : [null, null];
+        $record = self::recordOf($pair);
 
-        $type = \is_string($type) && $type !== '' && !\str_contains($type, "\0") ? self::typeOf($type) : null;
-
-        if ($type === null || !self::isKey($id)) {
+        if ($record === false) {
             return false;
         }
 
-        /** @var float|int|string $id */
-        $tenant = self::resolver()->tenantOfRecord($type, (string) $id);
+        /** @var string $type */
+        $type   = $record->type;
+        $id     = (string) $record->id;
+        $tenant = self::resolver()->tenantOfRecord($type, $id);
 
-        return $tenant === false ? false : ResourceReference::record($type, (string) $id, $tenant);
+        return $tenant === false ? false : ResourceReference::record($type, $id, $tenant);
     }
 
     /**

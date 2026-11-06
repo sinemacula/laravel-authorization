@@ -110,12 +110,15 @@ events themselves are described in [Events](events.md).
     anywhere else is refused with `GrantScopeMismatchException`. The write is insert-or-ignore on a null-folding unique
     key over the policy, the resource and the scope, so it is idempotent under concurrency and returns `GRANTED`,
     `REACH_CHANGED` or `UNCHANGED`; `detach()` removes the attachment in the scope it names and returns how many it
-    removed. The stored policy must suit a resource (`PolicyPrincipals`): an inline policy, or one with an allow naming
-    no principals, is refused with `ResourcePolicyException` before anything is written, and a resource that names no
-    type, or an unsaved model, with `InvalidResourceException`. A policy naming principals is refused the other way, by
-    every grant path to an identity or a role. Each call is one transaction and one operation, dispatches
-    `Resource\PolicyAttached` or `Resource\PolicyDetached` after commit only when it changed something, and refreshes
-    the resolution cache for the resource's type. The rows carry no actor column; the events carry the actor.
+    removed, and `detachAll()` removes every attachment of one record, in every scope, never a whole type's. The stored
+    policy must suit a resource (`PolicyPrincipals`): an inline policy, or one with an allow naming no principals, is
+    refused with `ResourcePolicyException` before anything is written, and a resource that names no type, an unsaved
+    model, or a record whose key is `*` (which the whole type stands for), with `InvalidResourceException`. A pair names
+    its record without asking the resource tenant resolver, since the call names the scope. A policy naming principals
+    is refused the other way, by every grant path to an identity or a role. Each call is one transaction and one
+    operation, dispatches `Resource\PolicyAttached` or `Resource\PolicyDetached` after commit only when it changed
+    something, and refreshes the resolution cache for the resource's type. The rows carry no actor column; the events
+    carry the actor.
 
 ## Success Path
 
@@ -156,7 +159,10 @@ working: each forwards to the matching service method with no actor.
   model, in one transaction on the package's connection and as one operation, rather than through
   `PermissionService`.
 - **A resource's attachments outlive the resource.** They name it by type and key, with no foreign key, so deleting the
-  record leaves them in place until they are detached. Deleting the policy removes them with its row.
+  record leaves them in place until they are detached, through `detachAll()` or by `authorization:prune`, which
+  detaches those of every record that no longer exists, resolving the morph type to its model class as it does a
+  grantee's, and reports each as `Resource\PolicyDetached`; a type that names no model class is reported and left, and
+  a whole type's attachments are never pruned. Deleting the policy removes them with its row.
 - **The commands name no actor by default.** `authorization:grant`, `authorization:revoke` and `authorization:sync`
   take `--actor={morphType}:{key}`, which must name a row that exists; without it they record no actor.
 
@@ -181,6 +187,7 @@ working: each forwards to the matching service method with no actor.
 - `PermissionServiceTest`, `PolicyServiceTest`, `RecordWriterTest`: the record writes, inline policies among them.
 - `InlinePoliciesTest`, `AuthorizablePolicyPivotObserverTest`, `OwnerUniquenessTest`, `GrantPrunerTest`: the grantee an
   inline policy belongs to, its refusals on every write path, its name per grantee and its deletion with the grantee.
+  `GrantPrunerTest` and `PruneGrantsCommandTest` also pin the pruning of a gone record's resource policies.
 - `ResourcePolicyServiceTest`, `ResourcePolicyTableTest`, `PolicyPrincipalsTest`: a resource's attachments, their
   scope, idempotency, events and refusals.
 - `HasRolesTest`, `HasPermissionsTest`, `HasPoliciesTest`, `ManagesPermissionsTest`: the traits delegate.

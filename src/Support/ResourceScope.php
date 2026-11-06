@@ -19,9 +19,10 @@ use SineMacula\Laravel\Authorization\Subject;
  * tenants below count. A resource of any other tenant, every tenant-owned
  * resource when no tenant is active included, is denied as `tenant_scope`
  * before any policy is read, unless the subject holds the action's permission
- * through a platform-wide grant, when the decision runs at platform scope. The
- * application stays the request's. A resource with no tenant is decided where
- * the request is.
+ * through a platform-wide grant, when the decision runs at platform scope; the
+ * denies attached to the resource in its own tenant still apply there (see
+ * `ResourcePolicyResolver`). The application stays the request's. A resource
+ * with no tenant is decided where the request is.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

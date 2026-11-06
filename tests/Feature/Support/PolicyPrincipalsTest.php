@@ -109,6 +109,12 @@ final class PolicyPrincipalsTest extends TestCase
 
         self::assertSame([self::DENY, self::NAMED], self::stored($sharing));
         self::assertSame([self::NAMED], self::stored($loose));
+
+        $own->update(['document' => ['statements' => [self::UNNAMED, self::DENY]]]);
+        $loose->update(['document' => ['statements' => [self::UNNAMED]]]);
+
+        self::assertSame([self::UNNAMED, self::DENY], self::stored($own));
+        self::assertSame([self::UNNAMED], self::stored($loose));
     }
 
     /**

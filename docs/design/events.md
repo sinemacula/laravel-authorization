@@ -17,7 +17,10 @@ named and the operation they belong to, and are dispatched only once the write c
 - **Resource policy events.** Under `Resource\`: `PolicyAttached` and `PolicyDetached`, when a policy is attached to
   or detached from a resource or a whole resource type (AUTHZ-7.3), each with the resource's type, its key (null for
   the whole type), the policy, its name and the scope. A re-attachment with another reach dispatches `PolicyAttached`
-  again, carrying the new reach. They name no grantee, so they implement `AuthorizationEvent` alone.
+  again, carrying the new reach, and `authorization:prune` dispatches `PolicyDetached` for each attachment of a record
+  that no longer exists, with an operation that names no actor. Both extend `Resource\ResourcePolicyEvent`, the
+  abstract, readonly shape they share, which is never dispatched itself. They name no grantee, so they implement
+  `AuthorizationEvent` alone.
 - **Expiry events.** Under `Identity\`: `RoleExpired`, `PermissionExpired` and `PolicyExpired`, dispatched when
   `authorization:prune` removes an expired grant, with its expiry and an operation that names no actor (the sweep is
   system work).
@@ -136,8 +139,8 @@ app(GrantService::class)->grantRole($user, 'editor', actor: $admin);
 
 - `EventSnapshotsTest`: every event implements the marker; every change event takes only plain values.
 - `OperationScopeTest`: after-commit dispatch, nesting, rollback and the current operation.
-- `ResourcePolicyServiceTest`, `PolicyAttachedTest`, `PolicyDetachedTest`: the resource policy events, after commit
-  and only for a change.
+- `ResourcePolicyServiceTest`, `PolicyAttachedTest`, `PolicyDetachedTest`, `ResourcePolicyEventTest`: the resource
+  policy events and the shape they share, after commit and only for a change.
 - `GrantServiceTest`, `RoleServiceTest`, `PermissionServiceTest`, `PolicyServiceTest`, `RecordWriterTest`: the actor,
   the grantor columns, one operation id per call, rollback and the morph map.
 - `RoleObserverTest`, `PermissionObserverTest`, `PolicyObserverTest`, `RecordChangesTest`: the payloads, the deleted

@@ -7,7 +7,10 @@ namespace Tests\Feature\Services;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
+use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\Resource\PolicyAttached;
 use SineMacula\Laravel\Authorization\Events\Resource\PolicyDetached;
 use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
@@ -15,13 +18,16 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidResourceException;
 use SineMacula\Laravel\Authorization\Exceptions\ResourcePolicyException;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\ReadsDispatchedEvents;
+use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
 /**
@@ -275,7 +281,8 @@ final class ResourcePolicyServiceTest extends TestCase
         $policy = self::sharing();
 
         $refused = [new StubIdentity, '', "po\0sts", ['posts', ''], new ResourceReference('opaque'), new ResourceReference('posts:', 'posts', '')];
-        $refused = [...$refused, ['posts', \str_repeat('a', 192)], null, 7];
+        $refused = [...$refused, ['posts', \str_repeat('a', 192)], [\str_repeat('p', 192), '7'], \str_repeat('p', 192), null, 7];
+        $refused = [...$refused, ['posts', '*'], ResourceReference::record('posts', '*')];
 
         foreach ($refused as $resource) {
             try {
@@ -400,6 +407,178 @@ final class ResourcePolicyServiceTest extends TestCase
         $policy->delete();
 
         self::assertSame(0, DB::table('resource_policies')->count());
+    }
+
+    /**
+     * A type or key of exactly the bytes the table stores is attached whole,
+     * and its policy is found for that resource.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAttachesATypeOrKeyAtTheLimit(): void
+    {
+        $key  = \str_repeat('a', 191);
+        $type = \str_repeat('p', 191);
+
+        self::assertSame(GrantOutcome::GRANTED, self::service()->attach(self::sharing('long-key'), ['posts', $key]));
+        self::assertSame(GrantOutcome::GRANTED, self::service()->attach(self::sharing('long-type'), ResourceReference::type($type)));
+
+        $rows = \array_map(self::identifierOf(...), DB::table('resource_policies')->get(['resource_type', 'resource_id'])->all());
+
+        \sort($rows);
+
+        self::assertSame(['posts:' . $key, $type . ':*'], $rows);
+        self::assertSame(['long-key'], self::namesFor(ResourceReference::record('posts', $key)));
+        self::assertSame(['long-type'], self::namesFor(ResourceReference::type($type)));
+    }
+
+    /**
+     * A pair names its record without asking the bound resource tenant
+     * resolver, so a pair it cannot place is still attached and detached.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAttachesAPairTheTenantResolverCannotPlace(): void
+    {
+        $resolver = new FixedResourceTenantResolver(null, false);
+
+        $this->app?->instance(ResourceTenantResolver::class, $resolver);
+
+        $policy = self::sharing();
+
+        self::assertSame(GrantOutcome::GRANTED, self::service()->attach($policy, ['posts', 7]));
+        self::assertSame(1, self::service()->detach($policy, ['posts', 7]));
+        self::assertSame([], $resolver->askedRecords);
+    }
+
+    /**
+     * Detaching a tenant's policy names the tenant below it that it was
+     * attached in, leaving its attachment in its own tenant; naming a tenant it
+     * was not attached in detaches nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testDetachesATenantsPolicyInTheTenantBelowItNamed(): void
+    {
+        $parent = self::createTenant('tenant-a');
+        $child  = self::createTenant('tenant-a1');
+        $other  = self::createTenant('tenant-b');
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($child), Reference::of($parent)));
+
+        $policy = self::sharing('owned', ['tenant_type' => $parent->getMorphClass(), 'tenant_id' => 'tenant-a']);
+
+        self::service()->attach($policy, 'posts', $child);
+        self::service()->attach($policy, 'posts');
+
+        self::assertSame(0, self::service()->detach($policy, 'posts', $other));
+        self::assertSame(['tenant-a', 'tenant-a1'], DB::table('resource_policies')->orderBy('tenant_id')->pluck('tenant_id')->all());
+        self::assertSame(1, self::service()->detach($policy, 'posts', $child));
+        self::assertSame(['tenant-a'], DB::table('resource_policies')->pluck('tenant_id')->all());
+    }
+
+    /**
+     * Detaching every policy from a record detaches each attachment it holds,
+     * in every scope, reporting each, and leaves its type's and another
+     * record's; a whole type is refused.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testDetachesEveryPolicyFromARecord(): void
+    {
+        Event::fake([PolicyDetached::class]);
+
+        $tenant = self::createTenant('tenant-a');
+        $policy = self::sharing();
+        $other  = self::sharing('other');
+
+        self::service()->attach($policy, ['posts', 7]);
+        self::service()->attach($policy, ['posts', 7], $tenant, false, 'admin');
+        self::service()->attach($other, ['posts', 7]);
+        self::service()->attach($policy, ['posts', 8]);
+        self::service()->attach($policy, 'posts');
+
+        self::assertSame(3, self::service()->detachAll(['posts', 7], new Reference('admin', '1')));
+        self::assertSame(0, self::service()->detachAll(['posts', 7]));
+
+        $rows = \array_map(self::identifierOf(...), DB::table('resource_policies')->get(['resource_type', 'resource_id'])->all());
+
+        \sort($rows);
+
+        self::assertSame(['posts:*', 'posts:8'], $rows);
+
+        $events = self::dispatchedEvents(PolicyDetached::class);
+        $scopes = \array_map(self::describedDetachment(...), $events);
+
+        \sort($scopes);
+
+        self::assertSame(['other@platform/every/subtree on posts:7', 'sharing@platform/every/subtree on posts:7', 'sharing@tenant-a/admin/own on posts:7'], $scopes);
+        self::assertTrue(self::refersTo($events[0]->operation->actor, new Reference('admin', '1')));
+
+        $this->expectException(InvalidResourceException::class);
+
+        self::service()->detachAll('posts');
+    }
+
+    /**
+     * A key that differs from another only in case names another record, on
+     * every database: its attachments apply to it alone and are detached alone.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAKeyThatDiffersOnlyInCaseNamesAnotherRecord(): void
+    {
+        $policy = self::sharing();
+
+        self::service()->attach($policy, ['docs', 'aB3']);
+
+        self::assertSame([], self::namesFor(ResourceReference::record('docs', 'Ab3')));
+        self::assertSame([], self::namesFor(ResourceReference::record('Docs', 'aB3')));
+
+        self::service()->attach($policy, ['docs', 'Ab3']);
+
+        self::assertSame(1, self::service()->detach($policy, ['docs', 'aB3']));
+        self::assertSame(['Ab3'], DB::table('resource_policies')->pluck('resource_id')->all());
+        self::assertSame(['sharing'], self::namesFor(ResourceReference::record('docs', 'Ab3')));
+    }
+
+    /**
+     * Describe a detachment as its policy's name, its tenant, application and
+     * reach, and its resource.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Events\Resource\PolicyDetached  $event
+     * @return string
+     */
+    private static function describedDetachment(PolicyDetached $event): string
+    {
+        $scope = ($event->scope->tenant->id ?? 'platform') . '/' . ($event->scope->application ?? 'every') . '/' . ($event->scope->includeSubtree ? 'subtree' : 'own');
+
+        return $event->name . '@' . $scope . ' on ' . $event->resourceType . ':' . $event->resourceId;
+    }
+
+    /**
+     * Return the names of the policies the resource reads, sorted.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
+     * @return list<string>
+     */
+    private static function namesFor(ResourceReference $resource): array
+    {
+        $names = \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, (new ResourcePolicyResolver)->policiesFor($resource));
+
+        \sort($names);
+
+        return $names;
     }
 
     /**

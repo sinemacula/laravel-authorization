@@ -15,7 +15,6 @@ use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
 use SineMacula\Laravel\Authorization\Support\GrantExpiry;
-use SineMacula\Laravel\Authorization\Support\InheritedPermissions;
 use SineMacula\Laravel\Authorization\Support\InheritedPolicies;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
@@ -23,8 +22,8 @@ use SineMacula\Laravel\Authorization\Support\RoleGraph;
 use SineMacula\Laravel\Authorization\Support\RolePolicies;
 
 /**
- * Resolves what an identity's grants come to: the names of its roles, the names
- * of its permissions, and its policies.
+ * Resolves what an identity's grants come to: the names of its roles, the keys
+ * of the roles it reaches, the names of its permissions, and its policies.
  *
  * Every read is on the write connection, so a read replica that has not caught
  * up never serves a grant already revoked. Each resolution pins the version of
@@ -34,10 +33,11 @@ use SineMacula\Laravel\Authorization\Support\RolePolicies;
  * hierarchy moved while it ran is returned but marked unstable, and is not
  * stored.
  *
- * Each kind takes a fixed number of queries: two for roles, two for policies,
- * and five for permissions however many roles the identity holds and however
- * deep they sit. Policies take four more, however many roles and however deep,
- * only when a role holds a policy in the current scope.
+ * Each kind takes a fixed number of queries: two for roles, three for the keys
+ * of the roles reached, two for policies, and five for permissions however many
+ * roles the identity holds and however deep they sit. Policies take four more,
+ * however many roles and however deep, only when a role holds a policy in the
+ * current scope.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -65,6 +65,35 @@ final class GrantResolver
     }
 
     /**
+     * Resolve the keys of the roles granted through the relation, with the keys
+     * of the roles above them when the hierarchy is enabled: the roles a
+     * resource policy's role selector names the grantee by.
+     *
+     * Every role reached is pinned before the roles are read again, as the
+     * permissions are, so a move in the hierarchy while the resolution runs is
+     * seen; the roles are then read afresh, and the resolution is marked
+     * unstable, so it is kept for the request or job alone and never stored.
+     *
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>  $grants
+     * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
+     * @return \SineMacula\Laravel\Authorization\Cache\Resolution<string>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
+     */
+    public static function roleKeys(MorphToMany $grants, ResolutionPins $pins): Resolution
+    {
+        $held  = self::held($grants);
+        $keys  = \array_keys($held->getDictionary());
+        $reach = RoleGraph::reach($keys);
+
+        $pins->roles(\array_keys($reach));
+
+        $within = RoleGraph::keysWithin($reach, $keys);
+
+        return new Resolution(\array_values(\array_unique($within ?? RoleGraph::keysHeldBy(self::rolesAfresh($grants, $keys)))), self::expiresIn(null, $held), $within !== null);
+    }
+
+    /**
      * Resolve the names of the permissions granted directly and through the
      * roles, with each role's ancestors' when the hierarchy is enabled.
      *
@@ -85,7 +114,7 @@ final class GrantResolver
         $pins->roles(\array_keys($reach));
 
         $within    = RoleGraph::permissionsWithin($reach, $keys);
-        $inherited = $within ?? self::inheritedAfresh($roles, $keys);
+        $inherited = $within ?? RoleGraph::permissionsHeldBy(self::rolesAfresh($roles, $keys));
 
         /** @var list<string> $names */
         $names = $granted->pluck('name')->all();
@@ -177,21 +206,17 @@ final class GrantResolver
     }
 
     /**
-     * Return the permissions the held roles hold, reading the roles and their
-     * hierarchy afresh, for a resolution whose hierarchy moved while it ran.
+     * Return the held roles read afresh, with their hierarchy as it is now, for
+     * a resolution whose hierarchy moved while it ran.
      *
      * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>  $roles
      * @param  list<string>  $keys
-     * @return \SineMacula\Laravel\Authorization\Support\InheritedPermissions
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
+     * @return list<\SineMacula\Laravel\Authorization\Models\Role>
      */
-    private static function inheritedAfresh(MorphToMany $roles, array $keys): InheritedPermissions
+    private static function rolesAfresh(MorphToMany $roles, array $keys): array
     {
-        /** @var list<\SineMacula\Laravel\Authorization\Models\Role> $fresh */
-        $fresh = $roles->getRelated()->newQuery()->useWritePdo()->whereKey($keys)->get()->all();
-
-        return RoleGraph::permissionsHeldBy($fresh);
+        /** @var list<\SineMacula\Laravel\Authorization\Models\Role> */
+        return $roles->getRelated()->newQuery()->useWritePdo()->whereKey($keys)->get()->all();
     }
 
     /**

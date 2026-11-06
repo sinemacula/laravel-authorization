@@ -9,6 +9,9 @@ use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Database\GrantApplications;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
+use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
+use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -22,7 +25,16 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * opaque identifier, or on no resource, none. Only the attachments that hold in
  * the tenant and application the check is decided in count: platform-wide ones,
  * those of the tenant, and those of a tenant above it that reach the tenants
- * below, each for every application or the check's own.
+ * below, each for every application or the check's own. A check on a resource
+ * of a tenant that is decided outside it, at platform scope once the subject
+ * holds the action's permission platform-wide (see `ResourceScope`), also reads
+ * the denies attached in the resource's own tenant, so a deny that tenant
+ * attached to its resource applies to everyone checking it; that tenant's
+ * allows do not apply there.
+ *
+ * A key the table cannot store (empty, `*`, holding a NUL byte or longer than
+ * it stores) has no attachment of its own, so a check on such a record reads
+ * its type's alone, never none. A type alone is cached apart from every record.
  *
  * The attachments and their documents are read in one query, on the write
  * connection, through the resolution cache, as a grantee's policies are: kept
@@ -43,7 +55,9 @@ final readonly class ResourcePolicyResolver
 
     /**
      * Return the policies attached to the resource and to its type, each as a
-     * resource policy attached to what it is attached to.
+     * resource policy attached to what it is attached to, and, for a resource
+     * of a tenant the check is decided outside, the denies attached in that
+     * tenant too.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
      * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>
@@ -52,17 +66,28 @@ final readonly class ResourcePolicyResolver
      */
     public function policiesFor(?ResourceReference $resource): array
     {
-        $type = $resource?->type;
-        $id   = $resource?->id;
-
-        // A type or key longer than the table stores has no attachments.
-        if ($type === null || \strlen($type) > Reference::MAX_BYTES || \strlen((string) $id) > Reference::MAX_BYTES) {
+        // A type longer than the table stores has no attachments.
+        if ($resource === null || $resource->type === null || \strlen($resource->type) > Reference::MAX_BYTES) {
             return [];
         }
 
-        $resolve = static fn (ResolutionPins $pins): Resolution => self::resolve($type, $id, $pins);
+        // No attachment can name a key the table cannot store, so a record of
+        // such a key has only its type's.
+        $type     = $resource->type;
+        $id       = self::isStorableKey($resource->id) ? $resource->id : null;
+        $policies = self::read($type, $id);
+        $tenant   = $resource->tenant;
 
-        return ResolutionCache::instance()?->rememberResourcePolicies(new Reference($type, $id ?? '*'), $resolve) ?? $resolve(new ResolutionPins)->value;
+        if ($tenant === null || self::isDecidedIn($tenant)) {
+            return $policies;
+        }
+
+        // Decided outside the resource's tenant, at platform scope, the
+        // resource's own tenant's denies still apply to everyone; its allows
+        // stay with the scope the check is decided in.
+        $own = TenantScope::within($tenant, TenantScope::currentApplication(), static fn (): array => self::read($type, $id));
+
+        return [...$policies, ...self::deniesOf($own, $policies)];
     }
 
     /**
@@ -110,6 +135,88 @@ final readonly class ResourcePolicyResolver
     }
 
     /**
+     * Read the policies attached to the record of the type with the key, and to
+     * the type, or to the type alone when there is no key, in the tenant and
+     * application the check is decided in, through the resolution cache.
+     *
+     * @param  string  $type
+     * @param  string|null  $id
+     * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
+     */
+    private static function read(string $type, ?string $id): array
+    {
+        $resolve = static fn (ResolutionPins $pins): Resolution => self::resolve($type, $id, $pins);
+
+        return ResolutionCache::instance()?->rememberResourcePolicies($type, $id, $resolve) ?? $resolve(new ResolutionPins)->value;
+    }
+
+    /**
+     * Determine whether a record's key is one an attachment can name: not
+     * empty, not `*`, without a NUL byte and within the bytes the table stores.
+     *
+     * @param  string|null  $id
+     * @return bool
+     *
+     * @phpstan-assert-if-true string $id
+     */
+    private static function isStorableKey(?string $id): bool
+    {
+        if ($id === null || \in_array($id, ['', '*'], true)) {
+            return false;
+        }
+
+        return !\str_contains($id, "\0") && \strlen($id) <= Reference::MAX_BYTES;
+    }
+
+    /**
+     * Determine whether the check is decided in the tenant: the tenant the
+     * tenant scope applies is that tenant.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
+     * @return bool
+     */
+    private static function isDecidedIn(Reference $tenant): bool
+    {
+        $current = TenantScope::currentChain()->tenant();
+
+        return $current !== null && $current->type === $tenant->type && $current->id === $tenant->id;
+    }
+
+    /**
+     * Return the deny statements of each policy read that is not among those
+     * already read, each policy with its deny statements alone, at the
+     * positions they hold in its document.
+     *
+     * @param  list<\SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
+     * @param  list<\SineMacula\Laravel\Authorization\Evaluation\Policy>  $read
+     * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>
+     */
+    private static function deniesOf(array $policies, array $read): array
+    {
+        $seen = [];
+
+        foreach ($read as $policy) {
+            $seen[$policy->id . "\0" . $policy->resource] = true;
+        }
+
+        $denies = [];
+
+        foreach ($policies as $policy) {
+            $statements = \array_filter($policy->statements, static fn (Statement $statement): bool => $statement->effect === PolicyEffect::DENY);
+
+            if ($statements === [] || isset($seen[$policy->id . "\0" . $policy->resource])) {
+                continue;
+            }
+
+            $denies[] = new EvaluationPolicy($policy->name, $statements, $policy->version, $policy->id, $policy->resource);
+        }
+
+        return $denies;
+    }
+
+    /**
      * Hydrate each policy read once, as attached to the record when it is
      * attached to the record, else to the type.
      *
@@ -125,16 +232,18 @@ final readonly class ResourcePolicyResolver
         $attached = [];
 
         foreach ($rows as $row) {
-            $key      = (string) $row->getKey(); // @phpstan-ignore cast.string
-            $recordId = $row->getAttribute(self::RESOURCE_ID);
-            $resource = \is_scalar($recordId) ? "{$type}:{$recordId}" : "{$type}:*";
+            $key = (string) $row->getKey(); // @phpstan-ignore cast.string
 
-            // The record's attachment wins over the type's.
-            if (isset($attached[$key]) && $resource === "{$type}:*") {
+            /** @var string|null $recordId */
+            $recordId = $row->getAttribute(self::RESOURCE_ID);
+
+            // The record's attachment wins over the type's, told apart by its
+            // key, never by its label.
+            if ($recordId === null && isset($attached[$key])) {
                 continue;
             }
 
-            $attached[$key] = [$row, $resource];
+            $attached[$key] = [$row, $recordId === null ? "{$type}:*" : "{$type}:{$recordId}"];
         }
 
         $policies = [];

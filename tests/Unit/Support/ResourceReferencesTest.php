@@ -306,6 +306,31 @@ final class ResourceReferencesTest extends TestCase
     }
 
     /**
+     * A pair's record is named without a tenant and without asking the
+     * resolver, even one that cannot tell its tenant; a pair that names no
+     * record is refused the same way as it is with a tenant.
+     *
+     * @return void
+     */
+    public function testAPairsRecordIsNamedWithoutAskingTheResolver(): void
+    {
+        $this->bindResolver(null, false);
+
+        Relation::morphMap(['stub_tenant' => StubTenant::class]);
+
+        self::assertEquals(ResourceReference::record('post', '42'), ResourceReferences::recordOf(['post', 42]));
+        self::assertEquals(ResourceReference::record('stub_tenant', 'abc'), ResourceReferences::recordOf([StubTenant::class, 'abc']));
+
+        $unnamed = [['post'], ['post', ''], ['', '1'], ["po\0st", '1'], ['post', "4\0"], [7, '1'], ['post', true]];
+
+        foreach ([...$unnamed, [AbstractStubModel::class, '1'], ['a' => 'post', 'b' => '1']] as $pair) {
+            self::assertFalse(ResourceReferences::recordOf($pair));
+        }
+
+        self::assertSame([], $this->resolver->askedRecords);
+    }
+
+    /**
      * An abstract model class names no type a record can be of, so neither the
      * class nor a pair of it can be identified, and no tenant is asked for.
      *

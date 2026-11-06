@@ -16,8 +16,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Two-tier cache (in-memory memo plus optional persistent store) for what a
- * grantee resolves to: its roles, its permissions and its policies, and for
- * what a resource resolves to: the policies attached to it and to its type.
+ * grantee resolves to: its roles, the keys of the roles it reaches, its
+ * permissions and its policies, and for what a resource resolves to: the
+ * policies attached to it and to its type.
  *
  * Persistent entries are keyed by kind, grantee and the tenant the tenant scope
  * applies, since the roles and permissions a grantee resolves to depend on it.
@@ -44,7 +45,7 @@ final readonly class ResolutionCache
     use HasContainerInstance;
 
     /** @var list<string> The kinds of entry that hold policy documents, hydrated under the policy limits. */
-    private const array POLICY_KINDS = ['policies', 'resource-policies'];
+    private const array POLICY_KINDS = ['policies', 'resource-policies', 'resource-type-policies'];
 
     /** @var \SineMacula\Laravel\Authorization\Cache\ResolutionMemo In-memory tier, keyed by full cache key. */
     private ResolutionMemo $memo;
@@ -115,22 +116,48 @@ final readonly class ResolutionCache
     }
 
     /**
-     * Return the policies attached to the resource, a record (`type:id`) or a
-     * type alone (`type:*`), resolving them on a miss. The persistent tier
-     * holds their documents, each with the resource it is attached to.
+     * Return the keys of the roles the grantee holds in the current scope, with
+     * the keys of the roles above them when the hierarchy is enabled, resolving
+     * them on a miss.
+     *
+     * The entry is keyed and pinned as the grantee's roles are: by the grantee,
+     * the tenant and the application, holding while the grantee's grants, every
+     * role it reaches and the tenant chain are unchanged, so a check that
+     * matches a resource policy's role selector reads no role once it is warm.
+     *
+     * @param  object  $grantee
+     * @param  \Closure(\SineMacula\Laravel\Authorization\Cache\ResolutionPins): \SineMacula\Laravel\Authorization\Cache\Resolution<string>  $resolve
+     * @return list<string>
+     */
+    public function rememberRoleKeys(object $grantee, \Closure $resolve): array
+    {
+        /** @var list<string> */
+        return $this->remember('role-keys', $grantee, $resolve, static fn (array $stored): array => self::names($stored));
+    }
+
+    /**
+     * Return the policies attached to the record of the type with the key, and
+     * to the type, or to the type alone when there is no key, resolving them on
+     * a miss. The persistent tier holds their documents, each with the resource
+     * it is attached to.
      *
      * The entry is keyed by the resource, the tenant and the application, and
      * records no grantee: its resolution pins the versions the resource's type
-     * and every resource policy share before it reads (see `ResolutionPins`).
+     * and every resource policy share before it reads (see `ResolutionPins`). A
+     * type alone is kept under a kind of its own, so its entry is never the
+     * entry of a record, whatever the record's key.
      *
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $resource
+     * @param  string  $type
+     * @param  string|null  $id
      * @param  \Closure(\SineMacula\Laravel\Authorization\Cache\ResolutionPins): \SineMacula\Laravel\Authorization\Cache\Resolution<mixed>  $resolve
      * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>
      */
-    public function rememberResourcePolicies(Reference $resource, \Closure $resolve): array
+    public function rememberResourcePolicies(string $type, ?string $id, \Closure $resolve): array
     {
+        $kind = $id === null ? 'resource-type-policies' : 'resource-policies';
+
         /** @var list<\SineMacula\Laravel\Authorization\Evaluation\Policy> */
-        return $this->remember('resource-policies', $resource, $resolve, self::policies(...), static fn (Policy $policy): array => self::encodePolicy($policy), false);
+        return $this->remember($kind, new Reference($type, $id ?? '*'), $resolve, self::policies(...), static fn (Policy $policy): array => self::encodePolicy($policy), false);
     }
 
     /**

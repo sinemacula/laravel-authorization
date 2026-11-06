@@ -7,8 +7,10 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
 /**
  * Thrown when a policy is attached to, or detached from, a value that names no
  * resource it can be attached to (AUTHZ-7.3): an unsaved model, an opaque
- * identifier, a pair that is not a type and a key, or a type or key longer than
- * the table stores.
+ * identifier, a pair that is not a type and a key, a type or key longer than
+ * the table stores, or a record whose key is `*`, which a check on the whole
+ * type stands for; and when every policy is detached from a whole type, whose
+ * attachments are detached one by one.
  *
  * A resource policy is attached to one record of a type, or to the whole type,
  * so the resource must have a type. The value comes from the calling code, so

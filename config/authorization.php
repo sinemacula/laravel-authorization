@@ -40,10 +40,10 @@ return [
     | The connection the package's tables live on. Every package model and
     | pivot reads and writes on it, the shipped migrations create and drop
     | their tables on it, and the package's own transactions run on it: each
-    | call to the role, permission, policy and grant services runs in one
-    | transaction here. Point it at the connection the application keeps its
-    | identity tables on, so a transaction that creates a principal and its
-    | grants commits or rolls back as one. Null uses the application's
+    | call to the role, permission, policy, grant and resource policy services
+    | runs in one transaction here. Point it at the connection the application
+    | keeps its identity tables on, so a transaction that creates a principal
+    | and its grants commits or rolls back as one. Null uses the application's
     | default connection.
     |
     */
@@ -187,7 +187,8 @@ return [
     | additional policies for the current subject from this source on every
     | check, such as policies shipped in code. Leave as null to rely solely on
     | the policies stored in the database: those attached to the identity,
-    | inline ones included, and those attached to the roles it holds.
+    | inline ones included, those attached to the roles it holds, and those
+    | attached to the check's resource and its type.
     |
     */
 
