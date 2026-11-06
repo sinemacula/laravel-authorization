@@ -42,10 +42,14 @@ interface ResourceAttributeProvider
     /**
      * Return the record's attribute values, nested by key, so `['owner' =>
      * ['id' => '7']]` supplies `resource.owner.id`. A key left out is missing.
+     * A declared key holds a scalar or null, or a list of them for a `list`;
+     * any other array is kept present but cannot be read into, so its keys are
+     * never exposed and a test of the key is undecidable.
      *
      * The model is the one the check was given, so the provider can read it
-     * rather than query for it; null when the check named the record some other
-     * way, such as a `(type, id)` pair.
+     * rather than query for it, including a model that implements
+     * `AuthorizableResource` whose reference carries no model; null when the
+     * check named the record some other way, such as a `(type, id)` pair.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
      * @param  \Illuminate\Database\Eloquent\Model|null  $model

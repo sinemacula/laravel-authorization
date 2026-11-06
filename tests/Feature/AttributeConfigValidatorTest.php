@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Config\AttributeConfigValidator;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\ResourceAttributeProvider;
 use SineMacula\Laravel\Authorization\Contracts\SubjectAttributeProvider;
+use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use Tests\Feature\Stubs\ConflictingResourceAttributes;
 use Tests\Feature\Stubs\RecordingResourceAttributes;
@@ -44,7 +45,8 @@ final class AttributeConfigValidatorTest extends TestCase
 
     /**
      * Providers of each kind, registered by morph type, pass; so do two
-     * declaring one key alike, and an empty config.
+     * declaring one key alike, one declaring its types as types and by name, an
+     * empty config and one whose lists of providers are null.
      *
      * @return void
      */
@@ -56,6 +58,11 @@ final class AttributeConfigValidatorTest extends TestCase
             'resources' => ['post' => RecordingResourceAttributes::class, 'page' => RecordingResourceAttributes::class],
             'subjects'  => ['user' => RecordingSubjectAttributes::class],
         ], $this->container());
+
+        $this->container()->instance(ConflictingResourceAttributes::class, new ConflictingResourceAttributes(['state' => ContextKeyType::STRING, 'count' => 'number']));
+
+        AttributeConfigValidator::validate(['resources' => ['post' => ConflictingResourceAttributes::class]], $this->container());
+        AttributeConfigValidator::validate(['resources' => null, 'subjects' => null], $this->container());
 
         $this->expectNotToPerformAssertions();
     }
@@ -161,6 +168,11 @@ final class AttributeConfigValidatorTest extends TestCase
             ['string'],
             'provider \'' . ConflictingResourceAttributes::class . '\' ' . self::TYPE_MAP,
         ];
+        yield 'a key under another it declares' => [
+            ['owner' => 'string', 'owner.id' => 'string'],
+            'Attribute provider ' . ConflictingResourceAttributes::class . ' declares \'resource.owner.id\' under \'resource.owner\', which it also declares;'
+                . ' declare the keys under \'resource.owner\' alone.',
+        ];
         yield 'a malformed path' => [
             ['status..code' => 'string'],
             'Context key \'resource.status..code\' must be a namespace and one or more \'.\'-separated segments of letters, digits, \'_\' and \'-\','
@@ -170,7 +182,8 @@ final class AttributeConfigValidatorTest extends TestCase
 
     /**
      * A provider declaring a built-in, a key under one, an unknown type, a
-     * value that is not a type, or a malformed path is refused at boot.
+     * value that is not a type, a key under another it declares, or a malformed
+     * path is refused at boot.
      *
      * @param  array<array-key, mixed>  $declared
      * @param  string  $reason
@@ -192,7 +205,8 @@ final class AttributeConfigValidatorTest extends TestCase
 
     /**
      * A provider the container cannot resolve, or resolves as something that
-     * does not implement its contract, is refused.
+     * does not implement its contract, is refused, with the reason it could not
+     * be resolved.
      *
      * @return void
      */
@@ -201,16 +215,27 @@ final class AttributeConfigValidatorTest extends TestCase
         $this->container()->bind(RecordingResourceAttributes::class, 'App\Missing');
         $this->container()->bind(RecordingSubjectAttributes::class, static fn (): RecordingResourceAttributes => new RecordingResourceAttributes);
 
+        $prefix  = 'a provider could not be resolved from the container: ';
+        $reasons = [];
+
         foreach (['resources' => RecordingResourceAttributes::class, 'subjects' => RecordingSubjectAttributes::class] as $key => $class) {
             try {
                 AttributeConfigValidator::validate([$key => ['post' => $class]], $this->container());
 
                 self::fail("A provider of {$key} that cannot be resolved is refused.");
             } catch (InvalidAuthorizationConfigException $exception) {
+                $reasons[$key] = $exception->getReason();
+
                 self::assertSame(self::ATTRIBUTES, $exception->getConfigKey());
-                self::assertStringStartsWith('a provider could not be resolved from the container: ', $exception->getReason());
+                self::assertStringStartsWith($prefix, $exception->getReason());
             }
         }
+
+        self::assertStringContainsString('App\Missing', $reasons['resources']);
+        self::assertSame(
+            $prefix . 'Attribute provider \'' . RecordingSubjectAttributes::class . '\' does not implement ' . SubjectAttributeProvider::class . '.',
+            $reasons['subjects'],
+        );
     }
 
     /**

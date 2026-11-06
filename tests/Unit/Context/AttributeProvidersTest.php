@@ -12,6 +12,11 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Context\AttributeProviders;
 use SineMacula\Laravel\Authorization\Contracts\ResourceAttributeProvider;
 use SineMacula\Laravel\Authorization\Contracts\SubjectAttributeProvider;
+use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
+use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
+use SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator;
+use SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
 use SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\ConflictingResourceAttributes;
@@ -137,44 +142,68 @@ final class AttributeProvidersTest extends TestCase
 
     /**
      * Only the declared paths are exposed: a declared key the provider leaves
-     * out, or one under a value that is not an array, is missing, and a
-     * declared map is kept whole.
+     * out, or one under a value that is not an array, is missing, a declared
+     * key whose value is null stays present, and every key the provider does
+     * not declare, even one beside a declared key, is dropped.
      *
      * @return void
      */
     public function testExposesOnlyTheDeclaredPaths(): void
     {
-        $provider = new class implements ResourceAttributeProvider {
-            /**
-             * Return the attributes the provider declares.
-             *
-             * @return array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType|string>
-             */
-            #[\Override]
-            public function attributes(): array
-            {
-                return ['owner.id' => 'string', 'owner.team' => 'string', 'status.code' => 'string', 'tags' => 'list', 'missing' => 'string', 'owner' => 'string'];
-            }
+        $values = $this->valuesOf(
+            ['owner.id' => 'string', 'owner.team' => 'string', 'status.code' => 'string', 'tags' => 'list', 'missing' => 'string'],
+            ['owner' => ['id' => '7', 'team' => null, 'email' => 'x'], 'status' => 'draft', 'tags' => ['a', 'b'], 'extra' => 1],
+        );
 
-            /**
-             * Return the record's attributes.
-             *
-             * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
-             * @param  \Illuminate\Database\Eloquent\Model|null  $model
-             * @return array<string, mixed>
-             */
-            #[\Override]
-            public function values(ResourceReference $resource, ?Model $model): array
-            {
-                return ['owner' => ['id' => '7', 'team' => null, 'email' => 'x'], 'status' => 'draft', 'tags' => ['a', 'b'], 'extra' => 1];
-            }
-        };
+        self::assertSame(['owner' => ['id' => '7', 'team' => null], 'tags' => ['a', 'b']], $values);
 
-        $this->container->instance('provider', $provider);
+        $context = new CheckContext(['resource' => $values]);
 
-        $values = (new AttributeProviders($this->container, ['post' => 'provider']))->resourceValues(ResourceReference::record('post', '1'));
+        self::assertSame([true, null], $context->lookup('resource.owner.team'));
+        self::assertSame([false, null], $context->lookup('resource.owner.email'));
+    }
 
-        self::assertSame(['owner' => ['id' => '7', 'team' => null, 'email' => 'x'], 'tags' => ['a', 'b']], $values);
+    /**
+     * A declared key whose value is an array is exposed only as a list of
+     * scalars and nulls declared as a `list`: a map, a list holding an array
+     * and a list under another type each stay present with a placeholder
+     * nothing can be read through, so none of the keys under it is exposed, a
+     * test of the key is undecidable and `${…}` leaves it unresolved.
+     *
+     * @return void
+     */
+    public function testADeclaredArrayIsExposedOnlyAsAListOfScalars(): void
+    {
+        $values = $this->valuesOf(
+            ['owner' => 'string', 'team' => 'list', 'tags' => ContextKeyType::LIST, 'groups' => 'list', 'codes' => 'string', 'flags' => 'list'],
+            [
+                'owner'  => ['id' => '7', 'secret' => 'S'],
+                'team'   => ['id' => '8', 'secret' => 'T'],
+                'tags'   => ['a', null, 1, true],
+                'groups' => [['id' => '9', 'secret' => 'G']],
+                'codes'  => ['a', 'b'],
+                'flags'  => [1 => 'a'],
+            ],
+        );
+
+        self::assertSame(['a', null, 1, true], $values['tags']);
+
+        $context      = new CheckContext(['resource' => $values]);
+        $interpolator = new ContextInterpolator;
+
+        foreach (['owner', 'team', 'groups', 'codes', 'flags'] as $key) {
+            [$isPresent, $value] = $context->lookup("resource.{$key}");
+
+            self::assertTrue($isPresent, "resource.{$key} stays present.");
+            self::assertIsObject($value, "resource.{$key} cannot be read through.");
+            self::assertSame(MatchOutcome::UNDECIDABLE, ConditionEvaluator::evaluate('starts_with', 'a', $value)->outcome);
+            self::assertNull($interpolator->interpolate("\${resource.{$key}}", $context));
+        }
+
+        foreach (['owner.id', 'owner.secret', 'team.secret', 'groups.0', 'groups.0.secret', 'codes.0', 'flags.1'] as $path) {
+            self::assertSame([false, null], $context->lookup("resource.{$path}"), "resource.{$path} is never exposed.");
+            self::assertNull($interpolator->interpolate("\${resource.{$path}}", $context));
+        }
     }
 
     /**
@@ -298,6 +327,80 @@ final class AttributeProvidersTest extends TestCase
         $this->container->instance('config', new Repository);
 
         self::assertSame([], AttributeProviders::fromConfig($this->container)->declarations());
+    }
+
+    /**
+     * A null `resources` or `subjects`, which the configuration validator
+     * accepts, registers no provider.
+     *
+     * @return void
+     */
+    public function testFromConfigTakesANullListAsNoProviders(): void
+    {
+        $this->container->instance('config', new Repository(['authorization' => ['attributes' => ['resources' => null, 'subjects' => null]]]));
+
+        $providers = AttributeProviders::fromConfig($this->container);
+
+        self::assertSame([], $providers->declarations());
+        self::assertSame([], $providers->resourceValues(ResourceReference::record('post', '1')));
+        self::assertSame([], $providers->subjectValues(new \stdClass, 'user'));
+    }
+
+    /**
+     * Return the values a `post` provider declaring the attributes exposes for
+     * a record when it returns the given values.
+     *
+     * @param  array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType|string>  $attributes
+     * @param  array<string, mixed>  $values
+     * @return array<string, mixed>
+     */
+    private function valuesOf(array $attributes, array $values): array
+    {
+        $provider = new class ($attributes, $values) implements ResourceAttributeProvider {
+            /**
+             * Create a new provider declaring the attributes and returning the
+             * values.
+             *
+             * @param  array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType|string>  $attributes
+             * @param  array<string, mixed>  $values
+             */
+            public function __construct(
+
+                /** The attributes the provider declares. */
+                private readonly array $attributes,
+
+                /** The values the provider returns. */
+                private readonly array $values,
+            ) {}
+
+            /**
+             * Return the attributes the provider declares.
+             *
+             * @return array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType|string>
+             */
+            #[\Override]
+            public function attributes(): array
+            {
+                return $this->attributes;
+            }
+
+            /**
+             * Return the record's attributes.
+             *
+             * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
+             * @param  \Illuminate\Database\Eloquent\Model|null  $model
+             * @return array<string, mixed>
+             */
+            #[\Override]
+            public function values(ResourceReference $resource, ?Model $model): array
+            {
+                return $this->values;
+            }
+        };
+
+        $this->container->instance('provider', $provider);
+
+        return (new AttributeProviders($this->container, ['post' => 'provider']))->resourceValues(ResourceReference::record('post', '1'));
     }
 
     /**

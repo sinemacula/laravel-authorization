@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Context;
 use Illuminate\Contracts\Container\Container;
 use SineMacula\Laravel\Authorization\Contracts\ResourceAttributeProvider;
 use SineMacula\Laravel\Authorization\Contracts\SubjectAttributeProvider;
+use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
 use SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
@@ -18,9 +19,12 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * Each provider is resolved from the container the first time it is needed,
  * then kept. Its values are read afresh for every check that reads its
  * namespace, and only those of the keys it declares are exposed: a value it
- * returns for a key it does not declare is dropped. A provider that cannot be
- * resolved, or that throws, aborts the check with `AttributeProviderFailed`,
- * which carries none of its values or of its failure's message.
+ * returns for a key it does not declare is dropped, and so is every key under a
+ * declared one. A declared key whose value is a map, or a list under a type
+ * other than `list`, is kept present with a value no path can be read through,
+ * so it is undecidable rather than missing. A provider that cannot be resolved,
+ * or that throws, aborts the check with `AttributeProviderFailed`, which
+ * carries none of its values or of its failure's message.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -223,17 +227,18 @@ final class AttributeProviders
     /**
      * Return the values at the declared paths alone, nested as given, leaving
      * out every key the provider does not declare and every declared key it
-     * leaves out.
+     * leaves out. The value at a declared path is exposed as `exposed()` gives
+     * it, so no key under it is.
      *
      * @param  array<array-key, mixed>  $values
-     * @param  array<string, mixed>  $attributes
+     * @param  array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType|string>  $attributes
      * @return array<string, mixed>
      */
     private static function declaredOnly(array $values, array $attributes): array
     {
         $declared = [];
 
-        foreach (\array_keys($attributes) as $path) {
+        foreach ($attributes as $path => $type) {
             $segments = \explode('.', $path);
             $value    = $values;
 
@@ -245,11 +250,55 @@ final class AttributeProviders
                 $value = $value[$segment];
             }
 
-            $declared = \array_replace_recursive($declared, self::nest($segments, $value));
+            $declared = \array_replace_recursive($declared, self::nest($segments, self::exposed($value, $type)));
         }
 
         /** @var array<string, mixed> */
         return $declared;
+    }
+
+    /**
+     * Return the value found at a declared path as it is exposed.
+     *
+     * A value that is not an array is kept, and so is a list of scalars and
+     * nulls declared as a `list`. Any other array, a map or a list under
+     * another type, is swapped for a placeholder that no path can be read
+     * through, so none of the keys under it, which no one declared, is exposed.
+     * The key stays present with a value of the wrong type, which is
+     * undecidable, rather than missing, which `_if_exists` would pass, and a
+     * `${…}` reference to it is unresolved.
+     *
+     * @param  mixed  $value
+     * @param  \SineMacula\Laravel\Authorization\Enums\ContextKeyType|string  $type
+     * @return mixed
+     */
+    private static function exposed(mixed $value, ContextKeyType|string $type): mixed
+    {
+        if (!\is_array($value)) {
+            return $value;
+        }
+
+        $isList = ($type instanceof ContextKeyType ? $type : ContextKeyType::tryFrom($type)) === ContextKeyType::LIST;
+
+        return $isList && self::isListOfScalars($value) ? $value : new \stdClass;
+    }
+
+    /**
+     * Determine whether the array is a list whose every element is a scalar or
+     * null.
+     *
+     * @param  array<array-key, mixed>  $value
+     * @return bool
+     */
+    private static function isListOfScalars(array $value): bool
+    {
+        foreach ($value as $element) {
+            if ($element !== null && !\is_scalar($element)) {
+                return false;
+            }
+        }
+
+        return \array_is_list($value);
     }
 
     /**

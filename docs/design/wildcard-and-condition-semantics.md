@@ -217,8 +217,13 @@ The context a check's statements read is nested namespaces (N24), each made by o
   `authorization.attributes.resources`, resolved from the container. Its `attributes()` declares dot paths within the
   namespace with their types, and its `values()` returns them nested by key: a `SubjectAttributeProvider` is given the
   subject, and a `ResourceAttributeProvider` the record's reference and the model the check was given, if any, so it
-  need not query for it. Only the keys the matching provider declares are exposed; any other value it returns is
-  dropped. The model's columns are never read directly, and there is no `principal` namespace.
+  need not query for it; a model implementing `AuthorizableResource` is handed on too, when the reference it returns
+  names one record and carries no model. Only the keys the matching provider declares are exposed; any other value it
+  returns is dropped, and so is everything under a declared key. A declared key's value is kept when it is a scalar or
+  null, or a list of them declared as `list`; any other array is swapped for a placeholder no path reads into, so the
+  key stays present but undecidable (never missing, which `_if_exists` would pass) and `${…}` leaves it unresolved. A
+  provider declaring a key under another it declares (`owner` and `owner.id`) is refused at boot. The model's columns
+  are never read directly, and there is no `principal` namespace.
 - **Attribute fallbacks and failures** (N31). A type alone, an opaque identifier, no resource and a type with no
   provider leave only the built-ins that apply, so an attribute key is missing (undecidable, or decided by `null` and
   `_if_exists`). A provider that throws, or cannot be resolved, aborts the check with `AttributeProviderFailed`, its

@@ -33,9 +33,10 @@ final class ResourceReferences
      * pair, so the check denies instead of matching every resource-less
      * statement. The resource contract wins over a model's own `type:id`; a
      * model's or a `(type, id)` pair's tenant comes from the bound resource
-     * tenant resolver, and a model's reference keeps the model; a model class
-     * names its type alone; a pair names one record; any other string, or
-     * object that can be cast to one, is an opaque identifier.
+     * tenant resolver, and a model's reference keeps the model, as does the
+     * record a model's own resource contract names; a model class names its
+     * type alone; a pair names one record; any other string, or object that can
+     * be cast to one, is an opaque identifier.
      *
      * An identifier holding a NUL byte names nothing, so it cannot be
      * identified either, however it was given: a string, a pair, a model's key,
@@ -51,7 +52,7 @@ final class ResourceReferences
         $reference = match (true) {
             $value === null                                            => null,
             $value instanceof ResourceReference                        => $value,
-            $value instanceof AuthorizableResource                     => $value->toResourceReference(),
+            $value instanceof AuthorizableResource                     => self::ofResource($value),
             $value instanceof Model                                    => self::ofModel($value),
             \is_string($value)                                         => self::ofString($value),
             \is_array($value)                                          => self::ofPair($value),
@@ -60,6 +61,27 @@ final class ResourceReferences
         };
 
         return $reference instanceof ResourceReference && \str_contains($reference->identifier, "\0") ? false : $reference;
+    }
+
+    /**
+     * Return the reference the resource's contract gives, handing on the
+     * resource itself when it is a model and the contract names one record
+     * without a model, so its type's resource attribute provider can read the
+     * model rather than query for it. The contract still decides the record and
+     * its tenant.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Contracts\AuthorizableResource  $resource
+     * @return \SineMacula\Laravel\Authorization\Support\ResourceReference
+     */
+    private static function ofResource(AuthorizableResource $resource): ResourceReference
+    {
+        $reference = $resource->toResourceReference();
+
+        if (!$resource instanceof Model || $reference->id === null || $reference->model !== null) {
+            return $reference;
+        }
+
+        return new ResourceReference($reference->identifier, $reference->type, $reference->id, $reference->tenant, $resource);
     }
 
     /**

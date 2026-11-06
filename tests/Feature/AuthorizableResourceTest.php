@@ -185,7 +185,7 @@ final class AuthorizableResourceTest extends TestCase
     /**
      * The contract wins over a model's own record and the tenant the bound
      * resolver reads for it, so a model naming no tenant is decided where the
-     * request is.
+     * request is; the model is still handed on with the record it names.
      *
      * @return void
      */
@@ -212,7 +212,7 @@ final class AuthorizableResourceTest extends TestCase
 
         $resource->setRawAttributes(['id' => '42']);
 
-        self::assertEquals(ResourceReference::record('document', '7'), ResourceReferences::of($resource));
+        self::assertEquals(ResourceReference::record('document', '7', null, $resource), ResourceReferences::of($resource));
         self::assertTrue(Gate::allows('posts:create', $resource));
         self::assertTrue(Authorization::for($user)->check('posts:create', $resource)->isAllowed());
         self::assertSame(DecisionReason::TENANT_SCOPE, Authorization::for($user)->check('posts:create', $user)->reason);

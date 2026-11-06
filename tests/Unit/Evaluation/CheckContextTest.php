@@ -165,6 +165,42 @@ final class CheckContextTest extends TestCase
     }
 
     /**
+     * A builder runs only for the namespaces it was given for, however alike
+     * another builder is: two closures over one method compare equal, yet each
+     * builds its own namespace, so each runs once.
+     *
+     * @return void
+     */
+    public function testABuilderRunsOnlyForItsOwnNamespaces(): void
+    {
+        $source = new class {
+            /** @var int How many times the namespaces were built. */
+            public int $calls = 0;
+
+            /**
+             * Build both namespaces.
+             *
+             * @return array<string, array<string, int>>
+             */
+            public function build(): array
+            {
+                $this->calls++;
+
+                return ['a' => ['v' => 1], 'b' => ['v' => 2]];
+            }
+        };
+
+        $first   = $source->build(...);
+        $second  = $source->build(...);
+        $context = new CheckContext([], ['a' => $first, 'b' => $second]);
+
+        self::assertEquals($first, $second);
+        self::assertSame([true, 1], $context->lookup('a.v'));
+        self::assertSame([true, 2], $context->lookup('b.v'));
+        self::assertSame(2, $source->calls);
+    }
+
+    /**
      * A builder that throws is never run again for the check: the failure
      * reaches the reader, a later read finds every namespace it was to build
      * missing, and the namespaces of other builders are still built.

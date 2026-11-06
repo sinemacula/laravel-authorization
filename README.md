@@ -691,8 +691,10 @@ string is an opaque identifier with neither: `'reports:42'` is never split at it
 Every other attribute comes from a provider, registered for one morph type. A resource attribute provider implements
 `SineMacula\Laravel\Authorization\Contracts\ResourceAttributeProvider`: `attributes()` declares each attribute, a dot
 path within `resource`, with its type, and `values()` returns a record's values, nested by key. It is given the
-record's reference and the model the check was given, so it can read the model rather than query for it; the model is
-null when the check named the record by a `(type, id)` pair or an `AuthorizableResource`:
+record's reference and the model the check was given, so it can read the model rather than query for it. A model that
+implements `AuthorizableResource` is handed on too, when the reference it returns names one record and carries no
+model. The model is null when the check named the record some other way, such as a `(type, id)` pair or an
+`AuthorizableResource` that is not a model:
 
 ```php
 use Illuminate\Database\Eloquent\Model;
@@ -755,10 +757,13 @@ A policy then reads them like any other key, through a condition or a `${…}` r
 ```
 
 What a provider declares enters the key catalogue at boot. A class that does not implement its contract or cannot be
-resolved, a provider declaring a built-in (`id`, `type` or anything under `tenant`), and two providers declaring one
-key with different types are refused at boot; two providers may declare one key alike. Only the keys a provider
-declares are exposed: a value it returns for any other key is dropped, and a value of the wrong type is undecidable
-when the policy is evaluated, as for any context value.
+resolved, a provider declaring a built-in (`id`, `type` or anything under `tenant`), a provider declaring a key under
+another key it declares (`owner` and `owner.id`), and two providers declaring one key with different types are refused
+at boot; two providers may declare one key alike. Only the keys a provider declares are exposed: a value it returns
+for any other key is dropped, and so is everything under a declared key. A declared key holds a scalar or `null`, or,
+for a `list`, a list of them; a map, or a list under any other type, stays present but cannot be read into, so a test
+of the key is undecidable, `${…}` does not resolve it and none of the keys under it can be read. A value of the wrong
+type is undecidable when the policy is evaluated, as for any context value.
 
 A namespace is built the first time a statement under evaluation reads any of its keys, built-in or not, and at most
 once a check, so a provider is asked at most once a check, and not at all by a check whose policies read nothing of

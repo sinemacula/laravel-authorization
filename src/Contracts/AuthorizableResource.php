@@ -14,6 +14,10 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * resolver, so a non-Eloquent object, or a model that knows its own tenant,
  * names exactly the resource, and the tenant, a check is about (N8).
  *
+ * A model that implements it is still handed to its type's resource attribute
+ * provider: when its reference names one record and carries no model, the check
+ * adds the model to it (N30).
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */

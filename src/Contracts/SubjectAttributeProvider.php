@@ -36,7 +36,9 @@ interface SubjectAttributeProvider
     /**
      * Return the subject's attribute values, nested by key, so `['clearance' =>
      * ['level' => 3]]` supplies `subject.clearance.level`. A key left out is
-     * missing.
+     * missing. A declared key holds a scalar or null, or a list of them for a
+     * `list`; any other array is kept present but cannot be read into, so its
+     * keys are never exposed and a test of the key is undecidable.
      *
      * @param  object  $subject
      * @return array<string, mixed>

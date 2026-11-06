@@ -24,8 +24,8 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyValidator;
  * The keys of `subject` and `resource` (N29) are the package's built-ins (`id`,
  * `type`, `tenant.type` and `tenant.id`) and those the attribute providers
  * declare, given at construction; neither namespace takes a key declared or
- * registered any other way, and no provider may declare a built-in or a key
- * under one.
+ * registered any other way, and no provider may declare a built-in, a key under
+ * one, or a key under another key it declares.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -206,8 +206,9 @@ final class DeclaredContextKeyCatalogue implements ContextKeyCatalogue
 
     /**
      * Declare the attributes a provider supplies under `subject` or `resource`,
-     * refusing another namespace, a built-in or a key under one, and a key
-     * another provider declares with another type.
+     * refusing another namespace, a built-in or a key under one, a key another
+     * provider declares with another type, and a key under another key the
+     * provider declares.
      *
      * @param  string  $namespace
      * @param  string  $provider
@@ -243,6 +244,37 @@ final class DeclaredContextKeyCatalogue implements ContextKeyCatalogue
             }
 
             $this->put($key, $type, true);
+        }
+
+        self::assertNoKeyUnderAnother($namespace, $provider, $keys);
+    }
+
+    /**
+     * Refuse a provider that declares a key under another key it declares, such
+     * as `owner` and `owner.id`: the value of the outer key could only be a
+     * map, which is never exposed, so the inner key could never be read.
+     *
+     * @param  string  $namespace
+     * @param  string  $provider
+     * @param  array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType|string>  $keys
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function assertNoKeyUnderAnother(string $namespace, string $provider, array $keys): void
+    {
+        foreach (\array_keys($keys) as $path) {
+            $parent = $path;
+
+            while (($end = \strrpos($parent, '.')) !== false) {
+                $parent = \substr($parent, 0, $end);
+
+                if (\array_key_exists($parent, $keys)) {
+                    $reason = "which it also declares; declare the keys under '{$namespace}.{$parent}' alone.";
+
+                    throw new \InvalidArgumentException("Attribute provider {$provider} declares '{$namespace}.{$path}' under '{$namespace}.{$parent}', {$reason}");
+                }
+            }
         }
     }
 

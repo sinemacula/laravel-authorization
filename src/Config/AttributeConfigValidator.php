@@ -21,7 +21,8 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  * one implementing its contract, to read the attributes it declares, which must
  * map dot paths to the names of types and be accepted by the context key
  * catalogue: a valid path, a known type, not a built-in (`id`, `type`, or under
- * `tenant`), and no key another provider declares with another type.
+ * `tenant`), no key another provider declares with another type, and no key
+ * under another key the same provider declares.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

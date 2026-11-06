@@ -333,8 +333,8 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
 
     /**
      * The attributes the providers declare enter the catalogue under their
-     * namespace, typed by name or as a type, and two providers may declare one
-     * key alike.
+     * namespace, typed by name or as a type, two providers may declare one key
+     * alike, and one provider may declare a key under another provider's.
      *
      * @return void
      */
@@ -343,13 +343,14 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
         $catalogue = new DeclaredContextKeyCatalogue(['tenant' => ['plan' => 'string']], [
             'resource' => [
                 'App\PostAttributes'    => ['status' => 'string', 'owner.id' => ContextKeyType::STRING],
-                'App\CommentAttributes' => ['status' => 'string'],
+                'App\CommentAttributes' => ['status' => 'string', 'owner' => 'string', 'owner-id' => 'string'],
             ],
             'subject' => ['App\UserAttributes' => ['clearance' => 'number']],
         ]);
 
         self::assertEquals(new ContextKey('resource.status', ContextKeyType::STRING), $catalogue->find('resource.status'));
         self::assertEquals(new ContextKey('resource.owner.id', ContextKeyType::STRING), $catalogue->find('resource.owner.id'));
+        self::assertEquals(new ContextKey('resource.owner', ContextKeyType::STRING), $catalogue->find('resource.owner'));
         self::assertEquals(new ContextKey('subject.clearance', ContextKeyType::NUMBER), $catalogue->find('subject.clearance'));
         self::assertTrue($catalogue->permits('subject.clearance', 'gte'));
         self::assertTrue($catalogue->permits('tenant.plan'));
@@ -382,6 +383,14 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
             ['subject' => ['App\User' => ['level' => 'integer']]],
             'Context key \'subject.level\' has an unknown type \'integer\'; use one of string, number, bool, time, ip, list.',
         ];
+        yield 'a key under another' => [
+            ['resource' => ['App\Post' => ['owner' => 'string', 'owner.id' => 'string']]],
+            'Attribute provider App\Post declares \'resource.owner.id\' under \'resource.owner\', which it also declares; declare the keys under \'resource.owner\' alone.',
+        ];
+        yield 'a key deep under another declared after it' => [
+            ['subject' => ['App\User' => ['team.lead.id' => 'string', 'status' => 'string', 'team' => 'list']]],
+            'Attribute provider App\User declares \'subject.team.lead.id\' under \'subject.team\', which it also declares; declare the keys under \'subject.team\' alone.',
+        ];
         yield 'a malformed path' => [
             ['subject' => ['App\User' => ['level..x' => 'string']]],
             'Context key \'subject.level..x\' must be',
@@ -391,7 +400,8 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
     /**
      * An attribute declaration outside `subject` and `resource`, of a built-in
      * or a key under one, of a key another provider declares with another type,
-     * of an unknown type or with a malformed path is refused.
+     * of a key under another the provider declares, of an unknown type or with
+     * a malformed path is refused.
      *
      * @param  array<string, array<string, array<string, string>>>  $attributes
      * @param  string  $message

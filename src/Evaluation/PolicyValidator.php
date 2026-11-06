@@ -242,10 +242,10 @@ final readonly class PolicyValidator
 
         foreach (\array_filter($subjects, \is_string(...)) as $subject) {
             foreach (ContextInterpolator::references($subject) as $path) {
-                $paths[$path] = true;
+                $paths[$path] = $path;
             }
         }
 
-        return \array_keys($paths);
+        return \array_values($paths);
     }
 }

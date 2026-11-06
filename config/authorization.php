@@ -241,6 +241,8 @@ return [
     | 'string']]`. A policy reading an undeclared key, or testing a key with an
     | operator that does not suit its type, is refused when it is written. A
     | service provider may also register keys on the `ContextKeyCatalogue`.
+    | Keys under `subject` and `resource` are refused here; declare them on an
+    | attribute provider (see attributes below).
     |
     | `sources` lists classes implementing `ContextSource`, resolved from the
     | container, each supplying one namespace of its own, built only when a
@@ -270,13 +272,17 @@ return [
     | Further attributes come from providers registered by morph type:
     | `resources` maps a type to a class implementing
     | `ResourceAttributeProvider`, given the record and the model the check
-    | was given, if any, and `subjects` maps a type to a class implementing
-    | `SubjectAttributeProvider`, given the subject. Each is resolved from the
-    | container, and the attributes it declares (`['status' => 'string']`
-    | becomes `resource.status`) are the only ones it exposes. A class that
-    | does not implement its contract, an unknown type, a built-in and a key
-    | two providers declare with different types are refused at boot. A
-    | provider that throws aborts the check with `AttributeProviderFailed`.
+    | was given, if any (a model implementing `AuthorizableResource` too,
+    | when its reference carries no model), and `subjects` maps a type to a
+    | class implementing `SubjectAttributeProvider`, given the subject. Each
+    | is resolved from the container, and the attributes it declares
+    | (`['status' => 'string']` becomes `resource.status`) are the only ones
+    | it exposes; nothing under a declared key is, and a map, or a list under
+    | a type other than `list`, stays present but undecidable. A class that
+    | does not implement its contract, an unknown type, a built-in, a key
+    | under another the provider declares and a key two providers declare
+    | with different types are refused at boot. A provider that throws aborts
+    | the check with `AttributeProviderFailed`.
     |
     */
 
