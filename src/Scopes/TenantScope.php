@@ -169,12 +169,15 @@ final class TenantScope implements Scope
 
     /**
      * Run the callback with the given tenant and application in place of the
-     * ones resolved for the request or job, then restore them, for a decision
-     * about another application than the request's, such as whether a principal
-     * may use it. The resolution cache's memo is emptied on the way in and out,
-     * since its entries hold under one tenant and application. Run while the
-     * subject is being resolved, nothing is held to restore, so the holder is
-     * dropped afterwards and resolved again on the next query.
+     * ones resolved for the request or job, for a decision about another
+     * application than the request's, such as whether a principal may use it.
+     *
+     * Queries the callback runs see that tenant and application, also when it
+     * runs while the subject is being resolved (a guard admitting a principal
+     * as it signs in, say). Afterwards the request's are resolved again on the
+     * next query, from the resolver and the default guard, and the resolution
+     * cache's memo, whose entries hold under one tenant and application, is
+     * emptied.
      *
      * @template TResult
      *
@@ -186,18 +189,22 @@ final class TenantScope implements Scope
     public static function within(?object $tenant, ?string $application, \Closure $callback): mixed
     {
         $container = Container::getInstance();
-        $previous  = self::whileResolving(static fn (ResolvedTenant $resolved): ResolvedTenant => $resolved);
+        $resolving = $container->bound(self::RESOLVING);
 
         /** @var \SineMacula\Laravel\Authorization\Contracts\SubjectResolver $resolver */
         $resolver = $container->make(SubjectResolver::class);
 
         $container->instance(ResolvedTenant::class, new ResolvedTenant($resolver, $tenant, $application, self::defaultGuard($container)));
-        ResolutionCache::instance()?->tenantChanged();
+        $container->forgetInstance(self::RESOLVING);
 
         try {
             return $callback();
         } finally {
-            $previous === null ? $container->forgetInstance(ResolvedTenant::class) : $container->instance(ResolvedTenant::class, $previous);
+            $container->forgetInstance(ResolvedTenant::class);
+
+            if ($resolving) {
+                $container->instance(self::RESOLVING, true);
+            }
 
             ResolutionCache::instance()?->tenantChanged();
         }

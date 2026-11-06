@@ -350,17 +350,28 @@ final class TenantScopeTest extends TestCase
     }
 
     /**
-     * Run while the subject is being resolved, a query within sees platform
-     * rows only, and the holder is then resolved as usual.
+     * Run while the subject is being resolved, queries within see the tenant
+     * and application given, and the holder is then resolved as usual.
      *
      * @return void
      */
-    public function testWithinWhileResolvingLeavesTheHolderToBeResolved(): void
+    public function testWithinWhileResolvingSeesItsTenantAndApplication(): void
     {
-        $this->seedRows();
+        [, $tenantB] = $this->seedRows();
 
-        $resolver = new class implements SubjectResolver {
-            /** @var array<int, string>|null The role names seen within, while resolving. */
+        $resolver = new class ($tenantB) implements SubjectResolver {
+            /**
+             * Create a resolver that queries within the given tenant.
+             *
+             * @param  object  $tenant
+             */
+            public function __construct(
+
+                /** The tenant the query within runs in. */
+                private readonly object $tenant,
+            ) {}
+
+            /** @var array{0: string|null, 1: array<int, string>}|null The application and role names seen within, while resolving. */
             public ?array $seen = null;
 
             /**
@@ -371,8 +382,12 @@ final class TenantScopeTest extends TestCase
             #[\Override]
             public function resolve(): Subject
             {
-                /** @var array<int, string> $seen */
-                $seen       = TenantScope::within(null, 'admin', static fn (): array => Role::query()->orderBy('name')->pluck('name')->all());
+                /** @var array{0: string|null, 1: array<int, string>} $seen */
+                $seen = TenantScope::within(
+                    $this->tenant,
+                    'admin',
+                    static fn (): array => [TenantScope::currentApplication(), Role::query()->orderBy('name')->pluck('name')->all()],
+                );
                 $this->seen = $seen;
 
                 return $this->forUser(new \stdClass);
@@ -394,7 +409,8 @@ final class TenantScopeTest extends TestCase
         $this->app?->instance(SubjectResolver::class, $resolver);
 
         self::assertSame('web', TenantScope::currentApplication());
-        self::assertSame(['platform-role'], $resolver->seen);
+        self::assertSame(['admin', ['b-role', 'platform-role']], $resolver->seen);
+        self::assertSame(['platform-role'], $this->roleNames());
         self::assertSame('web', TenantScope::currentApplication());
     }
 

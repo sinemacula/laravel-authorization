@@ -26,17 +26,21 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 final class ApplicationAccess
 {
     /**
-     * Determine whether the principal may use the application.
+     * Determine whether the principal may use the application, in the given
+     * tenant: the principal's own, or null for a platform principal.
      *
      * The principal becomes the subject as the bound subject resolver's
-     * `forUser()` makes it, in its tenant, and the check is decided on the
-     * application asked about rather than the request's.
+     * `forUser()` makes it, and the check is decided on the application asked
+     * about and in the tenant given, rather than the request's, since sign-in,
+     * a switch and a refresh ask about a principal that is not yet, or no
+     * longer, the request's.
      *
      * @param  string  $application
      * @param  object  $principal
+     * @param  object|null  $tenant
      * @return bool
      */
-    public function mayUse(string $application, object $principal): bool
+    public function mayUse(string $application, object $principal, ?object $tenant): bool
     {
         $permission = self::permissionFor($application);
 
@@ -46,7 +50,7 @@ final class ApplicationAccess
 
         $manager = self::manager()->forUser($principal);
 
-        return TenantScope::within($manager->currentSubject()?->tenant, $application, static fn (): bool => $manager->can($permission));
+        return TenantScope::within($tenant, $application, static fn (): bool => $manager->can($permission));
     }
 
     /**

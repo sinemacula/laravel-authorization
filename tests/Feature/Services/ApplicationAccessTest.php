@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\ApplicationAccess;
+use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\StubIdentity;
@@ -53,7 +54,7 @@ final class ApplicationAccessTest extends TestCase
      */
     public function testAnApplicationNotNamedIsOpen(): void
     {
-        self::assertTrue(self::access()->mayUse('web', StubIdentity::create(['id' => 'user-1'])));
+        self::assertTrue(self::access()->mayUse('web', StubIdentity::create(['id' => 'user-1']), null));
     }
 
     /**
@@ -70,9 +71,9 @@ final class ApplicationAccessTest extends TestCase
         Role::create(['name' => 'staff'])->givePermission(Permission::create(['name' => 'admin:access']));
         $staff->assignRole('staff');
 
-        self::assertTrue(self::access()->mayUse('admin', $staff));
-        self::assertFalse(self::access()->mayUse('admin', $customer));
-        self::assertFalse(self::access()->mayUse('mobile', $staff));
+        self::assertTrue(self::access()->mayUse('admin', $staff, null));
+        self::assertFalse(self::access()->mayUse('admin', $customer, null));
+        self::assertFalse(self::access()->mayUse('mobile', $staff, null));
     }
 
     /**
@@ -94,32 +95,97 @@ final class ApplicationAccessTest extends TestCase
         $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($user, null, 'web'));
         $this->app?->forgetInstance(ResolvedTenant::class);
 
-        self::assertTrue(self::access()->mayUse('admin', $user));
-        self::assertFalse(self::access()->mayUse('mobile', $user));
+        self::assertTrue(self::access()->mayUse('admin', $user, null));
+        self::assertFalse(self::access()->mayUse('mobile', $user, null));
         self::assertSame('web', TenantScope::currentApplication());
     }
 
     /**
-     * The check is decided in the principal's tenant as the subject resolver
-     * gives it, so a grant in that tenant counts and one in another does not.
+     * The check is decided in the tenant given, the principal's own, rather
+     * than the request's, so a grant there counts and one in the request's
+     * tenant does not.
      *
      * @return void
      */
-    public function testTheCheckIsDecidedInThePrincipalsTenant(): void
+    public function testTheCheckIsDecidedInTheTenantGiven(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
-        $tenant = self::createTenant('tenant-a');
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $own     = self::createTenant('tenant-a');
+        $request = self::createTenant('tenant-b');
 
         Permission::create(['name' => 'admin:access']);
-        $user->givePermission('admin:access', tenant: $tenant);
+        Permission::create(['name' => 'mobile:access']);
+        $user->givePermission('admin:access', tenant: $own);
+        $user->givePermission('mobile:access', tenant: $request);
 
-        $this->actAsTenant($tenant);
+        $this->actAsTenant($request);
 
-        self::assertTrue(self::access()->mayUse('admin', $user));
+        self::assertTrue(self::access()->mayUse('admin', $user, $own));
+        self::assertFalse(self::access()->mayUse('mobile', $user, $own));
+        self::assertFalse(self::access()->mayUse('admin', $user, null));
+    }
 
-        $this->actAsTenant(self::createTenant('tenant-b'));
+    /**
+     * Asked while the subject is being resolved, as a guard admitting a
+     * principal at sign-in asks, the check still sees the application.
+     *
+     * @return void
+     */
+    public function testTheCheckHoldsWhileTheSubjectIsBeingResolved(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
 
-        self::assertFalse(self::access()->mayUse('admin', $user));
+        Permission::create(['name' => 'admin:access']);
+        $user->givePermission('admin:access', application: 'admin');
+
+        $resolver = new class ($user) implements SubjectResolver {
+            /** @var bool|null Whether the principal was admitted while resolving. */
+            public ?bool $admitted = null;
+
+            /**
+             * Create a resolver that admits the principal as it resolves.
+             *
+             * @param  \Tests\Feature\Stubs\StubIdentity  $user
+             */
+            public function __construct(
+
+                /** The principal admitted. */
+                private readonly StubIdentity $user,
+            ) {}
+
+            /**
+             * Admit the principal to the admin application, then resolve it.
+             *
+             * @return \SineMacula\Laravel\Authorization\Subject
+             */
+            #[\Override]
+            public function resolve(): Subject
+            {
+                $this->admitted = app(ApplicationAccess::class)->mayUse('admin', $this->user, null);
+
+                return $this->forUser($this->user);
+            }
+
+            /**
+             * Return the user as the subject, on the web application.
+             *
+             * @param  object  $user
+             * @return \SineMacula\Laravel\Authorization\Subject
+             */
+            #[\Override]
+            public function forUser(object $user): Subject
+            {
+                return new Subject($user, $user, null, 'web');
+            }
+        };
+
+        $this->app?->instance(SubjectResolver::class, $resolver);
+        $this->app?->forgetInstance(ResolvedTenant::class);
+
+        Role::query()->get();
+
+        self::assertTrue($resolver->admitted);
+        self::assertSame('web', TenantScope::currentApplication());
     }
 
     /**
