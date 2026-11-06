@@ -80,6 +80,18 @@ final class TenantScope implements Scope
     }
 
     /**
+     * Return the application the subject is on, which limits the grants that
+     * count to those for every application and those for it, or null for none,
+     * when only grants for every application count.
+     *
+     * @return string|null
+     */
+    public static function currentApplication(): ?string
+    {
+        return self::whileResolving(static fn (ResolvedTenant $resolved): ?string => $resolved->application);
+    }
+
+    /**
      * Return the tenant the scope limits rows to and its ancestors, through the
      * bound tenant tree, or the platform's empty chain.
      *

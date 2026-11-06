@@ -109,9 +109,9 @@ app(GrantService::class)->grantRole($user, 'editor', actor: $admin);
 - **A role with children is never deleted** (D18), so no child's holders lose what a deleted role passed down; the
   children are moved or deleted first, each reported as its own update or delete.
 - **Grants carry their scope.** Every grant event reports the tenant the grant holds in, or none for platform-wide,
-  and whether it also holds in the tenants below (`includeSubtree`, always true platform-wide); the application is
-  always every application until applications are read. A grant re-made with another reach dispatches the granted
-  event again, carrying the new reach.
+  whether it also holds in the tenants below (`includeSubtree`, always true platform-wide), and its application, or
+  none for every application. A grant re-made with another reach dispatches the granted event again, carrying the new
+  reach.
 
 ## Implementation Anchors
 

@@ -256,6 +256,21 @@ final class TenantScopeTest extends TestCase
     }
 
     /**
+     * The current application is the one the resolved subject is on, or none.
+     *
+     * @return void
+     */
+    public function testCurrentApplicationIsTheSubjectsApplication(): void
+    {
+        self::assertNull(TenantScope::currentApplication());
+
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver(new \stdClass, null, 'admin'));
+        (new TenantScope)->flushResolvedTenant();
+
+        self::assertSame('admin', TenantScope::currentApplication());
+    }
+
+    /**
      * Flushing the resolved tenant empties the resolution cache's memo, whose
      * entries were resolved under it.
      *

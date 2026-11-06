@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Concerns;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
+use SineMacula\Laravel\Authorization\Database\GrantApplications;
 use SineMacula\Laravel\Authorization\Database\GrantRelation;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
@@ -67,6 +68,7 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
             ->withTimestamps()
             ->where(static function (Builder $query) use ($table): void {
                 TenantScope::currentChain()->grants($query, $table);
+                GrantApplications::only($query, $table, TenantScope::currentApplication());
             });
 
         LiveGrants::only($relation->getQuery(), $table);

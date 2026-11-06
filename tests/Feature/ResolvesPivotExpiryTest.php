@@ -8,14 +8,17 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Concerns\ResolvesPivotExpiry;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
@@ -106,6 +109,34 @@ final class ResolvesPivotExpiryTest extends TestCase
 
         $this->actAsTenant($org);
         self::assertEqualsCanonicalizing(['org-wide', 'org-only'], $user->getRoles());
+    }
+
+    /**
+     * A grant made for one application counts only on that application, and a
+     * grant for every application on all of them and with none (AUTHZ-5.6).
+     *
+     * @return void
+     */
+    public function testGrantsForAnApplicationCountOnlyOnIt(): void
+    {
+        $user = StubIdentity::query()->create(['id' => 'user-1']);
+
+        Role::query()->create(['name' => 'staff']);
+        Role::query()->create(['name' => 'member']);
+
+        $user->assignRole('staff', application: 'admin');
+        $user->assignRole('member');
+
+        $on = function (?string $application) use ($user): array {
+            $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($user, null, $application));
+            $this->app?->forgetInstance(ResolvedTenant::class);
+
+            return self::reread($user)->getRoles();
+        };
+
+        self::assertEqualsCanonicalizing(['staff', 'member'], $on('admin'));
+        self::assertSame(['member'], $on('mobile'));
+        self::assertSame(['member'], $on(null));
     }
 
     /**

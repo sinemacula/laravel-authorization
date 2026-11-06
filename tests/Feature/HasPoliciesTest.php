@@ -59,6 +59,34 @@ final class HasPoliciesTest extends TestCase
     }
 
     /**
+     * The trait passes an application on to the grant, the revocation and the
+     * sync, each staying in it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPolicyForAnApplication(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        $policy = Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]);
+
+        $user->attachPolicy($policy, application: 'admin');
+        $user->attachPolicy($policy, application: 'mobile');
+
+        self::assertEqualsCanonicalizing(['admin', 'mobile'], DB::table('authorizable_policies')->pluck('application')->all());
+
+        $user->detachPolicy($policy, application: 'admin');
+
+        self::assertSame(['mobile'], DB::table('authorizable_policies')->pluck('application')->all());
+
+        $user->syncPolicies([], application: 'mobile');
+
+        self::assertSame([], DB::table('authorizable_policies')->pluck('application')->all());
+    }
+
+    /**
      * A grant in a tenant through the trait can be limited to that tenant, and
      * reaches the tenants below it by default.
      *

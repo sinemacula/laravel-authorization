@@ -35,12 +35,13 @@ final class ResolvedTenantTest extends TestCase
     {
         $tenant   = new \stdClass;
         $resolver = $this->createMock(SubjectResolver::class);
-        $resolver->expects(self::once())->method('resolve')->willReturn(new Subject(new \stdClass, tenant: $tenant));
+        $resolver->expects(self::once())->method('resolve')->willReturn(new Subject(new \stdClass, tenant: $tenant, application: 'admin'));
 
         $resolved = ResolvedTenant::from($resolver);
 
         self::assertSame($resolver, $resolved->resolver);
         self::assertSame($tenant, $resolved->tenant);
+        self::assertSame('admin', $resolved->application);
     }
 
     /**
@@ -73,6 +74,7 @@ final class ResolvedTenantTest extends TestCase
 
         try {
             self::assertNull(ResolvedTenant::from($resolver)->tenant);
+            self::assertNull(ResolvedTenant::from($resolver)->application);
         } finally {
             \restore_error_handler();
         }

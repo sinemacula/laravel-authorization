@@ -83,9 +83,9 @@ Each grant has a scope: both tenant columns null grant platform-wide, a tenant p
 `include_subtree` (true by default) says whether the grant reaches the tenant's subtree. A null application grants in
 every application. The grant service, which the trait methods (`assignRole`, `givePermission`, `attachPolicy`) and the
 Spatie import write through, writes each grant in the tenant its target's owner fixes or the call names, else
-platform-wide, and a check reads the grants made platform-wide and in the current tenant. The subtree and the
-application are not read yet (the tenant tree and applications are the next steps), so every grant is written for
-every application and reaches only its own tenant.
+platform-wide, and for the application the call names, else every application. A check reads the grants made
+platform-wide, in the current tenant and in its ancestors (those that reach below), for every application or for the
+check's application.
 
 ## Pivot Class Hierarchy
 

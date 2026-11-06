@@ -191,6 +191,35 @@ final class GrantTableTest extends TestCase
     }
 
     /**
+     * A grant for an application is written for it and is a grant apart from
+     * the one for every application; the grants of every scope report it.
+     *
+     * @return void
+     */
+    public function testAGrantForAnApplicationIsAGrantApart(): void
+    {
+        $role   = self::role();
+        $admin  = new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_identity', 'user-1', null, null, true, 'admin');
+        $every  = self::table();
+        $mobile = new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_identity', 'user-1', null, null, true, 'mobile');
+
+        self::assertSame(GrantOutcome::GRANTED, $admin->grant($role->id, null)->outcome);
+        self::assertSame(GrantOutcome::GRANTED, $every->grant($role->id, null)->outcome);
+        self::assertSame(GrantOutcome::UNCHANGED, $admin->grant($role->id, null)->outcome);
+        self::assertSame([], $mobile->held());
+        self::assertSame([$role->id], $admin->held());
+
+        $admin->revoke([$role->id]);
+
+        self::assertEquals([[$role->id, new GrantScope]], self::table()->grantsInEveryScope());
+        self::assertEqualsCanonicalizing([null], DB::table('authorizable_roles')->pluck('application')->all());
+
+        $mobile->grant($role->id, null);
+
+        self::assertEquals([[$role->id, new GrantScope], [$role->id, new GrantScope(null, 'mobile')]], self::sortedGrants());
+    }
+
+    /**
      * Granting what is held with the same expiry changes nothing, the same
      * instant in another zone included.
      *
@@ -806,5 +835,20 @@ final class GrantTableTest extends TestCase
             ->get(['role_id', 'authorizable_type', 'authorizable_id', 'tenant_type', 'tenant_id', 'application', 'expires_at', 'created_at', 'updated_at'])
             ->map(static fn (object $row): array => (array) $row)
             ->all();
+    }
+
+    /**
+     * Return the grants of every scope the stub identity holds, those for every
+     * application first.
+     *
+     * @return list<array{0: string, 1: \SineMacula\Laravel\Authorization\Support\GrantScope}>
+     */
+    private static function sortedGrants(): array
+    {
+        $grants = self::table()->grantsInEveryScope();
+
+        \usort($grants, static fn (array $left, array $right): int => (string) $left[1]->application <=> (string) $right[1]->application);
+
+        return $grants;
     }
 }

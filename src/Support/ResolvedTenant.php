@@ -21,8 +21,10 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  * the scope builds a new holder, so the next query sees a rebound resolver.
  *
  * The tenant is null when there is no subject or the subject has no tenant, and
- * only platform-wide rows are visible then. The tenant's ancestors, read
- * through the bound tenant tree, are held with it once read.
+ * only platform-wide rows are visible then. The subject's application is held
+ * with it: grants made for one application count only on that application, and
+ * with none, only grants for every application count. The tenant's ancestors,
+ * read through the bound tenant tree, are held with it once read.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,6 +39,7 @@ final class ResolvedTenant
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\SubjectResolver  $resolver
      * @param  object|null  $tenant
+     * @param  string|null  $application
      */
     public function __construct(
 
@@ -45,17 +48,22 @@ final class ResolvedTenant
 
         /** The resolved tenant, or null when no tenant is active. */
         public readonly ?object $tenant,
+
+        /** The application the subject is on, or null for none. */
+        public readonly ?string $application = null,
     ) {}
 
     /**
-     * Resolve the subject's tenant through the given resolver.
+     * Resolve the subject's tenant and application through the given resolver.
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\SubjectResolver  $resolver
      * @return self
      */
     public static function from(SubjectResolver $resolver): self
     {
-        return new self($resolver, $resolver->resolve()?->tenant);
+        $subject = $resolver->resolve();
+
+        return new self($resolver, $subject?->tenant, $subject?->application);
     }
 
     /**

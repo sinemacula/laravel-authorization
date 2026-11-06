@@ -52,7 +52,7 @@ events themselves are described in [Events](events.md).
    visible in the tenant named, else the current tenant. A grant, a re-arm, a read of what is held and a revocation
    each stay in their scope, so a role held in two tenants is two grants; a sync replaces the grants of one scope,
    the tenant named, else the tenant that owns every target, else the platform. Only a grantee's deletion revokes in
-   every scope. Every grant is for every application until applications are read (BL-25).
+   every scope. A grant is for the application the call names, else every application (D24).
 
 6. **Reported once it commits, and nothing for a no-op.** Each call is one operation: every event it dispatches
    carries the same operation id and the caller's actor, and is dispatched once the write commits on the package's

@@ -86,13 +86,19 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  bool  $includeSubtree
+     * @param  string|null  $application
      * @return static
      *
      * @throws \Throwable
      */
-    public function givePermission(Permission|string $permission, ?\DateTimeInterface $expiresAt = null, Model|Reference|null $tenant = null, bool $includeSubtree = true): static
-    {
-        self::authorizationGrants()->grantPermission($this, $permission, $expiresAt, null, $tenant, $includeSubtree);
+    public function givePermission(
+        Permission|string $permission,
+        ?\DateTimeInterface $expiresAt = null,
+        Model|Reference|null $tenant = null,
+        bool $includeSubtree = true,
+        ?string $application = null,
+    ): static {
+        self::authorizationGrants()->grantPermission($this, $permission, $expiresAt, null, $tenant, $includeSubtree, $application);
 
         return $this;
     }
@@ -110,13 +116,14 @@ trait HasPermissions // @phpstan-ignore trait.unused
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  string|null  $application
      * @return static
      *
      * @throws \Throwable
      */
-    public function revokePermission(Permission|string $permission, Model|Reference|null $tenant = null): static
+    public function revokePermission(Permission|string $permission, Model|Reference|null $tenant = null, ?string $application = null): static
     {
-        self::authorizationGrants()->revokePermission($this, $permission, null, $tenant);
+        self::authorizationGrants()->revokePermission($this, $permission, null, $tenant, $application);
 
         return $this;
     }
@@ -141,13 +148,14 @@ trait HasPermissions // @phpstan-ignore trait.unused
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Permission|string>  $permissions
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  string|null  $application
      * @return static
      *
      * @throws \Throwable
      */
-    public function syncPermissions(array $permissions, Model|Reference|null $tenant = null): static
+    public function syncPermissions(array $permissions, Model|Reference|null $tenant = null, ?string $application = null): static
     {
-        self::authorizationGrants()->syncPermissions($this, $permissions, null, null, $tenant);
+        self::authorizationGrants()->syncPermissions($this, $permissions, tenant: $tenant, application: $application);
 
         return $this;
     }
