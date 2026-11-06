@@ -15,8 +15,8 @@ throws when it does not. It returns a `Decision`:
 - `effect` -- `DecisionEffect::ALLOW` or `DecisionEffect::DENY`; `isAllowed()` reads it.
 - `reason` -- why it denies, a `DecisionReason` (AUTHZ-7.10); null when it allows.
 - `stage` -- the `DecisionStage` that decided it.
-- `statements` -- the statements that decided it, each a `StatementReference` (policy name and position); none for a
-  permission held or a denial no statement made.
+- `statements` -- the statements that decided it, each a `StatementReference` (the policy's name, its stored key and
+  the statement's position, shown as `name[key]#position`); none for a permission held or a denial no statement made.
 - `trace` -- every step taken, in order, each a `TraceEntry`: its stage, its `TraceOutcome`, the statement it
   assessed (none for the permission step), and the condition keys it tested with whether each held.
 
@@ -41,10 +41,10 @@ log, store and put on an event.
    Guardrails, permission boundaries and session policies take their places between the deny and allow stages as they
    arrive (BL-48 to BL-50).
 
-2. **The decision is deterministic (AUTHZ-7.9).** Within each stage, policies are assessed in order of name and each
-   statement in order of position, and every statement of the stage is assessed whatever is found first, so the
-   decision, the statements that decided it and the trace are the same whatever order the policies were read in. A
-   stage that decides ends the decision: once a deny decided, no allow statement is assessed (N4).
+2. **The decision is deterministic (AUTHZ-7.9).** Within each stage, policies are assessed in order of name, then stored
+   key, then document, and each statement in order of position, and every statement of the stage is assessed whatever is
+   found first, so the decision, the statements that decided it and the trace are the same whatever order the policies
+   were read in. A stage that decides ends the decision: once a deny decided, no allow statement is assessed (N4).
 
 3. **RBAC is additive / allow-only.** Direct permission grants and role-inherited permissions are unioned on read.
    There is no RBAC-layer deny: every permission a subject holds contributes an allow and nothing else, and only when no
