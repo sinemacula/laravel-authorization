@@ -11,13 +11,16 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
+use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyAttached;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyDetached;
+use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Identity\RoleExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
@@ -365,6 +368,35 @@ final class GrantTargetTest extends TestCase
             \array_values((array) $changedEvent),
         );
         self::assertSame('UTC', $changedEvent->previousExpiresAt?->getTimezone()->getName()); // @phpstan-ignore property.notFound
+    }
+
+    /**
+     * Each kind builds its own expired event, carrying the grantee, the target,
+     * the scope and the expiry in UTC.
+     *
+     * @return void
+     */
+    public function testBuildsTheExpiredEventOfEachKind(): void
+    {
+        $operation = Operation::begin();
+        $grantee   = new Reference('stub_identity', 'user-1');
+        $scope     = GrantScope::platform();
+        $expiredAt = Carbon::parse('2026-07-01 14:00:00', 'Europe/Paris');
+        $targets   = [
+            [GrantTarget::ROLE, Role::query()->create(['name' => 'editor']), RoleExpired::class],
+            [GrantTarget::PERMISSION, Permission::query()->create(['name' => 'posts:edit']), PermissionExpired::class],
+            [GrantTarget::POLICY, Policy::query()->create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]), PolicyExpired::class],
+        ];
+
+        foreach ($targets as [$kind, $model, $class]) {
+            $event = $kind->expiredEvent($operation, $grantee, $model, $scope, $expiredAt);
+
+            self::assertInstanceOf($class, $event);
+            self::assertEquals(
+                [$operation, $grantee, Reference::of($model), $model->getAttribute('name'), $scope, new \DateTimeImmutable('2026-07-01 12:00:00', new \DateTimeZone('UTC'))],
+                \array_values((array) $event),
+            );
+        }
     }
 
     /**

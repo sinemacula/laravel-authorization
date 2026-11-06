@@ -53,7 +53,7 @@ final class EventSnapshotsTest extends TestCase
         self::assertContains('SystemOverrideUsed', $names);
         self::assertContains('Identity/RoleAssigned', $names);
         self::assertContains('Role/PermissionGranted', $names);
-        self::assertCount(23, $names);
+        self::assertCount(26, $names);
     }
 
     /**

@@ -13,6 +13,9 @@ named and the operation they belong to, and are dispatched only once the write c
 - **Grant events.** Under `Identity\`: `RoleAssigned`, `RoleRevoked`, `RoleExpiryChanged`, `PermissionGranted`,
   `PermissionRevoked`, `PermissionExpiryChanged`, `PolicyAttached`, `PolicyDetached` and `PolicyExpiryChanged`. Each
   also implements `Contracts\IdentityEvent` and names its `grantee`.
+- **Expiry events.** Under `Identity\`: `RoleExpired`, `PermissionExpired` and `PolicyExpired`, dispatched when
+  `authorization:prune` removes an expired grant, with its expiry and an operation that names no actor (the sweep is
+  system work).
 - **`SystemOverrideUsed`.** A change to a system role, permission or policy that `forceSystem()` unlocked.
 
 ## Invariants
