@@ -15,18 +15,17 @@ use Illuminate\Support\Facades\Facade;
  *
  * @phpcs:disable Generic.Files.LineLength.TooLong
  *
- * @method static bool can(string $action, string|null $resource = null, array<string, mixed> $context = [])
- * @method static void authorize(string $action, string|null $resource = null, array<string, mixed> $context = [])
- * @method static \SineMacula\Laravel\Authorization\Evaluation\Decision check(string $action, string|null $resource = null, array<string, mixed> $context = [])
+ * @method static bool can(string $action, mixed $resource = null, array<string, mixed> $context = [])
+ * @method static void authorize(string $action, mixed $resource = null, array<string, mixed> $context = [])
+ * @method static \SineMacula\Laravel\Authorization\Evaluation\Decision check(string $action, mixed $resource = null, array<string, mixed> $context = [])
  * @method static \SineMacula\Laravel\Authorization\AuthorizationManager for(object $subject)
  * @method static \SineMacula\Laravel\Authorization\AuthorizationManager forUser(object $user)
  * @method static \SineMacula\Laravel\Authorization\AuthorizationManager withPolicies(array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy> $policies)
  * @method static \SineMacula\Laravel\Authorization\Evaluation\Decision|null lastDecision()
  * @method static void forgetLastDecision()
- * @method static string explain(string $action, string|null $resource = null, array<string, mixed> $context = [])
+ * @method static string explain(string $action, mixed $resource = null, array<string, mixed> $context = [])
  * @method static array<string, bool> effectivePermissions(array<string, mixed> $context = [])
  * @method static \SineMacula\Laravel\Authorization\Subject|null currentSubject()
- * @method static \SineMacula\Laravel\Authorization\Evaluation\Decision refuseUnidentifiedResource(string $action, array<string, mixed> $context = [])
  * @method static void treeChanged(\Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant|\SineMacula\Laravel\Authorization\Support\Reference $tenant)
  *
  * @phpcs:enable Generic.Files.LineLength.TooLong

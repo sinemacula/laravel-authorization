@@ -23,6 +23,7 @@ use SineMacula\Laravel\Authorization\Console\SyncPermissionsCommand;
 use SineMacula\Laravel\Authorization\Console\WhyCanCommand;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
+use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
@@ -35,6 +36,7 @@ use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
+use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\ApplicationAccess;
 use SineMacula\Laravel\Authorization\Services\GrantService;
@@ -101,6 +103,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
         $this->registerSubjectResolver();
         $this->registerTenantTree();
+        $this->registerResourceTenantResolver();
         $this->registerResolvedTenant();
         $this->registerPolicyStore();
         $this->registerResolutionCache();
@@ -201,6 +204,20 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
         $this->forgetResolutionsOnRebinding(TenantTree::class);
         $this->bindScopedDefault(TenantTree::class, $class);
+    }
+
+    /**
+     * Bind the configured resource tenant resolver as the default, scoped to
+     * the request or job like the subject resolver.
+     *
+     * @return void
+     */
+    protected function registerResourceTenantResolver(): void
+    {
+        /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver> $class */
+        $class = $this->app['config']->get('authorization.resource_tenant_resolver', NoResourceTenant::class);
+
+        $this->bindScopedDefault(ResourceTenantResolver::class, $class);
     }
 
     /**

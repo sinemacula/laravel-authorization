@@ -37,6 +37,9 @@ enum DecisionReason: string
     /** The resource the check names cannot be identified. */
     case RESOURCE_UNRESOLVED = 'resource_unresolved';
 
+    /** The resource's tenant is outside the decision's tenant and its subtree, and no platform-wide grant covers it. */
+    case TENANT_SCOPE = 'tenant_scope';
+
     /**
      * Return a short description of the reason, for explanations.
      *
@@ -52,6 +55,7 @@ enum DecisionReason: string
             self::SUBJECT_INACTIVE    => 'the subject or its identity is inactive',
             self::SUBJECT_UNRESOLVED  => 'there is no subject',
             self::RESOURCE_UNRESOLVED => 'the resource cannot be identified',
+            self::TENANT_SCOPE        => 'the resource belongs to a tenant outside the scope',
         };
     }
 }

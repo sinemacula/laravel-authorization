@@ -22,17 +22,18 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 final class DecisionStageTest extends TestCase
 {
     /**
-     * The enum defines exactly the five stages, in the order a decision runs
-     * them: subject, resource, deny, allow, implicit.
+     * The enum defines exactly the six stages, in the order a decision runs
+     * them: subject, resource, tenant, deny, allow, implicit.
      *
      * @return void
      */
-    public function testExactlyFiveCasesInRunOrder(): void
+    public function testExactlySixCasesInRunOrder(): void
     {
         self::assertSame(
             [
                 DecisionStage::SUBJECT,
                 DecisionStage::RESOURCE,
+                DecisionStage::TENANT,
                 DecisionStage::DENY,
                 DecisionStage::ALLOW,
                 DecisionStage::IMPLICIT,
@@ -50,6 +51,7 @@ final class DecisionStageTest extends TestCase
     {
         self::assertSame('subject', DecisionStage::SUBJECT->value);
         self::assertSame('resource', DecisionStage::RESOURCE->value);
+        self::assertSame('tenant', DecisionStage::TENANT->value);
         self::assertSame('deny', DecisionStage::DENY->value);
         self::assertSame('allow', DecisionStage::ALLOW->value);
         self::assertSame('implicit', DecisionStage::IMPLICIT->value);
@@ -65,6 +67,7 @@ final class DecisionStageTest extends TestCase
     {
         self::assertSame(DecisionStage::SUBJECT, DecisionStage::tryFrom('subject'));
         self::assertSame(DecisionStage::RESOURCE, DecisionStage::tryFrom('resource'));
+        self::assertSame(DecisionStage::TENANT, DecisionStage::tryFrom('tenant'));
         self::assertSame(DecisionStage::DENY, DecisionStage::tryFrom('deny'));
         self::assertSame(DecisionStage::ALLOW, DecisionStage::tryFrom('allow'));
         self::assertSame(DecisionStage::IMPLICIT, DecisionStage::tryFrom('implicit'));

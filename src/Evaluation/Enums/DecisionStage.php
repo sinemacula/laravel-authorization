@@ -22,6 +22,9 @@ enum DecisionStage: string
     /** The resource could not be identified. */
     case RESOURCE = 'resource';
 
+    /** The resource's tenant is outside the decision's scope. */
+    case TENANT = 'tenant';
+
     /** An explicit deny, or a policy that cannot be evaluated, in any applicable policy. */
     case DENY = 'deny';
 

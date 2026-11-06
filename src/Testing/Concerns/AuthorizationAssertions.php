@@ -11,6 +11,8 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 
 /**
  * PHPUnit assertion trait for consumer test suites.
@@ -39,11 +41,11 @@ trait AuthorizationAssertions
      *
      * @param  object  $principal
      * @param  string  $action
-     * @param  string|null  $resource
+     * @param  mixed  $resource
      * @param  array<string, mixed>  $context
      * @return void
      */
-    public function assertCan(object $principal, string $action, ?string $resource = null, array $context = []): void
+    public function assertCan(object $principal, string $action, mixed $resource = null, array $context = []): void
     {
         $decision = Authorization::for($principal)->check($action, $resource, $context);
 
@@ -52,7 +54,7 @@ trait AuthorizationAssertions
             \sprintf(
                 "Failed asserting that the principal can perform '%s'%s.\nDecision:\n%s",
                 $action,
-                $resource !== null ? " on resource '{$resource}'" : '',
+                self::describeResource($resource),
                 $decision->explain(),
             ),
         );
@@ -66,11 +68,11 @@ trait AuthorizationAssertions
      *
      * @param  object  $principal
      * @param  string  $action
-     * @param  string|null  $resource
+     * @param  mixed  $resource
      * @param  array<string, mixed>  $context
      * @return void
      */
-    public function assertCannot(object $principal, string $action, ?string $resource = null, array $context = []): void
+    public function assertCannot(object $principal, string $action, mixed $resource = null, array $context = []): void
     {
         $decision = Authorization::for($principal)->check($action, $resource, $context);
 
@@ -79,7 +81,7 @@ trait AuthorizationAssertions
             \sprintf(
                 "Failed asserting that the principal cannot perform '%s'%s.\nDecision:\n%s",
                 $action,
-                $resource !== null ? " on resource '{$resource}'" : '',
+                self::describeResource($resource),
                 $decision->explain(),
             ),
         );
@@ -234,5 +236,19 @@ trait AuthorizationAssertions
         }
 
         return Container::getInstance();
+    }
+
+    /**
+     * Describe the resource a check named, for an assertion's message: its
+     * identifier, or nothing for no resource or one that cannot be identified.
+     *
+     * @param  mixed  $resource
+     * @return string
+     */
+    private static function describeResource(mixed $resource): string
+    {
+        $reference = ResourceReferences::of($resource);
+
+        return $reference instanceof ResourceReference ? " on resource '{$reference->identifier}'" : '';
     }
 }

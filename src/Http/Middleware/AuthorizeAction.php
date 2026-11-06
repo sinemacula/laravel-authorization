@@ -4,14 +4,9 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Http\Middleware;
 
-use Illuminate\Contracts\Events\Dispatcher;
-use Illuminate\Contracts\Translation\Translator;
 use Illuminate\Http\Request;
-use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
-use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
-use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
-use SineMacula\Laravel\Authorization\Subject;
-use SineMacula\Laravel\Authorization\Support\ResourceIdentifier;
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 
 /**
  * Route middleware that admits a request when the full decision allows an
@@ -19,12 +14,13 @@ use SineMacula\Laravel\Authorization\Support\ResourceIdentifier;
  *
  * Wired under the `authorize` alias by the service provider, as
  * `authorize:posts:update,post`. The parameter's bound model, or its raw value
- * when nothing binds it, is the resource, converted as the Gate converts its
- * argument: a resource names itself, a model is `morphClass:key` and a string
- * is used as given. A value that cannot be identified, such as an unsaved
- * model, or a parameter the route does not carry, denies. Without a parameter
- * (`authorize:reports:export`) the check is about no resource. Several actions
- * may be listed with `|`; any one allowed admits the request.
+ * when nothing binds it, is the resource, referenced as every check references
+ * it (`ResourceReferences`): a resource names itself, a model is `type:id` in
+ * its tenant, and a string is used as given. A value that cannot be identified,
+ * such as an unsaved model, or a parameter the route does not carry, denies as
+ * `resource_unresolved`. Without a parameter (`authorize:reports:export`) the
+ * check is about no resource. Several actions may be listed with `|`; any one
+ * allowed admits the request.
  *
  * The service provider places this middleware right after Laravel's
  * `SubstituteBindings` in the middleware priority, so it decides on the bound
@@ -35,23 +31,6 @@ use SineMacula\Laravel\Authorization\Support\ResourceIdentifier;
  */
 final class AuthorizeAction extends AbstractAuthorizationMiddleware
 {
-    /**
-     * Create a new middleware instance.
-     *
-     * @param  \Illuminate\Contracts\Translation\Translator|null  $translator
-     * @param  \Illuminate\Contracts\Events\Dispatcher|null  $events
-     */
-    public function __construct(
-
-        // Translator that words a denial's message; null keeps English.
-        ?Translator $translator = null,
-
-        /** Event dispatcher that reports a refusal; null disables. */
-        private readonly ?Dispatcher $events = null,
-    ) {
-        parent::__construct($translator);
-    }
-
     /**
      * Admit the request when any listed action is allowed on the parameter's
      * resource.
@@ -67,45 +46,15 @@ final class AuthorizeAction extends AbstractAuthorizationMiddleware
     #[\Override]
     protected function authorize(Request $request, array $names, ?string $option): void
     {
-        $resource = $option === null ? null : self::resourceOf($request, $option);
-        $subject  = $this->subject();
+        $this->subject();
 
-        if ($resource === false) {
-            throw $this->refusal($subject, $names[\array_key_last($names)]);
-        }
+        // A parameter the route does not carry is a resource that cannot be
+        // identified, never a check about no resource. A parameter no binding
+        // turned into a model is the caller's own text: an opaque identifier,
+        // never read as a class name. The resource is resolved once for every
+        // listed action.
+        $value = $option === null ? null : $request->route($option) ?? false;
 
-        $this->authorizeAny($names, $resource);
-    }
-
-    /**
-     * Refuse the action on a resource that cannot be identified, as a denied
-     * list is refused: the implicit deny is recorded for the last action and
-     * fires the `AuthorizationFailed` event once.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
-     * @param  string  $action
-     * @return \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
-     */
-    private function refusal(Subject $subject, string $action): AuthorizationException
-    {
-        $decision = self::manager()->refuseUnidentifiedResource($action);
-
-        $this->events?->dispatch(new AuthorizationFailed($subject->subject, $action, null, [], $decision));
-
-        return $this->denial(DecisionReason::RESOURCE_UNRESOLVED);
-    }
-
-    /**
-     * Return the resource identifier of the route parameter's value, or false
-     * when the route carries no such parameter or its value cannot be
-     * identified.
-     *
-     * @param  \Illuminate\Http\Request  $request
-     * @param  string  $parameter
-     * @return false|string
-     */
-    private static function resourceOf(Request $request, string $parameter): false|string
-    {
-        return ResourceIdentifier::of($request->route($parameter)) ?? false;
+        $this->authorizeAny($names, \is_string($value) ? new ResourceReference($value) : ResourceReferences::of($value));
     }
 }

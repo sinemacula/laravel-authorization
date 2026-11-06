@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
 use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
 use SineMacula\Laravel\Authorization\Concerns\HasRoles;
+use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
@@ -44,9 +45,11 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
+use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSecondIdentity;
@@ -701,14 +704,14 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * `refuseUnidentifiedResource()` denies the resolved principal as
-     * `resource_unresolved` at the resource stage without consulting RBAC,
-     * records the denial as the last decision and dispatches exactly one
-     * decision event without a resource.
+     * `check()` on an unsaved model, which cannot be identified, denies the
+     * resolved principal as `resource_unresolved` at the resource stage without
+     * consulting RBAC, records the denial as the last decision and dispatches
+     * exactly one decision event without a resource.
      *
      * @return void
      */
-    public function testRefuseUnidentifiedResourceDeniesTheResolvedPrincipal(): void
+    public function testCheckDeniesAnUnidentifiableResourceForTheResolvedPrincipal(): void
     {
         Permission::create(['id' => '4c5d6e7f-8a9b-4c0d-9e1f-2a3b4c5d6e10', 'name' => 'posts:create', 'guard' => 'web']);
 
@@ -719,7 +722,7 @@ final class AuthorizationManagerTest extends TestCase
 
         Event::fake();
 
-        $decision = Authorization::refuseUnidentifiedResource('posts:create', ['tenant' => 'org-1']);
+        $decision = Authorization::check('posts:create', new StubIdentity, ['tenant' => 'org-1']);
 
         self::assertFalse($decision->isAllowed());
         self::assertSame(DecisionReason::RESOURCE_UNRESOLVED, $decision->reason);
@@ -732,14 +735,14 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * `refuseUnidentifiedResource()` on a `for()` scope denies that principal
-     * as `resource_unresolved` at the resource stage without consulting RBAC,
-     * records the denial as the last decision and dispatches exactly one
-     * decision event without a resource.
+     * `check()` on a `for()` scope with a number, which cannot be identified,
+     * denies that principal as `resource_unresolved` at the resource stage
+     * without consulting RBAC, records the denial as the last decision and
+     * dispatches exactly one decision event without a resource.
      *
      * @return void
      */
-    public function testRefuseUnidentifiedResourceDeniesTheScopedPrincipal(): void
+    public function testCheckDeniesAnUnidentifiableResourceForTheScopedPrincipal(): void
     {
         Permission::create(['id' => '6e7f8a9b-0c1d-4e2f-9a3b-4c5d6e7f8a12', 'name' => 'posts:create', 'guard' => 'web']);
 
@@ -748,7 +751,7 @@ final class AuthorizationManagerTest extends TestCase
 
         Event::fake();
 
-        $decision = Authorization::for($user)->refuseUnidentifiedResource('posts:create', ['tenant' => 'org-2']);
+        $decision = Authorization::for($user)->check('posts:create', 42, ['tenant' => 'org-2']);
 
         self::assertFalse($decision->isAllowed());
         self::assertSame(DecisionReason::RESOURCE_UNRESOLVED, $decision->reason);
@@ -758,6 +761,165 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame($decision, Authorization::lastDecision());
 
         self::assertSoleDecisionEvent($user, ['tenant' => 'org-2'], $decision);
+    }
+
+    /**
+     * `check()` names a saved model, a pair and a model class to the evaluator
+     * as `type:id`, `type:id` and `type:*`, so each is allowed by the one
+     * statement written for that identifier and another record of the model's
+     * type is not, and each `DecisionEvaluated` carries the identifier string.
+     * The model class is another type, since only a pattern that covers every
+     * record of a type covers the type alone.
+     *
+     * @return void
+     */
+    public function testCheckNamesAModelAPairAndAClassStringByTheirIdentifiers(): void
+    {
+        $user  = StubIdentity::create(['id' => '8a9b0c1d-2e3f-4a4b-9c5d-6e7f8a9b0c14']);
+        $post  = StubIdentity::create(['id' => '9b0c1d2e-3f4a-4b5c-8d6e-7f8a9b0c1d15']);
+        $other = StubIdentity::create(['id' => '0c1d2e3f-4a5b-4c6d-9e7f-8a9b0c1d2e16']);
+
+        $postKey  = $post->getKey();
+        $otherKey = $other->getKey();
+
+        self::assertIsString($postKey);
+        self::assertIsString($otherKey);
+
+        $policy = EvaluationPolicy::fromArray([
+            'name'       => 'by-identifier',
+            'statements' => [
+                ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => [StubIdentity::class . ':' . $postKey]],
+                ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['posts:7']],
+                ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => [StubTenant::class . ':*']],
+            ],
+        ]);
+
+        Event::fake();
+
+        $scope = Authorization::for($user)->withPolicies([$policy]);
+
+        foreach ([$post, ['posts', 7], StubTenant::class] as $index => $resource) {
+            $decision = $scope->check('posts:read', $resource);
+
+            self::assertTrue($decision->isAllowed());
+            self::assertEquals([new StatementReference('by-identifier', $index)], $decision->statements);
+        }
+
+        $unmatched = $scope->check('posts:read', $other);
+
+        self::assertFalse($unmatched->isAllowed());
+        self::assertSame(DecisionReason::NO_MATCH, $unmatched->reason);
+
+        $resources = Event::dispatched(DecisionEvaluated::class)
+            ->map(static fn (array $arguments): ?string => $arguments[0]->resource)
+            ->values()
+            ->all();
+
+        self::assertSame([
+            StubIdentity::class . ':' . $postKey,
+            'posts:7',
+            StubTenant::class . ':*',
+            StubIdentity::class . ':' . $otherKey,
+        ], $resources);
+    }
+
+    /**
+     * `authorize()` denied on a pair reports the pair's `type:id` identifier on
+     * both the decision event and the failure event.
+     *
+     * @return void
+     */
+    public function testAuthorizeReportsTheResourceIdentifierWhenDenied(): void
+    {
+        $user = StubIdentity::create(['id' => '1d2e3f4a-5b6c-4d7e-8f8a-9b0c1d2e3f17']);
+
+        Event::fake();
+
+        try {
+            Authorization::for($user)->authorize('posts:delete', ['posts', 7]);
+
+            self::fail('Expected AuthorizationException.');
+        } catch (AuthorizationException) {
+            // Expected.
+        }
+
+        Event::assertDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => $event->resource === 'posts:7');
+        Event::assertDispatched(AuthorizationFailed::class, static fn (AuthorizationFailed $event): bool => $event->resource === 'posts:7');
+    }
+
+    /**
+     * `authorize()` resolves its resource once: denied on a saved model, or on
+     * a pair, it asks the bound resource tenant resolver about it exactly once,
+     * and the failure event carries the resource's identifier.
+     *
+     * @return void
+     */
+    public function testAuthorizeResolvesTheResourceOnce(): void
+    {
+        $user     = StubIdentity::create(['id' => '4a5b6c7d-8e9f-4a0b-9c1d-2e3f4a5b6c20']);
+        $model    = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
+        $resolver = new FixedResourceTenantResolver;
+
+        $this->app?->instance(ResourceTenantResolver::class, $resolver);
+
+        Event::fake();
+
+        foreach ([$model, ['posts', 7]] as $resource) {
+            try {
+                Authorization::for($user)->authorize('posts:delete', $resource);
+
+                self::fail('Expected AuthorizationException.');
+            } catch (AuthorizationException) {
+                // Expected.
+            }
+        }
+
+        self::assertSame([$model], $resolver->asked);
+        self::assertSame([['posts', '7']], $resolver->askedRecords);
+
+        $failed = Event::dispatched(AuthorizationFailed::class)
+            ->map(static fn (array $arguments): ?string => $arguments[0]->resource)
+            ->values()
+            ->all();
+
+        self::assertSame([StubTenant::class . ':tenant-a', 'posts:7'], $failed);
+    }
+
+    /**
+     * A resource that belongs to a tenant is out of scope when no tenant is
+     * active: a principal that does not hold the permission outside every
+     * tenant is denied as `tenant_scope` at the tenant stage, before any
+     * statement is read, even though a statement allows the action; one that
+     * holds it is decided by its grants.
+     *
+     * @return void
+     */
+    public function testCheckDeniesATenantOwnedResourceOutsideTheScope(): void
+    {
+        Permission::create(['id' => '2e3f4a5b-6c7d-4e8f-9a9b-0c1d2e3f4a18', 'name' => 'posts:read', 'guard' => 'web']);
+
+        $user     = StubIdentity::create(['id' => '3f4a5b6c-7d8e-4f9a-8b0c-1d2e3f4a5b19']);
+        $resource = ResourceReference::record('posts', '7', new Reference('org', 'org-1'));
+
+        $allowAll = EvaluationPolicy::fromArray([
+            'name'       => 'allow-all',
+            'statements' => [['effect' => 'allow', 'actions' => ['posts:read']]],
+        ]);
+
+        $denied = Authorization::for($user)->withPolicies([$allowAll])->check('posts:read', $resource);
+
+        self::assertFalse($denied->isAllowed());
+        self::assertSame(DecisionReason::TENANT_SCOPE, $denied->reason);
+        self::assertSame(DecisionStage::TENANT, $denied->stage);
+        self::assertSame([], $denied->statements);
+        self::assertSame([], $denied->trace);
+
+        $user->givePermission('posts:read');
+
+        $allowed = Authorization::for($user)->check('posts:read', $resource);
+
+        self::assertTrue($allowed->isAllowed());
+        self::assertSame(DecisionStage::ALLOW, $allowed->stage);
     }
 
     /**
@@ -805,7 +967,8 @@ final class AuthorizationManagerTest extends TestCase
 
     /**
      * With the shipped resolver and no user signed in, there is no subject and
-     * every check denies.
+     * every check denies, as `subject_unresolved` at the subject stage even
+     * when its resource cannot be identified: the subject stage decides first.
      *
      * @return void
      */
@@ -818,7 +981,12 @@ final class AuthorizationManagerTest extends TestCase
 
         self::assertNull(Authorization::currentSubject());
         self::assertFalse(Authorization::can('posts:create'));
-        self::assertFalse(Authorization::refuseUnidentifiedResource('posts:create')->isAllowed());
+
+        $decision = Authorization::check('posts:create', 42);
+
+        self::assertFalse($decision->isAllowed());
+        self::assertSame(DecisionReason::SUBJECT_UNRESOLVED, $decision->reason);
+        self::assertSame(DecisionStage::SUBJECT, $decision->stage);
 
         $this->expectException(AuthorizationException::class);
 

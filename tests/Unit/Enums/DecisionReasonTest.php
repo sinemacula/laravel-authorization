@@ -22,12 +22,12 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 final class DecisionReasonTest extends TestCase
 {
     /**
-     * The enum defines exactly the seven denial reasons, in declaration order:
+     * The enum defines exactly the eight denial reasons, in declaration order:
      * an allowed check carries no reason, so there is no allow case.
      *
      * @return void
      */
-    public function testExactlySevenCases(): void
+    public function testExactlyEightCases(): void
     {
         self::assertSame(
             [
@@ -38,6 +38,7 @@ final class DecisionReasonTest extends TestCase
                 DecisionReason::SUBJECT_INACTIVE,
                 DecisionReason::SUBJECT_UNRESOLVED,
                 DecisionReason::RESOURCE_UNRESOLVED,
+                DecisionReason::TENANT_SCOPE,
             ],
             DecisionReason::cases(),
         );
@@ -57,6 +58,7 @@ final class DecisionReasonTest extends TestCase
         self::assertSame('subject_inactive', DecisionReason::SUBJECT_INACTIVE->value);
         self::assertSame('subject_unresolved', DecisionReason::SUBJECT_UNRESOLVED->value);
         self::assertSame('resource_unresolved', DecisionReason::RESOURCE_UNRESOLVED->value);
+        self::assertSame('tenant_scope', DecisionReason::TENANT_SCOPE->value);
     }
 
     /**
@@ -86,6 +88,7 @@ final class DecisionReasonTest extends TestCase
         self::assertSame('the subject or its identity is inactive', DecisionReason::SUBJECT_INACTIVE->label());
         self::assertSame('there is no subject', DecisionReason::SUBJECT_UNRESOLVED->label());
         self::assertSame('the resource cannot be identified', DecisionReason::RESOURCE_UNRESOLVED->label());
+        self::assertSame('the resource belongs to a tenant outside the scope', DecisionReason::TENANT_SCOPE->label());
     }
 
     /**
@@ -114,6 +117,7 @@ final class DecisionReasonTest extends TestCase
         self::assertSame(DecisionReason::SUBJECT_INACTIVE, DecisionReason::tryFrom('subject_inactive'));
         self::assertSame(DecisionReason::SUBJECT_UNRESOLVED, DecisionReason::tryFrom('subject_unresolved'));
         self::assertSame(DecisionReason::RESOURCE_UNRESOLVED, DecisionReason::tryFrom('resource_unresolved'));
+        self::assertSame(DecisionReason::TENANT_SCOPE, DecisionReason::tryFrom('tenant_scope'));
     }
 
     /**

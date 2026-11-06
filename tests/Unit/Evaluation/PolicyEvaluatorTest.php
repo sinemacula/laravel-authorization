@@ -426,6 +426,31 @@ final class PolicyEvaluatorTest extends TestCase
     }
 
     /**
+     * A check on a type alone is allowed only by an allow that covers every
+     * record of the type: an allow on `post:?`, which needs an id character, is
+     * traced as not_applicable and not named, and the one on `post:*` is.
+     *
+     * @return void
+     */
+    public function testATypeAloneIsAllowedOnlyByAnAllowCoveringEveryRecord(): void
+    {
+        $policy = Policy::fromArray([
+            'name'       => 'type-allow',
+            'statements' => [
+                ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['post:?']],
+                ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['post:*']],
+            ],
+        ]);
+
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', 'post:*');
+
+        self::assertEquals(Decision::allow(DecisionStage::ALLOW, [self::reference('type-allow', 1)], [
+            self::entry(DecisionStage::ALLOW, TraceOutcome::NOT_APPLICABLE, 'type-allow', 0),
+            self::entry(DecisionStage::ALLOW, TraceOutcome::MATCHED, 'type-allow', 1),
+        ]), $decision);
+    }
+
+    /**
      * An allow that names the check but whose condition does not hold denies it
      * as condition_failed at the implicit stage, by no statement, and its trace
      * entry records the condition key as failed.

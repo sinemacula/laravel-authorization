@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
+use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
 use Tests\TestCase;
 
 /**
@@ -114,9 +115,10 @@ final class ConfigValidatorEdgeCasesTest extends TestCase
         $container = new Container;
 
         ConfigValidator::validate([
-            'subject_resolver' => AuthGuardSubjectResolver::class,
-            'tenant_tree'      => FlatTenantTree::class,
-            'cache'            => ['store' => 'redis'],
+            'subject_resolver'         => AuthGuardSubjectResolver::class,
+            'tenant_tree'              => FlatTenantTree::class,
+            'resource_tenant_resolver' => NoResourceTenant::class,
+            'cache'                    => ['store' => 'redis'],
         ], $container);
 
         self::assertFalse($container->bound('cache'));

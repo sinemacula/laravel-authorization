@@ -246,12 +246,14 @@ final class GateArgumentForwardingTest extends TestCase
     }
 
     /**
-     * Unmappable non-object, non-array trailing arguments are silently
-     * discarded rather than guessed at.
+     * Two positional arguments name the `(type, id)` pair they spell, since
+     * Laravel spreads an argument array, so a trailing value is part of the
+     * resource rather than silently discarded: `('arn:post', 42)` names
+     * `arn:post:42`, and `('arn:post:42', 99)` names another record.
      *
      * @return void
      */
-    public function testGateIgnoresUnmappableTrailingArguments(): void
+    public function testGateNamesThePairTwoPositionalArgumentsSpell(): void
     {
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $this->actAs($user);
@@ -266,8 +268,8 @@ final class GateArgumentForwardingTest extends TestCase
             ],
         ]));
 
-        // The trailing integer is not a context array and is discarded.
-        self::assertTrue(Gate::allows('posts:create', ['arn:post:42', 99]));
+        self::assertTrue(Gate::allows('posts:create', ['arn:post', 42]));
+        self::assertFalse(Gate::allows('posts:create', ['arn:post:42', 99]));
     }
 
     /**

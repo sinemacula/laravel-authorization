@@ -483,7 +483,7 @@ final readonly class Statement
             $resolved   = $scope->pattern($pattern);
             $unresolved = $unresolved || $resolved === null;
 
-            if ($resolved !== null && \fnmatch($resolved, $resource)) {
+            if ($resolved !== null && self::covers($resolved, $resource)) {
                 return MatchResult::matches();
             }
         }
@@ -491,5 +491,22 @@ final readonly class Statement
         return $unresolved
             ? MatchResult::undecidable('a resource pattern references a value that cannot be resolved')
             : MatchResult::doesNotMatch(self::TARGET_MISMATCH);
+    }
+
+    /**
+     * Determine whether a resolved pattern covers the resource. A type alone
+     * (`post:*`, N6) is covered only by a pattern that covers every record of
+     * the type, which also covers the type with an empty id, so a pattern that
+     * needs an id character, such as `post:?` or `post:[!0-9]`, does not cover
+     * it: its `*` is a literal character, not a wildcard.
+     *
+     * @param  string  $pattern
+     * @param  string  $resource
+     * @return bool
+     */
+    private static function covers(string $pattern, string $resource): bool
+    {
+        return \fnmatch($pattern, $resource)
+            && (!\str_ends_with($resource, ':*') || \fnmatch($pattern, \substr($resource, 0, -1)));
     }
 }

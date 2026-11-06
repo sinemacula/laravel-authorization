@@ -9,6 +9,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
+use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
@@ -17,20 +18,22 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
+use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
 use Tests\Feature\Stubs\Contracts\PermissionEnumInterface;
 use Tests\Feature\Stubs\CustomPermission;
 use Tests\Feature\Stubs\CustomPolicy;
 use Tests\Feature\Stubs\CustomRole;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
+use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
 /**
  * Feature tests for the boot-time validation of `authorization.models.*`, the
- * connection, the backing of `authorization.permission_enums` and the subject
- * resolver.
+ * connection, the backing of `authorization.permission_enums`, the subject
+ * resolver, the tenant tree and the resource tenant resolver.
  *
  * Each model entry must name an existing class that is the shipped model or a
  * subclass of it, and each permission enum must be backed by strings; anything
@@ -47,6 +50,11 @@ use Tests\TestCase;
 #[CoversClass(InvalidAuthorizationConfigException::class)]
 final class ConfigValidatorTest extends TestCase
 {
+    /** @var string The reason a missing resource tenant resolver is refused for. */
+    private const string RESOURCE_TENANT_RESOLVER_REQUIRED = 'a resource tenant resolver class is required; set it to \\'
+        . NoResourceTenant::class
+        . ' to read no resource\'s tenant.';
+
     /**
      * The shipped models pass validation.
      *
@@ -485,6 +493,87 @@ final class ConfigValidatorTest extends TestCase
     }
 
     /**
+     * The shipped resource tenant resolver, and any class implementing the
+     * contract, pass validation.
+     *
+     * @return void
+     */
+    public function testResourceTenantResolverImplementingTheContractPasses(): void
+    {
+        $this->validateWithResourceTenantResolver(NoResourceTenant::class);
+        $this->validateWithResourceTenantResolver(FixedResourceTenantResolver::class);
+
+        $this->expectNotToPerformAssertions();
+    }
+
+    /**
+     * Invalid `resource_tenant_resolver` values with the reason each is refused
+     * for.
+     *
+     * @return iterable<string, array{mixed, string}>
+     */
+    public static function invalidResourceTenantResolverProvider(): iterable
+    {
+        yield 'null' => [null, self::RESOURCE_TENANT_RESOLVER_REQUIRED];
+        yield 'missing class' => ['App\Tenancy\Missing', 'class \'App\Tenancy\Missing\' does not exist.'];
+        yield 'unrelated class' => [\stdClass::class, 'class \'stdClass\' does not implement ' . ResourceTenantResolver::class . '.'];
+    }
+
+    /**
+     * Every invalid `resource_tenant_resolver` value, null included, is refused
+     * with its reason: no resolver never means no resource's tenant by
+     * accident.
+     *
+     * @param  mixed  $resolver
+     * @param  string  $reason
+     * @return void
+     */
+    #[DataProvider('invalidResourceTenantResolverProvider')]
+    public function testInvalidResourceTenantResolverIsRejected(mixed $resolver, string $reason): void
+    {
+        $this->assertRejected(
+            fn () => $this->validateWithResourceTenantResolver($resolver),
+            'authorization.resource_tenant_resolver',
+            $reason,
+        );
+    }
+
+    /**
+     * A config without a `resource_tenant_resolver` key is refused as null is.
+     *
+     * @return void
+     */
+    public function testMissingResourceTenantResolverIsRejected(): void
+    {
+        $config = $this->authorizationConfig();
+        unset($config['resource_tenant_resolver']);
+
+        $this->assertRejected(
+            fn () => ConfigValidator::validate($config, $this->app),
+            'authorization.resource_tenant_resolver',
+            self::RESOURCE_TENANT_RESOLVER_REQUIRED,
+        );
+    }
+
+    /**
+     * A null `resource_tenant_resolver` fails the provider's boot.
+     *
+     * @return void
+     */
+    public function testNullResourceTenantResolverFailsBoot(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config->set('authorization.resource_tenant_resolver', null);
+
+        $this->assertRejected(
+            fn () => (new AuthorizationServiceProvider($this->app))->boot(),
+            'authorization.resource_tenant_resolver',
+            self::RESOURCE_TENANT_RESOLVER_REQUIRED,
+        );
+    }
+
+    /**
      * Invalid `subject_resolver` values with the reason each is refused for.
      *
      * @return iterable<string, array{mixed, string}>
@@ -562,6 +651,21 @@ final class ConfigValidatorTest extends TestCase
     {
         $config                     = $this->authorizationConfig();
         $config['subject_resolver'] = $resolver;
+
+        ConfigValidator::validate($config, $this->app);
+    }
+
+    /**
+     * Run the validator over the package config with the given
+     * `resource_tenant_resolver`.
+     *
+     * @param  mixed  $resolver
+     * @return void
+     */
+    private function validateWithResourceTenantResolver(mixed $resolver): void
+    {
+        $config                             = $this->authorizationConfig();
+        $config['resource_tenant_resolver'] = $resolver;
 
         ConfigValidator::validate($config, $this->app);
     }

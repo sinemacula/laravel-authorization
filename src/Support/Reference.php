@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Support;
 
 use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 
 /**
  * A record named by its morph type and key: a grantee, a granted role,
@@ -25,7 +26,7 @@ use Illuminate\Database\Eloquent\Model;
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class Reference
+final readonly class Reference implements AuthorizableTenant
 {
     /** @var int The most bytes a reference's type or key may hold. */
     public const int MAX_BYTES = 191;
@@ -98,6 +99,7 @@ final readonly class Reference
      *
      * @return string
      */
+    #[\Override]
     public function getMorphClass(): string
     {
         return $this->type;
@@ -108,6 +110,7 @@ final readonly class Reference
      *
      * @return string
      */
+    #[\Override]
     public function getKey(): string
     {
         return $this->id;

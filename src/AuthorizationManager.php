@@ -24,6 +24,9 @@ use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use SineMacula\Laravel\Authorization\Support\ResourceReferences;
+use SineMacula\Laravel\Authorization\Support\ResourceScope;
 use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 
 /**
@@ -31,9 +34,8 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
  *
  * Coordinates subject resolution, policy gathering, evaluation, and RBAC
  * fallback into a single API. The manager is deliberately small and delegates
- * the actual statement walking to the policy evaluator; all four evaluation
- * branches ultimately return an evaluation result, with the reason code and
- * trace recorded for audit consumers.
+ * the actual statement walking to the policy evaluator; every stage returns a
+ * decision, with the reason code and trace recorded for audit consumers.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -84,11 +86,11 @@ final class AuthorizationManager
      * action.
      *
      * @param  string  $action
-     * @param  string|null  $resource
+     * @param  mixed  $resource
      * @param  array<string, mixed>  $context
      * @return bool
      */
-    public function can(string $action, ?string $resource = null, array $context = []): bool
+    public function can(string $action, mixed $resource = null, array $context = []): bool
     {
         return $this->check($action, $resource, $context)->isAllowed();
     }
@@ -98,21 +100,23 @@ final class AuthorizationManager
      * authorization exception when denied.
      *
      * @param  string  $action
-     * @param  string|null  $resource
+     * @param  mixed  $resource
      * @param  array<string, mixed>  $context
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      */
-    public function authorize(string $action, ?string $resource = null, array $context = []): void
+    public function authorize(string $action, mixed $resource = null, array $context = []): void
     {
-        $decision = $this->check($action, $resource, $context);
+        // Resolved once, so a bound resource tenant resolver is asked once.
+        $reference = ResourceReferences::of($resource);
+        $decision  = $this->check($action, $reference, $context);
 
         if ($decision->isAllowed()) {
             return;
         }
 
-        $this->dispatch(new AuthorizationFailed($this->currentSubject()?->subject, $action, $resource, $context, $decision));
+        $this->dispatch(new AuthorizationFailed($this->currentSubject()?->subject, $action, self::identifierOf($reference), $context, $decision));
 
         throw AuthorizationException::translated($decision->reason ?? DecisionReason::NO_MATCH, $this->translator);
     }
@@ -124,32 +128,16 @@ final class AuthorizationManager
      * decision and reported with `DecisionEvaluated`.
      *
      * @param  string  $action
-     * @param  string|null  $resource
+     * @param  mixed  $resource
      * @param  array<string, mixed>  $context
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    public function check(string $action, ?string $resource = null, array $context = []): Decision
+    public function check(string $action, mixed $resource = null, array $context = []): Decision
     {
-        $subject = $this->currentSubject();
+        $subject   = $this->currentSubject();
+        $reference = ResourceReferences::of($resource);
 
-        return $this->record($subject, $action, $resource, $context, $this->decide($subject, $action, $resource, $context));
-    }
-
-    /**
-     * Deny a check whose resource argument could not be identified (an unsaved
-     * model, a number, a list), recording the denial and dispatching the
-     * decision event as any other check does.
-     *
-     * The Gate calls this instead of evaluating a check without a resource,
-     * which a statement covering every resource would otherwise allow.
-     *
-     * @param  string  $action
-     * @param  array<string, mixed>  $context
-     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
-     */
-    public function refuseUnidentifiedResource(string $action, array $context = []): Decision
-    {
-        return $this->record($this->currentSubject(), $action, null, $context, Decision::deny(DecisionReason::RESOURCE_UNRESOLVED, DecisionStage::RESOURCE));
+        return $this->record($subject, $action, self::identifierOf($reference), $context, $this->decide($subject, $action, $reference, $context));
     }
 
     /**
@@ -174,11 +162,11 @@ final class AuthorizationManager
      * trace. A shortcut over `check(...)->explain()`.
      *
      * @param  string  $action
-     * @param  string|null  $resource
+     * @param  mixed  $resource
      * @param  array<string, mixed>  $context
      * @return string
      */
-    public function explain(string $action, ?string $resource = null, array $context = []): string
+    public function explain(string $action, mixed $resource = null, array $context = []): string
     {
         return $this->check($action, $resource, $context)->explain();
     }
@@ -337,33 +325,38 @@ final class AuthorizationManager
     /**
      * Decide the action for the supplied subject, stage by stage (AUTHZ-7.1): a
      * subject that is missing, or inactive (it or its identity), is denied
-     * before any policy is read; then the policies' statements decide by their
-     * deny and allow stages; and when they allow nothing, a permission the
-     * subject holds allows. A policy document that cannot be read denies the
-     * check as an invalid policy. The subject's identity, when it is another
-     * model, contributes its policies and its grants (see `SubjectGrants`).
+     * before anything else is read; a resource that cannot be identified is
+     * denied next; a tenant-owned resource is decided in its tenant's scope, or
+     * denied as out of scope (see `ResourceScope`); then the grants decide.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @param  string  $action
-     * @param  string|null  $resource
+     * @param  false|\SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
      * @param  array<string, mixed>  $context
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    private function decide(?Subject $subject, string $action, ?string $resource, array $context): Decision
+    private function decide(?Subject $subject, string $action, false|ResourceReference|null $resource, array $context): Decision
     {
         if ($subject === null || SubjectGrants::isInactive($subject)) {
             return Decision::deny($subject === null ? DecisionReason::SUBJECT_UNRESOLVED : DecisionReason::SUBJECT_INACTIVE, DecisionStage::SUBJECT);
         }
 
-        $decision = $this->decidePolicies($subject, $action, $resource, $context);
+        if ($resource === false) {
+            return Decision::deny(DecisionReason::RESOURCE_UNRESOLVED, DecisionStage::RESOURCE);
+        }
 
-        return $decision->stage === DecisionStage::IMPLICIT ? $decision->withPermission(SubjectGrants::holdsPermission($subject, $action)) : $decision;
+        $decide = fn (): Decision => $this->decideGrants($subject, $action, $resource?->identifier, $context);
+
+        return $resource === null ? $decide() : ResourceScope::decide($subject, $action, $resource, $decide);
     }
 
     /**
-     * Decide the action from the subject's policies, and its identity's. A
-     * policy document that cannot be read denies the check as an invalid
-     * policy.
+     * Decide the action from the subject's grants: its policies' statements,
+     * and its identity's, by their deny and allow stages, then, when they allow
+     * nothing, a permission the subject holds. A policy document that cannot be
+     * read denies the check as an invalid policy. The subject's identity, when
+     * it is another model, contributes its policies and its grants (see
+     * `SubjectGrants`).
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
@@ -371,7 +364,7 @@ final class AuthorizationManager
      * @param  array<string, mixed>  $context
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    private function decidePolicies(Subject $subject, string $action, ?string $resource, array $context): Decision
+    private function decideGrants(Subject $subject, string $action, ?string $resource, array $context): Decision
     {
         try {
             $policies = $this->gatherPolicies($subject);
@@ -379,7 +372,21 @@ final class AuthorizationManager
             return Decision::deny(DecisionReason::INVALID_POLICY, DecisionStage::DENY);
         }
 
-        return $this->evaluator->evaluate($policies, $action, $resource, $context, $subject->subject);
+        $decision = $this->evaluator->evaluate($policies, $action, $resource, $context, $subject->subject);
+
+        return $decision->stage === DecisionStage::IMPLICIT ? $decision->withPermission(SubjectGrants::holdsPermission($subject, $action)) : $decision;
+    }
+
+    /**
+     * Return the identifier a resolved reference carries, or null for no
+     * resource or one that cannot be identified.
+     *
+     * @param  false|\SineMacula\Laravel\Authorization\Support\ResourceReference|null  $reference
+     * @return string|null
+     */
+    private static function identifierOf(false|ResourceReference|null $reference): ?string
+    {
+        return $reference === false ? null : $reference?->identifier;
     }
 
     /**
