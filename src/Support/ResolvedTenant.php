@@ -24,7 +24,9 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  * only platform-wide rows are visible then. The subject's application is held
  * with it: grants made for one application count only on that application, and
  * with none, only grants for every application count. The tenant's ancestors,
- * read through the bound tenant tree, are held with it once read.
+ * read through the bound tenant tree, are held with it once read. A holder put
+ * in place to decide just below its tenant (see `TenantScope::within()`) reads
+ * a chain standing there.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -41,6 +43,7 @@ final class ResolvedTenant
      * @param  object|null  $tenant
      * @param  string|null  $application
      * @param  string|null  $guard
+     * @param  bool  $isBelow
      */
     public function __construct(
 
@@ -55,6 +58,9 @@ final class ResolvedTenant
 
         /** The default authentication guard when the subject was resolved. */
         public readonly ?string $guard = null,
+
+        /** Whether checks are decided just below the tenant, counting a grant made there only when it reaches below. */
+        public readonly bool $isBelow = false,
     ) {}
 
     /**
@@ -99,7 +105,7 @@ final class ResolvedTenant
     {
         if ($this->chain === null || $this->chain[0] !== $tree) {
             $tenant      = $this->tenant === null ? null : new Reference(...TenantScope::extractTenantPair($this->tenant));
-            $this->chain = [$tree, TenantChain::of($tenant, $tree)];
+            $this->chain = [$tree, TenantChain::of($tenant, $tree, $this->isBelow)];
         }
 
         return $this->chain[1];

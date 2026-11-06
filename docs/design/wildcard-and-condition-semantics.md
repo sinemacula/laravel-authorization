@@ -539,8 +539,9 @@ reasons into one `InvalidPolicyDocumentException` message, separated by semicolo
 - **Actions** (N19): every `actions` and `not_actions` pattern must match at least one permission the code declares in
   `permission_enums` or `permission_providers`, compared with `fnmatch($pattern, $name, FNM_NOESCAPE)` or as the same
   string, so a misspelt action cannot be stored. The bound `ActionCatalogue` answers; the default,
-  `DeclaredActionCatalogue`, reads the declared names once per request or job. With nothing declared, every document is
-  refused with one reason that says so.
+  `DeclaredActionCatalogue`, reads the declared names once per request or job, the permission the package declares
+  itself (`authorization:guardrails:manage`) among them, so it is never empty. A custom catalogue that declares nothing
+  refuses every document with one reason that says so.
 
 `php artisan authorization:policy:validate` checks documents with the same validator: JSON files given as paths (one
 document, or an array of documents, per file; a directory's `*.json` files, in name order), or every stored policy row

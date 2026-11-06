@@ -16,6 +16,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
 use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
+use Tests\Feature\Stubs\EmptyActionCatalogue;
 use Tests\Feature\Stubs\Enums\CataloguePermission;
 use Tests\TestCase;
 
@@ -116,14 +117,14 @@ final class PolicyModelTest extends TestCase
     }
 
     /**
-     * Every document is refused at write time when the code declares no
-     * permissions.
+     * Every document is refused at write time when the catalogue declares no
+     * action at all.
      *
      * @return void
      */
-    public function testRejectsEveryWriteWhenNoPermissionsAreDeclared(): void
+    public function testRejectsEveryWriteWhenNoActionIsDeclared(): void
     {
-        $this->app?->instance(ActionCatalogue::class, $this->app->make(DeclaredActionCatalogue::class));
+        $this->app?->instance(ActionCatalogue::class, new EmptyActionCatalogue);
 
         $this->expectExceptionMessage('Invalid policy document \'readers\': ' . PolicyValidator::NOTHING_DECLARED);
 

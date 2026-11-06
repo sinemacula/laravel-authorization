@@ -152,5 +152,27 @@ final class ResolvedTenantTest extends TestCase
         $unused->expects(self::never())->method('ancestors');
 
         self::assertSame([], (new ResolvedTenant($resolver, null))->chain($unused)->tenants);
+        self::assertFalse($resolved->isBelow);
+        self::assertFalse($resolved->chain($first)->isBelow);
+    }
+
+    /**
+     * A holder put in place to decide just below its tenant reads a chain
+     * standing there, refreshed or not.
+     *
+     * @return void
+     */
+    public function testAHolderBelowItsTenantReadsAChainStandingThere(): void
+    {
+        $tree = self::createStub(TenantTree::class);
+
+        $tree->method('ancestors')->willReturn([]);
+
+        $resolved = new ResolvedTenant(self::createStub(SubjectResolver::class), new Reference('stub_tenant', 'org'), null, null, true);
+
+        self::assertTrue($resolved->isBelow);
+        self::assertTrue($resolved->chain($tree)->isBelow);
+        self::assertTrue($resolved->refreshChain($tree)->isBelow);
+        self::assertEquals([new Reference('stub_tenant', 'org')], $resolved->chain($tree)->tenants);
     }
 }

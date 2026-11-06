@@ -22,12 +22,12 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 final class DecisionReasonTest extends TestCase
 {
     /**
-     * The enum defines exactly the ten denial reasons, in declaration order: an
-     * allowed check carries no reason, so there is no allow case.
+     * The enum defines exactly the eleven denial reasons, in declaration order:
+     * an allowed check carries no reason, so there is no allow case.
      *
      * @return void
      */
-    public function testExactlyTenCases(): void
+    public function testExactlyElevenCases(): void
     {
         self::assertSame(
             [
@@ -40,6 +40,7 @@ final class DecisionReasonTest extends TestCase
                 DecisionReason::RESOURCE_UNRESOLVED,
                 DecisionReason::TENANT_SCOPE,
                 DecisionReason::INSUFFICIENT_AUTHENTICATION,
+                DecisionReason::GUARDRAIL,
                 DecisionReason::BOUNDARY,
             ],
             DecisionReason::cases(),
@@ -62,6 +63,7 @@ final class DecisionReasonTest extends TestCase
         self::assertSame('resource_unresolved', DecisionReason::RESOURCE_UNRESOLVED->value);
         self::assertSame('tenant_scope', DecisionReason::TENANT_SCOPE->value);
         self::assertSame('insufficient_authentication', DecisionReason::INSUFFICIENT_AUTHENTICATION->value);
+        self::assertSame('guardrail', DecisionReason::GUARDRAIL->value);
         self::assertSame('boundary', DecisionReason::BOUNDARY->value);
     }
 
@@ -94,6 +96,7 @@ final class DecisionReasonTest extends TestCase
         self::assertSame('the resource cannot be identified', DecisionReason::RESOURCE_UNRESOLVED->label());
         self::assertSame('the resource belongs to a tenant outside the scope', DecisionReason::TENANT_SCOPE->label());
         self::assertSame('a statement allows it once further authentication is met', DecisionReason::INSUFFICIENT_AUTHENTICATION->label());
+        self::assertSame('a guardrail does not allow it', DecisionReason::GUARDRAIL->label());
         self::assertSame('a permission boundary does not allow it', DecisionReason::BOUNDARY->label());
     }
 
@@ -125,6 +128,7 @@ final class DecisionReasonTest extends TestCase
         self::assertSame(DecisionReason::RESOURCE_UNRESOLVED, DecisionReason::tryFrom('resource_unresolved'));
         self::assertSame(DecisionReason::TENANT_SCOPE, DecisionReason::tryFrom('tenant_scope'));
         self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, DecisionReason::tryFrom('insufficient_authentication'));
+        self::assertSame(DecisionReason::GUARDRAIL, DecisionReason::tryFrom('guardrail'));
         self::assertSame(DecisionReason::BOUNDARY, DecisionReason::tryFrom('boundary'));
     }
 

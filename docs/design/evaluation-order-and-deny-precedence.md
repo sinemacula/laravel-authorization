@@ -2,10 +2,10 @@
 
 ## Purpose
 
-Document the staged decision every check goes through, the interaction between policy statements, permission boundaries
-and RBAC, the invariants that govern deny precedence and the caps, and how a decision fails closed when a statement
-cannot be decided or a policy cannot be evaluated. This note is the authoritative reference for why the decision behaves
-the way it does -- the code and tests encode the *what*; this note encodes the *why*.
+Document the staged decision every check goes through, the interaction between policy statements, guardrails, permission
+boundaries and RBAC, the invariants that govern deny precedence and the caps, and how a decision fails closed when a
+statement cannot be decided or a policy cannot be evaluated. This note is the authoritative reference for why the
+decision behaves the way it does -- the code and tests encode the *what*; this note encodes the *why*.
 
 ## The Decision
 
@@ -17,12 +17,13 @@ throws when it does not. It returns a `Decision`:
 - `stage` -- the `DecisionStage` that decided it.
 - `statements` -- the statements that decided it, each a `StatementReference` (the policy's name, its stored key, the
   statement's position, its `sid` when it has one and, for a resource policy, the resource the policy is attached to,
-  shown as `name[key]#position sid="…" on "post:7"`); none for a permission held, a boundary that allows nothing the
-  check names, or another denial no statement made. The
+  shown as `name[key]#position sid="…" on "post:7"`); none for a permission held, a guardrail or boundary that allows
+  nothing the check names, or another denial no statement made. The
   `sid` only names the statement: it never changes the decision or the order.
 - `trace` -- every step taken, in order, each a `TraceEntry`: its stage, its `TraceOutcome`, the statement it
-  assessed (none for the permission step, a boundary that refused the check, or a cap stage that capped nothing), the
-  boundary it names when it is a boundary's refusal (`name[key]`), and the condition keys (their dot paths) it tested
+  assessed (none for the permission step, a guardrail or boundary that refused the check, or a cap stage that capped
+  nothing), the cap it names when it is a guardrail's or a boundary's refusal (`cap`, as `name[key]`), and the
+  condition keys (their dot paths) it tested
   with whether each held.
 - `requirements` -- for an `insufficient_authentication` denial, one `UnmetRequirement` for each statement in
   `statements`, in the same order: the authentication requirement that alone kept it from applying and its unmet parts.
@@ -104,17 +105,20 @@ count, so an override never lifts a cap.
 
 The subject's permission boundaries are no policy source: they are read apart, through `SubjectGrants::boundaries()`,
 after the bound `PolicyResolver` and outside it, so a custom resolver can never drop them (see [Permission
-Boundaries](#permission-boundaries)).
+Boundaries](#permission-boundaries)). Nor are the guardrails, read apart through `GuardrailResolver::guardrailsFor()`
+for every check, whatever the subject (see [Guardrails](#guardrails)), and kept when `withPolicies()` replaces the
+policies.
 
 Within one grantee's resolution, its own attachments and its roles', a policy held more than one way (attached to the
 grantee and to a role, or to two of its roles) is listed once. A policy held by both the subject and its separate
-identity may be listed twice, and a policy may be held and set as a boundary too, or be the boundary of both: the
-evaluator gathers each policy once for each part it plays (`StatementEntries`), its denies once, its allows once as a
-policy and once as a boundary, so the decision is unchanged and names each statement once. The stored policies are read
-through the resolution cache; a change to any role's policy attachments refreshes every identity's cached policies, and
-a change to the hierarchy refreshes those of the identities whose roles it reaches. The order the sources are read in is
-never relied on: invariant 2 orders the policies within each stage, so a deny in a role's policy, or in the resource's,
-is decided exactly as one attached to the identity, and wins over every allow and every permission.
+identity may be listed twice, and a policy may be held and set as a guardrail or a boundary too, or be the boundary of
+both: the evaluator gathers each policy once for each part it plays (`StatementEntries`), its denies once, its allows
+once as a policy, once as a guardrail and once as a boundary, so the decision is unchanged and names each statement
+once. The stored policies are read through the resolution cache; a change to any role's policy attachments refreshes
+every identity's cached policies, and a change to the hierarchy refreshes those of the identities whose roles it
+reaches. The order the sources are read in is never relied on: invariant 2 orders the policies within each stage, so a
+deny in a role's policy, or in the resource's, is decided exactly as one attached to the identity, and wins over every
+allow and every permission.
 
 The resource's policies are read in one query, on the write connection, through the resolution cache, keyed by the
 resource, the tenant, the application and the policy limits; a type alone is kept under a kind of its own, so no
@@ -184,6 +188,52 @@ one shared boundaries version, which updating or deleting any policy bumps, rath
 coarser invalidation that saves a second cold query. Setting or removing a boundary bumps the grantee's version through
 its `IdentityEvent`.
 
+## Guardrails
+
+A guardrail (AUTHZ-7.6, N41) is a managed policy set on a tenant, or on the platform, through
+`GuardrailService::set()` and `remove()`, that caps what any subject may do in its scope whatever its grants allow:
+
+- **Storage.** A scope may have any number of guardrails, a policy at most once in each, held in `guardrails` with a
+  null-folding unique index over the policy and the tenant (both tenant columns null for the platform), the actor in
+  `granted_by_type` and `granted_by_id`. Setting a policy a scope already has is `GrantOutcome::UNCHANGED`. A guardrail
+  has no application column and no reach flag: it holds in every application, and a tenant's always reaches below it.
+  A tenant-owned policy is set on its tenant or a tenant below it, as a grant is.
+- **Which apply.** The guardrails of a check are the platform's and those of the check's tenant and of each of its
+  ancestors, through `TenantScope::currentChain()` as the tenant tree reaches down (AUTHZ-5.3, `GuardrailResolver`).
+  The check's tenant is the resource's when the resource has one, also when the tenant stage admitted a resource of a
+  tenant outside the subject's scope through a platform-wide permission and decides the rest at platform scope (N43):
+  the guardrails are then read in the resource's tenant, so a tenant's guardrails cap every check on its resources.
+  With no resource tenant, the guardrails are those of the tenant the check is decided in; with no tenant, the
+  platform's alone.
+- **Intersection.** Every guardrail that applies must allow the check: a tenant's never replaces its ancestors' or the
+  platform's, so a guardrail can only narrow what anyone may do in its scope. They apply to every subject, whatever its
+  principal, identity or grants.
+- **They cap, and grant nothing.** A guardrail's allow statements are assessed at the guardrail stage as an ordinary
+  policy's allows would be, conditions and `not_actions` included; passing it only lets the boundaries and the allows
+  be weighed. Its deny statements are explicit denies at the deny stage, after every policy's and before every
+  boundary's. It never names `principals`, so its allows apply to every subject.
+- **Who may change them.** Only an actor holding `authorization:guardrails:manage`, a permission the package declares
+  in its own catalogue (`Support\PackagePermissions`), from above the scope. The right is decided through `check()`
+  (D22), so every deny, guardrail and boundary that applies to the actor counts, run just below the parent of the
+  tenant changed (`TenantScope::within()` with `isBelow`): a grant held at an ancestor counts only when it reaches
+  below it, a platform-wide grant counts, and one held within the tenant itself never does. A tenant with no parent,
+  and the platform, are decided at platform scope, where only a platform-wide grant counts (`GuardrailAuthority`). An
+  actor refused is refused with `GuardrailException` (`not_permitted`) before anything is read or written. As every
+  guardrail above the scope caps that check too, a guardrail that does not allow the permission keeps every actor
+  from changing the guardrails of its scope and below, its own removal included.
+- **What is refused.** An inline policy (`GuardrailException`, `inline`), a policy naming `principals`
+  (`ResourcePolicyException`) and a policy whose row is gone (`InvalidGrantTargetException`) are refused before
+  anything is written; a guardrail is reported set only once its row is read back, as a boundary is. A policy in use as
+  a guardrail is neither edited nor deleted: `PolicyObserver::updating` and `deleting` refuse either with
+  `GuardrailException` (`in_use`), naming every scope it caps, so the cap never changes or lifts past the guardrail
+  service's check, and the table's foreign key restricts a delete made past the model.
+
+The guardrails and their documents are read in one query on the write connection, through the resolution cache
+(`ResolutionCache::rememberGuardrails()`), keyed by the tenant, the application and the policy limits, so a warm check
+reads none. Every guardrail entry pins one shared guardrails version, which setting or removing a guardrail and
+updating or deleting any policy bump. The entries the guardrail service's own check reads, decided just below a
+tenant, are keyed apart (`:below`), so they never stand for a tenant's.
+
 ## Invariants
 
 1. **The stages run in order, and the first that decides ends the decision (AUTHZ-7.1).** No allow of any source is
@@ -200,13 +250,17 @@ its `IdentityEvent`.
         subject holds the action's permission through a platform-wide grant, when the rest runs at platform scope
         (AUTHZ-4.4, AUTHZ-5.5, N9).
    2. *Deny*: every deny statement of every applicable source is assessed: the subject's and its identity's own and
-      role-attached policies, the policy store's, the resource's and its type's (for every subject), and the
-      boundaries' (guardrails' and session policies' denies join them as those arrive). One that matches, or whose test
-      cannot be decided, denies as `explicit_deny`. Failing that, a deny statement that cannot be evaluated denies as
-      `invalid_policy`. A stored policy or boundary that cannot be read, or whose document is over a configured limit,
-      denies as `invalid_policy` before any statement is assessed.
-   3. *Guardrail*: the guardrails on the tenant, its ancestors and the platform (BL-49). None apply yet: the stage
-      records `uncapped` in the trace and caps nothing.
+      role-attached policies, the policy store's, the resource's and its type's (for every subject), the guardrails'
+      and the boundaries' (session policies' denies join them as those arrive). One that matches, or whose test cannot
+      be decided, denies as `explicit_deny`. Failing that, a deny statement that cannot be evaluated denies as
+      `invalid_policy`. A stored policy, guardrail or boundary that cannot be read, or whose document is over a
+      configured limit, denies as `invalid_policy` before any statement is assessed.
+   3. *Guardrail*: every guardrail on the check's tenant, its ancestors and the platform must allow the check, each
+      through its allow statements, conditions included (see [Guardrails](#guardrails)). One whose statement cannot be
+      evaluated denies as `invalid_policy`; failing that, one with no allow that matches, one with no allow statement
+      at all included, denies as `guardrail`, and each guardrail that refuses adds a `refused` step naming it. An allow
+      whose authentication requirement is unmet does not allow, so the guardrail denies as `guardrail`, never as a
+      step-up. With no guardrail the stage records `uncapped` and caps nothing.
    4. *Boundary*: every permission boundary of the principal and of its identity that applies must allow the check,
       each through its allow statements, conditions included (see [Permission Boundaries](#permission-boundaries)).
       One whose statement cannot be evaluated denies as `invalid_policy`; failing that, one with no allow that matches,
@@ -225,23 +279,23 @@ its `IdentityEvent`.
       statement names them but its conditions do not hold or cannot be decided; and `no_match` otherwise.
 
    Each cap stage can only deny or let the check through: none allows. A cap stage that is reached is always recorded,
-   so the trace shows that the caps ran even when none applied, and a boundary that refuses is named, so the trace
-   shows which cap refused the check, an empty or deny-only boundary included.
+   so the trace shows that the caps ran even when none applied, and a guardrail or boundary that refuses is named, so
+   the trace shows which cap refused the check, an empty or deny-only one included.
 
 2. **The decision is deterministic (AUTHZ-7.9).** Within each stage, policies are assessed in order of name, then stored
    key, then the resource a resource policy is attached to, then document, and each statement in order of position, and
-   every statement of the stage is assessed whatever is found first, so the decision, the statements that decided it
-   and the trace are the same whatever order the policies were read in. A boundary's deny statements are assessed with
-   the deny stage's, after every policy's, and each boundary's allow statements together at the boundary stage, the
-   boundaries in the same order. A stage that decides ends the decision: once a deny decided, no cap and no allow
-   statement is assessed (N4), and once a cap denied, no allow is. What each policy gives (its statements split by
-   effect, their references and its sort key) is worked out once per policy object (`StatementEntries`), not once a
-   check.
+   every statement of the stage is assessed whatever is found first, so the decision, the statements that decided it and
+   the trace are the same whatever order the policies were read in. A guardrail's and a boundary's deny statements are
+   assessed with the deny stage's, after every policy's, the guardrails' before the boundaries', and each cap's allow
+   statements together at its own stage, the guardrails and the boundaries each in the same order. A stage that decides
+   ends the decision: once a deny decided, no cap and no allow statement is assessed (N4), and once a cap denied, no
+   allow is. What each policy gives (its statements split by effect, their references and its sort key) is worked out
+   once per policy object (`StatementEntries`), not once a check.
 
 3. **RBAC is additive / allow-only.** Direct permission grants and role-inherited permissions are unioned on read.
    There is no RBAC-layer deny: every permission a subject holds contributes an allow and nothing else, and only when no
-   statement has decided the check and every cap has let it through: a boundary caps a permission held as it caps a
-   policy's allow.
+   statement has decided the check and every cap has let it through: a guardrail or a boundary caps a permission held
+   as it caps a policy's allow.
 
 4. **All deny semantics live exclusively in policies.** "Everyone in role X except these three users" is a deny
    policy, not an RBAC construct, so an administrator reviewing effective permissions never reasons about negative
@@ -306,13 +360,24 @@ its `IdentityEvent`.
     `insufficient_authentication`: a step-up never gets past a cap. A boundary that cannot be read or evaluated denies
     as `invalid_policy` rather than being skipped (invariant 6), so a broken boundary never lifts the cap.
 
+11. **A guardrail caps every subject in its scope, intersects and grants nothing (AUTHZ-7.6, N41).** Every guardrail
+    that applies to the check, the platform's and those of the check's tenant and each of its ancestors, must allow it;
+    one that does not denies as `guardrail`, whatever else would allow it, before any boundary is weighed. No guardrail
+    means no cap. A guardrail never allows by itself, its unmet authentication requirement never asks for a step-up,
+    and one that cannot be read or evaluated denies as `invalid_policy` (invariant 6). The check's tenant is the
+    resource's when it has one, so a platform-wide permission that admits a resource of another tenant never gets past
+    that tenant's guardrails. A guardrail changes only through `GuardrailService`, for an actor holding
+    `authorization:guardrails:manage` from above the scope, decided through `check()`, and its policy is neither
+    edited nor deleted while it is one, so a tenant can never lift the guardrails it is set under.
+
 ## Trace
 
-Each statement adds one entry: in the deny stage for a deny statement, a boundary's included; in the boundary stage for
-a boundary's allow statement; and in the allow stage for any other allow statement. Each boundary that refuses the
-check adds one entry naming it (`[boundary] read-only[<key>]: refused`). A cap stage that caps nothing adds one entry
-with no statement (`[guardrail] guardrails: uncapped`, `[boundary] boundaries: uncapped`, `[session] session caps:
-uncapped`), and the permission step adds one more when it is asked:
+Each statement adds one entry: in the deny stage for a deny statement, a guardrail's and a boundary's included; in the
+guardrail stage for a guardrail's allow statement; in the boundary stage for a boundary's allow statement; and in the
+allow stage for any other allow statement. Each guardrail or boundary that refuses the check adds one entry naming it
+(`[guardrail] organisation-cap[<key>]: refused`, `[boundary] read-only[<key>]: refused`). A cap stage that caps nothing
+adds one entry with no statement (`[guardrail] guardrails: uncapped`, `[boundary] boundaries: uncapped`, `[session]
+session caps: uncapped`), and the permission step adds one more when it is asked:
 
 | What the step found                                                 | Outcome              |
 |---------------------------------------------------------------------|----------------------|
@@ -324,7 +389,7 @@ uncapped`), and the permission step adds one more when it is asked:
 | It cannot be evaluated                                              | `invalid`            |
 | The subject holds the permission the action names                   | `held`               |
 | The subject does not hold it                                        | `not_held`           |
-| A boundary no allow statement of its own lets the check through     | `refused`            |
+| A cap no allow statement of its own lets the check through          | `refused`            |
 | A cap stage has nothing to cap the check by                         | `uncapped`           |
 
 An authentication requirement is recorded as the condition key `authentication`, with whether it held, and never a
@@ -408,12 +473,34 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   gone, a grantee whose only rows are boundaries included, and removes its boundaries through
   `BoundaryService::removeAll()`, counted apart from its grants, before it revokes its grants through
   `GrantService::revokeAll()`; until then the boundary's policy cannot be deleted.
+- **A guardrail with no allow for the check**: as a boundary's, it denies every check in its scope it does not allow as
+  `guardrail`, names no statement, and adds a `refused` step naming it after its allows' steps.
+- **An unreadable guardrail**: a guardrail whose document cannot be hydrated, or is over a limit, denies every check in
+  its scope as `invalid_policy` at the deny stage (every check, for a platform guardrail), logged as an unreadable
+  policy is. Its policy cannot be edited while it is a guardrail, so it is fixed by removing the guardrail, correcting
+  the policy and setting it again. The right to remove it is decided above the tenant it is on, so a tenant's unreadable
+  guardrail never blocks its own removal, but an unreadable platform guardrail denies that check too, so it can only be
+  removed past the service.
+- **A guardrail and `withPolicies()`**: the override replaces the policies, never the guardrails, so an override never
+  lifts a guardrail.
+- **A guardrail in another application**: a guardrail has no application, so it holds in every application.
+- **A resource admitted from outside the scope**: a subject admitted at platform scope to another tenant's resource
+  through a platform-wide permission is capped by that tenant's guardrails and its ancestors', read in the resource's
+  tenant, besides the platform's.
+- **A guardrail that does not allow managing guardrails**: the right to change guardrails is decided through
+  `check()`, so such a guardrail caps it as any check, and no actor can change the guardrails of its scope or below,
+  its own removal included; every guardrail should allow `authorization:guardrails:manage`.
+- **No authorization manager bound**: `GuardrailAuthority` refuses every actor, so no guardrail is changed unchecked.
+- **The catalogue is never empty**: the package declares `authorization:guardrails:manage` whatever the application
+  configures, so the shipped `DeclaredActionCatalogue` always declares something and a policy is refused per pattern
+  that matches nothing declared, never for an empty catalogue.
 
 ## Implementation Anchors
 
 - `AuthorizationManager::check()` -- the core decision; `decide()` -- the subject and resource stages;
-  `decideGrants()` -- the check's context (`CheckContextFactory::make()`), `invalid_policy` when the policies or the
-  boundaries cannot be gathered, and the evaluator given the policies, the boundaries and the permission callback.
+  `decideGrants()` -- the check's context (`CheckContextFactory::make()`), `invalid_policy` when the policies, the
+  guardrails or the boundaries cannot be gathered, and the evaluator given the policies, the boundaries, the permission
+  callback and the guardrails.
 - `ResourceReferences::of()` -- every resource argument's reference; `ResourceScope::decide()` -- the tenant stage.
 - `ResourcePolicyResolver::policiesFor()` -- the resource's and its type's policies, in one query;
   `PrincipalSelectors` and `CheckContext::isSubjectNamedBy()` -- whether a selector names the subject;
@@ -425,10 +512,15 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   reached, shared with the permissions; `InlinePolicies` -- the grantee an inline policy belongs to and the refusals;
   `SubjectGrants::identityPolicies()` -- the policies of a separate identity, appended after the resolver's.
 - `PolicyEvaluator::evaluate()` -- the deny, cap, allow and implicit stages, each assessing its statements in a fixed
-  order; `cap()` -- the guardrail, boundary and session stages in order; `bound()` -- the boundary stage's
-  intersection; `allow()` -- the allow statements, then the permission asked lazily; `conclude()` -- the order of the
-  outcomes, `insufficient_authentication` among them. `StatementEntries` -- the statements of the policies and the
-  boundaries, split by stage and ordered, worked out once per policy.
+  order; `cap()` -- the guardrail, boundary and session stages in order; `capBy()` -- a cap stage's intersection, the
+  guardrails' and the boundaries'; `allow()` -- the allow statements, then the permission asked lazily; `conclude()` --
+  the order of the outcomes, `insufficient_authentication` among them. `StatementEntries` -- the statements of the
+  policies, the guardrails and the boundaries, split by stage and ordered, worked out once per policy.
+- `GuardrailResolver::guardrailsFor()` -- the guardrails of the platform, the check's tenant and its ancestors, in the
+  resource's tenant when it has one, in one query through `ResolutionCache::rememberGuardrails()`; `GuardrailService`,
+  `Services\Support\GuardrailTable` and `Services\Support\GuardrailAuthority` -- setting and removing them and who may;
+  `PolicyGuardrails` -- the refused edit and delete; `Support\PackagePermissions` -- the permission the package
+  declares.
 - `SubjectGrants::boundaries()` and `BoundaryResolver::boundariesFor()` -- the boundaries of the principal and the
   identity that hold in the check's tenant, in one query through `ResolutionCache::rememberBoundaries()`;
   `BoundaryService` and `Services\Support\BoundaryTable` -- setting, replacing and removing them; `PolicyBoundaries` --
@@ -446,8 +538,9 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 ## Authoritative Tests
 
 - `PolicyEvaluatorTest` -- every outcome and stage, the stage order and its trace, deny precedence, fail-closed
-  undecidable denies, `invalid_policy`, `condition_failed` and `no_match`, the boundary stage (intersection, conditions,
-  a boundary's denies, an invalid boundary, `insufficient_authentication` only after it), the permission asked lazily,
+  undecidable denies, `invalid_policy`, `condition_failed` and `no_match`, the guardrail and boundary stages
+  (intersection, conditions, a cap's denies, an invalid cap, the guardrails before the boundaries,
+  `insufficient_authentication` only after them), the permission asked lazily,
   and the same decision whatever order the policies arrive in; `StatementEntriesTest` -- the fixed order and the work
   done once per policy.
 - `BoundaryServiceTest`, `BoundaryTableTest`, `BoundaryResolverTest` and `PolicyBoundariesTest` -- setting, replacing
@@ -455,6 +548,12 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   refused delete; the Feature `AuthorizationManagerTest` -- a boundary capping every allow source and granting nothing,
   the platform and tenant and the principal and identity intersections, an unreadable boundary, the cache refreshed on
   every change, and the queries taken.
+- `GuardrailServiceTest`, `GuardrailTableTest`, `GuardrailAuthorityTest`, `GuardrailResolverTest` and
+  `PolicyGuardrailsTest` -- setting and removing a guardrail, its scope, the refusals, the events, who may change it
+  and from where, which guardrails apply to a check, and the refused edit and delete; the Feature
+  `AuthorizationManagerTest` -- a guardrail capping every allow source and granting nothing, the platform, tenant and
+  ancestor intersection, the resource's tenant after a platform-wide admission, an unreadable guardrail, the cache
+  refreshed on every change, and the queries taken.
 - `DecisionTest` and `TraceEntryTest` -- the decision's construction, the explanation, the cap stages' steps and the
   freshness.
 - `PolicyEvaluatorTest` and `StatementTest` -- `insufficient_authentication` and where it ranks, an unmet and an
@@ -482,10 +581,13 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 
 ## Change Triggers
 
-- Filling the guardrail (BL-49) or session (BL-50) stage requires updating this note and, for a new kind of denial,
-  `DecisionReason`, and running it in `PolicyEvaluator::cap()` in its place, so it ranks above every allow and above
+- Filling the session (BL-50) stage requires updating this note and, for a new kind of denial, `DecisionReason`, and
+  running it in `PolicyEvaluator::cap()` in its place, so it ranks above every allow and above
   `insufficient_authentication`; its denies join the deny stage. Adding any other stage requires a design decision
   before implementation.
+- Letting a guardrail allow by itself, be skipped when it cannot be read or evaluated, reach only some of its tenant's
+  subtree, or be changed by an actor whose right is held within the tenant it caps would violate invariant 11 and
+  requires a design decision before implementation.
 - Letting a boundary allow by itself, replace another boundary rather than intersect with it, or be skipped when it
   cannot be read or evaluated would violate invariant 10 and requires a design decision before implementation.
 - Letting `insufficient_authentication` win over a deny, an invalid policy or another allow, or reusing a decision that

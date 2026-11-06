@@ -59,6 +59,7 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\ApplicationAccess;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Services\GuardrailService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
@@ -365,6 +366,7 @@ final class AuthorizationServiceProviderTest extends TestCase
             GrantService::class,
             ResourcePolicyService::class,
             BoundaryService::class,
+            GuardrailService::class,
             ApplicationAccess::class,
         ];
 

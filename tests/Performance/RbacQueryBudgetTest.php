@@ -77,11 +77,11 @@ final class RbacQueryBudgetTest extends TestCase
     /**
      * A user carrying a role with five permissions must not emit a database
      * query on any `can()` beyond the first. The initial resolution loads
-     * roles, role permissions, direct permissions, attached policies and the
-     * permission boundaries — one query more than before boundaries, since they
-     * cap every check and are read apart from the policies, so a custom policy
-     * resolver can never drop them — and every subsequent `can()` for the same
-     * principal during the same request is served from cache.
+     * roles, role permissions, direct permissions, attached policies, the
+     * permission boundaries and the guardrails — one query each for the caps,
+     * since they cap every check and are read apart from the policies, so a
+     * custom policy resolver can never drop them — and every subsequent `can()`
+     * for the same principal during the same request is served from cache.
      *
      * @return void
      */
@@ -96,11 +96,12 @@ final class RbacQueryBudgetTest extends TestCase
         $manager = $app->make(AuthorizationManager::class);
 
         // Prime the cache — the first `can()` pays the full resolution cost.
-        // Budget: at most seven queries (roles, role-permissions, direct
-        // permissions, attached policies, the permission boundaries, read in
-        // one query with their documents, plus up to two guard/tenant lookups
-        // executed inside the trait helpers). This is loose on purpose — the
-        // hard assertion below is the zero-query floor on subsequent calls.
+        // Budget: at most eight queries (roles, role-permissions, direct
+        // permissions, attached policies, the permission boundaries and the
+        // guardrails, each read in one query with their documents, plus up to
+        // two guard/tenant lookups executed inside the trait helpers). This is
+        // loose on purpose — the hard assertion below is the zero-query floor
+        // on subsequent calls.
         DB::enableQueryLog();
         DB::flushQueryLog();
 
@@ -108,9 +109,9 @@ final class RbacQueryBudgetTest extends TestCase
 
         $primingQueries = DB::getQueryLog();
         self::assertLessThanOrEqual(
-            7,
+            8,
             \count($primingQueries),
-            'Initial RBAC resolution exceeded the 7-query priming budget.',
+            'Initial RBAC resolution exceeded the 8-query priming budget.',
         );
 
         // Clear the log and loop. A zero-query budget here is the N+1

@@ -10,20 +10,26 @@ use SineMacula\Laravel\Authorization\Events\Policy\Created as PolicyCreated;
 use SineMacula\Laravel\Authorization\Events\Policy\Deleted as PolicyDeleted;
 use SineMacula\Laravel\Authorization\Events\Policy\Updated as PolicyUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\BoundaryException;
+use SineMacula\Laravel\Authorization\Exceptions\GuardrailException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyOwnerException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\OwnerChangedException;
 use SineMacula\Laravel\Authorization\Exceptions\ResourcePolicyException;
 use SineMacula\Laravel\Authorization\Exceptions\SystemInlinePolicyException;
+use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Services\GuardrailService;
+use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Support\DocumentDigest;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
+use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
@@ -231,6 +237,52 @@ final class PolicyObserverTest extends TestCase
         $boundaries->remove(new Reference('user', '1'));
 
         self::assertTrue($policy->delete());
+        Event::assertDispatched(PolicyDeleted::class);
+    }
+
+    /**
+     * Editing or deleting a policy in use as a guardrail is refused before
+     * anything is written or reported, through the model and the policy service
+     * alike; once the guardrail is removed through the guardrail service, it is
+     * edited and deleted.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEditingOrDeletingAPolicyInUseAsAGuardrailIsRefused(): void
+    {
+        $policy     = Policy::query()->create(['name' => 'rail', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['authorization:*']]]]]);
+        $guardrails = $this->app?->make(GuardrailService::class);
+        $policies   = $this->app?->make(PolicyService::class);
+        $actor      = StubIdentity::create(['id' => 'admin-1']);
+
+        self::assertNotNull($guardrails);
+        self::assertNotNull($policies);
+
+        $actor->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAILS_MANAGE]));
+        $guardrails->set($policy, null, $actor);
+
+        Event::fake([PolicyUpdated::class, PolicyDeleted::class]);
+
+        $rewrite = ['statements' => [['effect' => 'allow', 'actions' => ['*']]]];
+
+        foreach ([static fn () => $policy->update(['document' => $rewrite]), static fn () => $policies->rewrite($policy, $rewrite), static fn () => $policy->delete()] as $change) {
+            $refusal = self::refusalOf($change);
+
+            self::assertInstanceOf(GuardrailException::class, $refusal);
+            self::assertSame(GuardrailException::IN_USE, $refusal->getReason());
+        }
+
+        self::assertSame(['authorization:*'], Policy::query()->findOrFail($policy->id)->document['statements'][0]['actions'] ?? null);
+        Event::assertNotDispatched(PolicyUpdated::class);
+        Event::assertNotDispatched(PolicyDeleted::class);
+
+        $guardrails->remove($policy, null, $actor);
+
+        self::assertTrue($policy->refresh()->update(['document' => $rewrite]));
+        self::assertTrue($policy->delete());
+        Event::assertDispatched(PolicyUpdated::class);
         Event::assertDispatched(PolicyDeleted::class);
     }
 

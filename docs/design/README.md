@@ -23,7 +23,8 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
   policies down the hierarchy, and the policies attached to the resource and its type) and why their order never
   matters; resource policies' `principals`, their denies for everyone and why their allows come after the tenant stage
   and every deny; the cap stages (guardrails, permission boundaries and session caps) between the denies and the allows,
-  and why every boundary that applies must allow a check and none grants anything.
+  and why every guardrail and boundary that applies must allow a check and none grants anything; which guardrails apply
+  to a check and who may change them.
 - `polymorphic-identity-pivots.md`: why role, permission, and policy pivots use plain `string`
   `authorizable_type`/`authorizable_id` columns so that integer, UUID, and ULID identities all work.
 - `subject-resolver-contract.md`: the one seam with `sinemacula/laravel-authentication` for the subject, its tenant
@@ -44,10 +45,11 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
 - `management-services.md`: the services every role, permission, policy and grant write goes through, their
   transaction, idempotent grants, re-armed expiries, the locked hierarchy check, the scope each grant holds in, a
   role's policies as its grants, inline policies attached to their grantee alone and deleted with it, and policies
-  attached to resources and resource types, and permission boundaries set on principals and identities.
+  attached to resources and resource types, permission boundaries set on principals and identities, and guardrails
+  set on tenants and the platform by an actor allowed to.
 - `events.md`: the one marker every event implements, the snapshot payloads, the actor the caller passes, one
-  operation id per call, dispatch after commit, the grantees a delete reports, the boundary events and the document
-  digests.
+  operation id per call, dispatch after commit, the grantees a delete reports, the boundary and guardrail events and the
+  document digests.
 
 These documents are secondary to the code and tests, not a replacement for them. If a note and a cited test disagree,
 the test should be treated as authoritative until the mismatch is resolved.

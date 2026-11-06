@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Cache;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
 use SineMacula\Laravel\Authorization\Contracts\IdentityEvent;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Events\Guardrail\GuardrailEvent;
 use SineMacula\Laravel\Authorization\Events\Permission\Deleted as PermissionDeleted;
 use SineMacula\Laravel\Authorization\Events\Permission\Updated as PermissionUpdated;
 use SineMacula\Laravel\Authorization\Events\Policy\Deleted as PolicyDeleted;
@@ -35,11 +36,13 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *   were built from, ancestors included, so the bump reaches every identity
  *   that holds the role or a role below it.
  * - A change to a policy or its deletion bumps the policy, and the versions
- *   every entry of a resource's policies and every entry of a grantee's
- *   boundaries share, since those entries read the documents with the
- *   attachments in one query.
+ *   every entry of a resource's policies, every entry of a grantee's boundaries
+ *   and every entry of the guardrails share, since those entries read the
+ *   documents with the attachments in one query.
  * - Setting, replacing or removing a grantee's boundary bumps the grantee, as
  *   any grant of it does.
+ * - Setting or removing a guardrail bumps the version every entry of the
+ *   guardrails shares, whichever scope it is in.
  * - A policy attached to or detached from a resource bumps the version the
  *   policies attached to the resources of its type share, for a record and for
  *   the whole type alike.
@@ -94,7 +97,8 @@ final class Invalidation
             $event instanceof RoleUpdated,
             $event instanceof RoleDeleted => [$store->roleKey($event->role->id)],
             $event instanceof PolicyUpdated,
-            $event instanceof PolicyDeleted => [$store->policyKey($event->policy->id), $store->resourcePoliciesKey(), $store->boundariesKey()],
+            $event instanceof PolicyDeleted  => [$store->policyKey($event->policy->id), $store->resourcePoliciesKey(), $store->boundariesKey(), $store->guardrailsKey()],
+            $event instanceof GuardrailEvent => [$store->guardrailsKey()],
             $event instanceof ResourcePolicyAttached,
             $event instanceof ResourcePolicyDetached => [$store->resourcePoliciesKey($event->resourceType)],
             $event instanceof PermissionDeleted      => self::holderKeys($store, \array_map(static fn (Reference $role): string => $role->id, $event->roles), $event->grantees),

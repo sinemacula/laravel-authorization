@@ -64,15 +64,19 @@ final class DeclaredActionCatalogueTest extends TestCase
     }
 
     /**
-     * With nothing declared, no pattern covers the catalogue, not even `*`.
+     * With nothing configured, only the package's own permissions are declared:
+     * a pattern covering one of them covers the catalogue, and any other
+     * pattern covers nothing.
      *
      * @return void
      */
-    public function testCoversNothingWhenNothingIsDeclared(): void
+    public function testCoversThePackagesPermissionsAloneWhenNothingIsConfigured(): void
     {
         $catalogue = $this->catalogue([], []);
 
-        self::assertFalse($catalogue->covers('*'));
+        self::assertTrue($catalogue->covers('*'));
+        self::assertTrue($catalogue->covers('authorization:guardrails:manage'));
+        self::assertTrue($catalogue->covers('authorization:*'));
         self::assertFalse($catalogue->covers('posts:create'));
     }
 

@@ -43,6 +43,9 @@ enum DecisionReason: string
     /** An allow statement names the check, and only its authentication requirement is unmet. */
     case INSUFFICIENT_AUTHENTICATION = 'insufficient_authentication';
 
+    /** A guardrail on the check's tenant, one of its ancestors or the platform does not allow the check. */
+    case GUARDRAIL = 'guardrail';
+
     /** A permission boundary of the subject's principal or identity does not allow the check. */
     case BOUNDARY = 'boundary';
 
@@ -63,6 +66,7 @@ enum DecisionReason: string
             self::RESOURCE_UNRESOLVED         => 'the resource cannot be identified',
             self::TENANT_SCOPE                => 'the resource belongs to a tenant outside the scope',
             self::INSUFFICIENT_AUTHENTICATION => 'a statement allows it once further authentication is met',
+            self::GUARDRAIL                   => 'a guardrail does not allow it',
             self::BOUNDARY                    => 'a permission boundary does not allow it',
         };
     }

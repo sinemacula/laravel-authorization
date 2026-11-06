@@ -18,6 +18,7 @@ use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use Tests\Feature\Stubs\ConfigurablePermissionProvider;
 use Tests\Feature\Stubs\ContributingAuthenticationContext;
+use Tests\Feature\Stubs\EmptyActionCatalogue;
 use Tests\Feature\Stubs\Enums\CataloguePermission;
 use Tests\TestCase;
 
@@ -476,19 +477,38 @@ final class PolicyValidatorTest extends TestCase
     }
 
     /**
-     * With no permissions declared, every document is refused with the one
-     * reason, whatever actions it names.
+     * With a catalogue that declares no action at all, every document is
+     * refused with the one reason, whatever actions it names.
      *
      * @return void
      */
-    public function testRefusesEveryDocumentWhenNoPermissionsAreDeclared(): void
+    public function testRefusesEveryDocumentWhenNoActionIsDeclared(): void
     {
-        $validator = $this->declaring([], []);
+        $this->app?->instance(ActionCatalogue::class, new EmptyActionCatalogue);
 
-        $reason = 'No permissions are declared to check the policy\'s actions against; declare them in permission_enums or permission_providers.';
+        $validator = self::validator();
+        $reason    = 'No permissions are declared to check the policy\'s actions against; declare them in permission_enums or permission_providers.';
 
         self::assertSame([$reason], $validator->errors(self::document([['effect' => 'allow', 'actions' => ['posts:create']], ['effect' => 'deny', 'actions' => ['*']]])));
         self::assertSame([$reason], $validator->errors(self::document([])));
+    }
+
+    /**
+     * With no permissions configured, the package's own are still declared: a
+     * document naming them is valid, and one naming any other action is refused
+     * pattern by pattern.
+     *
+     * @return void
+     */
+    public function testChecksTheActionsAgainstThePackagesPermissionsWhenNothingIsConfigured(): void
+    {
+        $validator = $this->declaring([], []);
+
+        self::assertSame([], $validator->errors(self::document([['effect' => 'allow', 'actions' => ['authorization:guardrails:manage', 'authorization:*']]])));
+        self::assertSame(
+            ['Policy statement #0 actions pattern \'posts:create\' matches no declared permission.'],
+            $validator->errors(self::document([['effect' => 'allow', 'actions' => ['posts:create']]])),
+        );
     }
 
     /**

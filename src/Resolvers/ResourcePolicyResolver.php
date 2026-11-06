@@ -78,7 +78,7 @@ final readonly class ResourcePolicyResolver
         $policies = self::read($type, $id);
         $tenant   = $resource->tenant;
 
-        if ($tenant === null || self::isDecidedIn($tenant)) {
+        if ($tenant === null || TenantScope::currentChain()->isAt($tenant)) {
             return $policies;
         }
 
@@ -168,20 +168,6 @@ final readonly class ResourcePolicyResolver
         }
 
         return !\str_contains($id, "\0") && \strlen($id) <= Reference::MAX_BYTES;
-    }
-
-    /**
-     * Determine whether the check is decided in the tenant: the tenant the
-     * tenant scope applies is that tenant.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
-     * @return bool
-     */
-    private static function isDecidedIn(Reference $tenant): bool
-    {
-        $current = TenantScope::currentChain()->tenant();
-
-        return $current !== null && $current->type === $tenant->type && $current->id === $tenant->id;
     }
 
     /**

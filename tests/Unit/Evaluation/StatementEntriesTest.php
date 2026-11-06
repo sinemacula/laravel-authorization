@@ -34,7 +34,7 @@ final class StatementEntriesTest extends TestCase
      */
     public function testGathersNothingFromNoPolicies(): void
     {
-        self::assertSame(['deny' => [], 'allow' => [], 'boundaries' => []], (new StatementEntries)->of([]));
+        self::assertSame(['deny' => [], 'allow' => [], 'guardrails' => [], 'boundaries' => []], (new StatementEntries)->of([]));
     }
 
     /**
@@ -53,6 +53,7 @@ final class StatementEntriesTest extends TestCase
 
         self::assertSame(['a#0', 'b#1'], self::labels($gathered['deny']));
         self::assertSame(['a#1', 'a#2', 'b#0'], self::labels($gathered['allow']));
+        self::assertSame([], $gathered['guardrails']);
         self::assertSame([], $gathered['boundaries']);
         self::assertSame($a->statements[0], $gathered['deny'][0][1]);
         self::assertEquals(new TraceEntry(DecisionStage::DENY, TraceOutcome::NOT_APPLICABLE, new StatementReference('a', 0)), $gathered['deny'][0][2]);
@@ -103,6 +104,57 @@ final class StatementEntriesTest extends TestCase
         self::assertSame(['b-cap#0'], self::labels($gathered['boundaries'][1][0]));
         self::assertEquals(new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::NOT_APPLICABLE, new StatementReference('a-cap', 1)), $gathered['boundaries'][0][0][0][2]);
         self::assertEquals(new TraceEntry(DecisionStage::DENY, TraceOutcome::NOT_APPLICABLE, new StatementReference('a-cap', 0)), $gathered['deny'][1][2]);
+    }
+
+    /**
+     * A guardrail's deny statements join the deny stage after every policy's
+     * and before every boundary's, and its allow statements are kept apart, one
+     * list per guardrail, each with the guardrail stage's trace entry, the
+     * guardrails by name.
+     *
+     * @return void
+     */
+    public function testKeepsEachGuardrailsAllowsApartAndJoinsItsDenies(): void
+    {
+        $policy   = self::policy('z', [['effect' => 'deny', 'actions' => ['x']], ['effect' => 'allow', 'actions' => ['x']]]);
+        $boundary = self::policy('a-boundary', [['effect' => 'deny', 'actions' => ['w']], ['effect' => 'allow', 'actions' => ['x']]]);
+        $second   = self::policy('b-rail', [['effect' => 'allow', 'actions' => ['x']]])->withId('2');
+        $first    = self::policy('a-rail', [['effect' => 'deny', 'actions' => ['y']], ['effect' => 'allow', 'actions' => ['x']], ['effect' => 'allow', 'actions' => ['z']]]);
+
+        $gathered = (new StatementEntries)->of([$policy], [$boundary], [$second, $first]);
+
+        self::assertSame(['z#0', 'a-rail#0', 'a-boundary#0'], self::labels($gathered['deny']));
+        self::assertSame(['z#1'], self::labels($gathered['allow']));
+        self::assertCount(2, $gathered['guardrails']);
+        self::assertSame(['a-rail#1', 'a-rail#2'], self::labels($gathered['guardrails'][0][0]));
+        self::assertSame(['b-rail#0'], self::labels($gathered['guardrails'][1][0]));
+        self::assertSame(['a-boundary#1'], self::labels($gathered['boundaries'][0][0]));
+        self::assertEquals(new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::NOT_APPLICABLE, new StatementReference('a-rail', 1)), $gathered['guardrails'][0][0][0][2]);
+        self::assertEquals(new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::REFUSED, null, [], 'b-rail[2]'), $gathered['guardrails'][1][1]);
+        self::assertEquals(new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::NOT_APPLICABLE, new StatementReference('a-boundary', 1)), $gathered['boundaries'][0][0][0][2]);
+    }
+
+    /**
+     * A policy that is both a guardrail and a boundary is gathered once for
+     * each cap, its deny statements once, each cap's entries naming its own
+     * stage, and worked out once per stage.
+     *
+     * @return void
+     */
+    public function testGathersAPolicyThatIsAGuardrailAndABoundaryOnceForEachCap(): void
+    {
+        $entries = new StatementEntries;
+        $cap     = self::policy('cap', [['effect' => 'deny', 'actions' => ['y']], ['effect' => 'allow', 'actions' => ['x']]])->withId('3');
+
+        $gathered = $entries->of([], [$cap], [$cap]);
+
+        self::assertSame(['cap#0'], self::labels($gathered['deny']));
+        self::assertSame(DecisionStage::GUARDRAIL, $gathered['guardrails'][0][0][0][2]->stage);
+        self::assertSame(DecisionStage::GUARDRAIL, $gathered['guardrails'][0][1]->stage);
+        self::assertSame(DecisionStage::BOUNDARY, $gathered['boundaries'][0][0][0][2]->stage);
+        self::assertSame(DecisionStage::BOUNDARY, $gathered['boundaries'][0][1]->stage);
+        self::assertSame($gathered['guardrails'][0][1], $entries->of([], [], [$cap])['guardrails'][0][1]);
+        self::assertSame($gathered['boundaries'][0][1], $entries->of([], [$cap])['boundaries'][0][1]);
     }
 
     /**

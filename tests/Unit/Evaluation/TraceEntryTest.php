@@ -38,7 +38,7 @@ final class TraceEntryTest extends TestCase
         self::assertSame(TraceOutcome::HELD, $entry->outcome);
         self::assertNull($entry->statement);
         self::assertSame([], $entry->conditions);
-        self::assertNull($entry->boundary);
+        self::assertNull($entry->cap);
     }
 
     /**
@@ -81,17 +81,18 @@ final class TraceEntryTest extends TestCase
     }
 
     /**
-     * toString() names the boundary a step about no one statement is about,
-     * such as one that refused the check.
+     * toString() names the guardrail or boundary a step about no one statement
+     * is about, such as one that refused the check.
      *
      * @return void
      */
-    public function testToStringNamesTheBoundaryOfAStepAboutNoStatement(): void
+    public function testToStringNamesTheCapOfAStepAboutNoStatement(): void
     {
         $entry = new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::REFUSED, null, [], 'cap[7]');
 
-        self::assertSame('cap[7]', $entry->boundary);
+        self::assertSame('cap[7]', $entry->cap);
         self::assertSame('[boundary] cap[7]: refused', $entry->toString());
+        self::assertSame('[guardrail] tenant-cap[9]: refused', (new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::REFUSED, null, [], 'tenant-cap[9]'))->toString());
     }
 
     /**

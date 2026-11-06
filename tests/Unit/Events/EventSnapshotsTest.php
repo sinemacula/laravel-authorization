@@ -55,7 +55,9 @@ final class EventSnapshotsTest extends TestCase
         self::assertContains('Role/PermissionGranted', $names);
         self::assertContains('Identity/BoundarySet', $names);
         self::assertContains('Identity/BoundaryRemoved', $names);
-        self::assertCount(32, $names);
+        self::assertContains('Guardrail/GuardrailSet', $names);
+        self::assertContains('Guardrail/GuardrailRemoved', $names);
+        self::assertCount(34, $names);
     }
 
     /**
