@@ -52,7 +52,8 @@ final class HasRolesTest extends TestCase
     }
 
     /**
-     * A grant in a tenant through the trait can be limited to that tenant.
+     * A grant in a tenant through the trait can be limited to that tenant, and
+     * reaches the tenants below it by default.
      *
      * @return void
      *
@@ -67,7 +68,12 @@ final class HasRolesTest extends TestCase
 
         $user->assignRole('editor', null, $tenant, false);
 
-        self::assertSame([false], DB::table('authorizable_roles')->pluck('include_subtree')->map(static fn (mixed $reach): bool => (bool) $reach)->all());
+        Role::create(['name' => 'viewer']);
+        $user->assignRole('viewer', null, $tenant);
+
+        $reaches = DB::table('authorizable_roles')->pluck('include_subtree')->map(static fn (mixed $reach): bool => (bool) $reach)->all();
+
+        self::assertEqualsCanonicalizing([false, true], $reaches);
     }
 
     /**

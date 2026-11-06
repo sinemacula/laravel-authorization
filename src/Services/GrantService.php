@@ -344,8 +344,8 @@ final class GrantService
 
         $table->revokeInEveryScope();
 
-        foreach ($grants as [$id, $tenant]) {
-            $events[] = $kind->revokedEvent($operation, $grantee, $models[$id], new GrantScope($tenant));
+        foreach ($grants as [$id, $scope]) {
+            $events[] = $kind->revokedEvent($operation, $grantee, $models[$id], $scope);
         }
 
         return $events;
@@ -424,14 +424,16 @@ final class GrantService
             foreach ($candidates as $model) {
                 $scope = GrantScopes::of($kind, $model, $named);
                 $table = self::table($kind, $reference, $operation, $scope);
+                $key   = self::key($model);
+                $reach = $table->reaches([$key]);
 
-                if ($table->held([self::key($model)]) === []) {
+                if ($reach === []) {
                     continue;
                 }
 
-                $table->revoke([self::key($model)]);
+                $table->revoke([$key]);
 
-                $events[] = $kind->revokedEvent($operation, $reference, $model, new GrantScope($scope));
+                $events[] = $kind->revokedEvent($operation, $reference, $model, new GrantScope($scope, null, $reach[$key]));
             }
 
             OperationScope::dispatch(...$events);
@@ -484,6 +486,8 @@ final class GrantService
             $changed = [];
             $events  = [];
 
+            $reaches = $table->reaches($revoked);
+
             $table->revoke($revoked);
 
             foreach ($keep as $model) {
@@ -495,7 +499,7 @@ final class GrantService
             }
 
             foreach ($kind->find($revoked) as $model) {
-                $events[] = $kind->revokedEvent($operation, $reference, $model, new GrantScope($scope));
+                $events[] = $kind->revokedEvent($operation, $reference, $model, new GrantScope($scope, null, $reaches[self::key($model)]));
             }
 
             OperationScope::dispatch(...$events);

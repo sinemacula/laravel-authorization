@@ -59,7 +59,8 @@ final class HasPoliciesTest extends TestCase
     }
 
     /**
-     * A grant in a tenant through the trait can be limited to that tenant.
+     * A grant in a tenant through the trait can be limited to that tenant, and
+     * reaches the tenants below it by default.
      *
      * @return void
      *
@@ -74,7 +75,12 @@ final class HasPoliciesTest extends TestCase
 
         $user->attachPolicy($policy, null, $tenant, false);
 
-        self::assertSame([false], DB::table('authorizable_policies')->pluck('include_subtree')->map(static fn (mixed $reach): bool => (bool) $reach)->all());
+        $other = Policy::create(['name' => 'writers', 'document' => ['version' => 1, 'statements' => []]]);
+        $user->attachPolicy($other, null, $tenant);
+
+        $reaches = DB::table('authorizable_policies')->pluck('include_subtree')->map(static fn (mixed $reach): bool => (bool) $reach)->all();
+
+        self::assertEqualsCanonicalizing([false, true], $reaches);
     }
 
     /**

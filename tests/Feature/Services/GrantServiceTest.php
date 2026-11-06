@@ -316,7 +316,8 @@ final class GrantServiceTest extends TestCase
      * A grant in a tenant can be limited to it, and granting it again with the
      * other reach changes the reach, reported as a change with the granted
      * event carrying it; a platform-wide grant always reaches below, whatever
-     * it is given, and each kind and the trait helpers pass the reach on.
+     * it is given, each kind and the trait helpers pass the reach on, and each
+     * reaches below by default.
      *
      * @return void
      *
@@ -358,6 +359,47 @@ final class GrantServiceTest extends TestCase
         self::assertSame(0, DB::table('authorizable_roles')->whereNull('tenant_type')->where('include_subtree', false)->count());
         self::assertSame(1, DB::table('authorizable_permissions')->where('include_subtree', false)->count());
         self::assertSame(1, DB::table('authorizable_policies')->where('include_subtree', false)->count());
+        self::assertSame(GrantOutcome::REACH_CHANGED, self::service()->grantPermission($user, 'posts:edit', tenant: $tenant));
+        self::assertSame(GrantOutcome::REACH_CHANGED, self::service()->attachPolicy($user, Policy::query()->sole(), tenant: $tenant));
+        self::assertSame(0, DB::table('authorizable_permissions')->where('include_subtree', false)->count());
+        self::assertSame(0, DB::table('authorizable_policies')->where('include_subtree', false)->count());
+    }
+
+    /**
+     * A revocation reports the reach the grant had, whether it is revoked by
+     * itself, dropped by a sync or revoked with everything the grantee held.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARevocationReportsTheReachTheGrantHad(): void
+    {
+        $user   = self::user();
+        $tenant = Reference::of(self::createTenant('tenant-a'));
+
+        foreach (['editor', 'viewer', 'author', 'owner'] as $name) {
+            Role::query()->create(['name' => $name]);
+        }
+
+        self::service()->grantRole($user, 'editor', tenant: $tenant, includeSubtree: false);
+        self::service()->grantRole($user, 'viewer', tenant: $tenant, includeSubtree: false);
+        self::service()->grantRole($user, 'author', tenant: $tenant);
+        self::service()->grantRole($user, 'owner', tenant: $tenant, includeSubtree: false);
+
+        Event::fake();
+
+        self::service()->revokeRole($user, 'editor', tenant: $tenant);
+        self::service()->syncRoles($user, ['author', 'owner'], tenant: $tenant);
+        self::service()->revokeAll($user);
+
+        $reaches = [];
+
+        foreach (self::dispatchedEvents(RoleRevoked::class) as $event) {
+            $reaches[$event->name] = $event->scope->includeSubtree;
+        }
+
+        self::assertEquals(['editor' => false, 'viewer' => false, 'author' => true, 'owner' => false], $reaches);
     }
 
     /**

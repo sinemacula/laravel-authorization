@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChange;
 use SineMacula\Laravel\Authorization\Services\Support\GrantTable;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\TestCase;
@@ -161,6 +162,26 @@ final class GrantTableTest extends TestCase
         self::assertSame(GrantOutcome::REARMED, $limited->rearm($expired->id, null)->outcome);
         self::assertSame(GrantOutcome::UNCHANGED, $limited->rearm($live->id, null)->outcome);
         self::assertEquals([$role->id => false, $expired->id => false, $live->id => true], self::reaches());
+    }
+
+    /**
+     * The reach of each held row in the scope is read by key, and a row in
+     * another scope or not held is left out.
+     *
+     * @return void
+     */
+    public function testReachesReadEachHeldRowInTheScope(): void
+    {
+        $role    = self::role();
+        $other   = self::role('viewer');
+        $outside = self::role('author');
+
+        self::table(tenant: self::tenant())->grant($role->id, null);
+        self::table(tenant: self::tenant(), includeSubtree: false)->grant($other->id, null);
+        self::table()->grant($outside->id, null);
+
+        self::assertEquals([$role->id => true, $other->id => false], self::table(tenant: self::tenant())->reaches([$role->id, $other->id, $outside->id]));
+        self::assertSame([], self::table(tenant: self::tenant())->reaches([]));
     }
 
     /**
@@ -355,7 +376,8 @@ final class GrantTableTest extends TestCase
     }
 
     /**
-     * A held grant's expiry is read back under a row lock on the grant table.
+     * A held grant's expiry, and then its reach, are read back under a row lock
+     * on the grant table.
      *
      * @return void
      */
@@ -370,7 +392,10 @@ final class GrantTableTest extends TestCase
 
         $table->grant($role->id, null);
 
-        self::assertSame([['authorizable_roles', ['stub_identity', 'user-1', $role->id]]], $locks->getArrayCopy());
+        self::assertSame([
+            ['authorizable_roles', ['stub_identity', 'user-1', $role->id]],
+            ['authorizable_roles', ['stub_identity', 'user-1', $role->id]],
+        ], $locks->getArrayCopy());
     }
 
     /**
@@ -603,14 +628,14 @@ final class GrantTableTest extends TestCase
         $second = self::role('second');
 
         self::table()->grant($first->id, null);
-        self::table(tenant: self::tenant())->grant($second->id, null);
+        self::table(tenant: self::tenant(), includeSubtree: false)->grant($second->id, null);
         self::table('user-2')->grant($first->id, null);
 
         $grants = self::table()->grantsInEveryScope();
 
         \usort($grants, static fn (array $left, array $right): int => $left[0] <=> $right[0]);
 
-        $expected = [[$first->id, null], [$second->id, self::tenant()]];
+        $expected = [[$first->id, new GrantScope], [$second->id, new GrantScope(self::tenant(), null, false)]];
 
         \usort($expected, static fn (array $left, array $right): int => $left[0] <=> $right[0]);
 

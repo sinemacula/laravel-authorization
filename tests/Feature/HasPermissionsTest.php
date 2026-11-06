@@ -53,7 +53,8 @@ final class HasPermissionsTest extends TestCase
     }
 
     /**
-     * A grant in a tenant through the trait can be limited to that tenant.
+     * A grant in a tenant through the trait can be limited to that tenant, and
+     * reaches the tenants below it by default.
      *
      * @return void
      *
@@ -68,7 +69,12 @@ final class HasPermissionsTest extends TestCase
 
         $user->givePermission('posts:edit', null, $tenant, false);
 
-        self::assertSame([false], DB::table('authorizable_permissions')->pluck('include_subtree')->map(static fn (mixed $reach): bool => (bool) $reach)->all());
+        Permission::create(['name' => 'posts:read']);
+        $user->givePermission('posts:read', null, $tenant);
+
+        $reaches = DB::table('authorizable_permissions')->pluck('include_subtree')->map(static fn (mixed $reach): bool => (bool) $reach)->all();
+
+        self::assertEqualsCanonicalizing([false, true], $reaches);
     }
 
     /**

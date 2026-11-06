@@ -74,8 +74,8 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * filtered out of `$user->policies` the moment the clock passes the
      * supplied instant, without requiring a sweeper run. Passing null (the
      * default) creates a forever attachment. Attaching a policy the identity
-     * holds with the same expiry changes nothing and dispatches no event; an
-     * attachment that has expired is re-armed with the new expiry.
+     * holds with the same expiry and reach changes nothing and dispatches no
+     * event; an attachment that has expired is re-armed with the new expiry.
      *
      * A grant in a tenant also holds in the tenants below it in the tenant
      * tree, unless `$includeSubtree` is false.
