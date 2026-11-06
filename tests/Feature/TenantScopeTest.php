@@ -327,6 +327,8 @@ final class TenantScopeTest extends TestCase
      * throws.
      *
      * @return void
+     *
+     * @throws \Throwable
      */
     public function testWithinRunsUnderAnotherTenantAndApplication(): void
     {
@@ -341,7 +343,7 @@ final class TenantScopeTest extends TestCase
         self::assertSame(['a-role', 'platform-role'], $this->roleNames());
 
         try {
-            TenantScope::within(null, 'admin', static fn (): never => throw new \RuntimeException('Refused.'));
+            TenantScope::within(null, 'admin', static fn (): never => self::refuse());
         } catch (\RuntimeException) {
             self::assertSame('web', TenantScope::currentApplication());
         }
@@ -675,5 +677,17 @@ final class TenantScopeTest extends TestCase
                 return 'custom-tenant';
             }
         };
+    }
+
+    /**
+     * Throw, as a callback that fails would.
+     *
+     * @return never
+     *
+     * @throws \RuntimeException
+     */
+    private static function refuse(): never
+    {
+        throw new \RuntimeException('Refused.');
     }
 }
