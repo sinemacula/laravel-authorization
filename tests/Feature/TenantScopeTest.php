@@ -322,6 +322,81 @@ final class TenantScopeTest extends TestCase
     }
 
     /**
+     * Within a tenant and application, queries and the current application are
+     * theirs; afterwards the request's are restored, also when the callback
+     * throws.
+     *
+     * @return void
+     */
+    public function testWithinRunsUnderAnotherTenantAndApplication(): void
+    {
+        [$tenantA, $tenantB] = $this->seedRows();
+
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver(new \stdClass, $tenantA, 'web'));
+
+        $inside = TenantScope::within($tenantB, 'admin', fn (): array => [TenantScope::currentApplication(), $this->roleNames()]);
+
+        self::assertSame(['admin', ['b-role', 'platform-role']], $inside);
+        self::assertSame('web', TenantScope::currentApplication());
+        self::assertSame(['a-role', 'platform-role'], $this->roleNames());
+
+        try {
+            TenantScope::within(null, 'admin', static fn (): never => throw new \RuntimeException('Refused.'));
+        } catch (\RuntimeException) {
+            self::assertSame('web', TenantScope::currentApplication());
+        }
+    }
+
+    /**
+     * Run while the subject is being resolved, a query within sees platform
+     * rows only, and the holder is then resolved as usual.
+     *
+     * @return void
+     */
+    public function testWithinWhileResolvingLeavesTheHolderToBeResolved(): void
+    {
+        $this->seedRows();
+
+        $resolver = new class implements SubjectResolver {
+            /** @var array<int, string>|null The role names seen within, while resolving. */
+            public ?array $seen = null;
+
+            /**
+             * Query the roles within another application, then resolve.
+             *
+             * @return \SineMacula\Laravel\Authorization\Subject
+             */
+            #[\Override]
+            public function resolve(): Subject
+            {
+                /** @var array<int, string> $seen */
+                $seen       = TenantScope::within(null, 'admin', static fn (): array => Role::query()->orderBy('name')->pluck('name')->all());
+                $this->seen = $seen;
+
+                return $this->forUser(new \stdClass);
+            }
+
+            /**
+             * Return the user as the subject, on the web application.
+             *
+             * @param  object  $user
+             * @return \SineMacula\Laravel\Authorization\Subject
+             */
+            #[\Override]
+            public function forUser(object $user): Subject
+            {
+                return new Subject($user, $user, null, 'web');
+            }
+        };
+
+        $this->app?->instance(SubjectResolver::class, $resolver);
+
+        self::assertSame('web', TenantScope::currentApplication());
+        self::assertSame(['platform-role'], $resolver->seen);
+        self::assertSame('web', TenantScope::currentApplication());
+    }
+
+    /**
      * Flushing the resolved tenant empties the resolution cache's memo, whose
      * entries were resolved under it.
      *

@@ -36,6 +36,7 @@ use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Services\ApplicationAccess;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
@@ -419,7 +420,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
      */
     private function registerManagementServices(): void
     {
-        foreach ([RoleService::class, PermissionService::class, PolicyService::class, GrantService::class] as $service) {
+        foreach ([RoleService::class, PermissionService::class, PolicyService::class, GrantService::class, ApplicationAccess::class] as $service) {
             $this->app->singleton($service);
         }
     }

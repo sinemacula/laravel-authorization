@@ -62,6 +62,7 @@ final class ConfigValidator
         self::validateGateOnConflict($config['gate']['on_conflict'] ?? null);
         self::validateSubjectResolver($config['subject_resolver'] ?? null);
         self::validateTenantTree($config['tenant_tree'] ?? null);
+        self::validateApplicationAccess($config['application_access'] ?? []);
         self::validatePolicyStore($config['policy_store'] ?? null);
         self::validateCacheStore($config['cache']['store'] ?? null, $container);
         self::validateCacheTtl($config['cache']['ttl'] ?? 300);
@@ -335,6 +336,28 @@ final class ConfigValidator
         }
 
         self::assertImplementsContract($value, TenantTree::class, 'authorization.tenant_tree');
+    }
+
+    /**
+     * Validate that `application_access` maps application names to the
+     * permission names they require, each a non-empty string.
+     *
+     * @param  mixed  $value
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    private static function validateApplicationAccess(mixed $value): void
+    {
+        if (!\is_array($value)) {
+            throw new InvalidAuthorizationConfigException('authorization.application_access', 'expected an array of application names to permission names.');
+        }
+
+        foreach ($value as $application => $permission) {
+            if (!\is_string($application) || $application === '' || !\is_string($permission) || $permission === '') {
+                throw new InvalidAuthorizationConfigException('authorization.application_access', 'each application name must map to a permission name, both non-empty strings.');
+            }
+        }
     }
 
     /**
