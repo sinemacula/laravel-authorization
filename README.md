@@ -108,6 +108,8 @@ must each allow the check, then an explicit allow or a permission held allows it
 - **Route middleware and Blade directives**: `permission:`, `authorize:` and the permission directives decide on the
   same full decision as the Gate; `role:` and the role directives check role membership. `|` separates the names of a
   list: any one of them admits for the middleware and the any-of directives, every one is needed for the all-of ones.
+- **Localisable messages**: every denial and unauthenticated response a client can see is a translation key, with one
+  generic line for every denial and the reason code beside it for an application that words its own.
 - **System records**: roles, permissions and policies flagged `is_system` cannot be edited, deleted or have the flag
   cleared unless `forceSystem()` unlocks the next change.
 - **Explanations**: `Authorization::explain()`, the last decision of the request, and `authorization:why-can` on the
@@ -511,14 +513,11 @@ that cannot be read, or that is over a configured limit, denies every check for 
 `Authorization::authorize()` throws `SineMacula\Laravel\Authorization\Exceptions\AuthorizationException` when the check
 is denied. It extends Laravel's `Illuminate\Auth\Access\AuthorizationException`, so Laravel's handler answers `403`. It
 carries the decision's reason code (`getReason()`) and nothing else: its message is the translated
-`authorization::authorization.denied` line, and the action, the resource and the policies stay out of it. A denial as
-`insufficient_authentication` throws `InsufficientAuthenticationException` instead (see [Authentication
-requirements](#authentication-requirements)). The full decision is on the `AuthorizationFailed` event and
-`Authorization::lastDecision()`. To reword the message or add a locale, publish the language files:
-
-```bash
-php artisan vendor:publish --tag=authorization-lang
-```
+`authorization::authorization.denied` line, whatever the reason, and the action, the resource and the policies stay out
+of it. A denial as `insufficient_authentication` throws `InsufficientAuthenticationException` instead (see
+[Authentication requirements](#authentication-requirements)). The full decision is on the `AuthorizationFailed` event
+and `Authorization::lastDecision()`. To reword the message, add a locale or word a message per reason, see
+[Localisation](#localisation).
 
 ### Role and inline policies
 
@@ -1611,9 +1610,10 @@ requirement as the key `authentication`, with whether it held, and never a proof
 `Illuminate\Auth\Access\AuthorizationException`, not the package's, so a handler that maps the package's denials does
 not catch it, and an application that maps it to nothing still answers `403`. It carries the reason code
 (`getReason()`) and the candidate requirements, once each (`requirements()`); never a policy, a statement, the trace or
-a proof. Its message is the translated `authorization::authorization.insufficient_authentication` line. Like any
-denial, it is recorded as the last decision and fires `AuthorizationFailed` first. Map it to your step-up response,
-such as RFC 9470's `insufficient_user_authentication` challenge:
+a proof. Its message is the generic `authorization::authorization.denied` line, as every denial's is, so a step-up
+prompt is the application's own to word (see [Localisation](#localisation)). Like any denial, it is recorded as the
+last decision and fires `AuthorizationFailed` first. Map it to your step-up response, such as RFC 9470's
+`insufficient_user_authentication` challenge:
 
 ```php
 // bootstrap/app.php
@@ -1624,7 +1624,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationExcept
 ->withExceptions(function (Exceptions $exceptions): void {
     $exceptions->render(fn (InsufficientAuthenticationException $exception) => response()->json(
         [
-            'message'      => $exception->getMessage(),
+            'message'      => __('Confirm your identity to continue.'),
             'requirements' => array_map(
                 fn (UnmetRequirement $candidate): array => $candidate->toArray(),
                 $exception->requirements(),
@@ -1871,13 +1871,13 @@ method name is mapped to an action: each method names its own. A guest (a null u
 method whose user is nullable) is no subject, so it is denied as `subject_unresolved`.
 
 An allow is `Response::allow()`. A denial is `Response::deny()` with the decision's reason code as its code, such as
-`explicit_deny`, and as its message the line the package's language file holds for that code, such as
-`authorization::authorization.explicit_deny`, in the current locale; publish the language files to reword one. A
-denial is never a not-found response, so Laravel answers it with a `403`:
+`explicit_deny`, and as its message the generic `authorization::authorization.denied` line, whatever the reason, in the
+current locale; read the code to word a message per reason (see [Localisation](#localisation)). A denial is never a
+not-found response, so Laravel answers it with a `403`:
 
 ```php
 Gate::inspect('archive', $post)->code();     // 'explicit_deny'
-Gate::inspect('archive', $post)->message();  // 'This action is not allowed.'
+Gate::inspect('archive', $post)->message();  // 'This action is unauthorized.'
 ```
 
 An `insufficient_authentication` denial keeps its own code, but the trait raises no
@@ -1922,12 +1922,14 @@ In each of them `|` separates alternatives, and any one admits the request; chai
 comma does not list alternatives: the second argument is the guard of `role:` or the route parameter of `authorize:`,
 `permission:` refuses one (no guard changes a decision), and a third argument, or a list that names nothing, is refused
 with an `InvalidCheckArgumentException`. A request without a subject throws Laravel's `AuthenticationException`
-(`401`). A denial throws the package's `AuthorizationException` (`403`) with the reason code and a translated message.
+(`401`) with the translated `authorization::authorization.unauthenticated` line. A denial throws the package's
+`AuthorizationException` (`403`) with the reason code and the translated `authorization::authorization.denied` line,
+whatever the reason.
 A denial of `permission:` or `authorize:` is a decision: it is recorded as the last decision and fires
-`AuthorizationFailed` once, for the list's last action, before the `authorization::authorization.denied` line is
-thrown, or, when that action is denied as `insufficient_authentication`, an `InsufficientAuthenticationException` (see
+`AuthorizationFailed` once, for the list's last action, before its denial is thrown, or, when that action is denied as
+`insufficient_authentication`, an `InsufficientAuthenticationException` (see
 [Authentication requirements](#authentication-requirements)). A denial of `role:` is not a decision: it carries
-`no_match` and the `authorization::authorization.role_required` line, and records nothing and fires no event.
+`no_match`, or `subject_inactive` for an inactive subject, and records nothing and fires no event.
 
 Run the package's middleware after authentication and after any step-up middleware, so a request that is not signed
 in, or not signed in strongly enough, is answered by those (a `401` or a step-up response) before it can be denied:
@@ -1962,6 +1964,71 @@ decide each action on the full decision, as `@can` does: the any forms need one 
 role directives check membership as `role:` does and take a guard; a permission directive refuses one. Every directive
 takes a string or a list, with `|` between names in either, and refuses a third argument. With no subject, every
 directive is false.
+
+### Localisation
+
+Every message the package can put in front of a client is a translation key of its `authorization` language file
+(AUTHZ-9.7). There are two:
+
+| Key                                            | English                        | Carried by                                                                                                                                                             |
+|------------------------------------------------|--------------------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `authorization::authorization.denied`          | `This action is unauthorized.` | Every denial: `AuthorizationException` and `InsufficientAuthenticationException`, from `authorize()` and the route middleware, and a policy class's `Response::deny()` |
+| `authorization::authorization.unauthenticated` | `Unauthenticated.`             | The `AuthenticationException` the route middleware throw for a request without a subject                                                                               |
+
+Every denial carries the one generic `denied` line, whatever its reason: an explicit deny, a missing role,
+`insufficient_authentication` and every other. Laravel's handler renders the message and not the reason code, so by
+default a client learns that it was refused and not why; what more to tell it is the application's choice. Each line
+is translated in the current locale when the exception or response is built. Without a translator, or when the locale
+has no line for the key, the message is Laravel's own English (`This action is unauthorized.`, `Unauthenticated.`).
+Laravel's exception handler is left as it is, and renders the message as it renders any `403` or `401`.
+
+To reword a line, or to add a locale, publish the package's language files into `lang/vendor/authorization`:
+
+```bash
+php artisan vendor:publish --tag=authorization-lang
+```
+
+Then edit `lang/vendor/authorization/en/authorization.php`, or add a file for another locale beside it, such as
+`lang/vendor/authorization/fr/authorization.php`. Laravel reads a published line in place of the package's, so a file
+needs only the keys it changes:
+
+```php
+// lang/vendor/authorization/fr/authorization.php
+return [
+    'denied'          => 'Cette action n’est pas autorisée.',
+    'unauthenticated' => 'Non authentifié.',
+];
+```
+
+To word a message per reason, read the reason code the denial carries, `getReason()` on the exceptions and `code()` on
+a policy response, and render a line of your own for it. A step-up prompt is worded the same way, in the
+`InsufficientAuthenticationException` mapping shown under [Authentication requirements](#authentication-requirements):
+
+```php
+// bootstrap/app.php
+use Illuminate\Foundation\Configuration\Exceptions;
+use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+
+->withExceptions(function (Exceptions $exceptions): void {
+    $exceptions->render(fn (AuthorizationException $exception) => response()->json(
+        ['message' => __("denials.{$exception->getReason()->value}"), 'code' => $exception->getReason()->value],
+        403,
+    ));
+})
+```
+
+```php
+$response = Gate::inspect('archive', $post);
+$message  = $response->allowed() ? null : __("denials.{$response->code()}");
+```
+
+The reason codes are those of `DecisionReason`, listed under [How a check is decided](#how-a-check-is-decided).
+
+AUTHZ-9.7 covers the denials and the unauthenticated response, the messages a client sees. The package's other
+messages are diagnostics for developers and administrators, and stay untranslated: the validators' refusals of a
+policy document, a name or a mistaken route or directive argument (`InvalidCheckArgumentException`), a management
+service's refusal (a protected system record, an unknown role or permission, a mismatched guard or tenant), the
+configuration validator's errors, and the console commands' output.
 
 ### Console commands
 

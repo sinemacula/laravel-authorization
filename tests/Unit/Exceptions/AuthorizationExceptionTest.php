@@ -10,6 +10,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Support\Messages;
 
 /**
  * Unit tests for `AuthorizationException`, the denial `authorize()` and the
@@ -79,48 +80,22 @@ final class AuthorizationExceptionTest extends TestCase
     }
 
     /**
-     * The translation key names the `denied` line of the package's
-     * `authorization` language file.
+     * `translated()` words the message with the translator's generic `denied`
+     * line, whatever the reason, and keeps the reason code.
      *
      * @return void
      */
-    public function testMessageKeyNamesThePackageLine(): void
-    {
-        self::assertSame('authorization::authorization.denied', AuthorizationException::MESSAGE_KEY);
-    }
-
-    /**
-     * The role key names the `role_required` line of the package's
-     * `authorization` language file.
-     *
-     * @return void
-     */
-    public function testRoleRequiredKeyNamesThePackageLine(): void
-    {
-        self::assertSame('authorization::authorization.role_required', AuthorizationException::ROLE_REQUIRED_KEY);
-    }
-
-    /**
-     * `translated()` words the message with the translator's line for the
-     * denial key by default, and for the key it is given otherwise.
-     *
-     * @return void
-     */
-    public function testTranslatedUsesTheTranslatorsLineForTheKey(): void
+    public function testTranslatedUsesTheGenericLineForEveryReason(): void
     {
         $translator = self::createStub(Translator::class);
-        $translator->method('get')->willReturnMap([
-            [AuthorizationException::MESSAGE_KEY, [], null, 'Action non autorisée.'],
-            [AuthorizationException::ROLE_REQUIRED_KEY, [], null, 'Rôle requis.'],
-        ]);
+        $translator->method('get')->willReturnMap([[Messages::DENIED, [], null, 'Action non autorisée.']]);
 
-        $denied = AuthorizationException::translated(DecisionReason::EXPLICIT_DENY, $translator);
-        $role   = AuthorizationException::translated(DecisionReason::NO_MATCH, $translator, AuthorizationException::ROLE_REQUIRED_KEY);
+        foreach (DecisionReason::cases() as $reason) {
+            $denial = AuthorizationException::translated($reason, $translator);
 
-        self::assertSame('Action non autorisée.', $denied->getMessage());
-        self::assertSame(DecisionReason::EXPLICIT_DENY, $denied->getReason());
-        self::assertSame('Rôle requis.', $role->getMessage());
-        self::assertSame(DecisionReason::NO_MATCH, $role->getReason());
+            self::assertSame('Action non autorisée.', $denial->getMessage());
+            self::assertSame($reason, $denial->getReason());
+        }
     }
 
     /**
@@ -133,7 +108,7 @@ final class AuthorizationExceptionTest extends TestCase
     public function testTranslatedFallsBackToLaravelsMessage(): void
     {
         $missing = self::createStub(Translator::class);
-        $missing->method('get')->willReturn(AuthorizationException::MESSAGE_KEY);
+        $missing->method('get')->willReturn(Messages::DENIED);
 
         $group = self::createStub(Translator::class);
         $group->method('get')->willReturn(['denied' => 'Denied.']);

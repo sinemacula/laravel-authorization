@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\CheckArguments;
+use SineMacula\Laravel\Authorization\Support\Messages;
 
 /**
  * Shared template method for the shipped authorization middleware.
@@ -21,11 +22,12 @@ use SineMacula\Laravel\Authorization\Support\CheckArguments;
  * Every middleware takes at most two arguments: the names to check, separated
  * by `|`, and one option (a guard, or a route parameter). A list that names
  * nothing, or a third argument, is a mistake in the route and is refused. A
- * request without a subject is unauthenticated (401); a denial throws the
- * package's `AuthorizationException`, which Laravel renders as a 403 with the
- * reason code and a translated message, and an `insufficient_authentication`
- * denial throws `InsufficientAuthenticationException`, which the application
- * maps to its step-up response (a 403 when it does not).
+ * request without a subject is unauthenticated (401), with the translated
+ * `unauthenticated` line; a denial throws the package's
+ * `AuthorizationException`, which Laravel renders as a 403 with the reason code
+ * and the translated `denied` line, and an `insufficient_authentication` denial
+ * throws `InsufficientAuthenticationException`, which the application maps to
+ * its step-up response (a 403 when it does not).
  *
  * Run it after authentication and after any step-up middleware, so a request
  * that is not signed in, or not signed in strongly enough, is answered by those
@@ -43,7 +45,7 @@ abstract class AbstractAuthorizationMiddleware
      */
     public function __construct(
 
-        /** Translator that words a denial's message; null keeps English. */
+        /** Translator that words the messages it throws; null keeps English. */
         private readonly ?Translator $translator = null,
     ) {}
 
@@ -87,13 +89,16 @@ abstract class AbstractAuthorizationMiddleware
     /**
      * Return the subject the request is about, or throw when there is none.
      *
+     * The exception's message is the translated `unauthenticated` line, or
+     * Laravel's English `Unauthenticated.` without a translator or a line.
+     *
      * @return \SineMacula\Laravel\Authorization\Subject
      *
      * @throws \Illuminate\Auth\AuthenticationException
      */
     protected function subject(): Subject
     {
-        return self::manager()->currentSubject() ?? throw new AuthenticationException('Unauthenticated.');
+        return self::manager()->currentSubject() ?? throw new AuthenticationException(Messages::line(Messages::UNAUTHENTICATED, $this->translator) ?? 'Unauthenticated.');
     }
 
     /**
@@ -126,15 +131,14 @@ abstract class AbstractAuthorizationMiddleware
     }
 
     /**
-     * Build the denial for the reason, worded by the line the key names.
+     * Build the denial for the reason, worded by the generic `denied` line.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason  $reason
-     * @param  string  $key
      * @return \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      */
-    protected function denial(DecisionReason $reason, string $key = AuthorizationException::MESSAGE_KEY): AuthorizationException
+    protected function denial(DecisionReason $reason): AuthorizationException
     {
-        return AuthorizationException::translated($reason, $this->translator, $key);
+        return AuthorizationException::translated($reason, $this->translator);
     }
 
     /**

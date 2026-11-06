@@ -1385,7 +1385,7 @@ final class AuthorizationManagerTest extends TestCase
         } catch (InsufficientAuthenticationException $exception) {
             self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $exception->getReason());
             self::assertSame(403, $exception->getCode());
-            self::assertSame('This action requires further authentication.', $exception->getMessage());
+            self::assertSame('This action is unauthorized.', $exception->getMessage());
             self::assertEquals([new UnmetRequirement(self::requirement(), ['multifactor'])], $exception->requirements());
             self::assertStringNotContainsString('step-up', \serialize($exception->requirements()));
             self::assertStringNotContainsString('Export', \serialize($exception->requirements()));

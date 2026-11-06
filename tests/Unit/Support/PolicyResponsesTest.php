@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement;
+use SineMacula\Laravel\Authorization\Support\Messages;
 use SineMacula\Laravel\Authorization\Support\PolicyResponses;
 
 /**
@@ -75,41 +76,42 @@ final class PolicyResponsesTest extends TestCase
     }
 
     /**
-     * A denial carries its reason code and the line keyed by that code.
+     * A denial carries its reason code and, whatever the reason, the generic
+     * `denied` line.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason  $reason
      * @return void
      */
     #[DataProvider('reasons')]
-    public function testADenialCarriesItsCodeAndItsTranslatedLine(DecisionReason $reason): void
+    public function testADenialCarriesItsCodeAndTheGenericLine(DecisionReason $reason): void
     {
         $translator = \Mockery::mock(Translator::class);
-        $translator->shouldReceive('get')->once()->with('authorization::authorization.' . $reason->value)->andReturn("Refused: {$reason->value}.");
+        $translator->shouldReceive('get')->once()->with('authorization::authorization.denied')->andReturn('Refused.');
 
         $response = PolicyResponses::of(Decision::deny($reason, DecisionStage::DENY), $translator);
 
         self::assertTrue($response->denied());
         self::assertSame($reason->value, $response->code());
-        self::assertSame("Refused: {$reason->value}.", $response->message());
+        self::assertSame('Refused.', $response->message());
     }
 
     /**
-     * An insufficient authentication denial keeps its own code and carries no
-     * requirement.
+     * An insufficient authentication denial keeps its own code, carries the
+     * generic line and carries no requirement.
      *
      * @return void
      */
     public function testAnInsufficientAuthenticationDenialKeepsItsCode(): void
     {
         $translator = \Mockery::mock(Translator::class);
-        $translator->shouldReceive('get')->with(PolicyResponses::KEY_PREFIX . 'insufficient_authentication')->andReturn('Step up.');
+        $translator->shouldReceive('get')->with(Messages::DENIED)->andReturn('Refused.');
 
         $requirement = new UnmetRequirement(new AuthenticationRequirement(['multifactor' => 900]), ['multifactor']);
         $response    = PolicyResponses::of(Decision::insufficientAuthentication(DecisionStage::ALLOW, [new StatementReference('step-up', 0)], [$requirement]), $translator);
 
         self::assertTrue($response->denied());
         self::assertSame('insufficient_authentication', $response->code());
-        self::assertSame('Step up.', $response->message());
+        self::assertSame('Refused.', $response->message());
         self::assertStringNotContainsString('multifactor', \serialize($response->toArray()));
     }
 
@@ -121,9 +123,8 @@ final class PolicyResponsesTest extends TestCase
      */
     public function testAnUntranslatedOrNonStringLineLeavesNoMessage(): void
     {
-        $key        = PolicyResponses::KEY_PREFIX . 'no_match';
         $translator = \Mockery::mock(Translator::class);
-        $translator->shouldReceive('get')->with($key)->andReturn($key, ['nested' => 'line']);
+        $translator->shouldReceive('get')->with(Messages::DENIED)->andReturn(Messages::DENIED, ['nested' => 'line']);
 
         $decision = Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT);
 
@@ -148,7 +149,7 @@ final class PolicyResponsesTest extends TestCase
         self::assertSame('boundary', PolicyResponses::of($decision)->code());
 
         $translator = \Mockery::mock(Translator::class);
-        $translator->shouldReceive('get')->with(PolicyResponses::KEY_PREFIX . 'boundary')->andReturn('Out of bounds.');
+        $translator->shouldReceive('get')->with(Messages::DENIED)->andReturn('Out of bounds.');
 
         $container = new Container;
         $container->instance(Translator::class, $translator);
@@ -174,25 +175,8 @@ final class PolicyResponsesTest extends TestCase
         Container::setInstance($container);
 
         $given = \Mockery::mock(Translator::class);
-        $given->shouldReceive('get')->once()->with(PolicyResponses::KEY_PREFIX . 'boundary')->andReturn('Explicit line.');
+        $given->shouldReceive('get')->once()->with(Messages::DENIED)->andReturn('Explicit line.');
 
         self::assertSame('Explicit line.', PolicyResponses::of($decision, $given)->message());
-    }
-
-    /**
-     * The package's language file has a line for every reason a decision can be
-     * denied with.
-     *
-     * @return void
-     */
-    public function testTheLanguageFileHasALinePerReason(): void
-    {
-        /** @var array<string, string> $lines */
-        $lines = require \dirname(__DIR__, 3) . '/lang/en/authorization.php';
-
-        foreach (DecisionReason::cases() as $reason) {
-            self::assertArrayHasKey($reason->value, $lines);
-            self::assertNotSame('', $lines[$reason->value]);
-        }
     }
 }

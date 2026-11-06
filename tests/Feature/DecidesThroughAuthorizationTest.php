@@ -79,9 +79,9 @@ final class DecidesThroughAuthorizationTest extends TestCase
     }
 
     /**
-     * A denial is a deny carrying the decision's reason code and the line of
-     * the language file for it, never a not-found response, and the trait
-     * raises nothing and reports no failure.
+     * A denial is a deny carrying the decision's reason code and, whatever the
+     * reason, the generic line of the language file, never a not-found
+     * response, and the trait raises nothing and reports no failure.
      *
      * @return void
      */
@@ -102,13 +102,13 @@ final class DecidesThroughAuthorizationTest extends TestCase
         $denied = Gate::forUser($user)->inspect('publish', $tenant);
 
         self::assertSame('explicit_deny', $denied->code());
-        self::assertSame('This action is not allowed.', $denied->message());
+        self::assertSame('This action is unauthorized.', $denied->message());
         Event::assertDispatchedTimes(DecisionEvaluated::class, 2);
         Event::assertNotDispatched(AuthorizationFailed::class);
     }
 
     /**
-     * The message is the translator's line for the reason, in its locale, so an
+     * The message is the translator's generic line, in its locale, so an
      * application rewording the line rewords the denial.
      *
      * @return void
@@ -119,7 +119,7 @@ final class DecidesThroughAuthorizationTest extends TestCase
 
         self::assertInstanceOf(\Illuminate\Translation\Translator::class, $translator);
 
-        $translator->addLines(['authorization.no_match' => 'Ask an administrator.'], 'en', 'authorization');
+        $translator->addLines(['authorization.denied' => 'Ask an administrator.'], 'en', 'authorization');
 
         $response = (new DecidingLaravelPolicy)->decideFor(StubIdentity::create(['id' => 'user-1']), 'posts:read');
 
@@ -128,8 +128,8 @@ final class DecidesThroughAuthorizationTest extends TestCase
     }
 
     /**
-     * An insufficient authentication denial keeps its own code and its line,
-     * and the trait raises no step-up exception.
+     * An insufficient authentication denial keeps its own code and carries the
+     * generic line, and the trait raises no step-up exception.
      *
      * @return void
      */
@@ -148,7 +148,7 @@ final class DecidesThroughAuthorizationTest extends TestCase
 
         self::assertTrue($response->denied());
         self::assertSame('insufficient_authentication', $response->code());
-        self::assertSame('This action requires further authentication.', $response->message());
+        self::assertSame('This action is unauthorized.', $response->message());
         Event::assertDispatchedTimes(DecisionEvaluated::class, 1);
     }
 
@@ -174,7 +174,7 @@ final class DecidesThroughAuthorizationTest extends TestCase
         foreach ([$response, $direct] as $denial) {
             self::assertTrue($denial->denied());
             self::assertSame('subject_unresolved', $denial->code());
-            self::assertSame('You must be signed in to perform this action.', $denial->message());
+            self::assertSame('This action is unauthorized.', $denial->message());
         }
 
         Event::assertDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => $event->principal === null);

@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
 use Illuminate\Auth\Access\AuthorizationException as LaravelAuthorizationException;
 use Illuminate\Contracts\Translation\Translator;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Support\Messages;
 
 /**
  * Thrown when `authorize()`, or one of the package's route middleware, decides
@@ -18,9 +19,10 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
  * not map it to a step-up response still renders it as a `403`. It carries the
  * reason code and the candidate requirements, each with its unmet parts, any
  * one of which met would allow the check, once each; never the policy, the
- * statements, the trace or any proof. Its message is the translated
- * `insufficient_authentication` line of the package's `authorization` language
- * file. The decision is recorded as the manager's last decision and fires the
+ * statements, the trace or any proof. Its message is the generic `denied` line
+ * of the package's `authorization` language file, as every denial's is, so an
+ * application words its own step-up prompt from the reason code. The decision
+ * is recorded as the manager's last decision and fires the
  * `AuthorizationFailed` event first, as any denial does.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -28,9 +30,6 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
  */
 final class InsufficientAuthenticationException extends LaravelAuthorizationException
 {
-    /** @var string Translation key of the message the exception carries. */
-    public const string MESSAGE_KEY = 'authorization::authorization.insufficient_authentication';
-
     /** @var list<\SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement> The candidate requirements, once each. */
     private readonly array $requirements;
 
@@ -54,8 +53,8 @@ final class InsufficientAuthenticationException extends LaravelAuthorizationExce
     }
 
     /**
-     * Create an exception whose message is the line the translator words for
-     * its key, in its current locale.
+     * Create an exception whose message is the `denied` line the translator
+     * words, in its current locale.
      *
      * Without a translator, or when it has no line for the key, the message is
      * Laravel's English default.
@@ -66,9 +65,7 @@ final class InsufficientAuthenticationException extends LaravelAuthorizationExce
      */
     public static function translated(array $requirements, ?Translator $translator): self
     {
-        $line = $translator?->get(self::MESSAGE_KEY);
-
-        return new self($requirements, \is_string($line) && $line !== self::MESSAGE_KEY ? $line : null);
+        return new self($requirements, Messages::line(Messages::DENIED, $translator));
     }
 
     /**
