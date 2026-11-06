@@ -30,13 +30,13 @@ use SineMacula\Laravel\Authorization\Support\RoleParity;
  * `getAuthorizationGuard()`, when it declares one), else the package default.
  *
  * Every grant holds in a scope (AUTHZ-5.1): a role, permission or policy one
- * tenant owns is granted in that tenant, and naming another is refused with
- * `GrantScopeMismatchException`; one the platform owns is granted in the tenant
- * a call names as `$tenant`, else platform-wide. A name is looked up among the
- * rows visible in the tenant named, else in the current tenant. A revocation
- * follows the same rule, and a sync replaces the grants in one scope: the
- * tenant named, else the tenant that owns every target, else the platform.
- * Every grant is for every application.
+ * tenant owns is granted in that tenant, or a tenant below it that a call
+ * names, and naming any other is refused with `GrantScopeMismatchException`;
+ * one the platform owns is granted in the tenant a call names as `$tenant`,
+ * else platform-wide. A name is looked up among the rows visible in the tenant
+ * named, else in the current tenant. A revocation follows the same rule, and a
+ * sync replaces the grants in one scope: the tenant named, else the tenant that
+ * owns every target, else the platform. Every grant is for every application.
  *
  * Grants are idempotent: granting what the grantee holds, with the same expiry,
  * changes nothing and is reported as unchanged, and a concurrent duplicate

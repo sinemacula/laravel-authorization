@@ -91,6 +91,22 @@ final class TenantScope implements Scope
     }
 
     /**
+     * Read the current tenant's ancestors again through the bound tenant tree,
+     * in place of the chain held for the request or job, and return the chain
+     * read, or the platform's empty chain.
+     *
+     * The resolution cache reads the chain again once it has pinned its
+     * versions, so a tree change made before the pin is never stored against
+     * the new versions.
+     *
+     * @return \SineMacula\Laravel\Authorization\Support\TenantChain
+     */
+    public static function refreshChain(): TenantChain
+    {
+        return self::whileResolving(static fn (ResolvedTenant $resolved): TenantChain => $resolved->refreshChain(TenantChain::tree())) ?? new TenantChain;
+    }
+
+    /**
      * Extract the `(tenant_type, tenant_id)` pair from an arbitrary tenant
      * object, refusing anything that cannot supply a stable pair without a
      * `spl_object_hash`-style fallback.

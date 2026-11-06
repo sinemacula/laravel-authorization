@@ -87,4 +87,20 @@ final class ResolvedTenant
 
         return $this->chain[1];
     }
+
+    /**
+     * Read the tenant's ancestors again through the given tree, in place of the
+     * chain held, and return the chain read.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Contracts\TenantTree  $tree
+     * @return \SineMacula\Laravel\Authorization\Support\TenantChain
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
+     */
+    public function refreshChain(TenantTree $tree): TenantChain
+    {
+        $this->chain = null;
+
+        return $this->chain($tree);
+    }
 }

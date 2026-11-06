@@ -35,12 +35,12 @@ final class OwnerMismatchExceptionTest extends TestCase
 
         self::assertSame(
             'Role \'editor\', owned by the platform, cannot take permission \'posts:own\', owned by tenant \'organisation:org-a\':'
-                . ' a role takes only the platform\'s and its own tenant\'s.',
+                . ' a role takes only the platform\'s, its own tenant\'s and its tenant\'s ancestors\'.',
             $platform->getMessage(),
         );
         self::assertSame(
             'Role \'author\', owned by tenant \'organisation:org-b\', cannot take parent role \'owner\','
-                . ' owned by tenant \'organisation:org-a\': a role takes only the platform\'s and its own tenant\'s.',
+                . ' owned by tenant \'organisation:org-a\': a role takes only the platform\'s, its own tenant\'s and its tenant\'s ancestors\'.',
             $tenant->getMessage(),
         );
         self::assertSame('author', $tenant->getRoleName());

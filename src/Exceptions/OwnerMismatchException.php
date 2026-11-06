@@ -44,7 +44,7 @@ final class OwnerMismatchException extends \InvalidArgumentException
     ) {
         parent::__construct(
             "Role '{$roleName}', " . self::owner($roleOwner) . ", cannot take {$relatedKind} '{$relatedName}', " . self::owner($relatedOwner)
-                . ': a role takes only the platform\'s and its own tenant\'s.',
+                . ': a role takes only the platform\'s, its own tenant\'s and its tenant\'s ancestors\'.',
         );
     }
 

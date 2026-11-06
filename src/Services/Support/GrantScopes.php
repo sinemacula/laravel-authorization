@@ -13,8 +13,9 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
  * Where the grant service writes a grant (AUTHZ-5.1, AUTHZ-5.2, D15): in the
- * tenant that owns the target, else the tenant a call names, else
- * platform-wide; a target one tenant owns is never granted anywhere else.
+ * tenant a call names, else the tenant that owns the target, else
+ * platform-wide; a target one tenant owns is granted only in that tenant or a
+ * tenant below it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -43,9 +44,9 @@ final class GrantScopes
     }
 
     /**
-     * Return the scope a grant of the target holds in: the tenant that owns it,
-     * else the tenant named, else null for platform-wide. A target one tenant
-     * owns cannot be granted in another.
+     * Return the scope a grant of the target holds in: the tenant named, else
+     * the tenant that owns it, else null for platform-wide. A target one tenant
+     * owns cannot be granted outside that tenant and the tenants below it.
      *
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
      * @param  \Illuminate\Database\Eloquent\Model  $target

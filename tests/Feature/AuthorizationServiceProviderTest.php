@@ -223,8 +223,9 @@ final class AuthorizationServiceProviderTest extends TestCase
     }
 
     /**
-     * Rebinding the subject resolver or the held tenant empties the resolution
-     * cache's memo, since its entries were resolved under the tenant they gave.
+     * Rebinding the subject resolver, the held tenant or the tenant tree
+     * empties the resolution cache's memo, since its entries were resolved
+     * under the tenant and ancestors they gave.
      *
      * @return void
      */
@@ -249,8 +250,10 @@ final class AuthorizationServiceProviderTest extends TestCase
         $cache->rememberPermissions($grantee, $resolve);
         $app->instance(ResolvedTenant::class, ResolvedTenant::from(new StubSubjectResolver(null)));
         $cache->rememberPermissions($grantee, $resolve);
+        $app->instance(TenantTree::class, new StubTenantTree);
+        $cache->rememberPermissions($grantee, $resolve);
 
-        self::assertSame(3, $resolutions);
+        self::assertSame(4, $resolutions);
     }
 
     /**

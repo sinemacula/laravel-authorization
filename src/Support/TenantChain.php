@@ -156,6 +156,18 @@ final readonly class TenantChain
     }
 
     /**
+     * Determine whether the other chain lists the same tenants in the same
+     * order.
+     *
+     * @param  self  $other
+     * @return bool
+     */
+    public function isSameAs(self $other): bool
+    {
+        return self::pairs($this->tenants) === self::pairs($other->tenants);
+    }
+
+    /**
      * Return the tenant the chain starts at, or null for the platform.
      *
      * @return \SineMacula\Laravel\Authorization\Support\Reference|null
@@ -163,6 +175,17 @@ final readonly class TenantChain
     public function tenant(): ?Reference
     {
         return $this->tenants[0] ?? null;
+    }
+
+    /**
+     * Return each tenant as its type and key.
+     *
+     * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>  $tenants
+     * @return list<array{0: string, 1: string}>
+     */
+    private static function pairs(array $tenants): array
+    {
+        return \array_map(static fn (Reference $tenant): array => [$tenant->type, $tenant->id], $tenants);
     }
 
     /**

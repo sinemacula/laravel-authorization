@@ -96,8 +96,8 @@ final class ResolvedTenantTest extends TestCase
 
     /**
      * The chain is the tenant then its ancestors, read once through a tree and
-     * again when another tree is asked; no tenant has the platform's empty
-     * chain, without asking the tree.
+     * again when another tree is asked or a refresh is; no tenant has the
+     * platform's empty chain, without asking the tree.
      *
      * @return void
      */
@@ -131,7 +131,7 @@ final class ResolvedTenantTest extends TestCase
         $first    = $this->createMock(TenantTree::class);
         $second   = $this->createMock(TenantTree::class);
 
-        $first->expects(self::once())->method('ancestors')->with(new Reference('stub_tenant', 'account'))->willReturn([$org]);
+        $first->expects(self::exactly(2))->method('ancestors')->with(new Reference('stub_tenant', 'account'))->willReturn([$org]);
         $second->expects(self::once())->method('ancestors')->willReturn([]);
 
         $resolved = new ResolvedTenant($resolver, $tenant);
@@ -139,6 +139,7 @@ final class ResolvedTenantTest extends TestCase
         self::assertEquals([new Reference('stub_tenant', 'account'), $org], $resolved->chain($first)->tenants);
         self::assertSame($resolved->chain($first), $resolved->chain($first));
         self::assertEquals([new Reference('stub_tenant', 'account')], $resolved->chain($second)->tenants);
+        self::assertEquals([new Reference('stub_tenant', 'account'), $org], $resolved->refreshChain($first)->tenants);
 
         $unused = $this->createMock(TenantTree::class);
         $unused->expects(self::never())->method('ancestors');

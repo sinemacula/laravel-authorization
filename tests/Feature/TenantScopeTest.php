@@ -137,11 +137,17 @@ final class TenantScopeTest extends TestCase
         self::assertSame(['a-role', 'b-role', 'platform-role'], $this->roleNames());
         self::assertSame(['a-permission', 'b-permission', 'platform-permission'], $this->permissionNames());
         self::assertEquals([Reference::of($tenantA), Reference::of($tenantB)], TenantScope::currentChain()->tenants);
+
+        $this->app?->instance(TenantTree::class, new StubTenantTree);
+
+        self::assertEquals([Reference::of($tenantA)], TenantScope::refreshChain()->tenants);
+        self::assertSame(['a-role', 'platform-role'], $this->roleNames());
     }
 
     /**
      * A query the tenant tree runs while it reads the ancestors sees platform
-     * rows only, and the chain it reads is held for the rest of the request.
+     * rows only, the chain it reads is held for the rest of the request, and a
+     * refresh reads it again the same way.
      *
      * @return void
      */
@@ -201,6 +207,10 @@ final class TenantScopeTest extends TestCase
         self::assertSame(['a-role', 'platform-role'], $this->roleNames());
         self::assertSame(['a-role', 'platform-role'], $this->roleNames());
         self::assertSame([['platform-role']], $tree->seen);
+
+        TenantScope::refreshChain();
+
+        self::assertSame([['platform-role'], ['platform-role']], $tree->seen);
         self::assertEquals([Reference::of($tenantA)], TenantScope::currentChain()->tenants);
     }
 

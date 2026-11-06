@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Cache;
 
+use Illuminate\Container\Container;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
@@ -133,14 +134,27 @@ final readonly class ResolutionCache
      * Empty the memo and bump the version of the tenant, which every entry
      * built in it or below it records, because the tree changed there: it moved
      * under another parent, or was deleted. Throws when the store fails, so the
-     * caller can retry rather than leave stale entries.
+     * caller can retry rather than leave stale entries. Like a grant, the
+     * version is bumped again once the caller's transaction commits, a failure
+     * then written to the log channel.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
      * @return void
      */
     public function treeChanged(Reference $tenant): void
     {
-        $this->invalidate($this->store === null ? [] : [$this->store->tenantKey($tenant)]);
+        $keys = $this->store === null ? [] : [$this->store->tenantKey($tenant)];
+
+        $this->invalidate($keys);
+
+        // Bump again once the caller's open transaction commits, on whichever
+        // connection the tree lives, so an entry a concurrent check stored from
+        // the tree before the commit never holds; with none open, straight
+        // away.
+        /** @var \Illuminate\Database\DatabaseTransactionsManager $transactions */
+        $transactions = Container::getInstance()->make('db.transactions');
+
+        $transactions->addCallback(fn () => $this->invalidateQuietly($keys));
     }
 
     /**
@@ -207,14 +221,14 @@ final readonly class ResolutionCache
 
         $pins = new ResolutionPins($this->store);
         $pins->grantee($grantee);
-        $pins->tenants(TenantScope::currentChain());
 
+        $held       = $this->isChainHeldOncePinned($pins);
         $resolution = $resolve($pins);
         $lifetime   = $this->lifetime($resolution->expiresIn);
 
         $this->memo->put($memoKey, $resolution->value, $lifetime);
 
-        if ($resolution->stable && $pins->isComplete()) {
+        if ($resolution->stable && $held && $pins->isComplete()) {
             $this->store?->put($this->key($kind, $grantee), [
                 'versions' => $pins->tokens(),
                 'value'    => $encode === null ? $resolution->value : \array_map($encode, $resolution->value),
@@ -223,6 +237,41 @@ final readonly class ResolutionCache
         }
 
         return $resolution->value;
+    }
+
+    /**
+     * Pin the versions of the tenant and its ancestors, then, with a store,
+     * read the ancestors again, and report whether the chain held.
+     *
+     * The chain may have been read early in the request or job, before its
+     * versions were pinned, so a tree change in between would otherwise be
+     * pinned with its new version against the old ancestors. Read again after
+     * the pin, a change made before it is seen and one made after it bumps a
+     * pinned version. When the chain moved, the new one is pinned and read
+     * from, but the entry is not stored.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
+     * @return bool
+     */
+    private function isChainHeldOncePinned(ResolutionPins $pins): bool
+    {
+        $chain = TenantScope::currentChain();
+
+        $pins->tenants($chain);
+
+        if ($this->store === null) {
+            return true;
+        }
+
+        $fresh = TenantScope::refreshChain();
+
+        if ($fresh->isSameAs($chain)) {
+            return true;
+        }
+
+        $pins->tenants($fresh);
+
+        return false;
     }
 
     /**

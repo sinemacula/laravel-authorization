@@ -7,6 +7,7 @@ namespace Tests\Feature;
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\Repository;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Cache\PrincipalCacheKey;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
@@ -148,6 +149,79 @@ final class ResolutionCacheTest extends TestCase
         $this->permissions($this->request());
 
         self::assertSame(3, $this->resolutions);
+    }
+
+    /**
+     * A chain read before its versions were pinned is read again after the pin:
+     * when the tree moved meanwhile, the entry is built from the new chain but
+     * not stored, so the next request resolves again and stores it.
+     *
+     * @return void
+     */
+    public function testAChainThatMovedBeforeThePinIsNotStored(): void
+    {
+        [$account, $org, $sibling] = \array_map(self::createTenant(...), ['account', 'org', 'sibling']);
+        $tree                      = (new StubTenantTree)->put(Reference::of($account), Reference::of($org));
+
+        $this->app?->instance(TenantTree::class, $tree);
+        $this->actAsTenant($account);
+
+        self::assertEquals([Reference::of($account), Reference::of($org)], TenantScope::currentChain()->tenants);
+
+        $tree->put(Reference::of($account), Reference::of($sibling));
+
+        $this->permissions($this->request());
+
+        self::assertEquals([Reference::of($account), Reference::of($sibling)], TenantScope::currentChain()->tenants);
+
+        $this->permissions($this->request());
+        $this->permissions($this->request());
+
+        self::assertSame(2, $this->resolutions);
+    }
+
+    /**
+     * Without a store the chain held for the request is used as it is, read
+     * once.
+     *
+     * @return void
+     */
+    public function testWithoutAStoreTheChainIsReadOnce(): void
+    {
+        $tree = new StubTenantTree;
+
+        $this->app?->instance(TenantTree::class, $tree);
+        $this->actAsTenant(self::createTenant('account'));
+
+        $this->permissions(new ResolutionCache);
+
+        self::assertSame(1, $tree->reads);
+    }
+
+    /**
+     * A tree change made inside a transaction bumps the tenant's version again
+     * once it commits, so an entry stored from the tree before the commit never
+     * holds.
+     *
+     * @return void
+     */
+    public function testATreeChangeBumpsAgainOnceItsTransactionCommits(): void
+    {
+        $tenant  = new Reference('stub_tenant', 'org');
+        $key     = $this->versions()->tenantKey($tenant);
+        $cache   = $this->request();
+        $pending = null;
+
+        DB::transaction(function () use ($cache, $tenant, $key, &$pending): void {
+            $cache->treeChanged($tenant);
+
+            // A concurrent check pins the version bumped inside the
+            // transaction.
+            $pending = $this->versions()->tokens([$key]);
+        });
+
+        self::assertNotNull($pending);
+        self::assertNotSame($pending, $this->versions()->tokens([$key]));
     }
 
     /**

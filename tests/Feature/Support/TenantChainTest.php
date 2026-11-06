@@ -33,7 +33,8 @@ final class TenantChainTest extends TestCase
 
     /**
      * A tenant's chain is the tenant, then its ancestors nearest first; the
-     * platform's is empty.
+     * platform's is empty. Two chains are the same when they list the same
+     * tenants in the same order.
      *
      * @return void
      */
@@ -49,6 +50,10 @@ final class TenantChainTest extends TestCase
         self::assertSame([], TenantChain::of(null, $tree)->tenants);
         self::assertNull(TenantChain::of(null, $tree)->tenant());
         self::assertNull((new TenantChain)->tenant());
+        self::assertTrue($chain->isSameAs(new TenantChain([$account, $org, $group])));
+        self::assertFalse($chain->isSameAs(new TenantChain([$account, $group, $org])));
+        self::assertFalse($chain->isSameAs(new TenantChain([$account, $org])));
+        self::assertFalse($chain->isSameAs(new TenantChain([$account, $org, new Reference('stub_tenant', 'other')])));
     }
 
     /**

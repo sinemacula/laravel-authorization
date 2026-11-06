@@ -73,7 +73,8 @@ final class AuthorizationManagerTest extends TestCase
     /**
      * A role granted in an organisation allows in an account below it and not
      * in one beside it; once the account moves away and the tree change is
-     * reported, the cached grant no longer reaches it.
+     * reported, by model or by reference, the cached grant no longer reaches
+     * it, and once it moves back, reaches it again.
      *
      * @return void
      *
@@ -113,6 +114,16 @@ final class AuthorizationManagerTest extends TestCase
         Authorization::treeChanged($account);
 
         self::assertFalse($in($account));
+
+        // Within one request, the report alone reads the ancestors again, and a
+        // reference reports a tenant as its model does.
+        $tree->put(Reference::of($account), Reference::of($org));
+
+        self::assertFalse(Authorization::can('posts:edit'));
+
+        Authorization::treeChanged(Reference::of($account));
+
+        self::assertTrue(Authorization::can('posts:edit'));
     }
 
     /**

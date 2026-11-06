@@ -39,7 +39,7 @@ final class GrantScopeMismatchException extends \InvalidArgumentException
         private readonly ?Reference $scope,
     ) {
         parent::__construct(
-            "The {$kind} '{$name}' belongs to tenant '{$owner->type}:{$owner->id}' and can only be granted there, not "
+            "The {$kind} '{$name}' belongs to tenant '{$owner->type}:{$owner->id}' and can only be granted there or in a tenant below it, not "
                 . ($scope === null ? 'platform-wide' : "in tenant '{$scope->type}:{$scope->id}'") . '.',
         );
     }
