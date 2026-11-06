@@ -19,6 +19,7 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
+use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
@@ -322,6 +323,132 @@ final class TenantScopeTest extends TestCase
     }
 
     /**
+     * Within a tenant and application, queries and the current application are
+     * theirs; afterwards the request's are restored, also when the callback
+     * throws.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testWithinRunsUnderAnotherTenantAndApplication(): void
+    {
+        [$tenantA, $tenantB] = $this->seedRows();
+
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver(new \stdClass, $tenantA, 'web'));
+
+        $inside = TenantScope::within($tenantB, 'admin', fn (): array => [TenantScope::currentApplication(), $this->roleNames()]);
+
+        self::assertSame(['admin', ['b-role', 'platform-role']], $inside);
+        self::assertSame('web', TenantScope::currentApplication());
+        self::assertSame(['a-role', 'platform-role'], $this->roleNames());
+
+        try {
+            TenantScope::within(null, 'admin', static fn (): never => self::refuse());
+        } catch (\RuntimeException) {
+            self::assertSame('web', TenantScope::currentApplication());
+        }
+    }
+
+    /**
+     * What is resolved within another application is not served to the request
+     * afterwards, and without a resolution cache bound, within runs all the
+     * same.
+     *
+     * @return void
+     */
+    public function testWithinLeavesNothingResolvedInsideToTheRequest(): void
+    {
+        $user = StubIdentity::query()->create(['id' => 'user-1']);
+
+        Permission::create(['name' => 'admin:access']);
+        $user->givePermission('admin:access', application: 'admin');
+
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($user, null, 'web'));
+
+        self::assertSame(['admin:access'], TenantScope::within(null, 'admin', static fn (): array => $user->getPermissions()));
+        self::assertSame([], $user->getPermissions());
+
+        $this->app?->offsetUnset(ResolutionCache::class);
+
+        self::assertSame('admin', TenantScope::within(null, 'admin', static fn (): ?string => TenantScope::currentApplication()));
+    }
+
+    /**
+     * Run while the subject is being resolved, queries within see the tenant
+     * and application given, a query after it still sees platform rows only,
+     * and the holder is then resolved as usual.
+     *
+     * @return void
+     */
+    public function testWithinWhileResolvingSeesItsTenantAndApplication(): void
+    {
+        [, $tenantB] = $this->seedRows();
+
+        $resolver = new class ($tenantB) implements SubjectResolver {
+            /**
+             * Create a resolver that queries within the given tenant.
+             *
+             * @param  object  $tenant
+             */
+            public function __construct(
+
+                /** The tenant the query within runs in. */
+                private readonly object $tenant,
+            ) {}
+
+            /** @var array{0: string|null, 1: array<int, string>}|null The application and role names seen within, while resolving. */
+            public ?array $seen = null;
+
+            /** @var array<int, string>|null The role names seen after within, still while resolving. */
+            public ?array $after = null;
+
+            /**
+             * Query the roles within another application, then resolve.
+             *
+             * @return \SineMacula\Laravel\Authorization\Subject
+             */
+            #[\Override]
+            public function resolve(): Subject
+            {
+                /** @var array{0: string|null, 1: array<int, string>} $seen */
+                $seen = TenantScope::within(
+                    $this->tenant,
+                    'admin',
+                    static fn (): array => [TenantScope::currentApplication(), Role::query()->orderBy('name')->pluck('name')->all()],
+                );
+                $this->seen = $seen;
+
+                /** @var array<int, string> $after */
+                $after       = Role::query()->orderBy('name')->pluck('name')->all();
+                $this->after = $after;
+
+                return $this->forUser(new \stdClass);
+            }
+
+            /**
+             * Return the user as the subject, on the web application.
+             *
+             * @param  object  $user
+             * @return \SineMacula\Laravel\Authorization\Subject
+             */
+            #[\Override]
+            public function forUser(object $user): Subject
+            {
+                return new Subject($user, $user, null, 'web');
+            }
+        };
+
+        $this->app?->instance(SubjectResolver::class, $resolver);
+
+        self::assertSame('web', TenantScope::currentApplication());
+        self::assertSame(['admin', ['b-role', 'platform-role']], $resolver->seen);
+        self::assertSame(['platform-role'], $resolver->after);
+        self::assertSame(['platform-role'], $this->roleNames());
+        self::assertSame('web', TenantScope::currentApplication());
+    }
+
+    /**
      * Flushing the resolved tenant empties the resolution cache's memo, whose
      * entries were resolved under it.
      *
@@ -600,5 +727,17 @@ final class TenantScopeTest extends TestCase
                 return 'custom-tenant';
             }
         };
+    }
+
+    /**
+     * Throw, as a callback that fails would.
+     *
+     * @return never
+     *
+     * @throws \RuntimeException
+     */
+    private static function refuse(): never
+    {
+        throw new \RuntimeException('Refused.');
     }
 }

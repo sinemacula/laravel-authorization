@@ -229,6 +229,23 @@ return [
 
     /*
     |---------------------------------------------------------------------------
+    | Application access
+    |---------------------------------------------------------------------------
+    |
+    | The permission each application requires before a principal may use it,
+    | keyed by the application's name (its guard's name, as
+    | `laravel-authentication` names it), for example
+    | `['admin' => 'admin:access']`. `ApplicationAccess::mayUse()` asks the
+    | full decision whether the principal holds it on that application, so a
+    | grant made for that application counts; grant it through the roles that
+    | should get in. An application not named here is open to every principal.
+    |
+    */
+
+    'application_access' => [],
+
+    /*
+    |---------------------------------------------------------------------------
     | Resolution cache
     |---------------------------------------------------------------------------
     |

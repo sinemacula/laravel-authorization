@@ -381,6 +381,61 @@ final class ConfigValidatorTest extends TestCase
     }
 
     /**
+     * Application access maps application names to permission names; an empty
+     * map, the default, passes.
+     *
+     * @return void
+     */
+    public function testApplicationAccessMapsApplicationsToPermissions(): void
+    {
+        $config = $this->authorizationConfig();
+
+        foreach ([[], ['admin' => 'admin:access', 'mobile' => 'mobile:access']] as $access) {
+            $config['application_access'] = $access;
+
+            ConfigValidator::validate($config, $this->app);
+        }
+
+        unset($config['application_access']);
+
+        ConfigValidator::validate($config, $this->app);
+
+        $this->expectNotToPerformAssertions();
+    }
+
+    /**
+     * Invalid `application_access` values with the reason each is refused for.
+     *
+     * @return iterable<string, array{mixed, string}>
+     */
+    public static function invalidApplicationAccessProvider(): iterable
+    {
+        $entry = 'each application name must map to a permission name, both non-empty strings.';
+
+        yield 'not an array' => ['admin:access', 'expected an array of application names to permission names.'];
+        yield 'a list' => [['admin:access'], $entry];
+        yield 'an empty application' => [['' => 'admin:access'], $entry];
+        yield 'a permission that is not a string' => [['admin' => 1], $entry];
+        yield 'an empty permission' => [['admin' => ''], $entry];
+    }
+
+    /**
+     * Every invalid `application_access` value is refused with its reason.
+     *
+     * @param  mixed  $access
+     * @param  string  $reason
+     * @return void
+     */
+    #[DataProvider('invalidApplicationAccessProvider')]
+    public function testInvalidApplicationAccessIsRejected(mixed $access, string $reason): void
+    {
+        $config                       = $this->authorizationConfig();
+        $config['application_access'] = $access;
+
+        $this->assertRejected(fn () => ConfigValidator::validate($config, $this->app), 'authorization.application_access', $reason);
+    }
+
+    /**
      * The shipped flat tenant tree, and any class implementing the contract,
      * pass validation.
      *

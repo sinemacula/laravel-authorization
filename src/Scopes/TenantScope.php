@@ -168,6 +168,49 @@ final class TenantScope implements Scope
     }
 
     /**
+     * Run the callback with the given tenant and application in place of the
+     * ones resolved for the request or job, for a decision about another
+     * application than the request's, such as whether a principal may use it.
+     *
+     * Queries the callback runs see that tenant and application, also when it
+     * runs while the subject is being resolved (a guard admitting a principal
+     * as it signs in, say). Afterwards the request's are resolved again on the
+     * next query, from the resolver and the default guard, and the resolution
+     * cache's memo, whose entries hold under one tenant and application, is
+     * emptied.
+     *
+     * @template TResult
+     *
+     * @param  object|null  $tenant
+     * @param  string|null  $application
+     * @param  \Closure(): TResult  $callback
+     * @return TResult
+     */
+    public static function within(?object $tenant, ?string $application, \Closure $callback): mixed
+    {
+        $container = Container::getInstance();
+        $resolving = $container->bound(self::RESOLVING);
+
+        /** @var \SineMacula\Laravel\Authorization\Contracts\SubjectResolver $resolver */
+        $resolver = $container->make(SubjectResolver::class);
+
+        $container->instance(ResolvedTenant::class, new ResolvedTenant($resolver, $tenant, $application, self::defaultGuard($container)));
+        $container->forgetInstance(self::RESOLVING);
+
+        try {
+            return $callback();
+        } finally {
+            $container->forgetInstance(ResolvedTenant::class);
+
+            if ($resolving) {
+                $container->instance(self::RESOLVING, true);
+            }
+
+            ResolutionCache::instance()?->tenantChanged();
+        }
+    }
+
+    /**
      * Return the name of the default authentication guard, which the default
      * resolver names the application after.
      *

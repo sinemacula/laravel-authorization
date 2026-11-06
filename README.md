@@ -326,6 +326,20 @@ $user->assignRole('member');                       // in every app
 $user->revokeRole('staff', application: 'admin');
 ```
 
+Whether a principal may use an application at all (sign in to it, switch to it, refresh a session of it) is answered by
+`ApplicationAccess::mayUse($application, $principal, $tenant)`, in the principal's own tenant (null for a platform
+principal), the answer `laravel-authentication`'s application access contract asks for. That contract admits every
+principal until it is bound to an adapter calling this service, as `laravel-iam` binds it. Name the permission each
+application requires in `config/authorization.php`, and grant it through the roles that should get in; an application
+not named there is open to every principal:
+
+```php
+'application_access' => ['admin' => 'admin:access'],
+```
+
+The check is the full decision, made on the application asked about and in the tenant given, so a grant made for that
+application counts and policies can add conditions or denies.
+
 A role takes only the platform's permissions and parent roles, its own tenant's and its tenant's ancestors', so a
 platform role takes only the platform's; anything else is refused with `OwnerMismatchException`. Guards follow the same
 rule as a role and its permissions: two concrete guards must match, and a guard-agnostic side suits any. A parent of
