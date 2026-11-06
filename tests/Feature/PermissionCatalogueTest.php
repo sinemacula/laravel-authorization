@@ -7,6 +7,7 @@ namespace Tests\Feature;
 use Illuminate\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueException;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\PermissionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use SineMacula\Laravel\Authorization\Support\PermissionMetadataReader;
@@ -18,8 +19,8 @@ use Tests\Feature\Stubs\StubPermissionProvider;
 use Tests\TestCase;
 
 /**
- * Feature tests for `PermissionCatalogue`, the permissions the configured enums
- * and providers declare.
+ * Feature tests for `PermissionCatalogue`, the permissions the package, the
+ * configured enums and the configured providers declare.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -48,8 +49,9 @@ final class PermissionCatalogueTest extends TestCase
     }
 
     /**
-     * The enums' cases come first, one definition per guard, then each
-     * provider's definitions, in the order declared.
+     * The package's own permissions come first, then the enums' cases, one
+     * definition per guard, then each provider's definitions, in the order
+     * declared.
      *
      * @return void
      */
@@ -59,6 +61,7 @@ final class PermissionCatalogueTest extends TestCase
 
         self::assertEquals(
             [
+                ...(new PackagePermissions)->permissions(),
                 new PermissionDefinition(name: 'posts:create', description: 'Create posts', category: 'Posts'),
                 new PermissionDefinition(name: 'posts.publish', description: 'Publish posts', category: 'Posts', guard: 'web'),
                 new PermissionDefinition(name: 'posts.publish', description: 'Publish posts', category: 'Posts', guard: 'api'),
@@ -85,19 +88,49 @@ final class PermissionCatalogueTest extends TestCase
 
         $this->configure([], [InjectedPermissionProvider::class]);
 
-        self::assertSame([$definition], $this->catalogue()->definitions());
+        self::assertSame($definition, $this->catalogue()->definitions()[1]);
+        self::assertCount(2, $this->catalogue()->definitions());
     }
 
     /**
-     * With nothing configured the catalogue is empty.
+     * With nothing configured the catalogue holds the package's own permissions
+     * alone: the right to manage guardrails, guard-agnostic, filed under the
+     * package's category.
      *
      * @return void
      */
-    public function testIsEmptyWithNothingConfigured(): void
+    public function testHoldsThePackagesPermissionsWithNothingConfigured(): void
     {
         $this->configure([], []);
 
-        self::assertSame([], $this->catalogue()->definitions());
+        self::assertEquals([
+            new PermissionDefinition(
+                'authorization:guardrails:manage',
+                'Set and remove guardrails from above the scope they cap.',
+                'authorization',
+            ),
+        ], $this->catalogue()->definitions());
+    }
+
+    /**
+     * An application declaring a package permission again with the same
+     * metadata keeps it once, and with other metadata is refused.
+     *
+     * @return void
+     */
+    public function testAPackagePermissionDeclaredAgainKeepsToTheDuplicateRule(): void
+    {
+        ConfigurablePermissionProvider::$permissions = (new PackagePermissions)->permissions();
+
+        $this->configure([], [ConfigurablePermissionProvider::class]);
+
+        self::assertCount(1, $this->catalogue()->definitions());
+
+        ConfigurablePermissionProvider::$permissions = [new PermissionDefinition(PackagePermissions::GUARDRAILS_MANAGE, 'Mine')];
+
+        $this->expectException(InvalidPermissionCatalogueException::class);
+
+        $this->catalogue()->definitions();
     }
 
     /**
@@ -117,9 +150,9 @@ final class PermissionCatalogueTest extends TestCase
 
         $definitions = $this->catalogue()->definitions();
 
-        self::assertCount(5, $definitions);
-        self::assertEquals(new PermissionDefinition(name: 'posts:create', description: 'Create posts', category: 'Posts'), $definitions[0]);
-        self::assertEquals(new PermissionDefinition(name: 'posts:create', description: 'Create posts', category: 'Posts', guard: 'web'), $definitions[4]);
+        self::assertCount(6, $definitions);
+        self::assertEquals(new PermissionDefinition(name: 'posts:create', description: 'Create posts', category: 'Posts'), $definitions[1]);
+        self::assertEquals(new PermissionDefinition(name: 'posts:create', description: 'Create posts', category: 'Posts', guard: 'web'), $definitions[5]);
     }
 
     /**

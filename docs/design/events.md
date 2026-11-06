@@ -30,6 +30,13 @@ named and the operation they belong to, and are dispatched only once the write c
   pruned as gone in an operation of their own, before its grants are revoked. Both
   extend `Identity\BoundaryEvent`, the abstract, readonly shape they share, which is never dispatched itself, and
   implement `IdentityEvent`, so the grantee's cached resolutions are refreshed as a grant's are.
+- **Guardrail events.** Under `Guardrail\`: `GuardrailSet` and `GuardrailRemoved`, when a policy is set as a guardrail
+  on a tenant or on the platform, or that guardrail is removed (AUTHZ-7.6), each with the policy, its name and the
+  scope, and the actor in `operation`. Setting a policy where it is already a guardrail, or removing one that is not
+  there, dispatches nothing, and `GuardrailSet` is dispatched only once the guardrail's row is read back. Both extend
+  `Guardrail\GuardrailEvent`, the abstract, readonly shape they share, which is never dispatched itself. They name no
+  grantee, so they implement `AuthorizationEvent` alone; the cached guardrails are refreshed through the version every
+  guardrail entry shares.
 - **Expiry events.** Under `Identity\`: `RoleExpired`, `PermissionExpired` and `PolicyExpired`, dispatched when
   `authorization:prune` removes an expired grant, with its expiry and an operation that names no actor (the sweep is
   system work).
@@ -77,7 +84,9 @@ named and the operation they belong to, and are dispatched only once the write c
    deleted policy's attachments to resources go with its row, through the foreign key, and are not reported one by one:
    `Policy\Deleted` stands for them. A policy in use as a permission boundary is never deleted: the delete is refused
    with `BoundaryException` before anything is read or written, so no `Policy\Deleted` and no `BoundaryRemoved` is
-   dispatched for it.
+   dispatched for it. Nor is a policy in use as a guardrail, which is not edited either: the delete or the update is
+   refused with `GuardrailException`, so no `Policy\Deleted` or `Policy\Updated` is dispatched for it until each
+   guardrail is removed, each reported as `GuardrailRemoved`.
 
 9. **Digests, not documents.** A policy event carries its document's version and the SHA-256 of its canonical JSON
    (keys sorted at every depth, lists in order, slashes and Unicode unescaped) as a `DocumentDigest`.
@@ -135,7 +144,13 @@ app(GrantService::class)->grantRole($user, 'editor', actor: $admin);
   whether it also holds in the tenants below (`includeSubtree`, always true platform-wide), and its application, or
   none for every application. A grant re-made with another reach dispatches the granted event again, carrying the new
   reach. A boundary holds in every application, so its events' scope names none; one set again with another reach
-  dispatches `BoundarySet` again, with no `previous`.
+  dispatches `BoundarySet` again, with no `previous`. A guardrail holds in every application and, on a tenant, always
+  in the tenants below it, so its events' scope names no application and reaches below; on the platform it is
+  `GrantScope::platform()`.
+- **Guardrail changes are refused before they are reported.** An actor that does not hold
+  `authorization:guardrails:manage` from above the scope is refused with `GuardrailException` before the transaction
+  opens, so a refused change dispatches nothing; the check that refused it is a decision like any other, so it
+  dispatches `DecisionEvaluated`.
 
 ## Implementation Anchors
 
@@ -147,6 +162,8 @@ app(GrantService::class)->grantRole($user, 'editor', actor: $admin);
 - `Enums\GrantTarget`: the grant events and the holders of a row.
 - `Services\BoundaryService`: the boundary events; `Support\PolicyBoundaries`: the refused delete of a boundary's
   policy.
+- `Services\GuardrailService`: the guardrail events; `Support\PolicyGuardrails`: the refused edit and delete of a
+  guardrail's policy.
 - `Concerns\HasSystemProtection`: the override event.
 - `Console\Support\ActorOption`: the commands' `--actor`.
 
@@ -160,6 +177,9 @@ app(GrantService::class)->grantRole($user, 'editor', actor: $admin);
   replaced and the shape they share, after commit and only for a change; `GrantServiceTest` and `GrantPrunerTest`: a
   deleted or pruned grantee's boundaries reported as removed; `PolicyObserverTest`: a boundary's policy refused
   deletion.
+- `GuardrailServiceTest`, `GuardrailSetTest`, `GuardrailRemovedTest`, `GuardrailEventTest`: the guardrail events and
+  the shape they share, after commit and only for a change; `PolicyObserverTest`: a guardrail's policy refused editing
+  and deletion.
 - `GrantServiceTest`, `RoleServiceTest`, `PermissionServiceTest`, `PolicyServiceTest`, `RecordWriterTest`: the actor,
   the grantor columns, one operation id per call, rollback and the morph map.
 - `RoleObserverTest`, `PermissionObserverTest`, `PolicyObserverTest`, `RecordChangesTest`: the payloads, the deleted
@@ -174,4 +194,4 @@ app(GrantService::class)->grantRole($user, 'editor', actor: $admin);
 - The decision payload: the subject as a reference, the deciding policy and statement, and the keys a decision
   depended on.
 - Applications: the grant events report the application written.
-- Grant expiry, guardrails and break-glass: their events join the set.
+- Grant expiry and break-glass: their events join the set.

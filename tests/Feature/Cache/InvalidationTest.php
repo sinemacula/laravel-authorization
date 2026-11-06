@@ -14,17 +14,21 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\Resource\PolicyAttached as ResourcePolicyAttached;
 use SineMacula\Laravel\Authorization\Events\Resource\PolicyDetached as ResourcePolicyDetached;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\BoundaryResolver;
+use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantPruner;
+use SineMacula\Laravel\Authorization\Services\GuardrailService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
@@ -143,7 +147,8 @@ final class InvalidationTest extends TestCase
 
     /**
      * A change to a policy and its deletion each bump the policy, and the
-     * versions every resource policy entry and every boundary entry share.
+     * versions every resource policy entry, every boundary entry and every
+     * guardrail entry share.
      *
      * @return void
      */
@@ -153,7 +158,7 @@ final class InvalidationTest extends TestCase
         $role     = Role::create(['name' => 'editor']);
         $policies = $this->app?->make(PolicyService::class);
         $policy   = Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]);
-        $key      = [$this->versions()->policyKey($policy->id), $this->versions()->resourcePoliciesKey(), $this->versions()->boundariesKey()];
+        $key      = [$this->versions()->policyKey($policy->id), $this->versions()->resourcePoliciesKey(), $this->versions()->boundariesKey(), $this->versions()->guardrailsKey()];
 
         self::assertNotNull($policies);
         $deny = ['version' => 1, 'statements' => [['effect' => 'deny', 'actions' => ['*']]]];
@@ -402,6 +407,81 @@ final class InvalidationTest extends TestCase
     }
 
     /**
+     * Setting and removing a guardrail each bump the version every guardrail
+     * entry shares, and nothing else; a change that changes nothing bumps
+     * nothing. The guardrail allows managing guardrails, so the actor may still
+     * remove it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testGuardrailChangesBumpTheGuardrails(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $role    = Role::create(['name' => 'editor']);
+        $policy  = Policy::create(['name' => 'rail', 'document' => ['version' => 1, 'statements' => [['effect' => 'allow', 'actions' => ['authorization:*']]]]]);
+        $service = $this->app?->make(GuardrailService::class);
+        $actor   = self::guardrailManager();
+        $key     = [$this->versions()->guardrailsKey()];
+
+        // A first check pins every version it reads, so what follows is told
+        // apart from a version given its first token.
+        self::assertTrue(Authorization::for($actor)->can(PackagePermissions::GUARDRAILS_MANAGE));
+        self::assertNotNull($service);
+        self::assertSame($key, $this->bumpedBy(static fn () => $service->set($policy, null, $actor), $user, $role, $policy));
+        self::assertSame([], $this->bumpedBy(static fn () => $service->set($policy, null, $actor), $user, $role, $policy));
+        self::assertSame($key, $this->bumpedBy(static fn () => $service->remove($policy, null, $actor), $user, $role, $policy));
+        self::assertSame([], $this->bumpedBy(static fn () => $service->remove($policy, null, $actor), $user, $role, $policy));
+    }
+
+    /**
+     * A guardrail set or removed takes effect on the next request, however the
+     * entries were built.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGuardrailChangeTakesEffectOnTheNextRequest(): void
+    {
+        $policy  = Policy::create(['name' => 'rail', 'document' => ['version' => 1, 'statements' => [['effect' => 'allow', 'actions' => ['posts:read', 'authorization:*']]]]]);
+        $service = $this->app?->make(GuardrailService::class);
+        $actor   = self::guardrailManager();
+        $names   = function (): array {
+            $this->nextRequest();
+
+            return self::names((new GuardrailResolver)->guardrailsFor(null));
+        };
+
+        self::assertNotNull($service);
+        self::assertSame([], $names());
+
+        $service->set($policy, null, $actor);
+
+        self::assertSame(['rail'], $names());
+
+        $service->remove($policy, null, $actor);
+
+        self::assertSame([], $names());
+    }
+
+    /**
+     * Return an identity that holds the right to manage guardrails
+     * platform-wide.
+     *
+     * @return \Tests\Feature\Stubs\StubIdentity
+     */
+    private static function guardrailManager(): StubIdentity
+    {
+        $actor = StubIdentity::create(['id' => 'admin-1']);
+
+        $actor->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAILS_MANAGE]));
+
+        return $actor;
+    }
+
+    /**
      * Return the version keys among the user's, the role's and the policy's,
      * and, with the role as a grantee, the role's as a grantee and the one the
      * role policies share, whose tokens the write changed.
@@ -421,6 +501,7 @@ final class InvalidationTest extends TestCase
             $keys[] = $this->versions()->policyKey($policy->id);
             $keys[] = $this->versions()->resourcePoliciesKey();
             $keys[] = $this->versions()->boundariesKey();
+            $keys[] = $this->versions()->guardrailsKey();
         }
 
         if ($asGrantee) {

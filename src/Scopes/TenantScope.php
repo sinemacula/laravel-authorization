@@ -83,6 +83,19 @@ final class TenantScope implements Scope
     }
 
     /**
+     * Determine whether checks are decided just below the tenant the scope
+     * limits rows to, so a grant made in it counts only when it reaches the
+     * tenants below (see `within()`). The resolution cache keys its entries by
+     * it, as by the tenant.
+     *
+     * @return bool
+     */
+    public static function isBelowTenant(): bool
+    {
+        return self::whileResolving(static fn (ResolvedTenant $resolved): bool => $resolved->isBelow) ?? false;
+    }
+
+    /**
      * Return the application the subject is on, which limits the grants that
      * count to those for every application and those for it, or null for none,
      * when only grants for every application count.
@@ -99,6 +112,8 @@ final class TenantScope implements Scope
      * bound tenant tree, or the platform's empty chain.
      *
      * @return \SineMacula\Laravel\Authorization\Support\TenantChain
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
      */
     public static function currentChain(): TenantChain
     {
@@ -183,14 +198,20 @@ final class TenantScope implements Scope
      * resolution cache's memo, whose entries hold under one tenant and
      * application, is emptied.
      *
+     * Given `$isBelow`, the callback decides just below the tenant: a grant
+     * made in the tenant counts only when it reaches the tenants below it, as
+     * an ancestor's does, which is what an administrator holds over the
+     * tenant's children from above them (see `TenantChain`).
+     *
      * @template TResult
      *
      * @param  object|null  $tenant
      * @param  string|null  $application
      * @param  \Closure(): TResult  $callback
+     * @param  bool  $isBelow
      * @return TResult
      */
-    public static function within(?object $tenant, ?string $application, \Closure $callback): mixed
+    public static function within(?object $tenant, ?string $application, \Closure $callback, bool $isBelow = false): mixed
     {
         $container = Container::getInstance();
         $resolving = $container->bound(self::RESOLVING);
@@ -198,7 +219,7 @@ final class TenantScope implements Scope
 
         /** @var \SineMacula\Laravel\Authorization\Contracts\SubjectResolver $resolver */
         $resolver = $container->make(SubjectResolver::class);
-        $holder   = new ResolvedTenant($resolver, $tenant, $application, self::defaultGuard($container));
+        $holder   = new ResolvedTenant($resolver, $tenant, $application, self::defaultGuard($container), $isBelow);
 
         $container->instance(ResolvedTenant::class, $holder);
         $container->instance(self::WITHIN, $holder);
@@ -269,6 +290,8 @@ final class TenantScope implements Scope
      *
      * @param  \Closure(\SineMacula\Laravel\Authorization\Support\ResolvedTenant): TValue  $read
      * @return TValue|null
+     *
+     * @param-immediately-invoked-callable $read
      */
     private static function whileResolving(\Closure $read): mixed
     {

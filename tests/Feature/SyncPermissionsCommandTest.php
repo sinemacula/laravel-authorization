@@ -75,7 +75,8 @@ final class SyncPermissionsCommandTest extends TestCase
 
     /**
      * A fresh catalogue is added, one row per case and guard, with each
-     * declaration's metadata, and each addition runs the model's observers.
+     * declaration's metadata, the package's own permission among them, and each
+     * addition runs the model's observers.
      *
      * @return void
      */
@@ -92,10 +93,12 @@ final class SyncPermissionsCommandTest extends TestCase
         self::assertMatchesRegularExpression('/\|\s+Action\s+\|\s+Name\s+\|\s+Guard\s+\|\s+Category\s+\|\s+Description\s+\|/', $output);
         self::assertMatchesRegularExpression('/\|\s+add\s+\|\s+media:upload\s+\|\s+web\s+\|\s+Media\s+\|\s+Upload media\s+\|/', $output);
         self::assertMatchesRegularExpression('/\|\s+add\s+\|\s+posts:archive\s+\|\s+\(any\)\s+\|\s+\|\s+\|/', $output);
-        self::assertStringContainsString("\nadd: 5, update: 0, stale: 0, prune: 0, protected: 0, unchanged: 0.", $output);
+        self::assertMatchesRegularExpression('/\|\s+add\s+\|\s+authorization:guardrails:manage\s+\|\s+\(any\)\s+\|\s+authorization\s+\|/', $output);
+        self::assertStringContainsString("\nadd: 6, update: 0, stale: 0, prune: 0, protected: 0, unchanged: 0.", $output);
 
         self::assertSame(
             [
+                ['authorization:guardrails:manage', null, 'Set and remove guardrails from above the scope they cap.', 'authorization', false],
                 ['media:upload', 'web', 'Upload media', 'Media', false],
                 ['posts.publish', 'api', 'Publish posts', 'Posts', false],
                 ['posts.publish', 'web', 'Publish posts', 'Posts', false],
@@ -105,7 +108,7 @@ final class SyncPermissionsCommandTest extends TestCase
             self::platformRows(),
         );
 
-        Event::assertDispatchedTimes(PermissionCreated::class, 5);
+        Event::assertDispatchedTimes(PermissionCreated::class, 6);
     }
 
     /**
@@ -120,7 +123,7 @@ final class SyncPermissionsCommandTest extends TestCase
         Event::fake([PermissionCreated::class, PermissionUpdated::class, PermissionDeleted::class]);
 
         self::assertSame(0, Artisan::call(self::COMMAND, ['--prune' => true]));
-        self::assertStringContainsString('add: 0, update: 0, stale: 0, prune: 0, protected: 0, unchanged: 4.', Artisan::output());
+        self::assertStringContainsString('add: 0, update: 0, stale: 0, prune: 0, protected: 0, unchanged: 5.', Artisan::output());
 
         Event::assertNothingDispatched();
     }
@@ -184,7 +187,7 @@ final class SyncPermissionsCommandTest extends TestCase
         $output = Artisan::output();
 
         self::assertMatchesRegularExpression('/\|\s+stale\s+\|\s+posts:purge\s+\|\s+\(any\)\s+\|\s+\|\s+Purge posts\s+\|/', $output);
-        self::assertStringContainsString('add: 4, update: 0, stale: 1, prune: 0, protected: 0, unchanged: 0.', $output);
+        self::assertStringContainsString('add: 5, update: 0, stale: 1, prune: 0, protected: 0, unchanged: 0.', $output);
         self::assertTrue(Permission::query()->whereKey($stale->getKey())->exists());
     }
 
@@ -245,7 +248,7 @@ final class SyncPermissionsCommandTest extends TestCase
         $output = Artisan::output();
 
         self::assertStringNotContainsString('tenant:only', $output);
-        self::assertStringContainsString('add: 4, update: 0, stale: 0, prune: 0, protected: 0, unchanged: 0.', $output);
+        self::assertStringContainsString('add: 5, update: 0, stale: 0, prune: 0, protected: 0, unchanged: 0.', $output);
 
         $tenantRows = Permission::query()->withoutGlobalScope(TenantScope::class)->whereNotNull('tenant_type');
 
@@ -262,7 +265,7 @@ final class SyncPermissionsCommandTest extends TestCase
     public function testDryRunWithAdditionsWritesNothingAndExitsWithDrift(): void
     {
         self::assertSame(1, Artisan::call(self::COMMAND, ['--dry-run' => true]));
-        self::assertStringContainsString('Dry run, nothing was written. add: 4, update: 0, stale: 0, prune: 0, protected: 0, unchanged: 0.', Artisan::output());
+        self::assertStringContainsString('Dry run, nothing was written. add: 5, update: 0, stale: 0, prune: 0, protected: 0, unchanged: 0.', Artisan::output());
         self::assertSame([], self::platformRows());
     }
 
@@ -331,8 +334,15 @@ final class SyncPermissionsCommandTest extends TestCase
         $expected = [
             'dry_run'     => true,
             'prune'       => true,
-            'summary'     => ['add' => 1, 'update' => 0, 'stale' => 0, 'prune' => 1, 'protected' => 0, 'unchanged' => 0],
+            'summary'     => ['add' => 2, 'update' => 0, 'stale' => 0, 'prune' => 1, 'protected' => 0, 'unchanged' => 0],
             'permissions' => [
+                [
+                    'action'      => 'add',
+                    'name'        => 'authorization:guardrails:manage',
+                    'guard'       => null,
+                    'description' => 'Set and remove guardrails from above the scope they cap.',
+                    'category'    => 'authorization',
+                ],
                 ['action' => 'add', 'name' => 'media:upload', 'guard' => 'web', 'description' => 'Read/write media', 'category' => 'Media'],
                 ['action' => 'prune', 'name' => 'media:purge', 'guard' => null, 'description' => null, 'category' => null],
             ],
@@ -357,6 +367,7 @@ final class SyncPermissionsCommandTest extends TestCase
         Permission::create(['name' => 'posts:empty']);
 
         $expected = [
+            ['add', 'authorization:guardrails:manage', null, 'Set and remove guardrails from above the scope they cap.', 'authorization'],
             ['add', 'posts.publish', 'api', 'Publish posts', 'Posts'],
             ['update', 'posts:create', null, 'Create posts', 'Posts'],
             ['prune', 'posts:empty', null, null, null],
@@ -369,15 +380,16 @@ final class SyncPermissionsCommandTest extends TestCase
         self::assertSame(1, Artisan::call(self::COMMAND, ['--format' => 'json', '--dry-run' => true, '--prune' => true]));
         self::assertSame($expected, self::listedRows());
 
-        $expected[2][0] = 'stale';
         $expected[3][0] = 'stale';
+        $expected[4][0] = 'stale';
 
         self::assertSame(1, Artisan::call(self::COMMAND, ['--format' => 'json', '--dry-run' => true]));
         self::assertSame($expected, self::listedRows());
     }
 
     /**
-     * JSON output of a writing run reports the mode it ran in.
+     * JSON output of a writing run reports the mode it ran in, and the
+     * package's own permission once it is synced.
      *
      * @return void
      */
@@ -387,12 +399,16 @@ final class SyncPermissionsCommandTest extends TestCase
 
         self::assertSame(0, Artisan::call(self::COMMAND, ['--format' => 'json']));
 
+        $output = Artisan::output();
+
         /** @var array{dry_run: bool, prune: bool, permissions: list<mixed>} $payload */
-        $payload = \json_decode(Artisan::output(), true, flags: \JSON_THROW_ON_ERROR);
+        $payload = \json_decode($output, true, flags: \JSON_THROW_ON_ERROR);
 
         self::assertFalse($payload['dry_run']);
         self::assertFalse($payload['prune']);
-        self::assertSame([], $payload['permissions']);
+        $package = ['add', 'authorization:guardrails:manage', null, 'Set and remove guardrails from above the scope they cap.', 'authorization'];
+
+        self::assertSame([$package], self::listedRows($output));
     }
 
     /**
@@ -493,7 +509,7 @@ final class SyncPermissionsCommandTest extends TestCase
 
         self::assertSame(0, Artisan::call(self::COMMAND));
 
-        self::assertSame(4, self::authorizationConnection()->table('permissions')->count());
+        self::assertSame(5, self::authorizationConnection()->table('permissions')->count());
         self::assertSame(0, DB::connection('testing')->table('permissions')->count());
     }
 
@@ -542,7 +558,7 @@ final class SyncPermissionsCommandTest extends TestCase
 
         $created = self::dispatchedEvents(PermissionCreated::class);
 
-        self::assertCount(4, $created);
+        self::assertCount(5, $created);
         self::assertCount(1, \array_unique(\array_map(static fn (PermissionCreated $event): string => $event->operation->id, $created)));
 
         foreach ($created as $event) {
@@ -591,12 +607,13 @@ final class SyncPermissionsCommandTest extends TestCase
      * Return the rows the last JSON run listed, each as `[action, name, guard,
      * description, category]`.
      *
+     * @param  string|null  $output
      * @return list<array{string, string, string|null, string|null, string|null}>
      */
-    private static function listedRows(): array
+    private static function listedRows(?string $output = null): array
     {
         /** @var array{permissions: list<array{action: string, name: string, guard: string|null, description: string|null, category: string|null}>} $payload */
-        $payload = \json_decode(Artisan::output(), true, flags: \JSON_THROW_ON_ERROR);
+        $payload = \json_decode($output ?? Artisan::output(), true, flags: \JSON_THROW_ON_ERROR);
 
         return \array_map(
             static fn (array $entry): array => [$entry['action'], $entry['name'], $entry['guard'], $entry['description'], $entry['category']],

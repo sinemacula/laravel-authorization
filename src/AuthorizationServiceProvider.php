@@ -42,6 +42,7 @@ use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
+use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
 use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
@@ -49,6 +50,7 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\ApplicationAccess;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Services\GuardrailService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
@@ -383,6 +385,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
             translator: $app->bound(Translator::class) ? $app->make(Translator::class) : null,
             contexts: $app->make(CheckContextFactory::class),
             resourcePolicies: new ResourcePolicyResolver,
+            guardrails: new GuardrailResolver,
         ));
 
         $this->app->alias('authorization', AuthorizationManager::class);
@@ -474,8 +477,8 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
     /**
      * Bind the management services that own every write of a role, permission,
-     * policy, grant, resource policy attachment or permission boundary. They
-     * hold no state, so each is a singleton.
+     * policy, grant, resource policy attachment, permission boundary or
+     * guardrail. They hold no state, so each is a singleton.
      *
      * @return void
      */
@@ -488,6 +491,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
             GrantService::class,
             ResourcePolicyService::class,
             BoundaryService::class,
+            GuardrailService::class,
             ApplicationAccess::class,
         ];
 

@@ -245,7 +245,8 @@ final class ValidatePolicyCommandTest extends TestCase
 
     /**
      * Files are checked against the bound action catalogue, so with no
-     * permissions declared every document is refused.
+     * permissions declared a document naming any action but the package's own
+     * is refused with the reason that nothing is declared.
      *
      * @return void
      */

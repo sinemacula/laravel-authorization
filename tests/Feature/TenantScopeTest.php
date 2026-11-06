@@ -351,6 +351,82 @@ final class TenantScopeTest extends TestCase
     }
 
     /**
+     * Within a tenant just below it, a grant made in the tenant counts only
+     * when it reaches below, the scope says so, and the request's tenant
+     * decides as usual afterwards; a plain within never stands below.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testWithinBelowATenantCountsOnlyItsGrantsThatReachBelow(): void
+    {
+        $tenant = StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'A']);
+        $user   = StubIdentity::query()->create(['id' => 'user-1']);
+
+        Permission::create(['name' => 'posts:read']);
+        Permission::create(['name' => 'posts:edit']);
+        $user->givePermission('posts:read', tenant: $tenant);
+        $user->givePermission('posts:edit', tenant: $tenant, includeSubtree: false);
+
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($user, $tenant, 'web'));
+
+        $below = TenantScope::within($tenant, null, static fn (): array => [TenantScope::isBelowTenant(), $user->getPermissions()], true);
+        $at    = TenantScope::within($tenant, null, static fn (): array => [TenantScope::isBelowTenant(), $user->getPermissions()]);
+
+        self::assertSame([true, ['posts:read']], $below);
+        self::assertFalse($at[0]);
+        self::assertEqualsCanonicalizing(['posts:read', 'posts:edit'], $at[1]);
+        self::assertFalse(TenantScope::isBelowTenant());
+        self::assertEqualsCanonicalizing(['posts:read', 'posts:edit'], $user->getPermissions());
+    }
+
+    /**
+     * Asked while the subject is being resolved, the scope stands below no
+     * tenant, as it limits rows to the platform's then.
+     *
+     * @return void
+     */
+    public function testWhileResolvingTheScopeIsBelowNoTenant(): void
+    {
+        $resolver = new class implements SubjectResolver {
+            /** @var bool|null Whether the scope stood below a tenant while the subject was resolved. */
+            public ?bool $below = null;
+
+            /**
+             * Record whether the scope stands below a tenant, and resolve no
+             * subject.
+             *
+             * @return \SineMacula\Laravel\Authorization\Subject|null
+             */
+            #[\Override]
+            public function resolve(): ?Subject
+            {
+                $this->below = TenantScope::isBelowTenant();
+
+                return null;
+            }
+
+            /**
+             * Make the given user the subject.
+             *
+             * @param  object  $user
+             * @return \SineMacula\Laravel\Authorization\Subject
+             */
+            #[\Override]
+            public function forUser(object $user): Subject
+            {
+                return new Subject($user, $user);
+            }
+        };
+
+        $this->app?->instance(SubjectResolver::class, $resolver);
+
+        self::assertFalse(TenantScope::isBelowTenant());
+        self::assertFalse($resolver->below);
+    }
+
+    /**
      * An application that binds its subject resolver with `bind()`, so every
      * `make()` builds a new one, still decides within a tenant and application
      * in theirs, the current tenant, application and scoped rows included,

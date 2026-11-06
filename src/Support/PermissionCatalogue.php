@@ -10,10 +10,13 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueExcept
 use SineMacula\Laravel\Authorization\Models\Permission;
 
 /**
- * The platform's permission catalogue as the application declares it in code.
+ * The platform's permission catalogue as the package and the application
+ * declare it in code.
  *
- * Reads every case of every enum in `authorization.permission_enums`, through
- * the `#[Permission]` attribute on the case, and every definition each class in
+ * Holds the permissions the package declares for its own services first (see
+ * `PackagePermissions`), then reads every case of every enum in
+ * `authorization.permission_enums`, through the `#[Permission]` attribute on
+ * the case, and every definition each class in
  * `authorization.permission_providers` returns, resolving the providers through
  * the container. Each name is checked against the configured permission model's
  * name rules and each guard must be null or a non-empty string. A permission
@@ -48,8 +51,9 @@ final readonly class PermissionCatalogue
     ) {}
 
     /**
-     * Return every permission the configured enums and providers declare, in
-     * the order they are declared.
+     * Return every permission the package, the configured enums and the
+     * configured providers declare, in the order they are declared, the
+     * package's first.
      *
      * @return list<\SineMacula\Laravel\Authorization\Support\PermissionDefinition>
      *
@@ -59,7 +63,7 @@ final readonly class PermissionCatalogue
     {
         $definitions = [];
 
-        foreach ([...$this->enumDefinitions(), ...$this->providerDefinitions()] as [$source, $definition]) {
+        foreach ([...self::packageDefinitions(), ...$this->enumDefinitions(), ...$this->providerDefinitions()] as [$source, $definition]) {
             $this->assertValid($source, $definition);
 
             $existing = $definitions[$definition->key()] ?? $definition;
@@ -72,6 +76,17 @@ final readonly class PermissionCatalogue
         }
 
         return \array_values($definitions);
+    }
+
+    /**
+     * Return the definitions the package declares for its own services, each
+     * with the class that declares it.
+     *
+     * @return list<array{string, \SineMacula\Laravel\Authorization\Support\PermissionDefinition}>
+     */
+    private static function packageDefinitions(): array
+    {
+        return \array_map(static fn (PermissionDefinition $definition): array => [PackagePermissions::class, $definition], (new PackagePermissions)->permissions());
     }
 
     /**

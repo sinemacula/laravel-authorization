@@ -54,6 +54,30 @@ final class TenantChainTest extends TestCase
         self::assertFalse($chain->isSameAs(new TenantChain([$account, $group, $org])));
         self::assertFalse($chain->isSameAs(new TenantChain([$account, $org])));
         self::assertFalse($chain->isSameAs(new TenantChain([$account, $org, new Reference('stub_tenant', 'other')])));
+        self::assertFalse($chain->isBelow);
+        self::assertFalse($chain->isSameAs(TenantChain::of($account, $tree, true)));
+        self::assertTrue(TenantChain::of($account, $tree, true)->isBelow);
+        self::assertTrue(TenantChain::of($account, $tree, true)->isSameAs(new TenantChain([$account, $org, $group], true)));
+        self::assertFalse(TenantChain::of(null, $tree, true)->isBelow);
+    }
+
+    /**
+     * A chain starts at its tenant alone: not at an ancestor, another tenant of
+     * the same type, or the same key of another type; the platform's starts at
+     * none.
+     *
+     * @return void
+     */
+    public function testAChainIsAtItsOwnTenant(): void
+    {
+        [$account, $org, $group] = self::tenants();
+
+        $chain = TenantChain::of($account, self::tree($account, $org, $group));
+
+        self::assertTrue($chain->isAt(new Reference($account->type, $account->id)));
+        self::assertFalse($chain->isAt($org));
+        self::assertFalse($chain->isAt(new Reference('other_tenant', $account->id)));
+        self::assertFalse((new TenantChain)->isAt($account));
     }
 
     /**
@@ -131,6 +155,17 @@ final class TenantChainTest extends TestCase
 
         self::assertEqualsCanonicalizing(['0', '1', '2'], $every->pluck('authorizable_id')->all());
         self::assertSame(['0'], (new TenantChain)->grants(DB::table('authorizable_roles'), 'authorizable_roles')->pluck('authorizable_id')->all());
+
+        // Just below a tenant, its own grants hold only when they reach below,
+        // as an ancestor's do.
+        $belowAccount = TenantChain::of($account, self::tree($account, $org, $group), true);
+        $belowGroup   = TenantChain::of($group, self::tree($account, $org, $group), true);
+
+        self::assertEqualsCanonicalizing(['0', '2'], $belowAccount->grants(DB::table('authorizable_roles'), 'authorizable_roles')->pluck('authorizable_id')->all());
+        self::assertSame(['0'], $belowGroup->grants(DB::table('authorizable_roles'), 'authorizable_roles')->pluck('authorizable_id')->all());
+        $atGroup = TenantChain::of($group, self::tree($account, $org, $group));
+
+        self::assertEqualsCanonicalizing(['0', '3'], $atGroup->grants(DB::table('authorizable_roles'), 'authorizable_roles')->pluck('authorizable_id')->all());
     }
 
     /**

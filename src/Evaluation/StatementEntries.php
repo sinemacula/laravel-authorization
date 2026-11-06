@@ -9,30 +9,32 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 
 /**
- * The statements a decision assesses, gathered from its policies and its
- * permission boundaries in the fixed order every decision keeps (AUTHZ-7.9).
+ * The statements a decision assesses, gathered from its policies, its
+ * guardrails and its permission boundaries in the fixed order every decision
+ * keeps (AUTHZ-7.9).
  *
  * The policies are ordered by name, then stored key, then the resource a
  * resource policy is attached to, then document, and each statement by its
  * position, so the statements come out the same whatever order the policies
- * were read in. A boundary's deny statements join the deny stage after every
- * policy's, and its allow statements are kept apart, one list per boundary, for
- * the boundary stage, the boundaries in the same order, each with the step it
- * adds when it refuses the check.
+ * were read in. A guardrail's and a boundary's deny statements join the deny
+ * stage after every policy's, the guardrails' first, and their allow statements
+ * are kept apart, one list per guardrail for the guardrail stage and one per
+ * boundary for the boundary stage, each in the same order, each with the step
+ * it adds when it refuses the check.
  *
  * A policy reached more than once, such as one held by both the principal and
- * its identity, one held and set as a boundary too, or one that is the boundary
- * of both, is gathered once for each part it plays: its deny statements once,
- * its allow statements once as a policy and once as a boundary. Two policies
- * that tie on what they are ordered by are the same policy, attached the same
- * way, and intersecting a boundary with itself changes nothing, so the decision
- * is unchanged and names each statement once.
+ * its identity, one held and set as a guardrail or a boundary too, or one that
+ * is the boundary of both, is gathered once for each part it plays: its deny
+ * statements once, its allow statements once as a policy, once as a guardrail
+ * and once as a boundary. Two policies that tie on what they are ordered by are
+ * the same policy, attached the same way, and intersecting a cap with itself
+ * changes nothing, so the decision is unchanged and names each statement once.
  *
  * What a policy gives is worked out once, while the policy lives: its deny and
  * allow statements apart, each with its reference and the trace entry it adds
  * when it does not name the action, and what it is ordered by; and, once it is
- * read as a boundary, its allow statements with the boundary stage's entries
- * and the step it adds when it refuses the check.
+ * read as a guardrail or a boundary, its allow statements with that stage's
+ * entries and the step it adds when it refuses the check.
  *
  * @phpstan-type StatementEntry array{
  *     \SineMacula\Laravel\Authorization\Evaluation\StatementReference,
@@ -63,6 +65,14 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  *         \SineMacula\Laravel\Authorization\Evaluation\Statement,
  *         \SineMacula\Laravel\Authorization\Evaluation\TraceEntry
  *     }>,
+ *     guardrails: list<array{
+ *         list<array{
+ *             \SineMacula\Laravel\Authorization\Evaluation\StatementReference,
+ *             \SineMacula\Laravel\Authorization\Evaluation\Statement,
+ *             \SineMacula\Laravel\Authorization\Evaluation\TraceEntry
+ *         }>,
+ *         \SineMacula\Laravel\Authorization\Evaluation\TraceEntry
+ *     }>|null,
  *     boundaries: list<array{
  *         list<array{
  *             \SineMacula\Laravel\Authorization\Evaluation\StatementReference,
@@ -72,7 +82,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  *         \SineMacula\Laravel\Authorization\Evaluation\TraceEntry
  *     }>
  * }
- * @phpstan-type BoundaryEntries array{
+ * @phpstan-type CapEntries array{
  *     list<array{
  *         \SineMacula\Laravel\Authorization\Evaluation\StatementReference,
  *         \SineMacula\Laravel\Authorization\Evaluation\Statement,
@@ -96,42 +106,46 @@ final class StatementEntries
      */
     private ?\WeakMap $policies = null;
 
-    /**
-     * Each boundary's allow statements with the boundary stage's trace entries,
-     * and the step it adds when it refuses the check, kept while the policy
-     * lives.
-     *
-     * @var \WeakMap<\SineMacula\Laravel\Authorization\Evaluation\Policy, BoundaryEntries>|null
-     */
-    private ?\WeakMap $boundaries = null;
+    /** @var array<string, \WeakMap<\SineMacula\Laravel\Authorization\Evaluation\Policy, CapEntries>> Each cap's entries, kept per cap stage while the policy lives. */
+    private array $caps = [];
 
     /**
-     * Return the statements of the policies and the boundaries, in order: every
-     * deny statement, the policies' and then the boundaries', every allow
-     * statement of the policies, and each boundary's allow statements, each
-     * policy gathered once for each part it plays.
+     * Return the statements of the policies, the guardrails and the boundaries,
+     * in order: every deny statement, the policies', then the guardrails', then
+     * the boundaries', every allow statement of the policies, each guardrail's
+     * allow statements and each boundary's, each policy gathered once for each
+     * part it plays. With the guardrails null, the check is exempt from them:
+     * no guardrail statement is gathered, and the guardrails are null too.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $boundaries
+     * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>|null  $guardrails
      * @return Gathered
      */
-    public function of(array $policies, array $boundaries = []): array
+    public function of(array $policies, array $boundaries = [], ?array $guardrails = []): array
     {
         $denies = [];
         $allows = [];
-        $bounds = [];
+        $caps   = [DecisionStage::GUARDRAIL->value => [], DecisionStage::BOUNDARY->value => []];
 
         foreach ($this->sorted($policies) as [$entries]) {
             $denies[$entries['order']] ??= $entries['deny'];
             $allows[$entries['order']] ??= $entries['allow'];
         }
 
-        foreach ($this->sorted($boundaries) as [$entries, $boundary]) {
-            $denies[$entries['order']] ??= $entries['deny'];
-            $bounds[$entries['order']] ??= $this->boundaryEntriesOf($boundary, $entries['allow']);
+        foreach ([[DecisionStage::GUARDRAIL, $guardrails ?? []], [DecisionStage::BOUNDARY, $boundaries]] as [$stage, $capping]) {
+            foreach ($this->sorted($capping) as [$entries, $cap]) {
+                $denies[$entries['order']]              ??= $entries['deny'];
+                $caps[$stage->value][$entries['order']] ??= $this->capEntriesOf($stage, $cap, $entries['allow']);
+            }
         }
 
-        return ['deny' => \array_merge(...\array_values($denies)), 'allow' => \array_merge(...\array_values($allows)), 'boundaries' => \array_values($bounds)];
+        return [
+            'deny'       => \array_merge(...\array_values($denies)),
+            'allow'      => \array_merge(...\array_values($allows)),
+            'guardrails' => $guardrails === null ? null : \array_values($caps[DecisionStage::GUARDRAIL->value]),
+            'boundaries' => \array_values($caps[DecisionStage::BOUNDARY->value]),
+        ];
     }
 
     /**
@@ -184,32 +198,40 @@ final class StatementEntries
     }
 
     /**
-     * Return a boundary's allow statements with the trace entry each adds at
-     * the boundary stage when it does not name the action, and the step the
-     * boundary adds when it refuses the check, naming it as `name[key]`, worked
-     * out once per policy.
+     * Return a guardrail's or a boundary's allow statements with the trace
+     * entry each adds at its cap stage when it does not name the action, and
+     * the step the cap adds when it refuses the check, naming it as
+     * `name[key]`, worked out once per policy and stage.
      *
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $boundary
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage  $stage
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $cap
      * @param  list<StatementEntry>  $allows
-     * @return BoundaryEntries
+     * @return CapEntries
      */
-    private function boundaryEntriesOf(Policy $boundary, array $allows): array
+    private function capEntriesOf(DecisionStage $stage, Policy $cap, array $allows): array
     {
-        $this->boundaries ??= new \WeakMap;
+        if (!isset($this->caps[$stage->value])) {
+            /** @var \WeakMap<\SineMacula\Laravel\Authorization\Evaluation\Policy, CapEntries> $map */
+            $map = new \WeakMap;
 
-        if (!isset($this->boundaries[$boundary])) {
+            $this->caps[$stage->value] = $map;
+        }
+
+        $caps = $this->caps[$stage->value];
+
+        if (!isset($caps[$cap])) {
             $entries = [];
 
             foreach ($allows as [$reference, $statement]) {
-                $entries[] = [$reference, $statement, new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::NOT_APPLICABLE, $reference)];
+                $entries[] = [$reference, $statement, new TraceEntry($stage, TraceOutcome::NOT_APPLICABLE, $reference)];
             }
 
-            $name = $boundary->name . ($boundary->id === null ? '' : "[{$boundary->id}]");
+            $name = $cap->name . ($cap->id === null ? '' : "[{$cap->id}]");
 
-            $this->boundaries[$boundary] = [$entries, new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::REFUSED, null, [], $name)];
+            $caps[$cap] = [$entries, new TraceEntry($stage, TraceOutcome::REFUSED, null, [], $name)];
         }
 
-        return $this->boundaries[$boundary];
+        return $caps[$cap];
     }
 
     /**

@@ -116,14 +116,19 @@ final class PolicyModelTest extends TestCase
     }
 
     /**
-     * Every document is refused at write time when the code declares no
-     * permissions.
+     * With no permissions declared, a document naming only the package's own is
+     * written, and one needing any other action is refused at write time with
+     * the reason that nothing is declared.
      *
      * @return void
      */
-    public function testRejectsEveryWriteWhenNoPermissionsAreDeclared(): void
+    public function testRejectsAWriteNeedingAnyOtherActionWhenNoPermissionsAreDeclared(): void
     {
         $this->app?->instance(ActionCatalogue::class, $this->app->make(DeclaredActionCatalogue::class));
+
+        $managers = Policy::create(['name' => 'managers', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['authorization:guardrails:manage']]]]]);
+
+        self::assertTrue($managers->exists);
 
         $this->expectExceptionMessage('Invalid policy document \'readers\': ' . PolicyValidator::NOTHING_DECLARED);
 

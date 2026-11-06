@@ -148,10 +148,21 @@ final class InlinePolicies
      */
     public static function stored(mixed $key): ?Policy
     {
-        $class  = self::policyClass();
-        $policy = $class::query()->withoutGlobalScopes()->useWritePdo()->find($key, [(new $class)->getKeyName(), 'name', 'owner_type', 'owner_id', 'document']);
+        return self::storedThrough(self::policyClass()::query(), $key);
+    }
 
-        return $policy instanceof Policy ? $policy : null;
+    /**
+     * Read the policy with the given key as `stored()` does, under a lock on
+     * its row held until the transaction ends, so a change to the policy that
+     * another transaction makes waits for this one, and this read sees the row
+     * as last committed; null when no policy has the key.
+     *
+     * @param  mixed  $key
+     * @return \SineMacula\Laravel\Authorization\Models\Policy|null
+     */
+    public static function storedForUpdate(mixed $key): ?Policy
+    {
+        return self::storedThrough(self::policyClass()::query()->lockForUpdate(), $key);
     }
 
     /**
@@ -293,6 +304,22 @@ final class InlinePolicies
     private static function ownedBy(Reference $owner): Builder
     {
         return self::policyClass()::query()->withoutGlobalScopes()->useWritePdo()->where('owner_type', $owner->type)->where('owner_id', $owner->id);
+    }
+
+    /**
+     * Read the name, owner columns and document of the policy with the given
+     * key through the query, outside any global scope and on the write
+     * connection; null when no policy has the key.
+     *
+     * @param  \Illuminate\Database\Eloquent\Builder<\SineMacula\Laravel\Authorization\Models\Policy>  $query
+     * @param  mixed  $key
+     * @return \SineMacula\Laravel\Authorization\Models\Policy|null
+     */
+    private static function storedThrough(Builder $query, mixed $key): ?Policy
+    {
+        $policy = $query->withoutGlobalScopes()->useWritePdo()->find($key, [$query->getModel()->getKeyName(), 'name', 'owner_type', 'owner_id', 'document']);
+
+        return $policy instanceof Policy ? $policy : null;
     }
 
     /**

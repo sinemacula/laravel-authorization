@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Support\DocumentDigest;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\PolicyBoundaries;
+use SineMacula\Laravel\Authorization\Support\PolicyGuardrails;
 use SineMacula\Laravel\Authorization\Support\PolicyPrincipals;
 use SineMacula\Laravel\Authorization\Support\RecordOwner;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -34,7 +35,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * own with no actor. The document is reported by its version and digest, never
  * its body, and a delete reads, before the row goes, every grantee the policy
  * was attached to. A policy in use as a permission boundary is never deleted:
- * the delete is refused until every boundary it is has been removed.
+ * the delete is refused until every boundary it is has been removed. A policy
+ * in use as a guardrail is neither edited nor deleted: either is refused until
+ * every guardrail it is has been removed through the guardrail service.
  *
  * A policy is owned by the platform (both tenant columns null) or by one tenant
  * (both set), as roles and permissions are. Unlike theirs, policy reads are not
@@ -73,15 +76,21 @@ final class PolicyObserver
     }
 
     /**
-     * Capture the changed fields' values before the update, other than the
-     * document, and the digest of the document it replaces when it is
-     * rewritten, so the paired `updated` hook can report the change.
+     * Refuse the edit of a policy in use as a guardrail (see
+     * `PolicyGuardrails`), then capture the changed fields' values before the
+     * update, other than the document, and the digest of the document it
+     * replaces when it is rewritten, so the paired `updated` hook can report
+     * the change.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\GuardrailException
      */
     public function updating(Policy $policy): void
     {
+        PolicyGuardrails::assertEditable($policy);
+
         RecordChanges::capture($policy, ['document']);
         RecordChanges::hold($policy, [
             'document' => $policy->isDirty('document') ? self::digest($policy->getOriginal('document')) : null,
@@ -131,17 +140,20 @@ final class PolicyObserver
 
     /**
      * Refuse the delete of a policy in use as a permission boundary (see
-     * `PolicyBoundaries`), then read, before the row goes, every grantee the
-     * policy is attached to, which the delete takes with it.
+     * `PolicyBoundaries`) or as a guardrail (see `PolicyGuardrails`), then
+     * read, before the row goes, every grantee the policy is attached to, which
+     * the delete takes with it.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\BoundaryException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\GuardrailException
      */
     public function deleting(Policy $policy): void
     {
         PolicyBoundaries::assertDeletable($policy);
+        PolicyGuardrails::assertDeletable($policy);
 
         RecordChanges::hold($policy, ['grantees' => GrantTarget::POLICY->holders(Reference::of($policy)->id)]);
     }

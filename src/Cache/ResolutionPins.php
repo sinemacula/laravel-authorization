@@ -16,8 +16,10 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * knows which they are. A resource's policies are read in one query, so their
  * resolution pins the versions every policy attached to the resource's type,
  * and every policy, share before it reads them; a grantee's boundaries are too,
- * so their resolution pins the version every boundary entry shares. Without a
- * persistent store nothing is pinned and every pin is a no-op.
+ * so their resolution pins the version every boundary entry shares, and so are
+ * the guardrails of a scope, whose resolution pins the version every guardrail
+ * entry shares. Without a persistent store nothing is pinned and every pin is a
+ * no-op.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -153,6 +155,23 @@ final class ResolutionPins
         }
 
         $this->pin($this->store, [$this->store->boundariesKey()]);
+    }
+
+    /**
+     * Pin the version every entry of the guardrails shares, before reading the
+     * guardrails that apply in the scope and their documents in one query, so a
+     * guardrail set or removed, or a change to any policy, made while the
+     * resolution runs is seen.
+     *
+     * @return void
+     */
+    public function guardrails(): void
+    {
+        if ($this->store === null) {
+            return;
+        }
+
+        $this->pin($this->store, [$this->store->guardrailsKey()]);
     }
 
     /**

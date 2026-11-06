@@ -1,0 +1,23 @@
+<?php
+
+declare(strict_types = 1);
+
+namespace SineMacula\Laravel\Authorization\Events\Guardrail;
+
+/**
+ * Dispatched when a guardrail is removed from a tenant or from the platform
+ * (AUTHZ-7.6), by the guardrail service.
+ *
+ * It carries what every change to a guardrail does (see `GuardrailEvent`): the
+ * operation, with the actor that removed it, the policy that was the guardrail,
+ * its name and the scope.
+ *
+ * Part of the SemVer-stable event API; breaking changes require a major version
+ * bump.
+ *
+ * @api
+ *
+ * @author      Ben Carey <bdmc@sinemacula.co.uk>
+ * @copyright   2026 Sine Macula Limited
+ */
+final readonly class GuardrailRemoved extends GuardrailEvent {}

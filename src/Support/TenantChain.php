@@ -16,6 +16,13 @@ use SineMacula\Laravel\Authorization\Contracts\TenantTree;
  * An empty chain is the platform: no tenant, so only platform-wide records and
  * grants count (AUTHZ-5.7).
  *
+ * A chain may stand just below its tenant: a grant made in the tenant then
+ * counts only when it reaches the tenants below it, as an ancestor's does, so
+ * what holds there is what holds in every one of the tenant's children from
+ * above them. A guardrail on a tenant is changed from there (AUTHZ-7.6): from
+ * the scope of the tenant's parent, by a grant that reaches the tenant, never
+ * one made in the tenant itself.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -25,24 +32,29 @@ final readonly class TenantChain
      * Create a new tenant chain.
      *
      * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>  $tenants
+     * @param  bool  $isBelow
      */
     public function __construct(
 
         /** The tenant first, then its ancestors, nearest first; none for the platform. */
         public array $tenants = [],
+
+        /** Whether the chain stands just below its tenant, so a grant made there counts only when it reaches below. */
+        public bool $isBelow = false,
     ) {}
 
     /**
-     * Return the chain of the tenant through the given tree, or the platform's
-     * for no tenant.
+     * Return the chain of the tenant through the given tree, standing just
+     * below the tenant when asked, or the platform's for no tenant.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  \SineMacula\Laravel\Authorization\Contracts\TenantTree  $tree
+     * @param  bool  $isBelow
      * @return self
      */
-    public static function of(?Reference $tenant, TenantTree $tree): self
+    public static function of(?Reference $tenant, TenantTree $tree, bool $isBelow = false): self
     {
-        return $tenant === null ? new self : new self([$tenant, ...$tree->ancestors($tenant)]);
+        return $tenant === null ? new self : new self([$tenant, ...$tree->ancestors($tenant)], $isBelow);
     }
 
     /**
@@ -98,7 +110,8 @@ final readonly class TenantChain
     /**
      * Limit a grant query to the grants that hold in the chain's tenant:
      * platform-wide grants, the tenant's own, and its ancestors' that reach the
-     * tenants below them.
+     * tenants below them; for a chain standing just below its tenant, the
+     * tenant's own only when they reach below it too.
      *
      * @template TQuery of \Illuminate\Contracts\Database\Query\Builder
      *
@@ -112,8 +125,10 @@ final readonly class TenantChain
             $query->whereNull($table . '.tenant_type');
 
             foreach ($this->tenants as $depth => $tenant) {
-                $query->orWhere(static function (Builder $query) use ($table, $tenant, $depth): void {
-                    self::heldIn($query, $table, $tenant, $depth === 0);
+                $own = $depth === 0 && !$this->isBelow;
+
+                $query->orWhere(static function (Builder $query) use ($table, $tenant, $own): void {
+                    self::heldIn($query, $table, $tenant, $own);
                 });
             }
         });
@@ -157,14 +172,14 @@ final readonly class TenantChain
 
     /**
      * Determine whether the other chain lists the same tenants in the same
-     * order.
+     * order, standing where this one does.
      *
      * @param  self  $other
      * @return bool
      */
     public function isSameAs(self $other): bool
     {
-        return self::pairs($this->tenants) === self::pairs($other->tenants);
+        return self::pairs($this->tenants) === self::pairs($other->tenants) && $this->isBelow === $other->isBelow;
     }
 
     /**
@@ -175,6 +190,20 @@ final readonly class TenantChain
     public function tenant(): ?Reference
     {
         return $this->tenants[0] ?? null;
+    }
+
+    /**
+     * Determine whether the chain starts at the tenant: a check decided in it
+     * is decided in that tenant. The platform's chain starts at no tenant.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
+     * @return bool
+     */
+    public function isAt(Reference $tenant): bool
+    {
+        $own = $this->tenant();
+
+        return $own !== null && $own->type === $tenant->type && $own->id === $tenant->id;
     }
 
     /**

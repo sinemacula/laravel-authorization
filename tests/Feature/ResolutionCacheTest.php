@@ -806,6 +806,89 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
+     * The guardrails of a scope are kept under a kind of their own, keyed by
+     * the tenant, the application and the policy limits, read back from the
+     * store in the next request without resolving, and record no grantee's
+     * version, only the one every guardrail entry shares.
+     *
+     * @return void
+     */
+    public function testTheGuardrailsAreKeptForTheScope(): void
+    {
+        $policy = EvaluationPolicy::fromArray(['name' => 'rail', 'statements' => [['effect' => 'allow', 'actions' => ['posts:*']]]])->withId('rail-key');
+        $key    = 'authorization-test:guardrails:guardrails:*:platform:every:limits:65536.100.50.512';
+
+        $this->request()->rememberGuardrails(function (ResolutionPins $pins) use ($policy): Resolution {
+            $pins->guardrails();
+
+            return $this->resolve([$policy]);
+        });
+
+        $entry = $this->store->get($key);
+
+        self::assertIsArray($entry);
+        self::assertSame([['id' => 'rail-key', 'document' => $policy->toArray(), 'resource' => null]], $entry['value']);
+        self::assertSame([$this->versions()->guardrailsKey()], \array_keys($entry['versions']));
+
+        $read = $this->request()->rememberGuardrails(fn (): Resolution => $this->resolve([]));
+
+        self::assertSame(1, $this->resolutions);
+        self::assertEquals([$policy], $read);
+
+        $this->versions()->bump([$this->versions()->guardrailsKey()]);
+
+        self::assertSame([], $this->request()->rememberGuardrails(fn (): Resolution => $this->resolve([])));
+        self::assertSame(2, $this->resolutions);
+    }
+
+    /**
+     * An entry built just below a tenant, where a grant made in the tenant
+     * counts only when it reaches below, is kept apart from the tenant's own:
+     * each scope writes its own key, and the tenant's never the one kept for
+     * below it.
+     *
+     * @return void
+     */
+    public function testEntriesBuiltBelowATenantAreKeptApart(): void
+    {
+        $tenant = self::createTenant('t-1');
+        $cache  = $this->request();
+        $prefix = 'authorization-test:permissions:' . PrincipalCacheKey::for(self::grantee()) . ':' . $tenant->getMorphClass() . ':t-1';
+
+        TenantScope::within($tenant, null, fn (): array => $this->permissions($cache));
+
+        self::assertIsArray($this->store->get($prefix . ':every'));
+        self::assertNull($this->store->get($prefix . ':below:every'));
+
+        TenantScope::within($tenant, null, fn (): array => $this->permissions($cache), true);
+
+        self::assertSame(2, $this->resolutions);
+        self::assertIsArray($this->store->get($prefix . ':below:every'));
+
+        TenantScope::within($tenant, null, fn (): array => $this->permissions($this->request()), true);
+
+        self::assertSame(2, $this->resolutions);
+    }
+
+    /**
+     * A resolution built only below a tenant writes the entry kept for below
+     * the tenant, and never the one kept for the tenant itself.
+     *
+     * @return void
+     */
+    public function testAnEntryBuiltOnlyBelowATenantIsWrittenUnderTheBelowKey(): void
+    {
+        $tenant = self::createTenant('t-1');
+        $prefix = 'authorization-test:permissions:' . PrincipalCacheKey::for(self::grantee()) . ':' . $tenant->getMorphClass() . ':t-1';
+
+        TenantScope::within($tenant, null, fn (): array => $this->permissions($this->request()), true);
+
+        self::assertSame(1, $this->resolutions);
+        self::assertIsArray($this->store->get($prefix . ':below:every'));
+        self::assertNull($this->store->get($prefix . ':every'));
+    }
+
+    /**
      * A resource policy entry whose resource is not a string is discarded as
      * corrupt and resolved again.
      *

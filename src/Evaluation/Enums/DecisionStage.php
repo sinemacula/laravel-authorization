@@ -28,10 +28,10 @@ enum DecisionStage: string
     /** The resource's tenant is outside the decision's scope. */
     case TENANT = 'tenant';
 
-    /** An explicit deny, or a policy that cannot be evaluated, in any applicable policy or boundary. */
+    /** An explicit deny, or a policy that cannot be evaluated, in any applicable policy, guardrail or boundary. */
     case DENY = 'deny';
 
-    /** A guardrail on the tenant, its ancestors or the platform does not allow the check (BL-49; none apply yet). */
+    /** A guardrail on the check's tenant, one of its ancestors or the platform does not allow the check. */
     case GUARDRAIL = 'guardrail';
 
     /** A permission boundary of the subject's principal or identity does not allow the check. */

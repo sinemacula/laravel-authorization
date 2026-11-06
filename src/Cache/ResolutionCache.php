@@ -16,8 +16,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 /**
  * Two-tier cache (in-memory memo plus optional persistent store) for what a
  * grantee resolves to: its roles, the keys of the roles it reaches, its
- * permissions, its policies and its permission boundaries, and for what a
- * resource resolves to: the policies attached to it and to its type.
+ * permissions, its policies and its permission boundaries, for what a resource
+ * resolves to: the policies attached to it and to its type, and for the
+ * guardrails that apply in a scope.
  *
  * Persistent entries are keyed by kind, grantee and the tenant the tenant scope
  * applies, since the roles and permissions a grantee resolves to depend on it.
@@ -44,7 +45,7 @@ final readonly class ResolutionCache
     use HasContainerInstance;
 
     /** @var list<string> The kinds of entry that hold policy documents, hydrated under the policy limits. */
-    private const array POLICY_KINDS = ['policies', 'boundaries', 'resource-policies', 'resource-type-policies'];
+    private const array POLICY_KINDS = ['policies', 'boundaries', 'resource-policies', 'resource-type-policies', 'guardrails'];
 
     /** @var \SineMacula\Laravel\Authorization\Cache\ResolutionMemo In-memory tier, keyed by full cache key. */
     private ResolutionMemo $memo;
@@ -178,6 +179,25 @@ final readonly class ResolutionCache
 
         /** @var list<\SineMacula\Laravel\Authorization\Evaluation\Policy> */
         return $this->remember($kind, new Reference($type, $id ?? '*'), $resolve, ResolutionCodec::policies(...), ResolutionCodec::encodePolicy(...), false);
+    }
+
+    /**
+     * Return the guardrails that apply in the current scope, resolving them on
+     * a miss. The persistent tier holds their documents.
+     *
+     * The entry is keyed by the tenant and the application, and records no
+     * grantee: its resolution pins the version every guardrail entry shares
+     * before it reads (see `ResolutionPins`), and the tenant chain is pinned as
+     * for every entry, so setting or removing a guardrail, changing any policy
+     * or moving the tenant in the tree is seen on the next check.
+     *
+     * @param  \Closure(\SineMacula\Laravel\Authorization\Cache\ResolutionPins): \SineMacula\Laravel\Authorization\Cache\Resolution<mixed>  $resolve
+     * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>
+     */
+    public function rememberGuardrails(\Closure $resolve): array
+    {
+        /** @var list<\SineMacula\Laravel\Authorization\Evaluation\Policy> */
+        return $this->remember('guardrails', new Reference('guardrails', '*'), $resolve, ResolutionCodec::policies(...), ResolutionCodec::encodePolicy(...), false);
     }
 
     /**
@@ -386,7 +406,8 @@ final readonly class ResolutionCache
 
     /**
      * Return the key of the kind's entry for the grantee under the tenant the
-     * tenant scope applies and the subject's application.
+     * tenant scope applies, and whether it decides just below that tenant, and
+     * the subject's application.
      *
      * A policies entry, a grantee's or a resource's, is also keyed by the
      * policy limits it was hydrated under. Its documents were checked against
@@ -403,10 +424,11 @@ final readonly class ResolutionCache
     private function key(string $kind, object $grantee): string
     {
         $tenant      = TenantScope::currentTenant();
+        $below       = TenantScope::isBelowTenant() ? ':below' : '';
         $application = TenantScope::currentApplication();
 
         return "{$this->prefix}:{$kind}:" . PrincipalCacheKey::for($grantee)
-            . ':' . ($tenant === null ? 'platform' : \implode(':', $tenant))
+            . ':' . ($tenant === null ? 'platform' : \implode(':', $tenant) . $below)
             . ':' . ($application === null ? 'every' : 'app:' . $application)
             . (\in_array($kind, self::POLICY_KINDS, true) ? ':limits:' . PolicyLimits::fromConfig()->fingerprint() : '');
     }

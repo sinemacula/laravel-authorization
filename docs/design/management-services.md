@@ -1,10 +1,10 @@
 # Management Services
 
-Every write of a role, permission, policy, grant, resource attachment or permission boundary goes through one of six
-injectable services, so each write runs in one transaction on the package's connection, reads the configured models and
-reports only what it changed. The identity traits, the role's permission helpers, the grant and revoke commands and the
-Spatie import all delegate to them. The one exception today is `authorization:sync`, which writes the permission
-catalogue through the permission model in its own transaction on the package's connection; it moves onto
+Every write of a role, permission, policy, grant, resource attachment, permission boundary or guardrail goes through one
+of seven injectable services, so each write runs in one transaction on the package's connection, reads the configured
+models and reports only what it changed. The identity traits, the role's permission helpers, the grant and revoke
+commands and the Spatie import all delegate to them. The one exception today is `authorization:sync`, which writes the
+permission catalogue through the permission model in its own transaction on the package's connection; it moves onto
 `PermissionService` later.
 
 ## Purpose
@@ -20,12 +20,14 @@ catalogue through the permission model in its own transaction on the package's c
   (AUTHZ-7.3).
 - `BoundaryService`: set, replace and remove the permission boundary of a principal or an identity, platform-wide or in
   a tenant (AUTHZ-7.4).
+- `GuardrailService`: set and remove the guardrails of a tenant or of the platform (AUTHZ-7.6), for an actor allowed to.
 
 Each is a final class bound as a singleton (it holds no state), resolved from the container or injected. Every public
 method takes the actor making the call as an optional `$actor`, a model or a `Support\Reference`: null for console and
-system work. Every event the call dispatches carries it, and every grant row it writes records it in
-`granted_by_type` and `granted_by_id`. It is never read from the authenticated user or the subject resolver. The
-events themselves are described in [Events](events.md).
+system work. `GuardrailService` alone requires it, as a model, since it decides whether the actor may make the change.
+Every event the call dispatches carries it, and every grant row it writes records it in `granted_by_type` and
+`granted_by_id`. It is never read from the authenticated user or the subject resolver. The events themselves are
+described in [Events](events.md).
 
 ## Invariants
 
@@ -145,6 +147,29 @@ events themselves are described in [Events](events.md).
     `previous` policy it replaced) or `Identity\BoundaryRemoved` after commit only when it changed something, and
     refreshes the grantee's cached resolutions through its version.
 
+14. **A guardrail is one row per policy per scope, and only an actor allowed to may write it (AUTHZ-7.6).**
+    `GuardrailService::set()` writes a row of `guardrails`: the policy, the tenant (both columns null for the platform)
+    and the actor. A null-folding unique key over the policy and the tenant keeps a policy once per scope, while a
+    scope may have any number of guardrails; the write is insert-or-ignore followed by a read-back
+    (`Services\Support\GuardrailTable`), retried once as a boundary's is, and returns `GRANTED` or `UNCHANGED`. A
+    guardrail has no application and no reach flag: it holds in every application and, on a tenant, in its subtree. A
+    tenant's policy is set on that tenant or below it, and anywhere else, the platform included, is refused with
+    `GrantScopeMismatchException`. `remove()` removes the policy's guardrail from the scope named and returns whether
+    there was one. Before either call reads or writes anything, `Services\Support\GuardrailAuthority` decides through
+    `check()` whether the actor holds `authorization:guardrails:manage` from above the scope: for a tenant, just below
+    its parent, so a grant held at an ancestor counts only when it reaches below it, a platform-wide grant counts, and
+    one held within the tenant never does; for a root tenant and the platform, at platform scope. The check is exempt
+    from the guardrails, as every check of that exact action is, so no guardrail caps it; every other deny and cap
+    still does. An actor refused, and every actor when no authorization manager is bound, is refused with
+    `GuardrailException` (`not_permitted`). `set()` reads the policy under a lock on its row, which the policy
+    observer takes too before it reads a policy's guardrails, so an edit and a guardrail set at the same moment are
+    serialised and the edit is refused once the guardrail is there.
+    An inline policy (`GuardrailException`, `inline`), a policy naming `principals` (`ResourcePolicyException`), a
+    policy whose row is gone and one deleted while the row is written (`InvalidGrantTargetException`) and a row a
+    concurrent change kept from being written (`UnwrittenGrantException`) are refused as a boundary's are. Each call is
+    one transaction and one operation, dispatches `Guardrail\GuardrailSet` or `Guardrail\GuardrailRemoved` after
+    commit only when it changed something, and refreshes every cached guardrail entry through the version they share.
+
 ## Success Path
 
 ```php
@@ -192,6 +217,14 @@ working: each forwards to the matching service method with no actor.
   every grantee it bounds, and the foreign key on `authorizable_boundaries.policy_id` restricts a delete made past the
   model; remove each boundary first. A boundary left by a grantee deleted past its model events keeps the policy
   undeletable until `authorization:prune` finds the grantee gone and removes it, counting it apart from the grants.
+- **A guardrail's policy cannot be edited or deleted.** The policy observer refuses either with `GuardrailException`
+  (`in_use`), naming every scope the policy caps, and the foreign key on `guardrails.policy_id` restricts a delete made
+  past the model; remove each guardrail through `GuardrailService` first, then set the edited policy again.
+- **No guardrail locks the guardrails.** The actor's right is decided through `check()`, but a check of exactly
+  `authorization:guardrails:manage` is exempt from the guardrails: none is read for it, so a guardrail that does not
+  allow the permission, one that denies it and one that cannot be read, a platform guardrail included, keep no actor
+  from changing the guardrails of any scope, its own removal included. The actor's other denies and its boundaries
+  still count.
 - **The commands name no actor by default.** `authorization:grant`, `authorization:revoke` and `authorization:sync`
   take `--actor={morphType}:{key}`, which must name a row that exists; without it they record no actor.
 
@@ -207,6 +240,9 @@ working: each forwards to the matching service method with no actor.
   resource's attachments, their scoped writes and the principals rule.
 - `Services\BoundaryService`, `Services\Support\BoundaryTable` and `Support\PolicyBoundaries`: a grantee's boundaries,
   their scoped writes and the refused delete of a boundary's policy.
+- `Services\GuardrailService`, `Services\Support\GuardrailTable`, `Services\Support\GuardrailAuthority` and
+  `Support\PolicyGuardrails`: the guardrails of a scope, their writes, who may make them and the refused edit and delete
+  of a guardrail's policy; `Support\PackagePermissions`: the permission the package declares for it.
 - `Enums\GrantOutcome` and `Services\SyncResult`: what a call changed.
 - `Observers\RoleObserver::assertNoHierarchyCycle()`: the locked, unscoped ancestor walk.
 
@@ -224,11 +260,13 @@ working: each forwards to the matching service method with no actor.
 - `BoundaryServiceTest`, `BoundaryTableTest`, `PolicyBoundariesTest`: a grantee's boundaries, their scope, one per
   scope, the replacement, events and refusals; `GrantServiceTest` and `GrantPrunerTest`: their removal with a deleted
   or pruned grantee.
+- `GuardrailServiceTest`, `GuardrailTableTest`, `GuardrailAuthorityTest`, `PolicyGuardrailsTest`: the guardrails of a
+  scope, the refusals, the events, who may change them and from where, and the refused edit and delete.
 - `HasRolesTest`, `HasPermissionsTest`, `HasPoliciesTest`, `ManagesPermissionsTest`: the traits delegate.
 
 ## Change Triggers
 
 - Scoped grants (tenant and application): the services gain scope arguments, and revocation narrows to the scope it
   names.
-- Delegated administration: the services check the actor before they write.
+- Delegated administration: the services check the actor before they write, as `GuardrailService` already does.
 - The permission catalogue sync moves onto `PermissionService`.

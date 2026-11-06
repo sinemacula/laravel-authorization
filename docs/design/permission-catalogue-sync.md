@@ -2,8 +2,9 @@
 
 The application declares its platform permissions in code: the cases of string-backed enums implementing
 `PermissionEnum`, and the definitions returned by classes implementing `PermissionProvider`. `authorization:sync`
-writes that catalogue to the `permissions` table on deploy. Booting the package never reads a provider or touches the
-database. This note documents what the sync changes, what it only reports, and how it fails.
+writes that catalogue to the `permissions` table on deploy, with the permissions the package declares for its own
+services. Booting the package never reads a provider or touches the database. This note documents what the sync
+changes, what it only reports, and how it fails.
 
 ## Invariants
 
@@ -34,6 +35,16 @@ database. This note documents what the sync changes, what it only reports, and h
 7. **Every write goes through the configured model, in one transaction.** Additions, updates and deletions use the
    class in `authorization.models.permission`, so its observers and events run, and happen inside one transaction on
    that model's connection (`authorization.connection`, else the default). A failure part-way rolls back every write.
+
+8. **The package's own permissions are always declared.** `Support\PackagePermissions`, the package's own provider,
+   comes first in every catalogue, whatever the application configures: today `authorization:guardrails:manage`, the
+   right `GuardrailService` checks (AUTHZ-7.6), guard-agnostic and under the `authorization` category. The sync adds and
+   updates it as any declared permission, so it can be granted, and the policy validator accepts a pattern covering it,
+   so a policy naming it validates. The action catalogue the validator asks (`DeclaredActionCatalogue`) leaves it out,
+   so it holds the application's declarations alone, and with none a policy needing any other action is still refused
+   because nothing is declared (N50). It is declared by a provider, so it is no Gate ability. An application declaration
+   of the same name, also guard-agnostic, is merged with it as any duplicate is, and refused when its description or
+   category differ.
 
 ## Declaring the Catalogue
 
@@ -146,7 +157,7 @@ A stale row is drift only under `--prune`, since without it the sync would leave
 - Attribute: `src/Attributes/Permission.php`
 - Definition: `src/Support/PermissionDefinition.php`
 - Reader: `src/Support/PermissionMetadataReader.php`
-- Catalogue: `src/Support/PermissionCatalogue.php`
+- Catalogue: `src/Support/PermissionCatalogue.php`; the package's own permissions: `src/Support/PackagePermissions.php`
 - Policy actions: `src/Support/DeclaredActionCatalogue.php`, the declared names a policy's `actions` and `not_actions`
   patterns must match when it is written
 - Diff: `src/Console/Support/PermissionDiffBuilder.php`, `src/Console/Support/PermissionDiff.php`
@@ -159,7 +170,8 @@ A stale row is drift only under `--prune`, since without it the sync would leave
 - `tests/Feature/SyncPermissionsCommandTest.php`: additions, updates, stale reports, pruning with observers, protected
   system rows, tenant rows, dry-run exit codes, JSON, invalid names and formats, the configured model and connection,
   and rollback.
-- `tests/Feature/PermissionCatalogueTest.php`, `tests/Feature/PermissionDiffBuilderTest.php`.
+- `tests/Feature/PermissionCatalogueTest.php`, `tests/Feature/PermissionDiffBuilderTest.php`,
+  `tests/Unit/Support/PackagePermissionsTest.php`.
 - `tests/Unit/Support/PermissionMetadataReaderTest.php`, `tests/Unit/Support/PermissionDefinitionTest.php`.
 - `tests/Feature/NoDatabaseAtBootTest.php`: booting with an enum and a provider and no tables runs no query.
 - `tests/Feature/ConfigValidatorTest.php`: enums backed by integers are refused at boot.

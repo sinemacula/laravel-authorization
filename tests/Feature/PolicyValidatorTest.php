@@ -15,9 +15,11 @@ use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyValidator;
 use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use Tests\Feature\Stubs\ConfigurablePermissionProvider;
 use Tests\Feature\Stubs\ContributingAuthenticationContext;
+use Tests\Feature\Stubs\EmptyActionCatalogue;
 use Tests\Feature\Stubs\Enums\CataloguePermission;
 use Tests\TestCase;
 
@@ -476,19 +478,60 @@ final class PolicyValidatorTest extends TestCase
     }
 
     /**
-     * With no permissions declared, every document is refused with the one
-     * reason, whatever actions it names.
+     * With no permissions configured, or a catalogue that declares no action at
+     * all, a document whose patterns need any action but the package's own is
+     * refused with the one reason that nothing is declared, an `actions` and a
+     * `not_actions` pattern alike, one naming the package's own beside it
+     * included.
      *
      * @return void
      */
-    public function testRefusesEveryDocumentWhenNoPermissionsAreDeclared(): void
+    public function testRefusesADocumentNeedingAnyOtherActionWhenNothingIsDeclared(): void
     {
-        $validator = $this->declaring([], []);
-
         $reason = 'No permissions are declared to check the policy\'s actions against; declare them in permission_enums or permission_providers.';
 
-        self::assertSame([$reason], $validator->errors(self::document([['effect' => 'allow', 'actions' => ['posts:create']], ['effect' => 'deny', 'actions' => ['*']]])));
-        self::assertSame([$reason], $validator->errors(self::document([])));
+        foreach ([$this->declaring([], []), $this->bound(new EmptyActionCatalogue)] as $validator) {
+            self::assertSame([$reason], $validator->errors(self::document([['effect' => 'allow', 'actions' => ['posts:create']], ['effect' => 'deny', 'actions' => ['*']]])));
+            self::assertSame([$reason], $validator->errors(self::document([['effect' => 'allow', 'actions' => [PackagePermissions::GUARDRAILS_MANAGE, 'posts:create']]])));
+            self::assertSame([$reason], $validator->errors(self::document([['effect' => 'deny', 'not_actions' => ['posts:*']]])));
+        }
+    }
+
+    /**
+     * With no permissions configured, or a catalogue that declares no action at
+     * all, a document naming only the package's own permissions, by name or by
+     * a pattern that covers one, may still be written, and so may one with no
+     * statement.
+     *
+     * @return void
+     */
+    public function testAcceptsThePackagesOwnPermissionsWhenNothingIsDeclared(): void
+    {
+        foreach ([$this->declaring([], []), $this->bound(new EmptyActionCatalogue)] as $validator) {
+            self::assertSame([], $validator->errors(self::document([['effect' => 'allow', 'actions' => [PackagePermissions::GUARDRAILS_MANAGE, 'authorization:*']]])));
+            $wide = [['effect' => 'deny', 'actions' => ['*']], ['effect' => 'allow', 'not_actions' => ['authorization:guardrails:*']]];
+
+            self::assertSame([], $validator->errors(self::document($wide)));
+            self::assertSame([], $validator->errors(self::document([])));
+        }
+    }
+
+    /**
+     * With the application's permissions declared, a pattern covering only the
+     * package's own permissions is accepted beside them, though the catalogue
+     * never holds the package's own.
+     *
+     * @return void
+     */
+    public function testAcceptsThePackagesOwnPermissionsBesideTheApplications(): void
+    {
+        $validator = $this->declaring([CataloguePermission::class], []);
+
+        self::assertSame([], $validator->errors(self::document([['effect' => 'allow', 'actions' => ['posts:create', PackagePermissions::GUARDRAILS_MANAGE, 'authorization:*']]])));
+        self::assertSame(
+            ['Policy statement #0 actions pattern \'authorization:roles:*\' matches no declared permission.'],
+            $validator->errors(self::document([['effect' => 'allow', 'actions' => ['authorization:roles:*']]])),
+        );
     }
 
     /**
@@ -720,6 +763,21 @@ final class PolicyValidatorTest extends TestCase
     {
         /** @var \SineMacula\Laravel\Authorization\Evaluation\PolicyValidator */
         return app(PolicyValidator::class);
+    }
+
+    /**
+     * Return a validator asking the action catalogue, and the bound context key
+     * catalogue.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Contracts\ActionCatalogue  $catalogue
+     * @return \SineMacula\Laravel\Authorization\Evaluation\PolicyValidator
+     */
+    private function bound(ActionCatalogue $catalogue): PolicyValidator
+    {
+        /** @var \SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue $keys */
+        $keys = $this->app?->make(ContextKeyCatalogue::class);
+
+        return new PolicyValidator($catalogue, $keys);
     }
 
     /**

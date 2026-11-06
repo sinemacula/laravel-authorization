@@ -1813,6 +1813,207 @@ final class PolicyEvaluatorTest extends TestCase
     }
 
     /**
+     * A guardrail that does not allow the check denies it as `guardrail` at the
+     * guardrail stage, naming it, before any boundary, allow statement or
+     * permission is weighed.
+     *
+     * @return void
+     */
+    public function testAGuardrailThatDoesNotAllowDeniesBeforeTheBoundariesAndTheAllows(): void
+    {
+        $asked     = new \ArrayObject;
+        $policy    = self::policy('p', [['effect' => 'allow', 'actions' => ['posts:edit']]]);
+        $boundary  = self::policy('cap', [['effect' => 'allow', 'actions' => ['posts:*']]]);
+        $guardrail = self::policy('rail', [['effect' => 'allow', 'actions' => ['posts:read']]])->withId('4');
+        $decision  = (new PolicyEvaluator)->evaluate([$policy], 'posts:edit', null, [], [$boundary], static function () use ($asked): bool {
+            $asked->append(true);
+
+            return true;
+        }, [$guardrail]);
+
+        self::assertFalse($decision->isAllowed());
+        self::assertSame(DecisionReason::GUARDRAIL, $decision->reason);
+        self::assertSame(DecisionStage::GUARDRAIL, $decision->stage);
+        self::assertSame([], $decision->statements);
+        self::assertEquals([
+            new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::NOT_APPLICABLE, self::reference('rail', 0, '4')),
+            new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::REFUSED, null, [], 'rail[4]'),
+        ], $decision->trace);
+        self::assertCount(0, $asked);
+        self::assertStringEndsWith('[guardrail] rail[4]: refused', $decision->explain());
+    }
+
+    /**
+     * Every guardrail must allow the check: the guardrails are intersected,
+     * each assessed whatever the others found, a guardrail with no allow
+     * statement allowing nothing, and once they all allow it the boundaries and
+     * then the allows decide.
+     *
+     * @return void
+     */
+    public function testEveryGuardrailMustAllowTheCheck(): void
+    {
+        $wide   = self::policy('a-wide', [['effect' => 'allow', 'actions' => ['posts:*']]]);
+        $narrow = self::policy('b-narrow', [['effect' => 'allow', 'actions' => ['posts:read']]]);
+
+        foreach ([[$wide, $narrow], [$narrow, $wide]] as $guardrails) {
+            $edit = (new PolicyEvaluator)->evaluate([], 'posts:edit', null, [], [], static fn (): bool => true, $guardrails);
+            $read = (new PolicyEvaluator)->evaluate([], 'posts:read', null, [], [], static fn (): bool => true, $guardrails);
+
+            self::assertSame(DecisionReason::GUARDRAIL, $edit->reason);
+            self::assertEquals([
+                new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::MATCHED, self::reference('a-wide', 0)),
+                new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::NOT_APPLICABLE, self::reference('b-narrow', 0)),
+                new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::REFUSED, null, [], 'b-narrow'),
+            ], $edit->trace);
+            self::assertTrue($read->isAllowed());
+            self::assertEquals([
+                new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::MATCHED, self::reference('a-wide', 0)),
+                new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::MATCHED, self::reference('b-narrow', 0)),
+                ...self::uncapped(DecisionStage::BOUNDARY, DecisionStage::SESSION),
+                new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD),
+            ], $read->trace);
+        }
+
+        $empty = (new PolicyEvaluator)->evaluate([], 'posts:read', null, [], [], static fn (): bool => true, [new Policy('empty', [])]);
+
+        self::assertSame(DecisionReason::GUARDRAIL, $empty->reason);
+        self::assertEquals([new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::REFUSED, null, [], 'empty')], $empty->trace);
+    }
+
+    /**
+     * A guardrail grants nothing: one that allows the check lets the boundaries
+     * and the allows decide it, so with nothing else allowing it the check is
+     * denied as no match, and a boundary that does not allow it still denies it
+     * as `boundary`.
+     *
+     * @return void
+     */
+    public function testAGuardrailThatAllowsGrantsNothing(): void
+    {
+        $guardrail = self::policy('rail', [['effect' => 'allow', 'actions' => ['posts:*']]]);
+        $boundary  = self::policy('cap', [['effect' => 'allow', 'actions' => ['posts:read']]]);
+        $alone     = (new PolicyEvaluator)->evaluate([], 'posts:edit', null, [], [], static fn (): bool => false, [$guardrail]);
+        $bounded   = (new PolicyEvaluator)->evaluate([], 'posts:edit', null, [], [$boundary], static fn (): bool => true, [$guardrail]);
+
+        self::assertSame(DecisionReason::NO_MATCH, $alone->reason);
+        self::assertSame(DecisionStage::IMPLICIT, $alone->stage);
+        self::assertSame(DecisionReason::BOUNDARY, $bounded->reason);
+        self::assertEquals([
+            new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::MATCHED, self::reference('rail', 0)),
+            new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::NOT_APPLICABLE, self::reference('cap', 0)),
+            self::refused('cap'),
+        ], $bounded->trace);
+    }
+
+    /**
+     * A guardrail's allow is judged as an ordinary policy's, conditions
+     * included, one naming principals applies to nobody, and one whose own
+     * authentication requirement is unmet does not allow the check and is never
+     * answered with a step-up.
+     *
+     * @return void
+     */
+    public function testAGuardrailsAllowIsJudgedWithItsConditions(): void
+    {
+        $guardrail = self::policy('rail', [['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => ['eq' => ['input.region' => 'eu']]]]);
+        $named     = self::policy('named', [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']]]);
+        $stepped   = self::policy('stepped', [self::requiringAllow(self::MULTIFACTOR)]);
+        $evaluate  = static fn (array $guardrails, array|CheckContext $context): Decision => (new PolicyEvaluator)
+            ->evaluate([], 'posts:read', null, $context, [], static fn (): bool => true, $guardrails);
+
+        self::assertTrue($evaluate([$guardrail], ['input' => ['region' => 'eu']])->isAllowed());
+        self::assertSame(DecisionReason::GUARDRAIL, $evaluate([$guardrail], ['input' => ['region' => 'us']])->reason);
+        self::assertSame(TraceOutcome::UNDECIDABLE, $evaluate([$guardrail], [])->trace[0]->outcome);
+
+        $mismatched = $evaluate([$named], self::namedContext('1'));
+
+        self::assertSame(DecisionReason::GUARDRAIL, $mismatched->reason);
+        self::assertEquals(new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::PRINCIPAL_MISMATCH, self::reference('named', 0)), $mismatched->trace[0]);
+
+        $capped = $evaluate([$stepped], self::requirementContext(RequirementResult::unmet(['multifactor'])));
+
+        self::assertSame(DecisionReason::GUARDRAIL, $capped->reason);
+        self::assertSame([], $capped->requirements);
+    }
+
+    /**
+     * A guardrail's deny statement denies at the deny stage, traced after the
+     * policies' denies and before the boundaries'.
+     *
+     * @return void
+     */
+    public function testAGuardrailsDenyDeniesAtTheDenyStage(): void
+    {
+        $policy    = self::policy('z-own', [['effect' => 'deny', 'actions' => ['posts:delete']], ['effect' => 'allow', 'actions' => ['posts:read']]]);
+        $boundary  = self::policy('a-cap', [['effect' => 'deny', 'actions' => ['posts:read']]]);
+        $guardrail = self::policy('m-rail', [['effect' => 'allow', 'actions' => ['posts:*']], ['effect' => 'deny', 'actions' => ['posts:read']]]);
+        $decision  = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, [], [$boundary], null, [$guardrail]);
+
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $decision->reason);
+        self::assertSame(DecisionStage::DENY, $decision->stage);
+        self::assertEquals([self::reference('m-rail', 1), self::reference('a-cap', 0)], $decision->statements);
+        self::assertEquals([
+            self::entry(DecisionStage::DENY, TraceOutcome::NOT_APPLICABLE, 'z-own', 0),
+            self::entry(DecisionStage::DENY, TraceOutcome::MATCHED, 'm-rail', 1),
+            self::entry(DecisionStage::DENY, TraceOutcome::MATCHED, 'a-cap', 0),
+        ], $decision->trace);
+    }
+
+    /**
+     * With the guardrails null, the check is exempt from the guardrail stage:
+     * it records the stage as exempt and caps nothing, and the boundaries and
+     * the allows decide as ever. The step is made once, and kept apart from the
+     * one the stage adds when no guardrail applies.
+     *
+     * @return void
+     */
+    public function testACheckExemptFromTheGuardrailsSkipsTheirStage(): void
+    {
+        $evaluator = new PolicyEvaluator;
+        $allowed   = $evaluator->evaluate([], 'posts:read', null, [], [], static fn (): bool => true, null);
+        $again     = $evaluator->evaluate([], 'posts:read', null, [], [], static fn (): bool => true, null);
+        $uncapped  = $evaluator->evaluate([], 'posts:read', null, [], [], static fn (): bool => true, []);
+        $boundary  = self::policy('cap', [['effect' => 'allow', 'actions' => ['posts:read']]]);
+        $bounded   = $evaluator->evaluate([], 'posts:edit', null, [], [$boundary], static fn (): bool => true, null);
+
+        self::assertTrue($allowed->isAllowed());
+        self::assertEquals([
+            new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::EXEMPT),
+            ...self::uncapped(DecisionStage::BOUNDARY, DecisionStage::SESSION),
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD),
+        ], $allowed->trace);
+        self::assertStringContainsString('[guardrail] guardrails: exempt', $allowed->explain());
+        self::assertSame($allowed->trace[0], $again->trace[0]);
+        self::assertEquals(new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::UNCAPPED), $uncapped->trace[0]);
+        self::assertSame(DecisionReason::BOUNDARY, $bounded->reason);
+        self::assertEquals(new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::EXEMPT), $bounded->trace[0]);
+    }
+
+    /**
+     * A guardrail statement that cannot be evaluated denies the check as an
+     * invalid policy at the guardrail stage, naming the statement, after every
+     * guardrail has been assessed.
+     *
+     * @return void
+     */
+    public function testAnInvalidGuardrailStatementDeniesAsAnInvalidPolicy(): void
+    {
+        $broken   = new Policy('a-broken', [new Statement(PolicyEffect::ALLOW, ['posts:read'], null, ['bogus' => ['input.k' => 1]])]);
+        $allowing = self::policy('b-allowing', [['effect' => 'allow', 'actions' => ['posts:read']]]);
+        $decision = (new PolicyEvaluator)->evaluate([], 'posts:read', null, [], [], static fn (): bool => true, [$allowing, $broken]);
+
+        self::assertSame(DecisionReason::INVALID_POLICY, $decision->reason);
+        self::assertSame(DecisionStage::GUARDRAIL, $decision->stage);
+        self::assertEquals([self::reference('a-broken', 0)], $decision->statements);
+        self::assertEquals([
+            new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::INVALID, self::reference('a-broken', 0)),
+            new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::REFUSED, null, [], 'a-broken'),
+            new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::MATCHED, self::reference('b-allowing', 0)),
+        ], $decision->trace);
+    }
+
+    /**
      * The permission is asked once, only when no allow statement allowed and
      * none was invalid, and a permission held allows over a failed condition
      * and an unmet requirement.
