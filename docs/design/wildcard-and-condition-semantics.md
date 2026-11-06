@@ -201,10 +201,10 @@ interpolation, that is not of the listed type makes the test undecidable.
 
 | Operator        | Operand                     | Context value   | Holds when                                             |
 |-----------------|-----------------------------|-----------------|--------------------------------------------------------|
-| `eq`            | scalar                      | any             | The value is strictly equal to the operand (`===`)     |
-| `neq`           | scalar                      | any             | The value is not strictly equal to the operand         |
-| `in`            | non-empty list of scalars   | any             | The value is in the list (strict)                      |
-| `not_in`        | non-empty list of scalars   | any             | The value is not in the list (strict)                  |
+| `eq`            | scalar                      | scalar or null  | The value is strictly equal to the operand (`===`)     |
+| `neq`           | scalar                      | scalar or null  | The value is not strictly equal to the operand         |
+| `in`            | non-empty list of scalars   | scalar or null  | The value is in the list (strict)                      |
+| `not_in`        | non-empty list of scalars   | scalar or null  | The value is not in the list (strict)                  |
 | `starts_with`   | non-empty `string`          | `string`        | The value starts with the operand                      |
 | `ends_with`     | non-empty `string`          | `string`        | The value ends with the operand                        |
 | `like`          | non-empty glob              | `string`        | The value matches the glob pattern                     |
@@ -224,7 +224,9 @@ interpolation, that is not of the listed type makes the test undecidable.
 
 - **Scalars** are strings, integers, floats and booleans. A set (the operand of `in`, `not_in`, `any_value_in` and
   `all_values_in`) holds only scalars, never `null` or an array, and its members are compared strictly, so `"1"` is not
-  `1`. `eq` and `neq` compare one scalar and never a list: use `in` to compare against several values.
+  `1`. `eq` and `neq` compare one scalar and never a list: use `in` to compare against several values. For all four, a
+  context value that is a list, a map or an object is the wrong type and undecidable, so `neq` and `not_in` never hold
+  for it; a present `null` equals no operand, so `neq` and `not_in` hold for it.
 - **Time-like** values are a `DateTimeInterface`, an integer UNIX timestamp, a finite float (truncated) or a non-empty
   string that `strtotime()` can parse. A string holding a NUL byte is not time-like, since `strtotime()` would read
   only the part before it: as a written operand it is refused, as a context value or substituted operand undecidable.

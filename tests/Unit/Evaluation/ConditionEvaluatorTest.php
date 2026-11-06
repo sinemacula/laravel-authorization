@@ -322,13 +322,17 @@ final class ConditionEvaluatorTest extends TestCase
         yield 'eq bool' => ['eq', false, false, MatchOutcome::MATCHES, ''];
         yield 'eq float' => ['eq', 1.5, 1.5, MatchOutcome::MATCHES, ''];
         yield 'eq null value' => ['eq', 'a', null, MatchOutcome::DOES_NOT_MATCH, ''];
-        yield 'eq list value' => ['eq', 'a', ['a'], MatchOutcome::DOES_NOT_MATCH, ''];
         yield 'neq different' => ['neq', 'a', 'b', MatchOutcome::MATCHES, ''];
         yield 'neq identical' => ['neq', 'a', 'a', MatchOutcome::DOES_NOT_MATCH, ''];
         yield 'neq strict int string' => ['neq', 1, '1', MatchOutcome::MATCHES, ''];
         yield 'neq null value' => ['neq', 'a', null, MatchOutcome::MATCHES, ''];
 
         foreach (['eq', 'neq'] as $operator) {
+            $undecidable = "operator '{$operator}' needs a scalar";
+
+            yield "{$operator} list value" => [$operator, 'a', ['a'], MatchOutcome::UNDECIDABLE, $undecidable];
+            yield "{$operator} map value" => [$operator, 'a', ['a' => 1], MatchOutcome::UNDECIDABLE, $undecidable];
+            yield "{$operator} object value" => [$operator, 'a', new \stdClass, MatchOutcome::UNDECIDABLE, $undecidable];
             yield "{$operator} list operand" => [$operator, ['a'], 'a', MatchOutcome::INVALID, "invalid operand for operator '{$operator}'"];
             yield "{$operator} null operand" => [$operator, null, null, MatchOutcome::INVALID, "invalid operand for operator '{$operator}'"];
         }
@@ -348,10 +352,13 @@ final class ConditionEvaluatorTest extends TestCase
         yield 'not_in non-member' => ['not_in', ['a'], 'c', MatchOutcome::MATCHES, ''];
         yield 'not_in member' => ['not_in', ['a'], 'a', MatchOutcome::DOES_NOT_MATCH, ''];
         yield 'not_in strict' => ['not_in', ['1'], 1, MatchOutcome::MATCHES, ''];
+        yield 'not_in null value' => ['not_in', ['a'], null, MatchOutcome::MATCHES, ''];
 
         foreach (['in', 'not_in'] as $operator) {
             $invalid = "invalid operand for operator '{$operator}'";
 
+            yield "{$operator} list value" => [$operator, ['a'], ['a'], MatchOutcome::UNDECIDABLE, "operator '{$operator}' needs a scalar"];
+            yield "{$operator} object value" => [$operator, ['a'], new \stdClass, MatchOutcome::UNDECIDABLE, "operator '{$operator}' needs a scalar"];
             yield "{$operator} without list" => [$operator, 'a', 'a', MatchOutcome::INVALID, $invalid];
             yield "{$operator} empty list" => [$operator, [], 'a', MatchOutcome::INVALID, $invalid];
             yield "{$operator} null member" => [$operator, ['a', null], 'a', MatchOutcome::INVALID, $invalid];
