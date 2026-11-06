@@ -29,6 +29,7 @@ final class GrantOutcomeTest extends TestCase
         self::assertTrue(GrantOutcome::GRANTED->isChange());
         self::assertTrue(GrantOutcome::REARMED->isChange());
         self::assertTrue(GrantOutcome::EXPIRY_CHANGED->isChange());
+        self::assertTrue(GrantOutcome::REACH_CHANGED->isChange());
         self::assertFalse(GrantOutcome::UNCHANGED->isChange());
     }
 
@@ -39,6 +40,8 @@ final class GrantOutcomeTest extends TestCase
      */
     public function testOutcomesAreBackedByStableStrings(): void
     {
-        self::assertSame(['granted', 'rearmed', 'expiry_changed', 'unchanged'], \array_map(static fn (GrantOutcome $outcome): string => $outcome->value, GrantOutcome::cases()));
+        $values = \array_map(static fn (GrantOutcome $outcome): string => $outcome->value, GrantOutcome::cases());
+
+        self::assertSame(['granted', 'rearmed', 'expiry_changed', 'reach_changed', 'unchanged'], $values);
     }
 }

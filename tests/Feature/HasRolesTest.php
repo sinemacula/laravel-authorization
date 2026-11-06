@@ -52,6 +52,25 @@ final class HasRolesTest extends TestCase
     }
 
     /**
+     * A grant in a tenant through the trait can be limited to that tenant.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARoleInATenantCanBeLimitedToIt(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $tenant = new Reference('stub_tenant', 'tenant-a');
+
+        Role::create(['name' => 'editor']);
+
+        $user->assignRole('editor', null, $tenant, false);
+
+        self::assertSame([false], DB::table('authorizable_roles')->pluck('include_subtree')->map(static fn (mixed $reach): bool => (bool) $reach)->all());
+    }
+
+    /**
      * A role assigned until 12:05 lapses at 12:05 for the same identity
      * instance, which reloads its roles once the cached entry has lapsed.
      *

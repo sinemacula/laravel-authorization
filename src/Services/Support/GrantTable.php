@@ -8,6 +8,7 @@ use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
+use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
@@ -45,6 +46,7 @@ final readonly class GrantTable extends ExpiringGrants
      * @param  string  $granteeId
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $grantedBy
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  bool  $includeSubtree
      */
     public function __construct(
 
@@ -68,7 +70,35 @@ final readonly class GrantTable extends ExpiringGrants
 
         /** The tenant the grants hold in; null for platform-wide. */
         private ?Reference $tenant = null,
+
+        /** Whether the grants written also hold in the tenants below the tenant. */
+        private bool $includeSubtree = true,
     ) {}
+
+    /**
+     * Grant the given row with the given expiry, and the writer's reach.
+     *
+     * Granting what is held with the same expiry and reach changes nothing. A
+     * different expiry is written with the reach; the same expiry with a
+     * different reach changes the reach alone (D21).
+     *
+     * @param  string  $id
+     * @param  \DateTimeInterface|null  $expiresAt
+     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange
+     */
+    #[\Override]
+    public function grant(string $id, ?\DateTimeInterface $expiresAt): GrantChange
+    {
+        $change = parent::grant($id, $expiresAt);
+
+        if ($change->outcome !== GrantOutcome::UNCHANGED || $this->reachesBelow($id) === $this->includeSubtree) {
+            return $change;
+        }
+
+        $this->writeExpiry($id, $change->previousExpiresAt);
+
+        return new GrantChange(GrantOutcome::REACH_CHANGED, $change->previousExpiresAt);
+    }
 
     /**
      * Return the keys of the rows the grantee holds in the scope, among the
@@ -143,6 +173,7 @@ final readonly class GrantTable extends ExpiringGrants
             'authorizable_id'   => $this->granteeId,
             'tenant_type'       => $this->tenant?->type,
             'tenant_id'         => $this->tenant?->id,
+            'include_subtree'   => $this->includeSubtree,
             'expires_at'        => $expiresAt,
             'granted_by_type'   => $this->grantedBy?->type,
             'granted_by_id'     => $this->grantedBy?->id,
@@ -166,8 +197,8 @@ final readonly class GrantTable extends ExpiringGrants
     }
 
     /**
-     * Write the new expiry, and the actor making the grant again, to the row in
-     * the scope.
+     * Write the new expiry, the reach, and the actor making the grant again, to
+     * the row in the scope.
      *
      * @param  string  $id
      * @param  \Illuminate\Support\Carbon|null  $expiresAt
@@ -177,11 +208,24 @@ final readonly class GrantTable extends ExpiringGrants
     protected function writeExpiry(string $id, ?Carbon $expiresAt): void
     {
         $this->inScope()->where($this->column, $id)->update([
+            'include_subtree' => $this->includeSubtree,
             'expires_at'      => $expiresAt,
             'granted_by_type' => $this->grantedBy?->type,
             'granted_by_id'   => $this->grantedBy?->id,
             'updated_at'      => Carbon::now(),
         ]);
+    }
+
+    /**
+     * Determine whether the held row in the scope reaches the tenants below its
+     * tenant.
+     *
+     * @param  string  $id
+     * @return bool
+     */
+    private function reachesBelow(string $id): bool
+    {
+        return (bool) $this->inScope()->where($this->column, $id)->value('include_subtree');
     }
 
     /**

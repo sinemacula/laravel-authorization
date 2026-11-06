@@ -38,6 +38,13 @@ use SineMacula\Laravel\Authorization\Support\RoleParity;
  * sync replaces the grants in one scope: the tenant named, else the tenant that
  * owns every target, else the platform. Every grant is for every application.
  *
+ * A grant in a tenant also holds in the tenants below it in the tenant tree
+ * (AUTHZ-5.3), unless the call passes `$includeSubtree` false to limit it to
+ * that tenant; a platform-wide grant counts everywhere whatever it is given.
+ * Granting what the grantee holds, with the same expiry and another reach,
+ * changes the reach and is reported as `REACH_CHANGED` with the granted event
+ * (D21); a sync writes its reach only to what it grants or re-arms.
+ *
  * Grants are idempotent: granting what the grantee holds, with the same expiry,
  * changes nothing and is reported as unchanged, and a concurrent duplicate
  * never surfaces a unique-constraint violation. Re-granting a grant that has
@@ -78,6 +85,7 @@ final class GrantService
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  bool  $includeSubtree
      * @return \SineMacula\Laravel\Authorization\Enums\GrantOutcome
      *
      * @throws \Throwable
@@ -88,8 +96,9 @@ final class GrantService
         ?\DateTimeInterface $expiresAt = null,
         Model|Reference|null $actor = null,
         Model|Reference|null $tenant = null,
+        bool $includeSubtree = true,
     ): GrantOutcome {
-        return $this->grant(GrantTarget::ROLE, $grantee, $role, $expiresAt, $actor, $tenant);
+        return $this->grant(GrantTarget::ROLE, $grantee, $role, $expiresAt, $actor, $tenant, $includeSubtree);
     }
 
     /**
@@ -125,6 +134,7 @@ final class GrantService
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  bool  $includeSubtree
      * @return \SineMacula\Laravel\Authorization\Services\SyncResult
      *
      * @throws \Throwable
@@ -135,8 +145,9 @@ final class GrantService
         ?\DateTimeInterface $expiresAt = null,
         Model|Reference|null $actor = null,
         Model|Reference|null $tenant = null,
+        bool $includeSubtree = true,
     ): SyncResult {
-        return $this->sync(GrantTarget::ROLE, $grantee, $roles, $expiresAt, $actor, $tenant);
+        return $this->sync(GrantTarget::ROLE, $grantee, $roles, $expiresAt, $actor, $tenant, $includeSubtree);
     }
 
     /**
@@ -148,6 +159,7 @@ final class GrantService
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  bool  $includeSubtree
      * @return \SineMacula\Laravel\Authorization\Enums\GrantOutcome
      *
      * @throws \Throwable
@@ -158,8 +170,9 @@ final class GrantService
         ?\DateTimeInterface $expiresAt = null,
         Model|Reference|null $actor = null,
         Model|Reference|null $tenant = null,
+        bool $includeSubtree = true,
     ): GrantOutcome {
-        return $this->grant(GrantTarget::PERMISSION, $grantee, $permission, $expiresAt, $actor, $tenant);
+        return $this->grant(GrantTarget::PERMISSION, $grantee, $permission, $expiresAt, $actor, $tenant, $includeSubtree);
     }
 
     /**
@@ -191,6 +204,7 @@ final class GrantService
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  bool  $includeSubtree
      * @return \SineMacula\Laravel\Authorization\Services\SyncResult
      *
      * @throws \Throwable
@@ -201,8 +215,9 @@ final class GrantService
         ?\DateTimeInterface $expiresAt = null,
         Model|Reference|null $actor = null,
         Model|Reference|null $tenant = null,
+        bool $includeSubtree = true,
     ): SyncResult {
-        return $this->sync(GrantTarget::PERMISSION, $grantee, $permissions, $expiresAt, $actor, $tenant);
+        return $this->sync(GrantTarget::PERMISSION, $grantee, $permissions, $expiresAt, $actor, $tenant, $includeSubtree);
     }
 
     /**
@@ -213,6 +228,7 @@ final class GrantService
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  bool  $includeSubtree
      * @return \SineMacula\Laravel\Authorization\Enums\GrantOutcome
      *
      * @throws \Throwable
@@ -223,8 +239,9 @@ final class GrantService
         ?\DateTimeInterface $expiresAt = null,
         Model|Reference|null $actor = null,
         Model|Reference|null $tenant = null,
+        bool $includeSubtree = true,
     ): GrantOutcome {
-        return $this->grant(GrantTarget::POLICY, $grantee, $policy, $expiresAt, $actor, $tenant);
+        return $this->grant(GrantTarget::POLICY, $grantee, $policy, $expiresAt, $actor, $tenant, $includeSubtree);
     }
 
     /**
@@ -253,6 +270,7 @@ final class GrantService
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  bool  $includeSubtree
      * @return \SineMacula\Laravel\Authorization\Services\SyncResult
      *
      * @throws \Throwable
@@ -263,8 +281,9 @@ final class GrantService
         ?\DateTimeInterface $expiresAt = null,
         Model|Reference|null $actor = null,
         Model|Reference|null $tenant = null,
+        bool $includeSubtree = true,
     ): SyncResult {
-        return $this->sync(GrantTarget::POLICY, $grantee, $policies, $expiresAt, $actor, $tenant);
+        return $this->sync(GrantTarget::POLICY, $grantee, $policies, $expiresAt, $actor, $tenant, $includeSubtree);
     }
 
     /**
@@ -342,6 +361,7 @@ final class GrantService
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  bool  $below
      * @return \SineMacula\Laravel\Authorization\Enums\GrantOutcome
      *
      * @throws \Throwable
@@ -353,21 +373,22 @@ final class GrantService
         ?\DateTimeInterface $expiresAt,
         Model|Reference|null $actor,
         Model|Reference|null $tenant,
+        bool $below,
     ): GrantOutcome {
         $reference = self::grantee($grantee);
         $named     = GrantScopes::named($tenant);
         $operation = Operation::begin($actor);
 
         /** @var \SineMacula\Laravel\Authorization\Enums\GrantOutcome $outcome */
-        $outcome = OperationScope::run($operation, static function (Operation $operation) use ($kind, $grantee, $reference, $named, $target, $expiresAt): GrantOutcome {
+        $outcome = OperationScope::run($operation, static function (Operation $operation) use ($kind, $grantee, $reference, $named, $target, $expiresAt, $below): GrantOutcome {
             $model = $kind->resolve($target, self::guard($grantee), $named);
-            $scope = GrantScopes::of($kind, $model, $named);
+            $scope = self::scope(GrantScopes::of($kind, $model, $named), $below);
 
             RoleParity::assertGrantable($kind->value, $model, self::guard($grantee));
 
-            $change = self::table($kind, $reference, $operation, $scope)->grant(self::key($model), $expiresAt);
+            $change = self::table($kind, $reference, $operation, $scope->tenant, $scope->includeSubtree)->grant(self::key($model), $expiresAt);
 
-            OperationScope::dispatch(...$kind->changeEvents($operation, $reference, $model, new GrantScope($scope), $change, $expiresAt));
+            OperationScope::dispatch(...$kind->changeEvents($operation, $reference, $model, $scope, $change, $expiresAt));
 
             return $change->outcome;
         });
@@ -434,6 +455,7 @@ final class GrantService
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  bool  $below
      * @return \SineMacula\Laravel\Authorization\Services\SyncResult
      *
      * @throws \Throwable
@@ -445,15 +467,17 @@ final class GrantService
         ?\DateTimeInterface $expiresAt,
         Model|Reference|null $actor,
         Model|Reference|null $tenant,
+        bool $below,
     ): SyncResult {
         $reference = self::grantee($grantee);
         $named     = GrantScopes::named($tenant);
         $operation = Operation::begin($actor);
 
         /** @var \SineMacula\Laravel\Authorization\Services\SyncResult $result */
-        $result = OperationScope::run($operation, static function (Operation $operation) use ($kind, $grantee, $reference, $named, $targets, $expiresAt): SyncResult {
+        $result = OperationScope::run($operation, static function (Operation $operation) use ($kind, $grantee, $reference, $named, $targets, $expiresAt, $below): SyncResult {
             $scope   = $named ?? GrantScopes::commonOwner($kind, self::guard($grantee), $targets);
-            $table   = self::table($kind, $reference, $operation, $scope);
+            $written = self::scope($scope, $below);
+            $table   = self::table($kind, $reference, $operation, $scope, $written->includeSubtree);
             $held    = $table->held();
             $keep    = self::toKeep($kind, $grantee, $targets, $held, $scope);
             $revoked = \array_values(\array_diff($held, \array_map(self::key(...), $keep)));
@@ -465,7 +489,7 @@ final class GrantService
             foreach ($keep as $model) {
                 $id     = self::key($model);
                 $change = $table->rearm($id, $expiresAt);
-                $events = [...$events, ...$kind->changeEvents($operation, $reference, $model, new GrantScope($scope), $change, $expiresAt)];
+                $events = [...$events, ...$kind->changeEvents($operation, $reference, $model, $written, $change, $expiresAt)];
 
                 $changed[$change->outcome->value][] = $id;
             }
@@ -562,11 +586,26 @@ final class GrantService
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  bool  $includeSubtree
      * @return \SineMacula\Laravel\Authorization\Services\Support\GrantTable
      */
-    private static function table(GrantTarget $kind, Reference $grantee, Operation $operation, ?Reference $tenant): GrantTable
+    private static function table(GrantTarget $kind, Reference $grantee, Operation $operation, ?Reference $tenant, bool $includeSubtree = true): GrantTable
     {
-        return new GrantTable(AuthorizationConnection::connection(), $kind->table(), $kind->column(), $grantee->type, $grantee->id, $operation->actor, $tenant);
+        return new GrantTable(AuthorizationConnection::connection(), $kind->table(), $kind->column(), $grantee->type, $grantee->id, $operation->actor, $tenant, $includeSubtree);
+    }
+
+    /**
+     * Return the scope a grant is written in: its tenant, and whether it also
+     * holds in the tenants below it. A platform-wide grant counts everywhere,
+     * so it always does.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  bool  $includeSubtree
+     * @return \SineMacula\Laravel\Authorization\Support\GrantScope
+     */
+    private static function scope(?Reference $tenant, bool $includeSubtree): GrantScope
+    {
+        return new GrantScope($tenant, null, $includeSubtree || $tenant === null);
     }
 
     /**

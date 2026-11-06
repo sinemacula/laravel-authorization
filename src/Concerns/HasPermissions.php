@@ -78,16 +78,20 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * holds with the same expiry changes nothing and dispatches no event; a
      * permission whose grant has expired is re-armed with the new expiry.
      *
+     * A grant in a tenant also holds in the tenants below it in the tenant
+     * tree, unless `$includeSubtree` is false.
+     *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  bool  $includeSubtree
      * @return static
      *
      * @throws \Throwable
      */
-    public function givePermission(Permission|string $permission, ?\DateTimeInterface $expiresAt = null, Model|Reference|null $tenant = null): static
+    public function givePermission(Permission|string $permission, ?\DateTimeInterface $expiresAt = null, Model|Reference|null $tenant = null, bool $includeSubtree = true): static
     {
-        self::authorizationGrants()->grantPermission($this, $permission, $expiresAt, null, $tenant);
+        self::authorizationGrants()->grantPermission($this, $permission, $expiresAt, null, $tenant, $includeSubtree);
 
         return $this;
     }

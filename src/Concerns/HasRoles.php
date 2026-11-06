@@ -69,16 +69,20 @@ trait HasRoles // @phpstan-ignore trait.unused
      * with the same expiry changes nothing and dispatches no event; a role
      * whose grant has expired is re-armed with the new expiry.
      *
+     * A grant in a tenant also holds in the tenants below it in the tenant
+     * tree, unless `$includeSubtree` is false.
+     *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  bool  $includeSubtree
      * @return static
      *
      * @throws \Throwable
      */
-    public function assignRole(Role|string $role, ?\DateTimeInterface $expiresAt = null, Model|Reference|null $tenant = null): static
+    public function assignRole(Role|string $role, ?\DateTimeInterface $expiresAt = null, Model|Reference|null $tenant = null, bool $includeSubtree = true): static
     {
-        self::authorizationGrants()->grantRole($this, $role, $expiresAt, null, $tenant);
+        self::authorizationGrants()->grantRole($this, $role, $expiresAt, null, $tenant, $includeSubtree);
 
         return $this;
     }

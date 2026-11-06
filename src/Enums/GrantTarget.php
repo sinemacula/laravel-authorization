@@ -329,8 +329,9 @@ enum GrantTarget: string
 
     /**
      * Build the events a grant's change dispatches: none when nothing changed,
-     * the granted event for a new grant, and also the expiry-changed event for
-     * a re-armed grant or a changed expiry.
+     * the granted event for a new grant or a changed reach, carrying the new
+     * reach in its scope, and also the expiry-changed event for a re-armed
+     * grant or a changed expiry.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
@@ -343,9 +344,9 @@ enum GrantTarget: string
     public function changeEvents(Operation $operation, Reference $grantee, Model $model, GrantScope $scope, GrantChange $change, ?\DateTimeInterface $expiresAt): array
     {
         return match ($change->outcome) {
-            GrantOutcome::UNCHANGED => [],
-            GrantOutcome::GRANTED   => [$this->grantedEvent($operation, $grantee, $model, $scope, $expiresAt)],
-            default                 => [
+            GrantOutcome::UNCHANGED                            => [],
+            GrantOutcome::GRANTED, GrantOutcome::REACH_CHANGED => [$this->grantedEvent($operation, $grantee, $model, $scope, $expiresAt)],
+            default                                            => [
                 $this->grantedEvent($operation, $grantee, $model, $scope, $expiresAt),
                 $this->expiryChangedEvent($operation, $grantee, $model, $scope, $change->previousExpiresAt, $expiresAt),
             ],

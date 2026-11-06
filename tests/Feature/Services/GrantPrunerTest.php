@@ -163,7 +163,7 @@ final class GrantPrunerTest extends TestCase
 
         $user->assignRole($role, $until);
         $user->assignRole($role, $until, new Reference('stub_team', '1'));
-        $user->assignRole($role, $until, new Reference('stub_org', '1'));
+        $user->assignRole($role, $until, new Reference('stub_org', '1'), false);
 
         DB::table('authorizable_roles')->insert([
             'role_id'           => $role->id,
@@ -179,13 +179,14 @@ final class GrantPrunerTest extends TestCase
         self::assertSame(0, DB::table('authorizable_roles')->count());
 
         $scopes = \array_map(static fn (RoleExpired $event): string => \sprintf(
-            '%s:%s:%s',
+            '%s:%s:%s:%s',
             $event->scope->tenant?->type,
             $event->scope->tenant?->id,
             $event->scope->application,
+            $event->scope->includeSubtree ? 'below' : 'alone',
         ), self::dispatchedEvents(RoleExpired::class));
 
-        self::assertEqualsCanonicalizing(['::', 'stub_team:1:', 'stub_org:1:', '::admin'], $scopes);
+        self::assertEqualsCanonicalizing([':::below', 'stub_team:1::below', 'stub_org:1::alone', '::admin:below'], $scopes);
     }
 
     /**

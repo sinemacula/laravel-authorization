@@ -37,6 +37,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *     authorizable_id: string,
  *     tenant_type: string|null,
  *     tenant_id: string|null,
+ *     include_subtree: bool|int|string,
  *     application: string|null,
  *     expires_at: string,
  * }
@@ -80,7 +81,7 @@ final readonly class GrantPruner
         foreach (GrantTarget::cases() as $kind) {
             $expired += $pretend ? self::expired($kind)->count() : self::sweep(
                 self::expired($kind),
-                [$kind->column() . ' as target_id', 'authorizable_type', 'authorizable_id', 'tenant_type', 'tenant_id', 'application', 'expires_at'],
+                [$kind->column() . ' as target_id', 'authorizable_type', 'authorizable_id', 'tenant_type', 'tenant_id', 'include_subtree', 'application', 'expires_at'],
                 $chunk,
                 static fn (array $rows, Operation $operation): int => self::pruneChunk($kind, $rows, $operation),
             );
@@ -284,7 +285,7 @@ final readonly class GrantPruner
     {
         $tenant = $row['tenant_type'] === null ? null : new Reference($row['tenant_type'], (string) $row['tenant_id']);
 
-        return new GrantScope($tenant, $row['application']);
+        return new GrantScope($tenant, $row['application'], (bool) $row['include_subtree']);
     }
 
     /**

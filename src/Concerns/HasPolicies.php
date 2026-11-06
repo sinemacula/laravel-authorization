@@ -77,16 +77,20 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * holds with the same expiry changes nothing and dispatches no event; an
      * attachment that has expired is re-armed with the new expiry.
      *
+     * A grant in a tenant also holds in the tenants below it in the tenant
+     * tree, unless `$includeSubtree` is false.
+     *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  bool  $includeSubtree
      * @return static
      *
      * @throws \Throwable
      */
-    public function attachPolicy(Policy $policy, ?\DateTimeInterface $expiresAt = null, Model|Reference|null $tenant = null): static
+    public function attachPolicy(Policy $policy, ?\DateTimeInterface $expiresAt = null, Model|Reference|null $tenant = null, bool $includeSubtree = true): static
     {
-        self::authorizationGrants()->attachPolicy($this, $policy, $expiresAt, null, $tenant);
+        self::authorizationGrants()->attachPolicy($this, $policy, $expiresAt, null, $tenant, $includeSubtree);
 
         return $this;
     }

@@ -96,6 +96,74 @@ final class GrantTableTest extends TestCase
     }
 
     /**
+     * A grant in a tenant is written with its reach: the tenants below it as
+     * well by default, or the tenant alone.
+     *
+     * @return void
+     */
+    public function testAGrantIsWrittenWithItsReach(): void
+    {
+        $role  = self::role();
+        $other = self::role('viewer');
+
+        self::table(tenant: self::tenant())->grant($role->id, null);
+        self::table(tenant: self::tenant(), includeSubtree: false)->grant($other->id, null);
+
+        self::assertEquals([$role->id => true, $other->id => false], self::reaches());
+    }
+
+    /**
+     * Granting what is held with the same expiry and another reach changes the
+     * reach alone, reported with the expiry held, and records the actor; the
+     * same reach again changes nothing.
+     *
+     * @return void
+     */
+    public function testAnotherReachOnAHeldGrantChangesTheReach(): void
+    {
+        $role  = self::role();
+        $actor = new Reference('stub_identity', 'admin');
+
+        self::table(tenant: self::tenant())->grant($role->id, Carbon::parse('2026-07-02 12:00:00'));
+
+        Carbon::setTestNow('2026-07-01 12:30:00');
+
+        $change = self::table(grantedBy: $actor, tenant: self::tenant(), includeSubtree: false)->grant($role->id, Carbon::parse('2026-07-02 12:00:00'));
+
+        self::assertSame(GrantOutcome::REACH_CHANGED, $change->outcome);
+        self::assertSame('2026-07-02 12:00:00', $change->previousExpiresAt?->format('Y-m-d H:i:s'));
+        self::assertEquals([$role->id => false], self::reaches());
+        self::assertSame(['2026-07-02 12:00:00'], self::expiries());
+        self::assertSame('2026-07-01 12:30:00', self::rows()[0]['updated_at']);
+        self::assertSame([[$role->id, 'stub_identity', 'admin']], self::grantors());
+        self::assertSame(GrantOutcome::UNCHANGED, self::table(tenant: self::tenant(), includeSubtree: false)->grant($role->id, Carbon::parse('2026-07-02 12:00:00'))->outcome);
+    }
+
+    /**
+     * A changed expiry, or a re-armed grant, is written with the writer's
+     * reach; a re-arm leaves a live grant's reach as it is.
+     *
+     * @return void
+     */
+    public function testARewriteCarriesTheReach(): void
+    {
+        $role    = self::role();
+        $expired = self::role('viewer');
+        $live    = self::role('author');
+        $table   = self::table(tenant: self::tenant());
+        $limited = self::table(tenant: self::tenant(), includeSubtree: false);
+
+        $table->grant($role->id, null);
+        $table->grant($expired->id, Carbon::parse(self::NOW));
+        $table->grant($live->id, null);
+
+        self::assertSame(GrantOutcome::EXPIRY_CHANGED, $limited->grant($role->id, Carbon::parse('2026-07-02 12:00:00'))->outcome);
+        self::assertSame(GrantOutcome::REARMED, $limited->rearm($expired->id, null)->outcome);
+        self::assertSame(GrantOutcome::UNCHANGED, $limited->rearm($live->id, null)->outcome);
+        self::assertEquals([$role->id => false, $expired->id => false, $live->id => true], self::reaches());
+    }
+
+    /**
      * Granting what is held with the same expiry changes nothing, the same
      * instant in another zone included.
      *
@@ -601,11 +669,29 @@ final class GrantTableTest extends TestCase
      * @param  string  $granteeId
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $grantedBy
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  bool  $includeSubtree
      * @return \SineMacula\Laravel\Authorization\Services\Support\GrantTable
      */
-    private static function table(string $granteeId = 'user-1', ?Reference $grantedBy = null, ?Reference $tenant = null): GrantTable
+    private static function table(string $granteeId = 'user-1', ?Reference $grantedBy = null, ?Reference $tenant = null, bool $includeSubtree = true): GrantTable
     {
-        return new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_identity', $granteeId, $grantedBy, $tenant);
+        return new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_identity', $granteeId, $grantedBy, $tenant, $includeSubtree);
+    }
+
+    /**
+     * Return whether each role grant row reaches the tenants below its tenant,
+     * keyed by the role.
+     *
+     * @return array<string, bool>
+     */
+    private static function reaches(): array
+    {
+        $reaches = [];
+
+        foreach (DB::table('authorizable_roles')->get(['role_id', 'include_subtree']) as $row) {
+            $reaches[(string) $row->role_id] = (bool) $row->include_subtree; // @phpstan-ignore cast.string
+        }
+
+        return $reaches;
     }
 
     /**

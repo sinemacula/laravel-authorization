@@ -53,6 +53,25 @@ final class HasPermissionsTest extends TestCase
     }
 
     /**
+     * A grant in a tenant through the trait can be limited to that tenant.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPermissionInATenantCanBeLimitedToIt(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $tenant = new Reference('stub_tenant', 'tenant-a');
+
+        Permission::create(['name' => 'posts:edit']);
+
+        $user->givePermission('posts:edit', null, $tenant, false);
+
+        self::assertSame([false], DB::table('authorizable_permissions')->pluck('include_subtree')->map(static fn (mixed $reach): bool => (bool) $reach)->all());
+    }
+
+    /**
      * A direct grant records when it was made and when it last changed.
      *
      * @return void
