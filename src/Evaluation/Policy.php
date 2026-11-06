@@ -85,13 +85,15 @@ final readonly class Policy
 
         $version = self::versionFrom($data);
 
-        $statements = \array_values(\array_map(static function (mixed $statement): Statement {
+        $statements = [];
+
+        foreach ($data['statements'] as $statement) {
             if (!\is_array($statement)) {
                 throw new \InvalidArgumentException('Policy statements must be associative arrays.');
             }
 
-            return Statement::fromArray($statement);
-        }, $data['statements']));
+            $statements[] = Statement::fromArray($statement);
+        }
 
         self::assertUniqueSids($statements);
 
