@@ -333,7 +333,7 @@ final class GrantService
      */
     private static function revokeEverywhere(GrantTarget $kind, Reference $grantee, Operation $operation): array
     {
-        $table  = self::table($kind, $grantee, $operation, null);
+        $table  = self::table($kind, $grantee, $operation, GrantScope::platform());
         $grants = $table->grantsInEveryScope();
         $models = [];
         $events = [];
@@ -386,7 +386,7 @@ final class GrantService
 
             RoleParity::assertGrantable($kind->value, $model, self::guard($grantee));
 
-            $change = self::table($kind, $reference, $operation, $scope->tenant, $scope->includeSubtree)->grant(self::key($model), $expiresAt);
+            $change = self::table($kind, $reference, $operation, $scope)->grant(self::key($model), $expiresAt);
 
             OperationScope::dispatch(...$kind->changeEvents($operation, $reference, $model, $scope, $change, $expiresAt));
 
@@ -423,7 +423,7 @@ final class GrantService
 
             foreach ($candidates as $model) {
                 $scope = GrantScopes::of($kind, $model, $named);
-                $table = self::table($kind, $reference, $operation, $scope);
+                $table = self::table($kind, $reference, $operation, new GrantScope($scope));
                 $key   = self::key($model);
                 $reach = $table->reaches([$key]);
 
@@ -479,7 +479,7 @@ final class GrantService
         $result = OperationScope::run($operation, static function (Operation $operation) use ($kind, $grantee, $reference, $named, $targets, $expiresAt, $below): SyncResult {
             $scope   = $named ?? GrantScopes::commonOwner($kind, self::guard($grantee), $targets);
             $written = self::scope($scope, $below);
-            $table   = self::table($kind, $reference, $operation, $scope, $written->includeSubtree);
+            $table   = self::table($kind, $reference, $operation, $written);
             $held    = $table->held();
             $keep    = self::toKeep($kind, $grantee, $targets, $held, $scope);
             $revoked = \array_values(\array_diff($held, \array_map(self::key(...), $keep)));
@@ -589,13 +589,21 @@ final class GrantService
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
-     * @param  bool  $includeSubtree
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
      * @return \SineMacula\Laravel\Authorization\Services\Support\GrantTable
      */
-    private static function table(GrantTarget $kind, Reference $grantee, Operation $operation, ?Reference $tenant, bool $includeSubtree = true): GrantTable
+    private static function table(GrantTarget $kind, Reference $grantee, Operation $operation, GrantScope $scope): GrantTable
     {
-        return new GrantTable(AuthorizationConnection::connection(), $kind->table(), $kind->column(), $grantee->type, $grantee->id, $operation->actor, $tenant, $includeSubtree);
+        return new GrantTable(
+            AuthorizationConnection::connection(),
+            $kind->table(),
+            $kind->column(),
+            $grantee->type,
+            $grantee->id,
+            $operation->actor,
+            $scope->tenant,
+            $scope->includeSubtree,
+        );
     }
 
     /**

@@ -136,11 +136,11 @@ final readonly class GrantTable extends ExpiringGrants
     {
         $reaches = [];
 
-        foreach ($this->inScope()->whereIn($this->column, $ids)->get([$this->column, 'include_subtree']) as $row) {
-            /** @var array<string, scalar|null> $columns */
+        foreach ($this->inScope()->whereIn($this->column, $ids)->get([$this->column . ' as target_id', 'include_subtree']) as $row) {
+            /** @var array{target_id: string, include_subtree: bool|int|string} $columns */
             $columns = (array) $row;
 
-            $reaches[(string) $columns[$this->column]] = (bool) $columns['include_subtree'];
+            $reaches[$columns['target_id']] = (bool) $columns['include_subtree'];
         }
 
         return $reaches;
@@ -157,12 +157,12 @@ final readonly class GrantTable extends ExpiringGrants
     {
         $grants = [];
 
-        foreach ($this->grantee()->get([$this->column, 'tenant_type', 'tenant_id', 'include_subtree']) as $row) {
-            /** @var array<string, scalar|null> $columns */
+        foreach ($this->grantee()->get([$this->column . ' as target_id', 'tenant_type', 'tenant_id', 'include_subtree']) as $row) {
+            /** @var array{target_id: string, tenant_type: string|null, tenant_id: string|null, include_subtree: bool|int|string} $columns */
             $columns  = (array) $row;
-            $type     = $columns['tenant_type'] ?? null;
-            $tenant   = $type === null ? null : new Reference((string) $type, (string) $columns['tenant_id']);
-            $grants[] = [(string) $columns[$this->column], new GrantScope($tenant, null, (bool) $columns['include_subtree'])];
+            $type     = $columns['tenant_type'];
+            $tenant   = $type === null ? null : new Reference($type, (string) $columns['tenant_id']);
+            $grants[] = [$columns['target_id'], new GrantScope($tenant, null, (bool) $columns['include_subtree'])];
         }
 
         return $grants;

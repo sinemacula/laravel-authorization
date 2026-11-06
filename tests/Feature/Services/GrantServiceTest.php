@@ -403,8 +403,8 @@ final class GrantServiceTest extends TestCase
     }
 
     /**
-     * A sync writes its reach to what it grants and re-arms, and leaves a live
-     * grant it keeps as it is.
+     * A sync writes its reach to what it grants and re-arms, reporting each,
+     * and leaves a live grant it keeps as it is; by default it reaches below.
      *
      * @return void
      *
@@ -425,7 +425,11 @@ final class GrantServiceTest extends TestCase
         self::service()->grantRole($user, 'editor', tenant: $tenant);
         self::service()->grantRole($user, 'viewer', Carbon::parse('2000-01-01 00:00:00'), tenant: $tenant);
 
+        Event::fake();
+
         $result = self::service()->syncRoles($user, ['editor', 'viewer', 'author'], tenant: $tenant, includeSubtree: false);
+
+        self::assertEqualsCanonicalizing(['viewer', 'author'], \array_map(static fn (RoleAssigned $event): string => $event->name, self::dispatchedEvents(RoleAssigned::class)));
 
         self::service()->syncPermissions($user, ['posts:edit'], tenant: $tenant, includeSubtree: false);
         self::service()->syncPolicies($user, [Policy::query()->sole()], tenant: $tenant, includeSubtree: false);
@@ -441,6 +445,16 @@ final class GrantServiceTest extends TestCase
         self::assertEquals(['editor' => true, 'viewer' => false, 'author' => false], $reaches);
         self::assertSame(1, DB::table('authorizable_permissions')->where('include_subtree', false)->count());
         self::assertSame(1, DB::table('authorizable_policies')->where('include_subtree', false)->count());
+
+        $other = StubIdentity::query()->create(['id' => 'user-2']);
+
+        self::service()->syncRoles($other, ['editor'], tenant: $tenant);
+        self::service()->syncPermissions($other, ['posts:edit'], tenant: $tenant);
+        self::service()->syncPolicies($other, [Policy::query()->sole()], tenant: $tenant);
+
+        foreach (['authorizable_roles', 'authorizable_permissions', 'authorizable_policies'] as $table) {
+            self::assertTrue((bool) DB::table($table)->where('authorizable_id', 'user-2')->value('include_subtree'), "{$table} did not reach below by default.");
+        }
     }
 
     /**

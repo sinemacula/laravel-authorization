@@ -107,7 +107,7 @@ final class GrantTableTest extends TestCase
         $role  = self::role();
         $other = self::role('viewer');
 
-        self::table(tenant: self::tenant())->grant($role->id, null);
+        (new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_identity', 'user-1', null, self::tenant()))->grant($role->id, null);
         self::table(tenant: self::tenant(), includeSubtree: false)->grant($other->id, null);
 
         self::assertEquals([$role->id => true, $other->id => false], self::reaches());
@@ -180,7 +180,13 @@ final class GrantTableTest extends TestCase
         self::table(tenant: self::tenant(), includeSubtree: false)->grant($other->id, null);
         self::table()->grant($outside->id, null);
 
-        self::assertEquals([$role->id => true, $other->id => false], self::table(tenant: self::tenant())->reaches([$role->id, $other->id, $outside->id]));
+        $reaches  = self::table(tenant: self::tenant())->reaches([$role->id, $other->id, $outside->id]);
+        $expected = [$role->id => true, $other->id => false];
+
+        \ksort($reaches);
+        \ksort($expected);
+
+        self::assertSame($expected, $reaches);
         self::assertSame([], self::table(tenant: self::tenant())->reaches([]));
     }
 
