@@ -21,7 +21,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
  *
  * @internal
  */
-final class NonMorphRolesGrantee extends Model implements SupportsPolicies, SupportsRoles
+final class NonMorphRolesGrantee extends Model implements SupportsPolicies, SupportsRoles // @phpstan-ignore sineMaculaLaravel.modelBehaviour, sineMaculaLaravel.modelBehaviour
 {
     use HasPolicies;
 

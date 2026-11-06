@@ -184,6 +184,18 @@ final class InlinePolicies
     }
 
     /**
+     * Determine whether a model's deletion removed it for good, rather than
+     * soft deleting it, so its inline policies are deleted with it.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model  $model
+     * @return bool
+     */
+    public static function isDeletedForGood(Model $model): bool
+    {
+        return !\method_exists($model, 'isForceDeleting') || $model->isForceDeleting() === true;
+    }
+
+    /**
      * Delete the inline policies the grantee owns, each through the model so
      * its observer reports it and its attachments go with it, as one operation
      * with no actor, and return how many were deleted.

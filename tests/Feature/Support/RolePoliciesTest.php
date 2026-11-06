@@ -7,6 +7,7 @@ namespace Tests\Feature\Support;
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\Repository;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
+use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -30,9 +31,11 @@ use SineMacula\Laravel\Authorization\Support\InheritedPolicies;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\RolePolicies;
 use Tests\Concerns\ActsAsTenant;
+use Tests\Feature\Stubs\NonMorphRolesGrantee;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
+use Tests\Feature\Stubs\UndeclaredRolesGrantee;
 use Tests\TestCase;
 
 /**
@@ -76,6 +79,24 @@ final class RolePoliciesTest extends TestCase
         Carbon::setTestNow();
 
         parent::tearDown();
+    }
+
+    /**
+     * Only a grantee that supports roles through the role grants' morph has
+     * roles whose policies it gets.
+     *
+     * @return void
+     */
+    public function testOnlyAGranteeHoldingRolesThroughTheGrantMorphHasThem(): void
+    {
+        $identity = new StubIdentity;
+        $roles    = RolePolicies::heldBy($identity);
+
+        self::assertInstanceOf(MorphToMany::class, $roles);
+        self::assertSame($identity, $roles->getParent());
+        self::assertNull(RolePolicies::heldBy(new NonMorphRolesGrantee));
+        self::assertNull(RolePolicies::heldBy(new UndeclaredRolesGrantee));
+        self::assertNull(RolePolicies::heldBy(new Role));
     }
 
     /**

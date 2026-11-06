@@ -20,7 +20,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
  *
  * @internal
  */
-final class UndeclaredRolesGrantee extends Model implements SupportsPolicies
+final class UndeclaredRolesGrantee extends Model implements SupportsPolicies // @phpstan-ignore sineMaculaLaravel.modelBehaviour, sineMaculaLaravel.modelBehaviour
 {
     use HasPolicies;
 

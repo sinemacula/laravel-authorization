@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use Illuminate\Database\Query\Builder;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
+use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Database\GrantApplications;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
@@ -39,6 +40,31 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  */
 final class RolePolicies
 {
+    /**
+     * Return the relation onto the roles a grantee holds, whose policies it
+     * also gets, or null for a grantee that holds no roles, such as a role, or
+     * whose `roles()` is not the morph the role grants use.
+     *
+     * @phpcs:disable Generic.Files.LineLength.TooLong
+     *
+     * @formatter:off
+     *
+     * @param  object  $grantee
+     * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>|null
+     *
+     * @formatter:on
+     *
+     * @phpcs:enable Generic.Files.LineLength.TooLong
+     */
+    public static function heldBy(object $grantee): ?MorphToMany
+    {
+        /** @var mixed $roles */
+        $roles = $grantee instanceof SupportsRoles && \method_exists($grantee, 'roles') ? $grantee->roles() : null;
+
+        /** @var \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>|null */
+        return $roles instanceof MorphToMany ? $roles : null;
+    }
+
     /**
      * Return a query for at most one attachment of a policy to any role that
      * holds in the current tenant and application and has not expired, with the
