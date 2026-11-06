@@ -487,6 +487,7 @@ php artisan authorization:revoke user:1 editor
 php artisan authorization:list-roles
 php artisan authorization:list-permissions
 php artisan authorization:why-can user:1 posts:delete posts/42
+php artisan authorization:prune --pretend
 ```
 
 The listing commands are administrative views: they list every role or permission, platform-wide and tenant-owned
@@ -496,6 +497,16 @@ no expiry, or does not hold, is reported as such and nothing is written. `grant`
 identity holds on a temporary or expired grant is made permanent and reported as granted. `grant`, `revoke` and
 `authorization:sync` take `--actor={morph type}:{key}` to name who made the change, which their events carry and the
 grant rows record; it must name a row that exists, and without it they record no actor.
+
+`authorization:prune` removes the grants that no longer count: expired grants, reported as `RoleExpired`,
+`PermissionExpired` or `PolicyExpired` with no actor, and the grants of a grantee deleted without its model events, such
+as by a raw query, reported as revoked. A soft-deleted grantee keeps its grants. Expired grants stop counting at their
+expiry with or without it, so pruning keeps the tables small rather than making checks correct. Like `model:prune`, it
+takes `--pretend` and `--chunk`, and is scheduled like any command:
+
+```php
+Schedule::command('authorization:prune')->daily();
+```
 
 ### Testing assertions
 
