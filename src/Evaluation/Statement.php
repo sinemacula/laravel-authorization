@@ -118,13 +118,10 @@ final readonly class Statement
             notResources: StatementValidator::patternsOf($data, 'not_resources'),
         );
 
-        $errors = \array_filter(
-            [...$statement->operatorErrors, ...\array_column($statement->tests, 'error')],
-            static fn (?string $error): bool => $error !== null,
-        );
-
-        foreach ($errors as $error) {
-            throw new \InvalidArgumentException("Policy statement {$error}.");
+        foreach ([...$statement->operatorErrors, ...\array_column($statement->tests, 'error')] as $error) {
+            if ($error !== null) {
+                throw new \InvalidArgumentException("Policy statement {$error}.");
+            }
         }
 
         return $statement;

@@ -174,7 +174,9 @@ final class StatementValidator
         }
 
         if (\str_ends_with($field, 'resources')) {
-            \array_walk($patterns, static fn (string $pattern) => self::assertValidResource($pattern));
+            foreach ($patterns as $pattern) {
+                self::assertValidResource($pattern);
+            }
         }
 
         return $patterns;
@@ -214,15 +216,21 @@ final class StatementValidator
         foreach ($conditions as $name => $tests) {
             $operator = \is_string($name) ? ConditionEvaluator::operatorOf($name) : null;
 
-            $errors[] = match (true) {
+            $error = match (true) {
                 !\is_string($name)        => 'conditions must map operator names to key tests',
                 $operator === null        => "conditions have an unknown operator '{$name}'",
                 !self::isKeyedMap($tests) => "condition operator '{$name}' must map context keys to operands",
                 default                   => null,
             };
+
+            if ($error === null) {
+                continue;
+            }
+
+            $errors[] = $error;
         }
 
-        return \array_values(\array_filter($errors, static fn (?string $error): bool => $error !== null));
+        return $errors;
     }
 
     /**
@@ -292,9 +300,17 @@ final class StatementValidator
      */
     private static function isKeyedMap(mixed $tests): bool
     {
-        return \is_array($tests)
-            && $tests !== []
-            && \array_filter(\array_keys($tests), static fn (int|string $key): bool => !\is_string($key)) === [];
+        if (!\is_array($tests) || $tests === []) {
+            return false;
+        }
+
+        foreach (\array_keys($tests) as $key) {
+            if (!\is_string($key)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /**
@@ -307,9 +323,16 @@ final class StatementValidator
      */
     private static function isPatternList(mixed $patterns): bool
     {
-        return \is_array($patterns)
-            && $patterns !== []
-            && \array_is_list($patterns)
-            && \array_filter($patterns, static fn (mixed $pattern): bool => !\is_string($pattern) || $pattern === '') === [];
+        if (!\is_array($patterns) || $patterns === [] || !\array_is_list($patterns)) {
+            return false;
+        }
+
+        foreach ($patterns as $pattern) {
+            if (!\is_string($pattern) || $pattern === '') {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

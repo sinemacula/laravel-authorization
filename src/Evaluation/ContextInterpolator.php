@@ -110,6 +110,10 @@ final class ContextInterpolator
      */
     public static function hasMalformedReference(string $subject): bool
     {
+        if (!\str_contains($subject, '${')) {
+            return false;
+        }
+
         foreach (self::split($subject) as $part) {
             if (self::isMalformed($part)) {
                 return true;
