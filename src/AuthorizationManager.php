@@ -55,8 +55,11 @@ final class AuthorizationManager
 {
     use HasContainerInstance;
 
-    /** @var \SineMacula\Laravel\Authorization\Subject|null The subject named through `for()` or `forUser()`; null defers to the bound resolver. */
+    /** @var \SineMacula\Laravel\Authorization\Subject|null The subject named through `for()` or `forUser()`, null for a guest. */
     private ?Subject $subjectOverride = null;
+
+    /** @var bool Whether `for()` or `forUser()` named the subject; until one does, the bound resolver resolves it. */
+    private bool $isSubjectNamed = false;
 
     /** @var array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>|null  Per-call policy override supplied via `withPolicies()`. */
     private ?array $policyOverride = null;
@@ -305,14 +308,16 @@ final class AuthorizationManager
     /**
      * Return a scoped manager deciding about the subject the resolver
      * translates the supplied user into: the user Laravel's Gate hands over,
-     * for example.
+     * for example. A guest (no user) is no subject, so every check of the
+     * scoped manager denies as `subject_unresolved`, whoever the current
+     * request is about.
      *
-     * @param  object  $user
+     * @param  object|null  $user
      * @return self
      */
-    public function forUser(object $user): self
+    public function forUser(?object $user): self
     {
-        return $this->scopedTo($this->subjectResolver->forUser($user));
+        return $this->scopedTo($user === null ? null : $this->subjectResolver->forUser($user));
     }
 
     /**
@@ -382,28 +387,31 @@ final class AuthorizationManager
     /**
      * Resolve the subject in scope for this invocation.
      *
-     * Honours a `for()` or `forUser()` scope when active; otherwise defers to
-     * the bound `SubjectResolver`. Public so every surface that needs the
-     * current subject — middleware, Blade helpers, custom Gates — can delegate
-     * here instead of re-implementing the scope and resolver pair.
+     * Honours a `for()` or `forUser()` scope when active, a guest's being no
+     * subject; otherwise defers to the bound `SubjectResolver`. Public so every
+     * surface that needs the current subject — middleware, Blade helpers,
+     * custom Gates — can delegate here instead of re-implementing the scope and
+     * resolver pair.
      *
      * @return \SineMacula\Laravel\Authorization\Subject|null
      */
     public function currentSubject(): ?Subject
     {
-        return $this->subjectOverride ?? $this->subjectResolver->resolve();
+        return $this->isSubjectNamed ? $this->subjectOverride : $this->subjectResolver->resolve();
     }
 
     /**
-     * Return a clone of this manager deciding about the supplied subject.
+     * Return a clone of this manager deciding about the supplied subject, or
+     * about no subject when it is null.
      *
-     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @return self
      */
-    private function scopedTo(Subject $subject): self
+    private function scopedTo(?Subject $subject): self
     {
         $scoped                  = clone $this;
         $scoped->subjectOverride = $subject;
+        $scoped->isSubjectNamed  = true;
 
         return $scoped;
     }

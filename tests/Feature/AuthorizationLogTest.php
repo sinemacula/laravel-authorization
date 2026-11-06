@@ -56,9 +56,9 @@ final class AuthorizationLogTest extends TestCase
     {
         config(['authorization.log_channel' => null]);
 
-        AuthorizationLog::warning('gate conflict', ['permission' => 'posts:create']);
+        AuthorizationLog::warning('corrupt cache entry', ['permission' => 'posts:create']);
 
-        self::assertTrue($this->handler('default-capture')->hasWarningThatContains('gate conflict'));
+        self::assertTrue($this->handler('default-capture')->hasWarningThatContains('corrupt cache entry'));
         self::assertSame(['permission' => 'posts:create'], $this->handler('default-capture')->getRecords()[0]->context);
         self::assertFalse($this->handler('default-capture')->hasEmergencyRecords());
         self::assertFalse($this->handler('audit-capture')->hasRecords('warning'));
@@ -74,9 +74,9 @@ final class AuthorizationLogTest extends TestCase
     {
         config(['authorization.log_channel' => 'audit-capture']);
 
-        AuthorizationLog::warning('gate conflict');
+        AuthorizationLog::warning('corrupt cache entry');
 
-        self::assertTrue($this->handler('audit-capture')->hasWarningThatContains('gate conflict'));
+        self::assertTrue($this->handler('audit-capture')->hasWarningThatContains('corrupt cache entry'));
         self::assertFalse($this->handler('default-capture')->hasRecords('warning'));
     }
 
@@ -90,9 +90,9 @@ final class AuthorizationLogTest extends TestCase
     {
         config(['authorization.log_channel' => 'authorization']);
 
-        AuthorizationLog::warning('gate conflict');
+        AuthorizationLog::warning('corrupt cache entry');
 
-        self::assertTrue($this->handler('default-capture')->hasWarningThatContains('gate conflict'));
+        self::assertTrue($this->handler('default-capture')->hasWarningThatContains('corrupt cache entry'));
         self::assertFalse($this->handler('default-capture')->hasEmergencyRecords());
     }
 
@@ -105,9 +105,9 @@ final class AuthorizationLogTest extends TestCase
     {
         config(['authorization.log_channel' => '']);
 
-        AuthorizationLog::warning('gate conflict');
+        AuthorizationLog::warning('corrupt cache entry');
 
-        self::assertTrue($this->handler('default-capture')->hasWarningThatContains('gate conflict'));
+        self::assertTrue($this->handler('default-capture')->hasWarningThatContains('corrupt cache entry'));
     }
 
     /**
@@ -154,10 +154,10 @@ final class AuthorizationLogTest extends TestCase
 
         $this->app?->instance('log', $logger);
 
-        AuthorizationLog::warning('gate conflict');
+        AuthorizationLog::warning('corrupt cache entry');
         AuthorizationLog::debug('unknown operator');
 
-        self::assertSame([['warning', 'gate conflict'], ['debug', 'unknown operator']], $logger->lines);
+        self::assertSame([['warning', 'corrupt cache entry'], ['debug', 'unknown operator']], $logger->lines);
     }
 
     /**
@@ -185,7 +185,7 @@ final class AuthorizationLogTest extends TestCase
             }
         });
 
-        AuthorizationLog::warning('gate conflict');
+        AuthorizationLog::warning('corrupt cache entry');
         AuthorizationLog::debug('unknown operator');
 
         self::addToAssertionCount(1);

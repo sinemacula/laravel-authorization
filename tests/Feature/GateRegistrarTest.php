@@ -4,15 +4,20 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Auth\Access\AuthorizationException as LaravelAuthorizationException;
+use Illuminate\Auth\Middleware\Authorize;
+use Illuminate\Contracts\Auth\Access\Gate as GateContract;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\Relation;
+use Illuminate\Foundation\Auth\Access\AuthorizesRequests;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Blade;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
-use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
-use Psr\Log\LoggerInterface;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableResource;
@@ -27,20 +32,26 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\DeclaredAbilities;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use Tests\Feature\Stubs\AllowingLaravelPolicy;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
-use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
+use Tests\Feature\Stubs\DenyingLaravelPolicy;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubPermissionProvider;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
 /**
- * Feature coverage for the Gate callback the registrar defines per permission
- * enum case, focused on how the positional arguments become the resource the
- * evaluator sees.
+ * Feature coverage for the Gate hook the registrar registers: which abilities
+ * it answers and which fall through to Laravel, its precedence over the
+ * application's defines, policy classes and before-callbacks, whom a check is
+ * about, the switch that turns it off, and how the positional arguments become
+ * the resource the evaluator sees.
  *
  * An argument that cannot be identified as a resource (an unsaved model, a
  * model without a usable key, a number, a boolean, a list that is not a `(type,
@@ -64,8 +75,9 @@ use Tests\TestCase;
 final class GateRegistrarTest extends TestCase
 {
     /**
-     * Boot the provider with the demo permission enum so the Gate is wired for
-     * each test, and fake the decision event so every evaluation is observable.
+     * Boot the provider with the demo permission enum so the Gate asks the
+     * package about its cases in each test, and fake the decision event so
+     * every evaluation is observable.
      *
      * @return void
      */
@@ -98,20 +110,6 @@ final class GateRegistrarTest extends TestCase
         Relation::morphMap([], false);
 
         parent::tearDown();
-    }
-
-    /**
-     * Every case of a configured enum is registered as a Gate named by the
-     * case's value, which is the permission name.
-     *
-     * @return void
-     */
-    public function testRegistersAGateNamedByEachCaseValue(): void
-    {
-        foreach (PermissionEnum::cases() as $case) {
-            self::assertTrue(Gate::has($case->value));
-            self::assertFalse(Gate::has($case->name));
-        }
     }
 
     /**
@@ -592,31 +590,6 @@ final class GateRegistrarTest extends TestCase
     }
 
     /**
-     * In `log` mode a conflicting Gate is kept and the conflict is written as a
-     * warning on the package's log channel.
-     *
-     * @return void
-     */
-    public function testLogModeKeepsTheExistingGateAndWarns(): void
-    {
-        $spy = \Mockery::spy(LoggerInterface::class);
-        Log::swap($spy);
-
-        Gate::define('posts:create', static fn (?object $user = null): bool => true);
-
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.gate.on_conflict', 'log');
-        $config->set('authorization.permission_enums', [PermissionEnum::class]);
-
-        (new AuthorizationServiceProvider($this->app))->boot(); // @phpstan-ignore argument.type
-
-        self::assertTrue(Gate::forUser((object) [])->allows('posts:create'));
-
-        $spy->shouldHaveReceived('warning')->with('Authorization gate \'posts:create\' already registered; existing Gate preserved.', [])->once();
-    }
-
-    /**
      * The Gate's user is translated through the subject resolver, and the check
      * decides about the subject the resolver returns, not about the user.
      *
@@ -658,24 +631,319 @@ final class GateRegistrarTest extends TestCase
     }
 
     /**
-     * With no Gate user, the check decides about the resolver's subject, and
-     * denies when the resolver has none.
+     * A guest (no Gate user) is decided as no subject, which denies as
+     * `subject_unresolved`, even when the request has a subject the package
+     * would allow, and never as that subject.
      *
      * @return void
      */
-    public function testNoGateUserDecidesAboutTheResolversSubjectOrDenies(): void
+    public function testAGuestIsDecidedAsNoSubject(): void
     {
         $principal = $this->actAsFullyPermittedPrincipal();
 
-        self::assertTrue(Gate::allows('posts:create'));
-        self::assertSame($principal, $this->decisions()[0]->principal);
+        Gate::define('posts:create', static fn (?object $user = null): bool => true);
 
-        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver);
-        $this->app?->forgetInstance('authorization');
-        Authorization::clearResolvedInstance('authorization');
-
-        self::assertFalse(Gate::allows('posts:create'));
+        self::assertTrue(Gate::forUser($principal)->allows('posts:create'));
+        self::assertFalse(Gate::forUser(null)->allows('posts:create'));
         self::assertNull($this->decisions()[1]->principal);
+        self::assertSame(DecisionReason::SUBJECT_UNRESOLVED, $this->decisions()[1]->decision->reason);
+        self::assertSame($principal, Authorization::currentSubject()?->subject);
+    }
+
+    /**
+     * The hook defines no ability: Laravel's Gate holds none of the package's
+     * names, yet every case of a configured enum is answered.
+     *
+     * @return void
+     */
+    public function testDefinesNoAbilityYetAnswersEveryEnumCase(): void
+    {
+        $this->actAsFullyPermittedPrincipal();
+
+        self::assertSame([], Gate::abilities());
+        self::assertTrue(Gate::allows(PermissionEnum::POSTS_CREATE->value));
+        self::assertFalse(Gate::allows(PermissionEnum::POSTS_DELETE->value));
+        self::assertSame(['posts:create', 'posts:delete'], $this->evaluatedActions());
+    }
+
+    /**
+     * The package's allow and its deny both stand over the application's own
+     * `Gate::define` callbacks for the same abilities.
+     *
+     * @return void
+     */
+    public function testAllowAndDenyStandOverAnApplicationDefine(): void
+    {
+        $this->actAsFullyPermittedPrincipal();
+
+        Gate::define('posts:create', static fn (?object $user = null): bool => false);
+        Gate::define('posts:delete', static fn (?object $user = null): bool => true);
+
+        self::assertTrue(Gate::allows('posts:create'));
+        self::assertFalse(Gate::allows('posts:delete'));
+        self::assertSame(['posts:create', 'posts:delete'], $this->evaluatedActions());
+    }
+
+    /**
+     * The package's allow and its deny both stand over a Laravel policy class
+     * registered for the resource's model, whatever the policy answers, and a
+     * controller's `authorize()` goes through the hook too.
+     *
+     * @return void
+     *
+     * @throws \Illuminate\Auth\Access\AuthorizationException
+     */
+    public function testAllowAndDenyStandOverALaravelPolicyClass(): void
+    {
+        $target = StubIdentity::create(['id' => 'target-1']);
+
+        $this->actAsPrincipalAllowedOn('stub:target-1');
+
+        Gate::policy(StubIdentity::class, DenyingLaravelPolicy::class);
+
+        self::assertTrue(Gate::allows('posts:create', $target));
+
+        Gate::policy(StubIdentity::class, AllowingLaravelPolicy::class);
+
+        self::assertFalse(Gate::allows('posts:delete', $target));
+
+        $controller = new class {
+            use AuthorizesRequests;
+        };
+
+        self::assertTrue($controller->authorize('posts:create', $target)->allowed());
+
+        $this->expectException(LaravelAuthorizationException::class);
+
+        $controller->authorize('posts:delete', $target);
+    }
+
+    /**
+     * An application's `Gate::before` registered after the package's boot runs
+     * after the hook, so it never overrides the package's answer.
+     *
+     * @return void
+     */
+    public function testAnApplicationBeforeRegisteredAfterThePackageDoesNotOverride(): void
+    {
+        $user = $this->actAsFullyPermittedPrincipal();
+
+        Gate::before(static fn (?object $user = null): bool => true);
+        Gate::before(static fn (?object $user = null): bool => false);
+
+        // Laravel's `forUser()` copies the before-callbacks in their order.
+        self::assertTrue(Gate::forUser($user)->allows('posts:create'));
+        self::assertFalse(Gate::forUser($user)->allows('posts:delete'));
+        self::assertTrue(Gate::forUser($user)->allows('reports:view'));
+    }
+
+    /**
+     * An application's `Gate::before` registered before the package boots runs
+     * first, and Laravel takes the first answer, so it pre-empts the hook: the
+     * documented precedence.
+     *
+     * @return void
+     */
+    public function testAnApplicationBeforeRegisteredBeforeThePackagePreEmptsIt(): void
+    {
+        $this->freshGate();
+
+        Gate::before(static fn (?object $user, string $ability): ?bool => $ability === 'posts:delete' ? true : null);
+
+        (new AuthorizationServiceProvider($this->app))->boot(); // @phpstan-ignore argument.type
+
+        $this->actAsFullyPermittedPrincipal();
+
+        self::assertTrue(Gate::allows('posts:delete'));
+        self::assertTrue(Gate::allows('posts:create'));
+        self::assertSame(['posts:create'], $this->evaluatedActions());
+    }
+
+    /**
+     * An ability the package does not declare falls through to Laravel: a
+     * define, a Laravel policy class or nothing decides it, and the package
+     * records no decision. The names are matched exactly, so a pattern or a
+     * near miss of a declared name is not the package's either.
+     *
+     * @return void
+     */
+    public function testUndeclaredAbilitiesFallThroughToLaravel(): void
+    {
+        $target = StubIdentity::create(['id' => 'target-1']);
+
+        $this->actAsFullyPermittedPrincipal();
+
+        Gate::define('reports:view', static fn (?object $user = null): bool => true);
+        Gate::define('posts:*', static fn (?object $user = null): bool => true);
+        Gate::define('Posts:Create', static fn (?object $user = null): bool => true);
+        Gate::policy(StubIdentity::class, AllowingLaravelPolicy::class);
+
+        self::assertTrue(Gate::allows('reports:view'));
+        self::assertTrue(Gate::allows('posts:*'));
+        self::assertTrue(Gate::allows('Posts:Create'));
+        self::assertTrue(Gate::allows('publish', $target));
+        self::assertFalse(Gate::allows('reports:archive'));
+        self::assertSame([], $this->decisions());
+    }
+
+    /**
+     * A permission row that exists only in the database, held by the subject,
+     * is not declared, so the Gate leaves it to Laravel, which knows nothing of
+     * it, while the package's own API still decides it.
+     *
+     * @return void
+     */
+    public function testADatabaseOnlyPermissionFallsThrough(): void
+    {
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'reports:archive', 'guard' => 'web']);
+
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user->givePermission('reports:archive');
+
+        $this->actAs($user);
+
+        self::assertFalse(Gate::allows('reports:archive'));
+        self::assertSame([], $this->decisions());
+        self::assertTrue(Authorization::can('reports:archive'));
+
+        Gate::define('reports:archive', static fn (?object $user = null): bool => false);
+
+        self::assertFalse(Gate::allows('reports:archive'));
+    }
+
+    /**
+     * The permissions a configured provider declares, and the package's own,
+     * are answered like an enum's, over the application's define.
+     *
+     * @return void
+     */
+    public function testProviderAndPackageAbilitiesAreAnswered(): void
+    {
+        config(['authorization.permission_providers' => [StubPermissionProvider::class]]);
+
+        foreach (['media:upload', PackagePermissions::GUARDRAILS_MANAGE] as $name) {
+            Permission::create(['id' => (string) Str::uuid(), 'name' => $name, 'guard' => 'web']);
+            Gate::define($name, static fn (?object $user = null): bool => false);
+        }
+
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user->givePermission('media:upload');
+        $user->givePermission(PackagePermissions::GUARDRAILS_MANAGE);
+
+        $this->actAs($user);
+
+        self::assertTrue(Gate::allows('media:upload'));
+        self::assertTrue(Gate::allows(PackagePermissions::GUARDRAILS_MANAGE));
+        self::assertFalse(Gate::allows('media:delete'));
+        self::assertSame(['media:upload', PackagePermissions::GUARDRAILS_MANAGE, 'media:delete'], $this->evaluatedActions());
+    }
+
+    /**
+     * `@can` and the `can:` route middleware ask the Gate, so the package
+     * decides them, over the application's define.
+     *
+     * @return void
+     *
+     * @throws \Illuminate\Auth\Access\AuthorizationException
+     * @throws \Illuminate\Auth\AuthenticationException
+     */
+    public function testBladeAndTheCanMiddlewareGoThroughTheHook(): void
+    {
+        $this->actAsFullyPermittedPrincipal();
+
+        Gate::define('posts:create', static fn (?object $user = null): bool => false);
+        Gate::define('posts:delete', static fn (?object $user = null): bool => true);
+
+        self::assertSame('allowed', \trim(Blade::render('@can(\'posts:create\') allowed @else refused @endcan')));
+        self::assertSame('refused', \trim(Blade::render('@can(\'posts:delete\') allowed @else refused @endcan')));
+
+        /** @var \Illuminate\Auth\Middleware\Authorize $middleware */
+        $middleware = $this->app?->make(Authorize::class);
+        $next       = static fn (): Response => new Response('ok');
+
+        /** @var \Illuminate\Http\Response $response */
+        $response = $middleware->handle(Request::create('/posts'), $next, 'posts:create');
+
+        self::assertSame('ok', $response->getContent());
+
+        $this->expectException(LaravelAuthorizationException::class);
+
+        $middleware->handle(Request::create('/posts'), $next, 'posts:delete');
+    }
+
+    /**
+     * With `authorization.gate.enabled` false, booting registers no hook and
+     * defines nothing, so Laravel decides even the package's own abilities.
+     *
+     * @return void
+     */
+    public function testTheSwitchOffRegistersNothing(): void
+    {
+        $this->freshGate();
+
+        config(['authorization.gate.enabled' => false]);
+        $this->app?->forgetInstance(DeclaredAbilities::class);
+        $this->app?->offsetUnset(DeclaredAbilities::class);
+
+        (new AuthorizationServiceProvider($this->app))->boot(); // @phpstan-ignore argument.type
+
+        $this->actAsFullyPermittedPrincipal();
+
+        self::assertFalse($this->app?->bound(DeclaredAbilities::class));
+        self::assertSame([], Gate::abilities());
+        self::assertFalse(Gate::allows('posts:create'));
+
+        Gate::define('posts:delete', static fn (?object $user = null): bool => true);
+
+        self::assertTrue(Gate::forUser(new \stdClass)->allows('posts:delete'));
+        self::assertSame([], $this->decisions());
+    }
+
+    /**
+     * The switch is on unless it is false: the hook is enabled when
+     * `authorization.gate.enabled` is true or absent, and only false turns it
+     * off.
+     *
+     * @return void
+     */
+    public function testTheSwitchIsOnUnlessItIsFalse(): void
+    {
+        $config = config();
+
+        $config->set('authorization.gate', ['enabled' => true]);
+        self::assertTrue(GateRegistrar::isEnabled($config));
+
+        $config->set('authorization.gate', ['enabled' => false]);
+        self::assertFalse(GateRegistrar::isEnabled($config));
+
+        $config->set('authorization.gate', []);
+        self::assertTrue(GateRegistrar::isEnabled($config));
+    }
+
+    /**
+     * A `gate` block without the switch keeps the hook on: registering on a
+     * fresh Gate answers a declared ability through the package, over a define
+     * that would refuse it.
+     *
+     * @return void
+     */
+    public function testAGateBlockWithoutTheSwitchRegistersTheHook(): void
+    {
+        $this->freshGate();
+
+        config(['authorization.gate' => []]);
+        $this->app?->forgetInstance(DeclaredAbilities::class);
+        $this->app?->offsetUnset(DeclaredAbilities::class);
+
+        (new GateRegistrar($this->app))->register(); // @phpstan-ignore argument.type
+
+        $this->actAsFullyPermittedPrincipal();
+
+        Gate::define('posts:create', static fn (?object $user = null): bool => false);
+
+        self::assertTrue($this->app?->bound(DeclaredAbilities::class));
+        self::assertTrue(Gate::allows('posts:create'));
+        self::assertSame(['posts:create'], $this->evaluatedActions());
     }
 
     /**
@@ -697,26 +965,6 @@ final class GateRegistrarTest extends TestCase
 
         self::assertTrue(Gate::allows('posts:create'));
         self::assertSame($user, $this->decisions()[1]->principal);
-    }
-
-    /**
-     * The registrar reads the configured enums itself, so it skips an enum not
-     * backed by strings, whose values name no permission, rather than fail with
-     * a TypeError, and still registers the valid enums.
-     *
-     * @return void
-     */
-    public function testSkipsAnEnumNotBackedByStrings(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.permission_enums', [IntBackedPermissionEnum::class, PermissionEnum::class]);
-        $config->set('authorization.gate.on_conflict', 'overwrite');
-
-        (new GateRegistrar($this->app))->register();
-
-        self::assertFalse(Gate::has((string) IntBackedPermissionEnum::POSTS_CREATE->value));
-        self::assertTrue(Gate::has(PermissionEnum::POSTS_CREATE->value));
     }
 
     /**
@@ -802,6 +1050,29 @@ final class GateRegistrarTest extends TestCase
                 ->map(static fn (array $arguments): DecisionEvaluated => $arguments[0])
                 ->all(),
         );
+    }
+
+    /**
+     * Return the action of every decision evaluated so far, in order.
+     *
+     * @return list<string>
+     */
+    private function evaluatedActions(): array
+    {
+        return \array_map(static fn (DecisionEvaluated $decision): string => $decision->action, $this->decisions());
+    }
+
+    /**
+     * Replace Laravel's Gate with a new one holding no callback, as before any
+     * provider booted, so a test can register before the package does.
+     *
+     * @return void
+     */
+    private function freshGate(): void
+    {
+        $this->app?->forgetInstance(GateContract::class);
+
+        Gate::clearResolvedInstance(GateContract::class);
     }
 
     /**
@@ -892,5 +1163,9 @@ final class GateRegistrarTest extends TestCase
         $this->app->instance(SubjectResolver::class, $resolver); // @phpstan-ignore method.nonObject
         $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
         $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
+
+        // The Gate decides about the user it hands over, as a signed-in user's
+        // would be, since a guest is decided as no subject.
+        Gate::swap(Gate::forUser($user));
     }
 }

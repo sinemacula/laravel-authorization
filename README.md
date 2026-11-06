@@ -18,8 +18,9 @@ Role-based access control and IAM-style policy evaluation for Laravel. Decides w
 permissions granted to any Eloquent model, policy documents that allow or deny actions on resources under conditions,
 and one evaluator that combines them.
 
-Drops into Laravel's existing authorisation machinery: permission enums become Gate abilities, so `Gate::allows()`,
-`@can`, `can:` middleware and `$user->can()` work unchanged. Adds `role`, `permission` and `authorize` route middleware,
+Drops into Laravel's existing authorisation machinery: the package is the authority of Laravel's Gate for every
+permission it declares, so `Gate::allows()`, `@can`, `can:` middleware and `$user->can()` work unchanged and decide
+through it. Adds `role`, `permission` and `authorize` route middleware,
 Blade directives, console commands and test assertions.
 
 ## Core Concept
@@ -95,8 +96,9 @@ must each allow the check, then an explicit allow or a permission held allows it
   come from providers registered by morph type; an application adds a namespace of its own with a `ContextSource`, and
   declares every key a policy may read, with its type, in a key catalogue. A namespace is built only when a statement
   reads it, and at most once a check.
-- **Gate auto-wiring**: every case of a configured permission enum is registered as a Gate ability, with a choice of
-  what happens when an ability of the same name already exists.
+- **The Gate's authority**: one `Gate::before` hook answers every ability the enums, the providers or the package
+  declare, and its allow and its deny both stand over any `Gate::define` callback or Laravel policy class; every other
+  ability falls through to Laravel unchanged. Configuration can turn it off, and `authorization:check` reports it.
 - **A permission catalogue in code**: enums and providers declare each permission with a description, a category and
   its guards, and `authorization:sync` writes them to the database on deploy, reporting stale rows rather than
   deleting them. Booting never touches the database.
@@ -150,7 +152,7 @@ Every check that does not name its subject is about the subject the subject reso
 name as the application, so `Authorization::can()`, the package's middleware and the Blade directives decide about the
 signed-in user with no setup. A request with no user has no subject, and its checks are denied. Laravel's Gate hands its
 user to the same resolver, so `@can`, `can:` and `Gate::forUser($user)` decide about the subject the resolver translates
-that user into.
+that user into, and a guest is denied (see [Laravel's Gate](#laravels-gate)).
 
 An application with principals or tenants binds its own resolver, a class implementing
 `SineMacula\Laravel\Authorization\Contracts\SubjectResolver`, in `config/authorization.php`. The active tenant comes
@@ -160,7 +162,8 @@ only from it: without a tenant, only platform-wide roles and permissions are vis
 'subject_resolver' => App\Authorization\CurrentSubject::class,
 ```
 
-List the enums whose cases should become Gate abilities and permissions, and any permission providers:
+List the enums whose cases are the application's permissions, and any permission providers; the Gate asks the package
+about every permission either declares:
 
 ```php
 'permission_enums' => [
@@ -186,15 +189,15 @@ php artisan migrate --force
 php artisan authorization:sync
 ```
 
-The package writes its warnings (a Gate conflict under the `log` mode, a discarded cache entry, a policy whose document
-cannot be read) to your default log channel. To send them elsewhere, name a channel from `config/logging.php`:
+The package writes its warnings (a discarded cache entry, a policy whose document cannot be read) to your default log
+channel. To send them elsewhere, name a channel from `config/logging.php`:
 
 ```dotenv
 AUTHORIZATION_LOG_CHANNEL=stderr
 ```
 
 `config/authorization.php` documents every other option: models, tables, the default guard, permission providers, the
-Gate conflict mode, the policy store, the policy limits, the context keys and sources, the attribute providers, the
+Gate switch, the policy store, the policy limits, the context keys and sources, the attribute providers, the
 subject resolver, the authentication requirement checker, the session policy source and the scope map, the cache, and
 the role hierarchy and rank.
 
@@ -265,9 +268,8 @@ enum PostPermission: string implements PermissionEnum
 ```
 
 A module that ships its own permissions can declare them with a provider. A provider's permissions are written to the
-catalogue and can be checked through the `Authorization` facade and `hasPermission()`, but they are not registered as
-Gate abilities and do not appear in `effectivePermissions()`. Declare a permission as an enum case when it must work
-with `Gate`, `@can` or the `can:` middleware:
+catalogue, answered through the Gate, `@can` and the `can:` middleware like an enum's, and checked through the
+`Authorization` facade and `hasPermission()`, but they do not appear in `effectivePermissions()`:
 
 ```php
 use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
@@ -899,8 +901,8 @@ from above.
 **The permission.** The package declares `authorization:guardrails:manage` in its own permission catalogue, whatever
 the application configures: guard-agnostic and under the `authorization` category. `authorization:sync` writes it with
 the application's permissions, so it can be granted as any permission can, and a policy naming it validates, even
-before the application declares any permission of its own. It is declared by a provider, so it is no Gate ability; it
-is decided through `check()`, exempt from the guardrails.
+before the application declares any permission of its own. It is decided through `check()`, exempt from the
+guardrails, and the Gate asks the package about it as about any declared permission.
 
 **Lifecycle.** Setting or removing a guardrail dispatches `Guardrail\GuardrailSet` or `Guardrail\GuardrailRemoved` once
 the call commits, only when it changed something, with the policy, its name, the scope and the actor. Both implement
@@ -1698,6 +1700,54 @@ the actor.
 `DecisionEvaluated` and `AuthorizationFailed` implement the marker too, but are dispatched when the decision is made,
 not after a commit, and still carry the principal, the context and the decision as they were evaluated.
 
+### Laravel's Gate
+
+The package is the authority of Laravel's Gate for the abilities it declares. Booting registers one `Gate::before`
+hook, and defines no ability. The hook answers every ability whose exact name a permission enum, a permission provider
+or the package itself (`authorization:guardrails:manage`) declares, with the package's decision: true for an allow,
+false for a deny. Laravel stops at the first before-callback that answers, so both stand: no `Gate::define` callback,
+Laravel policy class or `Gate::after` callback can override either. `Gate::allows()`, `Gate::forUser($user)`,
+`$user->can()`, `@can`, the `can:` middleware, `Gate::authorize()` and a controller's `authorize()` all go through it,
+whatever Laravel policy class the resource's model has:
+
+```php
+Gate::define('posts:update', fn (User $user) => true);  // never consulted: posts:update is declared
+
+Gate::allows('posts:update', $post);                     // the package's decision about $post
+Gate::forUser($other)->allows('posts:update', $post);    // the same, about $other
+```
+
+The Gate's arguments reach the check as the package's own API takes them: a model, a reference, a string or a
+`(type, id)` pair names the resource, and string keys and associative arrays are the caller's values, read under
+`input` (see [The check's context](#the-checks-context)).
+
+Every other ability falls through to Laravel unchanged: the hook answers nothing, so the application's defines and
+policy classes decide it as they always have. A name is matched exactly, never as a pattern, so `posts:*` is the
+package's only when a permission of that name is declared. A permission row that exists only in the database, declared
+by no enum or provider, is not the package's either: the Gate leaves it to Laravel, while `Authorization::can()` still
+decides it.
+
+The Gate's user is translated into the subject through the subject resolver's `forUser()`, so the check is about the
+principal the user acts as. A guest (no user) is decided as no subject, which denies as `subject_unresolved`; it is
+never decided as the current request's subject.
+
+**Precedence.** Laravel runs before-callbacks in the order they were registered, and the first that answers wins. The
+package registers its hook first thing in its boot, so a `Gate::before` the application registers afterwards, in its
+own service provider for example, runs after it and can only answer the abilities the package leaves alone. A
+`Gate::before` registered before the package boots (in a provider listed before it, or in a `register()` method) runs
+first and can pre-empt the package.
+
+**The switch.** To leave the Gate to Laravel entirely, turn the hook off:
+
+```dotenv
+AUTHORIZATION_GATE_ENABLED=false
+```
+
+Then nothing is registered and the Gate knows none of the package's permissions; the package's own API, middleware and
+directives still decide them. Only true or false is accepted: any other value of `authorization.gate.enabled` is
+refused at boot. `authorization:check` reports whether the hook is enabled. The contract behind the hook is in
+[Gate authority](docs/design/gate-authority.md).
+
 ### Middleware and Blade
 
 The package registers three route middleware aliases, each only when the application has not already taken it:
@@ -1784,7 +1834,17 @@ php artisan authorization:list-permissions
 php artisan authorization:why-can user:1 posts:delete posts/42
 php artisan authorization:policy:validate --database
 php artisan authorization:prune --pretend
+php artisan authorization:check
 ```
+
+`authorization:check` reports the configuration the application runs with, one `name: state` line per check, and exits
+with `0`. It reports whether the Gate hook is enabled:
+
+```text
+Gate hook: enabled (the package answers every ability it declares through Gate::before)
+```
+
+It is the start of the configuration report: each setting and seam it comes to report adds a line.
 
 The listing commands are administrative views: they list every role or permission, platform-wide and tenant-owned
 alike, and show each one's owner. `grant` and `revoke` write through the grant service and look the role up within the
@@ -1815,9 +1875,11 @@ Schedule::command('authorization:prune')->daily();
 
 In your tests, `SineMacula\Laravel\Authorization\Testing\Concerns\AuthorizationAssertions` adds `assertCan()`,
 `assertCannot()`, `assertHasRole()` and `assertHasPermission()`, and `actingAsIdentity($user, $tenant)` and
-`actingAsSubject($subject)`, which make every check without a named subject about that subject, in its tenant. When
-the Gate hands over the subject's principal or identity (for example after `actingAs($identity)`), `@can`, `can:` and
-`Gate::allows()` decide about the same subject. A subject built without a `session` meets no authentication
+`actingAsSubject($subject)`, which make every check without a named subject about that subject, in its tenant. They also
+make the subject's identity, or its principal when it has none, the Gate's user, so `Gate::allows()`, `@can` and `can:`
+decide about the same subject as the facade without a user signed in; `Gate::forUser()` with the subject's principal or
+identity does too. The Gate they bind keeps every ability, policy and callback registered before, and lives in the
+test's container, so nothing carries over to the next test. A subject built without a `session` meets no authentication
 requirement, so to test one give it a session and bind a checker of your own:
 
 ```php
@@ -1841,6 +1903,7 @@ The contracts behind the evaluator, for maintainers and reviewers, are in [docs/
 | [Permission catalogue sync](docs/design/permission-catalogue-sync.md)                       | Declaring permissions in code and `authorization:sync`         |
 | [Management services](docs/design/management-services.md)                                   | The services every role, permission and grant write uses       |
 | [Events](docs/design/events.md)                                                             | The marker, the snapshots, the actor and after-commit          |
+| [Gate authority](docs/design/gate-authority.md)                                             | The `Gate::before` hook, what falls through and the switch     |
 
 ## Requirements
 

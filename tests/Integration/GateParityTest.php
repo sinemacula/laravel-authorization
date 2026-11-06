@@ -48,8 +48,8 @@ final class GateParityTest extends TestCase
     private const string MATCHING_RESOURCE = 'arn:post:42';
 
     /**
-     * Register the demo permission enum and re-boot the provider so every enum
-     * case has a matching Gate.
+     * Register the demo permission enum and re-boot the provider so the Gate
+     * asks the package about every enum case.
      *
      * @return void
      */
@@ -61,10 +61,6 @@ final class GateParityTest extends TestCase
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
-        // The default is `throw`; the provider's previous boot has already
-        // defined the Gate under a fresh app, so re-booting with `overwrite`
-        // avoids a spurious conflict in this test.
-        $config->set('authorization.gate.on_conflict', 'overwrite');
 
         (new AuthorizationServiceProvider($this->app))->boot();
     }

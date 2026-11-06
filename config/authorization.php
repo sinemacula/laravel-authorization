@@ -98,9 +98,11 @@ return [
     |
     | String-backed enums implementing `PermissionEnum`; each case's value is
     | the permission name, and an enum backed by integers is refused at boot.
-    | Every case is wired into a Laravel Gate on boot, so a permission defined
-    | here is immediately callable via `Gate::allows(...)`, `$user->can(...)`,
-    | `@can(...)`, and the `can:` route middleware.
+    | The package answers every case through Laravel's Gate (see Gate below), so
+    | a permission defined here is decided by the package wherever it is asked:
+    | `Gate::allows(...)`, `$user->can(...)`, `@can(...)`,
+    | `Gate::authorize(...)`, a controller's `authorize()` and the `can:` route
+    | middleware.
     |
     | The cases are also the permission catalogue: `authorization:sync` writes
     | each one to the database, with the description, category and guards of
@@ -112,16 +114,8 @@ return [
     | permission declared here, by a provider or by the package itself, so a
     | misspelt action is refused rather than stored. The package always declares
     | `authorization:guardrails:manage`, the right to set and remove guardrails,
-    | so the sync writes it and it can be granted; it is no Gate ability.
-    |
-    | **Required for Laravel's Gate surface.** The `Authorization` facade
-    | (`Authorization::can(...)`, `Authorization::for($user)->can(...)`) works
-    | out of the box, but Laravel's Gate never dispatches to an action it has
-    | not been told about — `Gate::allows('posts:edit')` silently returns false
-    | until a `PermissionEnum` case is listed here. Consumers who want the
-    | standard Laravel authorization surface must register at least one enum;
-    | consumers who only use the facade can leave this empty, as long as a
-    | provider declares the permissions their policies name.
+    | so the sync writes it, it can be granted, and the Gate asks the package
+    | about it.
     |
     */
 
@@ -134,17 +128,18 @@ return [
     |
     | Class-strings implementing `PermissionProvider`. Each provider returns
     | `PermissionDefinition` objects, each a permission's name, description,
-    | category and guard, so modular packages can ship their own permission
-    | sets without the host application editing a central enum. The classes
-    | are validated at boot, but a provider is read only by
-    | `authorization:sync`, which writes its permissions alongside the enums',
-    | by the policy validator, which accepts a policy pattern that matches
-    | one of them, and at boot when the session scope map names a scope, to
-    | check its patterns (see Session policies below). A provider's
-    | permissions can be checked through the `Authorization` facade and
-    | `hasPermission()`, but they are not registered as Gate abilities and do
-    | not appear in `effectivePermissions()`; declare a permission as an enum
-    | case when it must work with `Gate`, `@can` or the `can:` middleware.
+    | category and guard, so modular packages can ship their own permission sets
+    | without the host application editing a central enum. The classes are
+    | validated at boot, but a provider is read only by `authorization:sync`,
+    | which writes its permissions alongside the enums', by the policy
+    | validator, which accepts a policy pattern that matches one of them, at
+    | boot when the session scope map names a scope, to check its patterns (see
+    | Session policies below), and, while the Gate hook is enabled, on the first
+    | Gate check of each request or job, to learn which abilities the package
+    | answers (see Gate below). A provider's permissions are answered through
+    | Laravel's Gate like an enum's, and checked through the `Authorization`
+    | facade and `hasPermission()`, but they do not appear in
+    | `effectivePermissions()`.
     |
     */
 
@@ -152,20 +147,33 @@ return [
 
     /*
     |---------------------------------------------------------------------------
-    | Gate conflict policy
+    | Gate
     |---------------------------------------------------------------------------
     |
-    | Decides what happens when auto-wiring a permission that already has a
-    | Gate of the same name. The opinionated enterprise default is `throw` —
-    | a duplicate Gate registration is almost always a bug, and failing boot
-    | is catchable and loud. `log` preserves the existing Gate and emits a
-    | warning (opt-in for consumers with deliberate collision patterns);
-    | `overwrite` silently replaces it.
+    | The package is the authority of Laravel's Gate. Booting registers one
+    | `Gate::before` hook that answers every ability whose exact name a
+    | permission enum, a permission provider or the package itself declares: it
+    | returns the package's allow or deny, and both stand, so no `Gate::define`
+    | callback or Laravel policy class can override either. Any other ability, a
+    | permission row that exists only in the database among them, is left to
+    | Laravel unchanged. The hook learns the declared names on the first Gate
+    | check of each request or job, so every configured provider is read then.
+    | The Gate's user is the subject the subject resolver's `forUser()` returns,
+    | and a guest is denied.
+    |
+    | Laravel runs before-callbacks in the order they are registered and the
+    | first answer wins. The hook is registered first thing in the package's
+    | boot, so an application's `Gate::before` registered after it never
+    | overrides it, while one registered before the package boots still can.
+    |
+    | Set `enabled` to false to register no hook and leave the Gate to Laravel
+    | entirely; `authorization:check` reports the setting. Only true or false
+    | is accepted: any other value is refused at boot.
     |
     */
 
     'gate' => [
-        'on_conflict' => env('AUTHORIZATION_GATE_ON_CONFLICT', 'throw'),
+        'enabled' => env('AUTHORIZATION_GATE_ENABLED', true),
     ],
 
     /*
@@ -174,10 +182,9 @@ return [
     |---------------------------------------------------------------------------
     |
     | The log channel the package writes its warnings and debug lines to: a
-    | Gate conflict under `log`, a discarded corrupt cache entry, a policy
-    | whose document cannot be read. Leave as null to use the application's
-    | default channel. A name that is not a channel in `logging.channels` falls
-    | back to the default channel.
+    | discarded corrupt cache entry, a policy whose document cannot be read.
+    | Leave as null to use the application's default channel. A name that is
+    | not a channel in `logging.channels` falls back to the default channel.
     |
     */
 

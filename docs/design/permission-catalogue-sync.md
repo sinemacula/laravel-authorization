@@ -9,10 +9,10 @@ and how it fails.
 
 ## Invariants
 
-1. **Booting never touches the database.** The service provider registers a Gate for every enum case and validates
-   the configured classes, but never queries or writes a table, so `config:cache`, `route:cache` and `migrate` run on
-   a fresh database with enums and providers configured (AUTHZ-17.4). `authorization:sync` is the only path that
-   writes the catalogue.
+1. **Booting never touches the database.** The service provider registers the Gate hook and validates the configured
+   classes, but never queries or writes a table, nor reads an enum or a provider for the hook, which reads the
+   catalogue on the first Gate check, so `config:cache`, `route:cache` and `migrate` run on a fresh database with
+   enums and providers configured (AUTHZ-17.4). `authorization:sync` is the only path that writes the catalogue.
 
 2. **An enum case's value is the permission name.** `PermissionEnum` extends `\BackedEnum`, so a unit enum cannot
    implement it, and the config validation refuses, at boot, an enum backed by integers. Callers read `->value`.
@@ -43,9 +43,9 @@ and how it fails.
    updates it as any declared permission, so it can be granted, and the policy validator accepts a pattern covering it,
    so a policy naming it validates. The action catalogue the validator asks (`DeclaredActionCatalogue`) leaves it out,
    so it holds the application's declarations alone, and with none a policy needing any other action is still refused
-   because nothing is declared (N50). It is declared by a provider, so it is no Gate ability. An application declaration
-   of the same name, also guard-agnostic, is merged with it as any duplicate is, and refused when its description or
-   category differ.
+   because nothing is declared (N50). The Gate asks the package about it as about every declared permission. An
+   application declaration of the same name, also guard-agnostic, is merged with it as any duplicate is, and refused
+   when its description or category differ.
 
 ## Declaring the Catalogue
 
@@ -88,10 +88,10 @@ final class BillingPermissions implements PermissionProvider
 }
 ```
 
-Providers are resolved through the container, so they can take dependencies. A provider only feeds the catalogue: its
-permissions are not registered as Gate abilities and do not appear in `effectivePermissions()`, which read only the
-enums. A permission declared twice for the same guard is kept once when both declarations agree, and refused when their
-description or category differ.
+Providers are resolved through the container, so they can take dependencies. A provider's permissions are answered
+through the Gate like an enum's, since the Gate hook reads the catalogue (see `gate-authority.md`), but they do not
+appear in `effectivePermissions()`, which reads only the enums. A permission declared twice for the same guard is kept
+once when both declarations agree, and refused when their description or category differ.
 
 ## Sync Command
 

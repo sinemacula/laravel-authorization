@@ -5,6 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Testing\Concerns;
 
 use Illuminate\Container\Container;
+use Illuminate\Contracts\Auth\Access\Gate as GateContract;
+use Illuminate\Support\Facades\Gate;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
@@ -130,7 +132,8 @@ trait AuthorizationAssertions
      * Swap the subject resolver for the duration of the test so that
      * `Authorization::can(...)` (without `for()`), the package's middleware and
      * Blade directives decide about the supplied identity, in the supplied
-     * tenant or in none.
+     * tenant or in none, and make the identity the user Laravel's Gate hands
+     * over, so `Gate::allows()`, `@can` and `can:` decide about it too.
      *
      * Works with both Orchestra Testbench (`$this->app`) and bare Laravel
      * (`app()`).
@@ -147,9 +150,12 @@ trait AuthorizationAssertions
     /**
      * Swap the subject resolver for the duration of the test so that every
      * check without a named subject is about the supplied subject, in its
-     * tenant and application. When Laravel's Gate hands over the subject's
-     * principal or identity, it decides about the subject, as the facade does;
-     * any other user is decided about in that same tenant and application.
+     * tenant and application, and make the subject's identity, or its principal
+     * when it has none, the user Laravel's Gate hands over. `Gate::allows()`,
+     * `@can` and `can:` then decide about the subject, as the facade does.
+     * `Gate::forUser()` with the subject's principal or identity decides about
+     * the subject too; any other user is decided about in that same tenant and
+     * application.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @return void
@@ -210,6 +216,29 @@ trait AuthorizationAssertions
         // Clear the facade's resolved-instance cache so the next static call
         // goes back through the container.
         Authorization::clearResolvedInstance('authorization');
+
+        self::actAsTheGatesUser($container, $subject);
+    }
+
+    /**
+     * Bind, in place of Laravel's Gate, one whose user is the subject's
+     * identity, or its principal when it has none, so the Gate's checks are
+     * about the subject rather than a guest's. The Gate keeps every ability,
+     * policy and callback registered so far, the package's hook among them, and
+     * lives in the test's container, so it goes with the container when the
+     * test ends.
+     *
+     * @param  \Illuminate\Container\Container  $container
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @return void
+     */
+    private static function actAsTheGatesUser(Container $container, Subject $subject): void
+    {
+        $container->instance(GateContract::class, $container->make(GateContract::class)->forUser($subject->identity ?? $subject->subject));
+
+        // Clear the facade's resolved-instance cache so the next static call
+        // reaches the Gate just bound.
+        Gate::clearResolvedInstance(GateContract::class);
     }
 
     /**

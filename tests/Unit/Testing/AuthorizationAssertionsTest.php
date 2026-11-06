@@ -4,6 +4,13 @@ declare(strict_types = 1);
 
 namespace Tests\Unit\Testing;
 
+use Illuminate\Auth\Access\AuthorizationException as LaravelAuthorizationException;
+use Illuminate\Auth\AuthenticationException;
+use Illuminate\Auth\Middleware\Authorize;
+use Illuminate\Http\Request;
+use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use PHPUnit\Framework\AssertionFailedError;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -12,6 +19,7 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
+use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -318,6 +326,107 @@ final class AuthorizationAssertionsTest extends TestCase
     }
 
     /**
+     * After `actingAsIdentity`, with no user signed in, the Gate's user is the
+     * identity: `Gate::allows()`, `@can` and `can:` answer as the facade does,
+     * for an allow and for a deny, and decide about the identity.
+     *
+     * @return void
+     */
+    public function testTheGateAndTheFacadeAgreeAfterActingAsIdentity(): void
+    {
+        $this->bootWithPermissionEnum();
+
+        $user = StubIdentity::create(['id' => '8b1d3f5a-7c9e-4b2d-a4f6-0e2c4a6b8d1f']);
+        $user->givePermission('posts:create');
+
+        $this->actingAsIdentity($user);
+
+        $this->assertGuest();
+        $this->assertTheGateAgreesWithTheFacade('posts:create', true);
+        $this->assertTheGateAgreesWithTheFacade('posts:delete', false);
+        self::assertSame($user, $this->lastPrincipal());
+    }
+
+    /**
+     * After `actingAsSubject`, with no user signed in, the Gate's user is the
+     * subject's identity, which the resolver maps to the subject: the Gate
+     * decides a declared ability about the principal, as the facade does, not
+     * about the identity, and hands the identity to an undeclared one.
+     *
+     * @return void
+     */
+    public function testTheGateAndTheFacadeAgreeAfterActingAsSubject(): void
+    {
+        $this->bootWithPermissionEnum();
+
+        $principal = StubIdentity::create(['id' => '9c2e4a6b-8d0f-4c3e-b5a7-1f3d5b7c9e2a']);
+        $identity  = AuthenticatableIdentity::create(['id' => '0d3f5b7c-9e1a-4d4f-86b8-2a4c6e8d0f3b']);
+
+        $principal->givePermission('posts:create');
+
+        Gate::define('reports:inspect', static fn (object $user): bool => $user === $identity);
+
+        $this->actingAsSubject(new Subject($principal, $identity, null, 'admin', 'web'));
+
+        $this->assertGuest();
+        self::assertTrue(Gate::allows('reports:inspect'));
+        $this->assertTheGateAgreesWithTheFacade('posts:create', true);
+        $this->assertTheGateAgreesWithTheFacade('posts:delete', false);
+        self::assertFalse($identity->hasPermission('posts:create'));
+        self::assertSame($principal, $this->lastPrincipal());
+    }
+
+    /**
+     * A subject without an identity makes its principal the Gate's user, so the
+     * Gate still decides about the subject rather than a guest.
+     *
+     * @return void
+     */
+    public function testASubjectWithoutAnIdentityMakesItsPrincipalTheGatesUser(): void
+    {
+        $this->bootWithPermissionEnum();
+
+        $principal = StubIdentity::create(['id' => '1e4a6c8d-0f2b-4e5a-97c9-3b5d7f9e1a4c']);
+        $principal->givePermission('posts:create');
+
+        Gate::define('reports:inspect', static fn (object $user): bool => $user === $principal);
+
+        $this->actingAsSubject(new Subject($principal));
+
+        self::assertTrue(Gate::allows('reports:inspect'));
+        $this->assertTheGateAgreesWithTheFacade('posts:create', true);
+        self::assertSame($principal, $this->lastPrincipal());
+    }
+
+    /**
+     * Acting again moves the Gate's user to the new subject, and the Gate keeps
+     * the abilities defined before either helper ran.
+     *
+     * @return void
+     */
+    public function testActingAgainMovesTheGatesUserAndKeepsItsAbilities(): void
+    {
+        $this->bootWithPermissionEnum();
+
+        $first  = StubIdentity::create(['id' => '2f5b7d9e-1a3c-4f6b-a8d0-4c6e8a0f2b5d']);
+        $second = StubIdentity::create(['id' => '3a6c8e0f-2b4d-4a7c-b9e1-5d7f9b1c3e6a']);
+
+        Gate::define('reports:export', static fn (object $user): bool => $user === $second);
+
+        $first->givePermission('posts:create');
+
+        $this->actingAsIdentity($first);
+
+        $this->assertTheGateAgreesWithTheFacade('posts:create', true);
+        self::assertFalse(Gate::allows('reports:export'));
+
+        $this->actingAsIdentity($second);
+
+        $this->assertTheGateAgreesWithTheFacade('posts:create', false);
+        self::assertTrue(Gate::allows('reports:export'));
+    }
+
+    /**
      * `assertCan` includes the resource in its failure message when one is
      * supplied.
      *
@@ -437,5 +546,78 @@ final class AuthorizationAssertionsTest extends TestCase
     {
         self::assertTrue((new \ReflectionMethod(self::class, 'assertCan'))->isPublic());
         self::assertTrue((new \ReflectionMethod(self::class, 'assertCannot'))->isPublic());
+    }
+
+    /**
+     * Declare the stub permission enum and boot the provider again, so the Gate
+     * hook answers its cases, and fake the decision event so each decision's
+     * principal is observable.
+     *
+     * @return void
+     */
+    private function bootWithPermissionEnum(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make('config');
+        $config->set('authorization.permission_enums', [PermissionEnum::class]);
+
+        (new AuthorizationServiceProvider($this->app))->boot(); // @phpstan-ignore argument.type
+
+        Permission::create(['name' => 'posts:create', 'guard' => 'web']);
+        Permission::create(['name' => 'posts:delete', 'guard' => 'web']);
+
+        Event::fake([DecisionEvaluated::class]);
+    }
+
+    /**
+     * Return the principal of the last decision evaluated.
+     *
+     * @return object|null
+     */
+    private function lastPrincipal(): ?object
+    {
+        /** @var \SineMacula\Laravel\Authorization\Events\DecisionEvaluated|null $decision */
+        $decision = Event::dispatched(DecisionEvaluated::class)->last()[0] ?? null;
+
+        return $decision?->principal;
+    }
+
+    /**
+     * Assert the facade, `Gate::allows()`, `@can` and the `can:` middleware all
+     * answer the action as expected for the acting subject.
+     *
+     * @param  string  $action
+     * @param  bool  $expected
+     * @return void
+     */
+    private function assertTheGateAgreesWithTheFacade(string $action, bool $expected): void
+    {
+        $verdict = $expected ? 'allowed' : 'refused';
+
+        self::assertSame($expected, Authorization::can($action), "The facade answered wrongly on {$action}.");
+        self::assertSame($expected, Gate::allows($action), "The Gate answered wrongly on {$action}.");
+        self::assertSame($verdict, \trim(Blade::render("@can('{$action}') allowed @else refused @endcan")), "@can answered wrongly on {$action}.");
+        self::assertSame($expected, $this->canMiddlewareAdmits($action), "can: answered wrongly on {$action}.");
+    }
+
+    /**
+     * Determine whether Laravel's `can:` middleware admits a request for the
+     * action: a refusal of either kind admits nothing.
+     *
+     * @param  string  $action
+     * @return bool
+     */
+    private function canMiddlewareAdmits(string $action): bool
+    {
+        /** @var \Illuminate\Auth\Middleware\Authorize $middleware */
+        $middleware = $this->app?->make(Authorize::class);
+
+        try {
+            $middleware->handle(Request::create('/posts'), static fn (): Response => new Response('ok'), $action);
+        } catch (AuthenticationException|LaravelAuthorizationException) {
+            return false;
+        }
+
+        return true;
     }
 }

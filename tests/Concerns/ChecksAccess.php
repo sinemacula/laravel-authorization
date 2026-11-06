@@ -6,9 +6,9 @@ namespace Tests\Concerns;
 
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Str;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
-use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
@@ -40,8 +40,8 @@ trait ChecksAccess
     use AuthorizationAssertions;
 
     /**
-     * Make the given model the subject of every check, or make no subject the
-     * request's.
+     * Make the given model the subject of every check and the Gate's user, or
+     * make no subject the request's and a guest the Gate's user.
      *
      * @param  object|null  $subject
      * @return void
@@ -54,6 +54,7 @@ trait ChecksAccess
             $this->app?->forgetInstance(AuthorizationManager::class);
 
             Authorization::clearResolvedInstance('authorization');
+            Gate::swap(Gate::forUser(null));
 
             return;
         }
@@ -167,6 +168,10 @@ trait ChecksAccess
      * @param  \Illuminate\Http\Request  $request
      * @param  string  ...$arguments
      * @return \Illuminate\Http\Response
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     protected function runMiddleware(string $middleware, Request $request, string ...$arguments): Response
     {
@@ -188,6 +193,9 @@ trait ChecksAccess
      * @param  \Illuminate\Http\Request  $request
      * @param  string  ...$arguments
      * @return bool
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     protected function admits(string $middleware, Request $request, string ...$arguments): bool
     {
@@ -201,23 +209,15 @@ trait ChecksAccess
     }
 
     /**
-     * Register a Gate for every case of the stub permission enum, as an
-     * application configuring it would.
+     * Declare the stub permission enum, as an application configuring it would.
+     * The Gate hook reads the declared catalogue on its first check, so the
+     * Gate then asks the package about every case.
      *
      * @return void
      */
-    protected function registerPermissionGates(): void
+    protected function declarePermissionEnum(): void
     {
-        config([
-            'authorization.permission_enums' => [PermissionEnum::class],
-            'authorization.gate.on_conflict' => 'overwrite',
-        ]);
-
-        if ($this->app === null) {
-            return;
-        }
-
-        (new AuthorizationServiceProvider($this->app))->boot();
+        config(['authorization.permission_enums' => [PermissionEnum::class]]);
     }
 
     /**

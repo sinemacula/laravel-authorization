@@ -21,7 +21,8 @@ and `forUser()` scopes, and how the Gate, middleware, Blade directives and tenan
 
 4. **The Gate's user is translated, not trusted.** Laravel's Gate hands its user to `forUser()`, and the check decides
    about the subject the resolver returns for it (AUTHZ-2.1). In an application without principals that is the user
-   itself; one with principals returns the principal the user acts as.
+   itself; one with principals returns the principal the user acts as. A guest (no Gate user) is no subject, so its
+   checks deny; it is never decided as the request's own subject.
 
 5. **Nothing outlives the request or job.** The package's default resolver and the tenant it resolves are bound with
    `scoped()`, so the queue worker and Octane build them afresh for each job or request (AUTHZ-12.5). A resolver the
@@ -103,8 +104,8 @@ its identity. A subject named this way never has a session, whichever model it i
 met for it. With no subject resolved, the clone has no tenant or application.
 
 `Authorization::forUser($user)` returns a cloned manager deciding about the subject the resolver translates the user
-into. The Gate callback uses it for the user Laravel hands over; with no Gate user, it decides about the request's own
-subject, or denies when there is none.
+into. The Gate hook uses it for the user Laravel hands over. `forUser(null)` decides about a guest: no subject, so
+every check of the clone denies as `subject_unresolved`, whoever the request is about.
 
 ## Static Resolution Path
 
@@ -138,7 +139,7 @@ rather than asking the resolver again without end.
 - `Subject` -- the resolved subject, identity, tenant, application, guard and session.
 - `Resolvers\AuthGuardSubjectResolver` -- the shipped default.
 - `AuthorizationManager::currentSubject()`, `for()` and `forUser()` -- resolution and the scoped clones.
-- `Registrars\GateRegistrar` -- the Gate callback translating its user.
+- `Registrars\GateRegistrar` -- the Gate hook translating its user.
 - `Support\ResolvedTenant` and `Scopes\TenantScope` -- the tenant held per request or job.
 - `AbstractAuthorizationMiddleware` and `BladeHelpers::currentSubject()` -- the static resolution paths.
 
@@ -147,8 +148,9 @@ rather than asking the resolver again without end.
 - `AuthGuardSubjectResolverTest` -- the signed-in user as subject, identity, guard and application; no user, no
   subject; the guard given at construction; a user loaded with its roles from the session.
 - `SubjectTest` -- the value and `withSubject()`.
-- `AuthorizationManagerTest` (Unit) -- `for()` keeps the tenant and application; `forUser()` uses the translation.
-- `GateRegistrarTest` -- the Gate's user translated, `Gate::forUser($other)`, and no Gate user.
+- `AuthorizationManagerTest` (Unit) -- `for()` keeps the tenant and application; `forUser()` uses the translation,
+  and `forUser(null)` decides about no subject.
+- `GateRegistrarTest` -- the Gate's user translated, `Gate::forUser($other)`, and a guest denied.
 - `TenantScopeTest` and `ResolvedTenantTest` -- the subject's tenant scopes the rows; no subject or tenant means
   platform rows only.
 - `AuthorizationServiceProviderTest` -- the resolver and tenant rebuilt per job; an application's own binding kept.

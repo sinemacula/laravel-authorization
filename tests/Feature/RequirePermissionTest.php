@@ -53,6 +53,10 @@ final class RequirePermissionTest extends TestCase
      * A held permission admits the request.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testHeldPermissionIsAllowed(): void
     {
@@ -65,6 +69,10 @@ final class RequirePermissionTest extends TestCase
      * A permission held through a role admits the request.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testPermissionHeldThroughARoleIsAllowed(): void
     {
@@ -103,6 +111,10 @@ final class RequirePermissionTest extends TestCase
      * A policy allow admits the request without the permission being held.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testPolicyAllowWithoutAHeldPermissionIsAllowed(): void
     {
@@ -133,6 +145,10 @@ final class RequirePermissionTest extends TestCase
      * policy the resolver gives every subject allows it one action.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testAnySubjectTheManagerDecidesAboutIsAccepted(): void
     {
@@ -149,6 +165,10 @@ final class RequirePermissionTest extends TestCase
      *
      * @param  string  $list
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     #[TestWith(['posts:delete|posts:update'])]
     #[TestWith(['posts:update|posts:delete'])]
@@ -164,6 +184,10 @@ final class RequirePermissionTest extends TestCase
      * The first allowed action admits the request without deciding the rest.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testTheFirstAllowedActionEndsTheChecks(): void
     {
@@ -205,6 +229,10 @@ final class RequirePermissionTest extends TestCase
      *
      * @param  string  $list
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     #[TestWith([''])]
     #[TestWith([' | '])]
@@ -224,6 +252,10 @@ final class RequirePermissionTest extends TestCase
      * changes the decision.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testAGuardArgumentIsRefused(): void
     {
@@ -240,10 +272,13 @@ final class RequirePermissionTest extends TestCase
      * explicit deny over one, a policy allow without one, and no grant.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testTheMiddlewareAndTheGateAgree(): void
     {
-        $this->registerPermissionGates();
+        $this->declarePermissionEnum();
 
         $held   = self::identityHolding(permissions: ['posts:create']);
         $denied = self::identityHolding(permissions: ['posts:delete']);
@@ -314,6 +349,10 @@ final class RequirePermissionTest extends TestCase
      * A request without a subject is unauthenticated.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testARequestWithoutASubjectIsUnauthenticated(): void
     {
@@ -329,6 +368,10 @@ final class RequirePermissionTest extends TestCase
      *
      * @param  string  ...$arguments
      * @return \Illuminate\Http\Response
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     private function handle(string ...$arguments): Response
     {

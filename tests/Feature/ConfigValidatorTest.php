@@ -42,8 +42,8 @@ use Tests\TestCase;
 /**
  * Feature tests for the boot-time validation of `authorization.models.*`, the
  * connection, the backing of `authorization.permission_enums`, the subject
- * resolver, the tenant tree, the resource tenant resolver, the policy limits
- * and the context.
+ * resolver, the tenant tree, the resource tenant resolver, the policy limits,
+ * the context and the Gate switch.
  *
  * Each model entry must name an existing class that is the shipped model or a
  * subclass of it, and each permission enum must be backed by strings; anything
@@ -852,6 +852,90 @@ final class ConfigValidatorTest extends TestCase
             'authorization.subject_resolver',
             'a subject resolver class is required; set it to \\' . AuthGuardSubjectResolver::class . ' to decide about the user Laravel authenticated.',
         );
+    }
+
+    /**
+     * The Gate switch passes when it is true or false, and when the `gate`
+     * block or its `enabled` key is left out, which keeps the hook on.
+     *
+     * @return void
+     */
+    public function testTheGateSwitchAcceptsOnlyABoolean(): void
+    {
+        $this->validateWithGate(['enabled' => true]);
+        $this->validateWithGate(['enabled' => false]);
+        $this->validateWithGate([]);
+
+        $config = $this->authorizationConfig();
+        unset($config['gate']);
+
+        ConfigValidator::validate($config, $this->app);
+
+        $this->expectNotToPerformAssertions();
+    }
+
+    /**
+     * Gate switches that are not strictly true or false, with the description
+     * each is refused with.
+     *
+     * @return iterable<string, array{mixed, string}>
+     */
+    public static function invalidGateSwitchProvider(): iterable
+    {
+        yield 'null' => [null, '\'null\' (null)'];
+        yield 'zero' => [0, '0 (int)'];
+        yield 'one' => [1, '1 (int)'];
+        yield 'string false' => ['false', '\'false\' (string)'];
+        yield 'string off' => ['off', '\'off\' (string)'];
+        yield 'empty string' => ['', '\'\' (string)'];
+        yield 'array' => [[true], '\'array\' (array)'];
+    }
+
+    /**
+     * Any Gate switch that is not strictly true or false is refused rather than
+     * read as either, and fails the provider's boot.
+     *
+     * @param  mixed  $enabled
+     * @param  string  $described
+     * @return void
+     */
+    #[DataProvider('invalidGateSwitchProvider')]
+    public function testAGateSwitchThatIsNotABooleanIsRejected(mixed $enabled, string $described): void
+    {
+        $reason = "expected true or false, got {$described}.";
+
+        $this->assertRejected(fn () => $this->validateWithGate(['enabled' => $enabled]), 'authorization.gate.enabled', $reason);
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config->set('authorization.gate.enabled', $enabled);
+
+        $this->assertRejected(fn () => (new AuthorizationServiceProvider($this->app))->boot(), 'authorization.gate.enabled', $reason);
+    }
+
+    /**
+     * A `gate` block that is not an array is refused.
+     *
+     * @return void
+     */
+    public function testANonArrayGateBlockIsRejected(): void
+    {
+        $this->assertRejected(fn () => $this->validateWithGate(false), 'authorization.gate', 'expected an array, got false (bool).');
+        $this->assertRejected(fn () => $this->validateWithGate(null), 'authorization.gate', 'expected an array, got \'null\' (null).');
+    }
+
+    /**
+     * Run the validator over the package config with the given `gate` block.
+     *
+     * @param  mixed  $gate
+     * @return void
+     */
+    private function validateWithGate(mixed $gate): void
+    {
+        $config         = $this->authorizationConfig();
+        $config['gate'] = $gate;
+
+        ConfigValidator::validate($config, $this->app);
     }
 
     /**

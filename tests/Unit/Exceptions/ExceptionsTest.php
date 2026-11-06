@@ -8,7 +8,6 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Database\MigrationCollisionException;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
-use SineMacula\Laravel\Authorization\Exceptions\GateConflictException;
 
 /**
  * Unit tests for the package's typed exceptions.
@@ -20,7 +19,6 @@ use SineMacula\Laravel\Authorization\Exceptions\GateConflictException;
  *
  * @SuppressWarnings("php:S1192")
  */
-#[CoversClass(GateConflictException::class)]
 #[CoversClass(InvalidPolicyDocumentException::class)]
 #[CoversClass(MigrationCollisionException::class)]
 final class ExceptionsTest extends TestCase
@@ -36,18 +34,6 @@ final class ExceptionsTest extends TestCase
 
         self::assertSame(400, $exception->getCode());
         self::assertSame('example', $exception->getPolicyName());
-    }
-
-    /**
-     * GateConflictException exposes the permission name.
-     *
-     * @return void
-     */
-    public function testGateConflictException(): void
-    {
-        $exception = new GateConflictException('posts:create');
-
-        self::assertSame('posts:create', $exception->getPermission());
     }
 
     /**

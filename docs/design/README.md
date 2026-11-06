@@ -43,6 +43,9 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
   `like`, `gt`, `gte`, `lt`, `lte`, `before`, `after`, `between`, `bool`, `null`, `ip_in`, `ip_not_in`, `any_value_in`,
   `all_values_in`, and the `_if_exists` suffix), the `authentication_requirement` operator, and the assurance keys no
   condition may test.
+- `gate-authority.md`: the one `Gate::before` hook through which the package answers the abilities it declares, what
+  falls through to Laravel, the registration order that decides precedence, the guest, and the switch that turns it
+  off.
 - `permission-catalogue-sync.md`: declaring permissions in enums and providers, why booting never touches the
   database, and what `authorization:sync` adds, updates, reports as stale or protected, and prunes.
 - `management-services.md`: the services every role, permission, policy and grant write goes through, their

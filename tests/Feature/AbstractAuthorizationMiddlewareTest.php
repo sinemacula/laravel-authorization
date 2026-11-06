@@ -56,6 +56,10 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
      * @param  class-string<\SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware>  $middleware
      * @param  string  $names
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     #[TestWith([RequireRole::class, 'admin'])]
     #[TestWith([RequirePermission::class, 'posts:create'])]
@@ -75,6 +79,10 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
      * no resolver of the application's own, and the request is passed on.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testTheSignedInUserPassesWhatItHolds(): void
     {
@@ -108,6 +116,10 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
      * Two arguments are taken; a third is refused, even without a subject.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testAThirdArgumentIsRefused(): void
     {
@@ -129,6 +141,10 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
      *
      * @param  class-string<\SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware>  $middleware
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     #[TestWith([RequireRole::class])]
     #[TestWith([RequirePermission::class])]
@@ -148,6 +164,9 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
      * none is, the last one is authorised, firing `AuthorizationFailed` once.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testAnyAllowedActionAdmitsAndTheLastIsAuthorized(): void
     {

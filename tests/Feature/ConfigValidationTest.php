@@ -9,7 +9,6 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
-use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
@@ -70,27 +69,6 @@ final class ConfigValidationTest extends TestCase
         ConfigValidator::validate((array) $config->get('authorization'), $this->app);
 
         self::assertTrue(true);
-    }
-
-    /**
-     * `gate.on_conflict` outside the three sentinels is rejected with a pointer
-     * to the offending key.
-     *
-     * @return void
-     */
-    public function testInvalidGateOnConflictIsRejected(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.gate.on_conflict', 'explode');
-
-        try {
-            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
-            self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
-        } catch (InvalidAuthorizationConfigException $exception) {
-            self::assertSame('authorization.gate.on_conflict', $exception->getConfigKey());
-            self::assertStringContainsString('\'explode\'', $exception->getReason());
-        }
     }
 
     /**
@@ -272,49 +250,6 @@ final class ConfigValidationTest extends TestCase
         ConfigValidator::validate((array) $config->get('authorization'), $this->app);
     }
 
-    /**
-     * Passing an already-coerced `GateConflictMode` value skips the string path
-     * and passes validation.
-     *
-     * @return void
-     */
-    public function testGateOnConflictAcceptsEnumInstance(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.gate.on_conflict', GateConflictMode::THROW);
-
-        ConfigValidator::validate((array) $config->get('authorization'), $this->app);
-
-        self::assertTrue(true);
-    }
-
-    /**
-     * The validator lists every enum-backed sentinel in its rejection message —
-     * the operator gets the accepted set verbatim without having to find the
-     * enum source.
-     *
-     * @return void
-     */
-    public function testGateOnConflictRejectionListsEveryEnumSentinel(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.gate.on_conflict', 'Log');
-
-        try {
-            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
-            self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
-        } catch (InvalidAuthorizationConfigException $exception) {
-            $reason = $exception->getReason();
-
-            self::assertStringContainsString('\'log\'', $reason);
-            self::assertStringContainsString('\'throw\'', $reason);
-            self::assertStringContainsString('\'overwrite\'', $reason);
-            self::assertStringContainsString('\'Log\' (string)', $reason);
-        }
-    }
-
     // ------------------------------------------------------------------
     // Mutation-kill: exception message shapes (Concat / ConcatOperandRemoval)
     // ------------------------------------------------------------------
@@ -364,34 +299,6 @@ final class ConfigValidationTest extends TestCase
             self::assertStringContainsString(\stdClass::class, $reason);
             self::assertStringContainsString('does not implement', $reason);
             self::assertStringContainsString('PermissionProvider', $reason);
-        }
-    }
-
-    /**
-     * `gate.on_conflict` rejection message includes the value description and
-     * the accepted sentinel list. Kills Concat and ConcatOperandRemoval mutants
-     * on line 139.
-     *
-     * @return void
-     */
-    public function testGateOnConflictRejectionMessageShape(): void
-    {
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.gate.on_conflict', 42);
-
-        try {
-            ConfigValidator::validate((array) $config->get('authorization'), $this->app);
-            self::fail('Expected InvalidAuthorizationConfigException was not thrown.');
-        } catch (InvalidAuthorizationConfigException $exception) {
-            $reason = $exception->getReason();
-            // Must contain "expected one of [...]"
-            self::assertStringContainsString('expected one of', $reason);
-            // Must contain the offending value description
-            self::assertStringContainsString('42', $reason);
-            self::assertStringContainsString('int', $reason);
-            // Must contain at least one sentinel
-            self::assertStringContainsString('\'log\'', $reason);
         }
     }
 

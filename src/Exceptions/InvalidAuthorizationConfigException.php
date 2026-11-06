@@ -6,10 +6,10 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
 
 /**
  * Thrown at boot time when the shipped `authorization` config is malformed — a
- * misspelled class name in `permission_enums`, a `gate.on_conflict` value
- * outside the three accepted sentinels, a `subject_resolver` that does not
- * implement the contract, a `cache.store` that the Laravel cache manager cannot
- * resolve, and so on.
+ * misspelled class name in `permission_enums`, a `gate.enabled` switch that is
+ * not strictly true or false, a `subject_resolver` that does not implement the
+ * contract, a `cache.store` that the Laravel cache manager cannot resolve, and
+ * so on.
  *
  * The exception carries the offending config key and the concrete reason so the
  * developer sees the exact fix path instead of a deep stack trace from the
@@ -34,10 +34,7 @@ final class InvalidAuthorizationConfigException extends \RuntimeException
         /** Human-readable explanation of why the value failed validation. */
         private readonly string $reason,
     ) {
-        parent::__construct(
-            "Invalid authorization config at '{$configKey}': {$reason}",
-            500,
-        );
+        parent::__construct(\sprintf('Invalid authorization config at \'%s\': %s', $configKey, $reason), 500);
     }
 
     /**

@@ -50,8 +50,8 @@ use Tests\TestCase;
 final class AuthorizableResourceTest extends TestCase
 {
     /**
-     * Boot the provider with the demo permission enum so the Gate is wired for
-     * each test.
+     * Boot the provider with the demo permission enum so the Gate asks the
+     * package about its cases in each test.
      *
      * @return void
      */
@@ -271,6 +271,10 @@ final class AuthorizableResourceTest extends TestCase
         $this->app->instance(SubjectResolver::class, $resolver); // @phpstan-ignore method.nonObject
         $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
         $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
+
+        // The Gate decides about the user it hands over, as a signed-in user's
+        // would be, since a guest is decided as no subject.
+        Gate::swap(Gate::forUser($user));
     }
 
     /**

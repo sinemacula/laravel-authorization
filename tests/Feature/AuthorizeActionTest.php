@@ -293,7 +293,7 @@ final class AuthorizeActionTest extends TestCase
      */
     public function testTheMiddlewareRunsAfterBindingWhereverItIsDeclared(): void
     {
-        $this->registerPermissionGates();
+        $this->declarePermissionEnum();
 
         $post     = StubTenant::create(['id' => 'post-1']);
         $identity = self::identityHolding(permissions: [self::ACTION]);
@@ -433,7 +433,7 @@ final class AuthorizeActionTest extends TestCase
      */
     public function testTheMiddlewareAndTheGateAgree(): void
     {
-        $this->registerPermissionGates();
+        $this->declarePermissionEnum();
 
         $post      = StubTenant::create(['id' => 'post-1']);
         $held      = self::identityHolding(permissions: [self::ACTION]);
