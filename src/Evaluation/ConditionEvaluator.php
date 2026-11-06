@@ -193,7 +193,9 @@ final class ConditionEvaluator
     }
 
     /**
-     * Evaluate `eq` and `neq`, which compare one scalar strictly.
+     * Evaluate `eq` and `neq`, which compare one scalar strictly. A value that
+     * is neither a scalar nor null is undecidable, so `neq` never holds for a
+     * list or a map.
      *
      * @param  string  $operator
      * @param  mixed  $operand
@@ -204,6 +206,10 @@ final class ConditionEvaluator
     {
         if (!\is_scalar($operand)) {
             return MatchResult::invalid(self::invalidOperand($operator));
+        }
+
+        if (!self::isComparable($actual)) {
+            return MatchResult::undecidable("operator '{$operator}' needs a scalar");
         }
 
         return MatchResult::fromBool(($actual === $operand) === ($operator === 'eq'));
@@ -224,7 +230,23 @@ final class ConditionEvaluator
             return MatchResult::invalid(self::invalidOperand($operator));
         }
 
+        if (!self::isComparable($actual)) {
+            return MatchResult::undecidable("operator '{$operator}' needs a scalar");
+        }
+
         return MatchResult::fromBool(\in_array($actual, $operand, true) === ($operator === 'in'));
+    }
+
+    /**
+     * Determine whether a context value can be compared by the equality and
+     * membership operators: a scalar, or null, which equals no operand.
+     *
+     * @param  mixed  $actual
+     * @return bool
+     */
+    private static function isComparable(mixed $actual): bool
+    {
+        return $actual === null || \is_scalar($actual);
     }
 
     /**
