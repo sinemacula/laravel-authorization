@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Context;
 use Illuminate\Contracts\Container\Container;
 use Illuminate\Http\Request;
 use SineMacula\Laravel\Authorization\Contracts\RequestContext;
+use SineMacula\Laravel\Authorization\Contracts\ScopeInvariant;
 
 /**
  * The default request context: the container's current request, once routed
@@ -22,10 +23,13 @@ use SineMacula\Laravel\Authorization\Contracts\RequestContext;
  * The request is read from the container on every check, never kept, so a
  * long-lived worker reads the request it is serving.
  *
+ * It is marked `ScopeInvariant`: it reads the request alone, never the record a
+ * check is about, so `whereAuthorized()` reads it once for a query.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class RoutedRequestContext implements RequestContext
+final readonly class RoutedRequestContext implements RequestContext, ScopeInvariant
 {
     /**
      * Create a new routed request context.

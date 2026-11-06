@@ -9,6 +9,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\ContextSource;
 use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
 use SineMacula\Laravel\Authorization\Contracts\RequestContext;
+use SineMacula\Laravel\Authorization\Contracts\ScopeInvariant;
 use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
 use SineMacula\Laravel\Authorization\Evaluation\PrincipalSelectors;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementCheck;
@@ -50,6 +51,9 @@ final readonly class CheckContextFactory
     /** @var array<string, \Closure(): array<array-key, mixed>> The builder of each namespace a source supplies. */
     private array $builders;
 
+    /** @var array<string, bool> Whether the source of each namespace a source supplies is marked `ScopeInvariant`. */
+    private array $invariant;
+
     /** @var \SineMacula\Laravel\Authorization\Context\AttributeNamespaces Builds each check's `subject` and `resource` namespaces. */
     private AttributeNamespaces $attributes;
 
@@ -76,20 +80,23 @@ final readonly class CheckContextFactory
         ?AttributeProviders $attributes = null,
         ?AuthenticationRequirementChecker $requirements = null,
     ) {
-        $builders = self::authenticationBuilders($authentication);
+        $builders  = self::authenticationBuilders($authentication);
+        $invariant = \array_fill_keys(\array_keys($builders), $authentication instanceof ScopeInvariant);
 
         foreach ($sources as $source) {
             $namespace = $source->namespace();
 
             self::assertClaimable($namespace, $builders, $source::class);
 
-            $builders[$namespace] = static fn (): array => self::namespaced($namespace, $source->values());
+            $builders[$namespace]  = static fn (): array => self::namespaced($namespace, $source->values());
+            $invariant[$namespace] = $source instanceof ScopeInvariant;
         }
 
         $builders['request']     = static fn (): array => self::namespaced('request', $request->values());
         $builders['environment'] = static fn (): array => self::namespaced('environment', $environment->values());
 
         $this->builders     = $builders;
+        $this->invariant    = [...$invariant, 'request' => $request instanceof ScopeInvariant, 'environment' => $environment instanceof ScopeInvariant];
         $this->attributes   = new AttributeNamespaces($attributes);
         $this->requirements = $requirements;
     }
@@ -113,6 +120,40 @@ final readonly class CheckContextFactory
             new RequirementCheck($this->requirements, $subject),
             $subject === null ? null : new PrincipalSelectors($subject),
         );
+    }
+
+    /**
+     * Determine whether a namespace of a check about the subject depends on the
+     * request alone, so `whereAuthorized()` may read it once for a query rather
+     * than once per row (AUTHZ-10.1): `input`, a namespace whose source is
+     * marked `ScopeInvariant`, the subject's when its attribute provider is
+     * absent or marked, and one no source supplies, which is always missing.
+     * The resource's never is.
+     *
+     * @param  string  $namespace
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @return bool
+     */
+    public function isScopeInvariant(string $namespace, Subject $subject): bool
+    {
+        return match ($namespace) {
+            self::INPUT                  => true,
+            AttributeProviders::RESOURCE => false,
+            AttributeProviders::SUBJECT  => $this->attributes->isSubjectScopeInvariant($subject),
+            default                      => $this->invariant[$namespace] ?? true,
+        };
+    }
+
+    /**
+     * Determine whether the requirement checker judges a requirement from the
+     * request alone: there is none, so every requirement is unmet, or it is
+     * marked `ScopeInvariant`.
+     *
+     * @return bool
+     */
+    public function isRequirementCheckScopeInvariant(): bool
+    {
+        return $this->requirements === null || $this->requirements instanceof ScopeInvariant;
     }
 
     /**

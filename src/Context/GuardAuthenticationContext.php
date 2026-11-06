@@ -9,6 +9,7 @@ use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
+use SineMacula\Laravel\Authorization\Contracts\ScopeInvariant;
 
 /**
  * The default authentication context: what Laravel knows (AUTHZ-13.2).
@@ -23,10 +24,13 @@ use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
  * The guard read is Laravel's default guard (`auth.defaults.guard`), the one
  * the default subject resolver reads too, unless one is given at construction.
  *
+ * It is marked `ScopeInvariant`: it reads the request alone, never the record a
+ * check is about, so `whereAuthorized()` reads it once for a query.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class GuardAuthenticationContext implements AuthenticationContext
+final readonly class GuardAuthenticationContext implements AuthenticationContext, ScopeInvariant
 {
     /** @var string The namespace the context supplies. */
     public const string NAMESPACE = 'authentication';

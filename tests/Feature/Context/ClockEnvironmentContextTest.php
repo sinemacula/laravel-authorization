@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\Date;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Context\ClockEnvironmentContext;
 use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
+use SineMacula\Laravel\Authorization\Contracts\ScopeInvariant;
 use Tests\TestCase;
 
 /**
@@ -55,5 +56,16 @@ final class ClockEnvironmentContextTest extends TestCase
 
         $this->travel(90)->seconds();
         self::assertSame(['time' => '2026-06-01T00:01:30Z'], $context->values());
+    }
+
+    /**
+     * It reads the request alone, so it is marked `ScopeInvariant` and a query
+     * scope reads it once for a query.
+     *
+     * @return void
+     */
+    public function testItIsMarkedScopeInvariant(): void
+    {
+        self::assertContains(ScopeInvariant::class, \class_implements(ClockEnvironmentContext::class));
     }
 }

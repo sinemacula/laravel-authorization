@@ -17,6 +17,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\RecordingResourceAttributes;
 use Tests\Feature\Stubs\RecordingSubjectAttributes;
+use Tests\Fixtures\QueryScoping\InvariantSubjectAttributes;
 
 /**
  * Unit tests for `AttributeNamespaces`, which builds the `subject` and
@@ -190,6 +191,26 @@ final class AttributeNamespacesTest extends TestCase
 
         self::assertSame(['subject', 'resource'], \array_keys($builders));
         self::assertSame([], $posts->calls);
+    }
+
+    /**
+     * The subject's namespace depends on the request alone when its type has no
+     * attribute provider, or one marked `ScopeInvariant`, and not when its
+     * provider is unmarked.
+     *
+     * @return void
+     */
+    public function testTheSubjectIsScopeInvariantWhenItsProviderIsMarkedOrAbsent(): void
+    {
+        $subject = new Subject(new \stdClass);
+
+        self::assertTrue((new AttributeNamespaces)->isSubjectScopeInvariant($subject));
+        self::assertTrue((new AttributeNamespaces(new AttributeProviders(new Container)))->isSubjectScopeInvariant($subject));
+        $marked   = new AttributeProviders(new Container, [], [\stdClass::class => InvariantSubjectAttributes::class]);
+        $unmarked = new AttributeProviders(new Container, [], [\stdClass::class => RecordingSubjectAttributes::class]);
+
+        self::assertTrue((new AttributeNamespaces($marked))->isSubjectScopeInvariant($subject));
+        self::assertFalse((new AttributeNamespaces($unmarked))->isSubjectScopeInvariant($subject));
     }
 
     /**

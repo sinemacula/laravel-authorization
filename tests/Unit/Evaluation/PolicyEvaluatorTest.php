@@ -2240,6 +2240,30 @@ final class PolicyEvaluatorTest extends TestCase
     }
 
     /**
+     * An allow applies to the subject as its source admits: one of a policy
+     * attached to a resource only when its principals name the subject, and one
+     * attached any other way only when it names none.
+     *
+     * @return void
+     */
+    public function testAnAllowAppliesToTheSubjectsItsSourceAdmits(): void
+    {
+        $user    = new \stdClass;
+        $context = new CheckContext([], [], null, new PrincipalSelectors(new Subject(new Reference('user', 'u1'), $user)));
+        $named   = new Statement(PolicyEffect::ALLOW, ['posts:view'], principals: ['user:u1']);
+        $other   = new Statement(PolicyEffect::ALLOW, ['posts:view'], principals: ['user:u2']);
+        $plain   = new Statement(PolicyEffect::ALLOW, ['posts:view']);
+        $shared  = new StatementReference('shared', 0, null, null, 'posts:1');
+        $held    = new StatementReference('held', 0);
+
+        self::assertTrue(PolicyEvaluator::isForSubject($shared, $named, $context));
+        self::assertFalse(PolicyEvaluator::isForSubject($shared, $other, $context));
+        self::assertFalse(PolicyEvaluator::isForSubject($shared, $plain, $context));
+        self::assertTrue(PolicyEvaluator::isForSubject($held, $plain, $context));
+        self::assertFalse(PolicyEvaluator::isForSubject($held, $named, $context));
+    }
+
+    /**
      * Build a check context with `request`, `tenant` and `environment`
      * namespaces, each built on demand, counting each build.
      *

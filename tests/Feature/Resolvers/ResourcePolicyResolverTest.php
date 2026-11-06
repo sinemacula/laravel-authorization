@@ -7,6 +7,7 @@ namespace Tests\Feature\Resolvers;
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\Repository;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
@@ -385,6 +386,46 @@ final class ResourcePolicyResolverTest extends TestCase
 
         self::assertCount(1, $logger->records);
         self::assertSame($policy->id, $logger->records[0]['context']['policy_id'] ?? null);
+    }
+
+    /**
+     * Every policy attached to a record of the type is read, once, in any
+     * tenant and for any application, and none attached to the type alone or to
+     * another type's records; a type longer than the table stores has none, and
+     * a document that cannot be read throws.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEveryPolicyAttachedToARecordOfTheTypeIsRead(): void
+    {
+        $service = self::service();
+        $tenant  = new Reference('teams', '5');
+        $first   = self::sharing('first');
+        $second  = self::sharing('second');
+
+        $service->attach($first, ['posts', '1']);
+        $service->attach($first, ['posts', '2'], $tenant, true, 'admin');
+        $service->attach($second, ['posts', '3'], $tenant);
+        $service->attach(self::sharing('type'), 'posts');
+        $service->attach(self::sharing('other'), ['comments', '1']);
+
+        $names = \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, (new ResourcePolicyResolver)->recordPolicies('posts'));
+
+        \sort($names);
+
+        self::assertSame(['first', 'second'], $names);
+        self::assertSame([], (new ResourcePolicyResolver)->recordPolicies(\str_repeat('p', 192)));
+
+        $id = (string) Str::uuid();
+
+        DB::table('policies')->insert(['id' => $id, 'name' => 'unreadable', 'document' => '{"statements":[{"effect":"allow"}]}', 'created_at' => now(), 'updated_at' => now()]);
+        DB::table('resource_policies')->insert(['policy_id' => $id, 'resource_type' => 'posts', 'resource_id' => '9']);
+
+        $this->expectException(InvalidPolicyDocumentException::class);
+
+        (new ResourcePolicyResolver)->recordPolicies('posts');
     }
 
     /**

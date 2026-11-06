@@ -8,6 +8,7 @@ use Illuminate\Config\Repository as ConfigRepositoryImplementation;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Http\Kernel as HttpKernelContract;
+use Illuminate\Database\Eloquent\Builder as EloquentBuilder;
 use Illuminate\Events\Dispatcher;
 use Illuminate\Foundation\Application;
 use Illuminate\Routing\Middleware\SubstituteBindings;
@@ -50,12 +51,14 @@ use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Query\SchemaInspector;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
+use SineMacula\Laravel\Authorization\Registrars\QueryScopeRegistrar;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
+use SineMacula\Laravel\Authorization\Resolvers\DeclaredResourceTenant;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
-use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
 use SineMacula\Laravel\Authorization\Resolvers\NoSessionPolicy;
 use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
@@ -534,28 +537,49 @@ final class AuthorizationServiceProviderTest extends TestCase
     }
 
     /**
-     * The resolver that knows no resource's tenant is bound by default, and the
-     * configured class in its place.
+     * The declared resolver is bound around the resolver that knows no
+     * resource's tenant by default, and around the configured class in its
+     * place, which answers every model that declares no tenancy.
      *
      * @return void
      */
     public function testConfiguredResourceTenantResolverIsBound(): void
     {
-        $app = $this->application();
+        $app   = $this->application();
+        $model = new StubIdentity;
 
         $default = $app->make(ResourceTenantResolver::class);
 
-        self::assertInstanceOf(NoResourceTenant::class, $default);
+        self::assertInstanceOf(DeclaredResourceTenant::class, $default);
+        self::assertNull($default->tenantOf($model));
 
         /** @var \Illuminate\Config\Repository $config */
         $config = $app->make(ConfigRepository::class);
         $config->set('authorization.resource_tenant_resolver', FixedResourceTenantResolver::class);
+        $app->instance(FixedResourceTenantResolver::class, $fixed = new FixedResourceTenantResolver(new Reference('fixed', '1')));
 
         (new AuthorizationServiceProvider($app))->register();
 
         $configured = $app->make(ResourceTenantResolver::class);
 
-        self::assertInstanceOf(FixedResourceTenantResolver::class, $configured);
+        self::assertInstanceOf(DeclaredResourceTenant::class, $configured);
+        self::assertEquals(new Reference('fixed', '1'), $configured->tenantOf($model));
+        self::assertSame([$model], $fixed->asked);
+    }
+
+    /**
+     * Booting registers the `whereAuthorized()` builder macro, and the schema
+     * inspector its scopes read through is bound once per request or job.
+     *
+     * @return void
+     */
+    public function testBootingRegistersTheQueryScopeMacro(): void
+    {
+        $app = $this->application();
+
+        self::assertTrue(EloquentBuilder::hasGlobalMacro(QueryScopeRegistrar::MACRO));
+        self::assertSame($app->make(SchemaInspector::class), $app->make(SchemaInspector::class));
+        self::assertTrue($app->isShared(SchemaInspector::class));
     }
 
     /**

@@ -23,6 +23,7 @@ use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
+use SineMacula\Laravel\Authorization\Query\AuthorizedQuery;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
@@ -225,7 +226,7 @@ final class AuthorizationManager
             return;
         }
 
-        $this->dispatch(new AuthorizationFailed($this->currentSubject()?->subject, $action, ResourceReferences::identifierOf($reference), $context, $decision));
+        $this->events?->dispatch(new AuthorizationFailed($this->currentSubject()?->subject, $action, ResourceReferences::identifierOf($reference), $context, $decision));
 
         $reason = $decision->reason ?? DecisionReason::NO_MATCH;
         $denial = $reason === DecisionReason::INSUFFICIENT_AUTHENTICATION ? InsufficientAuthenticationException::translated($decision->requirements, $this->translator) : null;
@@ -266,6 +267,29 @@ final class AuthorizationManager
         $reference = ResourceReferences::of($resource);
 
         return $this->record($subject, $action, ResourceReferences::identifierOf($reference), $context, $this->pipeline->decide($subject, $action, $reference, $context));
+    }
+
+    /**
+     * Return the scope that keeps the rows of the model's queries the current
+     * subject may take the action on, with the caller's context, as `check()`
+     * decides them (AUTHZ-10.1): `whereAuthorized()` puts it on a builder.
+     *
+     * It is compiled now, so a query the scope cannot compile exactly is
+     * refused here with `QueryScopeRefusedException`, and compiled again from
+     * the state at each execution, about the subject current then. Compiling
+     * decides no check: no decision is recorded and no decision event is
+     * dispatched.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model  $model
+     * @param  string  $action
+     * @param  array<string, mixed>  $context
+     * @return \SineMacula\Laravel\Authorization\Query\AuthorizedQuery
+     */
+    public function queryScope(Model $model, string $action, array $context = []): AuthorizedQuery
+    {
+        $authorizer = $this->pipeline->queryAuthorizer();
+
+        return AuthorizedQuery::compiled($model, $action, fn (): string => $authorizer->compile($this->currentSubject(), $model, $action, $context));
     }
 
     /**
@@ -491,7 +515,7 @@ final class AuthorizationManager
     /**
      * Record the result as the last decision, with the session of the request
      * when it read an authentication requirement, and dispatch its decision
-     * event.
+     * event when a dispatcher is available.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @param  string  $action
@@ -503,19 +527,8 @@ final class AuthorizationManager
     private function record(?Subject $subject, string $action, ?string $resource, array $context, Decision $decision): Decision
     {
         $this->lastDecisionStore->put($decision, $decision->freshness === null ? null : $this->subjectResolver->resolve()?->session);
-        $this->dispatch(new DecisionEvaluated($subject?->subject, $action, $resource, $context, $decision));
+        $this->events?->dispatch(new DecisionEvaluated($subject?->subject, $action, $resource, $context, $decision));
 
         return $decision;
-    }
-
-    /**
-     * Dispatch the supplied event when a dispatcher is available.
-     *
-     * @param  object  $event
-     * @return void
-     */
-    private function dispatch(object $event): void
-    {
-        $this->events?->dispatch($event);
     }
 }

@@ -9,6 +9,7 @@ use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
+use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
@@ -139,6 +140,77 @@ final class DecisionPipeline
     }
 
     /**
+     * Gather every source the check is decided from, in the scope it runs in:
+     * the policies, the guardrails (none when the check is exempt from them),
+     * the boundaries, the check's context, the permission held and the session
+     * caps, as `decideGrants()` weighs them. `whereAuthorized()` reads them
+     * before they are weighed, so a query is decided from exactly the sources
+     * `check()` is.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @param  string  $action
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
+     * @param  array<string, mixed>  $context
+     * @return \SineMacula\Laravel\Authorization\Evaluation\CheckSources
+     *
+     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
+     *
+     * @internal
+     */
+    public function sources(Subject $subject, string $action, ?ResourceReference $resource, array $context): CheckSources
+    {
+        $policies   = $this->gatherPolicies($subject, $resource);
+        $guardrails = $action === PackagePermissions::GUARDRAILS_MANAGE ? null : ($this->guardrails?->guardrailsFor($resource) ?? []);
+        $boundaries = SubjectGrants::boundaries($subject);
+
+        // What the caller passes is held under `input` alone, never promoted
+        // into another namespace, so it cannot stand in for the request, the
+        // authentication, the subject, the resource or any source's values
+        // (N27). Without a factory, the subject and resource still supply their
+        // built-in keys.
+        $checkContext = $this->contexts?->make($context, $subject, $resource)
+            ?? new CheckContext([CheckContextFactory::INPUT => $context], (new AttributeNamespaces)->builders($subject, $resource), null, new PrincipalSelectors($subject));
+
+        $permission = static fn (): ?string => SubjectGrants::permissionFor($subject, $action);
+        $session    = ($this->sessionCaps ?? new SessionCapResolver)->capsFor($subject, $this->caps);
+
+        return new CheckSources($policies, $guardrails, $boundaries, $checkContext, $permission, $session);
+    }
+
+    /**
+     * Weigh the sources gathered for a check, stage by stage, through the
+     * policy evaluator.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckSources  $sources
+     * @param  string  $action
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
+     *
+     * @internal
+     */
+    public function weigh(CheckSources $sources, string $action, ?ResourceReference $resource): Decision
+    {
+        $evaluator = $this->evaluator->capped($sources->session);
+
+        return $evaluator->evaluate($sources->policies, $action, $resource?->identifier, $sources->context, $sources->boundaries, $sources->permission, $sources->guardrails);
+    }
+
+    /**
+     * Return the compiler that scopes a query to the records this pipeline
+     * would allow (AUTHZ-10.1), with this pipeline's sources: its context
+     * factory and, unless a `withPolicies()` override replaces them, its
+     * resource policies, whose record attachments it must see.
+     *
+     * @return \SineMacula\Laravel\Authorization\Query\QueryAuthorizer
+     *
+     * @internal
+     */
+    public function queryAuthorizer(): QueryAuthorizer
+    {
+        return new QueryAuthorizer($this, $this->contexts, $this->policyOverride === null ? $this->resourcePolicies : null);
+    }
+
+    /**
      * Decide the admitted action from every source the subject's grants and the
      * resource give, in the evaluator's stages: every explicit deny, from the
      * subject's policies, its identity's, those attached to the resource and
@@ -198,25 +270,12 @@ final class DecisionPipeline
     private function decideGrants(Subject $subject, string $action, ?ResourceReference $resource, array $context): Decision
     {
         try {
-            $policies   = $this->gatherPolicies($subject, $resource);
-            $guardrails = $action === PackagePermissions::GUARDRAILS_MANAGE ? null : ($this->guardrails?->guardrailsFor($resource) ?? []);
-            $boundaries = SubjectGrants::boundaries($subject);
+            $sources = $this->sources($subject, $action, $resource, $context);
         } catch (InvalidPolicyDocumentException) {
             return Decision::deny(DecisionReason::INVALID_POLICY, DecisionStage::DENY);
         }
 
-        // What the caller passes is held under `input` alone, never promoted
-        // into another namespace, so it cannot stand in for the request, the
-        // authentication, the subject, the resource or any source's values
-        // (N27). Without a factory, the subject and resource still supply their
-        // built-in keys.
-        $checkContext = $this->contexts?->make($context, $subject, $resource)
-            ?? new CheckContext([CheckContextFactory::INPUT => $context], (new AttributeNamespaces)->builders($subject, $resource), null, new PrincipalSelectors($subject));
-
-        $permission = static fn (): ?string => SubjectGrants::permissionFor($subject, $action);
-        $session    = ($this->sessionCaps ?? new SessionCapResolver)->capsFor($subject, $this->caps);
-
-        return $this->evaluator->capped($session)->evaluate($policies, $action, $resource?->identifier, $checkContext, $boundaries, $permission, $guardrails);
+        return $this->weigh($sources, $action, $resource);
     }
 
     /**

@@ -10,10 +10,13 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Context\AttributeProviders;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
+use SineMacula\Laravel\Authorization\Context\ClockEnvironmentContext;
+use SineMacula\Laravel\Authorization\Context\RoutedRequestContext;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\ContextSource;
 use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
 use SineMacula\Laravel\Authorization\Contracts\RequestContext;
+use SineMacula\Laravel\Authorization\Contracts\ScopeInvariant;
 use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementFreshness;
@@ -23,7 +26,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\RecordingResourceAttributes;
 use Tests\Feature\Stubs\RecordingSubjectAttributes;
+use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubRequirementChecker;
+use Tests\Fixtures\QueryScoping\InvariantRequirementChecker;
 
 /**
  * Unit tests for `CheckContextFactory`, which makes the context of each check
@@ -321,6 +326,96 @@ final class CheckContextFactoryTest extends TestCase
         self::assertTrue($context->isSubjectNamedBy(['user:1']));
         self::assertFalse($context->isSubjectNamedBy(['user:2']));
         self::assertFalse($this->factory()->make()->isSubjectNamedBy(['user:1']));
+    }
+
+    /**
+     * A namespace is read once for a query only when its source is marked
+     * `ScopeInvariant`: `input` always is, the resource's never, the subject's
+     * when its type has no attribute provider or a marked one, and one no
+     * source supplies, which is always missing, is too; the requirement checker
+     * is when there is none or it is marked.
+     *
+     * @return void
+     */
+    public function testANamespaceIsScopeInvariantWhenItsSourceIsMarked(): void
+    {
+        $subject = new Subject(new \stdClass);
+        $factory = $this->factory();
+
+        foreach (['authentication', 'mfa', 'request', 'environment', 'tenant', 'resource'] as $namespace) {
+            self::assertFalse($factory->isScopeInvariant($namespace, $subject), $namespace);
+        }
+
+        foreach (['input', 'subject', 'nothing'] as $namespace) {
+            self::assertTrue($factory->isScopeInvariant($namespace, $subject), $namespace);
+        }
+
+        self::assertTrue($factory->isRequirementCheckScopeInvariant());
+
+        $marked = new CheckContextFactory(
+            new class implements AuthenticationContext, ScopeInvariant {
+                /**
+                 * Return the namespaces supplied.
+                 *
+                 * @return list<string>
+                 */
+                #[\Override]
+                public function namespaces(): array
+                {
+                    return ['authentication', 'mfa'];
+                }
+
+                /**
+                 * Return no values.
+                 *
+                 * @return array<string, array<string, mixed>>
+                 */
+                #[\Override]
+                public function values(): array
+                {
+                    return [];
+                }
+            },
+            new RoutedRequestContext(new Container),
+            new ClockEnvironmentContext,
+            [new class implements ContextSource, ScopeInvariant {
+                /**
+                 * Return the namespace supplied.
+                 *
+                 * @return string
+                 */
+                #[\Override]
+                public function namespace(): string
+                {
+                    return 'plan';
+                }
+
+                /**
+                 * Return no values.
+                 *
+                 * @return array<string, mixed>
+                 */
+                #[\Override]
+                public function values(): array
+                {
+                    return [];
+                }
+            }],
+            new AttributeProviders(new Container, [], [\stdClass::class => RecordingSubjectAttributes::class]),
+            new StubRequirementChecker(RequirementResult::met()),
+        );
+
+        foreach (['authentication', 'mfa', 'request', 'environment', 'plan'] as $namespace) {
+            self::assertTrue($marked->isScopeInvariant($namespace, $subject), $namespace);
+        }
+
+        self::assertFalse($marked->isScopeInvariant('subject', $subject));
+        self::assertTrue($marked->isScopeInvariant('subject', new Subject(new StubIdentity)));
+        self::assertFalse($marked->isRequirementCheckScopeInvariant());
+        $checker   = new InvariantRequirementChecker(true);
+        $invariant = new CheckContextFactory($this->authentication([], ['authentication']), $this->request([]), $this->environment([]), [], null, $checker);
+
+        self::assertTrue($invariant->isRequirementCheckScopeInvariant());
     }
 
     /**

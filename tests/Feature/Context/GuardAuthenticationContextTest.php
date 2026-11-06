@@ -13,6 +13,7 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Context\GuardAuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
+use SineMacula\Laravel\Authorization\Contracts\ScopeInvariant;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\TestCase;
 
@@ -184,6 +185,17 @@ final class GuardAuthenticationContextTest extends TestCase
 
             self::assertSame([], $this->context()->values());
         }
+    }
+
+    /**
+     * It reads the request alone, so it is marked `ScopeInvariant` and a query
+     * scope reads it once for a query.
+     *
+     * @return void
+     */
+    public function testItIsMarkedScopeInvariant(): void
+    {
+        self::assertContains(ScopeInvariant::class, \class_implements(GuardAuthenticationContext::class));
     }
 
     /**

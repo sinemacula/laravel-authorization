@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Route as Router;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Context\RoutedRequestContext;
 use SineMacula\Laravel\Authorization\Contracts\RequestContext;
+use SineMacula\Laravel\Authorization\Contracts\ScopeInvariant;
 use Tests\TestCase;
 
 /**
@@ -140,6 +141,17 @@ final class RoutedRequestContextTest extends TestCase
         $container->instance('request', new \stdClass);
 
         self::assertSame([], (new RoutedRequestContext($container))->values());
+    }
+
+    /**
+     * It reads the request alone, so it is marked `ScopeInvariant` and a query
+     * scope reads it once for a query.
+     *
+     * @return void
+     */
+    public function testItIsMarkedScopeInvariant(): void
+    {
+        self::assertContains(ScopeInvariant::class, \class_implements(RoutedRequestContext::class));
     }
 
     /**
