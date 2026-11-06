@@ -184,7 +184,9 @@ return [
     |
     | Optional class implementing `PolicyStore`. When set, the manager loads
     | additional policies for the current subject from this source on every
-    | check. Leave as null to rely solely on policies attached to identities.
+    | check, such as policies shipped in code. Leave as null to rely solely on
+    | the policies stored in the database: those attached to the identity,
+    | inline ones included, and those attached to the roles it holds.
     |
     */
 
@@ -432,12 +434,14 @@ return [
     | Role hierarchy
     |---------------------------------------------------------------------------
     |
-    | Controls whether the role parent-child hierarchy affects permission
-    | resolution. When enabled (the default), a role's `getPermissions()`
+    | Controls whether the role parent-child hierarchy affects permission and
+    | policy resolution. When enabled (the default), a role's `getPermissions()`
     | returns the deduplicated union of its own direct permissions and all
-    | permissions inherited from ancestor roles. When disabled, only directly
-    | attached permissions are returned — `parent_id` can still be set for
-    | organisational grouping but has no effect on authorization decisions.
+    | permissions inherited from ancestor roles, and a role's holders get the
+    | policies attached to its ancestors as well as its own. When disabled,
+    | only directly attached permissions and policies count — `parent_id` can
+    | still be set for organisational grouping but has no effect on
+    | authorization decisions.
     |
     */
 

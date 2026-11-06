@@ -9,12 +9,16 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Events\Policy\Created as PolicyCreated;
 use SineMacula\Laravel\Authorization\Events\Policy\Deleted as PolicyDeleted;
 use SineMacula\Laravel\Authorization\Events\Policy\Updated as PolicyUpdated;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyOwnerException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
+use SineMacula\Laravel\Authorization\Exceptions\OwnerChangedException;
+use SineMacula\Laravel\Authorization\Exceptions\SystemInlinePolicyException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Support\DocumentDigest;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
 use Tests\TestCase;
 
@@ -34,7 +38,7 @@ use Tests\TestCase;
 #[CoversClass(PolicyObserver::class)]
 final class PolicyObserverTest extends TestCase
 {
-    use ComparesReferences;
+    use CatchesRefusals, ComparesReferences;
 
     /**
      * A platform-wide policy saves.
@@ -102,6 +106,73 @@ final class PolicyObserverTest extends TestCase
         $this->expectException(InvalidTenantColumnsException::class);
 
         $policy->update(['tenant_id' => null]);
+    }
+
+    /**
+     * An inline policy saves with both owner columns; one owner column without
+     * the other is refused, naming the missing column.
+     *
+     * @return void
+     */
+    public function testAnInlinePolicyNeedsBothOwnerColumns(): void
+    {
+        $inline = Policy::query()->create(['name' => 'mine', 'document' => self::document(), 'owner_type' => 'user', 'owner_id' => '1']);
+
+        self::assertSame('user', Policy::query()->findOrFail($inline->id)->owner_type);
+
+        $this->expectException(InvalidPolicyOwnerException::class);
+        $this->expectExceptionMessage('Cannot save policy \'half\' with inconsistent owner columns: \'owner_id\' is required');
+
+        Policy::query()->create(['name' => 'half', 'document' => self::document(), 'owner_type' => 'user']);
+    }
+
+    /**
+     * The grantee an inline policy belongs to cannot change once it is created,
+     * nor can a managed policy become inline.
+     *
+     * @return void
+     */
+    public function testTheOwnerOfAPolicyCannotChange(): void
+    {
+        $inline  = Policy::query()->create(['name' => 'mine', 'document' => self::document(), 'owner_type' => 'user', 'owner_id' => '1']);
+        $managed = Policy::query()->create(['name' => 'shared', 'document' => self::document()]);
+
+        foreach ([[$inline, ['owner_id' => '2']], [$inline, ['owner_type' => 'team']], [$managed, ['owner_type' => 'user', 'owner_id' => '2']]] as [$policy, $change]) {
+            $refusal = self::refusalOf(static fn () => $policy->update($change));
+
+            self::assertInstanceOf(OwnerChangedException::class, $refusal);
+            self::assertSame($policy->name, $refusal->getName());
+
+            $policy->refresh();
+        }
+
+        self::assertSame('user', Policy::query()->findOrFail($inline->id)->owner_type);
+        self::assertSame('1', Policy::query()->findOrFail($inline->id)->owner_id);
+        self::assertNull(Policy::query()->findOrFail($managed->id)->owner_id);
+    }
+
+    /**
+     * An inline policy is refused as a system policy, whether it is created as
+     * one or flagged later, and nothing is written.
+     *
+     * @return void
+     */
+    public function testAnInlinePolicyCannotBeASystemPolicy(): void
+    {
+        $owner  = ['owner_type' => 'user', 'owner_id' => '1'];
+        $inline = Policy::query()->create(['name' => 'mine', 'document' => self::document()] + $owner);
+
+        $refusals = [
+            'created as a system policy' => static fn () => Policy::query()->create(['name' => 'root', 'document' => self::document(), 'is_system' => true] + $owner),
+            'flagged later'              => static fn () => $inline->update(['is_system' => true]),
+        ];
+
+        foreach ($refusals as $case => $refused) {
+            self::assertInstanceOf(SystemInlinePolicyException::class, self::refusalOf($refused), $case);
+        }
+
+        self::assertSame(['mine'], Policy::query()->pluck('name')->all());
+        self::assertFalse(Policy::query()->findOrFail($inline->id)->is_system);
     }
 
     /**

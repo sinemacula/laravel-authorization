@@ -11,8 +11,10 @@ model in its own transaction on the package's connection; it moves onto `Permiss
 - `RoleService`: create, rename, describe, re-parent, delete and list roles; grant, revoke and sync the permissions a
   role carries.
 - `PermissionService`: create, rename, describe, delete and list permissions.
-- `PolicyService`: create, rename, describe, rewrite, delete and list policies.
-- `GrantService`: grant, revoke and sync roles, permissions and policies to a grantee, with an optional expiry.
+- `PolicyService`: create, rename, describe, rewrite, delete and list policies, and create a grantee's inline policies
+  (`createInline()`).
+- `GrantService`: grant, revoke and sync roles, permissions and policies to a grantee, an identity or a role, with an
+  optional expiry.
 
 Each is a final class bound as a singleton (it holds no state), resolved from the container or injected. Every public
 method takes the actor making the call as an optional `$actor`, a model or a `Support\Reference`: null for console and
@@ -78,7 +80,25 @@ events themselves are described in [Events](events.md).
    throws `UnsavedRecordException`, so a change never creates a record outside `create()` and an unsaved parent never
    clears a role's parent.
 
-9. **A name reaches every held row.** A role or permission name answers every row of it under the guard, the current
+9. **An inline policy is attached to its grantee alone (AUTHZ-6.9).** `PolicyService::createInline()` and the
+   grantee's `createInlinePolicy()` create a policy that names its grantee in `owner_type` and `owner_id`, validated as
+   any policy's document is, and do not attach it. A grant or a sync that would attach it to any other grantee throws
+   `InlinePolicyAttachmentException` before anything is written, and so does a write through a grantee's `policies()`
+   relation, through the pivot's observer. Both read the grantee from the stored row on the write connection, inside
+   the grant's transaction, never from the model in hand, which may have been loaded without its owner columns or
+   changed since; a policy whose row is gone is refused with `InvalidGrantTargetException`. A resolution leaves out an
+   attachment to another grantee all the same. Its name is unique among that grantee's inline policies; a managed
+   policy, with neither owner column, keeps the uniqueness it has. An inline policy is never a system policy
+   (`SystemInlinePolicyException`), so nothing stops its deletion with its grantee: deleting the grantee deletes its
+   inline policies through the model, each reported as `Policy\Deleted` with its attachments, and
+   `authorization:prune` deletes those of a grantee that no longer exists, once it has revoked that grantee's grants.
+
+10. **A role's policies are its grants.** A policy attached to a role is a row of `authorizable_policies` with the role
+    as the grantee, written, reported and invalidated as any grant is (the events name the role as the grantee).
+    Deleting a role detaches its policies through `revokeAll()`, each reported as detached, since the grantee columns
+    carry no foreign key.
+
+11. **A name reaches every held row.** A role or permission name answers every row of it under the guard, the current
    tenant's and the platform's alike. A revocation by name revokes each of them the grantee or role holds, and a sync
    that names one keeps each held row of the name, granting the row the lookup ranks first only when none is held.
 
@@ -110,6 +130,8 @@ working: each forwards to the matching service method with no actor.
   unsupported for any change that must be audited.
 - **A grantee whose class is not loadable** is named with `Reference` (its morph type and key), as the Spatie
   import does for Spatie's `model_type` and `model_id`. A reference carries no guard.
+- **An inline policy created is not attached.** The caller attaches it to its grantee, in the scope it should hold in,
+  with `attachPolicy()`.
 - **Without the service provider** the traits refuse to write (`LogicException`) rather than lose the write.
 - **List methods are reads** and run outside a transaction. They take the actor like every other method, so the
   delegated administration checks can read it there too.
@@ -127,6 +149,8 @@ working: each forwards to the matching service method with no actor.
 - `Services\Support\GrantTable`: the scoped row writes, insert-or-ignore and the locked read-back.
 - `Services\Support\RecordWriter`: the record saves and deletes, each in one transaction.
 - `Enums\GrantTarget`: each kind's configured model, grant table and events.
+- `Support\InlinePolicies` and `Observers\AuthorizablePolicyPivotObserver`: the grantee an inline policy belongs to, the
+  refusals and its deletion with that grantee.
 - `Enums\GrantOutcome` and `Services\SyncResult`: what a call changed.
 - `Observers\RoleObserver::assertNoHierarchyCycle()`: the locked, unscoped ancestor walk.
 
@@ -135,7 +159,9 @@ working: each forwards to the matching service method with no actor.
 - `GrantServiceTest`, `GrantTableTest`, `GrantTargetTest`: idempotency, re-arming, scope, events, the transaction and
   the connection.
 - `RoleServiceTest`, `RoleObserverTest`: the lock order, cycles across tenants, role permissions and guard parity.
-- `PermissionServiceTest`, `PolicyServiceTest`, `RecordWriterTest`: the record writes.
+- `PermissionServiceTest`, `PolicyServiceTest`, `RecordWriterTest`: the record writes, inline policies among them.
+- `InlinePoliciesTest`, `AuthorizablePolicyPivotObserverTest`, `OwnerUniquenessTest`, `GrantPrunerTest`: the grantee an
+  inline policy belongs to, its refusals on every write path, its name per grantee and its deletion with the grantee.
 - `HasRolesTest`, `HasPermissionsTest`, `HasPoliciesTest`, `ManagesPermissionsTest`: the traits delegate.
 
 ## Change Triggers

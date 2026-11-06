@@ -102,6 +102,7 @@ final class GrantResolverTest extends TestCase
         self::assertSame(1, self::queriesFor(static fn () => GrantResolver::roles($user->roles(), new ResolutionPins)));
         self::assertSame(2, self::queriesFor(static fn () => GrantResolver::permissions($user->permissions(), $user->roles(), new ResolutionPins)));
         self::assertSame(1, self::queriesFor(static fn () => GrantResolver::policies($user->policies(), new ResolutionPins)));
+        self::assertSame(1, self::queriesFor(static fn () => GrantResolver::policies($user->policies(), new ResolutionPins, $user->roles())));
     }
 
     /**
@@ -245,6 +246,106 @@ final class GrantResolverTest extends TestCase
         self::assertSame(['writers', 'readers'], \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $resolution->value));
         self::assertSame(60, $resolution->expiresIn);
         self::assertSame([$store->policyKey($writers->id), $store->policyKey($readers->id)], \array_keys($pins->tokens()));
+    }
+
+    /**
+     * Given the roles, policies come directly and through the roles, each once,
+     * pinning the version every role's attachments share first, and expire with
+     * the nearest of the attachments and the grant of the role.
+     *
+     * @return void
+     */
+    public function testPoliciesComeDirectlyAndThroughTheRoles(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $role   = Role::create(['name' => 'editor']);
+        $own    = Policy::create(['name' => 'own', 'document' => ['version' => 1, 'statements' => []]]);
+        $shared = Policy::create(['name' => 'shared', 'document' => ['version' => 1, 'statements' => []]]);
+        $roles  = Policy::create(['name' => 'editors', 'document' => ['version' => 1, 'statements' => []]]);
+
+        $user->attachPolicy($own, Carbon::parse('2026-07-01 12:10:00'));
+        $user->attachPolicy($shared);
+        $role->attachPolicy($shared);
+        $role->attachPolicy($roles);
+        $user->assignRole($role, Carbon::parse('2026-07-01 12:04:00'));
+
+        [$pins, $store] = self::pins();
+
+        $resolution = GrantResolver::policies($user->policies(), $pins, $user->roles());
+        $keys       = \array_keys($pins->tokens());
+
+        self::assertSame(['own', 'shared', 'editors'], \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $resolution->value));
+        self::assertSame(240, $resolution->expiresIn);
+        self::assertTrue($resolution->stable);
+        self::assertSame($store->rolePoliciesKey(), $keys[0]);
+        self::assertEqualsCanonicalizing(
+            [$store->rolePoliciesKey(), $store->roleKey($role->id), $store->policyKey($own->id), $store->policyKey($shared->id), $store->policyKey($roles->id)],
+            $keys,
+        );
+    }
+
+    /**
+     * Without the roles, only the grantee's own policies resolve: nothing of
+     * the roles is read or pinned, and its own attachments bound the expiry.
+     *
+     * @return void
+     */
+    public function testWithoutTheRolesOnlyTheGranteesOwnPoliciesResolve(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+        $role = Role::create(['name' => 'editor']);
+        $own  = Policy::create(['name' => 'own', 'document' => ['version' => 1, 'statements' => []]]);
+
+        $role->attachPolicy(Policy::create(['name' => 'editors', 'document' => ['version' => 1, 'statements' => []]]), Carbon::parse('2026-07-01 12:01:00'));
+        $user->attachPolicy($own, Carbon::parse('2026-07-01 12:10:00'));
+        $user->assignRole($role);
+
+        [$pins, $store] = self::pins();
+
+        $resolution = GrantResolver::policies($user->policies(), $pins);
+
+        self::assertSame(['own'], \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $resolution->value));
+        self::assertSame(600, $resolution->expiresIn);
+        self::assertSame([$store->policyKey($own->id)], \array_keys($pins->tokens()));
+    }
+
+    /**
+     * Resolving leaves the grantee's relation as it was, so it reads the
+     * policies afterwards as before.
+     *
+     * @return void
+     */
+    public function testResolvingLeavesTheRelationAsItWas(): void
+    {
+        $user     = StubIdentity::create(['id' => 'user-1']);
+        $relation = $user->policies();
+
+        $user->attachPolicy(Policy::create(['name' => 'writers', 'document' => ['version' => 1, 'statements' => []]]));
+        Role::create(['name' => 'editor'])->attachPolicy(Policy::create(['name' => 'editors', 'document' => ['version' => 1, 'statements' => []]]));
+
+        GrantResolver::policies($relation, new ResolutionPins, $user->roles());
+
+        self::assertSame(['writers'], $relation->pluck('name')->all());
+    }
+
+    /**
+     * An attachment of another grantee's inline policy, written past the write
+     * paths, never resolves; the grantee's own inline policy does.
+     *
+     * @return void
+     */
+    public function testAnotherGranteesInlinePolicyNeverResolves(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $other  = StubIdentity::create(['id' => 'user-2']);
+        $theirs = $other->createInlinePolicy('theirs', ['version' => 1, 'statements' => []]);
+
+        $user->attachPolicy($user->createInlinePolicy('mine', ['version' => 1, 'statements' => []]));
+        DB::table('authorizable_policies')->insert(['policy_id' => $theirs->id, 'authorizable_type' => $user->getMorphClass(), 'authorizable_id' => 'user-1']);
+
+        $resolution = GrantResolver::policies($user->policies(), new ResolutionPins, $user->roles());
+
+        self::assertSame(['mine'], \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $resolution->value));
     }
 
     /**

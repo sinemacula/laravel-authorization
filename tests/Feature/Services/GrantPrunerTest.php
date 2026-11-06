@@ -14,7 +14,9 @@ use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
+use SineMacula\Laravel\Authorization\Events\Policy\Deleted as PolicyDeleted;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionExpired as RolePermissionExpired;
+use SineMacula\Laravel\Authorization\Exceptions\SystemPolicyProtectedException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -27,8 +29,8 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Feature tests for removing expired grants and the grants of grantees that no
- * longer exist.
+ * Feature tests for removing expired grants, and the grants and inline policies
+ * of grantees that no longer exist.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -301,6 +303,121 @@ final class GrantPrunerTest extends TestCase
             RoleRevoked::class,
             static fn (RoleRevoked $event): bool => $event->grantee->id === 'user-gone' && $event->grantee->type === 'stub_identity' && $event->operation->actor === null,
         );
+    }
+
+    /**
+     * The inline policies of a grantee that no longer exists are deleted and
+     * reported, with their attachments, and pretending only counts them; those
+     * of a grantee that exists or is soft-deleted stay, and an owner type
+     * naming no model class is reported and left.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testDeletesTheInlinePoliciesOfGranteesThatAreGone(): void
+    {
+        $gone    = StubIdentity::create(['id' => 'user-gone']);
+        $goneToo = StubIdentity::create(['id' => 'user-gone-too']);
+        $kept    = StubIdentity::create(['id' => 'user-kept']);
+        $soft    = NumberedIdentity::create(['name' => 'Ada']);
+        $role    = Role::create(['name' => 'editor']);
+
+        $gone->attachPolicy($gone->createInlinePolicy('gone-first', ['version' => 1, 'statements' => []]));
+        $gone->createInlinePolicy('gone-second', ['version' => 1, 'statements' => []]);
+        $goneToo->createInlinePolicy('gone-too', ['version' => 1, 'statements' => []]);
+        $kept->createInlinePolicy('kept', ['version' => 1, 'statements' => []]);
+        $soft->createInlinePolicy('soft', ['version' => 1, 'statements' => []]);
+        $role->createInlinePolicy('role', ['version' => 1, 'statements' => []]);
+        Policy::create(['name' => 'ghost', 'document' => ['version' => 1, 'statements' => []], 'owner_type' => 'ghost_owner', 'owner_id' => '1']);
+        Policy::create(['name' => 'managed', 'document' => ['version' => 1, 'statements' => []]]);
+
+        DB::table('stub_identities')->whereIn('id', ['user-gone', 'user-gone-too'])->delete();
+        $soft->delete();
+
+        Event::fake([PolicyDeleted::class]);
+
+        $pretended = self::pruner()->prune(1, true);
+
+        self::assertSame(3, $pretended->inlinePolicies);
+        self::assertSame(1, $pretended->orphaned);
+        self::assertSame(['ghost_owner'], $pretended->unresolvedTypes);
+        self::assertSame(8, Policy::query()->count());
+        Event::assertNotDispatched(PolicyDeleted::class);
+
+        $result = self::pruner()->prune(1);
+
+        self::assertSame(3, $result->inlinePolicies);
+        self::assertSame(1, $result->orphaned);
+        self::assertSame(['ghost_owner'], $result->unresolvedTypes);
+        self::assertSame(['ghost', 'kept', 'managed', 'role', 'soft'], Policy::query()->orderBy('name')->pluck('name')->all());
+        self::assertSame(0, DB::table('authorizable_policies')->count());
+        Event::assertDispatchedTimes(PolicyDeleted::class, 3);
+    }
+
+    /**
+     * Pretending counts exactly what a real run removes: an expired grant of a
+     * grantee that is gone once, among the expired, and the attachment of the
+     * grantee's own inline policy among its orphaned grants.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testPretendingCountsWhatARealRunRemoves(): void
+    {
+        $gone = StubIdentity::create(['id' => 'user-gone']);
+
+        $gone->assignRole(Role::create(['name' => 'editor']), Carbon::parse('2026-07-01 11:00:00'));
+        $gone->givePermission(Permission::create(['name' => 'posts:read']));
+        $gone->attachPolicy($gone->createInlinePolicy('mine', ['version' => 1, 'statements' => []]));
+
+        DB::table('stub_identities')->where('id', 'user-gone')->delete();
+
+        Event::fake();
+
+        $pretended = self::pruner()->prune(1000, true);
+        $result    = self::pruner()->prune(1000);
+
+        self::assertSame([1, 2, 1], [$pretended->expired, $pretended->orphaned, $pretended->inlinePolicies]);
+        self::assertSame([$result->expired, $result->orphaned, $result->inlinePolicies], [$pretended->expired, $pretended->orphaned, $pretended->inlinePolicies]);
+        self::assertSame(0, Policy::query()->count());
+    }
+
+    /**
+     * The orphaned grants are revoked before any inline policy is deleted, so a
+     * policy that cannot be deleted never keeps the grants of a grantee that is
+     * gone.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnInlinePolicyThatCannotBeDeletedLeavesTheOrphanedGrantsRevoked(): void
+    {
+        $gone = StubIdentity::create(['id' => 'user-gone']);
+
+        $gone->givePermission(Permission::create(['name' => 'posts:read']));
+
+        // A row the observer would refuse, written past it.
+        DB::table('policies')->insert([
+            'id'         => '00000000-0000-0000-0000-000000000001',
+            'name'       => 'stuck',
+            'is_system'  => true,
+            'document'   => '{"version":1,"statements":[]}',
+            'owner_type' => $gone->getMorphClass(),
+            'owner_id'   => 'user-gone',
+        ]);
+
+        DB::table('stub_identities')->where('id', 'user-gone')->delete();
+
+        try {
+            self::pruner()->prune(1000);
+            self::fail('A system inline policy was deleted.');
+        } catch (SystemPolicyProtectedException) {
+            self::assertSame(0, DB::table('authorizable_permissions')->count());
+            self::assertSame(1, Policy::query()->count());
+        }
     }
 
     /**

@@ -16,12 +16,13 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use Tests\Feature\Stubs\Enums\CataloguePermission;
+use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenant;
 
 /**
  * Feature tests for the string casts on the shipped `Policy` model, its tenant
- * relation, the name it gives the evaluation policy it hydrates, and the policy
- * validator its `document` attribute writes through.
+ * and owner relations, the name it gives the evaluation policy it hydrates, and
+ * the policy validator its `document` attribute writes through.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -46,7 +47,27 @@ final class PolicyTest extends StringCastsTestCase
         $platform = Policy::query()->create(['name' => 'readers', 'document' => $document]);
 
         self::assertTrue($tenant->is($owned->tenant));
+        self::assertTrue($tenant->is($owned->tenant()->first()));
         self::assertNull($platform->tenant);
+    }
+
+    /**
+     * The owner relation resolves the grantee an inline policy belongs to, and
+     * nothing for a managed one.
+     *
+     * @return void
+     */
+    public function testOwnerRelationResolvesTheGranteeOfAnInlinePolicy(): void
+    {
+        $user     = StubIdentity::create(['id' => 'user-1']);
+        $document = ['version' => 1, 'statements' => []];
+        $inline   = Policy::query()->create(['name' => 'mine', 'document' => $document, 'owner_type' => $user->getMorphClass(), 'owner_id' => 'user-1']);
+        $managed  = Policy::query()->create(['name' => 'shared', 'document' => $document]);
+
+        self::assertTrue($user->is($inline->owner));
+        self::assertTrue($user->is($inline->owner()->first()));
+        self::assertTrue($user->is(Policy::query()->with('owner')->whereKey($inline->getKey())->sole()->getRelation('owner')));
+        self::assertNull($managed->owner);
     }
 
     /**
@@ -197,7 +218,7 @@ final class PolicyTest extends StringCastsTestCase
     #[\Override]
     protected static function stringColumns(): array
     {
-        return ['name', 'description', 'tenant_type', 'tenant_id'];
+        return ['name', 'description', 'tenant_type', 'tenant_id', 'owner_type', 'owner_id'];
     }
 
     /**

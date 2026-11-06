@@ -13,6 +13,9 @@ use SineMacula\Laravel\Authorization\Models\Role;
 /**
  * Reads the role hierarchy and the permissions roles hold in a fixed number of
  * queries, however many roles there are and however deep the hierarchy runs.
+ * The roles a holder gets grants through, its roles and their ancestors, are
+ * read the same way for its permissions and for the policies attached to those
+ * roles.
  *
  * The ancestors of any number of roles take two queries: one recursive query
  * for the keys of every role above them, then one load of those roles through
@@ -91,6 +94,21 @@ final class RoleGraph
      */
     public static function permissionsHeldBy(array $roles): InheritedPermissions
     {
+        return self::permissions(self::keysHeldBy($roles));
+    }
+
+    /**
+     * Return the keys of the roles, with each role's ancestors' when the
+     * hierarchy is enabled: the roles whose grants the holder of the roles
+     * gets, their permissions and their policies alike.
+     *
+     * @param  list<\SineMacula\Laravel\Authorization\Models\Role>  $roles
+     * @return list<string>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
+     */
+    public static function keysHeldBy(array $roles): array
+    {
         $keys = \array_map(static fn (Role $role): string => $role->id, $roles);
 
         if (self::isHierarchyEnabled()) {
@@ -101,7 +119,7 @@ final class RoleGraph
             }
         }
 
-        return self::permissions($keys);
+        return $keys;
     }
 
     /**
@@ -135,6 +153,25 @@ final class RoleGraph
      */
     public static function permissionsWithin(array $reach, array $held): ?InheritedPermissions
     {
+        $keys = self::keysWithin($reach, $held);
+
+        return $keys === null ? null : self::permissions($keys);
+    }
+
+    /**
+     * Return the keys of the held roles the tenant scope shows, with their
+     * ancestors' when the hierarchy is enabled, reading the roles `reach()`
+     * returned afresh; or null when a role now has a parent `reach()` did not
+     * return, because the hierarchy moved after it was read.
+     *
+     * @param  array<string, string|null>  $reach
+     * @param  list<string>  $held
+     * @return list<string>|null
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
+     */
+    public static function keysWithin(array $reach, array $held): ?array
+    {
         $visible   = self::load(\array_keys($reach));
         $hierarchy = self::isHierarchyEnabled();
         $keys      = [];
@@ -153,7 +190,7 @@ final class RoleGraph
             }
         }
 
-        return self::permissions($keys);
+        return $keys;
     }
 
     /**

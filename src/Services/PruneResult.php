@@ -17,6 +17,7 @@ final readonly class PruneResult
      *
      * @param  int  $expired
      * @param  int  $orphaned
+     * @param  int  $inlinePolicies
      * @param  list<string>  $unresolvedTypes
      */
     public function __construct(
@@ -27,7 +28,10 @@ final readonly class PruneResult
         /** The grants removed because their grantee no longer exists. */
         public int $orphaned,
 
-        /** The grantee types that name no model class, whose grants were left. */
+        /** The inline policies removed because the grantee they belong to no longer exists. */
+        public int $inlinePolicies,
+
+        /** The grantee types that name no model class, whose grants and inline policies were left. */
         public array $unresolvedTypes,
     ) {}
 }

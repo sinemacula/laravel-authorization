@@ -31,5 +31,25 @@ final class OwnerChangedExceptionTest extends TestCase
         self::assertSame('The owner of role \'editor\' is fixed once it is created; create the role in the new owner instead.', $exception->getMessage());
         self::assertSame('role', $exception->getKind());
         self::assertSame('editor', $exception->getName());
+        self::assertSame('tenant', $exception->getOwnerKind());
+    }
+
+    /**
+     * A change of the grantee an inline policy belongs to names the policy and
+     * points at a policy for the new grantee.
+     *
+     * @return void
+     */
+    public function testAChangeOfGranteeNamesTheInlinePolicy(): void
+    {
+        $exception = new OwnerChangedException('policy', 'mine', 'grantee');
+
+        self::assertSame(
+            'The grantee of inline policy \'mine\' is fixed once it is created; create an inline policy for the new grantee instead.',
+            $exception->getMessage(),
+        );
+        self::assertSame('policy', $exception->getKind());
+        self::assertSame('mine', $exception->getName());
+        self::assertSame('grantee', $exception->getOwnerKind());
     }
 }

@@ -13,12 +13,13 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * The persistent tier of the resolution cache: entries, and the version tokens
  * that decide whether an entry still holds.
  *
- * Every grantee, role and policy has a version token, a random string that a
- * write bumps by replacing it. An entry records the tokens of everything it was
- * built from, and holds only while every one of them is unchanged, so a write
- * invalidates exactly the entries it affects on any store, with or without
- * tags. A token is random rather than a counter, so a token the store evicted
- * and created again can never match an entry recorded before.
+ * Every grantee, role, policy and tenant has a version token, a random string
+ * that a write bumps by replacing it, and the policies attached to roles share
+ * one more. An entry records the tokens of everything it was built from, and
+ * holds only while every one of them is unchanged, so a write invalidates
+ * exactly the entries it affects on any store, with or without tags. A token is
+ * random rather than a counter, so a token the store evicted and created again
+ * can never match an entry recorded before.
  *
  * A store that fails is never fatal to a check: the read or write is skipped,
  * the failure is written to the package's log channel once, and the store is
@@ -81,6 +82,19 @@ final class VersionedStore
     public function policyKey(string $policy): string
     {
         return "{$this->prefix}:version:policy:{$policy}";
+    }
+
+    /**
+     * Return the key of the one version token every policy attachment to a role
+     * shares, which every entry of an identity's policies records before it
+     * reads whether any role holds a policy, and every attachment, detachment
+     * or expiry change of a role's policy bumps.
+     *
+     * @return string
+     */
+    public function rolePoliciesKey(): string
+    {
+        return "{$this->prefix}:version:role-policies";
     }
 
     /**

@@ -19,7 +19,8 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
   deny, allow and implicit order), why an explicit DENY always wins over
   an RBAC allow, and why an undecidable deny applies and a malformed, unreadable or over-limit policy denies
   (`invalid_policy`) instead of being skipped; `insufficient_authentication`, where it ranks, and how long a decision
-  that read an authentication requirement may be reused.
+  that read an authentication requirement may be reused; where a check's policies come from (the policy store, the
+  identity's own and inline policies, and its roles' policies down the hierarchy) and why their order never matters.
 - `polymorphic-identity-pivots.md`: why role, permission, and policy pivots use plain `string`
   `authorizable_type`/`authorizable_id` columns so that integer, UUID, and ULID identities all work.
 - `subject-resolver-contract.md`: the one seam with `sinemacula/laravel-authentication` for the subject, its tenant
@@ -38,7 +39,8 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
 - `permission-catalogue-sync.md`: declaring permissions in enums and providers, why booting never touches the
   database, and what `authorization:sync` adds, updates, reports as stale or protected, and prunes.
 - `management-services.md`: the services every role, permission, policy and grant write goes through, their
-  transaction, idempotent grants, re-armed expiries, the locked hierarchy check, and the scope each grant holds in.
+  transaction, idempotent grants, re-armed expiries, the locked hierarchy check, the scope each grant holds in, a
+  role's policies as its grants, and inline policies attached to their grantee alone and deleted with it.
 - `events.md`: the one marker every event implements, the snapshot payloads, the actor the caller passes, one
   operation id per call, dispatch after commit, the grantees a delete reports and the document digests.
 

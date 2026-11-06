@@ -100,6 +100,22 @@ final class ResolutionPins
     }
 
     /**
+     * Pin the version the policies attached to roles share, before reading
+     * whether any role holds a policy, so an attachment made to any role while
+     * the resolution runs is seen.
+     *
+     * @return void
+     */
+    public function rolePolicies(): void
+    {
+        if ($this->store === null) {
+            return;
+        }
+
+        $this->pin($this->store, [$this->store->rolePoliciesKey()]);
+    }
+
+    /**
      * Return the token of each pinned version key.
      *
      * @return array<string, string>

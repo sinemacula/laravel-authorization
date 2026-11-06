@@ -16,11 +16,18 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyAttached;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyDetached;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged;
+use SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\PolicyService;
+use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ChecksGrantExpiry;
+use Tests\Feature\Stubs\NonMorphRolesGrantee;
+use Tests\Feature\Stubs\NumberedIdentity;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\UndeclaredRolesGrantee;
 use Tests\TestCase;
 
 /**
@@ -317,6 +324,147 @@ final class HasPoliciesTest extends TestCase
         }
 
         self::assertSame([$policy->id], DB::table('authorizable_policies')->pluck('policy_id')->all());
+    }
+
+    /**
+     * An identity creates an inline policy of its own, validated as any policy
+     * is, and attaches it, in any scope; another grantee cannot attach it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnInlinePolicyIsCreatedForTheGranteeAndAttachedToItAlone(): void
+    {
+        $user   = $this->identity();
+        $other  = $this->identity();
+        $inline = $user->createInlinePolicy('mine', ['version' => 1, 'statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]], 'My own');
+
+        self::assertEquals(Reference::of($user), InlinePolicies::ownerOf($inline));
+        self::assertSame('My own', $inline->description);
+        self::assertSame($user, $user->attachPolicy($inline, application: 'admin'));
+
+        try {
+            $other->attachPolicy($inline);
+            self::fail('Another grantee attached the inline policy.');
+        } catch (InlinePolicyAttachmentException $exception) {
+            self::assertEquals(Reference::of($other), $exception->getGrantee());
+        }
+
+        try {
+            $other->syncPolicies([$inline]);
+            self::fail('Another grantee synced the inline policy.');
+        } catch (InlinePolicyAttachmentException $exception) {
+            self::assertSame('mine', $exception->getPolicyName());
+        }
+
+        self::assertSame([Reference::of($user)->id], DB::table('authorizable_policies')->pluck('authorizable_id')->all());
+
+        $this->expectException(InvalidPolicyDocumentException::class);
+
+        $user->createInlinePolicy('broken', ['version' => 1, 'statements' => [['effect' => 'allow']]]);
+    }
+
+    /**
+     * Without the policy service bound, creating an inline policy is refused
+     * rather than lost.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testCreatingAnInlinePolicyWithoutThePolicyServiceIsRefused(): void
+    {
+        $user = $this->identity();
+
+        unset($this->app[PolicyService::class]);
+
+        $this->expectExceptionObject(new \LogicException('The authorization policy service is not bound; register the package\'s service provider.'));
+
+        $user->createInlinePolicy('mine', ['version' => 1, 'statements' => []]);
+    }
+
+    /**
+     * Deleting the grantee deletes its inline policies, with their attachments;
+     * a soft delete keeps them until the grantee is force-deleted.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGranteesInlinePoliciesAreDeletedWithIt(): void
+    {
+        $user     = $this->identity();
+        $numbered = NumberedIdentity::create(['name' => 'numbered']);
+        $managed  = $this->policy('shared');
+
+        $user->attachPolicy($user->createInlinePolicy('mine', ['version' => 1, 'statements' => []]));
+        $user->attachPolicy($managed);
+        $numbered->createInlinePolicy('theirs', ['version' => 1, 'statements' => []]);
+
+        $user->delete();
+
+        self::assertSame(['shared', 'theirs'], Policy::query()->orderBy('name')->pluck('name')->all());
+        self::assertSame(0, DB::table('authorizable_policies')->count());
+
+        $numbered->delete();
+
+        self::assertSame(['shared', 'theirs'], Policy::query()->orderBy('name')->pluck('name')->all());
+
+        $numbered->forceDelete();
+
+        self::assertSame(['shared'], Policy::query()->pluck('name')->all());
+    }
+
+    /**
+     * An identity's policies include those attached to the roles it holds and
+     * to the roles above them; a role's own are only those attached to it.
+     *
+     * @return void
+     */
+    public function testGetPoliciesIncludesTheRolesPolicies(): void
+    {
+        $user   = $this->identity();
+        $parent = Role::create(['name' => 'staff']);
+        $role   = Role::create(['name' => 'editor', 'parent_id' => $parent->id]);
+
+        $parent->attachPolicy($this->policy('staff'));
+        $role->attachPolicy($this->policy('editors'));
+        $user->attachPolicy($this->policy('own'));
+        $user->assignRole($role);
+
+        $names = \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $user->getPolicies());
+
+        self::assertEqualsCanonicalizing(['own', 'editors', 'staff'], $names);
+        self::assertSame(['editors'], \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $role->getPolicies()));
+    }
+
+    /**
+     * A grantee gets its roles' policies only when it declares that it supports
+     * roles and its `roles()` relation is the morph onto the role grants: one
+     * with such a relation that does not declare it, and one that declares it
+     * with another kind of relation, get only their own.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testOnlyAGranteeThatSupportsRolesGetsItsRolesPolicies(): void
+    {
+        $role = Role::create(['name' => 'editor']);
+
+        $role->attachPolicy($this->policy('editors'));
+
+        $undeclared = UndeclaredRolesGrantee::query()->create(['id' => 'undeclared']);
+        $nonMorph   = NonMorphRolesGrantee::query()->create(['id' => 'non-morph']);
+
+        $undeclared->roles()->attach($role->id);
+        $undeclared->attachPolicy($this->policy('undeclared-own'));
+        $nonMorph->attachPolicy($this->policy('non-morph-own'));
+
+        self::assertSame(1, $undeclared->roles()->count());
+        self::assertSame(['undeclared-own'], \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $undeclared->getPolicies()));
+        self::assertSame(['non-morph-own'], \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $nonMorph->getPolicies()));
     }
 
     /**

@@ -10,6 +10,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Cache\Invalidation;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\VersionedStore;
+use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -66,6 +67,27 @@ final class InvalidationTest extends TestCase
         self::assertSame([$this->versions()->granteeKey($user)], $this->bumpedBy(static fn () => $user->assignRole($role), $user, $role));
         self::assertSame([$this->versions()->granteeKey($user)], $this->bumpedBy(static fn () => $user->assignRole($role, now()->addHour()), $user, $role));
         self::assertSame([$this->versions()->granteeKey($user)], $this->bumpedBy(static fn () => $user->revokeRole($role), $user, $role));
+    }
+
+    /**
+     * A policy attached to, re-dated on or detached from a role bumps the role
+     * as a grantee and the version every role's policy attachments share, and
+     * nothing else; one attached to an identity leaves the shared version
+     * alone.
+     *
+     * @return void
+     */
+    public function testRolePolicyChangesBumpTheSharedVersion(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $role   = Role::create(['name' => 'editor']);
+        $policy = Policy::create(['name' => 'editors', 'document' => ['version' => 1, 'statements' => []]]);
+        $both   = [$this->versions()->granteeKey($role), $this->versions()->rolePoliciesKey()];
+
+        self::assertSame($both, $this->bumpedBy(static fn () => $role->attachPolicy($policy), $user, $role, $policy, true));
+        self::assertSame($both, $this->bumpedBy(static fn () => $role->attachPolicy($policy, now()->addHour()), $user, $role, $policy, true));
+        self::assertSame($both, $this->bumpedBy(static fn () => $role->detachPolicy($policy), $user, $role, $policy, true));
+        self::assertSame([$this->versions()->granteeKey($user)], $this->bumpedBy(static fn () => $user->attachPolicy($policy), $user, $role, $policy, true));
     }
 
     /**
@@ -184,6 +206,66 @@ final class InvalidationTest extends TestCase
     }
 
     /**
+     * A policy attached to or detached from a role reaches every holder of the
+     * role, and of the roles below it, on the next request.
+     *
+     * @return void
+     */
+    public function testARolePolicyAttachedOrDetachedTakesEffectOnTheNextRequest(): void
+    {
+        $staff  = Role::create(['name' => 'staff']);
+        $editor = Role::create(['name' => 'editor', 'parent_id' => $staff->id]);
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $policy = Policy::create(['name' => 'staff', 'document' => ['version' => 1, 'statements' => []]]);
+
+        $user->assignRole($editor);
+
+        self::assertSame([], self::names($user->getPolicies()));
+
+        $this->nextRequest();
+        $staff->attachPolicy($policy);
+        $this->nextRequest();
+
+        self::assertSame(['staff'], self::names($this->fresh($user)->getPolicies()));
+
+        $this->nextRequest();
+        $staff->detachPolicy($policy);
+        $this->nextRequest();
+
+        self::assertSame([], self::names($this->fresh($user)->getPolicies()));
+    }
+
+    /**
+     * Moving a role under a parent that holds a policy, or out from under it,
+     * reaches the role's holders on the next request.
+     *
+     * @return void
+     */
+    public function testAReparentedRolesPoliciesTakeEffectOnTheNextRequest(): void
+    {
+        $publisher = Role::create(['name' => 'publisher']);
+        $editor    = Role::create(['name' => 'editor']);
+        $user      = StubIdentity::create(['id' => 'user-1']);
+
+        $publisher->attachPolicy(Policy::create(['name' => 'publishers', 'document' => ['version' => 1, 'statements' => []]]));
+        $user->assignRole($editor);
+
+        self::assertSame([], self::names($user->getPolicies()));
+
+        $this->nextRequest();
+        $this->app?->make(RoleService::class)->setParent($editor, $publisher);
+        $this->nextRequest();
+
+        self::assertSame(['publishers'], self::names($this->fresh($user)->getPolicies()));
+
+        $this->nextRequest();
+        $this->app?->make(RoleService::class)->setParent($editor, null);
+        $this->nextRequest();
+
+        self::assertSame([], self::names($this->fresh($user)->getPolicies()));
+    }
+
+    /**
      * Changing a policy's document reaches its holders on the next request
      * (#48).
      *
@@ -236,21 +318,27 @@ final class InvalidationTest extends TestCase
     }
 
     /**
-     * Return the version keys among the user's, the role's and the policy's
-     * whose tokens the write changed.
+     * Return the version keys among the user's, the role's and the policy's,
+     * and, with the role as a grantee, the role's as a grantee and the one the
+     * role policies share, whose tokens the write changed.
      *
      * @param  \Closure(): mixed  $write
      * @param  \Tests\Feature\Stubs\StubIdentity  $user
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @param  \SineMacula\Laravel\Authorization\Models\Policy|null  $policy
+     * @param  bool  $asGrantee
      * @return list<string>
      */
-    private function bumpedBy(\Closure $write, StubIdentity $user, Role $role, ?Policy $policy = null): array
+    private function bumpedBy(\Closure $write, StubIdentity $user, Role $role, ?Policy $policy = null, bool $asGrantee = false): array
     {
         $keys = [$this->versions()->roleKey($role->id), $this->versions()->granteeKey($user)];
 
         if ($policy !== null) {
             $keys[] = $this->versions()->policyKey($policy->id);
+        }
+
+        if ($asGrantee) {
+            $keys = [...$keys, $this->versions()->granteeKey($role), $this->versions()->rolePoliciesKey()];
         }
 
         $before = $this->versions()->tokens($keys);
@@ -260,6 +348,17 @@ final class InvalidationTest extends TestCase
         $after = $this->versions()->tokens($keys);
 
         return \array_values(\array_filter($keys, static fn (string $key): bool => ($before[$key] ?? null) !== ($after[$key] ?? null)));
+    }
+
+    /**
+     * Return the names of the policies.
+     *
+     * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
+     * @return list<string>
+     */
+    private static function names(array $policies): array
+    {
+        return \array_values(\array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $policies));
     }
 
     /**

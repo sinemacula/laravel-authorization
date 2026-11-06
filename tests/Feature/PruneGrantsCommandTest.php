@@ -24,6 +24,9 @@ use Tests\TestCase;
 #[CoversClass(PruneGrantsCommand::class)]
 final class PruneGrantsCommandTest extends TestCase
 {
+    /** @var string What the command reports it removed, after its verb. */
+    private const string SUMMARY = '1 expired grant(s), 1 grant(s) of grantees that no longer exist and 1 inline polic(ies) of grantees that no longer exist.';
+
     /**
      * Reset the clock.
      *
@@ -38,8 +41,9 @@ final class PruneGrantsCommandTest extends TestCase
     }
 
     /**
-     * The command removes expired grants and the grants of grantees that are
-     * gone, and says how many; pretending says how many it would remove.
+     * The command removes expired grants, and the grants and inline policies of
+     * grantees that are gone, and says how many; pretending says how many it
+     * would remove.
      *
      * @return void
      */
@@ -48,17 +52,18 @@ final class PruneGrantsCommandTest extends TestCase
         Carbon::setTestNow('2026-07-01 12:00:00');
 
         StubIdentity::create(['id' => 'user-1'])->assignRole(Role::create(['name' => 'editor']), Carbon::parse('2026-07-01 11:00:00'));
-        StubIdentity::create(['id' => 'user-2'])->assignRole(Role::create(['name' => 'viewer']));
+        StubIdentity::create(['id' => 'user-2'])->assignRole(Role::create(['name' => 'viewer']))->createInlinePolicy('mine', ['version' => 1, 'statements' => []]);
 
         DB::table('stub_identities')->where('id', 'user-2')->delete();
 
         self::assertSame(0, Artisan::call('authorization:prune', ['--pretend' => true]));
-        self::assertSame("Would prune 1 expired grant(s) and 1 grant(s) of grantees that no longer exist.\n", Artisan::output());
+        self::assertSame('Would prune ' . self::SUMMARY . "\n", Artisan::output());
         self::assertSame(2, DB::table('authorizable_roles')->count());
 
         self::assertSame(0, Artisan::call('authorization:prune', ['--chunk' => '1']));
-        self::assertSame("Pruned 1 expired grant(s) and 1 grant(s) of grantees that no longer exist.\n", Artisan::output());
+        self::assertSame('Pruned ' . self::SUMMARY . "\n", Artisan::output());
         self::assertSame(0, DB::table('authorizable_roles')->count());
+        self::assertSame(0, DB::table('policies')->count());
     }
 
     /**
@@ -72,7 +77,7 @@ final class PruneGrantsCommandTest extends TestCase
         DB::table('authorizable_roles')->insert(['role_id' => Role::create(['name' => 'editor'])->id, 'authorizable_type' => 'unmapped_type', 'authorizable_id' => '1']);
 
         self::assertSame(0, Artisan::call('authorization:prune'));
-        self::assertStringContainsString('Grantee type \'unmapped_type\' names no model class; its grants were left.', Artisan::output());
+        self::assertStringContainsString('Grantee type \'unmapped_type\' names no model class; its grants and inline policies were left.', Artisan::output());
         self::assertSame(1, DB::table('authorizable_roles')->count());
     }
 

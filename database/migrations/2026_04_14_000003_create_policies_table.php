@@ -4,8 +4,11 @@
  * Create the `policies` table.
  *
  * Policies are JSON documents of allow and deny statements attached to
- * authorizable identities. A policy is owned by the platform (null tenant
- * columns) or by one tenant, and its name is unique within its owner.
+ * authorizable identities and roles. A policy belongs to the platform (null
+ * tenant columns) or to one tenant; a managed policy's name is unique within
+ * its tenant. An inline policy names the one grantee it belongs to, and its
+ * name is unique among that grantee's inline policies (it may share a managed
+ * policy's name).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -58,21 +61,41 @@ return new class extends Migration {
             $blueprint->string('tenant_type', 191)->nullable();
             $blueprint->string('tenant_id', 191)->nullable();
 
+            // The grantee an inline policy belongs to, apart from the tenant
+            // that owns it. Both columns null mark a managed policy, attachable
+            // to any grantee; a concrete pair marks an inline one, attachable
+            // only to that grantee and deleted with it. Grantees are morphs, so
+            // there is no foreign key: `authorization:prune` removes the inline
+            // policies of a grantee that no longer exists.
+            $blueprint->string('owner_type', 191)->nullable();
+            $blueprint->string('owner_id', 191)->nullable();
+
             $blueprint->timestamps();
 
             $blueprint->index('name', $table . '_name_index');
             $blueprint->index(['tenant_type', 'tenant_id'], $table . '_tenant_index');
+            $blueprint->index(['owner_type', 'owner_id'], $table . '_owner_index');
+
+            // An inline policy's name is unique among its grantee's inline
+            // policies. A managed policy's null owner columns are distinct from
+            // each other inside the index, so this key never compares two
+            // managed policies.
+            $blueprint->unique(['name', 'owner_type', 'owner_id'], $table . '_name_inline_unique');
         });
 
-        // A name is unique within its owner: at most one row per name and
-        // tenant, with null tenant columns (platform-wide) counting as one
-        // value. A platform policy and a tenant's policy may share a name, and
-        // two tenants may each have their own.
-        (new NullFoldingUniqueIndex($schema->getConnection()))->create(
+        // A managed policy's name is unique within its tenant: at most one row
+        // per name and tenant, with null tenant columns (platform-wide)
+        // counting as one value. A platform policy and a tenant's policy may
+        // share a name, and two tenants may each have their own. The owner
+        // columns, folded the same way, keep inline policies out of the
+        // comparison, so a grantee's inline policy may share a managed policy's
+        // name. The key is digested on MySQL, where the name and four folded
+        // columns would not fit.
+        (new NullFoldingUniqueIndex($schema->getConnection()))->createDigested(
             $table,
             $table . '_name_owner_unique',
             ['name'],
-            ['tenant_type', 'tenant_id'],
+            ['tenant_type', 'tenant_id', 'owner_type', 'owner_id'],
         );
     }
 

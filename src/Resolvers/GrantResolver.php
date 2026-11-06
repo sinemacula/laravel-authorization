@@ -14,9 +14,13 @@ use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
+use SineMacula\Laravel\Authorization\Support\GrantExpiry;
 use SineMacula\Laravel\Authorization\Support\InheritedPermissions;
+use SineMacula\Laravel\Authorization\Support\InheritedPolicies;
+use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
+use SineMacula\Laravel\Authorization\Support\RolePolicies;
 
 /**
  * Resolves what an identity's grants come to: the names of its roles, the names
@@ -32,7 +36,8 @@ use SineMacula\Laravel\Authorization\Support\RoleGraph;
  *
  * Each kind takes a fixed number of queries: two for roles, two for policies,
  * and five for permissions however many roles the identity holds and however
- * deep they sit.
+ * deep they sit. Policies take four more, however many roles and however deep,
+ * only when a role holds a policy in the current scope.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -93,8 +98,16 @@ final class GrantResolver
     }
 
     /**
-     * Resolve the policies attached through the relation, hydrated for
-     * evaluation.
+     * Resolve the policies attached through the relation and, given the
+     * relation onto the grantee's roles, those attached to its roles and to the
+     * roles above them, hydrated for evaluation, each once.
+     *
+     * A role's policy applies only where the grant of the role and the
+     * attachment of the policy both hold (see `RolePolicies`). The grantee's
+     * own attachments are read in one query that also asks whether any role
+     * holds a policy in the current scope, so the roles are read only when one
+     * might apply. The evaluator orders the policies, by name, then stored key,
+     * then document, wherever they came from.
      *
      * A policy whose document cannot be read is written to the log channel and
      * its exception thrown, so it denies every check for its holder rather than
@@ -102,14 +115,25 @@ final class GrantResolver
      *
      * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy, \Illuminate\Database\Eloquent\Model>  $grants
      * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>|null  $roles
      * @return \SineMacula\Laravel\Authorization\Cache\Resolution<\SineMacula\Laravel\Authorization\Evaluation\Policy>
      *
      * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
      */
-    public static function policies(MorphToMany $grants, ResolutionPins $pins): Resolution
+    public static function policies(MorphToMany $grants, ResolutionPins $pins, ?MorphToMany $roles = null): Resolution
     {
-        $held = self::held($grants);
-        $keys = \array_keys($held->getDictionary());
+        if ($roles !== null) {
+            $pins->rolePolicies();
+        }
+
+        [$own, $throughRoles] = self::attached($grants, $roles);
+
+        $inherited = $roles !== null && $throughRoles ? RolePolicies::heldThrough(self::held($roles), $roles, $pins) : new InheritedPolicies;
+
+        // Flipping the keys and back lists each policy once, in the order it
+        // was first reached.
+        $keys = \array_keys(\array_flip([...\array_column($own, 'policy_id'), ...$inherited->keys]));
 
         $pins->policies($keys);
 
@@ -121,7 +145,7 @@ final class GrantResolver
             $policies[] = self::hydrate($policy);
         }
 
-        return new Resolution($policies, self::expiresIn(null, $held));
+        return new Resolution($policies, GrantExpiry::nearest($inherited->expiresIn, \array_column($own, 'expires_at')), $inherited->stable);
     }
 
     /**
@@ -140,6 +164,35 @@ final class GrantResolver
         $fresh = $roles->getRelated()->newQuery()->useWritePdo()->whereKey($keys)->get()->all();
 
         return RoleGraph::permissionsHeldBy($fresh);
+    }
+
+    /**
+     * Read the grantee's own attachments of policies, each with its expiry, on
+     * the write connection, and, given the relation onto its roles, whether any
+     * role holds a policy in the current scope, in the same query. An
+     * attachment of an inline policy that belongs to another grantee is left
+     * out.
+     *
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy, \Illuminate\Database\Eloquent\Model>  $grants
+     * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>|null  $roles
+     * @return array{0: array<int, array{policy_id: string, authorizable_type: string, expires_at: string|null}>, 1: bool}
+     */
+    private static function attached(MorphToMany $grants, ?MorphToMany $roles): array
+    {
+        $columns = ['policy_id', 'authorizable_type', 'expires_at'];
+        $query   = InlinePolicies::attachedToTheirGrantee((clone $grants->getQuery())->toBase(), $grants->getTable())
+            ->select(\array_map($grants->qualifyPivotColumn(...), $columns));
+
+        if ($roles !== null) {
+            $query->unionAll(RolePolicies::probe($roles, $columns));
+        }
+
+        /** @var list<array{policy_id: string, authorizable_type: string, expires_at: string|null}> $rows */
+        $rows = $query->useWritePdo()->get()->map(static fn (object $row): array => (array) $row)->all();
+        $role = $roles?->getRelated()->getMorphClass();
+        $own  = \array_filter($rows, static fn (array $row): bool => $row['authorizable_type'] !== $role);
+
+        return [$own, \count($own) !== \count($rows)];
     }
 
     /**

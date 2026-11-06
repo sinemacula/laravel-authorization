@@ -19,7 +19,8 @@ use Tests\TestCase;
 /**
  * Feature tests for the unique keys of the roles, permissions and policies
  * tables: a name is unique within its owner (the platform, or one tenant) and,
- * for roles and permissions, its guard, not globally.
+ * for roles and permissions, its guard, not globally; an inline policy's name
+ * is unique among its grantee's inline policies.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -216,6 +217,54 @@ final class OwnerUniquenessTest extends TestCase
     }
 
     /**
+     * A grantee cannot own two inline policies of one name, whichever tenant
+     * owns them.
+     *
+     * @return void
+     */
+    public function testAGranteeCannotOwnAnInlinePolicyNameTwice(): void
+    {
+        Policy::query()->create(['name' => 'mine', 'document' => self::document()] + self::inline('user', 'user-1'));
+
+        $this->assertRefused(static fn (): Model => Policy::query()->create(['name' => 'mine', 'document' => self::document()] + self::inline('user', 'user-1')));
+        $tenant = self::ownedBy(self::createTenant('tenant-a'));
+
+        $this->assertRefused(static fn (): Model => Policy::query()->create(['name' => 'mine', 'document' => self::document()] + self::inline('user', 'user-1') + $tenant));
+    }
+
+    /**
+     * Two grantees, including two of different types that share an id, may each
+     * own an inline policy of one name, and an inline policy may share a
+     * managed policy's name.
+     *
+     * @return void
+     */
+    public function testInlinePolicyNamesAreUniquePerGrantee(): void
+    {
+        Policy::query()->create(['name' => 'mine', 'document' => self::document()]);
+        Policy::query()->create(['name' => 'mine', 'document' => self::document()] + self::inline('user', '1'));
+        Policy::query()->create(['name' => 'mine', 'document' => self::document()] + self::inline('user', '2'));
+        Policy::query()->create(['name' => 'mine', 'document' => self::document()] + self::inline('team', '1'));
+
+        self::assertSame(4, self::rows(Policy::class));
+    }
+
+    /**
+     * Inline policies never take a managed policy's place in its unique key:
+     * the platform still owns one managed policy of a name beside a grantee's
+     * inline policy of it.
+     *
+     * @return void
+     */
+    public function testAnInlinePolicyLeavesTheManagedKeyAlone(): void
+    {
+        Policy::query()->create(['name' => 'mine', 'document' => self::document()] + self::inline('user', '1'));
+        Policy::query()->create(['name' => 'mine', 'document' => self::document()]);
+
+        $this->assertRefused(static fn (): Model => Policy::query()->create(['name' => 'mine', 'document' => self::document()]));
+    }
+
+    /**
      * Assert the write is refused by a unique key. On PostgreSQL a failed
      * statement aborts the test's transaction, so the write runs inside a
      * savepoint the failure rolls back.
@@ -244,6 +293,18 @@ final class OwnerUniquenessTest extends TestCase
     private static function rows(string $class): int
     {
         return DB::table((new $class)->getTable())->count();
+    }
+
+    /**
+     * Return the owner columns of an inline policy of the given grantee.
+     *
+     * @param  string  $type
+     * @param  string  $id
+     * @return array{owner_type: string, owner_id: string}
+     */
+    private static function inline(string $type, string $id): array
+    {
+        return ['owner_type' => $type, 'owner_id' => $id];
     }
 
     /**

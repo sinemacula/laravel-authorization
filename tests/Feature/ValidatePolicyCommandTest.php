@@ -280,7 +280,8 @@ final class ValidatePolicyCommandTest extends TestCase
 
     /**
      * A stored policy over a limit fails, named by its key and its name, and a
-     * tenant-owned one is checked as well as the platform's.
+     * tenant-owned one and a grantee's inline one are checked as well as the
+     * platform's.
      *
      * @return void
      */
@@ -288,6 +289,7 @@ final class ValidatePolicyCommandTest extends TestCase
     {
         $platform = Policy::query()->create(['name' => 'readers', 'document' => self::VALID]);
         $tenant   = Policy::query()->create(['name' => 'writers', 'document' => self::VALID, 'tenant_type' => (new StubTenant)->getMorphClass(), 'tenant_id' => 'tenant-1']);
+        $inline   = Policy::query()->create(['name' => 'zeta', 'document' => self::VALID, 'owner_type' => 'user', 'owner_id' => '1']);
 
         $this->config()->set('authorization.policies.limits.pattern_length', 4);
 
@@ -295,7 +297,8 @@ final class ValidatePolicyCommandTest extends TestCase
         self::assertSame(
             "database:{$platform->id}: readers: Policy statement #0 has 1 patterns or operands longer than the 4 characters allowed.\n"
             . "database:{$tenant->id}: writers: Policy statement #0 has 1 patterns or operands longer than the 4 characters allowed.\n"
-            . "Checked 2 policy document(s): 2 invalid.\n",
+            . "database:{$inline->id}: zeta: Policy statement #0 has 1 patterns or operands longer than the 4 characters allowed.\n"
+            . "Checked 3 policy document(s): 3 invalid.\n",
             Artisan::output(),
         );
     }
