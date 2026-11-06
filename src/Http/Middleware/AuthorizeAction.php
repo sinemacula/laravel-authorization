@@ -42,6 +42,7 @@ final class AuthorizeAction extends AbstractAuthorizationMiddleware
      *
      * @throws \Illuminate\Auth\AuthenticationException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     #[\Override]
     protected function authorize(Request $request, array $names, ?string $option): void

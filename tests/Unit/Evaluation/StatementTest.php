@@ -8,6 +8,7 @@ use Illuminate\Support\Arr;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
 use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
 use SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator;
 use SineMacula\Laravel\Authorization\Evaluation\ConditionOperands;
@@ -16,8 +17,13 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\IpRanges;
 use SineMacula\Laravel\Authorization\Evaluation\MatchResult;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementCheck;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Evaluation\StatementValidator;
+use SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement;
+use SineMacula\Laravel\Authorization\Subject;
+use Tests\Feature\Stubs\StubRequirementChecker;
 
 /**
  * Unit tests for the policy statement value object.
@@ -39,6 +45,9 @@ use SineMacula\Laravel\Authorization\Evaluation\StatementValidator;
 #[CoversClass(ContextInterpolator::class)]
 final class StatementTest extends TestCase
 {
+    /** @var array<string, array<string, mixed>> The conditions of a statement stating the requirement most tests judge. */
+    private const array REQUIREMENT = ['authentication_requirement' => ['authentication' => ['multifactor' => ['max_age' => 900], 'phishing_resistant' => []]]];
+
     /** @var string Trace detail for a statement whose patterns do not cover the check. */
     private const string TARGET_MISMATCH = 'action/resource did not match';
 
@@ -1294,6 +1303,190 @@ final class StatementTest extends TestCase
     }
 
     /**
+     * Provide malformed authentication requirement conditions, with the message
+     * each is refused with.
+     *
+     * @return iterable<string, array{array<string, mixed>, string}>
+     */
+    public static function malformedRequirementProvider(): iterable
+    {
+        yield 'another key' => [
+            ['authentication_requirement' => ['authentication.amr' => ['multifactor' => []]]],
+            'Policy statement condition operator \'authentication_requirement\' tests the key \'authentication\' alone, not \'authentication.amr\'.',
+        ];
+        yield 'an unknown part' => [
+            ['authentication_requirement' => ['authentication' => ['hardware' => []]]],
+            'Policy statement authentication requirement names an unknown part \'hardware\'.',
+        ];
+        yield 'a bad max age' => [
+            ['authentication_requirement' => ['authentication' => ['multifactor' => ['max_age' => '900']]]],
+            'Policy statement authentication requirement part \'multifactor\' max_age must be a whole number of seconds, at least 1.',
+        ];
+        yield 'the _if_exists form' => [
+            ['authentication_requirement_if_exists' => ['authentication' => ['multifactor' => []]]],
+            'Policy statement condition operator \'authentication_requirement_if_exists\' is not an operator; an authentication requirement has no _if_exists form.',
+        ];
+    }
+
+    /**
+     * A malformed authentication requirement is refused on hydration.
+     *
+     * @param  array<string, mixed>  $conditions
+     * @param  string  $message
+     * @return void
+     */
+    #[DataProvider('malformedRequirementProvider')]
+    public function testFromArrayRefusesAMalformedRequirement(array $conditions, string $message): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage($message);
+
+        Statement::fromArray(['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => $conditions]);
+    }
+
+    /**
+     * A statement keeps its requirement as written, so it round-trips.
+     *
+     * @return void
+     */
+    public function testARequirementRoundTrips(): void
+    {
+        $data = ['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => self::REQUIREMENT];
+
+        self::assertSame($data, Statement::fromArray($data)->toArray());
+    }
+
+    /**
+     * A met requirement holds, and the trace records it as the key
+     * `authentication`, held, without building the `authentication` namespace.
+     *
+     * @return void
+     */
+    public function testAMetRequirementHolds(): void
+    {
+        $context = $this->requirementContext(RequirementResult::met(), ['authentication' => ['amr' => ['pwd']]]);
+        $result  = self::requiring()->assess('posts:read', null, $context);
+
+        self::assertSame(MatchOutcome::MATCHES, $result->outcome);
+        self::assertSame(['authentication' => true], $result->conditions);
+        self::assertNull($result->unmetRequirement);
+        self::assertSame([], $this->builds);
+    }
+
+    /**
+     * An unmet requirement does not hold, and the assessment carries it with
+     * its unmet parts, the key `authentication` recorded as not held.
+     *
+     * @return void
+     */
+    public function testAnUnmetRequirementIsCarried(): void
+    {
+        $result = self::requiring()->assess('posts:read', null, $this->requirementContext(RequirementResult::unmet(['multifactor'])));
+
+        self::assertSame(MatchOutcome::DOES_NOT_MATCH, $result->outcome);
+        self::assertSame(['authentication' => false], $result->conditions);
+        self::assertEquals(new UnmetRequirement(self::requirement(), ['multifactor']), $result->unmetRequirement);
+    }
+
+    /**
+     * A requirement the checker fails on is undecidable, and carries nothing.
+     *
+     * @return void
+     */
+    public function testARequirementTheCheckerFailsOnIsUndecidable(): void
+    {
+        $result = self::requiring()->assess('posts:read', null, $this->requirementContext(new \RuntimeException('down')));
+
+        self::assertSame(MatchOutcome::UNDECIDABLE, $result->outcome);
+        self::assertSame(['authentication' => false], $result->conditions);
+        self::assertNull($result->unmetRequirement);
+    }
+
+    /**
+     * The unmet requirement is carried when every other test holds, and not
+     * when another does not hold or cannot be decided, nor when the requirement
+     * is met and another test fails.
+     *
+     * @return void
+     */
+    public function testTheRequirementIsCarriedOnlyWhenItAloneFails(): void
+    {
+        $unmet = RequirementResult::unmet(['multifactor']);
+        $with  = static fn (array $conditions): Statement => Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['posts:read'],
+            'conditions' => [...self::REQUIREMENT, ...$conditions],
+        ]);
+
+        $holds       = $with(['eq' => ['input.k' => 'a']])->assess('posts:read', null, $this->requirementContext($unmet, ['input' => ['k' => 'a']]));
+        $fails       = $with(['eq' => ['input.k' => 'a']])->assess('posts:read', null, $this->requirementContext($unmet, ['input' => ['k' => 'b']]));
+        $undecidable = $with(['eq' => ['input.missing' => 'a']])->assess('posts:read', null, $this->requirementContext($unmet, ['input' => []]));
+        $met         = $with(['eq' => ['input.k' => 'a']])->assess('posts:read', null, $this->requirementContext(RequirementResult::met(), ['input' => ['k' => 'b']]));
+
+        self::assertNotNull($holds->unmetRequirement);
+        self::assertSame(['authentication' => false, 'input.k' => true], $holds->conditions);
+        self::assertSame(MatchOutcome::DOES_NOT_MATCH, $fails->outcome);
+        self::assertNull($fails->unmetRequirement);
+        self::assertSame(MatchOutcome::DOES_NOT_MATCH, $undecidable->outcome);
+        self::assertNull($undecidable->unmetRequirement);
+        self::assertSame(MatchOutcome::DOES_NOT_MATCH, $met->outcome);
+        self::assertNull($met->unmetRequirement);
+    }
+
+    /**
+     * A malformed operator beside an unmet requirement makes the statement
+     * invalid, carrying nothing.
+     *
+     * @return void
+     */
+    public function testAnInvalidStatementCarriesNoRequirement(): void
+    {
+        $statement = new Statement(PolicyEffect::ALLOW, ['posts:read'], null, [...self::REQUIREMENT, 'bogus' => ['input.k' => 1]]);
+        $result    = $statement->assess('posts:read', null, $this->requirementContext(RequirementResult::unmet(['multifactor'])));
+
+        self::assertSame(MatchOutcome::INVALID, $result->outcome);
+        self::assertNull($result->unmetRequirement);
+    }
+
+    /**
+     * An unmet requirement is carried when the resource definitely matches, and
+     * not when a resource pattern cannot be resolved.
+     *
+     * @return void
+     */
+    public function testTheRequirementIsCarriedOnlyWhenTheResourceMatches(): void
+    {
+        $unmet     = RequirementResult::unmet(['multifactor']);
+        $statement = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['posts:read'],
+            'resources'  => ['post:${input.post}'],
+            'conditions' => self::REQUIREMENT,
+        ]);
+
+        $matched    = $statement->assess('posts:read', 'post:1', $this->requirementContext($unmet, ['input' => ['post' => '1']]), new ContextInterpolator);
+        $unresolved = $statement->assess('posts:read', 'post:1', $this->requirementContext($unmet, ['input' => []]), new ContextInterpolator);
+
+        self::assertNotNull($matched->unmetRequirement);
+        self::assertSame(MatchOutcome::DOES_NOT_MATCH, $unresolved->outcome);
+        self::assertNull($unresolved->unmetRequirement);
+    }
+
+    /**
+     * A context given as an array meets no requirement.
+     *
+     * @return void
+     */
+    public function testAnArrayContextMeetsNoRequirement(): void
+    {
+        $result = self::requiring()->assess('posts:read', null, ['authentication' => ['multifactor' => true]]);
+
+        self::assertSame(MatchOutcome::DOES_NOT_MATCH, $result->outcome);
+        self::assertSame(['multifactor', 'phishing_resistant'], $result->unmetRequirement?->unmet);
+        self::assertFalse(self::requiring()->conditionsSatisfiedBy([]));
+    }
+
+    /**
      * Assert a match result's outcome and trace detail.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome  $outcome
@@ -1327,6 +1520,51 @@ final class StatementTest extends TestCase
         }
 
         return new CheckContext([], $builders);
+    }
+
+    /**
+     * Return a statement allowing `posts:read` under the requirement.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Statement
+     */
+    private static function requiring(): Statement
+    {
+        return Statement::fromArray(['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => self::REQUIREMENT]);
+    }
+
+    /**
+     * Return the requirement the statements state.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement
+     */
+    private static function requirement(): AuthenticationRequirement
+    {
+        return new AuthenticationRequirement(['multifactor' => 900, 'phishing_resistant' => null]);
+    }
+
+    /**
+     * Build a context whose requirements the checker answers for a subject in a
+     * session, its namespaces counted as they are built.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\RequirementResult|\Throwable  $answer
+     * @param  array<string, array<string, mixed>>  $values
+     * @return \SineMacula\Laravel\Authorization\Evaluation\CheckContext
+     */
+    private function requirementContext(RequirementResult|\Throwable $answer, array $values = []): CheckContext
+    {
+        $builders = [];
+
+        foreach ($values as $namespace => $namespaceValues) {
+            $builders[$namespace] = function () use ($namespace, $namespaceValues): array {
+                $this->builds[$namespace] = ($this->builds[$namespace] ?? 0) + 1;
+
+                return [$namespace => $namespaceValues];
+            };
+        }
+
+        $user = new \stdClass;
+
+        return new CheckContext([], $builders, new RequirementCheck(new StubRequirementChecker($answer), new Subject($user, $user, session: 'session-1')));
     }
 
     /**

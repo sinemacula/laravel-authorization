@@ -11,9 +11,14 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Translation\Translator as TranslatorImplementation;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\TestWith;
+use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
+use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware;
 use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
@@ -192,6 +197,62 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
         $denial = self::denialOf(static fn (): mixed => (new RequireRole)->handle(self::request(), self::passThrough(), 'auditor'));
 
         self::assertSame('This action is unauthorized.', $denial->getMessage());
+    }
+
+    /**
+     * An allow whose authentication requirement alone is unmet raises the
+     * insufficient authentication exception from the `permission` and
+     * `authorize` middleware, so the application can map it to a step-up.
+     *
+     * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
+     */
+    public function testAnUnmetRequirementRaisesInsufficientAuthentication(): void
+    {
+        $policy = EvaluationPolicy::fromArray(['name' => 'step-up', 'statements' => [[
+            'effect'     => 'allow',
+            'actions'    => ['reports:export'],
+            'conditions' => ['authentication_requirement' => ['authentication' => ['multifactor' => []]]],
+        ]]]);
+
+        $this->app?->instance(PolicyResolver::class, new class ($policy) implements PolicyResolver {
+            /**
+             * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $policy
+             */
+            public function __construct(
+
+                /** The policy every subject is given. */
+                private readonly EvaluationPolicy $policy,
+            ) {}
+
+            /**
+             * @param  object  $principal
+             * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
+             */
+            #[\Override]
+            public function policiesFor(object $principal): array
+            {
+                return [$this->policy];
+            }
+        });
+        $this->app?->forgetInstance('authorization');
+        $this->app?->forgetInstance(AuthorizationManager::class);
+        Authorization::clearResolvedInstances();
+
+        $this->actingAs($this->seedGrantedUser());
+
+        foreach ([new RequirePermission, new AuthorizeAction] as $middleware) {
+            try {
+                $middleware->handle(self::request(), self::passThrough(), 'reports:export');
+                self::fail($middleware::class . ' admitted the request.');
+            } catch (InsufficientAuthenticationException $exception) {
+                self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $exception->getReason());
+                self::assertSame(['multifactor'], $exception->requirements()[0]->unmet);
+            }
+        }
     }
 
     /**

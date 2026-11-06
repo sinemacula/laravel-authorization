@@ -20,6 +20,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
+use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 
 /**
  * Boot-time validator for the shipped authorization config.
@@ -67,6 +68,7 @@ final class ConfigValidator
         self::validateTenantTree($config['tenant_tree'] ?? null);
         self::validateApplicationAccess($config['application_access'] ?? []);
         self::validateResourceTenantResolver($config['resource_tenant_resolver'] ?? null);
+        RequirementCheckerConfigValidator::validate(\array_key_exists('requirement_checker', $config) ? $config['requirement_checker'] : RefusingRequirementChecker::class);
         self::validatePolicyStore($config['policy_store'] ?? null);
         self::validateCacheStore($config['cache']['store'] ?? null, $container);
         self::validateCacheTtl($config['cache']['ttl'] ?? 300);

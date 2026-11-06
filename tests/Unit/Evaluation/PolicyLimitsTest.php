@@ -126,6 +126,48 @@ final class PolicyLimitsTest extends TestCase
     }
 
     /**
+     * An authentication requirement counts as one key test, however many parts
+     * it names, and its part names are not strings measured against the pattern
+     * length, though its minimum level is.
+     *
+     * @return void
+     */
+    public function testARequirementCountsAsOneTest(): void
+    {
+        $document = ['statements' => [['conditions' => [
+            'authentication_requirement' => ['authentication' => [
+                'additional_verification' => [],
+                'multifactor'             => ['max_age' => 900],
+                'phishing_resistant'      => [],
+                'assurance_level'         => ['min' => 'aal2'],
+            ]],
+            'eq' => ['input.a' => 1],
+        ]]]];
+
+        self::assertSame([], (new PolicyLimits(conditions: 2, patternLength: 4))->violations($document));
+        self::assertSame(['Policy statement #0 has 2 conditions, more than the 1 allowed.'], (new PolicyLimits(conditions: 1))->violations($document));
+    }
+
+    /**
+     * A requirement's minimum level longer than the pattern length is refused,
+     * as any other string operand is.
+     *
+     * @return void
+     */
+    public function testARequirementsMinimumLevelIsMeasuredAgainstThePatternLength(): void
+    {
+        $document = ['statements' => [['conditions' => [
+            'authentication_requirement' => ['authentication' => [
+                'multifactor'     => [],
+                'assurance_level' => ['min' => \str_repeat('a', 5)],
+            ]],
+        ]]]];
+
+        self::assertSame([], (new PolicyLimits(patternLength: 5))->violations($document));
+        self::assertSame(['Policy statement #0 has 1 patterns or operands longer than the 4 characters allowed.'], (new PolicyLimits(patternLength: 4))->violations($document));
+    }
+
+    /**
      * An operator entry that does not map keys to operands counts as one test.
      *
      * @return void

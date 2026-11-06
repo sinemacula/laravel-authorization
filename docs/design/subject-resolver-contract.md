@@ -50,6 +50,7 @@ interface SubjectResolver
 | `tenant`      | The active tenant, or `null` for none.                                                  |
 | `application` | The application the request came in on, or `null`.                                      |
 | `guard`       | The authentication guard the subject was resolved from, or `null`.                      |
+| `session`     | The session that signed in this very subject; a requirement checker judges its proofs.  |
 
 Evaluation and RBAC run against `subject`; the decision events carry it in their `principal` field.
 
@@ -61,6 +62,16 @@ its user from. The user is the subject and its identity, no tenant is active, an
 (AUTHZ-13.1). A request with no user has no subject. `forUser()` wraps the user it is handed in the same guard and
 application without reading the guard.
 
+The session is the current request's session id only when that session signed in that very user: the guard is a
+`SessionGuard` using the request's session, once it has started, and the session's login key names the user, compared
+strictly as strings. The user is the one `resolve()` reads, or that same user handed to `forUser()`, as the Gate does. A
+user set on the guard without the session (through `once()`, `onceUsingId()`, `onceBasic()` or `setUser()`, so over a
+session that may hold another user's login), a user a token or request guard returns, any other user, and every user
+outside a session (a console command, a queued job, a stateless request), has none, and a subject without a session
+meets no authentication requirement (N34). The request is read from the container on every resolution, never kept. A
+resolver of the application's own sets `session` to whatever its requirement checker knows the proofs by, and only for
+the user that session authenticated. A checker should still confirm the proofs it finds belong to `$subject->subject`.
+
 So an application with a `web` guard and a `User` model (AUTHZ-1.1) gets `Authorization::can()`, the `role:` and
 `permission:` middleware and the Blade directives deciding about the signed-in user with no setup. A deployment that
 wants another guard binds the contract to an instance built with that guard's name:
@@ -70,14 +81,18 @@ $this->app->singleton(SubjectResolver::class, fn ($app) => new AuthGuardSubjectR
     $app->make('auth'),
     $app->make('config'),
     'api',
+    $app,
 ));
 ```
+
+Without the container, the resolver reads no session, so its subjects meet no authentication requirement.
 
 ## Scoped Subjects via `for()` and `forUser()`
 
 `Authorization::for($model)` returns a cloned manager deciding about the model named, as its own identity, in the
-request's tenant, application and guard (see `docs/design/impersonation.md`). Naming the request's own subject keeps it
-unchanged, identity included. With no subject resolved, the clone has no tenant or application.
+request's tenant, application and guard (see `docs/design/impersonation.md`). Naming the request's own subject keeps
+its identity. A subject named this way never has a session, whichever model it is, so no authentication requirement is
+met for it. With no subject resolved, the clone has no tenant or application.
 
 `Authorization::forUser($user)` returns a cloned manager deciding about the subject the resolver translates the user
 into. The Gate callback uses it for the user Laravel hands over; with no Gate user, it decides about the request's own
@@ -112,7 +127,7 @@ rather than asking the resolver again without end.
 ## Implementation Anchors
 
 - `Contracts\SubjectResolver` -- the contract.
-- `Subject` -- the resolved subject, identity, tenant, application and guard.
+- `Subject` -- the resolved subject, identity, tenant, application, guard and session.
 - `Resolvers\AuthGuardSubjectResolver` -- the shipped default.
 - `AuthorizationManager::currentSubject()`, `for()` and `forUser()` -- resolution and the scoped clones.
 - `Registrars\GateRegistrar` -- the Gate callback translating its user.

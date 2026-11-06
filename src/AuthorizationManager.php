@@ -25,6 +25,7 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
@@ -104,7 +105,11 @@ final class AuthorizationManager
 
     /**
      * Authorize the current subject for the supplied action, raising an
-     * authorization exception when denied.
+     * authorization exception when denied: an
+     * `InsufficientAuthenticationException`, with the requirements any one of
+     * which met would allow the action, when the denial is
+     * `insufficient_authentication`, and an `AuthorizationException` with the
+     * reason code otherwise.
      *
      * @param  string  $action
      * @param  mixed  $resource
@@ -112,6 +117,7 @@ final class AuthorizationManager
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function authorize(string $action, mixed $resource = null, array $context = []): void
     {
@@ -125,7 +131,10 @@ final class AuthorizationManager
 
         $this->dispatch(new AuthorizationFailed($this->currentSubject()?->subject, $action, self::identifierOf($reference), $context, $decision));
 
-        throw AuthorizationException::translated($decision->reason ?? DecisionReason::NO_MATCH, $this->translator);
+        $reason = $decision->reason ?? DecisionReason::NO_MATCH;
+        $denial = $reason === DecisionReason::INSUFFICIENT_AUTHENTICATION ? InsufficientAuthenticationException::translated($decision->requirements, $this->translator) : null;
+
+        throw $denial ?? AuthorizationException::translated($reason, $this->translator);
     }
 
     /**
@@ -169,19 +178,27 @@ final class AuthorizationManager
      * evaluation.
      *
      * Returns null when the process has not yet produced a decision or when the
-     * store was explicitly cleared between requests in a long-running worker.
+     * store was explicitly cleared between requests in a long-running worker. A
+     * decision that read an authentication requirement is returned only in the
+     * session of the request that recorded it, as the subject resolver gives
+     * it, whichever subject the decision was about (one named with `for()`
+     * included), and until the earliest instant a met requirement it read stops
+     * being met (N37).
      *
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision|null
      */
     public function lastDecision(): ?Decision
     {
-        return $this->lastDecisionStore->get();
+        $decision = $this->lastDecisionStore->get();
+
+        return $decision?->freshness === null || $this->lastDecisionStore->wasRecordedIn($this->subjectResolver->resolve()?->session) ? $decision : null;
     }
 
     /**
      * Decide the supplied action and return the decision's explanation: the
-     * verdict, the stage and statements that decided it, and every step of its
-     * trace. A shortcut over `check(...)->explain()`.
+     * verdict, the stage and statements that decided it, each requirement an
+     * insufficient authentication names with its unmet parts, and every step of
+     * its trace. A shortcut over `check(...)->explain()`.
      *
      * @param  string  $action
      * @param  mixed  $resource
@@ -442,7 +459,9 @@ final class AuthorizationManager
     }
 
     /**
-     * Record the result as the last decision and dispatch its decision event.
+     * Record the result as the last decision, with the session of the request
+     * when it read an authentication requirement, and dispatch its decision
+     * event.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @param  string  $action
@@ -453,7 +472,7 @@ final class AuthorizationManager
      */
     private function record(?Subject $subject, string $action, ?string $resource, array $context, Decision $decision): Decision
     {
-        $this->lastDecisionStore->put($decision);
+        $this->lastDecisionStore->put($decision, $decision->freshness === null ? null : $this->subjectResolver->resolve()?->session);
         $this->dispatch(new DecisionEvaluated($subject?->subject, $action, $resource, $context, $decision));
 
         return $decision;

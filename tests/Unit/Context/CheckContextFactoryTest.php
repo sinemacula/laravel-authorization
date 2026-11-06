@@ -14,10 +14,15 @@ use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\ContextSource;
 use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
 use SineMacula\Laravel\Authorization\Contracts\RequestContext;
+use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementFreshness;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\RecordingResourceAttributes;
 use Tests\Feature\Stubs\RecordingSubjectAttributes;
+use Tests\Feature\Stubs\StubRequirementChecker;
 
 /**
  * Unit tests for `CheckContextFactory`, which makes the context of each check
@@ -259,6 +264,46 @@ final class CheckContextFactoryTest extends TestCase
 
         self::assertSame([true, 'okta'], $context->lookup('sso_2.provider'));
         self::assertSame([true, 'd1'], $context->lookup('_device9.id'));
+    }
+
+    /**
+     * Each context judges its requirements with the factory's checker, for the
+     * check's subject and session, without reading the authentication context.
+     *
+     * @return void
+     */
+    public function testJudgesRequirementsWithTheCheckerForTheSubject(): void
+    {
+        $checker = new StubRequirementChecker(RequirementResult::met());
+        $user    = new \stdClass;
+        $subject = new Subject($user, $user, session: 'session-1');
+        $factory = new CheckContextFactory(
+            $this->authentication(['authentication' => ['guard' => 'web']], ['authentication']),
+            $this->request([]),
+            $this->environment([]),
+            requirements: $checker,
+        );
+
+        $context     = $factory->make([], $subject);
+        $requirement = new AuthenticationRequirement(['multifactor' => null]);
+
+        self::assertSame(MatchOutcome::MATCHES, $context->assessRequirement($requirement)->outcome);
+        self::assertSame([[$requirement, $subject]], $checker->calls);
+        self::assertEquals(new RequirementFreshness('session-1'), $context->requirementFreshness());
+        self::assertSame([], $this->calls);
+    }
+
+    /**
+     * Without a checker every requirement is unmet.
+     *
+     * @return void
+     */
+    public function testWithoutACheckerNothingIsMet(): void
+    {
+        $user    = new \stdClass;
+        $context = $this->factory()->make([], new Subject($user, $user, session: 'session-1'));
+
+        self::assertSame(MatchOutcome::DOES_NOT_MATCH, $context->assessRequirement(new AuthenticationRequirement(['multifactor' => null]))->outcome);
     }
 
     /**

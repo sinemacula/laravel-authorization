@@ -40,6 +40,9 @@ enum DecisionReason: string
     /** The resource's tenant is outside the decision's tenant and its subtree, and no platform-wide grant covers it. */
     case TENANT_SCOPE = 'tenant_scope';
 
+    /** An allow statement names the check, and only its authentication requirement is unmet. */
+    case INSUFFICIENT_AUTHENTICATION = 'insufficient_authentication';
+
     /**
      * Return a short description of the reason, for explanations.
      *
@@ -48,14 +51,15 @@ enum DecisionReason: string
     public function label(): string
     {
         return match ($this) {
-            self::EXPLICIT_DENY       => 'an applicable statement denies it',
-            self::NO_MATCH            => 'no statement or permission names it',
-            self::CONDITION_FAILED    => 'a statement names it, but its conditions do not hold',
-            self::INVALID_POLICY      => 'an applicable policy cannot be evaluated',
-            self::SUBJECT_INACTIVE    => 'the subject or its identity is inactive',
-            self::SUBJECT_UNRESOLVED  => 'there is no subject',
-            self::RESOURCE_UNRESOLVED => 'the resource cannot be identified',
-            self::TENANT_SCOPE        => 'the resource belongs to a tenant outside the scope',
+            self::EXPLICIT_DENY               => 'an applicable statement denies it',
+            self::NO_MATCH                    => 'no statement or permission names it',
+            self::CONDITION_FAILED            => 'a statement names it, but its conditions do not hold',
+            self::INVALID_POLICY              => 'an applicable policy cannot be evaluated',
+            self::SUBJECT_INACTIVE            => 'the subject or its identity is inactive',
+            self::SUBJECT_UNRESOLVED          => 'there is no subject',
+            self::RESOURCE_UNRESOLVED         => 'the resource cannot be identified',
+            self::TENANT_SCOPE                => 'the resource belongs to a tenant outside the scope',
+            self::INSUFFICIENT_AUTHENTICATION => 'a statement allows it once further authentication is met',
         };
     }
 }

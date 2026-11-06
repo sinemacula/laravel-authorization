@@ -27,6 +27,11 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyValidator;
  * registered any other way, and no provider may declare a built-in, a key under
  * one, or a key under another key it declares.
  *
+ * An assurance key (see `AssuranceKeys`) of `authentication` or of a namespace
+ * the authentication context contributes is always declared untestable,
+ * whatever its declaration says (N37), so declaring it testable again changes
+ * nothing.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -57,21 +62,29 @@ final class DeclaredContextKeyCatalogue implements ContextKeyCatalogue
     /** @var array<string, \SineMacula\Laravel\Authorization\Context\ContextKey> Every declared key, by dot path. */
     private array $keys = [];
 
+    /** @var list<string> The namespaces the authentication context contributes beside `authentication`. */
+    private readonly array $authenticationNamespaces;
+
     /**
      * Create a new declared context key catalogue with the package's keys, the
      * given ones and the attributes the providers declare.
      *
      * The attributes are keyed by namespace (`subject` or `resource`), then by
      * the provider's class, each a map of dot paths within the namespace to
-     * their types, as the provider's `attributes()` returns them.
+     * their types, as the provider's `attributes()` returns them. The
+     * namespaces are those the authentication context contributes, whose
+     * assurance keys are untestable like those of `authentication`.
      *
      * @param  array<string, array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType|string>>  $keys
      * @param  array<string, array<string, array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType|string>>>  $attributes
+     * @param  list<string>  $authenticationNamespaces
      *
      * @throws \InvalidArgumentException
      */
-    public function __construct(array $keys = [], array $attributes = [])
+    public function __construct(array $keys = [], array $attributes = [], array $authenticationNamespaces = [])
     {
+        $this->authenticationNamespaces = $authenticationNamespaces;
+
         foreach (self::PACKAGE_KEYS as $path => $type) {
             $this->put($path, ContextKeyType::from($type), true);
         }
@@ -184,7 +197,8 @@ final class DeclaredContextKeyCatalogue implements ContextKeyCatalogue
 
     /**
      * Declare a key, refusing one already declared with another type or
-     * testability.
+     * testability. An assurance key is declared untestable whatever it is
+     * declared as.
      *
      * @param  string  $path
      * @param  \SineMacula\Laravel\Authorization\Enums\ContextKeyType  $type
@@ -195,7 +209,8 @@ final class DeclaredContextKeyCatalogue implements ContextKeyCatalogue
      */
     private function put(string $path, ContextKeyType $type, bool $isTestable): void
     {
-        $declared = $this->keys[$path] ?? null;
+        $isTestable = $isTestable && !AssuranceKeys::isAssuranceKey($path, $this->authenticationNamespaces);
+        $declared   = $this->keys[$path] ?? null;
 
         if ($declared !== null && ($declared->type !== $type || $declared->isTestable !== $isTestable)) {
             throw new \InvalidArgumentException("Context key '{$path}' is already declared as {$declared->type->value}" . ($declared->isTestable ? '' : ', untestable') . '.');

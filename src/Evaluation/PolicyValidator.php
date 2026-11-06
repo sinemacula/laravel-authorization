@@ -4,7 +4,9 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
+use SineMacula\Laravel\Authorization\Context\AssuranceKeys;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
+use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 
 /**
@@ -23,6 +25,12 @@ use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
  * or a resource pattern must name a declared key, `${subject.…}` and
  * `${resource.…}` included. A value of the wrong type is still undecidable at
  * evaluation, whatever the key declares.
+ *
+ * An `authentication_requirement` test reads no context key, so the catalogue
+ * is not asked about its key `authentication`. An assurance key of the
+ * authentication context (see `AssuranceKeys`) may never be tested or read
+ * through a `${…}` reference, whatever the catalogue declares (AUTHZ-8.9, N37):
+ * the reason points at `authentication_requirement`.
  *
  * The policy model's `document` attribute writes through here, and so does
  * every write of the policy service, and `authorization:policy:validate` checks
@@ -51,6 +59,7 @@ final readonly class PolicyValidator
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\ActionCatalogue  $catalogue
      * @param  \SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue  $keys
+     * @param  \SineMacula\Laravel\Authorization\Contracts\AuthenticationContext|null  $authentication
      */
     public function __construct(
 
@@ -59,6 +68,9 @@ final readonly class PolicyValidator
 
         /** The context keys a policy may read. */
         private ContextKeyCatalogue $keys,
+
+        /** The authentication context, whose contributed namespaces hold assurance keys too; null for `authentication` alone. */
+        private ?AuthenticationContext $authentication = null,
     ) {}
 
     /**
@@ -134,10 +146,11 @@ final readonly class PolicyValidator
      */
     private function contextErrors(Policy $policy): array
     {
-        $errors = [];
+        $errors     = [];
+        $namespaces = $this->authentication?->namespaces() ?? [];
 
         foreach ($policy->statements as $index => $statement) {
-            $errors = [...$errors, ...$this->statementContextErrors("Policy statement #{$index}", $statement)];
+            $errors = [...$errors, ...$this->statementContextErrors("Policy statement #{$index}", $statement, $namespaces)];
         }
 
         return \array_values(\array_unique($errors));
@@ -145,34 +158,86 @@ final readonly class PolicyValidator
 
     /**
      * Return a reason, after the prefix naming the statement, for each of its
-     * condition tests and `${…}` references the key catalogue does not permit.
+     * condition tests and `${…}` references the key catalogue does not permit,
+     * or that names an assurance key of `authentication` or of one of the
+     * namespaces the authentication context contributes.
      *
      * @param  string  $prefix
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
+     * @param  list<string>  $namespaces
      * @return list<string>
      */
-    private function statementContextErrors(string $prefix, Statement $statement): array
+    private function statementContextErrors(string $prefix, Statement $statement, array $namespaces): array
     {
         $errors   = [];
         $subjects = $statement->resources ?? $statement->notResources ?? [];
 
         // A statement's conditions have been checked to map operators to keyed
-        // maps, so every entry is an array keyed by context key.
+        // maps, so every entry is an array keyed by context key. A requirement
+        // reads no context key, and its operand holds no reference.
         /** @var array<string, array<string, mixed>> $conditions */
-        $conditions = $statement->conditions;
+        $conditions = \array_diff_key($statement->conditions, [AuthenticationRequirement::OPERATOR => true]);
 
         foreach ($conditions as $operator => $tests) {
             foreach ($tests as $key => $operand) {
-                $errors[]   = $this->keys->permits($key, $operator) ? null : "{$prefix} " . $this->testError($key, $operator);
+                $errors[]   = self::prefixed($prefix, $this->keyError($key, $operator, $namespaces));
                 $subjects[] = $operand;
             }
         }
 
         foreach (self::referencesOf($subjects) as $path) {
-            $errors[] = $this->keys->permits($path) ? null : "{$prefix} reference '\${{$path}}' names no declared context key; " . self::DECLARE_KEYS;
+            $errors[] = self::prefixed($prefix, $this->referenceError($path, $namespaces));
         }
 
         return \array_values(\array_filter($errors, static fn (?string $error): bool => $error !== null));
+    }
+
+    /**
+     * Return the reason after the prefix naming the statement, or null when
+     * there is no reason.
+     *
+     * @param  string  $prefix
+     * @param  string|null  $error
+     * @return string|null
+     */
+    private static function prefixed(string $prefix, ?string $error): ?string
+    {
+        return $error === null ? null : "{$prefix} {$error}";
+    }
+
+    /**
+     * Describe why a condition may not test the key with the operator, or
+     * return null when it may.
+     *
+     * @param  string  $key
+     * @param  string  $operator
+     * @param  list<string>  $namespaces
+     * @return string|null
+     */
+    private function keyError(string $key, string $operator, array $namespaces): ?string
+    {
+        return match (true) {
+            AssuranceKeys::isAssuranceKey($key, $namespaces) => "condition key '{$key}' " . AssuranceKeys::REASON,
+            $this->keys->permits($key, $operator)            => null,
+            default                                          => $this->testError($key, $operator),
+        };
+    }
+
+    /**
+     * Describe why a `${…}` reference may not read the key at the path, or
+     * return null when it may.
+     *
+     * @param  string  $path
+     * @param  list<string>  $namespaces
+     * @return string|null
+     */
+    private function referenceError(string $path, array $namespaces): ?string
+    {
+        return match (true) {
+            AssuranceKeys::isAssuranceKey($path, $namespaces) => "reference '\${{$path}}' names '{$path}', which " . AssuranceKeys::REASON,
+            $this->keys->permits($path)                       => null,
+            default                                           => "reference '\${{$path}}' names no declared context key; " . self::DECLARE_KEYS,
+        };
     }
 
     /**

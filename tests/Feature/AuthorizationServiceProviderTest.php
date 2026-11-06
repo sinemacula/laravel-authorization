@@ -29,6 +29,7 @@ use SineMacula\Laravel\Authorization\Context\GuardAuthenticationContext;
 use SineMacula\Laravel\Authorization\Context\RoutedRequestContext;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
+use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
@@ -41,6 +42,7 @@ use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
@@ -52,6 +54,7 @@ use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
+use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\ApplicationAccess;
 use SineMacula\Laravel\Authorization\Services\GrantService;
@@ -64,6 +67,7 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\CustomRoleMiddlewareDouble;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
+use Tests\Feature\Stubs\InjectedRequirementChecker;
 use Tests\Feature\Stubs\PermissiveActionCatalogue;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubPolicyStore;
@@ -152,6 +156,7 @@ final class AuthorizationServiceProviderTest extends TestCase
             SubjectResolver::class,
             TenantTree::class,
             ResourceTenantResolver::class,
+            AuthenticationRequirementChecker::class,
             ResolvedTenant::class,
             ResolutionCache::class,
             PolicyResolver::class,
@@ -529,6 +534,50 @@ final class AuthorizationServiceProviderTest extends TestCase
     }
 
     /**
+     * The checker that meets no requirement is bound by default, and the
+     * configured class in its place; a checker the application binds itself
+     * survives the reset between jobs.
+     *
+     * @return void
+     */
+    public function testConfiguredRequirementCheckerIsBound(): void
+    {
+        $app = $this->application();
+
+        $default = $app->make(AuthenticationRequirementChecker::class);
+
+        self::assertInstanceOf(RefusingRequirementChecker::class, $default);
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $app->make(ConfigRepository::class);
+        $config->set('authorization.requirement_checker', InjectedRequirementChecker::class);
+
+        (new AuthorizationServiceProvider($app))->register();
+
+        $configured = $app->make(AuthenticationRequirementChecker::class);
+
+        self::assertInstanceOf(InjectedRequirementChecker::class, $configured);
+
+        $bound = new RefusingRequirementChecker;
+
+        $app->instance(AuthenticationRequirementChecker::class, $bound);
+
+        $this->startNextJob();
+
+        self::assertSame($bound, $app->make(AuthenticationRequirementChecker::class));
+    }
+
+    /**
+     * The shipped language file has a line for an insufficient authentication.
+     *
+     * @return void
+     */
+    public function testLoadsTheInsufficientAuthenticationLine(): void
+    {
+        self::assertSame('This action requires further authentication.', $this->translator()->get(InsufficientAuthenticationException::MESSAGE_KEY));
+    }
+
+    /**
      * The shipped subject resolver has no tenant, so only platform-wide rows
      * are visible, whether or not a user is signed in.
      *
@@ -755,6 +804,8 @@ final class AuthorizationServiceProviderTest extends TestCase
      * current locale.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testManagerTranslatesTheDenialInTheCurrentLocale(): void
     {

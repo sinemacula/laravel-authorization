@@ -6,6 +6,7 @@ namespace Tests\Unit\Evaluation;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
 use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionEffect;
@@ -15,9 +16,15 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementCheck;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementFreshness;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
+use SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement;
+use SineMacula\Laravel\Authorization\Subject;
+use Tests\Feature\Stubs\StubRequirementChecker;
 
 /**
  * Unit tests for the policy evaluator's deny, allow and implicit stages.
@@ -33,6 +40,9 @@ use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
 #[CoversClass(PolicyEvaluator::class)]
 final class PolicyEvaluatorTest extends TestCase
 {
+    /** @var array<string, array<string, int>> A requirement of multifactor within fifteen minutes. */
+    private const array MULTIFACTOR = ['multifactor' => ['max_age' => 900]];
+
     /**
      * With no policies nothing names the check, so it is denied as no_match at
      * the implicit stage, by no statement and with an empty trace.
@@ -1173,6 +1183,209 @@ final class PolicyEvaluatorTest extends TestCase
     }
 
     /**
+     * An allow statement whose requirement alone is unmet denies as
+     * insufficient_authentication at the implicit stage, decided by that
+     * statement and carrying its requirement and unmet parts, the trace
+     * recording the key `authentication` as not held.
+     *
+     * @return void
+     */
+    public function testAnUnmetRequirementAloneIsInsufficientAuthentication(): void
+    {
+        $policy   = self::policy('p', [self::requiringAllow(self::MULTIFACTOR)]);
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, self::requirementContext(RequirementResult::unmet(['multifactor'])));
+
+        self::assertFalse($decision->isAllowed());
+        self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $decision->reason);
+        self::assertSame(DecisionStage::IMPLICIT, $decision->stage);
+        self::assertEquals([self::reference('p', 0)], $decision->statements);
+        self::assertEquals([new UnmetRequirement(AuthenticationRequirement::fromOperand(self::MULTIFACTOR), ['multifactor'])], $decision->requirements);
+        self::assertEquals([self::entry(DecisionStage::ALLOW, TraceOutcome::CONDITION_FAILED, 'p', 0, ['authentication' => false])], $decision->trace);
+    }
+
+    /**
+     * Several allow statements whose requirements alone are unmet are each a
+     * candidate, in the order they were assessed, and an allow whose other
+     * condition fails is not.
+     *
+     * @return void
+     */
+    public function testSeveralCandidatesAreAlternatives(): void
+    {
+        $policy = self::policy('p', [
+            self::requiringAllow(self::MULTIFACTOR),
+            self::requiringAllow(self::MULTIFACTOR, ['eq' => ['input.k' => 'a']]),
+            self::requiringAllow(['phishing_resistant' => []]),
+        ]);
+
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, self::requirementContext(RequirementResult::unmet([]), ['k' => 'b']));
+
+        self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $decision->reason);
+        self::assertEquals([self::reference('p', 0), self::reference('p', 2)], $decision->statements);
+        self::assertEquals([
+            new UnmetRequirement(AuthenticationRequirement::fromOperand(self::MULTIFACTOR), ['multifactor']),
+            new UnmetRequirement(AuthenticationRequirement::fromOperand(['phishing_resistant' => []]), ['phishing_resistant']),
+        ], $decision->requirements);
+    }
+
+    /**
+     * Another allow that applies allows the check, whatever requirement goes
+     * unmet.
+     *
+     * @return void
+     */
+    public function testAnotherAllowAllowsOverAnUnmetRequirement(): void
+    {
+        $policy   = self::policy('p', [self::requiringAllow(self::MULTIFACTOR), ['effect' => 'allow', 'actions' => ['posts:read']]]);
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, self::requirementContext(RequirementResult::unmet(['multifactor'])));
+
+        self::assertTrue($decision->isAllowed());
+        self::assertEquals([self::reference('p', 1)], $decision->statements);
+        self::assertSame([], $decision->requirements);
+    }
+
+    /**
+     * A deny that applies denies the check over an unmet requirement.
+     *
+     * @return void
+     */
+    public function testADenyWinsOverAnUnmetRequirement(): void
+    {
+        $policy   = self::policy('p', [self::requiringAllow(self::MULTIFACTOR), ['effect' => 'deny', 'actions' => ['posts:read']]]);
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, self::requirementContext(RequirementResult::unmet(['multifactor'])));
+
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $decision->reason);
+        self::assertSame([], $decision->requirements);
+    }
+
+    /**
+     * An invalid allow statement denies the check as invalid_policy over an
+     * unmet requirement.
+     *
+     * @return void
+     */
+    public function testAnInvalidPolicyBlocksInsufficientAuthentication(): void
+    {
+        $invalid  = new Policy('q', [new Statement(PolicyEffect::ALLOW, ['posts:read'], null, ['bogus' => ['input.k' => 1]])]);
+        $policy   = self::policy('p', [self::requiringAllow(self::MULTIFACTOR)]);
+        $decision = (new PolicyEvaluator)->evaluate([$policy, $invalid], 'posts:read', null, self::requirementContext(RequirementResult::unmet(['multifactor'])));
+
+        self::assertSame(DecisionReason::INVALID_POLICY, $decision->reason);
+        self::assertSame([], $decision->requirements);
+    }
+
+    /**
+     * A requirement that cannot be checked on an allow statement is a failed
+     * condition, never insufficient authentication.
+     *
+     * @return void
+     */
+    public function testAnUndecidableRequirementOnAnAllowIsAFailedCondition(): void
+    {
+        $policy   = self::policy('p', [self::requiringAllow(self::MULTIFACTOR)]);
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, self::requirementContext(new \RuntimeException('down')));
+
+        self::assertSame(DecisionReason::CONDITION_FAILED, $decision->reason);
+        self::assertSame([], $decision->requirements);
+        self::assertEquals([self::entry(DecisionStage::ALLOW, TraceOutcome::UNDECIDABLE, 'p', 0, ['authentication' => false])], $decision->trace);
+    }
+
+    /**
+     * A met requirement on an allow statement allows the check.
+     *
+     * @return void
+     */
+    public function testAMetRequirementOnAnAllowAllows(): void
+    {
+        $policy   = self::policy('p', [self::requiringAllow(self::MULTIFACTOR)]);
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, self::requirementContext(RequirementResult::met()));
+
+        self::assertTrue($decision->isAllowed());
+        self::assertEquals([self::entry(DecisionStage::ALLOW, TraceOutcome::MATCHED, 'p', 0, ['authentication' => true])], $decision->trace);
+    }
+
+    /**
+     * On a deny statement an unmet requirement is a test that does not hold, so
+     * the deny does not apply; a met one applies it, and one that cannot be
+     * checked applies it too.
+     *
+     * @return void
+     */
+    public function testARequirementOnADeny(): void
+    {
+        $policy = self::policy('p', [
+            ['effect' => 'deny', 'actions' => ['posts:read'], 'conditions' => ['authentication_requirement' => ['authentication' => self::MULTIFACTOR]]],
+            ['effect' => 'allow', 'actions' => ['posts:read']],
+        ]);
+
+        $unmet       = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, self::requirementContext(RequirementResult::unmet(['multifactor'])));
+        $met         = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, self::requirementContext(RequirementResult::met()));
+        $undecidable = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, self::requirementContext(new \RuntimeException('down')));
+
+        self::assertTrue($unmet->isAllowed());
+        self::assertSame(TraceOutcome::CONDITION_FAILED, $unmet->trace[0]->outcome);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $met->reason);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $undecidable->reason);
+        self::assertSame(TraceOutcome::UNDECIDABLE, $undecidable->trace[0]->outcome);
+    }
+
+    /**
+     * An unmet requirement on a deny is never a candidate, so a check that
+     * nothing else allows is no_match.
+     *
+     * @return void
+     */
+    public function testAnUnmetRequirementOnADenyIsNoCandidate(): void
+    {
+        $deny     = ['effect' => 'deny', 'actions' => ['posts:read'], 'conditions' => ['authentication_requirement' => ['authentication' => self::MULTIFACTOR]]];
+        $policy   = self::policy('p', [$deny]);
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, self::requirementContext(RequirementResult::unmet(['multifactor'])));
+
+        self::assertSame(DecisionReason::NO_MATCH, $decision->reason);
+        self::assertSame([], $decision->requirements);
+    }
+
+    /**
+     * Insufficient authentication wins over another allow whose conditions
+     * fail.
+     *
+     * @return void
+     */
+    public function testInsufficientAuthenticationWinsOverAFailedCondition(): void
+    {
+        $policy = self::policy('p', [
+            ['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => ['eq' => ['input.k' => 'a']]],
+            self::requiringAllow(self::MULTIFACTOR),
+        ]);
+
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, self::requirementContext(RequirementResult::unmet(['multifactor']), ['k' => 'b']));
+
+        self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $decision->reason);
+        self::assertEquals([self::reference('p', 1)], $decision->statements);
+    }
+
+    /**
+     * A decision that read a requirement carries the session and the earliest
+     * instant a met requirement stays met until; one that read none carries no
+     * freshness.
+     *
+     * @return void
+     */
+    public function testTheDecisionCarriesItsFreshness(): void
+    {
+        $until    = new \DateTimeImmutable('2100-01-01 00:00:00');
+        $policy   = self::policy('p', [self::requiringAllow(self::MULTIFACTOR)]);
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, self::requirementContext(RequirementResult::met($until)));
+        $denied   = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, self::requirementContext(RequirementResult::unmet(['multifactor'])));
+        $open     = self::policy('p', [['effect' => 'allow', 'actions' => ['posts:read']]]);
+        $plain    = (new PolicyEvaluator)->evaluate([$open], 'posts:read', null, self::requirementContext(RequirementResult::met()));
+
+        self::assertEquals(new RequirementFreshness('session-1', $until), $decision->freshness);
+        self::assertEquals(new RequirementFreshness('session-1'), $denied->freshness);
+        self::assertNull($plain->freshness);
+    }
+
+    /**
      * Build a check context with `request`, `tenant` and `environment`
      * namespaces, each built on demand, counting each build.
      *
@@ -1200,6 +1413,46 @@ final class PolicyEvaluatorTest extends TestCase
         }
 
         return new CheckContext(['input' => []], $builders);
+    }
+
+    /**
+     * Build a policy of the statement documents.
+     *
+     * @param  string  $name
+     * @param  list<array<string, mixed>>  $statements
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Policy
+     */
+    private static function policy(string $name, array $statements): Policy
+    {
+        return Policy::fromArray(['name' => $name, 'statements' => $statements]);
+    }
+
+    /**
+     * Return an allow statement document for `posts:read` stating the
+     * requirement, with any further conditions.
+     *
+     * @param  array<string, mixed>  $requirement
+     * @param  array<string, mixed>  $conditions
+     * @return array<string, mixed>
+     */
+    private static function requiringAllow(array $requirement, array $conditions = []): array
+    {
+        return ['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => ['authentication_requirement' => ['authentication' => $requirement], ...$conditions]];
+    }
+
+    /**
+     * Build a context whose requirements the checker answers for a subject in
+     * `session-1`, with the input given.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\RequirementResult|\Throwable  $answer
+     * @param  array<string, mixed>  $input
+     * @return \SineMacula\Laravel\Authorization\Evaluation\CheckContext
+     */
+    private static function requirementContext(RequirementResult|\Throwable $answer, array $input = []): CheckContext
+    {
+        $user = new \stdClass;
+
+        return new CheckContext(['input' => $input], [], new RequirementCheck(new StubRequirementChecker($answer), new Subject($user, $user, session: 'session-1')));
     }
 
     /**

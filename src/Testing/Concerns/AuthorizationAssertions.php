@@ -176,9 +176,10 @@ trait AuthorizationAssertions
             }
 
             /**
-             * Return the acting subject for its own principal or identity,
-             * since the Gate hands over the signed-in identity, and any other
-             * user as a subject of its own in the same request.
+             * Return the acting subject, its session included, for its own
+             * principal or identity, since the Gate hands over the signed-in
+             * user, and any other user as a subject of its own in the same
+             * request.
              *
              * @param  object  $user
              * @return \SineMacula\Laravel\Authorization\Subject
@@ -186,7 +187,7 @@ trait AuthorizationAssertions
             #[\Override]
             public function forUser(object $user): Subject
             {
-                if ($user === $this->subject->identity) {
+                if ($user === $this->subject->identity || $user === $this->subject->subject) {
                     return $this->subject;
                 }
 

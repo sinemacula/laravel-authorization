@@ -128,6 +128,8 @@ final class FailClosedPolicyHydrationTest extends TestCase
      * decision carry the `invalid_policy` reason.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testMalformedPolicyRowMakesAuthorizeRaise(): void
     {

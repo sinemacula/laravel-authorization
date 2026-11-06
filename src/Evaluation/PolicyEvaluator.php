@@ -25,10 +25,20 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  * evaluated denies the check as an invalid policy, so no fault in a statement
  * ever skips a deny.
  *
- * Nothing allowed by a statement is denied as `condition_failed` when an allow
- * statement names the action and the resource but its conditions do not hold,
- * and as `no_match` otherwise. A permission the subject holds is a further
- * allow source, which the manager consults when the statements allow nothing.
+ * Nothing allowed by a statement is denied as `insufficient_authentication`
+ * when an allow statement names the action and the resource and only its
+ * authentication requirement is unmet (N35), with each such requirement and its
+ * unmet parts as alternatives; as `condition_failed` when an allow statement
+ * names them but its conditions do not hold; and as `no_match` otherwise. On a
+ * deny statement an unmet requirement is a test that does not hold, so the deny
+ * does not apply, and one that cannot be checked applies it, as any undecidable
+ * test does. A permission the subject holds is a further allow source, which
+ * the manager consults when the statements allow nothing, so it allows over an
+ * insufficient authentication too.
+ *
+ * A decision that read a requirement carries how long it may be reused: in the
+ * session it was made in, until the earliest instant a met requirement it read
+ * stops being met (N37).
  *
  * @phpstan-type StatementEntry array{
  *     \SineMacula\Laravel\Authorization\Evaluation\StatementReference,
@@ -52,6 +62,9 @@ final class PolicyEvaluator
 
     /** @var string An allow statement that names the check but whose conditions do not hold. */
     private const string FAILED = 'failed';
+
+    /** @var string An allow statement that names the check and whose authentication requirement alone does not hold. */
+    private const string INSUFFICIENT = 'insufficient';
 
     /** @var string A statement that does not bear on the check. */
     private const string NONE = 'none';
@@ -85,23 +98,39 @@ final class PolicyEvaluator
      */
     public function evaluate(array $policies, string $action, ?string $resource = null, array|CheckContext $context = []): Decision
     {
-        $context    = CheckContext::from($context);
-        $statements = $this->statementsOf($policies);
-        $trace      = [];
-        $denies     = $this->assess($statements[self::DENY], DecisionStage::DENY, $action, $resource, $context, $trace);
+        $context = CheckContext::from($context);
+
+        return $this->decide($this->statementsOf($policies), $action, $resource, $context)->withFreshness($context->requirementFreshness());
+    }
+
+    /**
+     * Decide the check from the statements, the deny stage first.
+     *
+     * @param  array{deny: list<StatementEntry>, allow: list<StatementEntry>}  $statements
+     * @param  string  $action
+     * @param  string|null  $resource
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
+     */
+    private function decide(array $statements, string $action, ?string $resource, CheckContext $context): Decision
+    {
+        $trace    = [];
+        [$denies] = $this->assess($statements[self::DENY], DecisionStage::DENY, $action, $resource, $context, $trace);
 
         if ($denies[self::DENY] !== [] || $denies[self::INVALID] !== []) {
-            return self::conclude(DecisionStage::DENY, $denies, $trace);
+            return self::conclude(DecisionStage::DENY, $denies, [], $trace);
         }
 
-        $allows = $this->assess($statements[self::ALLOW], DecisionStage::ALLOW, $action, $resource, $context, $trace);
+        [$allows, $requirements] = $this->assess($statements[self::ALLOW], DecisionStage::ALLOW, $action, $resource, $context, $trace);
 
-        return self::conclude(DecisionStage::ALLOW, $allows, $trace);
+        return self::conclude(DecisionStage::ALLOW, $allows, $requirements, $trace);
     }
 
     /**
      * Assess the statements of one stage, adding each to the trace, and return
-     * what they found, by how each bears on the check.
+     * what they found, by how each bears on the check, with the unmet
+     * requirement of each allow statement that only it kept from applying, in
+     * the order of those statements.
      *
      * @param  list<StatementEntry>  $statements
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage  $stage
@@ -112,11 +141,12 @@ final class PolicyEvaluator
      *
      * @param-out list<\SineMacula\Laravel\Authorization\Evaluation\TraceEntry>  $trace
      *
-     * @return array<string, list<\SineMacula\Laravel\Authorization\Evaluation\StatementReference>>
+     * @return array{array<string, list<\SineMacula\Laravel\Authorization\Evaluation\StatementReference>>, list<\SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement>}
      */
     private function assess(array $statements, DecisionStage $stage, string $action, ?string $resource, CheckContext $context, array &$trace): array
     {
-        $found = [self::DENY => [], self::INVALID => [], self::ALLOW => [], self::FAILED => [], self::NONE => []];
+        $found        = [self::DENY => [], self::INVALID => [], self::ALLOW => [], self::INSUFFICIENT => [], self::FAILED => [], self::NONE => []];
+        $requirements = [];
 
         foreach ($statements as [$reference, $statement, $notApplicable]) {
             // Most statements do not name the action, and decide nothing.
@@ -128,12 +158,21 @@ final class PolicyEvaluator
 
             $assessment = $statement->assess($action, $resource, $context, $this->interpolator());
             $outcome    = self::outcomeOf($assessment);
+            $unmet      = $stage === DecisionStage::ALLOW ? $assessment->unmetRequirement : null;
 
-            $trace[]                                                             = new TraceEntry($stage, $outcome, $reference, $assessment->conditions ?? []);
-            $found[self::categoryOf($stage === DecisionStage::DENY, $outcome)][] = $reference;
+            $trace[] = new TraceEntry($stage, $outcome, $reference, $assessment->conditions ?? []);
+
+            if ($unmet === null) {
+                $found[self::categoryOf($stage === DecisionStage::DENY, $outcome)][] = $reference;
+
+                continue;
+            }
+
+            $found[self::INSUFFICIENT][] = $reference;
+            $requirements[]              = $unmet;
         }
 
-        return $found;
+        return [$found, $requirements];
     }
 
     /**
@@ -251,22 +290,30 @@ final class PolicyEvaluator
 
     /**
      * Conclude the decision from what a stage's statements found: an explicit
-     * deny, then an invalid statement, then an allow, then an implicit deny. An
+     * deny, then an invalid statement, then an allow, then an implicit deny:
+     * insufficient authentication, then a failed condition, then no match. An
      * invalid statement denies at the stage that found it.
+     *
+     * Insufficient authentication is concluded at the implicit stage, so a
+     * permission the subject holds still allows over it.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage  $stage
      * @param  array<string, list<\SineMacula\Laravel\Authorization\Evaluation\StatementReference>>  $found
+     * @param  list<\SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement>  $requirements
      * @param  list<\SineMacula\Laravel\Authorization\Evaluation\TraceEntry>  $trace
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    private static function conclude(DecisionStage $stage, array $found, array $trace): Decision
+    private static function conclude(DecisionStage $stage, array $found, array $requirements, array $trace): Decision
     {
+        // Boundaries, guardrails and session caps (BL-48 to BL-50) will rank
+        // above insufficient authentication when they arrive.
         return match (true) {
-            $found[self::DENY]    !== [] => Decision::deny(DecisionReason::EXPLICIT_DENY, DecisionStage::DENY, $found[self::DENY], $trace),
-            $found[self::INVALID] !== [] => Decision::deny(DecisionReason::INVALID_POLICY, $stage, $found[self::INVALID], $trace),
-            $found[self::ALLOW]   !== [] => Decision::allow(DecisionStage::ALLOW, $found[self::ALLOW], $trace),
-            $found[self::FAILED]  !== [] => Decision::deny(DecisionReason::CONDITION_FAILED, DecisionStage::IMPLICIT, [], $trace),
-            default                      => Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT, [], $trace),
+            $found[self::DENY]         !== [] => Decision::deny(DecisionReason::EXPLICIT_DENY, DecisionStage::DENY, $found[self::DENY], $trace),
+            $found[self::INVALID]      !== [] => Decision::deny(DecisionReason::INVALID_POLICY, $stage, $found[self::INVALID], $trace),
+            $found[self::ALLOW]        !== [] => Decision::allow(DecisionStage::ALLOW, $found[self::ALLOW], $trace),
+            $found[self::INSUFFICIENT] !== [] => Decision::insufficientAuthentication(DecisionStage::IMPLICIT, $found[self::INSUFFICIENT], $requirements, $trace),
+            $found[self::FAILED]       !== [] => Decision::deny(DecisionReason::CONDITION_FAILED, DecisionStage::IMPLICIT, [], $trace),
+            default                           => Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT, [], $trace),
         };
     }
 
