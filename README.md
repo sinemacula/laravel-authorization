@@ -326,12 +326,16 @@ guard with `GranteeGuardMismatchException`. A role's, permission's or policy's o
 Tenants can form a tree (an organisation above its accounts, say). The package never stores it: bind a class
 implementing `SineMacula\Laravel\Authorization\Contracts\TenantTree` as `tenant_tree` in `config/authorization.php`,
 answering a tenant's ancestors, whether one tenant is within another, and a tenant's subtree as a query. The default is
-a flat set of tenants. With a tree, a grant in a tenant also applies in every tenant below it, unless its
-`include_subtree` is false, and a tenant sees the roles, permissions and policies its ancestors own as well as its own
-and the platform's; the nearest owner's wins a lookup by name. When the tree changes (a tenant moved under another
-parent, or deleted), report it so cached answers below it are dropped and the move takes effect at once:
+a flat set of tenants. With a tree, a grant in a tenant also applies in every tenant below it, unless it is limited to
+that tenant, and a tenant sees the roles, permissions and policies its ancestors own as well as its own and the
+platform's; the nearest owner's wins a lookup by name. Granting again with the other reach changes it, reported as
+`GrantOutcome::REACH_CHANGED`. When the tree changes (a tenant moved under another parent, or deleted), report it so
+cached answers below it are dropped and the move takes effect at once:
 
 ```php
+$user->assignRole('admin', tenant: $organisation);                          // the organisation and its accounts
+$user->assignRole('billing', tenant: $organisation, includeSubtree: false); // the organisation alone
+
 Authorization::treeChanged($account);
 ```
 

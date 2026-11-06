@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChange;
 use SineMacula\Laravel\Authorization\Services\Support\GrantTable;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\RecordsRowLocks;
 use Tests\TestCase;
@@ -93,6 +94,100 @@ final class GrantTableTest extends TestCase
             'created_at'        => self::NOW,
             'updated_at'        => self::NOW,
         ]], self::rows());
+    }
+
+    /**
+     * A grant in a tenant is written with its reach: the tenants below it as
+     * well by default, or the tenant alone.
+     *
+     * @return void
+     */
+    public function testAGrantIsWrittenWithItsReach(): void
+    {
+        $role  = self::role();
+        $other = self::role('viewer');
+
+        (new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_identity', 'user-1', null, self::tenant()))->grant($role->id, null);
+        self::table(tenant: self::tenant(), includeSubtree: false)->grant($other->id, null);
+
+        self::assertEquals([$role->id => true, $other->id => false], self::reaches());
+    }
+
+    /**
+     * Granting what is held with the same expiry and another reach changes the
+     * reach alone, reported with the expiry held, and records the actor; the
+     * same reach again changes nothing.
+     *
+     * @return void
+     */
+    public function testAnotherReachOnAHeldGrantChangesTheReach(): void
+    {
+        $role  = self::role();
+        $actor = new Reference('stub_identity', 'admin');
+
+        self::table(tenant: self::tenant())->grant($role->id, Carbon::parse('2026-07-02 12:00:00'));
+
+        Carbon::setTestNow('2026-07-01 12:30:00');
+
+        $change = self::table(grantedBy: $actor, tenant: self::tenant(), includeSubtree: false)->grant($role->id, Carbon::parse('2026-07-02 12:00:00'));
+
+        self::assertSame(GrantOutcome::REACH_CHANGED, $change->outcome);
+        self::assertSame('2026-07-02 12:00:00', $change->previousExpiresAt?->format('Y-m-d H:i:s'));
+        self::assertEquals([$role->id => false], self::reaches());
+        self::assertSame(['2026-07-02 12:00:00'], self::expiries());
+        self::assertSame('2026-07-01 12:30:00', self::rows()[0]['updated_at']);
+        self::assertSame([[$role->id, 'stub_identity', 'admin']], self::grantors());
+        self::assertSame(GrantOutcome::UNCHANGED, self::table(tenant: self::tenant(), includeSubtree: false)->grant($role->id, Carbon::parse('2026-07-02 12:00:00'))->outcome);
+    }
+
+    /**
+     * A changed expiry, or a re-armed grant, is written with the writer's
+     * reach; a re-arm leaves a live grant's reach as it is.
+     *
+     * @return void
+     */
+    public function testARewriteCarriesTheReach(): void
+    {
+        $role    = self::role();
+        $expired = self::role('viewer');
+        $live    = self::role('author');
+        $table   = self::table(tenant: self::tenant());
+        $limited = self::table(tenant: self::tenant(), includeSubtree: false);
+
+        $table->grant($role->id, null);
+        $table->grant($expired->id, Carbon::parse(self::NOW));
+        $table->grant($live->id, null);
+
+        self::assertSame(GrantOutcome::EXPIRY_CHANGED, $limited->grant($role->id, Carbon::parse('2026-07-02 12:00:00'))->outcome);
+        self::assertSame(GrantOutcome::REARMED, $limited->rearm($expired->id, null)->outcome);
+        self::assertSame(GrantOutcome::UNCHANGED, $limited->rearm($live->id, null)->outcome);
+        self::assertEquals([$role->id => false, $expired->id => false, $live->id => true], self::reaches());
+    }
+
+    /**
+     * The reach of each held row in the scope is read by key, and a row in
+     * another scope or not held is left out.
+     *
+     * @return void
+     */
+    public function testReachesReadEachHeldRowInTheScope(): void
+    {
+        $role    = self::role();
+        $other   = self::role('viewer');
+        $outside = self::role('author');
+
+        self::table(tenant: self::tenant())->grant($role->id, null);
+        self::table(tenant: self::tenant(), includeSubtree: false)->grant($other->id, null);
+        self::table()->grant($outside->id, null);
+
+        $reaches  = self::table(tenant: self::tenant())->reaches([$role->id, $other->id, $outside->id]);
+        $expected = [$role->id => true, $other->id => false];
+
+        \ksort($reaches);
+        \ksort($expected);
+
+        self::assertSame($expected, $reaches);
+        self::assertSame([], self::table(tenant: self::tenant())->reaches([]));
     }
 
     /**
@@ -287,7 +382,8 @@ final class GrantTableTest extends TestCase
     }
 
     /**
-     * A held grant's expiry is read back under a row lock on the grant table.
+     * A held grant's expiry, and then its reach, are read back under a row lock
+     * on the grant table.
      *
      * @return void
      */
@@ -302,7 +398,10 @@ final class GrantTableTest extends TestCase
 
         $table->grant($role->id, null);
 
-        self::assertSame([['authorizable_roles', ['stub_identity', 'user-1', $role->id]]], $locks->getArrayCopy());
+        self::assertSame([
+            ['authorizable_roles', ['stub_identity', 'user-1', $role->id]],
+            ['authorizable_roles', ['stub_identity', 'user-1', $role->id]],
+        ], $locks->getArrayCopy());
     }
 
     /**
@@ -535,14 +634,14 @@ final class GrantTableTest extends TestCase
         $second = self::role('second');
 
         self::table()->grant($first->id, null);
-        self::table(tenant: self::tenant())->grant($second->id, null);
+        self::table(tenant: self::tenant(), includeSubtree: false)->grant($second->id, null);
         self::table('user-2')->grant($first->id, null);
 
         $grants = self::table()->grantsInEveryScope();
 
         \usort($grants, static fn (array $left, array $right): int => $left[0] <=> $right[0]);
 
-        $expected = [[$first->id, null], [$second->id, self::tenant()]];
+        $expected = [[$first->id, new GrantScope], [$second->id, new GrantScope(self::tenant(), null, false)]];
 
         \usort($expected, static fn (array $left, array $right): int => $left[0] <=> $right[0]);
 
@@ -601,11 +700,29 @@ final class GrantTableTest extends TestCase
      * @param  string  $granteeId
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $grantedBy
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  bool  $includeSubtree
      * @return \SineMacula\Laravel\Authorization\Services\Support\GrantTable
      */
-    private static function table(string $granteeId = 'user-1', ?Reference $grantedBy = null, ?Reference $tenant = null): GrantTable
+    private static function table(string $granteeId = 'user-1', ?Reference $grantedBy = null, ?Reference $tenant = null, bool $includeSubtree = true): GrantTable
     {
-        return new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_identity', $granteeId, $grantedBy, $tenant);
+        return new GrantTable(DB::connection(), 'authorizable_roles', 'role_id', 'stub_identity', $granteeId, $grantedBy, $tenant, $includeSubtree);
+    }
+
+    /**
+     * Return whether each role grant row reaches the tenants below its tenant,
+     * keyed by the role.
+     *
+     * @return array<string, bool>
+     */
+    private static function reaches(): array
+    {
+        $reaches = [];
+
+        foreach (DB::table('authorizable_roles')->get(['role_id', 'include_subtree']) as $row) {
+            $reaches[(string) $row->role_id] = (bool) $row->include_subtree; // @phpstan-ignore cast.string
+        }
+
+        return $reaches;
     }
 
     /**

@@ -401,8 +401,8 @@ final class GrantTargetTest extends TestCase
 
     /**
      * A grant's change dispatches nothing when unchanged, the granted event
-     * when new, and the granted and expiry-changed events when re-armed or
-     * changed.
+     * when new or its reach changed, and the granted and expiry-changed events
+     * when re-armed or changed.
      *
      * @return void
      */
@@ -420,6 +420,7 @@ final class GrantTargetTest extends TestCase
 
         self::assertSame([], $classes(GrantOutcome::UNCHANGED));
         self::assertSame([RoleAssigned::class], $classes(GrantOutcome::GRANTED));
+        self::assertSame([RoleAssigned::class], $classes(GrantOutcome::REACH_CHANGED));
         self::assertSame([RoleAssigned::class, RoleExpiryChanged::class], $classes(GrantOutcome::REARMED));
         self::assertSame([RoleAssigned::class, RoleExpiryChanged::class], $classes(GrantOutcome::EXPIRY_CHANGED));
     }

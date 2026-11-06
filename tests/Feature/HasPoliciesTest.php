@@ -18,6 +18,7 @@ use SineMacula\Laravel\Authorization\Events\Identity\PolicyDetached;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ChecksGrantExpiry;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
@@ -55,6 +56,31 @@ final class HasPoliciesTest extends TestCase
         Carbon::setTestNow();
 
         parent::tearDown();
+    }
+
+    /**
+     * A grant in a tenant through the trait can be limited to that tenant, and
+     * reaches the tenants below it by default.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPolicyInATenantCanBeLimitedToIt(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $tenant = new Reference('stub_tenant', 'tenant-a');
+
+        $policy = Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]);
+
+        $user->attachPolicy($policy, null, $tenant, false);
+
+        $other = Policy::create(['name' => 'writers', 'document' => ['version' => 1, 'statements' => []]]);
+        $user->attachPolicy($other, null, $tenant);
+
+        $reaches = DB::table('authorizable_policies')->pluck('include_subtree')->map(static fn (mixed $reach): bool => (bool) $reach)->all();
+
+        self::assertEqualsCanonicalizing([false, true], $reaches);
     }
 
     /**

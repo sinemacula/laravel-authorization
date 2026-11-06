@@ -8,6 +8,8 @@ use Illuminate\Database\Connection;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
+use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
@@ -45,6 +47,7 @@ final readonly class GrantTable extends ExpiringGrants
      * @param  string  $granteeId
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $grantedBy
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  bool  $includeSubtree
      */
     public function __construct(
 
@@ -68,7 +71,35 @@ final readonly class GrantTable extends ExpiringGrants
 
         /** The tenant the grants hold in; null for platform-wide. */
         private ?Reference $tenant = null,
+
+        /** Whether the grants written also hold in the tenants below the tenant. */
+        private bool $includeSubtree = true,
     ) {}
+
+    /**
+     * Grant the given row with the given expiry, and the writer's reach.
+     *
+     * Granting what is held with the same expiry and reach changes nothing. A
+     * different expiry is written with the reach; the same expiry with a
+     * different reach changes the reach alone (D21).
+     *
+     * @param  string  $id
+     * @param  \DateTimeInterface|null  $expiresAt
+     * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange
+     */
+    #[\Override]
+    public function grant(string $id, ?\DateTimeInterface $expiresAt): GrantChange
+    {
+        $change = parent::grant($id, $expiresAt);
+
+        if ($change->outcome !== GrantOutcome::UNCHANGED || $this->reachesBelow($id) === $this->includeSubtree) {
+            return $change;
+        }
+
+        $this->writeExpiry($id, $change->previousExpiresAt);
+
+        return new GrantChange(GrantOutcome::REACH_CHANGED, $change->previousExpiresAt);
+    }
 
     /**
      * Return the keys of the rows the grantee holds in the scope, among the
@@ -94,21 +125,44 @@ final readonly class GrantTable extends ExpiringGrants
     }
 
     /**
-     * Return every grant the grantee holds, in any scope, as its granted key
-     * and the tenant it holds in (null for platform-wide), for the revocation
-     * of everything a deleted grantee held.
+     * Return whether each of the given rows the grantee holds in the scope
+     * reaches the tenants below the tenant, keyed by the granted key, for the
+     * events of their revocation.
      *
-     * @return list<array{0: string, 1: \SineMacula\Laravel\Authorization\Support\Reference|null}>
+     * @param  list<string>  $ids
+     * @return array<string, bool>
+     */
+    public function reaches(array $ids): array
+    {
+        $reaches = [];
+
+        foreach ($this->inScope()->whereIn($this->column, $ids)->get([$this->column . ' as target_id', 'include_subtree']) as $row) {
+            /** @var array{target_id: string, include_subtree: bool|int|string} $columns */
+            $columns = (array) $row;
+
+            $reaches[$columns['target_id']] = (bool) $columns['include_subtree'];
+        }
+
+        return $reaches;
+    }
+
+    /**
+     * Return every grant the grantee holds, in any scope, as its granted key
+     * and the scope it holds in (its tenant, null for platform-wide, and its
+     * reach), for the revocation of everything a deleted grantee held.
+     *
+     * @return list<array{0: string, 1: \SineMacula\Laravel\Authorization\Support\GrantScope}>
      */
     public function grantsInEveryScope(): array
     {
         $grants = [];
 
-        foreach ($this->grantee()->get([$this->column, 'tenant_type', 'tenant_id']) as $row) {
-            /** @var array<string, scalar|null> $columns */
+        foreach ($this->grantee()->get([$this->column . ' as target_id', 'tenant_type', 'tenant_id', 'include_subtree']) as $row) {
+            /** @var array{target_id: string, tenant_type: string|null, tenant_id: string|null, include_subtree: bool|int|string} $columns */
             $columns  = (array) $row;
-            $type     = $columns['tenant_type'] ?? null;
-            $grants[] = [(string) $columns[$this->column], $type === null ? null : new Reference((string) $type, (string) $columns['tenant_id'])];
+            $type     = $columns['tenant_type'];
+            $tenant   = $type === null ? null : new Reference($type, (string) $columns['tenant_id']);
+            $grants[] = [$columns['target_id'], new GrantScope($tenant, null, (bool) $columns['include_subtree'])];
         }
 
         return $grants;
@@ -143,6 +197,7 @@ final readonly class GrantTable extends ExpiringGrants
             'authorizable_id'   => $this->granteeId,
             'tenant_type'       => $this->tenant?->type,
             'tenant_id'         => $this->tenant?->id,
+            'include_subtree'   => $this->includeSubtree,
             'expires_at'        => $expiresAt,
             'granted_by_type'   => $this->grantedBy?->type,
             'granted_by_id'     => $this->grantedBy?->id,
@@ -166,8 +221,8 @@ final readonly class GrantTable extends ExpiringGrants
     }
 
     /**
-     * Write the new expiry, and the actor making the grant again, to the row in
-     * the scope.
+     * Write the new expiry, the reach, and the actor making the grant again, to
+     * the row in the scope.
      *
      * @param  string  $id
      * @param  \Illuminate\Support\Carbon|null  $expiresAt
@@ -177,11 +232,26 @@ final readonly class GrantTable extends ExpiringGrants
     protected function writeExpiry(string $id, ?Carbon $expiresAt): void
     {
         $this->inScope()->where($this->column, $id)->update([
+            'include_subtree' => $this->includeSubtree,
             'expires_at'      => $expiresAt,
             'granted_by_type' => $this->grantedBy?->type,
             'granted_by_id'   => $this->grantedBy?->id,
             'updated_at'      => Carbon::now(),
         ]);
+    }
+
+    /**
+     * Determine whether the held row in the scope reaches the tenants below its
+     * tenant.
+     *
+     * @param  string  $id
+     * @return bool
+     */
+    private function reachesBelow(string $id): bool
+    {
+        // A locking read, as the expiry's: on MySQL a plain read would see the
+        // transaction's snapshot rather than the row it has just locked.
+        return (bool) $this->inScope()->where($this->column, $id)->lockForUpdate()->value('include_subtree');
     }
 
     /**

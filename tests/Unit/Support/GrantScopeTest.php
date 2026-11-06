@@ -28,6 +28,7 @@ final class GrantScopeTest extends TestCase
     public function testThePlatformScopeNamesNoTenantOrApplication(): void
     {
         self::assertEquals(new GrantScope(null, null), GrantScope::platform());
+        self::assertTrue(GrantScope::platform()->includeSubtree);
     }
 
     /**
@@ -42,5 +43,7 @@ final class GrantScopeTest extends TestCase
 
         self::assertSame($tenant, $scope->tenant);
         self::assertSame('admin', $scope->application);
+        self::assertTrue($scope->includeSubtree);
+        self::assertFalse((new GrantScope($tenant, null, false))->includeSubtree);
     }
 }

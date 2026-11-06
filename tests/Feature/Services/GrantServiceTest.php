@@ -313,6 +313,151 @@ final class GrantServiceTest extends TestCase
     }
 
     /**
+     * A grant in a tenant can be limited to it, and granting it again with the
+     * other reach changes the reach, reported as a change with the granted
+     * event carrying it; a platform-wide grant always reaches below, whatever
+     * it is given, each kind and the trait helpers pass the reach on, and each
+     * reaches below by default.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGrantInATenantCanBeLimitedToIt(): void
+    {
+        $user   = self::user();
+        $tenant = Reference::of(self::createTenant('tenant-a'));
+
+        Role::query()->create(['name' => 'editor']);
+        Role::query()->create(['name' => 'viewer']);
+        Permission::query()->create(['name' => 'posts:edit']);
+        Policy::query()->create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]);
+
+        Event::fake();
+
+        $outcomes = [
+            self::service()->grantRole($user, 'editor', tenant: $tenant, includeSubtree: false),
+            self::service()->grantRole($user, 'editor', tenant: $tenant),
+            self::service()->grantRole($user, 'editor', tenant: $tenant),
+            self::service()->grantRole($user, 'viewer', includeSubtree: false),
+            self::service()->grantRole($user, 'viewer'),
+        ];
+
+        self::assertSame([GrantOutcome::GRANTED, GrantOutcome::REACH_CHANGED, GrantOutcome::UNCHANGED, GrantOutcome::GRANTED, GrantOutcome::UNCHANGED], $outcomes);
+
+        $user->givePermission('posts:edit', null, $tenant, false);
+        $user->attachPolicy(Policy::query()->sole(), null, $tenant, false);
+        $user->assignRole('viewer', null, $tenant, false);
+
+        self::assertSame(
+            [false, true, true],
+            \array_map(static fn (RoleAssigned $event): bool => $event->scope->includeSubtree, \array_slice(self::dispatchedEvents(RoleAssigned::class), 0, 3)),
+        );
+        self::assertFalse(self::dispatchedEvents(RoleAssigned::class)[3]->scope->includeSubtree);
+        self::assertFalse(self::dispatchedEvents(PermissionGranted::class)[0]->scope->includeSubtree);
+        self::assertFalse(self::dispatchedEvents(PolicyAttached::class)[0]->scope->includeSubtree);
+        self::assertSame(0, DB::table('authorizable_roles')->whereNull('tenant_type')->where('include_subtree', false)->count());
+        self::assertSame(1, DB::table('authorizable_permissions')->where('include_subtree', false)->count());
+        self::assertSame(1, DB::table('authorizable_policies')->where('include_subtree', false)->count());
+        self::assertSame(GrantOutcome::REACH_CHANGED, self::service()->grantPermission($user, 'posts:edit', tenant: $tenant));
+        self::assertSame(GrantOutcome::REACH_CHANGED, self::service()->attachPolicy($user, Policy::query()->sole(), tenant: $tenant));
+        self::assertSame(0, DB::table('authorizable_permissions')->where('include_subtree', false)->count());
+        self::assertSame(0, DB::table('authorizable_policies')->where('include_subtree', false)->count());
+    }
+
+    /**
+     * A revocation reports the reach the grant had, whether it is revoked by
+     * itself, dropped by a sync or revoked with everything the grantee held.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARevocationReportsTheReachTheGrantHad(): void
+    {
+        $user   = self::user();
+        $tenant = Reference::of(self::createTenant('tenant-a'));
+
+        foreach (['editor', 'viewer', 'author', 'owner'] as $name) {
+            Role::query()->create(['name' => $name]);
+        }
+
+        self::service()->grantRole($user, 'editor', tenant: $tenant, includeSubtree: false);
+        self::service()->grantRole($user, 'viewer', tenant: $tenant, includeSubtree: false);
+        self::service()->grantRole($user, 'author', tenant: $tenant);
+        self::service()->grantRole($user, 'owner', tenant: $tenant, includeSubtree: false);
+
+        Event::fake();
+
+        self::service()->revokeRole($user, 'editor', tenant: $tenant);
+        self::service()->syncRoles($user, ['author', 'owner'], tenant: $tenant);
+        self::service()->revokeAll($user);
+
+        $reaches = [];
+
+        foreach (self::dispatchedEvents(RoleRevoked::class) as $event) {
+            $reaches[$event->name] = $event->scope->includeSubtree;
+        }
+
+        self::assertEquals(['editor' => false, 'viewer' => false, 'author' => true, 'owner' => false], $reaches);
+    }
+
+    /**
+     * A sync writes its reach to what it grants and re-arms, reporting each,
+     * and leaves a live grant it keeps as it is; by default it reaches below.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASyncWritesItsReachOnlyToWhatItGrants(): void
+    {
+        $user   = self::user();
+        $tenant = Reference::of(self::createTenant('tenant-a'));
+
+        foreach (['editor', 'viewer', 'author'] as $name) {
+            Role::query()->create(['name' => $name]);
+        }
+
+        Permission::query()->create(['name' => 'posts:edit']);
+        Policy::query()->create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]);
+
+        self::service()->grantRole($user, 'editor', tenant: $tenant);
+        self::service()->grantRole($user, 'viewer', Carbon::parse('2000-01-01 00:00:00'), tenant: $tenant);
+
+        Event::fake();
+
+        $result = self::service()->syncRoles($user, ['editor', 'viewer', 'author'], tenant: $tenant, includeSubtree: false);
+
+        self::assertEqualsCanonicalizing(['viewer', 'author'], \array_map(static fn (RoleAssigned $event): string => $event->name, self::dispatchedEvents(RoleAssigned::class)));
+
+        self::service()->syncPermissions($user, ['posts:edit'], tenant: $tenant, includeSubtree: false);
+        self::service()->syncPolicies($user, [Policy::query()->sole()], tenant: $tenant, includeSubtree: false);
+
+        $reaches = DB::table('authorizable_roles')
+            ->join('roles', 'roles.id', '=', 'authorizable_roles.role_id')
+            ->pluck('authorizable_roles.include_subtree', 'roles.name')
+            ->map(static fn (mixed $reach): bool => (bool) $reach)
+            ->all();
+
+        self::assertCount(1, $result->granted);
+        self::assertCount(1, $result->rearmed);
+        self::assertEquals(['editor' => true, 'viewer' => false, 'author' => false], $reaches);
+        self::assertSame(1, DB::table('authorizable_permissions')->where('include_subtree', false)->count());
+        self::assertSame(1, DB::table('authorizable_policies')->where('include_subtree', false)->count());
+
+        $other = StubIdentity::query()->create(['id' => 'user-2']);
+
+        self::service()->syncRoles($other, ['editor'], tenant: $tenant);
+        self::service()->syncPermissions($other, ['posts:edit'], tenant: $tenant);
+        self::service()->syncPolicies($other, [Policy::query()->sole()], tenant: $tenant);
+
+        foreach (['authorizable_roles', 'authorizable_permissions', 'authorizable_policies'] as $table) {
+            self::assertTrue((bool) DB::table($table)->where('authorizable_id', 'user-2')->value('include_subtree'), "{$table} did not reach below by default.");
+        }
+    }
+
+    /**
      * A role a tenant owns is granted in that tenant without naming it, and the
      * event reports the scope; naming another tenant is refused.
      *
