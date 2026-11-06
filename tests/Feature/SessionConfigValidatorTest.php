@@ -103,6 +103,7 @@ final class SessionConfigValidatorTest extends TestCase
         yield 'scopes that are not an array' => [['scopes' => 'editor'], $scopes, 'expected an array of scopes to their action patterns, got string.'];
         yield 'a scope listed as a number' => [['scopes' => [7]], $scopes, self::NOT_A_SCOPE];
         yield 'an empty scope listed' => [['scopes' => ['']], $scopes, self::NOT_A_SCOPE];
+        yield 'an empty scope mapped' => [['scopes' => ['' => ['posts:create']]], $scopes, self::NOT_A_SCOPE];
         yield 'a scope mapped to a string' => [['scopes' => ['editor' => 'posts:*']], $scopes, self::NOT_A_SCOPE];
         yield 'a scope mapped to nothing' => [['scopes' => ['editor' => []]], $scopes, self::NOT_A_SCOPE];
         yield 'a scope mapped to a keyed array' => [['scopes' => ['editor' => ['a' => 'posts:*']]], $scopes, self::NOT_A_SCOPE];

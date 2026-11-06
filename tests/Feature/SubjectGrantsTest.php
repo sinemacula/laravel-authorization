@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
+use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -135,9 +136,9 @@ final class SubjectGrantsTest extends TestCase
 
     /**
      * A person's grants never reach a machine principal: the roles, permissions
-     * and policies of a person identity count for nothing about the machine,
-     * while its boundary still caps it and its being inactive still denies
-     * everything.
+     * and allow statements of a person identity count for nothing about the
+     * machine, while its deny statements, its boundary and its being inactive
+     * still narrow every check.
      *
      * @return void
      *
@@ -155,12 +156,24 @@ final class SubjectGrantsTest extends TestCase
         $person->assignRole(Role::create(['name' => 'staff']));
         $person->givePermission(Permission::create(['name' => 'admin:read']));
         $person->attachPolicy(Policy::create(['name' => 'person', 'document' => ['version' => 1, 'statements' => []]]));
+        $person->attachPolicy(Policy::create(['name' => 'person-allow', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['admin:*']]]]]));
+        $person->attachPolicy(Policy::create(['name' => 'person-mixed', 'document' => ['statements' => [
+            ['effect' => 'allow', 'actions' => ['posts:*']],
+            ['effect' => 'deny', 'actions' => ['exports:*']],
+            ['effect' => 'allow', 'actions' => ['comments:*']],
+            ['effect' => 'deny', 'actions' => ['billing:*']],
+        ]]]));
         $service->set($person, Policy::create(['name' => 'person-cap', 'document' => ['version' => 1, 'statements' => []]]));
+
+        $denials = SubjectGrants::identityPolicies($subject);
 
         self::assertNull(SubjectGrants::grantingIdentity($subject));
         self::assertFalse(SubjectGrants::holdsRole($subject, 'staff'));
         self::assertFalse(SubjectGrants::holdsPermission($subject, 'admin:read'));
-        self::assertSame([], SubjectGrants::identityPolicies($subject));
+        self::assertCount(1, $denials);
+        self::assertSame('person-mixed', $denials[0]->name);
+        self::assertSame([1, 3], \array_keys($denials[0]->statements));
+        self::assertSame([['exports:*'], ['billing:*']], \array_values(\array_map(static fn (Statement $statement): ?array => $statement->actions, $denials[0]->statements)));
         self::assertCount(1, SubjectGrants::boundaries($subject));
 
         $person->suspended = true;
@@ -169,9 +182,9 @@ final class SubjectGrantsTest extends TestCase
     }
 
     /**
-     * A machine's grants never reach a person: the roles, permissions and
-     * policies of a machine identity count for nothing about a person
-     * principal.
+     * A machine's grants never reach a person: the roles, permissions and allow
+     * statements of a machine identity count for nothing about a person
+     * principal, and a policy of it with no deny statement gives nothing.
      *
      * @return void
      */

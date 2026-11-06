@@ -2928,6 +2928,47 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * A deny attached to the identity still denies a subject of the other kind,
+     * since a deny only narrows a check, and the trace names it at its position
+     * in its policy; an allow beside it never allows, whichever way round the
+     * machine and the person are.
+     *
+     * @return void
+     */
+    public function testACrossKindIdentitysDenyStillDeniesAndItsAllowNeverAllows(): void
+    {
+        $machine = StubMachine::create(['id' => 'svc-1']);
+        $person  = StubIdentity::create(['id' => 'user-1']);
+        $mixed   = [['effect' => 'allow', 'actions' => ['posts:publish']], ['effect' => 'deny', 'actions' => ['exports:*']]];
+        $denies  = self::resourcePolicy('person-mixed', $mixed);
+        $allows  = self::resourcePolicy('machine-mixed', [['effect' => 'allow', 'actions' => ['posts:archive']], ['effect' => 'deny', 'actions' => ['deploys:*']]]);
+
+        $person->attachPolicy($denies);
+        $machine->attachPolicy($allows);
+        $machine->givePermission(Permission::create(['name' => 'exports:run']));
+        $person->givePermission(Permission::create(['name' => 'deploys:run']));
+
+        $this->withCredential(['*']);
+        $this->resolveSubject(new Subject($machine, $person));
+
+        $denied = Authorization::check('exports:run');
+
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $denied->reason);
+        self::assertEquals([new StatementReference('person-mixed', 1, $denies->id)], $denied->statements);
+        self::assertSame(DecisionReason::NO_MATCH, Authorization::check('posts:publish')->reason);
+        self::assertTrue(Authorization::can('posts:archive'));
+
+        $this->resolveSubject(new Subject($person, $machine));
+
+        $denied = Authorization::check('deploys:run');
+
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $denied->reason);
+        self::assertEquals([new StatementReference('machine-mixed', 1, $allows->id)], $denied->statements);
+        self::assertSame(DecisionReason::NO_MATCH, Authorization::check('posts:archive')->reason);
+        self::assertTrue(Authorization::can('posts:publish'));
+    }
+
+    /**
      * The credential's source is asked once per check, about the check's
      * subject, and a session cap reads nothing from the database: a check a cap
      * covers runs the same queries as one with no cap, and one a cap refuses

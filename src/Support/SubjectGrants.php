@@ -9,6 +9,9 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPolicies;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
+use SineMacula\Laravel\Authorization\Evaluation\Policy;
+use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Resolvers\BoundaryResolver;
 use SineMacula\Laravel\Authorization\Subject;
 
@@ -19,13 +22,16 @@ use SineMacula\Laravel\Authorization\Subject;
  * An identity's grants hold in every principal of that identity, a principal's
  * only in that principal, and nothing reaches a principal through another
  * principal of the same identity. A machine is never treated as a person
- * (AUTHZ-2.4): the identity's roles, permissions and policies reach the subject
- * only when both are machines (see `AuthorizableMachine`) or neither is, so a
- * person's grants never reach a machine principal and a machine's never reach a
- * person. What only narrows a check still holds across the two: the permission
- * boundaries of both cap every check about the subject, and a subject or
- * identity that reports itself inactive is denied everything, whatever either
- * holds.
+ * (AUTHZ-2.4): the identity's roles, permissions and the allow statements of
+ * its policies reach the subject only when both are machines (see
+ * `AuthorizableMachine`) or neither is, so a person's grants never reach a
+ * machine principal and a machine's never reach a person. What only narrows a
+ * check still holds across the two: the deny statements of the identity's
+ * policies, its own and those its roles attach, deny the subject, the
+ * permission boundaries of both cap every check about the subject, and a
+ * subject or identity that reports itself inactive is denied everything,
+ * whatever either holds. An identity policy that cannot be read therefore
+ * denies the check whatever the identity's kind.
  *
  * The manager, the Blade role helpers and the `role:` middleware all ask here,
  * so they read the same grants.
@@ -102,17 +108,24 @@ final class SubjectGrants
     }
 
     /**
-     * Return the policies attached to the subject's identity when it grants to
-     * the subject; the subject's own come through the policy resolver.
+     * Return the policies attached to the subject's identity when that is
+     * another model; the subject's own come through the policy resolver. An
+     * identity that grants to the subject gives its policies whole; one of the
+     * other kind gives only those with a deny statement, each with its deny
+     * statements alone, at their positions, since a deny only narrows a check.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
      */
     public static function identityPolicies(Subject $subject): array
     {
-        $identity = self::grantingIdentity($subject);
+        $identity = self::separateIdentity($subject);
 
-        return $identity instanceof SupportsPolicies ? $identity->getPolicies() : [];
+        if (!$identity instanceof SupportsPolicies) {
+            return [];
+        }
+
+        return self::grantingIdentity($subject) === null ? self::denialsOf($identity->getPolicies()) : $identity->getPolicies();
     }
 
     /**
@@ -143,6 +156,31 @@ final class SubjectGrants
         $identity = self::separateIdentity($subject);
 
         return $identity instanceof AuthorizableMachine === $subject->subject instanceof AuthorizableMachine ? $identity : null;
+    }
+
+    /**
+     * Return each policy that has a deny statement with its deny statements
+     * alone, each keeping its position, so the trace names it as the policy
+     * does; a policy with none is left out.
+     *
+     * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
+     * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>
+     */
+    private static function denialsOf(array $policies): array
+    {
+        $denials = [];
+
+        foreach ($policies as $policy) {
+            $denies = \array_filter($policy->statements, static fn (Statement $statement): bool => $statement->effect === PolicyEffect::DENY);
+
+            if ($denies === []) {
+                continue;
+            }
+
+            $denials[] = new Policy($policy->name, $denies, $policy->version, $policy->id, $policy->resource);
+        }
+
+        return $denials;
     }
 
     /**

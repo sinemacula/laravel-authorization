@@ -21,7 +21,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static \SineMacula\Laravel\Authorization\AuthorizationManager for(object $subject)
  * @method static \SineMacula\Laravel\Authorization\AuthorizationManager forUser(object $user)
  * @method static \SineMacula\Laravel\Authorization\AuthorizationManager withPolicies(array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy> $policies)
- * @method static \SineMacula\Laravel\Authorization\AuthorizationManager capped(array<array-key, string> $actions)
+ * @method static \SineMacula\Laravel\Authorization\AuthorizationManager capped(list<string> $actions)
  * @method static \SineMacula\Laravel\Authorization\Evaluation\Decision|null lastDecision()
  * @method static void forgetLastDecision()
  * @method static string explain(string $action, mixed $resource = null, array<string, mixed> $context = [])

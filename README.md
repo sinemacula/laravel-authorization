@@ -81,8 +81,9 @@ must each allow the check, then an explicit allow or a permission held allows it
 - **Session caps and machines**: a check is capped by the scopes of the subject's credential, from a session policy
   source you bind and mapped to actions through a scope map checked at boot, and by any actions the caller passes to
   `Authorization::capped()`. Every cap must cover the action, a cap grants nothing, and an empty cap allows nothing. A
-  machine principal is allowed nothing without its credential's scopes, and a person's grants never reach it, nor its
-  a person. A scope registry backed by the permission catalogue tells which scopes a credential may carry.
+  machine principal is allowed nothing without its credential's scopes, a person's grants never reach a machine, and a
+  machine's grants never reach a person, though an identity's denies apply whatever its kind. A scope registry backed
+  by the permission catalogue tells which scopes a credential may carry.
 - **Authentication requirements**: an allow can require additional verification, multifactor authentication,
   phishing resistance or a minimum assurance level, each with an optional maximum age, judged for the subject's session
   by a requirement checker you bind. When only that requirement keeps an allow from applying, the check is denied as
@@ -227,7 +228,9 @@ public function isAuthorizationActive(): bool
 
 A check about an inactive subject is denied with the `subject_inactive` reason before anything else is read. When the
 subject resolver returns a subject with a separate identity (an account belonging to a person, say), a check counts the
-grants and policies of both, and is denied if either is inactive.
+grants and policies of both, and is denied if either is inactive. When one of the two is a machine and the other is
+not, only the identity's denies, boundaries and inactivity count: see
+[Session caps and machines](#session-caps-and-machines).
 
 Define permissions as a string-backed enum. Each case's value is the permission name:
 
@@ -962,14 +965,17 @@ the subject's own or its roles' policies, and a resource policy's allow naming t
 the check's policies alone, so the caps still apply. An action a cap refuses is never a step-up: the denial is
 `session_policy`, never `insufficient_authentication`. A cap has no deny statements, so it adds nothing to the deny
 stage, and a deny decides before any cap is weighed. The credential's scopes cap every check about the subject: the
-Gate, the middleware, the directives and `effectivePermissions()` included. An explicit cap caps only the checks made
-through the manager `capped()` returned, so the Gate and the middleware never see it. `hasPermission()` and `hasRole()`
-report what is granted, not what a cap lets through.
+Gate, the `permission:` and `authorize:` middleware, the permission directives and `effectivePermissions()` included.
+An explicit cap caps only the checks made through the manager `capped()` returned, so the Gate and the middleware never
+see it. `hasPermission()`, `hasRole()`, the `role:` middleware and `@role` report what is granted, not what a cap lets
+through, so a cap never stops a role check.
 
 **The source.** A class implementing `SineMacula\Laravel\Authorization\Contracts\SessionPolicySource` answers
 `scopesFor(Subject $subject): ?array`, the scopes as a list of strings or null. It is asked once for each check that
-gets past the subject, resource and tenant stages, with the check's `Subject`, also one named with `for()`, so answer
-null for a subject the credential does not belong to. A source that throws aborts the check, so no decision is made.
+gets past the subject, resource and tenant stages and whose policies, guardrails and boundaries could then be read; a
+check denied as `invalid_policy` before then asks no source. It is given the check's `Subject`, also one named with
+`for()`, so answer null for a subject the credential does not belong to. A source that throws aborts the check, so no
+decision is made.
 
 ```php
 use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
@@ -1035,11 +1041,13 @@ class ServiceAccount extends Model implements AuthorizableIdentity, Authorizable
 }
 ```
 
-A machine is never treated as a person. A subject's identity contributes its roles, permissions and policies only when
-the subject and its identity are both machines or neither is, so a person's grants never reach a machine principal
-acting for them, and a machine's grants never reach a person; a resource policy naming the identity by reference does
-not name such a principal either. What only narrows a check still holds across the two: the identity's permission
-boundaries cap the principal, and an inactive identity denies it everything.
+A machine is never treated as a person. A subject's identity contributes its roles, its permissions and the allow
+statements of its policies only when the subject and its identity are both machines or neither is, so a person's grants
+never reach a machine principal acting for them, and a machine's grants never reach a person; a resource policy naming
+the identity by reference does not name such a principal either. What only narrows a check still holds across the two:
+the deny statements of the identity's policies, its own and its roles', still deny the principal, the identity's
+permission boundaries cap it, and an inactive identity denies it everything. An identity policy that cannot be read
+therefore denies the check as `invalid_policy` whatever the identity's kind.
 
 **The scope registry.** `SineMacula\Laravel\Authorization\Contracts\ScopeRegistry` answers which scopes a credential may
 carry, so that one is issued only scopes naming real permissions: `isValid($scope)` and `scopes()`. The package ships
@@ -1076,7 +1084,7 @@ is weighed before every deny and every cap has run:
 | `subject`   | Whether there is a subject, and whether it and its identity are active                                            | `subject_unresolved`, `subject_inactive`                      |
 | `resource`  | Whether the resource argument can be identified                                                                   | `resource_unresolved`                                         |
 | `tenant`    | Whether the resource's tenant is within the check's, or a platform-wide grant of the permission admits it         | `tenant_scope`                                                |
-| `deny`      | Every deny: the subject's, its identity's, their roles', the resource's, the guardrails' and the boundaries'      | `explicit_deny`, `invalid_policy`                             |
+| `deny`      | Every deny: the subject's, its identity's of either kind, their roles', the resource's, guardrails', boundaries'  | `explicit_deny`, `invalid_policy`                             |
 | `guardrail` | Every guardrail on the check's tenant, its ancestors and the platform must allow the check, unless it is exempt   | `guardrail`, `invalid_policy`                                 |
 | `boundary`  | Every permission boundary of the principal and of its identity that applies must allow the check                  | `boundary`, `invalid_policy`                                  |
 | `session`   | Every session cap, the credential's scopes and each set of actions `capped()` was given, must cover the action    | `session_policy`                                              |

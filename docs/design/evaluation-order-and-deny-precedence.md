@@ -66,8 +66,9 @@ and leaves a resource-less `posts:delete` check alone. Only a statement without 
 ## Where Policies Come From
 
 A check's policies are gathered by the bound `PolicyResolver`, then from the subject's identity when that is a separate
-model, and then from the policies attached to the check's resource and its type. The default resolver,
-`DefaultPolicyResolver`, unions three sources (AUTHZ-6.9, AUTHZ-7.2):
+model (whole when it is of the same kind, both machines or neither, `SubjectGrants::grantingIdentity()`, and only its
+deny statements otherwise), and then from the policies attached to the check's resource and its type. The default
+resolver, `DefaultPolicyResolver`, unions three sources (AUTHZ-6.9, AUTHZ-7.2):
 
 - **The policy store.** The `PolicyStore` bound as `policy_store`, asked on every check, for policies shipped in code
   or kept outside the package's tables.
@@ -87,7 +88,9 @@ Two more sources follow the resolver's, in `AuthorizationManager::gatherPolicies
 rather than through it, so a custom resolver controls neither:
 
 - **A separate identity's policies.** When the subject's identity is a separate model, that identity's own and
-  role-attached policies, through `SubjectGrants::identityPolicies()`.
+  role-attached policies, through `SubjectGrants::identityPolicies()`: whole when it is of the same kind, both machines
+  or neither (`SubjectGrants::grantingIdentity()`), and otherwise only those with a deny statement, each with its deny
+  statements alone, at their positions, so a deny still narrows the check while no allow crosses.
 - **The resource's policies (AUTHZ-7.3).** The managed policies attached through `resource_policies` to the check's
   record and to its type, through `ResourcePolicyResolver::policiesFor()`. A check on a type alone reads those attached
   to the type; a check on an opaque identifier, or on no resource, reads none and runs no query. A record whose key no
@@ -245,10 +248,11 @@ no statements, no conditions and no denies, and it grants nothing. A check has u
 
 - **The credential's.** The bound `SessionPolicySource` (AUTHZ-13.3, `authorization.session.source`) answers the scopes
   the credential of the check's subject carries, or null when it carries no cap. It is asked once for each check that
-  gets past the subject, resource and tenant stages, with the check's `Subject`, a subject named with `for()` included,
-  so a source answers null for a subject whose credential it does not know. The default, `NoSessionPolicy`, answers
-  null for every subject. A source that throws aborts the check: no decision is made, recorded or dispatched, as for an
-  attribute provider that throws.
+  gets past the subject, resource and tenant stages and whose policies, guardrails and boundaries could then be read; a
+  check denied as `invalid_policy` before then asks no source. It is given the check's `Subject`, a subject named with
+  `for()` included, so a source answers null for a subject whose credential it does not know. The default,
+  `NoSessionPolicy`, answers null for every subject. A source that throws aborts the check: no decision is made,
+  recorded or dispatched, as for an attribute provider that throws.
 - **The caller's.** `AuthorizationManager::capped($actions)` returns a scoped manager, as `for()` and `withPolicies()`
   do (D22: `check()` stays the one decision), whose checks are capped by the actions given, for a delegated or a
   restricted call. Capping a capped manager adds another cap rather than replacing the first. The Gate, the middleware
@@ -278,14 +282,16 @@ How they decide:
   source answers null for a machine, the check is capped by an empty cap in their place, named `credential:missing`,
   so it is denied as `session_policy` whatever it holds and whatever explicit caps are passed: `capped()` never stands
   in for the missing scopes, it only narrows them. A credential answering `[]` for a machine allows nothing either.
-- **A machine is never a person.** The grants of a subject's identity, its roles, permissions and policies, reach the
-  subject only when the subject and the identity are both machines or neither is (`SubjectGrants::grantingIdentity()`),
-  so a person's grants never reach a machine principal acting for them and a machine's never reach a person. A resource
-  policy's selector naming the identity by reference, or a role only the identity holds, does not name such a subject
-  either (`PrincipalSelectors`). What only narrows a check still crosses: the identity's permission boundaries cap the
-  subject, and an inactive identity denies it everything, so the rule never lifts a cap. No resolver the package ships
-  attaches an identity of another kind: `AuthGuardSubjectResolver` and `Subject::withSubject()` make the subject its own
-  identity, and an application's resolver that pairs a machine with a person gets the separation above.
+- **A machine is never a person.** The grants of a subject's identity, its roles, its permissions and the allow
+  statements of its policies, reach the subject only when the subject and the identity are both machines or neither is
+  (`SubjectGrants::grantingIdentity()`), so a person's grants never reach a machine principal acting for them and a
+  machine's never reach a person. A resource policy's selector naming the identity by reference, or a role only the
+  identity holds, does not name such a subject either (`PrincipalSelectors`). What only narrows a check still crosses:
+  the deny statements of the identity's own and role-attached policies join the deny stage, its permission boundaries
+  cap the subject, and an inactive identity denies it everything, so the rule never lifts a deny or a cap. An identity
+  policy that cannot be read denies the check as `invalid_policy` whatever the identity's kind. No resolver the package
+  ships attaches an identity of another kind: `AuthGuardSubjectResolver` and `Subject::withSubject()` make the subject
+  its own identity, and an application's resolver that pairs a machine with a person gets the separation above.
 - **The scope registry (AUTHZ-13.5).** `ScopeRegistry` answers which scopes a credential may carry. The package ships
   `CatalogueScopeRegistry`, backed by the permission catalogue and the scope map, and binds none: a scope is valid when
   the map names it, or when it equals or matches a declared permission, the package's own included, and `scopes()`
@@ -312,11 +318,11 @@ refuses never reads the permissions, since the session stage runs before the all
         subject holds the action's permission through a platform-wide grant, when the rest runs at platform scope
         (AUTHZ-4.4, AUTHZ-5.5, N9).
    2. *Deny*: every deny statement of every applicable source is assessed: the subject's and its identity's own and
-      role-attached policies, the policy store's, the resource's and its type's (for every subject), the guardrails'
-      and the boundaries' (a session cap has no deny statements, so it adds none). One that matches, or whose test
-      cannot be decided, denies as `explicit_deny`. Failing that, a deny statement that cannot be evaluated denies as
-      `invalid_policy`. A stored policy, guardrail or boundary that cannot be read, or whose document is over a
-      configured limit, denies as `invalid_policy` before any statement is assessed.
+      role-attached policies (the identity's whatever its kind), the policy store's, the resource's and its type's (for
+      every subject), the guardrails' and the boundaries' (a session cap has no deny statements, so it adds none). One
+      that matches, or whose test cannot be decided, denies as `explicit_deny`. Failing that, a deny statement that
+      cannot be evaluated denies as `invalid_policy`. A stored policy, guardrail or boundary that cannot be read, or
+      whose document is over a configured limit, denies as `invalid_policy` before any statement is assessed.
    3. *Guardrail*: every guardrail on the check's tenant, its ancestors and the platform must allow the check, each
       through its allow statements, conditions included (see [Guardrails](#guardrails)). One whose statement cannot be
       evaluated denies as `invalid_policy`; failing that, one with no allow that matches, one with no allow statement
@@ -444,8 +450,9 @@ refuses never reads the permissions, since the session stage runs before the all
     policy's allow and a resource policy's allow alike, and `withPolicies()` never lifts it. No cap caps nothing; an
     empty cap allows nothing. A cap never allows by itself and is never a step-up: a check it refuses is never
     `insufficient_authentication`. A machine principal without credential scopes is allowed nothing, and an explicit
-    cap never stands in for them. A machine is never treated as a person: an identity's grants reach its subject only
-    when both are machines or neither is, while the identity's boundaries and inactivity still apply.
+    cap never stands in for them. A machine is never treated as a person: an identity's grants and allow statements
+    reach its subject only when both are machines or neither is, while the identity's deny statements, its boundaries
+    and its inactivity still apply.
 
 ## Trace
 
@@ -592,8 +599,9 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 - **An explicit cap and the Gate**: `capped()` scopes the manager it returns; `Gate::allows()`, `can:` and the
   middleware decide through the unscoped manager, so only the credential's scopes cap them.
 - **A machine paired with a person**: a subject whose principal is a machine and whose identity is a person, or the
-  reverse, gets none of the identity's roles, permissions or policies, and no resource policy selector naming the
-  identity names it; the identity's boundaries still cap it and its inactivity still denies it.
+  reverse, gets none of the identity's roles, permissions or allow statements, and no resource policy selector naming
+  the identity names it; the identity's deny statements still deny it, its boundaries still cap it and its inactivity
+  still denies it.
 - **A session policy source that throws**: the check is aborted with the exception, and no decision is made, recorded
   or dispatched.
 - **Nothing declared**: the package declares `authorization:guardrails:manage` whatever the application configures,
@@ -618,7 +626,8 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   `HasPolicies::getPolicies()` and `GrantResolver::policies()` -- the identity's own attachments and its roles';
   `RolePolicies` -- where a role's policy applies; `RoleGraph::keysHeldBy()` and `RoleGraph::keysWithin()` -- the roles
   reached, shared with the permissions; `InlinePolicies` -- the grantee an inline policy belongs to and the refusals;
-  `SubjectGrants::identityPolicies()` -- the policies of a separate identity, appended after the resolver's.
+  `SubjectGrants::identityPolicies()` -- the policies of a separate identity, appended after the resolver's, whole or,
+  across kinds, as their deny statements alone.
 - `PolicyEvaluator::evaluate()` -- the deny, cap, allow and implicit stages, each assessing its statements in a fixed
   order; `cap()` -- the guardrail, boundary and session stages in order; `capBy()` -- a cap stage's intersection, the
   guardrails' and the boundaries'; `capped()` and `capBySession()` -- the session caps a check is decided under and
@@ -674,11 +683,11 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 - `SessionCapsTest`, `SessionScopesTest`, `SessionCapResolverTest` and `NoSessionPolicyTest` -- covering, the trace
   names, the scope map, the machine rule and the default source; `PolicyEvaluatorTest` -- the session stage, its
   intersection, an empty cap against none, its place after the denies, guardrails and boundaries and before
-  `insufficient_authentication`; the Feature `AuthorizationManagerTest` -- the credential's cap, an explicit cap,
-  nested caps, their intersection, a cap capping every allow source and granting nothing, a machine with and without
-  scopes, identity grants never crossing between a machine and a person, and the queries taken; `SubjectGrantsTest`
-  and `PrincipalSelectorsTest` -- the identity whose grants reach the subject; `SessionConfigValidatorTest` -- the boot
-  checks; `CatalogueScopeRegistryTest` -- the scope registry.
+  `insufficient_authentication`; the Feature `AuthorizationManagerTest` -- the credential's cap, an explicit cap, nested
+  caps, their intersection, a cap capping every allow source and granting nothing, a machine with and without scopes,
+  identity grants never crossing between a machine and a person while the identity's denies still deny, and the queries
+  taken; `SubjectGrantsTest` and `PrincipalSelectorsTest` -- the identity whose grants reach the subject;
+  `SessionConfigValidatorTest` -- the boot checks; `CatalogueScopeRegistryTest` -- the scope registry.
 - `DecisionTest` and `TraceEntryTest` -- the decision's construction, the explanation, the cap stages' steps and the
   freshness.
 - `PolicyEvaluatorTest` and `StatementTest` -- `insufficient_authentication` and where it ranks, an unmet and an
@@ -706,10 +715,11 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 
 ## Change Triggers
 
-- Letting a session cap allow by itself, replace another cap rather than intersect with it, or treat no cap and an
-  empty cap alike; letting `capped()` stand in for a machine's missing credential scopes; or letting an identity's
-  grants cross between a machine and a person would violate invariant 12 and requires a design decision before
-  implementation. Adding any other stage requires a design decision before implementation.
+- Letting a session cap allow by itself, replace another cap rather than intersect with it, or treat no cap and an empty
+  cap alike; letting `capped()` stand in for a machine's missing credential scopes; letting an identity's grants or
+  allow statements cross between a machine and a person; or dropping a cross-kind identity's deny statements, boundaries
+  or inactivity would violate invariant 12 and requires a design decision before implementation. Adding any other stage
+  requires a design decision before implementation.
 - Letting a guardrail allow by itself, be skipped when it cannot be read or evaluated, reach only some of its tenant's
   subtree, or be changed by an actor whose right is held within the tenant it caps would violate invariant 11 and
   requires a design decision before implementation.

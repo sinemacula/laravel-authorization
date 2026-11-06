@@ -50,7 +50,7 @@ final readonly class SessionScopes
                 continue;
             }
 
-            $map[$scope] = \array_values(\array_filter($patterns, \is_string(...)));
+            $map[$scope] = self::stringsOf($patterns);
         }
 
         return new self($map);
@@ -69,11 +69,11 @@ final readonly class SessionScopes
 
         foreach ($scopes as $scope) {
             foreach ($this->map[$scope] ?? [$scope] as $pattern) {
-                $patterns[$pattern] = true;
+                $patterns[$pattern] = $pattern;
             }
         }
 
-        return \array_map(\strval(...), \array_keys($patterns));
+        return \array_values($patterns);
     }
 
     /**
@@ -95,5 +95,26 @@ final readonly class SessionScopes
     public function names(): array
     {
         return \array_map(\strval(...), \array_keys($this->map));
+    }
+
+    /**
+     * Return the entries of a scope's list that are strings, in order.
+     *
+     * @param  array<array-key, mixed>  $patterns
+     * @return list<string>
+     */
+    private static function stringsOf(array $patterns): array
+    {
+        $strings = [];
+
+        foreach ($patterns as $pattern) {
+            if (!\is_string($pattern)) {
+                continue;
+            }
+
+            $strings[] = $pattern;
+        }
+
+        return $strings;
     }
 }

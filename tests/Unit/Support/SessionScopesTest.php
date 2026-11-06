@@ -65,11 +65,13 @@ final class SessionScopesTest extends TestCase
             'posts:read',
             'broken' => 'posts:edit',
             7,
+            'reader' => ['posts:read'],
         ]);
 
-        self::assertSame(['editor', 'posts:read'], $scopes->names());
+        self::assertSame(['editor', 'posts:read', 'reader'], $scopes->names());
         self::assertSame(['posts:*', 'comments:read'], $scopes->patternsFor(['editor']));
         self::assertSame(['posts:read'], $scopes->patternsFor(['posts:read']));
+        self::assertSame(['posts:read'], $scopes->patternsFor(['reader']));
         self::assertFalse($scopes->isMapped('broken'));
         self::assertSame(['broken'], $scopes->patternsFor(['broken']));
     }

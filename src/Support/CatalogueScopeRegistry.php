@@ -26,7 +26,7 @@ use SineMacula\Laravel\Authorization\Evaluation\SessionCaps;
  */
 final class CatalogueScopeRegistry implements ScopeRegistry
 {
-    /** @var list<string>|null The name of every permission declared, each once, once read. */
+    /** @var array<int, string>|null The name of every permission declared, each once, once read. */
     private ?array $names = null;
 
     /**
@@ -82,14 +82,14 @@ final class CatalogueScopeRegistry implements ScopeRegistry
     {
         $mapped = $this->map->names();
 
-        return [...$mapped, ...\array_values(\array_diff($this->names(), $mapped))];
+        return [...$mapped, ...\array_diff($this->names(), $mapped)];
     }
 
     /**
      * Return the name of every permission declared, each once, reading them on
      * first use.
      *
-     * @return list<string>
+     * @return array<int, string>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueException
      */
@@ -97,6 +97,6 @@ final class CatalogueScopeRegistry implements ScopeRegistry
     {
         $name = static fn (PermissionDefinition $definition): string => $definition->name;
 
-        return $this->names ??= \array_values(\array_unique(\array_map($name, $this->catalogue->definitions())));
+        return $this->names ??= \array_unique(\array_map($name, $this->catalogue->definitions()));
     }
 }

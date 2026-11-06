@@ -1343,7 +1343,7 @@ final class AuthorizationManagerTest extends TestCase
     public function testCappedReturnsAScopedManagerWhoseCapsIntersect(): void
     {
         $manager = $this->managerResolving(new StubSubjectResolver($this->stubAuthorizable(['posts:read', 'posts:edit'])));
-        $capped  = $manager->capped(['key' => 'posts:*']);
+        $capped  = $manager->capped(['posts:*']);
         $nested  = $capped->capped(['posts:read']);
 
         self::assertNotSame($manager, $capped);

@@ -345,13 +345,13 @@ final class AuthorizationManager
      * credential's scopes cap the check too. For a machine without credential
      * scopes, which is allowed nothing, a cap never stands in for them.
      *
-     * @param  array<array-key, string>  $actions
+     * @param  list<string>  $actions
      * @return self
      */
     public function capped(array $actions): self
     {
         $scoped         = clone $this;
-        $scoped->caps[] = \array_values($actions);
+        $scoped->caps[] = $actions;
 
         return $scoped;
     }
@@ -470,11 +470,13 @@ final class AuthorizationManager
      * across tenants, and a deny attached to the resource in its own tenant
      * applies even once the check falls back to platform scope. A policy,
      * guardrail or boundary document that cannot be read denies the check as an
-     * invalid policy. The subject's identity, when it is another model,
-     * contributes its policies, its grants and its boundaries (see
-     * `SubjectGrants`). A `withPolicies()` override replaces the policies
-     * alone: the guardrails, the subject's boundaries and its permissions still
-     * count.
+     * invalid policy. The subject's identity, when it is another model of the
+     * same kind (both machines or neither, see
+     * `SubjectGrants::grantingIdentity()`), contributes its policies and its
+     * grants; its deny statements and its boundaries cap the check whatever its
+     * kind. A `withPolicies()` override replaces the policies alone: the
+     * guardrails, the subject's boundaries, the session caps and its
+     * permissions still count.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
@@ -513,8 +515,11 @@ final class AuthorizationManager
      * the manager delegates to the bound `PolicyResolver` for the subject —
      * consumers swap the resolver to introduce tenant scoping or other
      * gathering strategies without touching the manager — and adds the policies
-     * attached to its identity when that is another model, and those attached
-     * to the resource and its type (see `ResourcePolicyResolver`).
+     * attached to its identity when that is another model, whole when it grants
+     * to the subject (another model of the same kind, see
+     * `SubjectGrants::grantingIdentity()`) and as their deny statements alone
+     * otherwise, and those attached to the resource and its type (see
+     * `ResourcePolicyResolver`).
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
