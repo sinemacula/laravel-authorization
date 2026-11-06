@@ -11,8 +11,10 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Console\ValidatePolicyCommand;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
+use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
+use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use Tests\Feature\Stubs\Enums\CataloguePermission;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
@@ -56,14 +58,15 @@ final class ValidatePolicyCommandTest extends TestCase
     }
 
     /**
-     * Remove the test's files and their directory.
+     * Remove the test's files and their directory, a subdirectory's files
+     * before the subdirectory.
      *
      * @return void
      */
     #[\Override]
     protected function tearDown(): void
     {
-        foreach (\glob($this->directory . '/{,*/}*', \GLOB_BRACE) ?: [] as $path) {
+        foreach (\array_reverse(\glob($this->directory . '/{,*/}*', \GLOB_BRACE) ?: []) as $path) {
             \is_dir($path) ? \rmdir($path) : \unlink($path);
         }
 
@@ -120,6 +123,20 @@ final class ValidatePolicyCommandTest extends TestCase
     }
 
     /**
+     * An array file is read as an array of documents even when its JSON starts
+     * with whitespace.
+     *
+     * @return void
+     */
+    public function testChecksEachDocumentOfAnArrayFileAfterLeadingWhitespace(): void
+    {
+        $file = $this->write('all.json', "\n  " . \json_encode([self::VALID, self::INVALID]));
+
+        self::assertSame(1, Artisan::call('authorization:policy:validate', ['paths' => [$file]]));
+        self::assertSame("{$file}[1]: auditors: Invalid policy effect: 'audit'.\nChecked 2 policy document(s): 1 invalid.\n", Artisan::output());
+    }
+
+    /**
      * An array file of valid documents passes, and an empty one holds none.
      *
      * @return void
@@ -147,6 +164,61 @@ final class ValidatePolicyCommandTest extends TestCase
 
         self::assertSame(1, Artisan::call('authorization:policy:validate', ['paths' => [$this->directory . '/']]));
         self::assertSame("{$this->directory}/b.json: auditors: Invalid policy effect: 'audit'.\nChecked 2 policy document(s): 1 invalid.\n", Artisan::output());
+    }
+
+    /**
+     * A directory whose name holds glob metacharacters is listed as named, so
+     * the invalid document in it is found rather than the directory passing as
+     * one holding no documents.
+     *
+     * @return void
+     */
+    public function testChecksADirectoryWhoseNameHoldsGlobMetacharacters(): void
+    {
+        \mkdir($this->directory . '/policies[prod]');
+
+        $this->write('policies[prod]/a.json', self::VALID);
+        $this->write('policies[prod]/b.json', self::INVALID);
+
+        $directory = $this->directory . '/policies[prod]';
+
+        self::assertSame(1, Artisan::call('authorization:policy:validate', ['paths' => [$directory]]));
+        self::assertSame("{$directory}/b.json: auditors: Invalid policy effect: 'audit'.\nChecked 2 policy document(s): 1 invalid.\n", Artisan::output());
+    }
+
+    /**
+     * A file or directory that exists but cannot be read is reported as one
+     * that cannot be read, and the command goes on to the paths after it and
+     * the summary.
+     *
+     * @return void
+     */
+    public function testReportsAFileOrDirectoryThatCannotBeRead(): void
+    {
+        if (\function_exists('posix_geteuid') && \posix_geteuid() === 0) {
+            self::markTestSkipped('The superuser can read a file of mode 000.');
+        }
+
+        $locked    = $this->write('locked.json', self::VALID);
+        $directory = $this->directory . '/locked';
+        $readable  = $this->write('readers.json', self::VALID);
+
+        \mkdir($directory);
+        \chmod($locked, 0);
+        \chmod($directory, 0);
+
+        try {
+            self::assertSame(1, Artisan::call('authorization:policy:validate', ['paths' => [$locked, $directory, $readable]]));
+            self::assertSame(
+                "{$locked}: [unnamed]: The file cannot be read.\n"
+                . "{$directory}: [unnamed]: The file cannot be read.\n"
+                . "Checked 3 policy document(s): 2 invalid.\n",
+                Artisan::output(),
+            );
+        } finally {
+            \chmod($locked, 0o644);
+            \chmod($directory, 0o755);
+        }
     }
 
     /**
@@ -250,6 +322,39 @@ final class ValidatePolicyCommandTest extends TestCase
     }
 
     /**
+     * A stored document whose own name is longer than its row's is measured
+     * under the row's name by the command, as hydration measures it, so the two
+     * agree whichever side of the byte limit it falls.
+     *
+     * @return void
+     */
+    public function testMeasuresAStoredDocumentUnderItsRowNameAsHydrationDoes(): void
+    {
+        // Named after its row `p`, the document is 73 bytes; as stored, under
+        // its old name, it is 85.
+        $id = $this->insert('p', (string) \json_encode(['name' => 'long-old-name', 'statements' => [['effect' => 'allow', 'actions' => ['posts:create']]]]));
+
+        $this->config()->set('authorization.policies.limits.document_bytes', 80);
+
+        self::assertSame(0, Artisan::call('authorization:policy:validate', ['--database' => true]));
+        self::assertSame("Checked 1 policy document(s): 0 invalid.\n", Artisan::output());
+        self::assertSame('p', PolicyDocument::hydrate(self::stored($id))->name);
+
+        $this->config()->set('authorization.policies.limits.document_bytes', 72);
+
+        self::assertSame(1, Artisan::call('authorization:policy:validate', ['--database' => true]));
+        self::assertSame("database:{$id}: p: Policy document is 73 bytes, more than the 72 allowed.\nChecked 1 policy document(s): 1 invalid.\n", Artisan::output());
+
+        try {
+            PolicyDocument::hydrate(self::stored($id));
+
+            self::fail('A stored document over the byte limit must not be hydrated.');
+        } catch (InvalidPolicyDocumentException $exception) {
+            self::assertSame('Invalid policy document \'p\': Policy document is 73 bytes, more than the 72 allowed.', $exception->getMessage());
+        }
+    }
+
+    /**
      * Without paths the database is checked, an empty one passing; with paths
      * it is checked only when `--database` is given.
      *
@@ -303,6 +408,17 @@ final class ValidatePolicyCommandTest extends TestCase
         DB::table('policies')->insert(['id' => $id, 'name' => $name, 'document' => $document, 'created_at' => now(), 'updated_at' => now()]);
 
         return $id;
+    }
+
+    /**
+     * Read a stored policy back by its key.
+     *
+     * @param  string  $id
+     * @return \SineMacula\Laravel\Authorization\Models\Policy
+     */
+    private static function stored(string $id): Policy
+    {
+        return Policy::query()->whereKey($id)->firstOrFail();
     }
 
     /**

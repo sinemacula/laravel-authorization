@@ -74,11 +74,26 @@ final readonly class PolicyLimits
     }
 
     /**
+     * Return a fingerprint of the limits, which changes whenever any of them
+     * does, so what was checked under one set of limits can be told apart from
+     * what was checked under another.
+     *
+     * @return string
+     */
+    public function fingerprint(): string
+    {
+        return "{$this->documentBytes}.{$this->statements}.{$this->conditions}.{$this->patternLength}";
+    }
+
+    /**
      * Return every way the document is over the limits; none when it is within
      * them.
      *
      * The document need not be a valid policy: whatever of it can be measured
-     * is measured, and the rest is left to the policy's own validation.
+     * is measured, and the rest is left to the policy's own validation. A
+     * document that cannot be encoded as JSON, such as one holding NaN, an
+     * infinity or a string that is not valid UTF-8, cannot be measured or
+     * stored, so that is a violation too.
      *
      * @param  array<array-key, mixed>  $document
      * @return list<string>
@@ -86,10 +101,12 @@ final readonly class PolicyLimits
     public function violations(array $document): array
     {
         $violations = [];
-        $bytes      = \strlen((string) \json_encode($document));
+        $encoded    = \json_encode($document);
 
-        if ($bytes > $this->documentBytes) {
-            $violations[] = "Policy document is {$bytes} bytes, more than the {$this->documentBytes} allowed.";
+        if ($encoded === false) {
+            $violations[] = 'Policy document cannot be encoded as JSON: ' . \json_last_error_msg() . '.';
+        } elseif (\strlen($encoded) > $this->documentBytes) {
+            $violations[] = 'Policy document is ' . \strlen($encoded) . " bytes, more than the {$this->documentBytes} allowed.";
         }
 
         $statements = \is_array($document['statements'] ?? null) ? $document['statements'] : [];
@@ -138,7 +155,7 @@ final readonly class PolicyLimits
      *
      * @param  array<array-key, mixed>  $statement
      * @param  array<array-key, mixed>  $conditions
-     * @return list<string>
+     * @return array<int, string>
      */
     private static function stringsOf(array $statement, array $conditions): array
     {
@@ -154,7 +171,7 @@ final readonly class PolicyLimits
             }
         }
 
-        return \array_values(\array_filter($values, \is_string(...)));
+        return \array_filter($values, \is_string(...));
     }
 
     /**

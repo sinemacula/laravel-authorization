@@ -66,8 +66,27 @@ final class IpRanges
     }
 
     /**
+     * Pack an IPv4 or IPv6 address, or return null when the value is not one.
+     *
+     * PHP's own validator decides what an address is, so a zone id (`%en0`) or
+     * an IPv4 part with a leading zero, which some platforms' `inet_pton()`
+     * accepts, is refused on every platform, and a NUL byte never reaches
+     * `inet_pton()`, which would throw on it.
+     *
+     * @param  mixed  $value
+     * @return string|null
+     */
+    public static function pack(mixed $value): ?string
+    {
+        $packed = \is_string($value) && \filter_var($value, \FILTER_VALIDATE_IP) !== false ? \inet_pton($value) : false;
+
+        return $packed === false ? null : $packed;
+    }
+
+    /**
      * Parse an address or CIDR range into its packed network and prefix length,
-     * or null when it is malformed.
+     * or null when it is malformed: an address `FILTER_VALIDATE_IP` refuses, or
+     * a prefix length that is not a whole number within the address's bits.
      *
      * @param  string  $range
      * @return array{0: string, 1: int}|null
@@ -76,9 +95,9 @@ final class IpRanges
     {
         [$subnet, $bits] = \str_contains($range, '/') ? \explode('/', $range, 2) : [$range, null];
 
-        $network = \inet_pton($subnet);
+        $network = self::pack($subnet);
 
-        if ($network === false) {
+        if ($network === null) {
             return null;
         }
 

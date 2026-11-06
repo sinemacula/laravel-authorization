@@ -119,10 +119,12 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   hydrated on read is never skipped: `HasPolicies::getPolicies()` logs a warning on the package's log channel and
   rethrows, and the decision is `invalid_policy`. A custom `PolicyResolver` must do the same: throw
   `InvalidPolicyDocumentException` rather than leave a policy out.
-- **Limits on read**: `PolicyDocument::hydrate()` checks a stored document against `authorization.policies.limits`
-  before it is evaluated, and one over a limit throws `InvalidPolicyDocumentException`, so it denies as
-  `invalid_policy`: it is never skipped and never partly evaluated. Lowering a limit therefore makes every stored
-  document over it deny until it is fixed; `authorization:policy:validate --database` lists them.
+- **Limits on read**: `PolicyDocument::hydrate()` checks a stored document, named after its row, against
+  `authorization.policies.limits` before it is evaluated, and one over a limit throws `InvalidPolicyDocumentException`,
+  so it denies as `invalid_policy`: it is never skipped and never partly evaluated. The resolution cache keys cached
+  policies by the limits they were checked under, so a changed limit makes every cached entry miss and the policies be
+  read through `hydrate()` again. Lowering a limit therefore makes every stored document over it deny until it is
+  fixed; `authorization:policy:validate --database` lists them.
 - **Invalid statement at decision time**: a directly constructed statement with an unknown operator, conditions that do
   not map operators to key tests, a malformed literal operand or a malformed `${…}` reference in a condition is
   `invalid` as soon as it is assessed, whatever the context holds. An interpolated operand that resolves to a value of
@@ -132,10 +134,13 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   `type:id` with the tenant the bound `ResourceTenantResolver` gives it (none by default, N10), a `(type, id)` pair the
   same way, its type a model class's morph class and its tenant the resolver's `tenantOfRecord()` (N17), a model class
   as `type:*` (N6), an `AuthorizableResource` as the reference it returns (N8), and any other string as an opaque
-  identifier with no tenant (N7). A pair whose tenant the resolver cannot tell, and an abstract model class, deny as
-  `resource_unresolved`. A type alone is covered only by a pattern that covers every record of the type (`*`,
-  `post:*`), never by one that needs an id character (`post:?`). Through the Gate, the arguments Laravel spreads from
-  `['post', 42]` name the pair, and a route parameter no binding resolved is an opaque identifier.
+  identifier with no tenant (N7). A pair whose tenant the resolver cannot tell, an abstract model class, and any
+  reference whose identifier holds a NUL byte (which names nothing, so it never reaches a pattern match; the resolver is
+  never asked about such a pair) deny as `resource_unresolved`. A record of an anonymous model class is one, since its
+  class name holds a NUL byte, unless the morph map names it. A type alone is covered only by a pattern that covers
+  every record of the type (`*`, `post:*`), never by one that needs an id character (`post:?`). Through the Gate, the
+  arguments Laravel spreads from `['post', 42]` name the pair, and a route parameter no binding resolved is an opaque
+  identifier.
 - **Resource-less check**: a check without a resource matches only statements with neither `resources` nor
   `not_resources`, or whose `resources` include `*`. An argument that cannot be identified as a resource denies as
   `resource_unresolved` at the resource stage, without reading any policy or permission, rather than becoming a

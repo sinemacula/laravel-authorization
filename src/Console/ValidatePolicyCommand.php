@@ -83,8 +83,8 @@ final class ValidatePolicyCommand extends Command
     }
 
     /**
-     * Check the documents of one path: every `*.json` file of a directory, or
-     * the file itself.
+     * Check the documents of one path: every `*.json` file of a directory, in
+     * name order, or the file itself.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\PolicyValidator  $validator
      * @param  string  $path
@@ -92,12 +92,29 @@ final class ValidatePolicyCommand extends Command
      */
     private function checkPath(PolicyValidator $validator, string $path): void
     {
-        $found = \is_dir($path) ? \glob(\rtrim($path, '/') . '/*.json') : [$path];
-        $files = $found === false ? [] : $found;
-
-        foreach ($files as $file) {
+        // A directory that cannot be listed is reported as a file that cannot
+        // be read, rather than passing as one that holds no documents.
+        foreach (\is_dir($path) && \is_readable($path) ? self::jsonFilesOf($path) : [$path] as $file) {
             $this->checkFile($validator, $file);
         }
+    }
+
+    /**
+     * Return the path of every `*.json` file of the directory, in name order.
+     *
+     * The directory is listed rather than globbed, so a directory whose name
+     * holds glob metacharacters, such as `policies[prod]`, is read as named.
+     *
+     * @param  string  $directory
+     * @return list<string>
+     */
+    private static function jsonFilesOf(string $directory): array
+    {
+        $directory = \rtrim($directory, '/') . '/';
+        $entries   = \scandir($directory);
+        $files     = \array_filter($entries === false ? [] : $entries, static fn (string $entry): bool => \str_ends_with($entry, '.json') && \is_file($directory . $entry));
+
+        return \array_map(static fn (string $entry): string => $directory . $entry, \array_values($files));
     }
 
     /**
@@ -110,7 +127,7 @@ final class ValidatePolicyCommand extends Command
      */
     private function checkFile(PolicyValidator $validator, string $file): void
     {
-        $contents = \is_file($file) ? \file_get_contents($file) : false;
+        $contents = \is_file($file) && \is_readable($file) ? \file_get_contents($file) : false;
         $decoded  = \is_string($contents) ? \json_decode($contents, true) : null;
 
         if (!\is_array($decoded)) {

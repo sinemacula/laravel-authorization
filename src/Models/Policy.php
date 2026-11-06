@@ -12,7 +12,6 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
 use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
-use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyValidator;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPolicyProtectedException;
 use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
@@ -146,17 +145,10 @@ class Policy extends Model
 
                 Container::getInstance()->make(PolicyValidator::class)->assertValid($document, $name);
 
-                $encoded = \json_encode($document);
-
-                // @codeCoverageIgnoreStart
-                // Defensive: a document the validator accepts holds only arrays
-                // and scalars, which always encode unless a string is not valid
-                // UTF-8.
-                if ($encoded === false) {
-                    throw new InvalidPolicyDocumentException(policyName: $name, reason: 'policy document is not JSON-encodable.');
-                }
-                // @codeCoverageIgnoreEnd
-                return $encoded;
+                // The validator refuses a document that cannot be encoded as
+                // JSON, so this does not throw; were it ever to, the write
+                // would fail rather than store an empty document.
+                return \json_encode($document, \JSON_THROW_ON_ERROR);
             },
         );
     }

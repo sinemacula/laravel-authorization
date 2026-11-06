@@ -50,12 +50,13 @@ set, `${…}` interpolation, and the interaction between wildcards and the RBAC 
 7. **Malformed documents are refused when they are written and when they are read.** `Statement::fromArray()` refuses
    unknown keys, a malformed `sid`, both `actions` and `not_actions` (or neither), both `resources` and `not_resources`,
    a pattern list that is empty or holds anything but non-empty strings, conditions that are not a map of operators to
-   key tests, an unknown operator, a malformed literal operand and a malformed `${…}` reference in a resource pattern or
-   a condition. `Policy::fromArray()` refuses statements that share a `sid`. On write, `PolicyValidator` adds the
-   limits, the condition key syntax and the action catalogue (see [Writing a policy](#writing-a-policy)), so a policy
-   row with any of these faults cannot be saved; on read, a stored document over a limit, or one that no longer parses,
-   denies as `invalid_policy`. The evaluation-time `invalid` outcome is the backstop for statements constructed
-   directly; an operand whose value is known only after interpolation is never invalid, only undecidable.
+   key tests, an unknown operator, a malformed literal operand, a resource pattern holding a NUL byte and a malformed
+   `${…}` reference in a resource pattern or a condition. `Policy::fromArray()` refuses statements that share a `sid`.
+   On write, `PolicyValidator` adds the limits, the condition key syntax and the action catalogue (see [Writing a
+   policy](#writing-a-policy)), so a policy row with any of these faults cannot be saved; on read, a stored document
+   over a limit, or one that no longer parses, denies as `invalid_policy`. The evaluation-time `invalid` outcome is the
+   backstop for statements constructed directly; an operand whose value is known only after interpolation is never
+   invalid, only undecidable.
 
 ## Wildcard Matching
 
@@ -150,6 +151,8 @@ A test is **undecidable** when:
   `null` value is not missing, although most operators find `null` the wrong type);
 - a `${…}` reference cannot be resolved in a resource pattern (unless another of the statement's patterns covers the
   resource) or in an operand, or a resource pattern of a directly constructed statement holds a malformed reference;
+  a resource pattern left holding a NUL byte, by a substituted value or as written on a directly constructed
+  statement, is unresolved the same way;
 - the context value has the wrong type for the operator (see the catalogue below), including a value that is not a valid
   IP address for `ip_in` or `ip_not_in` and one that is not a list of scalars for `any_value_in` or `all_values_in`;
 - an interpolated operand resolves to a value of the wrong type for the operator (for example a `${…}` `ip_in` operand
@@ -185,6 +188,11 @@ Conditions are a map of operator to key tests, and each key test maps a context 
 }
 ```
 
+A condition key is looked up as one literal key of the context array, not as a dot path into it, unlike a
+`${context.<path>}` reference: `request.ip` tests the entry `$context['request.ip']`, and a context of
+`['request' => ['ip' => '10.1.2.3']]` lacks that key, so its test is undecidable, or passes under `_if_exists`. Pass
+each tested value under its full key.
+
 When a statement's action and resource patterns match, the evaluator assesses every key test before committing the
 effect, and every one must hold for an allow to apply. One key may be tested by several operators
 (`{"gte": {"age": 18}, "lt": {"age": 65}}`); the trace records each key once, held only when all of its tests held. A
@@ -218,12 +226,15 @@ interpolation, that is not of the listed type makes the test undecidable.
   `all_values_in`) holds only scalars, never `null` or an array, and its members are compared strictly, so `"1"` is not
   `1`. `eq` and `neq` compare one scalar and never a list: use `in` to compare against several values.
 - **Time-like** values are a `DateTimeInterface`, an integer UNIX timestamp, a finite float (truncated) or a non-empty
-  string that `strtotime()` can parse.
+  string that `strtotime()` can parse. A string holding a NUL byte is not time-like, since `strtotime()` would read
+  only the part before it: as a written operand it is refused, as a context value or substituted operand undecidable.
 - **Numeric** values are integers, floats and numeric strings, compared as floats. `NAN`, `INF` and `-INF` (and a
   numeric string that overflows to an infinity) are not numbers: as an operand they are invalid, as a context value
   undecidable (`operator 'gt' needs a number`).
 - **Non-empty `string`** operands are refused when empty as written; an operand that becomes empty only after
-  interpolation is undecidable.
+  interpolation is undecidable. A NUL byte is refused in a written `starts_with`, `ends_with` or `like` operand, even
+  one with a `${…}` reference, and a context value or substituted operand holding one is undecidable for them, since
+  `fnmatch()` cannot test it.
 - **Boolean forms** are `true`, `false`, `1`, `0`, `'1'`, `'0'`, `'true'` and `'false'`, on both sides.
 - **`null`** takes strictly `true` or `false` (N20), and decides a missing key rather than finding it undecidable:
   `{"null": {"deleted_at": true}}` holds when the context lacks `deleted_at` or carries it as `null`, and
@@ -231,9 +242,11 @@ interpolation, that is not of the listed type makes the test undecidable.
 - **`ip_in` and `ip_not_in`** take one IPv4 or IPv6 address or CIDR range, or a non-empty list of them read as one set
   of ranges. An operand without `/` is an exact address match; the prefix length must be digits no greater than 32 for
   IPv4 or 128 for IPv6. An address of the other family is within none of a range's addresses (it is decided, not
-  undecidable), so `::ffff:10.0.0.1` is not within `10.0.0.0/8`. A context value that is not a valid address is
-  undecidable for both, so `ip_not_in` never reads an unreadable address as outside every range, and a deny written with
-  it still applies.
+  undecidable), so `::ffff:10.0.0.1` is not within `10.0.0.0/8`. PHP's `FILTER_VALIDATE_IP` decides what an address
+  is, as an operand and as a context value, so the answer is the same on every platform: a zone id (`fe80::1%en0`), an
+  IPv4 part with a leading zero (`010.0.0.1`, `010.0.0.0/8`) and a NUL byte are not addresses, though some platforms'
+  `inet_pton()` accepts the first two. A context value that is not a valid address is undecidable for both, so
+  `ip_not_in` never reads an unreadable address as outside every range, and a deny written with it still applies.
 - **`any_value_in` and `all_values_in`** test a multi-valued key, such as a token's scopes or a principal's groups. The
   context value must be a list of scalars; anything else is undecidable. An empty list never holds for `all_values_in`
   (N22), so a principal with no scopes does not pass a test that every scope is allowed.
@@ -252,7 +265,9 @@ unknown operator, as `null` already decides a missing key.
 ```
 
 holds for a check from `10.1.2.3` and for a queued job whose context carries no `request.ip`, does not hold for a check
-from `203.0.113.7`, and is undecidable for a `request.ip` of `unknown`.
+from `203.0.113.7`, and is undecidable for a `request.ip` of `unknown`. It also holds for a context of
+`['request' => ['ip' => '203.0.113.7']]`, which lacks the key `request.ip`: a condition key is never read as a path, so
+a nested value goes untested.
 
 ### Interpolation
 
@@ -268,7 +283,8 @@ Resource patterns and string operands may reference the check through `${namespa
 | `${resource.id}`     | The resource after its first `:`; unresolved when it has none                  |
 
 A token is `${`, a body matching `[a-zA-Z_][a-zA-Z0-9_.]*`, and `}`. The namespace is the body up to its first `.` and
-the key everything after it, so `${context.request.ip}` reads the context path `request.ip`. A well-formed token whose
+the key everything after it, so `${context.request.ip}` reads the context path `request.ip`: the key `request.ip` when
+the context has it, else `ip` within `request`. A condition key is never read this way. A well-formed token whose
 namespace is not `principal`, `context` or `resource`, or which has no key (`${context}`, `${context.}`), is accepted
 when written and unresolved when evaluated. Any other `${` that is not the `\${` escape -- `${context.tenant-id}`,
 `${}`, `${1x}`, an unclosed `${foo` -- is a **malformed reference**: `Statement::fromArray()` refuses it in a resource
@@ -315,19 +331,25 @@ fails.
 
 ## Writing a Policy
 
-`PolicyValidator::errors()` gives every reason a document cannot be written, and the `Policy` model's `document` setter,
+`PolicyValidator::errors()` gives the reasons a document cannot be written, and the `Policy` model's `document` setter,
 and so every write of `PolicyService`, refuses a document with any of them through `assertValid()`, which joins the
 reasons into one `InvalidPolicyDocumentException` message, separated by semicolons. The reasons are:
 
-- **Structure**: whatever `Policy::fromArray()` refuses, including statements sharing a `sid`.
+- **Structure**: whatever `Policy::fromArray()` refuses, including statements sharing a `sid`. This reason stops the
+  check: when `Policy::fromArray()` refuses the document, only its first fault and the limits it breaks are reported,
+  and the condition-key and catalogue checks do not run. Every other reason is reported at once.
 - **Limits** (AUTHZ-6.10), from `authorization.policies.limits`: `document_bytes` (65536) on the document's JSON
   encoding, `statements` (100), `conditions` (50) on the key tests of one statement, each key of each operator counting
   as one, and `pattern_length` (512) on the characters of any action or resource pattern and any string operand, strings
-  inside list operands included. The same limits are checked when a stored document is read
-  (`PolicyDocument::hydrate()`), so a stored document over a limit denies as `invalid_policy` and is never skipped or
-  partly evaluated. Lowering a limit therefore makes every stored document over it deny until it is fixed.
+  inside list operands included. A document that cannot be encoded as JSON (one holding NaN, an infinity or a string
+  that is not valid UTF-8) can be neither measured nor stored, so it is refused too. The same limits are checked when a
+  stored document is read (`PolicyDocument::hydrate()`), on the document as it is evaluated, named after its row, so a
+  stored document over a limit denies as `invalid_policy` and is never skipped or partly evaluated. The resolution
+  cache keys cached policies by the limits they were checked under, so a changed limit makes them be read and checked
+  again. Lowering a limit therefore makes every stored document over it deny until it is fixed.
 - **Condition keys**: a letter or `_`, then letters, digits and `_`, then any number of `.`-separated segments of
-  letters, digits, `_` and `-`, at most 128 characters (`request.ip`, `mfa.level`, `token.scopes`).
+  letters, digits, `_` and `-`, at most 128 characters (`request.ip`, `mfa.level`, `token.scopes`). Each names one
+  literal key of the context, not a dot path into it (see [Condition Operators](#condition-operators)).
 - **Actions** (N19): every `actions` and `not_actions` pattern must match at least one permission the code declares in
   `permission_enums` or `permission_providers`, compared with `fnmatch($pattern, $name, FNM_NOESCAPE)` or as the same
   string, so a misspelt action cannot be stored. The bound `ActionCatalogue` answers; the default,
@@ -335,10 +357,11 @@ reasons into one `InvalidPolicyDocumentException` message, separated by semicolo
   refused with one reason that says so.
 
 `php artisan authorization:policy:validate` checks documents with the same validator: JSON files given as paths (one
-document, or an array of documents, per file; a directory's `*.json` files), or every stored policy row of every tenant
-with `--database`, the default when no path is given. Stored rows are read as stored, not through hydration, so the
-command finds the rows a lowered limit has made invalid. It prints one line for each invalid document, then a summary,
-and exits 1 when any is invalid.
+document, or an array of documents, per file; a directory's `*.json` files, in name order), or every stored policy row
+of every tenant with `--database`, the default when no path is given. A file or directory that cannot be read is
+reported as invalid. Stored rows are read from the column and named after the row, as hydration names them, but not
+hydrated, so the command finds exactly the rows a lowered limit has made deny. It prints one line for each invalid
+document, then a summary, and exits 1 when any is invalid.
 
 ## Failure / Edge Cases
 

@@ -182,6 +182,119 @@ final class PolicyValidatorTest extends TestCase
     }
 
     /**
+     * A condition key outside the key syntax is refused when only an earlier
+     * operator of the statement tests it, so the keys of every operator are
+     * checked, not only the last one's.
+     *
+     * @return void
+     */
+    public function testRefusesAConditionKeyTestedOnlyByAnEarlierOperator(): void
+    {
+        $document = self::document([['effect' => 'allow', 'actions' => ['a'], 'conditions' => ['eq' => ['1bad' => 'x'], 'neq' => ['tenant' => 'y']]]]);
+
+        self::assertSame([
+            'Policy statement #0 condition key \'1bad\' must be letters, digits and \'_\', then any \'.\'-separated segments that may also hold \'-\', and at most 128 characters.',
+        ], self::validator()->errors($document));
+    }
+
+    /**
+     * Provide operands holding a NUL byte, or an address only some platforms
+     * read, with the operator they are written for.
+     *
+     * @return iterable<string, array{0: string, 1: string}>
+     */
+    public static function unreadableOperands(): iterable
+    {
+        yield 'like with a nul byte' => ['like', "curl\0*"];
+        yield 'starts_with with a nul byte' => ['starts_with', "/a\0"];
+        yield 'ends_with with a nul byte and a reference' => ['ends_with', "\${context.suffix}\0"];
+        yield 'ip_in with a nul byte' => ['ip_in', "10.0.0.0\0/8"];
+        yield 'ip_not_in with a nul byte' => ['ip_not_in', "10.0.0.1\0"];
+        yield 'ip_in with a zone id' => ['ip_in', 'fe80::1%en0'];
+        yield 'ip_in with a leading zero' => ['ip_in', '010.0.0.0/8'];
+        yield 'before with a nul byte' => ['before', "2026-01-01\0"];
+        yield 'after with a nul byte and a reference' => ['after', "\${context.deadline}\0"];
+    }
+
+    /**
+     * An operand holding a NUL byte, or an address with a zone id or a leading
+     * zero, is refused as an invalid operand, never thrown as a ValueError.
+     *
+     * @param  string  $operator
+     * @param  string  $operand
+     * @return void
+     */
+    #[DataProvider('unreadableOperands')]
+    public function testRefusesAnOperandNoPlatformReadsTheSameWay(string $operator, string $operand): void
+    {
+        $document = self::document([['effect' => 'deny', 'actions' => ['a'], 'conditions' => [$operator => ['k' => $operand]]]]);
+
+        self::assertSame(["Policy statement condition 'k' has an invalid operand for operator '{$operator}'."], self::validator()->errors($document));
+    }
+
+    /**
+     * A resource pattern holding a NUL byte is refused, since no resource can
+     * match it.
+     *
+     * @return void
+     */
+    public function testRefusesAResourcePatternHoldingANulByte(): void
+    {
+        $document = self::document([['effect' => 'allow', 'actions' => ['a'], 'resources' => ["post:\0*"]]]);
+
+        self::assertSame(['Policy statement resource pattern holds a NUL byte.'], self::validator()->errors($document));
+    }
+
+    /**
+     * Provide documents that cannot be encoded as JSON, with the reason.
+     *
+     * @return iterable<string, array{0: mixed, 1: string}>
+     */
+    public static function unencodableOperands(): iterable
+    {
+        yield 'nan' => [\NAN, 'Inf and NaN cannot be JSON encoded'];
+        yield 'infinity' => [-\INF, 'Inf and NaN cannot be JSON encoded'];
+        yield 'invalid utf-8' => ["\xff", 'Malformed UTF-8 characters, possibly incorrectly encoded'];
+    }
+
+    /**
+     * A document that cannot be encoded as JSON is refused, so it is never
+     * reported valid and then refused only when it is stored.
+     *
+     * @param  mixed  $operand
+     * @param  string  $reason
+     * @return void
+     */
+    #[DataProvider('unencodableOperands')]
+    public function testRefusesADocumentThatCannotBeEncoded(mixed $operand, string $reason): void
+    {
+        $document = self::document([['effect' => 'allow', 'actions' => ['a'], 'conditions' => ['eq' => ['x' => $operand]]]]);
+
+        self::assertSame(["Policy document cannot be encoded as JSON: {$reason}."], self::validator()->errors($document));
+    }
+
+    /**
+     * A structural fault stops the check: only it and the limits the document
+     * breaks are given, and the condition-key and catalogue checks do not run.
+     *
+     * @return void
+     */
+    public function testAStructuralFaultHidesTheOtherReasons(): void
+    {
+        $this->config()->set('authorization.policies.limits.statements', 1);
+
+        $validator = $this->declaring([CataloguePermission::class], []);
+
+        self::assertSame([
+            'Policy document has 2 statements, more than the 1 allowed.',
+            'Policy statement conditions have an unknown operator \'cidr\'.',
+        ], $validator->errors(self::document([
+            ['effect' => 'allow', 'actions' => ['psts:read'], 'conditions' => ['eq' => ['bad key' => 'x']]],
+            ['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['cidr' => ['ip' => '10.0.0.0/8']]],
+        ])));
+    }
+
+    /**
      * With no permissions declared, every document is refused with the one
      * reason, whatever actions it names.
      *
@@ -253,7 +366,7 @@ final class PolicyValidatorTest extends TestCase
     }
 
     /**
-     * Every reason of every check is given together.
+     * Every limit, condition-key and catalogue reason is given together.
      *
      * @return void
      */

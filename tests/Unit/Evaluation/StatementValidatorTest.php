@@ -89,7 +89,12 @@ final class StatementValidatorTest extends TestCase
         yield 'not_actions' => [null, ['a'], null, null, null];
         yield 'actions and resources' => [['a'], null, ['r'], null, null];
         yield 'not_actions and not_resources' => [null, ['a'], null, ['r'], null];
-        yield 'empty actions' => [[], null, null, null, null];
+        yield 'empty actions' => [[], null, null, null, 'Policy statement actions must be a non-empty list of non-empty strings.'];
+        yield 'empty not_actions' => [null, [], null, null, 'Policy statement not_actions must be a non-empty list of non-empty strings.'];
+        yield 'empty resources' => [['a'], null, [], null, 'Policy statement resources must be a non-empty list of non-empty strings.'];
+        yield 'empty not_resources' => [['a'], null, null, [], 'Policy statement not_resources must be a non-empty list of non-empty strings.'];
+        yield 'empty action' => [[''], null, null, null, 'Policy statement actions must be a non-empty list of non-empty strings.'];
+        yield 'map of not_actions' => [null, [1 => 'a'], null, null, 'Policy statement not_actions must be a non-empty list of non-empty strings.'];
         yield 'neither actions' => [null, null, null, null, 'Policy statement requires actions or not_actions.'];
         yield 'neither actions with resources' => [null, null, ['r'], null, 'Policy statement requires actions or not_actions.'];
         yield 'both actions' => [['a'], ['b'], null, null, 'Policy statement takes actions or not_actions, not both.'];
@@ -97,8 +102,9 @@ final class StatementValidatorTest extends TestCase
     }
 
     /**
-     * assertTargets() requires exactly one of actions and not_actions, and at
-     * most one of resources and not_resources.
+     * assertTargets() requires exactly one of actions and not_actions, at most
+     * one of resources and not_resources, and each one given to be a non-empty
+     * list of non-empty strings.
      *
      * @param  array<int, string>|null  $actions
      * @param  array<int, string>|null  $notActions
@@ -137,6 +143,20 @@ final class StatementValidatorTest extends TestCase
         $this->expectExceptionMessage('Policy statement resource pattern \'posts:${foo\' has a malformed ${…} reference.');
 
         StatementValidator::assertValidResource('posts:${foo');
+    }
+
+    /**
+     * assertValidResource() refuses a pattern holding a NUL byte, without
+     * echoing the byte in the message.
+     *
+     * @return void
+     */
+    public function testAssertValidResourceRefusesANulByte(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Policy statement resource pattern holds a NUL byte.');
+
+        StatementValidator::assertValidResource("posts:\0*");
     }
 
     /**

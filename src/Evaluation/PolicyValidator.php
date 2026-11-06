@@ -47,7 +47,11 @@ final readonly class PolicyValidator
     ) {}
 
     /**
-     * Return every reason the document cannot be written; none when it can.
+     * Return the reasons the document cannot be written; none when it can.
+     *
+     * Every limit, condition-key and catalogue reason is given at once, but a
+     * structural fault stops the check: when the document is not a valid
+     * policy, only the first fault found and the limits it breaks are given.
      *
      * @param  mixed  $document
      * @return list<string>
@@ -63,7 +67,10 @@ final readonly class PolicyValidator
         try {
             /** @var array<string, mixed> $document */
             $policy = Policy::fromArray($document);
-        } catch (\InvalidArgumentException $exception) {
+        } catch (\InvalidArgumentException|\ValueError $exception) { // @phpstan-ignore catch.neverThrown
+            // A ValueError is caught too, as a backstop: no part of a document
+            // reaches a PHP function that refuses it outright, but were one to,
+            // it would be reported rather than thrown.
             return [...$errors, $exception->getMessage()];
         }
 
@@ -71,7 +78,7 @@ final readonly class PolicyValidator
     }
 
     /**
-     * Refuse a document that cannot be written, giving every reason, joined by
+     * Refuse a document that cannot be written, giving the reasons, joined by
      * `; ` into one sentence.
      *
      * @param  mixed  $document
@@ -142,9 +149,9 @@ final readonly class PolicyValidator
 
         foreach ($policy->statements as $index => $statement) {
             $field    = $statement->notActions === null ? 'actions' : 'not_actions';
-            $patterns = $statement->notActions ?? $statement->actions ?? [];
+            $patterns = $statement->notActions === null ? $statement->actions : $statement->notActions;
 
-            foreach (\array_filter($patterns, fn (string $pattern): bool => !$this->catalogue->covers($pattern)) as $pattern) {
+            foreach (\array_filter($patterns ?? [], fn (string $pattern): bool => !$this->catalogue->covers($pattern)) as $pattern) {
                 $errors[] = "Policy statement #{$index} {$field} pattern '{$pattern}' matches no declared permission.";
             }
         }
@@ -162,11 +169,18 @@ final readonly class PolicyValidator
     {
         $keys = [];
 
-        foreach (\array_filter($statement->conditions, \is_array(...)) as $tests) {
-            $keys += $tests;
+        // A statement's conditions have been checked to map operators to keyed
+        // maps, so every entry is an array keyed by context key.
+        /** @var array<string, array<string, mixed>> $conditions */
+        $conditions = $statement->conditions;
+
+        foreach ($conditions as $tests) {
+            foreach (\array_keys($tests) as $key) {
+                $keys[$key] = true;
+            }
         }
 
-        return \array_map(static fn (int|string $key): string => (string) $key, \array_keys($keys));
+        return \array_keys($keys);
     }
 
     /**

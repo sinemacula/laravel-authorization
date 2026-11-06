@@ -453,7 +453,7 @@ final class ResolutionCacheTest extends TestCase
 
         $this->request()->rememberPolicies(self::grantee(), fn (): Resolution => $this->resolve([$keyed, $unkeyed]));
 
-        $entry = $this->store->get('authorization-test:policies:' . PrincipalCacheKey::for(self::grantee()) . ':platform:every');
+        $entry = $this->store->get(self::policiesKey());
         self::assertIsArray($entry);
         self::assertSame([
             ['id' => 'policy-key', 'document' => $keyed->toArray()],
@@ -466,6 +466,37 @@ final class ResolutionCacheTest extends TestCase
         self::assertEquals([$keyed, $unkeyed], $read);
         self::assertSame('policy-key', $read[0]->id);
         self::assertNull($read[1]->id);
+    }
+
+    /**
+     * A policies entry is kept per set of policy limits: under changed limits
+     * the entry built under the old ones misses and the policies are resolved
+     * again, and under the old limits it is served again.
+     *
+     * @return void
+     */
+    public function testPoliciesAreKeptPerSetOfLimits(): void
+    {
+        $policy = EvaluationPolicy::fromArray(['name' => 'readers', 'statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]);
+
+        $this->request()->rememberPolicies(self::grantee(), fn (): Resolution => $this->resolve([$policy]));
+
+        self::assertIsArray($this->store->get(self::policiesKey()));
+
+        config(['authorization.policies.limits.statements' => 1]);
+
+        $this->request()->rememberPolicies(self::grantee(), fn (): Resolution => $this->resolve([$policy]));
+
+        self::assertSame(2, $this->resolutions);
+        self::assertIsArray($this->store->get('authorization-test:policies:' . PrincipalCacheKey::for(self::grantee()) . ':platform:every:limits:65536.1.50.512'));
+
+        config(['authorization.policies.limits.statements' => 100]);
+
+        $this->request()->rememberPolicies(self::grantee(), fn (): Resolution => $this->resolve([]));
+        $this->request()->rememberRoles(self::grantee(), fn (): Resolution => $this->resolve(['editor']));
+
+        self::assertSame(3, $this->resolutions);
+        self::assertIsArray($this->store->get('authorization-test:roles:' . PrincipalCacheKey::for(self::grantee()) . ':platform:every'));
     }
 
     /**
@@ -483,7 +514,7 @@ final class ResolutionCacheTest extends TestCase
 
         $this->request()->rememberPolicies(self::grantee(), fn (): Resolution => $this->resolve([$policy]));
 
-        $key   = 'authorization-test:policies:' . PrincipalCacheKey::for(self::grantee()) . ':platform:every';
+        $key   = self::policiesKey();
         $entry = $this->store->get($key);
         self::assertIsArray($entry);
 
@@ -618,7 +649,7 @@ final class ResolutionCacheTest extends TestCase
         $this->recordLogs();
         $this->request()->rememberPolicies(self::grantee(), fn (): Resolution => $this->resolve([]));
 
-        $key   = 'authorization-test:policies:' . PrincipalCacheKey::for(self::grantee()) . ':platform:every';
+        $key   = self::policiesKey();
         $entry = $this->store->get($key);
         self::assertIsArray($entry);
 
@@ -785,6 +816,17 @@ final class ResolutionCacheTest extends TestCase
         $this->app?->instance('log', $logger);
 
         return $logger;
+    }
+
+    /**
+     * Return the key of the grantee's policies entry, platform-wide, under the
+     * default policy limits.
+     *
+     * @return string
+     */
+    private static function policiesKey(): string
+    {
+        return 'authorization-test:policies:' . PrincipalCacheKey::for(self::grantee()) . ':platform:every:limits:65536.100.50.512';
     }
 
     /**

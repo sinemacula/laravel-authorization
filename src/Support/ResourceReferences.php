@@ -37,12 +37,18 @@ final class ResourceReferences
      * record; any other string, or object that can be cast to one, is an opaque
      * identifier.
      *
+     * An identifier holding a NUL byte names nothing, so it cannot be
+     * identified either, however it was given: a string, a pair, a model's key,
+     * a resource's own reference or a reference built directly, as the route
+     * middleware builds one for a raw parameter. It never reaches a pattern
+     * match.
+     *
      * @param  mixed  $value
      * @return false|\SineMacula\Laravel\Authorization\Support\ResourceReference|null
      */
     public static function of(mixed $value): false|ResourceReference|null
     {
-        return match (true) {
+        $reference = match (true) {
             $value === null                                            => null,
             $value instanceof ResourceReference                        => $value,
             $value instanceof AuthorizableResource                     => $value->toResourceReference(),
@@ -52,6 +58,8 @@ final class ResourceReferences
             \is_object($value) && \method_exists($value, '__toString') => new ResourceReference((string) $value),
             default                                                    => false,
         };
+
+        return $reference instanceof ResourceReference && \str_contains($reference->identifier, "\0") ? false : $reference;
     }
 
     /**
@@ -93,9 +101,11 @@ final class ResourceReferences
     /**
      * Return the reference to the record a `(type, id)` pair names, with the
      * tenant the bound resource tenant resolver gives it, or false when it is
-     * not a type and a non-empty string or number, names an abstract model
-     * class, or the resolver cannot tell its tenant. A model class names its
-     * type as the model's morph class, as the model itself would.
+     * not a type and a non-empty string or number, either holds a NUL byte,
+     * names an abstract model class, or the resolver cannot tell its tenant.
+     * The resolver is never asked about a type or id holding a NUL byte. A
+     * model class names its type as the model's morph class, as the model
+     * itself would.
      *
      * @param  array<mixed>  $pair
      * @return false|\SineMacula\Laravel\Authorization\Support\ResourceReference
@@ -104,7 +114,7 @@ final class ResourceReferences
     {
         [$type, $id] = \array_is_list($pair) && \count($pair) === 2 ? $pair : [null, null];
 
-        $type = \is_string($type) && $type !== '' ? self::typeOf($type) : null;
+        $type = \is_string($type) && $type !== '' && !\str_contains($type, "\0") ? self::typeOf($type) : null;
 
         if ($type === null || !self::isKey($id)) {
             return false;
@@ -136,14 +146,15 @@ final class ResourceReferences
     }
 
     /**
-     * Determine whether a pair's id is a key: a string or number, not empty.
+     * Determine whether a pair's id is a key: a string or number, not empty and
+     * without a NUL byte.
      *
      * @param  mixed  $id
      * @return bool
      */
     private static function isKey(mixed $id): bool
     {
-        return \is_scalar($id) && !\is_bool($id) && $id !== '';
+        return \is_scalar($id) && !\is_bool($id) && $id !== '' && !\str_contains((string) $id, "\0");
     }
 
     /**

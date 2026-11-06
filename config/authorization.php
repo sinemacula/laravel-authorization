@@ -202,7 +202,8 @@ return [
     | whole number of at least 1.
     |
     | A document over a limit is refused when it is written, and a stored one
-    | over a limit denies every check for its holder as an invalid policy. So
+    | over a limit denies every check for its holder as an invalid policy.
+    | Cached policies are keyed by the limits they were checked under, so
     | lowering a limit makes the stored documents over it deny until they are
     | fixed; `php artisan authorization:policy:validate --database` lists them.
     |

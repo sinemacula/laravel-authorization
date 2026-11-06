@@ -9,6 +9,7 @@ use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
+use SineMacula\Laravel\Authorization\Evaluation\PolicyLimits;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -318,6 +319,14 @@ final readonly class ResolutionCache
      * Return the key of the kind's entry for the grantee under the tenant the
      * tenant scope applies and the subject's application.
      *
+     * A policies entry is also keyed by the policy limits it was hydrated
+     * under. Its documents were checked against the limits when they were read
+     * from the database, and are not checked again when read from the store, so
+     * a change to any limit makes every entry built under the old limits miss,
+     * and the policies are read again and checked against the new ones. The
+     * memo, which lasts one request or job, is keyed without them, so a memo
+     * hit costs nothing more.
+     *
      * @param  string  $kind
      * @param  object  $grantee
      * @return string
@@ -329,7 +338,8 @@ final readonly class ResolutionCache
 
         return "{$this->prefix}:{$kind}:" . PrincipalCacheKey::for($grantee)
             . ':' . ($tenant === null ? 'platform' : \implode(':', $tenant))
-            . ':' . ($application === null ? 'every' : 'app:' . $application);
+            . ':' . ($application === null ? 'every' : 'app:' . $application)
+            . ($kind === 'policies' ? ':limits:' . PolicyLimits::fromConfig()->fingerprint() : '');
     }
 
     /**

@@ -52,7 +52,12 @@ final class StatementValidator
 
     /**
      * Refuse a statement that names both or neither of `actions` and
-     * `not_actions`, or both `resources` and `not_resources`.
+     * `not_actions`, or both `resources` and `not_resources`, or that gives any
+     * of them as other than a non-empty list of non-empty strings.
+     *
+     * A statement built in code is held to the same rule as one read from a
+     * document, so a computed list that turns out empty never makes
+     * `not_actions` or `not_resources` name everything.
      *
      * @param  array<int, string>|null  $actions
      * @param  array<int, string>|null  $notActions
@@ -75,10 +80,17 @@ final class StatementValidator
         if ($resources !== null && $notResources !== null) {
             throw new \InvalidArgumentException('Policy statement takes resources or not_resources, not both.');
         }
+
+        foreach (['actions' => $actions, 'not_actions' => $notActions, 'resources' => $resources, 'not_resources' => $notResources] as $field => $patterns) {
+            if ($patterns !== null && !self::isPatternList($patterns)) {
+                throw new \InvalidArgumentException("Policy statement {$field} must be a non-empty list of non-empty strings.");
+            }
+        }
     }
 
     /**
-     * Refuse a resource pattern with a malformed `${…}` reference.
+     * Refuse a resource pattern that holds a NUL byte, which no resource can
+     * match, or a malformed `${…}` reference.
      *
      * @param  string  $pattern
      * @return void
@@ -87,6 +99,10 @@ final class StatementValidator
      */
     public static function assertValidResource(string $pattern): void
     {
+        if (\str_contains($pattern, "\0")) {
+            throw new \InvalidArgumentException('Policy statement resource pattern holds a NUL byte.');
+        }
+
         if (ContextInterpolator::hasMalformedReference($pattern)) {
             throw new \InvalidArgumentException("Policy statement resource pattern '{$pattern}' has a malformed \${…} reference.");
         }

@@ -477,7 +477,11 @@ final class ConfigValidator
         }
 
         foreach (PolicyLimits::KEYS as $key) {
-            $limit = $value[$key] ?? 1;
+            if (!isset($value[$key])) {
+                continue;
+            }
+
+            $limit = $value[$key];
 
             if (!\is_int($limit) || $limit < 1) {
                 throw new InvalidAuthorizationConfigException("authorization.policies.limits.{$key}", 'expected a whole number of at least 1, got ' . self::describe($limit) . '.');

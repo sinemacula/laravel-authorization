@@ -20,7 +20,7 @@ use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
  */
 final class DeclaredActionCatalogue implements ActionCatalogue
 {
-    /** @var list<string>|null Every declared permission name, once read. */
+    /** @var list<string>|null The name of every declared permission, once read; a name declared for two guards is listed twice. */
     private ?array $names = null;
 
     /**
@@ -64,9 +64,9 @@ final class DeclaredActionCatalogue implements ActionCatalogue
      */
     private function names(): array
     {
-        return $this->names ??= \array_values(\array_unique(\array_map(
+        return $this->names ??= \array_map(
             static fn (PermissionDefinition $definition): string => $definition->name,
             $this->catalogue->definitions(),
-        )));
+        );
     }
 }

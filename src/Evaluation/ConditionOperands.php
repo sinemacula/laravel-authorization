@@ -42,17 +42,17 @@ final class ConditionOperands
     }
 
     /**
-     * Determine whether the value is a non-empty string: the operand of
-     * `starts_with`, `ends_with` and `like`.
+     * Determine whether the value is a non-empty string without a NUL byte: the
+     * operand of `starts_with`, `ends_with` and `like`.
      *
      * @param  mixed  $value
      * @return bool
      *
      * @phpstan-assert-if-true non-empty-string $value
      */
-    public static function isNonEmptyString(mixed $value): bool
+    public static function isStringOperand(mixed $value): bool
     {
-        return \is_string($value) && $value !== '';
+        return \is_string($value) && $value !== '' && !\str_contains($value, "\0");
     }
 
     /**
@@ -141,7 +141,8 @@ final class ConditionOperands
 
     /**
      * Coerce a time-like value into a UNIX timestamp, returning null when the
-     * value cannot be parsed.
+     * value cannot be parsed. A string holding a NUL byte is malformed, since
+     * `strtotime()` would read only the part before it.
      *
      * @param  mixed  $value
      * @return int|null
@@ -152,7 +153,7 @@ final class ConditionOperands
             $value instanceof \DateTimeInterface     => $value->getTimestamp(),
             \is_int($value)                          => $value,
             \is_float($value)  && \is_finite($value) => (int) $value,
-            \is_string($value) && $value !== ''      => self::parseTime($value),
+            \is_string($value) && $value !== ''      => \str_contains($value, "\0") ? null : self::parseTime($value),
             default                                  => null,
         };
     }
@@ -167,17 +168,21 @@ final class ConditionOperands
     {
         static $rules = null;
 
+        if ($rules !== null) {
+            return $rules;
+        }
+
         $isTime = static fn (mixed $operand): bool => self::toTimestamp($operand) !== null;
         $isIp   = static fn (mixed $operand): bool => IpRanges::parse($operand) !== null;
 
-        return $rules ??= [
+        return $rules = [
             'eq'            => \is_scalar(...),
             'neq'           => \is_scalar(...),
             'in'            => self::isScalarSet(...),
             'not_in'        => self::isScalarSet(...),
-            'starts_with'   => self::isNonEmptyString(...),
-            'ends_with'     => self::isNonEmptyString(...),
-            'like'          => self::isNonEmptyString(...),
+            'starts_with'   => self::isStringOperand(...),
+            'ends_with'     => self::isStringOperand(...),
+            'like'          => self::isStringOperand(...),
             'gt'            => self::isNumber(...),
             'gte'           => self::isNumber(...),
             'lt'            => self::isNumber(...),

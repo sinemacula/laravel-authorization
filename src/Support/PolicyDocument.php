@@ -34,7 +34,9 @@ final class PolicyDocument
      * A stored document over the configured limits is refused, as an invalid
      * one is, so it denies every check for its holder rather than being skipped
      * or partly evaluated: lowering a limit makes the documents over it deny
-     * until they are fixed.
+     * until they are fixed. The limits are measured on the document as it is
+     * evaluated, under the stored policy's name, as a write and
+     * `authorization:policy:validate` measure it.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return \SineMacula\Laravel\Authorization\Evaluation\Policy
@@ -44,9 +46,8 @@ final class PolicyDocument
     public static function hydrate(Policy $policy): EvaluationPolicy
     {
         $name     = self::nameOf($policy->getAttribute('name'));
-        $stored   = self::decode($policy->getAttribute('document'), $name);
-        $over     = PolicyLimits::fromConfig()->violations($stored);
-        $document = self::named($stored, $policy->getAttribute('name'), true);
+        $document = self::named(self::decode($policy->getAttribute('document'), $name), $policy->getAttribute('name'), true);
+        $over     = PolicyLimits::fromConfig()->violations($document);
 
         if ($over !== []) {
             throw new InvalidPolicyDocumentException(policyName: $name, reason: PolicyValidator::joined($over));

@@ -79,31 +79,33 @@ final class PolicyDocumentTest extends TestCase
 
     /**
      * A stored document over a limit is refused under the policy's name with
-     * the limit it is over, measured on the document as stored, before it is
-     * named after the policy.
+     * the limit it is over, measured on the document as it is evaluated: named
+     * after the policy, as a write and `authorization:policy:validate` measure
+     * it, not as stored.
      *
      * @return void
      */
     public function testAStoredDocumentOverALimitIsRefused(): void
     {
-        $stored = '{"statements":[{"effect":"allow","actions":["a"]}]}';
+        $stored = '{"name":"a-much-longer-old-name","statements":[{"effect":"allow","actions":["a"]}]}';
+        $named  = '{"name":"readers","statements":[{"effect":"allow","actions":["a"]}]}';
         $policy = new Policy;
         $policy->setRawAttributes(['name' => 'readers', 'document' => $stored]);
 
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app?->make(ConfigRepository::class);
-        $config->set('authorization.policies.limits.document_bytes', \strlen($stored));
+        $config->set('authorization.policies.limits.document_bytes', \strlen($named));
 
         self::assertSame('readers', PolicyDocument::hydrate($policy)->name);
 
-        $config->set('authorization.policies.limits.document_bytes', \strlen($stored) - 1);
+        $config->set('authorization.policies.limits.document_bytes', \strlen($named) - 1);
 
         try {
             PolicyDocument::hydrate($policy);
             self::fail('A document over a limit was hydrated.');
         } catch (InvalidPolicyDocumentException $exception) {
             self::assertSame('readers', $exception->getPolicyName());
-            self::assertSame('Invalid policy document \'readers\': Policy document is 51 bytes, more than the 50 allowed.', $exception->getMessage());
+            self::assertSame('Invalid policy document \'readers\': Policy document is 68 bytes, more than the 67 allowed.', $exception->getMessage());
             self::assertNull($exception->getPrevious());
         }
     }

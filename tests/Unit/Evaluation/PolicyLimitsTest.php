@@ -153,6 +153,8 @@ final class PolicyLimitsTest extends TestCase
         yield 'a string operand' => [['conditions' => ['eq' => ['a' => '@@@@']]]];
         yield 'a string in a list operand' => [['conditions' => ['in' => ['a' => [1, '@@@@']]]]];
         yield 'a multibyte string operand' => [['conditions' => ['like' => ['a' => 'éééé']]]];
+        yield 'a string in a map operand' => [['conditions' => ['in' => ['a' => ['k' => '@@@@']]]]];
+        yield 'a map of actions' => [['actions' => ['x' => '@@@@']]];
     }
 
     /**
@@ -223,6 +225,55 @@ final class PolicyLimitsTest extends TestCase
         self::assertSame([], $limits->violations(['statements' => ['statement']]));
         self::assertSame([], $limits->violations(['statements' => [['actions' => 'long', 'conditions' => 'many']]]));
         self::assertSame([], $limits->violations([]));
+    }
+
+    /**
+     * Provide documents that cannot be encoded as JSON, with the reason.
+     *
+     * @return iterable<string, array{0: array<string, mixed>, 1: string}>
+     */
+    public static function unencodableDocuments(): iterable
+    {
+        $statement = static fn (mixed $operand): array => ['statements' => [['effect' => 'allow', 'actions' => ['a'], 'conditions' => ['eq' => ['x' => $operand]]]]];
+
+        yield 'nan' => [$statement(\NAN), 'Inf and NaN cannot be JSON encoded'];
+        yield 'infinity' => [$statement(\INF), 'Inf and NaN cannot be JSON encoded'];
+        yield 'invalid utf-8' => [['name' => "\xff", 'statements' => []], 'Malformed UTF-8 characters, possibly incorrectly encoded'];
+    }
+
+    /**
+     * A document that cannot be encoded as JSON can be neither measured nor
+     * stored, so it is a violation rather than measured as no bytes at all.
+     *
+     * @param  array<string, mixed>  $document
+     * @param  string  $reason
+     * @return void
+     */
+    #[DataProvider('unencodableDocuments')]
+    public function testADocumentThatCannotBeEncodedIsAViolation(array $document, string $reason): void
+    {
+        self::assertSame(["Policy document cannot be encoded as JSON: {$reason}."], (new PolicyLimits)->violations($document));
+    }
+
+    /**
+     * The fingerprint names every limit, so it changes whenever any of them
+     * does.
+     *
+     * @return void
+     */
+    public function testTheFingerprintChangesWithEveryLimit(): void
+    {
+        $fingerprints = [
+            (new PolicyLimits)->fingerprint(),
+            (new PolicyLimits(documentBytes: 1))->fingerprint(),
+            (new PolicyLimits(statements: 1))->fingerprint(),
+            (new PolicyLimits(conditions: 1))->fingerprint(),
+            (new PolicyLimits(patternLength: 1))->fingerprint(),
+        ];
+
+        self::assertSame('65536.100.50.512', $fingerprints[0]);
+        self::assertSame($fingerprints, \array_unique($fingerprints));
+        self::assertSame((new PolicyLimits)->fingerprint(), PolicyLimits::fromConfig()->fingerprint());
     }
 
     /**

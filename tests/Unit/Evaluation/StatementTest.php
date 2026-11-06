@@ -136,7 +136,7 @@ final class StatementTest extends TestCase
 
     /**
      * Provide constructor arguments that name both or neither of the action
-     * lists, or both resource lists.
+     * lists, or both resource lists, or give one of them empty.
      *
      * @return iterable<string, array{0: array<string, mixed>, 1: string}>
      */
@@ -145,11 +145,17 @@ final class StatementTest extends TestCase
         yield 'neither actions' => [[], 'Policy statement requires actions or not_actions.'];
         yield 'both actions' => [['actions' => ['a'], 'notActions' => ['b']], 'Policy statement takes actions or not_actions, not both.'];
         yield 'both resources' => [['actions' => ['a'], 'resources' => ['r'], 'notResources' => ['s']], 'Policy statement takes resources or not_resources, not both.'];
+        yield 'empty actions' => [['actions' => []], 'Policy statement actions must be a non-empty list of non-empty strings.'];
+        yield 'empty not_actions' => [['notActions' => []], 'Policy statement not_actions must be a non-empty list of non-empty strings.'];
+        yield 'empty resources' => [['actions' => ['x'], 'resources' => []], 'Policy statement resources must be a non-empty list of non-empty strings.'];
+        yield 'empty not_resources' => [['actions' => ['x'], 'notResources' => []], 'Policy statement not_resources must be a non-empty list of non-empty strings.'];
     }
 
     /**
      * A directly constructed statement must name exactly one action list and at
-     * most one resource list.
+     * most one resource list, each a non-empty list of non-empty strings, so a
+     * computed `not_actions` or `not_resources` that turns out empty never
+     * names every action or resource.
      *
      * @param  array<string, mixed>  $arguments
      * @param  string  $message
@@ -190,6 +196,14 @@ final class StatementTest extends TestCase
         yield 'non-string resource' => [
             ['effect' => 'allow', 'actions' => ['x'], 'resources' => [42]],
             'Policy statement resources must be a non-empty list of non-empty strings.',
+        ];
+        yield 'nul byte in a resource' => [
+            ['effect' => 'allow', 'actions' => ['x'], 'resources' => ["post:1\0"]],
+            'Policy statement resource pattern holds a NUL byte.',
+        ];
+        yield 'nul byte in a not_resource' => [
+            ['effect' => 'allow', 'actions' => ['x'], 'not_resources' => ["post:\0*"]],
+            'Policy statement resource pattern holds a NUL byte.',
         ];
         yield 'map of not_resources' => [
             ['effect' => 'allow', 'actions' => ['x'], 'not_resources' => ['a' => 'post:1']],
@@ -245,12 +259,23 @@ final class StatementTest extends TestCase
         yield 'starts_with empty' => [['starts_with' => ['path' => '']], 'condition \'path\' has an invalid operand for operator \'starts_with\''];
         yield 'ends_with list' => [['ends_with' => ['path' => ['.json']]], 'condition \'path\' has an invalid operand for operator \'ends_with\''];
         yield 'like empty' => [['like' => ['name' => '']], 'condition \'name\' has an invalid operand for operator \'like\''];
+        yield 'like nul byte' => [['like' => ['ua' => "curl\0*"]], 'condition \'ua\' has an invalid operand for operator \'like\''];
+        yield 'starts_with nul byte' => [['starts_with' => ['path' => "/a\0"]], 'condition \'path\' has an invalid operand for operator \'starts_with\''];
+        yield 'ends_with nul byte reference' => [
+            ['ends_with' => ['path' => "\${context.suffix}\0"]],
+            'condition \'path\' has an invalid operand for operator \'ends_with\'',
+        ];
+        yield 'ip_in nul byte' => [['ip_in' => ['ip' => "10.0.0.0\0/8"]], 'condition \'ip\' has an invalid operand for operator \'ip_in\''];
+        yield 'ip_in zone id' => [['ip_in' => ['ip' => 'fe80::%en0/10']], 'condition \'ip\' has an invalid operand for operator \'ip_in\''];
+        yield 'ip_not_in leading zero' => [['ip_not_in' => ['ip' => '010.0.0.0/8']], 'condition \'ip\' has an invalid operand for operator \'ip_not_in\''];
         yield 'gt word' => [['gt' => ['age' => 'abc']], 'condition \'age\' has an invalid operand for operator \'gt\''];
         yield 'lte infinite' => [['lte' => ['age' => \INF]], 'condition \'age\' has an invalid operand for operator \'lte\''];
         yield 'before unparseable' => [['before' => ['at' => 'not-a-date']], 'condition \'at\' has an invalid operand for operator \'before\''];
         yield 'between one bound' => [['between' => ['at' => ['2026-04-10']]], 'condition \'at\' has an invalid operand for operator \'between\''];
         yield 'bool yes' => [['bool' => ['flag' => 'yes']], 'condition \'flag\' has an invalid operand for operator \'bool\''];
         yield 'null string' => [['null' => ['deleted_at' => 'true']], 'condition \'deleted_at\' has an invalid operand for operator \'null\''];
+        yield 'before nul byte' => [['before' => ['at' => "2026-04-15\0"]], 'condition \'at\' has an invalid operand for operator \'before\''];
+        yield 'between nul byte' => [['between' => ['at' => ["2026-04-10\0", '2026-04-15']]], 'condition \'at\' has an invalid operand for operator \'between\''];
         yield 'ip_in bad range' => [['ip_in' => ['ip' => '10.0.0.0/33']], 'condition \'ip\' has an invalid operand for operator \'ip_in\''];
         yield 'ip_not_in empty set' => [['ip_not_in' => ['ip' => []]], 'condition \'ip\' has an invalid operand for operator \'ip_not_in\''];
         yield 'any_value_in nested' => [['any_value_in' => ['tags' => [['a']]]], 'condition \'tags\' has an invalid operand for operator \'any_value_in\''];
@@ -526,6 +551,30 @@ final class StatementTest extends TestCase
         self::assertResult(MatchOutcome::MATCHES, '', $fallback->assess('posts:read', 'posts:42:draft', [], $interpolator));
         self::assertResult(MatchOutcome::UNDECIDABLE, self::UNRESOLVED_RESOURCE, $malformed->assess('posts:read', 'posts:1', ['tenant-id' => '1'], $interpolator));
         self::assertResult(MatchOutcome::MATCHES, '', $malformed->assess('posts:read', 'posts:${context.tenant-id}'));
+    }
+
+    /**
+     * A NUL byte never reaches a resource match: a value holding one that is
+     * substituted into a resource pattern leaves the pattern unresolved, so the
+     * test is undecidable unless another pattern matches, and a literal one on
+     * a constructed statement is unresolved too.
+     *
+     * @return void
+     */
+    public function testAResourcePatternHoldingANulByteIsUnresolved(): void
+    {
+        $interpolator = new ContextInterpolator;
+        $substituted  = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read'], 'resources' => ['posts:${context.tenant}:*']]);
+        $fallback     = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read'], 'resources' => ['posts:${context.tenant}:*', 'posts:*']]);
+        $negated      = Statement::fromArray(['effect' => 'allow', 'actions' => ['posts:read'], 'not_resources' => ['posts:${context.tenant}:*']]);
+        $literal      = new Statement(PolicyEffect::DENY, ['posts:read'], ["posts:\0*"]);
+        $context      = ['tenant' => "org\0"];
+
+        self::assertResult(MatchOutcome::UNDECIDABLE, self::UNRESOLVED_RESOURCE, $substituted->assess('posts:read', 'posts:org:1', $context, $interpolator));
+        self::assertResult(MatchOutcome::MATCHES, '', $fallback->assess('posts:read', 'posts:org:1', $context, $interpolator));
+        self::assertResult(MatchOutcome::UNDECIDABLE, self::UNRESOLVED_RESOURCE, $negated->assess('posts:read', 'posts:org:1', $context, $interpolator));
+        self::assertResult(MatchOutcome::UNDECIDABLE, self::UNRESOLVED_RESOURCE, $literal->assess('posts:read', 'posts:1'));
+        self::assertResult(MatchOutcome::MATCHES, '', $substituted->assess('posts:read', 'posts:org:1', ['tenant' => 'org'], $interpolator));
     }
 
     // ------------------------------------------------------------------
@@ -815,6 +864,39 @@ final class StatementTest extends TestCase
             $statement->assess('x', null, ['request.ip' => 'unknown']),
         );
         self::assertResult(MatchOutcome::MATCHES, '', $statement->assess('x', null, ['request.ip' => '192.0.2.1']));
+    }
+
+    /**
+     * A NUL byte in a context value, or in an operand substituted into one,
+     * never throws: the test is undecidable, so a deny applies and an allow
+     * does not.
+     *
+     * @return void
+     */
+    public function testANulByteIsUndecidable(): void
+    {
+        $interpolator = new ContextInterpolator;
+        $cases        = [
+            'ip_in'       => ['request.ip', '1.2.3.0/24', "1.2.3.4\0", 'operator \'ip_in\' needs an IP address'],
+            'ip_not_in'   => ['request.ip', '1.2.3.0/24', "9.9.9.9\0", 'operator \'ip_not_in\' needs an IP address'],
+            'like'        => ['ua', 'curl*', "curl\0", 'operator \'like\' cannot test a NUL byte'],
+            'starts_with' => ['ua', 'curl', "curl\0", 'operator \'starts_with\' cannot test a NUL byte'],
+            'ends_with'   => ['ua', 'curl', "\0curl", 'operator \'ends_with\' cannot test a NUL byte'],
+        ];
+
+        foreach ($cases as $operator => [$key, $operand, $value, $detail]) {
+            $statement = Statement::fromArray(['effect' => 'deny', 'actions' => ['a'], 'conditions' => [$operator => [$key => $operand]]]);
+
+            self::assertResult(MatchOutcome::UNDECIDABLE, "condition '{$key}': {$detail}", $statement->assess('a', null, [$key => $value]));
+        }
+
+        $substituted = Statement::fromArray(['effect' => 'deny', 'actions' => ['a'], 'conditions' => ['like' => ['ua' => '${context.agent}*']]]);
+
+        self::assertResult(
+            MatchOutcome::UNDECIDABLE,
+            'condition \'ua\': operator \'like\' cannot test a NUL byte',
+            $substituted->assess('a', null, ['ua' => 'curl', 'agent' => "cu\0"], $interpolator),
+        );
     }
 
     /**

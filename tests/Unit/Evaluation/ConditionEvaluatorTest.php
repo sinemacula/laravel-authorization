@@ -419,6 +419,9 @@ final class ConditionEvaluatorTest extends TestCase
             yield "{$operator} value a range" => [$operator, '10.0.0.0/8', '10.0.0.0/8', MatchOutcome::UNDECIDABLE, $undecidable];
             yield "{$operator} value not a string" => [$operator, '10.0.0.0/8', 167772161, MatchOutcome::UNDECIDABLE, $undecidable];
             yield "{$operator} value null" => [$operator, '10.0.0.0/8', null, MatchOutcome::UNDECIDABLE, $undecidable];
+            yield "{$operator} value with a nul byte" => [$operator, '1.2.3.0/24', "1.2.3.4\0", MatchOutcome::UNDECIDABLE, $undecidable];
+            yield "{$operator} value with a zone id" => [$operator, 'fe80::/10', 'fe80::1%en0', MatchOutcome::UNDECIDABLE, $undecidable];
+            yield "{$operator} value with a leading zero" => [$operator, '10.0.0.0/8', '010.0.0.1', MatchOutcome::UNDECIDABLE, $undecidable];
         }
     }
 
@@ -486,6 +489,9 @@ final class ConditionEvaluatorTest extends TestCase
             'list with non-string' => ['10.0.0.0/8', 10],
             'list with null'       => ['10.0.0.0/8', null],
             'map'                  => ['a' => '10.0.0.0/8'],
+            'zone id'              => 'fe80::%en0/10',
+            'leading zero'         => '010.0.0.0/8',
+            'nul byte'             => "10.0.0.0\0/8",
         ];
 
         foreach (['ip_in', 'ip_not_in'] as $operator) {
@@ -514,6 +520,8 @@ final class ConditionEvaluatorTest extends TestCase
             yield "{$operator} empty operand first" => [$operator, '', 5, MatchOutcome::UNDECIDABLE, "operator '{$operator}' has an empty operand"];
             yield "{$operator} non-string value" => [$operator, $hit, 5, MatchOutcome::UNDECIDABLE, "operator '{$operator}' needs a string value"];
             yield "{$operator} null value" => [$operator, $hit, null, MatchOutcome::UNDECIDABLE, "operator '{$operator}' needs a string value"];
+            yield "{$operator} value with a nul byte" => [$operator, $hit, "ab\0c", MatchOutcome::UNDECIDABLE, "operator '{$operator}' cannot test a NUL byte"];
+            yield "{$operator} operand with a nul byte" => [$operator, "a\0", 'abc', MatchOutcome::UNDECIDABLE, "operator '{$operator}' cannot test a NUL byte"];
         }
     }
 
@@ -533,6 +541,8 @@ final class ConditionEvaluatorTest extends TestCase
         yield 'like list operand' => ['like', ['a*'], 'abc', MatchOutcome::INVALID, 'invalid operand for operator \'like\''];
         yield 'like empty operand' => ['like', '', 'abc', MatchOutcome::UNDECIDABLE, 'operator \'like\' has an empty operand'];
         yield 'like non-string value' => ['like', 'a*', 5, MatchOutcome::UNDECIDABLE, 'operator \'like\' needs a string value'];
+        yield 'like value with a nul byte' => ['like', 'curl*', "curl\0", MatchOutcome::UNDECIDABLE, 'operator \'like\' cannot test a NUL byte'];
+        yield 'like operand with a nul byte' => ['like', "curl\0*", 'curl', MatchOutcome::UNDECIDABLE, 'operator \'like\' cannot test a NUL byte'];
     }
 
     /**
@@ -570,6 +580,8 @@ final class ConditionEvaluatorTest extends TestCase
             yield "{$operator} list operand" => [$operator, [1000], 1000, MatchOutcome::INVALID, $invalid];
             yield "{$operator} invalid before value" => [$operator, 'not-a-time', 'not-a-time', MatchOutcome::INVALID, $invalid];
             yield "{$operator} unparseable value" => [$operator, 1000, 'not-a-time', MatchOutcome::UNDECIDABLE, $undecidable];
+            yield "{$operator} value with a nul byte" => [$operator, 1000, "2026-01-01\0", MatchOutcome::UNDECIDABLE, $undecidable];
+            yield "{$operator} operand with a nul byte" => [$operator, "2026-01-01\0", '2026-01-01', MatchOutcome::INVALID, "invalid operand for operator '{$operator}'"];
             yield "{$operator} empty value" => [$operator, 1000, '', MatchOutcome::UNDECIDABLE, $undecidable];
             yield "{$operator} null value" => [$operator, 1000, null, MatchOutcome::UNDECIDABLE, $undecidable];
             yield "{$operator} bool value" => [$operator, 1000, true, MatchOutcome::UNDECIDABLE, $undecidable];
@@ -614,6 +626,7 @@ final class ConditionEvaluatorTest extends TestCase
         yield 'between bad upper bound' => ['between', ['2026-06-01', 'bad'], '2026-06-15', MatchOutcome::INVALID, $invalid];
         yield 'between invalid before value' => ['between', ['bad', 'bad'], 'not-a-time', MatchOutcome::INVALID, $invalid];
         yield 'between unparseable value' => ['between', $june, 'not-a-time', MatchOutcome::UNDECIDABLE, $undecidable];
+        yield 'between value with a nul byte' => ['between', $june, "2026-06-15\0", MatchOutcome::UNDECIDABLE, $undecidable];
         yield 'between null value' => ['between', $june, null, MatchOutcome::UNDECIDABLE, $undecidable];
         yield 'between NaN lower bound' => ['between', [\NAN, 200], 150, MatchOutcome::INVALID, $invalid];
         yield 'between INF upper bound' => ['between', [100, \INF], 150, MatchOutcome::INVALID, $invalid];
@@ -815,6 +828,11 @@ final class ConditionEvaluatorTest extends TestCase
             yield "{$operator} empty set" => [$operator, [], $error];
             yield "{$operator} set with a bad range" => [$operator, ['10.0.0.0/8', 'bad'], $error];
             yield "{$operator} set with an interpolated range" => [$operator, ['${context.network}'], $error];
+            yield "{$operator} zone id" => [$operator, 'fe80::1%en0', $error];
+            yield "{$operator} leading-zero address" => [$operator, '010.0.0.1', $error];
+            yield "{$operator} leading-zero range" => [$operator, '010.0.0.0/8', $error];
+            yield "{$operator} nul byte" => [$operator, "10.0.0.0\0/8", $error];
+            yield "{$operator} interpolated with a nul byte" => [$operator, "\${context.network}\0", $error];
         }
     }
 
@@ -835,6 +853,8 @@ final class ConditionEvaluatorTest extends TestCase
             yield "{$operator} list" => [$operator, ['a'], $error];
             yield "{$operator} escaped reference" => [$operator, '\${principal.id}', null];
             yield "{$operator} malformed reference" => [$operator, '${principal.tenant-id}', null];
+            yield "{$operator} nul byte" => [$operator, "a\0b", $error];
+            yield "{$operator} interpolated with a nul byte" => [$operator, "\${principal.id}\0", $error];
         }
     }
 
@@ -861,6 +881,8 @@ final class ConditionEvaluatorTest extends TestCase
             yield "{$operator} NaN" => [$operator, \NAN, $error];
             yield "{$operator} INF" => [$operator, \INF, $error];
             yield "{$operator} -INF" => [$operator, -\INF, $error];
+            yield "{$operator} nul byte" => [$operator, "2026-01-01\0", $error];
+            yield "{$operator} interpolated with a nul byte" => [$operator, "\${context.deadline}\0", $error];
         }
 
         $error = 'invalid operand for operator \'between\'';
@@ -877,6 +899,7 @@ final class ConditionEvaluatorTest extends TestCase
         yield 'between interpolated string' => ['between', '${context.window}', $error];
         yield 'between NaN lower bound' => ['between', [\NAN, 200], $error];
         yield 'between INF upper bound' => ['between', [100, \INF], $error];
+        yield 'between nul byte in a bound' => ['between', ['2026-01-01', "2026-02-01\0"], $error];
     }
 
     /**

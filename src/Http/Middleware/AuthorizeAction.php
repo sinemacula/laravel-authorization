@@ -17,10 +17,10 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  * when nothing binds it, is the resource, referenced as every check references
  * it (`ResourceReferences`): a resource names itself, a model is `type:id` in
  * its tenant, and a string is used as given. A value that cannot be identified,
- * such as an unsaved model, or a parameter the route does not carry, denies as
- * `resource_unresolved`. Without a parameter (`authorize:reports:export`) the
- * check is about no resource. Several actions may be listed with `|`; any one
- * allowed admits the request.
+ * such as an unsaved model or a value holding a NUL byte, or a parameter the
+ * route does not carry, denies as `resource_unresolved`. Without a parameter
+ * (`authorize:reports:export`) the check is about no resource. Several actions
+ * may be listed with `|`; any one allowed admits the request.
  *
  * The service provider places this middleware right after Laravel's
  * `SubstituteBindings` in the middleware priority, so it decides on the bound

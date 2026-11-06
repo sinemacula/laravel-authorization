@@ -33,7 +33,10 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
  *
  * Documents are validated on hydration: unknown keys, a malformed sid, an empty
  * pattern list, conditions that do not map operators to key tests, an unknown
- * operator or a malformed operand are refused.
+ * operator or a malformed operand are refused. A statement built in code is
+ * held to the same rule for its targets, so an empty pattern list is refused on
+ * construction too, and a computed `not_actions` that turns out empty never
+ * names every action.
  *
  * @phpstan-import-type ConditionTest from \SineMacula\Laravel\Authorization\Evaluation\StatementValidator
  *
@@ -234,7 +237,7 @@ final readonly class Statement
      */
     public function coversAction(string $action): bool
     {
-        foreach ($this->notActions ?? $this->actions ?? [] as $pattern) {
+        foreach (($this->notActions === null ? $this->actions : $this->notActions) ?? [] as $pattern) {
             if (\fnmatch($pattern, $action, \FNM_NOESCAPE)) {
                 return $this->notActions === null;
             }
@@ -382,7 +385,7 @@ final readonly class Statement
     private function matchesResource(string $resource, InterpolationScope $scope): MatchResult
     {
         $isNegated = $this->notResources !== null;
-        $isCovered = self::isCoveredByAny($this->notResources ?? $this->resources ?? [], $resource, $scope);
+        $isCovered = self::isCoveredByAny(($isNegated ? $this->notResources : $this->resources) ?? [], $resource, $scope);
 
         return match (true) {
             $isCovered === null       => MatchResult::undecidable('a resource pattern references a value that cannot be resolved'),
@@ -394,7 +397,7 @@ final readonly class Statement
     /**
      * Determine whether any of the patterns covers the resource: true when one
      * does, false when none does, and null when none does but one references a
-     * value that cannot be resolved.
+     * value that cannot be resolved or that holds a NUL byte.
      *
      * @param  array<int, string>  $patterns
      * @param  string  $resource
@@ -406,7 +409,11 @@ final readonly class Statement
         $unresolved = false;
 
         foreach ($patterns as $pattern) {
+            // A substituted value holding a NUL byte names nothing, so the
+            // pattern is unresolved, as one whose reference cannot be resolved
+            // is, and never reaches fnmatch().
             $resolved   = $scope->pattern($pattern);
+            $resolved   = $resolved !== null && \str_contains($resolved, "\0") ? null : $resolved;
             $unresolved = $unresolved || $resolved === null;
 
             if ($resolved !== null && self::covers($resolved, $resource)) {

@@ -123,32 +123,36 @@ final class ConditionOperandsTest extends TestCase
     }
 
     /**
-     * Provide values with whether they are a non-empty string.
+     * Provide values with whether they are a string operand: a non-empty string
+     * without a NUL byte.
      *
      * @return iterable<string, array{0: mixed, 1: bool}>
      */
-    public static function nonEmptyStringProvider(): iterable
+    public static function stringOperandProvider(): iterable
     {
         yield 'letter' => ['a', true];
         yield 'zero' => ['0', true];
         yield 'space' => [' ', true];
         yield 'empty' => ['', false];
+        yield 'nul' => ["a\0b", false];
+        yield 'only nul' => ["\0", false];
         yield 'null' => [null, false];
         yield 'int' => [1, false];
         yield 'list' => [['a'], false];
     }
 
     /**
-     * isNonEmptyString() accepts a string with at least one character only.
+     * isStringOperand() accepts a string with at least one character and no NUL
+     * byte only.
      *
      * @param  mixed  $value
      * @param  bool  $expected
      * @return void
      */
-    #[DataProvider('nonEmptyStringProvider')]
-    public function testIsNonEmptyString(mixed $value, bool $expected): void
+    #[DataProvider('stringOperandProvider')]
+    public function testIsStringOperand(mixed $value, bool $expected): void
     {
-        self::assertSame($expected, ConditionOperands::isNonEmptyString($value));
+        self::assertSame($expected, ConditionOperands::isStringOperand($value));
     }
 
     /**
@@ -192,7 +196,8 @@ final class ConditionOperandsTest extends TestCase
     }
 
     /**
-     * toTimestamp() reads every time-like form.
+     * toTimestamp() reads every time-like form, and refuses a string holding a
+     * NUL byte, which `strtotime()` would read only up to the byte.
      *
      * @return void
      */
@@ -203,7 +208,7 @@ final class ConditionOperandsTest extends TestCase
         self::assertSame(1000, ConditionOperands::toTimestamp(new \DateTimeImmutable('@1000')));
         self::assertSame(86400, ConditionOperands::toTimestamp('1970-01-02 00:00:00 UTC'));
 
-        foreach (['', 'not-a-time', null, true, \NAN, \INF, [1000]] as $value) {
+        foreach (['', 'not-a-time', "1970-01-02\0", "1970-01-02\0junk", null, true, \NAN, \INF, [1000]] as $value) {
             self::assertNull(ConditionOperands::toTimestamp($value));
         }
     }

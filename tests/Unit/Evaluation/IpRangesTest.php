@@ -81,6 +81,13 @@ final class IpRangesTest extends TestCase
         yield 'list with a list' => [[['10.0.0.0/8']]];
         yield 'map' => [['a' => '10.0.0.0/8']];
         yield 'list from one' => [[1 => '10.0.0.0/8']];
+        yield 'zone id' => ['fe80::1%en0'];
+        yield 'zone id range' => ['fe80::%en0/10'];
+        yield 'leading-zero address' => ['010.0.0.1'];
+        yield 'leading-zero range' => ['010.0.0.0/8'];
+        yield 'nul in the address' => ["10.0.0.0\0/8"];
+        yield 'nul in the prefix' => ["10.0.0.0/8\0"];
+        yield 'nul after an address' => ["10.0.0.1\0"];
     }
 
     /**
@@ -138,6 +145,43 @@ final class IpRangesTest extends TestCase
 
         self::assertNotNull($ranges);
         self::assertSame($expected, IpRanges::contains($ranges, self::packed($address)));
+    }
+
+    /**
+     * Provide values with the address they pack into, or null for one that is
+     * not an IPv4 or IPv6 address on every platform.
+     *
+     * @return iterable<string, array{0: mixed, 1: string|null}>
+     */
+    public static function packProvider(): iterable
+    {
+        yield 'ipv4' => ['10.1.2.3', '10.1.2.3'];
+        yield 'ipv6' => ['2001:db8::1', '2001:db8::1'];
+        yield 'mapped ipv4' => ['::ffff:10.0.0.1', '::ffff:10.0.0.1'];
+        yield 'zone id' => ['fe80::1%en0', null];
+        yield 'unknown zone id' => ['fe80::1%zzz', null];
+        yield 'leading zero' => ['010.0.0.1', null];
+        yield 'nul byte' => ["10.0.0.1\0", null];
+        yield 'surrounding space' => [' 10.0.0.1', null];
+        yield 'range' => ['10.0.0.0/8', null];
+        yield 'empty string' => ['', null];
+        yield 'int' => [167772161, null];
+        yield 'null' => [null, null];
+    }
+
+    /**
+     * pack() packs an address PHP's own validator accepts, and refuses anything
+     * else without calling inet_pton(), which some platforms let accept a zone
+     * id or a leading zero and which throws on a NUL byte.
+     *
+     * @param  mixed  $value
+     * @param  string|null  $address
+     * @return void
+     */
+    #[DataProvider('packProvider')]
+    public function testPack(mixed $value, ?string $address): void
+    {
+        self::assertSame($address === null ? null : self::packed($address), IpRanges::pack($value));
     }
 
     /**

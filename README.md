@@ -51,9 +51,9 @@ denied.
   `:`) and **role hierarchy**: a role inherits its parent's permissions, with cycle checks on write.
 - **Policy documents** of statements with an optional `sid`, an `effect`, `actions` or `not_actions`, `resources` or
   `not_resources`, and operator-first `conditions`: twenty operators (equality, set membership, prefix, suffix and glob,
-  numeric and time comparisons, booleans, null tests, IPv4 and IPv6 ranges, and multi-valued keys), each with an
-  `_if_exists` form, and `${…}` interpolation from the check's context. A document is refused when it is saved if it is
-  malformed, over the configured limits, or names an action no declared permission matches, and
+  numeric and time comparisons, booleans, null tests, IPv4 and IPv6 ranges, and multi-valued keys), every one but
+  `null` with an `_if_exists` form, and `${…}` interpolation from the check's context. A document is refused when it is
+  saved if it is malformed, over the configured limits, or names an action no declared permission matches, and
   `authorization:policy:validate` checks files or stored policies against the same rules.
 - **Gate auto-wiring**: every case of a configured permission enum is registered as a Gate ability, with a choice of
   what happens when an ability of the same name already exists.
@@ -421,16 +421,16 @@ $decision->statements;         // [StatementReference('no-deletes-off-network', 
 A check's resource can be a model (`type:id`), a `[type, id]` pair, a model class for a check on the type alone
 (`type:*`, so `post:*` covers "create a post" and `post:42` does not), an object implementing
 `SineMacula\Laravel\Authorization\Contracts\AuthorizableResource` (which returns its own `ResourceReference`), or any
-other string, used as given. A value that cannot be identified, such as an unsaved model, denies as
-`resource_unresolved`. Through the Gate, `Gate::allows('posts:update', ['post', 42])` names the pair too, since Laravel
-spreads the array into two arguments. To have tenant-owned resources decided in their own tenant, bind a
-`ResourceTenantResolver` as `resource_tenant_resolver` in `config/authorization.php`. It answers a model's tenant
+other string, used as given. A value that cannot be identified, such as an unsaved model or an identifier holding a NUL
+byte, denies as `resource_unresolved`. Through the Gate, `Gate::allows('posts:update', ['post', 42])` names the pair
+too, since Laravel spreads the array into two arguments. To have tenant-owned resources decided in their own tenant,
+bind a `ResourceTenantResolver` as `resource_tenant_resolver` in `config/authorization.php`. It answers a model's tenant
 (`tenantOf()`) and a pair's (`tenantOfRecord()`, which returns `false` when it cannot tell, denying the check as
-`resource_unresolved`), so a record is decided the same way however it is named. A resource of the active tenant, or
-of a tenant below it, is then decided there, and one of any other tenant is denied as `tenant_scope` before any policy
-is read, unless a platform-wide grant of the permission covers it. The default knows no record's tenant. Any other
-string is never given a tenant, so a tenant-owned resource that is not a model should implement `AuthorizableResource`
-and carry its tenant.
+`resource_unresolved`), so a record is decided the same way however it is named. A resource of the active tenant, or of
+a tenant below it, is then decided there, and one of any other tenant is denied as `tenant_scope` before any policy is
+read, unless a platform-wide grant of the permission covers it. The default knows no record's tenant. Any other string
+is never given a tenant, so a tenant-owned resource that is not a model should implement `AuthorizableResource` and
+carry its tenant.
 
 Policies fail closed. A deny whose condition cannot be decided, such as a check made without `ip` in its context or with
 an `ip` that is not an address, still applies, while an allow in the same position does not. A check without a resource
@@ -493,23 +493,33 @@ Conditions name the operator first, then each context key it tests:
 | `ip_in`, `ip_not_in`            | an address or range, or a list        | is an IPv4 or IPv6 address within any, or within none, of them |
 | `any_value_in`, `all_values_in` | a non-empty list of scalars           | is a list with some element, or only elements, in it           |
 
+- A condition key is one literal key of the context array, not a dot path into it as a `${context.…}` reference is:
+  `request.ip` tests `$context['request.ip']`, so a context of `['request' => ['ip' => '10.1.2.3']]` lacks it. Pass
+  each tested value under its full key.
 - A key the context lacks makes a test undecidable: an allow does not apply and a deny does. `null` decides a missing
   key instead, and any other operator takes the `_if_exists` suffix (`ip_in_if_exists`, `eq_if_exists`), under which a
   missing key passes; everything else is decided as without it.
 - A context value that is not an IP address is undecidable for `ip_in` and `ip_not_in`, so `ip_not_in` never treats
-  an unreadable address as outside every range.
+  an unreadable address as outside every range. PHP's `FILTER_VALIDATE_IP` decides what an address is, on every
+  platform, so a zone id (`fe80::1%en0`) or an IPv4 part with a leading zero (`010.0.0.1`) is not one.
+- A NUL byte is refused in a `starts_with`, `ends_with`, `like` or time operand and in a resource pattern, and a
+  context value holding one is undecidable for them and for `ip_in` and `ip_not_in`. A `${…}` value holding one leaves
+  a resource pattern unresolved.
 - `any_value_in` and `all_values_in` need the context value to be a list, such as a token's scopes. An empty list never
   passes `all_values_in`.
 - `eq` and `neq` never take a list: use `in` or `not_in`. String operands may use `${…}` interpolation; list operands
   are literal.
 
-A policy is checked whenever it is saved, through the model or `PolicyService`, and refused with every reason at once: a
-malformed document, a condition key that is not letters, digits and `_` with `.`-separated segments, an `actions` or
-`not_actions` pattern that matches no declared permission, or a document over the limits in `policies.limits`
+A policy is checked whenever it is saved, through the model or `PolicyService`, and refused with every limit,
+condition-key and catalogue reason at once, or, for a malformed document, the first structural fault found and any limit
+it breaks. The reasons are a malformed document; a condition key that is not a letter or `_`, then letters, digits and
+`_`, then any `.`-separated segments that may also hold `-`, at most 128 characters in all; an `actions` or
+`not_actions` pattern that matches no declared permission; or a document over the limits in `policies.limits`
 (`AUTHORIZATION_POLICY_DOCUMENT_BYTES`, `_STATEMENTS`, `_CONDITIONS` and `_PATTERN_LENGTH`: 64 KiB of JSON, 100
 statements, 50 key tests a statement and 512 characters a pattern or string operand). The limits are checked again when
-a stored policy is read, so lowering one makes the stored policies over it deny as `invalid_policy` until they are
-fixed. To find them, or to check policy files before you deploy them:
+a stored policy is read, and the resolution cache keys cached policies by the limits they were checked under, so
+lowering one makes the stored policies over it deny as `invalid_policy` until they are fixed. To find them, or to check
+policy files before you deploy them:
 
 ```bash
 php artisan authorization:policy:validate --database
@@ -573,11 +583,11 @@ Route::get('/api/admin', ApiAdmin::class)->middleware('role:admin,api');
   policies, explicit denies, the permissions held and the subject's tenant. An explicit deny wins over a held
   permission, and a policy allow admits without one. The check has no resource, so only statements with neither
   `resources` nor `not_resources`, or whose `resources` include `*`, apply to it.
-- `authorize:{action},{route parameter}` decides the action on the parameter's bound model, referenced as every
-  check references it, or on the parameter's value when nothing binds it. A value that cannot be identified, such as
-  an unsaved model, or a parameter the route does not carry, denies as `resource_unresolved`. Without a parameter, the
-  check has no resource. Like Laravel's `can:`, it is placed right after `SubstituteBindings` in the middleware
-  priority, so it decides on the bound model wherever the route lists it.
+- `authorize:{action},{route parameter}` decides the action on the parameter's bound model, referenced as every check
+  references it, or on the parameter's value when nothing binds it. A value that cannot be identified, such as an
+  unsaved model or a value holding a NUL byte, or a parameter the route does not carry, denies as `resource_unresolved`.
+  Without a parameter, the check has no resource. Like Laravel's `can:`, it is placed right after `SubstituteBindings`
+  in the middleware priority, so it decides on the bound model wherever the route lists it.
 - `role:` checks role membership. A role is not an action, so policies never apply to it: it sees the roles the
   subject's `hasRole()` sees, the platform's and its tenant's. A second argument limits it to the roles of that
   authentication guard and the guard-agnostic ones. A name that is not in `auth.guards` is refused, and so is a bare

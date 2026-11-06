@@ -132,7 +132,8 @@ final class ConditionEvaluator
      *
      * A string operand containing a `${…}` reference is accepted for the
      * operators that interpolate their operand, since its value is known only
-     * at evaluation time. The operands of `in`, `not_in`, `between`, `null`,
+     * at evaluation time, unless it holds a NUL byte, which is then checked as
+     * a literal one is. The operands of `in`, `not_in`, `between`, `null`,
      * `any_value_in` and `all_values_in` are never interpolated, so they are
      * always checked.
      *
@@ -146,7 +147,10 @@ final class ConditionEvaluator
             return "unknown operator '{$operator}'";
         }
 
-        $deferred = \is_string($operand) && ContextInterpolator::containsReference($operand) && !\in_array($operator, self::LITERAL_OPERAND_OPERATORS, true);
+        $deferred = \is_string($operand)
+            && !\str_contains($operand, "\0")
+            && ContextInterpolator::containsReference($operand)
+            && !\in_array($operator, self::LITERAL_OPERAND_OPERATORS, true);
 
         return $deferred || ConditionOperands::isValid($operator, $operand) ? null : self::invalidOperand($operator);
     }
@@ -225,7 +229,9 @@ final class ConditionEvaluator
 
     /**
      * Evaluate the string operators. A pattern operand reaches here already
-     * prepared for `fnmatch()` without `FNM_NOESCAPE`.
+     * prepared for `fnmatch()` without `FNM_NOESCAPE`. A value or substituted
+     * operand holding a NUL byte is undecidable, since `fnmatch()` cannot test
+     * it and the three operators are kept alike.
      *
      * @param  string  $operator
      * @param  mixed  $operand
@@ -238,8 +244,12 @@ final class ConditionEvaluator
             return MatchResult::invalid(self::invalidOperand($operator));
         }
 
-        if ($operand === '' || !\is_string($actual)) {
-            return MatchResult::undecidable($operand === '' ? "operator '{$operator}' has an empty operand" : "operator '{$operator}' needs a string value");
+        if ($operand === '' || !\is_string($actual) || \str_contains($operand . $actual, "\0")) {
+            return MatchResult::undecidable(match (true) {
+                $operand === ''      => "operator '{$operator}' has an empty operand",
+                !\is_string($actual) => "operator '{$operator}' needs a string value",
+                default              => "operator '{$operator}' cannot test a NUL byte",
+            });
         }
 
         return MatchResult::fromBool(match ($operator) {
@@ -357,8 +367,9 @@ final class ConditionEvaluator
     /**
      * Evaluate `ip_in` and `ip_not_in`. The value must be an IPv4 or IPv6
      * address: `ip_in` holds when it is within any of the ranges and
-     * `ip_not_in` when it is within none. A value that is not an address is
-     * undecidable for both, so `ip_not_in` never reads it as outside.
+     * `ip_not_in` when it is within none. A value that is not an address,
+     * including one with a zone id or a NUL byte, is undecidable for both, so
+     * `ip_not_in` never reads it as outside.
      *
      * @param  string  $operator
      * @param  mixed  $operand
@@ -368,9 +379,9 @@ final class ConditionEvaluator
     private static function matchesIp(string $operator, mixed $operand, mixed $actual): MatchResult
     {
         $ranges  = IpRanges::parse($operand);
-        $address = \is_string($actual) ? \inet_pton($actual) : false;
+        $address = IpRanges::pack($actual);
 
-        if ($ranges === null || $address === false) {
+        if ($ranges === null || $address === null) {
             return $ranges === null
                 ? MatchResult::invalid(self::invalidOperand($operator))
                 : MatchResult::undecidable("operator '{$operator}' needs an IP address");
