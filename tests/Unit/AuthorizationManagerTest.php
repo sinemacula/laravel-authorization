@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Unit;
 
+use Illuminate\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Translation\Translator;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -13,6 +14,7 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
+use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
@@ -28,6 +30,7 @@ use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
+use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\StubIdentity;
@@ -49,7 +52,8 @@ use Tests\Feature\Stubs\StubSubjectResolver;
 final class AuthorizationManagerTest extends TestCase
 {
     /**
-     * Tear down Mockery instances after every test.
+     * Tear down Mockery instances and forget any container a test set after
+     * every test.
      *
      * @return void
      */
@@ -57,6 +61,7 @@ final class AuthorizationManagerTest extends TestCase
     protected function tearDown(): void
     {
         \Mockery::close();
+        Container::setInstance(null);
 
         parent::tearDown();
     }
@@ -451,18 +456,22 @@ final class AuthorizationManagerTest extends TestCase
      * and a resource reference to the evaluator by their identifiers — a pair
      * as `type:id`, a model class as `type:*` — so each is allowed by the one
      * statement written for that identifier, and `DecisionEvaluated` carries
-     * the identifier string.
+     * the identifier string. A pair's tenant is asked of the bound resource
+     * tenant resolver, so one that knows none is bound in a fresh container.
      *
      * @return void
      */
     public function testCheckNamesEachResourceByItsIdentifier(): void
     {
+        Container::setInstance(new Container);
+        Container::getInstance()->instance(ResourceTenantResolver::class, new NoResourceTenant);
+
         $principal = $this->stubAuthorizable([], [
             Policy::fromArray([
                 'name'       => 'by-identifier',
                 'statements' => [
                     ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['posts:7']],
-                    ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => [StubIdentity::class . ':[*]']],
+                    ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => [StubIdentity::class . ':*']],
                     ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['report:q3']],
                     ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['arn:posts']],
                     ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['comments:9']],

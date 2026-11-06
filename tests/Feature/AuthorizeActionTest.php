@@ -88,6 +88,9 @@ final class AuthorizeActionTest extends TestCase
         Route::middleware('authorize:posts:update|' . self::ACTION . ',post')
             ->get('/listed/{post}', static fn (string $post): string => 'ok');
 
+        Route::middleware([SubstituteBindings::class, 'authorize:posts:update|' . self::ACTION . ',post'])
+            ->get('/either/{post}', static fn (StubTenant $post): string => 'ok');
+
         Route::bind('draft', static fn (): StubTenant => new StubTenant);
 
         Route::middleware([SubstituteBindings::class, 'authorize:posts:update|' . self::ACTION . ',draft'])
@@ -170,6 +173,59 @@ final class AuthorizeActionTest extends TestCase
 
         $this->getJson('/reports/report-7')->assertOk();
         $this->getJson('/reports/report-8')->assertForbidden();
+    }
+
+    /**
+     * A parameter nothing binds is the caller's own text, an opaque identifier,
+     * even when it spells a model class: it is never read as the class's type
+     * (`post:*`), so a statement on every post does not admit it.
+     *
+     * @return void
+     */
+    public function testARawParameterSpellingAModelClassIsNotItsType(): void
+    {
+        Event::fake([DecisionEvaluated::class, AuthorizationFailed::class]);
+
+        $identity = StubIdentity::create(['id' => 'reader']);
+        self::attachStatement($identity, 'allow', [self::ACTION], ['post:*']);
+
+        $this->actAs($identity);
+
+        $this->getJson('/reports/' . \rawurlencode(StubTenant::class))->assertForbidden();
+
+        Event::assertDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => $event->resource === StubTenant::class
+            && $event->decision->reason                                                                                  === DecisionReason::NO_MATCH);
+    }
+
+    /**
+     * The bound model is resolved once for every listed action, so the resource
+     * tenant resolver is asked about it once, however many of the actions are
+     * checked, and each check is about the model.
+     *
+     * @return void
+     */
+    public function testTheBoundModelIsResolvedOnceForEveryListedAction(): void
+    {
+        Event::fake([DecisionEvaluated::class, AuthorizationFailed::class]);
+
+        $post     = StubTenant::create(['id' => 'post-1']);
+        $resolver = new FixedResourceTenantResolver;
+
+        $this->app?->instance(ResourceTenantResolver::class, $resolver);
+
+        $this->actAs(StubIdentity::create(['id' => 'bystander']));
+
+        $this->getJson('/either/post-1')->assertForbidden();
+
+        self::assertCount(1, $resolver->asked);
+        self::assertTrue($resolver->asked[0]->is($post));
+        Event::assertDispatchedTimes(DecisionEvaluated::class, 2);
+        Event::assertDispatched(AuthorizationFailed::class, static fn (AuthorizationFailed $event): bool => $event->resource === 'post:post-1');
+
+        foreach (['posts:update', self::ACTION] as $action) {
+            Event::assertDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => $event->action === $action
+                && $event->resource                                                                                        === 'post:post-1');
+        }
     }
 
     /**

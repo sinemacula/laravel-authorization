@@ -357,6 +357,33 @@ final class StatementTest extends TestCase
     }
 
     /**
+     * A type alone (`post:*`) is covered only by a pattern that covers every
+     * record of the type, so one that needs an id character, or reads the `*`
+     * as a literal character, does not cover it, while a record of the type is
+     * still matched by such patterns. A resource ending in `*` without the type
+     * separator is matched as it is.
+     *
+     * @return void
+     */
+    public function testATypeAloneIsCoveredOnlyByAPatternCoveringEveryRecord(): void
+    {
+        foreach (['post:*', '*', '*:*', 'post*'] as $pattern) {
+            self::assertTrue(self::allowOn($pattern)->matches('posts:read', 'post:*'), $pattern);
+        }
+
+        foreach (['post:?', 'post:?*', 'post:[*]', 'post:[!0-9]'] as $pattern) {
+            $statement = self::allowOn($pattern);
+
+            self::assertFalse($statement->matches('posts:read', 'post:*'), $pattern);
+            self::assertResult(MatchOutcome::DOES_NOT_MATCH, self::TARGET_MISMATCH, $statement->assess('posts:read', 'post:*'));
+        }
+
+        self::assertTrue(self::allowOn('post:?*')->matches('posts:read', 'post:42'));
+        self::assertTrue(self::allowOn('post:4?')->matches('posts:read', 'post:42'));
+        self::assertTrue(self::allowOn('report?')->matches('posts:read', 'report*'));
+    }
+
+    /**
      * A check without a resource is covered only by a statement whose resources
      * include `*`; a statement scoped to particular resources never covers it.
      *
@@ -2272,5 +2299,20 @@ final class StatementTest extends TestCase
             // bool
             ['k' => ['bool' => true], 'ctx' => 'yes', 'outcome' => $undecidable, 'detail' => 'condition \'k\': operator \'bool\' needs a boolean'],
         ];
+    }
+
+    /**
+     * Build a statement allowing `posts:read` on the given resource pattern.
+     *
+     * @param  string  $pattern
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Statement
+     */
+    private static function allowOn(string $pattern): Statement
+    {
+        return Statement::fromArray([
+            'effect'    => 'allow',
+            'actions'   => ['posts:read'],
+            'resources' => [$pattern],
+        ]);
     }
 }

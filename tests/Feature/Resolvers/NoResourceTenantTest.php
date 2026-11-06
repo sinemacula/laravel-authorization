@@ -20,7 +20,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for the default resource tenant resolver, which knows no
- * model's tenant.
+ * model's or record's tenant.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -45,6 +45,49 @@ final class NoResourceTenantTest extends TestCase
         self::assertNull($resolver->tenantOf(StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'Tenant A'])));
         self::assertNull($resolver->tenantOf($owned));
         self::assertNull($resolver->tenantOf(new StubTenant));
+    }
+
+    /**
+     * No `(type, id)` pair's record has a tenant either, whatever it names, a
+     * tenant itself included, and none is refused as one it cannot tell.
+     *
+     * @return void
+     */
+    public function testKnowsNoRecordsTenant(): void
+    {
+        $resolver = new NoResourceTenant;
+
+        StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'Tenant A']);
+
+        self::assertNull($resolver->tenantOfRecord('post', '42'));
+        self::assertNull($resolver->tenantOfRecord(StubTenant::class, 'tenant-a'));
+        self::assertNull($resolver->tenantOfRecord('post', 'missing'));
+    }
+
+    /**
+     * Under the default, a pair's reference carries no tenant, so a check on it
+     * with no tenant active is decided where the request is.
+     *
+     * @return void
+     */
+    public function testAPairIsDecidedWhereTheRequestIs(): void
+    {
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+
+        $user->attachPolicy(Policy::create([
+            'id'       => (string) Str::uuid(),
+            'name'     => 'every-post',
+            'document' => [
+                'statements' => [
+                    ['effect' => 'allow', 'actions' => ['posts:update'], 'resources' => ['post:*']],
+                ],
+            ],
+        ]));
+
+        $reference = ResourceReferences::of(['post', 42]);
+
+        self::assertEquals(ResourceReference::record('post', '42'), $reference);
+        self::assertTrue(Authorization::for($user)->check('posts:update', ['post', 42])->isAllowed());
     }
 
     /**

@@ -297,6 +297,13 @@ final class TenantScope implements Scope
      */
     private static function readResolvedTenant(Container $container): ResolvedTenant
     {
+        // A within() override holds whatever resolver is bound, even one bound
+        // afresh on every make(), so it is never rebuilt from the resolver.
+        if ($container->bound(self::WITHIN)) {
+            /** @var \SineMacula\Laravel\Authorization\Support\ResolvedTenant */
+            return $container->make(self::WITHIN);
+        }
+
         /** @var \SineMacula\Laravel\Authorization\Contracts\SubjectResolver $resolver */
         $resolver = $container->make(SubjectResolver::class);
 

@@ -378,4 +378,16 @@ final class AuthorizationAssertionsTest extends TestCase
 
         $this->assertCan($user, 'docs:view', new StubIdentity);
     }
+
+    /**
+     * `assertCan` and `assertCannot` are public, so a helper outside the test
+     * case that uses the trait can call them on it.
+     *
+     * @return void
+     */
+    public function testAssertCanAndAssertCannotArePublic(): void
+    {
+        self::assertTrue((new \ReflectionMethod(self::class, 'assertCan'))->isPublic());
+        self::assertTrue((new \ReflectionMethod(self::class, 'assertCannot'))->isPublic());
+    }
 }

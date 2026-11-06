@@ -14,6 +14,8 @@ use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceReferences;
+use Tests\Feature\Stubs\AbstractStubModel;
+use Tests\Feature\Stubs\ConstructedStubModel;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\StubTenant;
 
@@ -51,7 +53,8 @@ final class ResourceReferencesTest extends TestCase
     }
 
     /**
-     * Forget the container and clear the morph map.
+     * Forget the container, clear the morph map and reset the count of models
+     * constructed.
      *
      * @return void
      */
@@ -60,6 +63,7 @@ final class ResourceReferencesTest extends TestCase
     {
         Container::setInstance(null);
         Relation::morphMap([], false);
+        ConstructedStubModel::$constructed = 0;
 
         parent::tearDown();
     }
@@ -212,6 +216,112 @@ final class ResourceReferencesTest extends TestCase
     }
 
     /**
+     * A pair whose type is a model class names the record by the model's morph
+     * class, as the model itself would, under the application's morph map, and
+     * the resolver is asked about the record by that type.
+     *
+     * @return void
+     */
+    public function testAPairOfAModelClassNamesItsMorphClass(): void
+    {
+        self::assertEquals(ResourceReference::record(StubTenant::class, 'abc'), ResourceReferences::of([StubTenant::class, 'abc']));
+
+        Relation::morphMap(['stub_tenant' => StubTenant::class]);
+
+        $reference = ResourceReferences::of([StubTenant::class, 'abc']);
+
+        self::assertInstanceOf(ResourceReference::class, $reference);
+        self::assertSame('stub_tenant:abc', $reference->identifier);
+        self::assertSame('stub_tenant', $reference->type);
+        self::assertSame([[StubTenant::class, 'abc'], ['stub_tenant', 'abc']], $this->resolver->askedRecords);
+        self::assertCount(0, $this->resolver->asked);
+    }
+
+    /**
+     * A pair's tenant is the one the bound resolver gives its record, asked
+     * once with the pair's type and its id as a string.
+     *
+     * @return void
+     */
+    public function testAPairCarriesTheTenantTheResolverGivesItsRecord(): void
+    {
+        $tenant = new Reference('stub_tenant', '7');
+
+        $this->bindResolver(null, $tenant);
+
+        $reference = ResourceReferences::of(['post', 42]);
+
+        self::assertInstanceOf(ResourceReference::class, $reference);
+        self::assertSame('post:42', $reference->identifier);
+        self::assertSame($tenant, $reference->tenant);
+        self::assertSame([['post', '42']], $this->resolver->askedRecords);
+        self::assertCount(0, $this->resolver->asked);
+    }
+
+    /**
+     * A pair whose record's tenant the resolver cannot tell cannot be
+     * identified, rather than being taken as a record of no tenant.
+     *
+     * @return void
+     */
+    public function testAPairWhoseTenantCannotBeToldCannotBeIdentified(): void
+    {
+        $this->bindResolver(null, false);
+
+        self::assertFalse(ResourceReferences::of(['post', '42']));
+        self::assertSame([['post', '42']], $this->resolver->askedRecords);
+    }
+
+    /**
+     * An abstract model class names no type a record can be of, so neither the
+     * class nor a pair of it can be identified, and no tenant is asked for.
+     *
+     * @return void
+     */
+    public function testAnAbstractModelClassCannotBeIdentified(): void
+    {
+        self::assertFalse(ResourceReferences::of(AbstractStubModel::class));
+        self::assertFalse(ResourceReferences::of([AbstractStubModel::class, '42']));
+        self::assertSame([], $this->resolver->askedRecords);
+    }
+
+    /**
+     * A model class whose constructor needs an argument still names its type,
+     * alone or in a pair, under the morph map too, and its constructor never
+     * runs.
+     *
+     * @return void
+     */
+    public function testAModelClassIsNamedWithoutRunningItsConstructor(): void
+    {
+        self::assertEquals(ResourceReference::type(ConstructedStubModel::class), ResourceReferences::of(ConstructedStubModel::class));
+        self::assertEquals(ResourceReference::record(ConstructedStubModel::class, '42'), ResourceReferences::of([ConstructedStubModel::class, 42]));
+
+        Relation::morphMap(['constructed' => ConstructedStubModel::class]);
+
+        self::assertEquals(ResourceReference::type('constructed'), ResourceReferences::of(ConstructedStubModel::class));
+        self::assertEquals(ResourceReference::record('constructed', '42'), ResourceReferences::of([ConstructedStubModel::class, 42]));
+        self::assertSame(0, ConstructedStubModel::$constructed);
+    }
+
+    /**
+     * A pair's id of zero, as a number or a string, is a key; an empty string
+     * and a boolean are not, whatever they would be cast to.
+     *
+     * @return void
+     */
+    public function testZeroIsAKeyButAnEmptyStringAndABooleanAreNot(): void
+    {
+        self::assertEquals(ResourceReference::record('post', '0'), ResourceReferences::of(['post', 0]));
+        self::assertEquals(ResourceReference::record('post', '0'), ResourceReferences::of(['post', '0']));
+        self::assertEquals(ResourceReference::record('post', '0'), ResourceReferences::of(['post', 0.0]));
+        self::assertFalse(ResourceReferences::of(['post', '']));
+        self::assertFalse(ResourceReferences::of(['post', true]));
+        self::assertFalse(ResourceReferences::of(['post', false]));
+        self::assertSame([['post', '0'], ['post', '0'], ['post', '0']], $this->resolver->askedRecords);
+    }
+
+    /**
      * A list of any other length, or a keyed array, is not a pair and cannot be
      * identified.
      *
@@ -283,14 +393,15 @@ final class ResourceReferencesTest extends TestCase
 
     /**
      * Bind a resource tenant resolver that answers the given tenant for every
-     * model.
+     * model, and the given record tenant for every pair.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  false|\SineMacula\Laravel\Authorization\Support\Reference|null  $recordTenant
      * @return void
      */
-    private function bindResolver(?Reference $tenant): void
+    private function bindResolver(?Reference $tenant, false|Reference|null $recordTenant = null): void
     {
-        $this->resolver = new FixedResourceTenantResolver($tenant);
+        $this->resolver = new FixedResourceTenantResolver($tenant, $recordTenant);
 
         Container::getInstance()->instance(ResourceTenantResolver::class, $this->resolver);
     }

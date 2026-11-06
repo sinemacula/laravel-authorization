@@ -354,6 +354,21 @@ final class ResourceScopeTest extends TestCase
 
                 return $owner === null ? null : Reference::of($owner);
             }
+
+            /**
+             * Return the tenant the pair's id names.
+             *
+             * @param  string  $type
+             * @param  string  $id
+             * @return \SineMacula\Laravel\Authorization\Support\Reference|null
+             */
+            #[\Override]
+            public function tenantOfRecord(string $type, string $id): ?Reference
+            {
+                $owner = $this->owners[$id] ?? null;
+
+                return $owner === null ? null : Reference::of($owner);
+            }
         });
 
         $this->user->givePermission('posts:edit', null, $this->account);
@@ -362,6 +377,39 @@ final class ResourceScopeTest extends TestCase
 
         self::assertSame(DecisionReason::TENANT_SCOPE, $out->reason);
         self::assertTrue(Authorization::for($this->user)->check('posts:edit', StubIdentity::query()->create(['id' => 'in']))->isAllowed());
+    }
+
+    /**
+     * An application that binds its subject resolver with `bind()`, so every
+     * `make()` builds a new one, still has a resource decided in the scope its
+     * tenant calls for: a resource of a tenant below the active one in that
+     * tenant, where a grant held only there counts, and one of a sibling tenant
+     * denied as `tenant_scope`, since a grant in the active tenant is not a
+     * platform-wide one.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAResolverBoundAfreshStillDecidesInTheResourcesScope(): void
+    {
+        $this->requestBoundAfresh($this->org);
+
+        $this->user->givePermission('posts:edit', null, $this->account, false);
+
+        self::assertFalse(Authorization::for($this->user)->check('posts:edit')->isAllowed());
+        self::assertTrue(Authorization::for($this->user)->check('posts:edit', $this->postOf($this->account))->isAllowed());
+
+        $this->requestBoundAfresh($this->account);
+
+        $this->user->givePermission('posts:archive', null, $this->account);
+        $this->user->givePermission('posts:archive', null, $this->sibling);
+
+        $decision = Authorization::for($this->user)->check('posts:archive', $this->postOf($this->sibling));
+
+        self::assertSame(DecisionReason::TENANT_SCOPE, $decision->reason);
+        self::assertSame(DecisionStage::TENANT, $decision->stage);
+        self::assertTrue(Authorization::for($this->user)->check('posts:archive', $this->postOf($this->account))->isAllowed());
     }
 
     /**
@@ -380,6 +428,19 @@ final class ResourceScopeTest extends TestCase
         $this->app?->forgetInstance(ResolvedTenant::class);
 
         return $resolver->forUser($this->user);
+    }
+
+    /**
+     * Make the request one in the given tenant, in the web application, under a
+     * subject resolver bound with `bind()`, so every `make()` builds a new one.
+     *
+     * @param  \Tests\Feature\Stubs\StubTenant  $tenant
+     * @return void
+     */
+    private function requestBoundAfresh(StubTenant $tenant): void
+    {
+        $this->app?->bind(SubjectResolver::class, fn (): SubjectResolver => new StubSubjectResolver($this->user, $tenant, 'web'));
+        $this->app?->forgetInstance(ResolvedTenant::class);
     }
 
     /**

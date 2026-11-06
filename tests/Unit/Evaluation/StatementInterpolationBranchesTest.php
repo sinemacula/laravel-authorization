@@ -232,7 +232,8 @@ final class StatementInterpolationBranchesTest extends TestCase
 
     /**
      * A resource pattern is interpolated as a pattern: a substituted wildcard
-     * only matches a literal wildcard resource.
+     * only matches a literal wildcard in the resource. (A literal `posts:*` is
+     * the type alone, which a pattern naming one record never covers.).
      *
      * @return void
      */
@@ -244,16 +245,16 @@ final class StatementInterpolationBranchesTest extends TestCase
             'resources' => ['posts:${principal.id}'],
         ]);
 
-        $principal = self::principal('*');
+        $principal = self::principal('4*');
 
-        $matched = $statement->assess('posts:update', 'posts:*', [], new ContextInterpolator, $principal);
+        $matched = $statement->assess('posts:update', 'posts:4*', [], new ContextInterpolator, $principal);
         self::assertSame(MatchOutcome::MATCHES, $matched->outcome);
 
         $mismatched = $statement->assess('posts:update', 'posts:42', [], new ContextInterpolator, $principal);
         self::assertSame(MatchOutcome::DOES_NOT_MATCH, $mismatched->outcome);
         self::assertSame('action/resource did not match', $mismatched->detail);
 
-        self::assertTrue($statement->matches('posts:update', 'posts:*', new ContextInterpolator, $principal));
+        self::assertTrue($statement->matches('posts:update', 'posts:4*', new ContextInterpolator, $principal));
         self::assertFalse($statement->matches('posts:update', 'posts:42', new ContextInterpolator, $principal));
     }
 

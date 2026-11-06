@@ -15,7 +15,8 @@ Each note is intentionally short and follows the same structure:
 
 The planned note set (populated during implementation — see `ISSUES.md` item #7) is:
 
-- `evaluation-order-and-deny-precedence.md`: the AWS IAM 4-step decision order, why an explicit DENY always wins over
+- `evaluation-order-and-deny-precedence.md`: the staged decision order (subject, resource, tenant, then the AWS IAM
+  deny, allow and implicit order), why an explicit DENY always wins over
   an RBAC allow, and why an undecidable deny applies and a malformed or unreadable policy denies (`invalid_policy`)
   instead of being skipped.
 - `polymorphic-identity-pivots.md`: why role, permission, and policy pivots use plain `string`

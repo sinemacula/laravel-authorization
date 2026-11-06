@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
 use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
 use SineMacula\Laravel\Authorization\Concerns\HasRoles;
+use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
@@ -48,6 +49,7 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
+use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSecondIdentity;
@@ -764,8 +766,10 @@ final class AuthorizationManagerTest extends TestCase
     /**
      * `check()` names a saved model, a pair and a model class to the evaluator
      * as `type:id`, `type:id` and `type:*`, so each is allowed by the one
-     * statement written for that identifier and another record of the same type
-     * is not, and each `DecisionEvaluated` carries the identifier string.
+     * statement written for that identifier and another record of the model's
+     * type is not, and each `DecisionEvaluated` carries the identifier string.
+     * The model class is another type, since only a pattern that covers every
+     * record of a type covers the type alone.
      *
      * @return void
      */
@@ -786,7 +790,7 @@ final class AuthorizationManagerTest extends TestCase
             'statements' => [
                 ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => [StubIdentity::class . ':' . $postKey]],
                 ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['posts:7']],
-                ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => [StubIdentity::class . ':[*]']],
+                ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => [StubTenant::class . ':*']],
             ],
         ]);
 
@@ -794,7 +798,7 @@ final class AuthorizationManagerTest extends TestCase
 
         $scope = Authorization::for($user)->withPolicies([$policy]);
 
-        foreach ([$post, ['posts', 7], StubIdentity::class] as $index => $resource) {
+        foreach ([$post, ['posts', 7], StubTenant::class] as $index => $resource) {
             $decision = $scope->check('posts:read', $resource);
 
             self::assertTrue($decision->isAllowed());
@@ -814,7 +818,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame([
             StubIdentity::class . ':' . $postKey,
             'posts:7',
-            StubIdentity::class . ':*',
+            StubTenant::class . ':*',
             StubIdentity::class . ':' . $otherKey,
         ], $resources);
     }
@@ -841,6 +845,44 @@ final class AuthorizationManagerTest extends TestCase
 
         Event::assertDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => $event->resource === 'posts:7');
         Event::assertDispatched(AuthorizationFailed::class, static fn (AuthorizationFailed $event): bool => $event->resource === 'posts:7');
+    }
+
+    /**
+     * `authorize()` resolves its resource once: denied on a saved model, or on
+     * a pair, it asks the bound resource tenant resolver about it exactly once,
+     * and the failure event carries the resource's identifier.
+     *
+     * @return void
+     */
+    public function testAuthorizeResolvesTheResourceOnce(): void
+    {
+        $user     = StubIdentity::create(['id' => '4a5b6c7d-8e9f-4a0b-9c1d-2e3f4a5b6c20']);
+        $model    = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
+        $resolver = new FixedResourceTenantResolver;
+
+        $this->app?->instance(ResourceTenantResolver::class, $resolver);
+
+        Event::fake();
+
+        foreach ([$model, ['posts', 7]] as $resource) {
+            try {
+                Authorization::for($user)->authorize('posts:delete', $resource);
+
+                self::fail('Expected AuthorizationException.');
+            } catch (AuthorizationException) {
+                // Expected.
+            }
+        }
+
+        self::assertSame([$model], $resolver->asked);
+        self::assertSame([['posts', '7']], $resolver->askedRecords);
+
+        $failed = Event::dispatched(AuthorizationFailed::class)
+            ->map(static fn (array $arguments): ?string => $arguments[0]->resource)
+            ->values()
+            ->all();
+
+        self::assertSame([StubTenant::class . ':tenant-a', 'posts:7'], $failed);
     }
 
     /**

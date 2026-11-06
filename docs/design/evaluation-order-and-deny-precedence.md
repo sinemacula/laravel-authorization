@@ -107,8 +107,12 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   at, so it never makes the check invalid.
 - **Resource references**: every check names its resource the same way (`ResourceReferences::of()`): a model as
   `type:id` with the tenant the bound `ResourceTenantResolver` gives it (none by default, N10), a `(type, id)` pair the
-  same way, a model class as `type:*` (N6), an `AuthorizableResource` as the reference it returns (N8), and any other
-  string as an opaque identifier with no tenant (N7).
+  same way, its type a model class's morph class and its tenant the resolver's `tenantOfRecord()` (N17), a model class
+  as `type:*` (N6), an `AuthorizableResource` as the reference it returns (N8), and any other string as an opaque
+  identifier with no tenant (N7). A pair whose tenant the resolver cannot tell, and an abstract model class, deny as
+  `resource_unresolved`. A type alone is covered only by a pattern that covers every record of the type (`*`,
+  `post:*`), never by one that needs an id character (`post:?`). Through the Gate, the arguments Laravel spreads from
+  `['post', 42]` name the pair, and a route parameter no binding resolved is an opaque identifier.
 - **Resource-less check**: a check without a resource matches only statements whose resources include `*`. An argument
   that cannot be identified as a resource denies as `resource_unresolved` at the resource stage, without reading any
   policy or permission, rather than becoming a resource-less check; the denial is recorded and reported like any

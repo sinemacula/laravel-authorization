@@ -5,6 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Http\Middleware;
 
 use Illuminate\Http\Request;
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 
 /**
  * Route middleware that admits a request when the full decision allows an
@@ -47,7 +49,12 @@ final class AuthorizeAction extends AbstractAuthorizationMiddleware
         $this->subject();
 
         // A parameter the route does not carry is a resource that cannot be
-        // identified, never a check about no resource.
-        $this->authorizeAny($names, $option === null ? null : $request->route($option) ?? false);
+        // identified, never a check about no resource. A parameter no binding
+        // turned into a model is the caller's own text: an opaque identifier,
+        // never read as a class name. The resource is resolved once for every
+        // listed action.
+        $value = $option === null ? null : $request->route($option) ?? false;
+
+        $this->authorizeAny($names, \is_string($value) ? new ResourceReference($value) : ResourceReferences::of($value));
     }
 }

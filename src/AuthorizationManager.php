@@ -34,9 +34,8 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
  *
  * Coordinates subject resolution, policy gathering, evaluation, and RBAC
  * fallback into a single API. The manager is deliberately small and delegates
- * the actual statement walking to the policy evaluator; all four evaluation
- * branches ultimately return an evaluation result, with the reason code and
- * trace recorded for audit consumers.
+ * the actual statement walking to the policy evaluator; every stage returns a
+ * decision, with the reason code and trace recorded for audit consumers.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -109,13 +108,15 @@ final class AuthorizationManager
      */
     public function authorize(string $action, mixed $resource = null, array $context = []): void
     {
-        $decision = $this->check($action, $resource, $context);
+        // Resolved once, so a bound resource tenant resolver is asked once.
+        $reference = ResourceReferences::of($resource);
+        $decision  = $this->check($action, $reference, $context);
 
         if ($decision->isAllowed()) {
             return;
         }
 
-        $this->dispatch(new AuthorizationFailed($this->currentSubject()?->subject, $action, self::identifierOf($resource), $context, $decision));
+        $this->dispatch(new AuthorizationFailed($this->currentSubject()?->subject, $action, self::identifierOf($reference), $context, $decision));
 
         throw AuthorizationException::translated($decision->reason ?? DecisionReason::NO_MATCH, $this->translator);
     }
@@ -377,16 +378,14 @@ final class AuthorizationManager
     }
 
     /**
-     * Return the identifier a resource argument names, or null for none or one
-     * that cannot be identified, for the decision events.
+     * Return the identifier a resolved reference carries, or null for no
+     * resource or one that cannot be identified.
      *
-     * @param  mixed  $resource
+     * @param  false|\SineMacula\Laravel\Authorization\Support\ResourceReference|null  $reference
      * @return string|null
      */
-    private static function identifierOf(mixed $resource): ?string
+    private static function identifierOf(false|ResourceReference|null $reference): ?string
     {
-        $reference = ResourceReferences::of($resource);
-
         return $reference === false ? null : $reference?->identifier;
     }
 

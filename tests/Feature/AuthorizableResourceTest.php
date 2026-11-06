@@ -301,6 +301,17 @@ final class AuthorizableResourceTest extends TestCase
             {
                 return $this->tenant;
             }
+
+            /**
+             * @param  string  $type
+             * @param  string  $id
+             * @return \SineMacula\Laravel\Authorization\Support\Reference
+             */
+            #[\Override]
+            public function tenantOfRecord(string $type, string $id): Reference
+            {
+                return $this->tenant;
+            }
         });
     }
 

@@ -39,8 +39,8 @@ use Tests\TestCase;
 
 /**
  * Feature coverage for the Gate callback the registrar defines per permission
- * enum case, focused on how the leading positional argument becomes the
- * resource the evaluator sees.
+ * enum case, focused on how the positional arguments become the resource the
+ * evaluator sees.
  *
  * An argument that cannot be identified as a resource (an unsaved model, a
  * model without a usable key, a number, a boolean, a list that is not a `(type,
@@ -224,6 +224,94 @@ final class GateRegistrarTest extends TestCase
         self::assertTrue(Gate::allows('posts:create', [['post', '42']]));
         self::assertFalse(Gate::allows('posts:create', [['post', 43]]));
         self::assertSame(['post:42', 'post:42', 'post:43'], $this->evaluatedResources());
+    }
+
+    /**
+     * Laravel spreads an argument array, so `Gate::allows('x', ['post', 42])`
+     * reaches the callback as two positional arguments, which name the record
+     * they spell: a deny on `post:42` refuses it despite an allow on every
+     * resource, and another record of the type is still allowed.
+     *
+     * @return void
+     */
+    public function testSpreadTypeAndIdArgumentsNameTheRecord(): void
+    {
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+
+        $user->attachPolicy(Policy::create([
+            'id'       => (string) Str::uuid(),
+            'name'     => 'all-but-post-42',
+            'document' => [
+                'statements' => [
+                    ['effect' => 'allow', 'actions' => ['posts:create'], 'resources' => ['*']],
+                    ['effect' => 'deny', 'actions' => ['posts:create'], 'resources' => ['post:42']],
+                ],
+            ],
+        ]));
+
+        $this->actAs($user);
+
+        self::assertFalse(Gate::allows('posts:create', ['post', 42]));
+        self::assertSame(DecisionReason::EXPLICIT_DENY, Authorization::lastDecision()?->reason);
+        self::assertTrue(Gate::allows('posts:create', ['post', 43]));
+        self::assertSame(['post:42', 'post:43'], $this->evaluatedResources());
+    }
+
+    /**
+     * A context map before or after the spread `(type, id)` arguments, or
+     * context passed by name after them, is merged into the context, a later
+     * map's key over an earlier one's, and not counted as part of the resource,
+     * so the check is still about the record.
+     *
+     * @return void
+     */
+    public function testContextBesideSpreadTypeAndIdArgumentsIsMerged(): void
+    {
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+
+        $user->attachPolicy(Policy::create([
+            'id'       => (string) Str::uuid(),
+            'name'     => 'post-42-in-org-1',
+            'document' => [
+                'statements' => [[
+                    'effect'     => 'allow',
+                    'actions'    => ['posts:create'],
+                    'resources'  => ['post:42'],
+                    'conditions' => ['tenant' => ['eq' => 'org-1']],
+                ]],
+            ],
+        ]));
+
+        $this->actAs($user);
+
+        self::assertTrue(Gate::allows('posts:create', [['tenant' => 'org-1'], 'post', 42]));
+        self::assertTrue(Gate::allows('posts:create', ['post', 42, ['tenant' => 'org-1']]));
+        self::assertTrue(Gate::allows('posts:create', ['post', 42, 'tenant' => 'org-1']));
+        self::assertTrue(Gate::allows('posts:create', [['tenant' => 'org-2'], 'post', 42, ['tenant' => 'org-1']]));
+        self::assertFalse(Gate::allows('posts:create', ['post', 42, ['tenant' => 'org-2']]));
+        self::assertSame(['post:42', 'post:42', 'post:42', 'post:42', 'post:42'], $this->evaluatedResources());
+        self::assertSame(['tenant' => 'org-2'], $this->decisions()[4]->context);
+    }
+
+    /**
+     * Three positional resource arguments, or a model followed by a stray
+     * value, name no resource the check can identify, so the Gate refuses them
+     * as an unresolved resource rather than silently dropping a value.
+     *
+     * @return void
+     */
+    public function testMoreResourceArgumentsThanAPairAreRefusedAsUnresolved(): void
+    {
+        $user   = $this->actAsFullyPermittedPrincipal();
+        $target = StubIdentity::create(['id' => 'target-1']);
+
+        self::assertFalse(Gate::allows('posts:create', ['post', 42, 'extra']));
+        $this->assertRefusalRecorded(0, $user);
+
+        self::assertFalse(Gate::allows('posts:create', [$target, 99]));
+        $this->assertRefusalRecorded(1, $user);
+
+        $this->assertResourcelessCheckStillAllowed();
     }
 
     /**

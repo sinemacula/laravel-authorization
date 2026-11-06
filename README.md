@@ -32,8 +32,9 @@ Blade directives, console commands and test assertions.
 | **Policy**     | A JSON document of statements, each allowing or denying actions on resources, optionally under conditions.    |
 | **Decision**   | The answer to one check: allowed or not, with the reason and a trace of the statements that decided it.       |
 
-Every check runs the same four steps: an explicit deny in any attached policy wins, then an explicit allow, then the
-principal's role and permission grants, and anything left is denied.
+Every check runs the same stages: the subject, the resource and its tenant are checked first, then an explicit deny in
+any attached policy wins, then an explicit allow, then the principal's role and permission grants, and anything left is
+denied.
 
 ## Features
 
@@ -414,10 +415,15 @@ A check's resource can be a model (`type:id`), a `[type, id]` pair, a model clas
 (`type:*`, so `post:*` covers "create a post" and `post:42` does not), an object implementing
 `SineMacula\Laravel\Authorization\Contracts\AuthorizableResource` (which returns its own `ResourceReference`), or any
 other string, used as given. A value that cannot be identified, such as an unsaved model, denies as
-`resource_unresolved`. To have tenant-owned resources decided in their own tenant, bind a `ResourceTenantResolver` as
-`resource_tenant_resolver` in `config/authorization.php`: a resource of the active tenant, or of a tenant below it, is
-then decided there, and one of any other tenant is denied as `tenant_scope` before any policy is read, unless a
-platform-wide grant of the permission covers it. The default knows no model's tenant.
+`resource_unresolved`. Through the Gate, `Gate::allows('posts:update', ['post', 42])` names the pair too, since Laravel
+spreads the array into two arguments. To have tenant-owned resources decided in their own tenant, bind a
+`ResourceTenantResolver` as `resource_tenant_resolver` in `config/authorization.php`. It answers a model's tenant
+(`tenantOf()`) and a pair's (`tenantOfRecord()`, which returns `false` when it cannot tell, denying the check as
+`resource_unresolved`), so a record is decided the same way however it is named. A resource of the active tenant, or
+of a tenant below it, is then decided there, and one of any other tenant is denied as `tenant_scope` before any policy
+is read, unless a platform-wide grant of the permission covers it. The default knows no record's tenant. Any other
+string is never given a tenant, so a tenant-owned resource that is not a model should implement `AuthorizableResource`
+and carry its tenant.
 
 Policies fail closed. A deny whose condition cannot be decided, such as a check made without `ip` in its context,
 still applies, while an allow in the same position does not. A check without a resource matches only statements whose
@@ -592,7 +598,7 @@ The contracts behind the evaluator, for maintainers and reviewers, are in [docs/
 
 | Note                                                                                        | Covers                                                      |
 |---------------------------------------------------------------------------------------------|-------------------------------------------------------------|
-| [Evaluation order and deny precedence](docs/design/evaluation-order-and-deny-precedence.md) | The four-step decision order and why an explicit deny wins  |
+| [Evaluation order and deny precedence](docs/design/evaluation-order-and-deny-precedence.md) | The staged decision order and why an explicit deny wins     |
 | [Wildcard and condition semantics](docs/design/wildcard-and-condition-semantics.md)         | Pattern matching, undecidable tests and condition operators |
 | [Polymorphic identity pivots](docs/design/polymorphic-identity-pivots.md)                   | Why grants work for integer, UUID and ULID keys             |
 | [Subject resolver contract](docs/design/subject-resolver-contract.md)                       | The default resolver and how an application binds its own   |
