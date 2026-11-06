@@ -12,14 +12,21 @@ use SineMacula\Laravel\Authorization\Context\ContextBindings;
 use SineMacula\Laravel\Authorization\Context\GuardAuthenticationContext;
 use SineMacula\Laravel\Authorization\Context\RoutedRequestContext;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
+use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
 use SineMacula\Laravel\Authorization\Contracts\RequestContext;
+use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
+use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use Tests\Feature\Stubs\ContributingAuthenticationContext;
 use Tests\Feature\Stubs\PlanContextSource;
 use Tests\Feature\Stubs\RecordingResourceAttributes;
 use Tests\Feature\Stubs\RecordingSubjectAttributes;
 use Tests\Feature\Stubs\ReservedContextSource;
+use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\TestCase;
 
 /**
@@ -166,6 +173,47 @@ final class ContextBindingsTest extends TestCase
         $this->expectExceptionMessage('Context source ' . ReservedContextSource::class . ' cannot supply the namespace \'request\'');
 
         ContextBindings::factory($this->application());
+    }
+
+    /**
+     * The catalogue makes the assurance keys of the namespaces the bound
+     * authentication context contributes untestable, as it does those of
+     * `authentication`.
+     *
+     * @return void
+     */
+    public function testTheCatalogueKnowsTheContributedNamespaces(): void
+    {
+        $this->config()->set('authorization.context.keys', ['authentication' => ['amr' => 'list'], 'mfa' => ['multifactor' => 'bool', 'enrolled' => 'bool']]);
+        $this->application()->instance(AuthenticationContext::class, new ContributingAuthenticationContext(['mfa']));
+
+        $catalogue = ContextBindings::catalogue($this->application());
+
+        self::assertFalse($catalogue->permits('authentication.amr', 'any_value_in'));
+        self::assertFalse($catalogue->permits('mfa.multifactor', 'bool'));
+        self::assertTrue($catalogue->permits('mfa.enrolled', 'bool'));
+
+        $catalogue->declare('mfa.amr', ContextKeyType::LIST);
+
+        self::assertFalse($catalogue->find('mfa.amr')?->isTestable);
+    }
+
+    /**
+     * The factory judges each check's requirements with the bound checker.
+     *
+     * @return void
+     */
+    public function testTheFactoryHoldsTheBoundChecker(): void
+    {
+        $checker = new StubRequirementChecker(RequirementResult::met());
+        $user    = new \stdClass;
+
+        $this->application()->instance(AuthenticationRequirementChecker::class, $checker);
+
+        $context = ContextBindings::factory($this->application())->make([], new Subject($user, $user, session: 'session-1'));
+
+        self::assertSame(MatchOutcome::MATCHES, $context->assessRequirement(new AuthenticationRequirement(['multifactor' => null]))->outcome);
+        self::assertCount(1, $checker->calls);
     }
 
     /**

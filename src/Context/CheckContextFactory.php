@@ -5,10 +5,12 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Context;
 
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
+use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\ContextSource;
 use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
 use SineMacula\Laravel\Authorization\Contracts\RequestContext;
 use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementCheck;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
@@ -24,6 +26,10 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * passing `['request' => ['ip' => …]]` supplies `input.request.ip`, never
  * `request.ip`. Each check's context is new, and builds a namespace only when a
  * statement of the check reads it, at most once.
+ *
+ * Each context judges the check's authentication requirements with the bound
+ * requirement checker, for the check's subject and its session (N34); without a
+ * checker every requirement is unmet.
  *
  * A source claiming a namespace that is not a name (letters, digits and `_`),
  * is reserved, or is supplied by another source or the authentication context,
@@ -46,6 +52,9 @@ final readonly class CheckContextFactory
     /** @var \SineMacula\Laravel\Authorization\Context\AttributeNamespaces Builds each check's `subject` and `resource` namespaces. */
     private AttributeNamespaces $attributes;
 
+    /** @var \SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker|null Judges each check's authentication requirements; null finds them unmet. */
+    private ?AuthenticationRequirementChecker $requirements;
+
     /**
      * Create a new check context factory.
      *
@@ -54,6 +63,7 @@ final readonly class CheckContextFactory
      * @param  \SineMacula\Laravel\Authorization\Contracts\EnvironmentContext  $environment
      * @param  iterable<\SineMacula\Laravel\Authorization\Contracts\ContextSource>  $sources
      * @param  \SineMacula\Laravel\Authorization\Context\AttributeProviders|null  $attributes
+     * @param  \SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker|null  $requirements
      *
      * @throws \InvalidArgumentException
      */
@@ -63,6 +73,7 @@ final readonly class CheckContextFactory
         EnvironmentContext $environment,
         iterable $sources = [],
         ?AttributeProviders $attributes = null,
+        ?AuthenticationRequirementChecker $requirements = null,
     ) {
         $builders = self::authenticationBuilders($authentication);
 
@@ -77,14 +88,15 @@ final readonly class CheckContextFactory
         $builders['request']     = static fn (): array => self::namespaced('request', $request->values());
         $builders['environment'] = static fn (): array => self::namespaced('environment', $environment->values());
 
-        $this->builders   = $builders;
-        $this->attributes = new AttributeNamespaces($attributes);
+        $this->builders     = $builders;
+        $this->attributes   = new AttributeNamespaces($attributes);
+        $this->requirements = $requirements;
     }
 
     /**
      * Make the context of one check, holding what the caller passes under
      * `input`, and the check's subject and resource under `subject` and
-     * `resource`.
+     * `resource`, judging its authentication requirements for the subject.
      *
      * @param  array<array-key, mixed>  $input
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
@@ -93,7 +105,11 @@ final readonly class CheckContextFactory
      */
     public function make(array $input = [], ?Subject $subject = null, ?ResourceReference $resource = null): CheckContext
     {
-        return new CheckContext([self::INPUT => $input], [...$this->builders, ...$this->attributes->builders($subject, $resource)]);
+        return new CheckContext(
+            [self::INPUT => $input],
+            [...$this->builders, ...$this->attributes->builders($subject, $resource)],
+            new RequirementCheck($this->requirements, $subject),
+        );
     }
 
     /**

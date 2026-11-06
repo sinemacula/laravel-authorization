@@ -8,6 +8,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
+use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 
 return [
 
@@ -372,6 +373,32 @@ return [
     */
 
     'resource_tenant_resolver' => NoResourceTenant::class,
+
+    /*
+    |---------------------------------------------------------------------------
+    | Authentication requirement checker
+    |---------------------------------------------------------------------------
+    |
+    | A class implementing `AuthenticationRequirementChecker`, which judges an
+    | `authentication_requirement` condition (additional verification,
+    | multifactor, phishing resistance, a minimum assurance level, each with
+    | an optional `max_age`) for the subject's session, fetching the proofs
+    | itself. It answers met, with the instant until which the requirement
+    | stays met, or unmet, with the parts that are not. A subject without a
+    | session, such as one named with `for()`, meets no requirement, and the
+    | checker is not asked; a checker that throws makes the test undecidable.
+    |
+    | The shipped default refuses: every part of every requirement is unmet,
+    | so an allow that states one never applies, and when nothing else allows
+    | the check is denied as `insufficient_authentication`. Under the suite
+    | `sinemacula/laravel-iam` binds `laravel-mfa`'s requirement check. A class
+    | that does not implement the contract is refused at boot. A class named
+    | here is built per request or job, while a checker bound directly on the
+    | contract is kept.
+    |
+    */
+
+    'requirement_checker' => RefusingRequirementChecker::class,
 
     /*
     |---------------------------------------------------------------------------

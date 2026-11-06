@@ -106,6 +106,7 @@ final class MiddlewareBench extends BenchmarkCase
      *
      * @throws \Illuminate\Auth\AuthenticationException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     #[Bench\BeforeMethods('setUp')]
     #[Bench\Iterations(3)]
@@ -123,6 +124,7 @@ final class MiddlewareBench extends BenchmarkCase
      *
      * @throws \Illuminate\Auth\AuthenticationException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     #[Bench\BeforeMethods('setUp')]
     #[Bench\Iterations(3)]

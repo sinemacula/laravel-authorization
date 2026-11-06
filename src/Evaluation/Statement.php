@@ -35,6 +35,14 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
  * `false` does not. A key present with a null value is not missing: every
  * operator but `null` tests the null.
  *
+ * The `authentication_requirement` operator states an authentication
+ * requirement on the reserved key `authentication` (N33): one test, judged by
+ * the bound requirement checker for the check's subject and session, never read
+ * from the context. It holds when met, does not hold when unmet, and is
+ * undecidable when the checker fails. An allow statement whose requirement
+ * alone does not hold says so in its assessment, with the requirement and its
+ * unmet parts, so the evaluator can decide `insufficient_authentication`.
+ *
  * A statement reads the check's context through its condition keys and its
  * `${…}` references. A namespace is built the first time a check reads a path
  * in it, through `CheckContext`, and kept for the rest of the check, so a
@@ -222,9 +230,13 @@ final readonly class Statement
             return $target;
         }
 
+        // An unmet authentication requirement is kept only when the resource
+        // definitely matched, so an undecidable resource pattern never makes
+        // the statement a candidate for insufficient authentication.
         $conditions = $this->assessConditions($scope);
+        $result     = $target->and($conditions)->withConditions($conditions->conditions ?? []);
 
-        return $target->and($conditions)->withConditions($conditions->conditions ?? []);
+        return $result->unmetRequirement === null || $target->holds() ? $result : $result->withUnmetRequirement(null);
     }
 
     /**
@@ -275,26 +287,44 @@ final readonly class Statement
      * Assess every key test of the conditions against the context, recording
      * each key with whether all of its tests held.
      *
+     * The authentication requirement, when the statement states one, is
+     * combined last, and its unmet parts are kept only when every other test
+     * held, so the result names the requirement exactly when it alone kept the
+     * conditions from holding.
+     *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\InterpolationScope  $scope
      * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
      */
     private function assessConditions(InterpolationScope $scope): MatchResult
     {
-        $result = $this->operatorErrors === [] ? MatchResult::matches() : MatchResult::invalid($this->operatorErrors[0]);
-        $held   = [];
+        $result      = $this->operatorErrors === [] ? MatchResult::matches() : MatchResult::invalid($this->operatorErrors[0]);
+        $requirement = MatchResult::matches();
+        $held        = [];
 
         foreach ($this->tests as $test) {
-            $part   = self::assessTest($test, $scope);
-            $result = $part->outcome === MatchOutcome::MATCHES ? $result : $result->and($part);
+            $part = self::assessTest($test, $scope);
+
+            if ($test['operator'] === AuthenticationRequirement::OPERATOR) {
+                $requirement = $part;
+            } elseif ($part->outcome !== MatchOutcome::MATCHES) {
+                $result = $result->and($part);
+            }
 
             $held[$test['key']] = ($held[$test['key']] ?? true) && $part->outcome === MatchOutcome::MATCHES;
         }
 
-        return $result->withConditions($held);
+        $combined = $result->and($requirement)->withConditions($held);
+
+        return $combined->unmetRequirement === null || $result->holds() ? $combined : $combined->withUnmetRequirement(null);
     }
 
     /**
      * Assess a single key test.
+     *
+     * A malformed test is invalid whatever the context holds, so its shape
+     * (worked out on construction) is checked before the key is looked up, and
+     * its namespace is never built for it. An authentication requirement is
+     * judged by the context's requirement check, never read as a key.
      *
      * @param  ConditionTest  $test
      * @param  \SineMacula\Laravel\Authorization\Evaluation\InterpolationScope  $scope
@@ -302,13 +332,22 @@ final readonly class Statement
      */
     private static function assessTest(array $test, InterpolationScope $scope): MatchResult
     {
-        // A malformed test is invalid whatever the context holds, so its shape
-        // (worked out on construction) is checked before the key is looked up,
-        // and its namespace is never built for it.
-        if ($test['error'] !== null) {
-            return MatchResult::invalid($test['error']);
-        }
+        return match (true) {
+            $test['error'] !== null                               => MatchResult::invalid($test['error']),
+            $test['operand'] instanceof AuthenticationRequirement => $scope->context->assessRequirement($test['operand']),
+            default                                               => self::assessKey($test, $scope),
+        };
+    }
 
+    /**
+     * Assess a well-formed key test against the value of its key.
+     *
+     * @param  ConditionTest  $test
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\InterpolationScope  $scope
+     * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
+     */
+    private static function assessKey(array $test, InterpolationScope $scope): MatchResult
+    {
         [$isPresent, $actual] = $scope->context->find($test['path']);
 
         return $isPresent

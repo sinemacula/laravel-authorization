@@ -37,6 +37,7 @@ final class RequirePermission extends AbstractAuthorizationMiddleware
      *
      * @throws \Illuminate\Auth\AuthenticationException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
      */
     #[\Override]

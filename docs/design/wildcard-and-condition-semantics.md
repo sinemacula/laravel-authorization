@@ -4,7 +4,8 @@ Permission checks and policy statement matching both use `fnmatch` for pattern e
 a condition operator catalogue for context-sensitive decisions. This note documents the wildcard matching direction, how
 backslashes and substituted values are kept literal, the four outcomes a statement test can have, the check's context
 (the subject and resource attributes among it) and the keys a policy may read from it, the condition operator set,
-`${…}` interpolation, and the interaction between wildcards and the RBAC fallback.
+the authentication requirement and the assurance keys no condition may test, `${…}` interpolation, and the interaction
+between wildcards and the RBAC fallback.
 
 ## Invariants
 
@@ -284,7 +285,9 @@ A key's type decides the operators a condition may test it with. The `_if_exists
 
 The type is a write-time rule only: at evaluation a value is checked exactly as the operator table below says, so a
 value of the wrong type is undecidable whatever the key was declared as. An untestable key may be read by a `${…}`
-reference but not tested by a condition.
+reference but not tested by a condition. An assurance key is always untestable, and not even a reference may read it
+(see [Assurance keys](#assurance-keys)). The catalogue is given the namespaces the authentication context contributes,
+so it knows them.
 
 ## Condition Operators
 
@@ -358,6 +361,64 @@ produced by interpolation, that is not of the listed type makes the test undecid
   context value must be a list of scalars; anything else is undecidable. An empty list never holds for `all_values_in`
   (N22), so a principal with no scopes does not pass a test that every scope is allowed.
 - **`like`** follows invariants 4 and 5: the operand's own backslashes are literal and substituted values are escaped.
+
+### `authentication_requirement`
+
+The `authentication_requirement` operator (AUTHZ-8.3, N33) states an authentication requirement rather than testing a
+context value. It is valid only on the reserved key `authentication`, and its operand is a non-empty map of parts to
+their options:
+
+```json
+{
+  "authentication_requirement": {
+    "authentication": { "multifactor": { "max_age": 900 }, "phishing_resistant": {} }
+  }
+}
+```
+
+| Part                      | Options                                     |
+|---------------------------|---------------------------------------------|
+| `additional_verification` | `{}` or `{"max_age": n}`                    |
+| `multifactor`             | `{}` or `{"max_age": n}`                    |
+| `phishing_resistant`      | `{}` or `{"max_age": n}`                    |
+| `assurance_level`         | `{"min": "<level>"}`, with `max_age` or not |
+
+- **One test, judged whole.** The operand becomes an `AuthenticationRequirement` (each part with its maximum age, and
+  the minimum level), and the bound `AuthenticationRequirementChecker` judges all of it at once for the subject's
+  session, from the session's proofs, which it fetches itself. The package never reads `authentication` through the
+  context resolver for it, never passes proofs or `amr` in, and never splits it into scalar tests that a fresh weak
+  proof and a stale strong one could meet together. It counts as one key test for the `conditions` limit.
+- **Outcomes.** Met is `MATCHES`; unmet is `DOES_NOT_MATCH`, carrying the requirement and its unmet parts; a checker
+  that throws makes it `UNDECIDABLE`. A subject without a session, no subject and the default
+  `RefusingRequirementChecker` all find every part unmet, and the checker is not asked without a session. A met result
+  whose `metUntil` has passed is unmet, every part; an unmet result keeps only the requirement's own parts, and all of
+  them when it names none. Nothing the checker answers is remembered: every requirement of every check is put to it
+  afresh.
+- **Insufficient authentication.** On an allow statement whose action and resource definitely match and whose every
+  other test holds, an unmet requirement is kept on the `MatchResult` (`unmetRequirement`), so the evaluator can deny
+  as `insufficient_authentication` with it (see [Evaluation Order and Deny
+  Precedence](evaluation-order-and-deny-precedence.md)). On a deny statement it is a test that does not hold, so the
+  deny does not apply; an undecidable one applies it.
+- **Refused on write.** Any key but `authentication`; an operand that is not a non-empty map; an unknown part; options
+  that are not a map, or that hold an unknown option; a `max_age` that is not an integer of at least 1; an
+  `assurance_level` without a `min` that is a non-blank string. `authentication_requirement_if_exists` is refused with
+  a reason of its own: a requirement has no `_if_exists` form. A statement constructed directly with any of these is
+  invalid. The operand is never interpolated.
+- **Trace.** The requirement is recorded as the condition key `authentication`, with whether it held, never a proof.
+- **Catalogue.** The requirement reads no context key, so it skips the key catalogue: `authentication` need not be
+  declared for it, and its type rules do not apply.
+
+### Assurance keys
+
+Scalar assurance keys may be in the context, for display and logging, but no policy may decide on them (AUTHZ-8.9,
+N37). A key is an assurance key when its namespace is `authentication`, or one the bound `AuthenticationContext`
+contributes beside it (such as `mfa`), and any segment of its path after the namespace is one of
+`AssuranceKeys::NAMES`: `assurance_level`, `auth_time`, `seconds_since_step_up`, `last_verified_at`,
+`verification_age`, `multifactor` and `amr`. So `authentication.amr`, `mfa.multifactor` and `mfa.multifactor.enabled`
+are assurance keys, and `request.amr` and `authentication.guard` are not. The package declares none of them;
+`DeclaredContextKeyCatalogue` declares any of them untestable whatever the declaring context, provider or configuration
+says, and `PolicyValidator` refuses a condition on one, and a `${…}` reference to one in an operand or a resource
+pattern, whatever the catalogue says, with a reason that names the key and points at `authentication_requirement`.
 
 ### `_if_exists`
 
@@ -456,7 +517,9 @@ reasons into one `InvalidPolicyDocumentException` message, separated by semicolo
   again. Lowering a limit therefore makes every stored document over it deny until it is fixed.
 - **Context keys** (N25): every condition key must be declared in the context key catalogue, may not be one declared
   untestable, and must be of a type its operator suits; every `${…}` reference in an operand or a resource pattern
-  must name a declared key, so a `${principal.…}` reference is refused (see [The key catalogue](#the-key-catalogue)). A
+  must name a declared key, so a `${principal.…}` reference is refused (see [The key catalogue](#the-key-catalogue)).
+  A condition key or reference that is an assurance key is refused whatever the catalogue says, and an
+  `authentication_requirement` test skips the catalogue (see [Assurance keys](#assurance-keys)). A
   declared key is always a valid path: a letter or `_`, then letters, digits and `_`, then any number of `.`-separated
   segments of letters, digits, `_` and `-`, at most 128 characters, so a malformed key is refused as undeclared. Each
   reason is given once for its statement; a reason naming an undeclared key says how to declare it.
@@ -517,6 +580,12 @@ document, then a summary, and exits 1 when any is invalid.
   `AttributeProviderFailed`; the `SubjectAttributeProvider` and `ResourceAttributeProvider` contracts;
   `AttributeConfigValidator` -- `authorization.attributes` at boot.
 - `ContextInterpolator::references()` -- the paths a string references.
+- `AuthenticationRequirement` -- the operand's rules (`errorOf()`) and the requirement it builds;
+  `StatementValidator` -- the operator on `authentication` alone and no `_if_exists` form; `RequirementCheck` -- one
+  check's requirements put to the bound `AuthenticationRequirementChecker` (default `RefusingRequirementChecker`) and
+  the `RequirementResult` read; `MatchResult::unmet()` -- the unmet outcome with its parts.
+- `AssuranceKeys` -- the names and `isAssuranceKey()`; `DeclaredContextKeyCatalogue` and `PolicyValidator` -- where
+  they are made untestable and refused.
 - The `ContextKeyCatalogue` contract, `DeclaredContextKeyCatalogue`, `ContextKey` and `ContextKeyType::suits()` -- the
   declared keys and the type and operator rules; `ContextConfigValidator` -- `authorization.context` at boot.
 - The `AuthenticationContext`, `RequestContext`, `EnvironmentContext` and `ContextSource` contracts and their defaults,
@@ -554,6 +623,9 @@ document, then a summary, and exits 1 when any is invalid.
 - `AuthorizationManagerTest::testCallerValuesLandUnderInputAndNeverInTheRequest`,
   `GateArgumentForwardingTest::testGateArgumentsLandUnderInputAndNeverInAnotherNamespace` and `AuthorizeActionTest` --
   caller values under `input` through every entry point, and the `request` namespace of a routed request.
+- `AuthenticationRequirementTest`, `StatementValidatorTest`, `StatementTest` and `RequirementCheckTest` -- the
+  requirement's operand rules, its outcomes and the checker; `AssuranceKeysTest`, `DeclaredContextKeyCatalogueTest` and
+  `PolicyValidatorTest` -- the assurance keys made untestable and refused.
 - `DeclaredContextKeyCatalogueTest`, `ContextKeyTypeTest` and `ContextConfigValidatorTest` -- the catalogue, the type
   rules and the configuration; `GuardAuthenticationContextTest`, `RoutedRequestContextTest` and
   `ClockEnvironmentContextTest` -- the trusted sources.
@@ -570,6 +642,12 @@ document, then a summary, and exits 1 when any is invalid.
   operand is a glob or in `LITERAL_OPERAND_OPERATORS` when its operand is never interpolated, the key types it suits in
   `ContextKeyType`, and a new row in the operator catalogue above, including which operands are invalid and which
   context values are undecidable.
+- Adding a part to an authentication requirement requires a new entry in `AuthenticationRequirement::PARTS`, its
+  options in `partError()`, and a row in the requirement table above; adding an assurance key name requires a new entry
+  in `AssuranceKeys::NAMES`.
+- Letting a condition test an assurance key, or splitting an authentication requirement into separate tests, would let
+  a fresh weak proof and a stale strong one meet a requirement together, and requires a design decision before
+  implementation.
 - Letting a caller's value reach a namespace other than `input`, reading a condition key as a literal flat key, or
   reading a model's columns or an undeclared attribute into `subject` or `resource`, would violate invariant 8 and
   requires a design decision before implementation.

@@ -7,7 +7,14 @@ namespace Tests\Unit\Evaluation;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
 use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementCheck;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementFreshness;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
+use SineMacula\Laravel\Authorization\Subject;
+use Tests\Feature\Stubs\StubRequirementChecker;
 
 /**
  * Unit tests for the context of one check: its namespaces, read as dot paths,
@@ -299,6 +306,49 @@ final class CheckContextTest extends TestCase
         self::assertEquals($context, CheckContext::from(self::NAMESPACES));
         self::assertSame([true, '10.0.0.1'], CheckContext::from(self::NAMESPACES)->lookup('request.ip'));
         self::assertSame([false, null], CheckContext::from([])->lookup('request.ip'));
+    }
+
+    /**
+     * A context built without a requirement check meets no requirement, and
+     * records that it read one.
+     *
+     * @return void
+     */
+    public function testWithoutARequirementCheckNothingIsMet(): void
+    {
+        $context = new CheckContext(['authentication' => ['multifactor' => true]]);
+
+        self::assertNull($context->requirementFreshness());
+
+        $result = $context->assessRequirement(new AuthenticationRequirement(['multifactor' => null]));
+
+        self::assertSame(MatchOutcome::DOES_NOT_MATCH, $result->outcome);
+        self::assertSame(['multifactor'], $result->unmetRequirement?->unmet);
+        self::assertEquals(new RequirementFreshness(null), $context->requirementFreshness());
+    }
+
+    /**
+     * A context judges requirements with its requirement check, and reports its
+     * freshness, without building any namespace.
+     *
+     * @return void
+     */
+    public function testJudgesRequirementsWithItsCheck(): void
+    {
+        $user    = new \stdClass;
+        $builder = function (): array {
+            $this->builds['authentication'] = ($this->builds['authentication'] ?? 0) + 1;
+
+            return ['authentication' => ['amr' => ['otp']]];
+        };
+        $context = new CheckContext([], ['authentication' => $builder], new RequirementCheck(
+            new StubRequirementChecker(RequirementResult::met()),
+            new Subject($user, $user, session: 'session-1'),
+        ));
+
+        self::assertSame(MatchOutcome::MATCHES, $context->assessRequirement(new AuthenticationRequirement(['multifactor' => null]))->outcome);
+        self::assertEquals(new RequirementFreshness('session-1'), $context->requirementFreshness());
+        self::assertSame([], $this->builds);
     }
 
     /**

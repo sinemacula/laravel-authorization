@@ -4,11 +4,16 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Container\Container;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use Illuminate\Contracts\Auth\Guard;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Http\Request;
+use Illuminate\Session\ArraySessionHandler;
+use Illuminate\Session\Store;
 use PHPUnit\Framework\Attributes\CoversClass;
+use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
@@ -31,6 +36,9 @@ use Tests\TestCase;
 #[CoversClass(AuthGuardSubjectResolver::class)]
 final class AuthGuardSubjectResolverTest extends TestCase
 {
+    /** @var string The id of the session the requests hold. */
+    private const string SESSION = 'a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0';
+
     /**
      * Tear down Mockery instances after every test.
      *
@@ -183,6 +191,122 @@ final class AuthGuardSubjectResolverTest extends TestCase
         self::assertInstanceOf(EagerRolesIdentity::class, $subject?->subject);
         self::assertSame($user->getKey(), $subject->subject->getKey());
         self::assertTrue($subject->subject->hasRole('admin'));
+    }
+
+    /**
+     * The user signed in on the guard has the request's session, once it has
+     * started.
+     *
+     * @return void
+     */
+    public function testTheSignedInUserHasTheRequestsSession(): void
+    {
+        $user      = \Mockery::mock(Authenticatable::class);
+        $container = $this->containerWith(self::requestInSession(true));
+        $resolver  = new AuthGuardSubjectResolver($this->factoryReturning('web', $user), $this->configWithDefaultGuard('web'), null, $container);
+        $subject   = $resolver->resolve();
+
+        $this->assertSubject($subject, $user, 'web');
+        self::assertSame(self::SESSION, $subject?->session);
+    }
+
+    /**
+     * Provide containers whose request gives no session: none bound, one that
+     * is not a request, one without a session, and one whose session has not
+     * started.
+     *
+     * @return iterable<string, array{\Closure(): ?\Illuminate\Container\Container}>
+     */
+    public static function sessionlessProvider(): iterable
+    {
+        yield 'no container' => [static fn (): ?Container => null];
+        yield 'no request' => [static fn (): Container => new Container];
+        yield 'not a request' => [static function (): Container {
+            $container = new Container;
+            $container->instance('request', new \stdClass);
+
+            return $container;
+        }];
+        yield 'no session' => [static function (): Container {
+            $container = new Container;
+            $container->instance('request', Request::create('/'));
+
+            return $container;
+        }];
+        yield 'a session not started' => [static function (): Container {
+            $container = new Container;
+            $container->instance('request', self::requestInSession(false));
+
+            return $container;
+        }];
+    }
+
+    /**
+     * Without a started session on the request, the signed-in user has no
+     * session.
+     *
+     * @param  \Closure(): ?\Illuminate\Container\Container  $container
+     * @return void
+     */
+    #[DataProvider('sessionlessProvider')]
+    public function testOutsideASessionTheUserHasNone(\Closure $container): void
+    {
+        $user     = \Mockery::mock(Authenticatable::class);
+        $resolver = new AuthGuardSubjectResolver($this->factoryReturning('web', $user), $this->configWithDefaultGuard('web'), null, $container());
+
+        self::assertNull($resolver->resolve()?->session);
+    }
+
+    /**
+     * `forUser()` gives the request's session to the user signed in on the
+     * guard, and none to any other user.
+     *
+     * @return void
+     */
+    public function testForUserGivesTheSessionToTheSignedInUserAlone(): void
+    {
+        $user      = \Mockery::mock(Authenticatable::class);
+        $container = $this->containerWith(self::requestInSession(true));
+
+        $same  = (new AuthGuardSubjectResolver($this->factoryReturning('web', $user), $this->configWithDefaultGuard('web'), null, $container))->forUser($user);
+        $other = (new AuthGuardSubjectResolver($this->factoryReturning('web', $user), $this->configWithDefaultGuard('web'), null, $container))->forUser(new \stdClass);
+
+        self::assertSame(self::SESSION, $same->session);
+        self::assertNull($other->session);
+    }
+
+    /**
+     * Return a container holding the request.
+     *
+     * @param  \Illuminate\Http\Request  $request
+     * @return \Illuminate\Container\Container
+     */
+    private function containerWith(Request $request): Container
+    {
+        $container = new Container;
+        $container->instance('request', $request);
+
+        return $container;
+    }
+
+    /**
+     * Return a request with a session, started or not.
+     *
+     * @param  bool  $isStarted
+     * @return \Illuminate\Http\Request
+     */
+    private static function requestInSession(bool $isStarted): Request
+    {
+        $session = new Store('laravel_session', new ArraySessionHandler(120), self::SESSION);
+
+        if ($isStarted) {
+            $session->start();
+        }
+
+        $request = Request::create('/');
+        $request->setLaravelSession($session);
+
+        return $request;
     }
 
     /**

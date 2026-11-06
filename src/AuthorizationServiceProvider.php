@@ -25,6 +25,7 @@ use SineMacula\Laravel\Authorization\Console\WhyCanCommand;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Context\ContextBindings;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
+use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
@@ -42,6 +43,7 @@ use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
+use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\ApplicationAccess;
 use SineMacula\Laravel\Authorization\Services\GrantService;
@@ -78,11 +80,11 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
  * provider registers on it are kept for every request and job.
  *
  * The contracts an application may bind itself (the subject resolver, the
- * policy store, the policy resolver, the action catalogue and the trusted
- * context sources) resolve through a package-owned key that holds the scoped
- * default. An application's own binding of the contract therefore replaces the
- * default without being scoped itself, and an instance it binds survives the
- * reset between jobs.
+ * policy store, the policy resolver, the action catalogue, the authentication
+ * requirement checker and the trusted context sources) resolve through a
+ * package-owned key that holds the scoped default. An application's own binding
+ * of the contract therefore replaces the default without being scoped itself,
+ * and an instance it binds survives the reset between jobs.
  *
  * Row-lifecycle behaviour for `Role` / `Permission` / `Policy` is attached via
  * the `#[ObservedBy]` attribute on each model; the service provider does not
@@ -339,8 +341,9 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * those of `authorization.context.keys`. The trusted context sources
      * (authentication, request and environment) and the check context factory
      * that holds them with the sources of `authorization.context.sources` are
-     * built per request or job. Each contract is bound as a default an
-     * application may replace.
+     * built per request or job, and so is the authentication requirement
+     * checker `authorization.requirement_checker` names. Each contract is bound
+     * as a default an application may replace.
      *
      * @return void
      */
@@ -348,7 +351,11 @@ final class AuthorizationServiceProvider extends ServiceProvider
     {
         $this->app->scoped(PolicyEvaluator::class);
 
-        foreach ([ActionCatalogue::class => DeclaredActionCatalogue::class, ...ContextBindings::DEFAULTS] as $contract => $concrete) {
+        /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker> $checker */
+        $checker  = $this->app['config']->get('authorization.requirement_checker', RefusingRequirementChecker::class);
+        $defaults = [ActionCatalogue::class => DeclaredActionCatalogue::class, AuthenticationRequirementChecker::class => $checker, ...ContextBindings::DEFAULTS];
+
+        foreach ($defaults as $contract => $concrete) {
             $this->bindScopedDefault($contract, $concrete);
         }
 

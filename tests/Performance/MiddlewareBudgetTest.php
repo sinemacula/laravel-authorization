@@ -49,6 +49,7 @@ final class MiddlewareBudgetTest extends TestCase
      *
      * @throws \Illuminate\Auth\AuthenticationException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testRequireRoleAdmitOverheadStaysBounded(): void
     {
@@ -84,6 +85,7 @@ final class MiddlewareBudgetTest extends TestCase
      *
      * @throws \Illuminate\Auth\AuthenticationException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testRequirePermissionAdmitOverheadStaysBounded(): void
     {

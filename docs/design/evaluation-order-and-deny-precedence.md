@@ -20,6 +20,12 @@ throws when it does not. It returns a `Decision`:
   or a denial no statement made. The `sid` only names the statement: it never changes the decision or the order.
 - `trace` -- every step taken, in order, each a `TraceEntry`: its stage, its `TraceOutcome`, the statement it
   assessed (none for the permission step), and the condition keys (their dot paths) it tested with whether each held.
+- `requirements` -- for an `insufficient_authentication` denial, one `UnmetRequirement` for each statement in
+  `statements`, in the same order: the authentication requirement that alone kept it from applying and its unmet parts.
+  They are alternatives: any one of them met would allow the check. Empty for every other decision.
+- `freshness` -- for a decision that read an authentication requirement, a `RequirementFreshness`: the session it was
+  made in and the earliest instant a met requirement it read stops being met. `isFreshFor($session)` says whether the
+  decision may still be reused; null when it read none, and such a decision may always be.
 
 The trace never carries a context or attribute value, only key names and results (AUTHZ-8.8), so a decision is safe to
 log, store and put on an event.
@@ -67,11 +73,13 @@ and leaves a resource-less `posts:delete` check alone. Only a statement without 
    5. *Allow*: only when no deny decided, every allow statement is assessed. One that cannot be evaluated denies as
       `invalid_policy`; failing that, one that matches allows. Failing that, a permission the subject holds that the
       action names (directly or through a role) allows.
-   6. *Implicit*: nothing allowed. The denial is `condition_failed` when an allow statement names the action and the
-      resource but its conditions do not hold or cannot be decided, and `no_match` otherwise.
+   6. *Implicit*: nothing allowed. The denial is `insufficient_authentication` when an allow statement names the action
+      and the resource and only its authentication requirement is unmet (invariant 7); `condition_failed` when an allow
+      statement names them but its conditions do not hold or cannot be decided; and `no_match` otherwise.
 
    Guardrails, permission boundaries and session policies take their places between the deny and allow stages as they
-   arrive (BL-48 to BL-50).
+   arrive (BL-48 to BL-50), and each of them ranks above `insufficient_authentication`: a step-up never gets past a
+   boundary, a guardrail or a session cap.
 
 2. **The decision is deterministic (AUTHZ-7.9).** Within each stage, policies are assessed in order of name, then stored
    key, then document, and each statement in order of position, and every statement of the stage is assessed whatever is
@@ -99,6 +107,28 @@ and leaves a resource-less `posts:delete` check alone. Only a statement without 
    unreadable policy row would also drop the denies it carries, so both deny as `invalid_policy`, and RBAC never
    overrides that, even when the subject holds the permission.
 
+7. **Insufficient authentication is reported apart from other failures, and never beats a denial (AUTHZ-7.8, N35).**
+   An `authentication_requirement` condition is one test, judged by the bound `AuthenticationRequirementChecker` for
+   the subject's session: it holds when met, definitely does not hold when unmet, and is undecidable when the checker
+   throws. A subject without a session (one the caller names with `for()`, or one outside a request's session) meets no
+   requirement, and the checker is not asked. The check is denied as `insufficient_authentication` only when no deny
+   applies, no invalid statement or policy blocks, no allow statement matches and no permission held allows, and at
+   least one allow statement names the action and the resource with every other test definitely holding and only its
+   requirement unmet. An undecidable requirement, or an undecidable resource pattern or other test beside it, makes the
+   statement no candidate, so the denial is `condition_failed` instead. It is concluded at the implicit stage, so RBAC
+   still allows over it, and it ranks above `condition_failed`, so a step-up is asked for whenever one would help. On a
+   deny statement an unmet requirement is a test that does not hold, so the deny does not apply, and an undecidable one
+   applies it, as invariant 5 says. The decision names each candidate statement and its requirement with the unmet
+   parts; `authorize()` and the route middleware raise `InsufficientAuthenticationException` for it (AUTHZ-9.6), which
+   extends Laravel's `AuthorizationException` and carries the reason code and the candidates, once each, and never a
+   policy, a statement, the trace or a proof.
+
+8. **A decision that read a requirement is never reused beyond its freshness (AUTHZ-12.3, N37).** The last decision is
+   returned only in the session it was made in and until the earliest instant a met requirement it read stops being
+   met. The checker is asked for every requirement of every check and nothing it answers is remembered, so an unmet or
+   undecidable result is never reused. Every other entry point (`can()`, the Gate, the Blade directives and
+   `effectivePermissions()`) decides afresh, and the resolution cache holds grants and policies, never decisions.
+
 ## Trace
 
 Each statement adds one entry, in the deny stage for a deny statement and the allow stage for an allow statement, and
@@ -113,6 +143,11 @@ the permission step adds one more when the statements allowed nothing:
 | It cannot be evaluated                                              | `invalid`          |
 | The subject holds the permission the action names                   | `held`             |
 | The subject does not hold it                                        | `not_held`         |
+
+An authentication requirement is recorded as the condition key `authentication`, with whether it held, and never a
+proof or anything the checker answered: a statement whose requirement alone is unmet is `condition_failed` with
+`authentication` not held, and one whose checker threw is `undecidable`. The decision's `requirements` say which
+parts were unmet, and `explain()` lists them after the statements.
 
 Policy names in the trace are the stored policy's name: when a policy row is hydrated, the model's name replaces any
 `name` inside the document, so a document cannot claim another policy's name.
@@ -159,6 +194,14 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   resource-less check; the denial is recorded and reported like any other decision.
 - **Empty statements list**: a policy with zero statements contributes nothing to the trace and does not affect the
   decision.
+- **No requirement checker bound**: the default `RefusingRequirementChecker` finds every part of every requirement
+  unmet, so an allow that states one never applies and, when nothing else allows, the check is denied as
+  `insufficient_authentication`.
+- **Requirement checker that throws**: the requirement is undecidable. The failure is logged at debug level, by the
+  checker's class and the exception's class alone, so no proof reaches the log; an allow it guards does not apply and a
+  deny it guards does.
+- **Several candidates**: every allow statement that only its requirement kept from applying is a candidate, so the
+  decision lists one requirement per statement, and the exception lists each distinct requirement once.
 
 ## Implementation Anchors
 
@@ -167,7 +210,11 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   gathered, the statements, and the permission step.
 - `ResourceReferences::of()` -- every resource argument's reference; `ResourceScope::decide()` -- the tenant stage.
 - `PolicyEvaluator::evaluate()` -- the deny, allow and implicit stages, each assessing its statements in a fixed
-  order.
+  order; `conclude()` -- the order of the outcomes, `insufficient_authentication` among them.
+- `RequirementCheck` -- one check's requirements put to the checker, the session rule and the freshness;
+  `CheckContext::assessRequirement()` -- where a statement's requirement is judged; `LastDecisionStore::get()` and
+  `AuthorizationManager::lastDecision()` -- the freshness of the last decision.
+- `InsufficientAuthenticationException` and `AuthorizationManager::authorize()` -- the exception and when it is raised.
 - `Statement::assess()` -- the assessment, with each condition key's result.
 - `PolicyValidator` -- the write-time checks; `PolicyDocument::hydrate()` and `PolicyLimits` -- the limits on read.
 - `Decision`, `TraceEntry`, `StatementReference`, and the `DecisionEffect`, `DecisionReason`, `DecisionStage` and
@@ -177,7 +224,12 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 
 - `PolicyEvaluatorTest` -- every outcome and stage, deny precedence, fail-closed undecidable denies, `invalid_policy`,
   `condition_failed` and `no_match`, and the same decision whatever order the policies arrive in.
-- `DecisionTest` -- the decision's construction, the permission step and the explanation.
+- `DecisionTest` -- the decision's construction, the permission step, the explanation and the freshness.
+- `PolicyEvaluatorTest` and `StatementTest` -- `insufficient_authentication` and where it ranks, an unmet and an
+  undecidable requirement on an allow and on a deny, and the trace's `authentication` key.
+- `RequirementCheckTest`, `RequirementFreshnessTest` and `LastDecisionStoreTest` -- the session rule, a checker that
+  throws, the met-until instant and the last decision's freshness; `InsufficientAuthenticationExceptionTest` -- the
+  exception.
 - `AuthorizationManagerTest` (Unit and Feature) -- the subject stage, the RBAC allow, deny over RBAC and over a role,
   `invalid_policy` over a held permission, and the caller's values under `input` and nowhere else.
 - `FailClosedPolicyHydrationTest` -- an unreadable row, or one over a limit, is never skipped.
@@ -189,7 +241,11 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 ## Change Triggers
 
 - Adding a stage (guardrails, boundaries, session policies) requires updating this note, `DecisionStage` and, for a
-  new kind of denial, `DecisionReason`.
+  new kind of denial, `DecisionReason`, and ranking it above `insufficient_authentication` in
+  `PolicyEvaluator::conclude()`.
+- Letting `insufficient_authentication` win over a deny, an invalid policy or another allow, or reusing a decision that
+  read a requirement in another session or past its met-until instant, would violate invariants 7 and 8 and requires a
+  design decision before implementation.
 - Changing deny semantics (e.g. deny-unless, deny-with-exception) requires a new invariant entry above.
 - Introducing RBAC-layer deny (negative permissions) would violate invariant 3 and requires a design decision before
   implementation.

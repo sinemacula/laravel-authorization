@@ -7,6 +7,7 @@ namespace Tests\Unit\Evaluation;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\StatementValidator;
 
@@ -332,6 +333,15 @@ final class StatementValidatorTest extends TestCase
         yield 'string_like' => [['string_like' => ['name' => 'a*']], ['conditions have an unknown operator \'string_like\'']];
         yield 'not_null' => [['not_null' => ['name' => true]], ['conditions have an unknown operator \'not_null\'']];
         yield 'null_if_exists' => [['null_if_exists' => ['name' => true]], ['conditions have an unknown operator \'null_if_exists\'']];
+        yield 'authentication_requirement' => [['authentication_requirement' => ['authentication' => ['multifactor' => []]]], []];
+        yield 'authentication_requirement_if_exists' => [
+            ['authentication_requirement_if_exists' => ['authentication' => ['multifactor' => []]]],
+            ['condition operator \'authentication_requirement_if_exists\' is not an operator; an authentication requirement has no _if_exists form'],
+        ];
+        yield 'authentication_requirement without tests' => [
+            ['authentication_requirement' => []],
+            ['condition operator \'authentication_requirement\' must map context keys to operands'],
+        ];
         yield 'list of conditions' => [[['eq' => ['input.k' => 1]]], ['conditions must map operator names to key tests']];
         yield 'operator without tests' => [['eq' => []], ['condition operator \'eq\' must map context keys to operands']];
         yield 'operator with a value' => [['eq' => 'org-1'], ['condition operator \'eq\' must map context keys to operands']];
@@ -385,6 +395,32 @@ final class StatementValidatorTest extends TestCase
     }
 
     /**
+     * conditionTests() carries a well-formed requirement's operand built, as
+     * one test of the key `authentication` that a missing key never passes, and
+     * leaves a malformed one's operand as written.
+     *
+     * @return void
+     */
+    public function testConditionTestsBuildTheRequirement(): void
+    {
+        $tests = StatementValidator::conditionTests([
+            'authentication_requirement' => ['authentication' => ['multifactor' => ['max_age' => 900], 'phishing_resistant' => []]],
+        ]);
+
+        self::assertCount(1, $tests);
+        self::assertSame('authentication', $tests[0]['key']);
+        self::assertSame(['authentication'], $tests[0]['path']);
+        self::assertSame('authentication_requirement', $tests[0]['operator']);
+        self::assertFalse($tests[0]['isOptional']);
+        self::assertNull($tests[0]['error']);
+        self::assertEquals(new AuthenticationRequirement(['multifactor' => 900, 'phishing_resistant' => null]), $tests[0]['operand']);
+
+        $malformed = StatementValidator::conditionTests(['authentication_requirement' => ['authentication' => ['mfa' => []]]]);
+
+        self::assertSame(['mfa' => []], $malformed[0]['operand']);
+    }
+
+    /**
      * Provide key tests with the fault each carries, or null when it is well
      * formed.
      *
@@ -404,6 +440,31 @@ final class StatementValidatorTest extends TestCase
         yield 'malformed reference' => [['eq' => ['input.k' => '${foo']], 'condition \'input.k\' has a malformed ${…} reference'];
         yield 'malformed reference in a pattern' => [['like' => ['input.k' => 'a-${input.tenant-id}*']], 'condition \'input.k\' has a malformed ${…} reference'];
         yield 'malformed reference in a number' => [['gt' => ['input.k' => '${input.tenant-id}']], 'condition \'input.k\' has an invalid operand for operator \'gt\''];
+        yield 'requirement' => [['authentication_requirement' => ['authentication' => ['multifactor' => ['max_age' => 900]]]], null];
+        yield 'requirement on another key' => [
+            ['authentication_requirement' => ['request.ip' => ['multifactor' => []]]],
+            'condition operator \'authentication_requirement\' tests the key \'authentication\' alone, not \'request.ip\'',
+        ];
+        yield 'requirement on a key under authentication' => [
+            ['authentication_requirement' => ['authentication.amr' => ['multifactor' => []]]],
+            'condition operator \'authentication_requirement\' tests the key \'authentication\' alone, not \'authentication.amr\'',
+        ];
+        yield 'requirement with an unknown part' => [
+            ['authentication_requirement' => ['authentication' => ['mfa' => []]]],
+            'authentication requirement names an unknown part \'mfa\'',
+        ];
+        yield 'requirement with no parts' => [
+            ['authentication_requirement' => ['authentication' => []]],
+            'authentication requirement must map one or more parts (additional_verification, multifactor, phishing_resistant, assurance_level) to their options',
+        ];
+        yield 'requirement with a bad max age' => [
+            ['authentication_requirement' => ['authentication' => ['multifactor' => ['max_age' => 0]]]],
+            'authentication requirement part \'multifactor\' max_age must be a whole number of seconds, at least 1',
+        ];
+        yield 'requirement with a level and no min' => [
+            ['authentication_requirement' => ['authentication' => ['assurance_level' => []]]],
+            'authentication requirement part \'assurance_level\' requires min, a non-empty string',
+        ];
     }
 
     /**

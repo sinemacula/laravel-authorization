@@ -241,6 +241,7 @@ final class MutationKillersTest extends TestCase
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testAuthorizeWritesLastDecisionOnBothOutcomes(): void
     {

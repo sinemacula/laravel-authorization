@@ -7,8 +7,10 @@ namespace Tests\Unit\Evaluation;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\MatchResult;
+use SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement;
 
 /**
  * Unit tests for the match result value object.
@@ -351,5 +353,67 @@ final class MatchResultTest extends TestCase
         self::assertSame('b', MatchResult::doesNotMatch('b')->detail);
         self::assertSame(MatchResult::matches(), MatchResult::fromBool(true));
         self::assertSame(MatchResult::doesNotMatch(), MatchResult::fromBool(false));
+    }
+
+    /**
+     * A result carries no unmet requirement unless it is given one.
+     *
+     * @return void
+     */
+    public function testCarriesNoUnmetRequirementByDefault(): void
+    {
+        self::assertNull((new MatchResult(MatchOutcome::DOES_NOT_MATCH))->unmetRequirement);
+        self::assertNull(MatchResult::doesNotMatch()->unmetRequirement);
+    }
+
+    /**
+     * unmet() builds a result that does not hold, with a fixed detail and the
+     * unmet requirement, and no condition keys.
+     *
+     * @return void
+     */
+    public function testUnmetDoesNotHoldAndCarriesTheRequirement(): void
+    {
+        $unmet  = self::unmetRequirement();
+        $result = MatchResult::unmet($unmet);
+
+        self::assertSame(MatchOutcome::DOES_NOT_MATCH, $result->outcome);
+        self::assertSame('the authentication requirement is not met', $result->detail);
+        self::assertNull($result->conditions);
+        self::assertSame($unmet, $result->unmetRequirement);
+        self::assertFalse($result->holds());
+    }
+
+    /**
+     * withConditions() keeps the unmet requirement, and withUnmetRequirement()
+     * replaces or clears it, keeping everything else.
+     *
+     * @return void
+     */
+    public function testTheUnmetRequirementSurvivesConditionsAndCanBeReplaced(): void
+    {
+        $unmet  = self::unmetRequirement();
+        $result = MatchResult::unmet($unmet)->withConditions(['authentication' => false]);
+
+        self::assertSame($unmet, $result->unmetRequirement);
+        self::assertSame(['authentication' => false], $result->conditions);
+
+        $cleared = $result->withUnmetRequirement(null);
+
+        self::assertNull($cleared->unmetRequirement);
+        self::assertSame(MatchOutcome::DOES_NOT_MATCH, $cleared->outcome);
+        self::assertSame('the authentication requirement is not met', $cleared->detail);
+        self::assertSame(['authentication' => false], $cleared->conditions);
+        self::assertSame($unmet, MatchResult::doesNotMatch()->withUnmetRequirement($unmet)->unmetRequirement);
+    }
+
+    /**
+     * Return an unmet multifactor requirement.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement
+     */
+    private static function unmetRequirement(): UnmetRequirement
+    {
+        return new UnmetRequirement(new AuthenticationRequirement(['multifactor' => null]), ['multifactor']);
     }
 }

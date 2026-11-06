@@ -18,7 +18,8 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
 - `evaluation-order-and-deny-precedence.md`: the staged decision order (subject, resource, tenant, then the AWS IAM
   deny, allow and implicit order), why an explicit DENY always wins over
   an RBAC allow, and why an undecidable deny applies and a malformed, unreadable or over-limit policy denies
-  (`invalid_policy`) instead of being skipped.
+  (`invalid_policy`) instead of being skipped; `insufficient_authentication`, where it ranks, and how long a decision
+  that read an authentication requirement may be reused.
 - `polymorphic-identity-pivots.md`: why role, permission, and policy pivots use plain `string`
   `authorizable_type`/`authorizable_id` columns so that integer, UUID, and ULID identities all work.
 - `subject-resolver-contract.md`: the one seam with `sinemacula/laravel-authentication` for the subject, its tenant
@@ -32,7 +33,8 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
   with its types and the operators each type allows, `${…}` interpolation, the write-time refusals, limits and action
   catalogue, and the operator-first condition catalogue (`eq`, `neq`, `in`, `not_in`, `starts_with`, `ends_with`,
   `like`, `gt`, `gte`, `lt`, `lte`, `before`, `after`, `between`, `bool`, `null`, `ip_in`, `ip_not_in`, `any_value_in`,
-  `all_values_in`, and the `_if_exists` suffix).
+  `all_values_in`, and the `_if_exists` suffix), the `authentication_requirement` operator, and the assurance keys no
+  condition may test.
 - `permission-catalogue-sync.md`: declaring permissions in enums and providers, why booting never touches the
   database, and what `authorization:sync` adds, updates, reports as stale or protected, and prunes.
 - `management-services.md`: the services every role, permission, policy and grant write goes through, their

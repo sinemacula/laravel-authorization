@@ -16,18 +16,24 @@ use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
 use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
 use SineMacula\Laravel\Authorization\Concerns\HasRoles;
+use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
+use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementFreshness;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
+use SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted as IdentityPermissionGranted;
@@ -38,6 +44,7 @@ use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned as IdentityRol
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked as IdentityRoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
@@ -59,6 +66,7 @@ use Tests\Feature\Stubs\RecordingResourceAttributes;
 use Tests\Feature\Stubs\RecordingSubjectAttributes;
 use Tests\Feature\Stubs\ReservedContextSource;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
@@ -523,6 +531,8 @@ final class AuthorizationManagerTest extends TestCase
      * throwing.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testAuthorizationFailedEventFires(): void
     {
@@ -835,6 +845,8 @@ final class AuthorizationManagerTest extends TestCase
      * both the decision event and the failure event.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testAuthorizeReportsTheResourceIdentifierWhenDenied(): void
     {
@@ -860,6 +872,8 @@ final class AuthorizationManagerTest extends TestCase
      * and the failure event carries the resource's identifier.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testAuthorizeResolvesTheResourceOnce(): void
     {
@@ -1037,6 +1051,7 @@ final class AuthorizationManagerTest extends TestCase
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testCallerValuesLandUnderInputAndNeverInTheRequest(): void
     {
@@ -1288,6 +1303,7 @@ final class AuthorizationManagerTest extends TestCase
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testAFailingAttributeProviderAbortsTheCheck(): void
     {
@@ -1332,6 +1348,192 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * `authorize()` raises an insufficient authentication exception for an
+     * allow whose requirement alone is unmet, carrying the reason and the
+     * candidate requirement and nothing of the policy, after recording the
+     * decision and firing `AuthorizationFailed`.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testAuthorizeRaisesInsufficientAuthentication(): void
+    {
+        Event::fake([AuthorizationFailed::class]);
+
+        $user    = StubIdentity::create(['id' => '0d6a7f1e-5c2b-4e9a-8f3d-1b2c3d4e5f60']);
+        $checker = new StubRequirementChecker(RequirementResult::unmet(['multifactor']));
+        $manager = $this->inSession($user, 'session-1', $checker)->withPolicies([self::requiringPolicy()]);
+
+        try {
+            $manager->authorize('reports:export');
+            self::fail('The check was allowed.');
+        } catch (InsufficientAuthenticationException $exception) {
+            self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $exception->getReason());
+            self::assertSame(403, $exception->getCode());
+            self::assertSame('This action requires further authentication.', $exception->getMessage());
+            self::assertEquals([new UnmetRequirement(self::requirement(), ['multifactor'])], $exception->requirements());
+            self::assertStringNotContainsString('step-up', \serialize($exception->requirements()));
+            self::assertStringNotContainsString('Export', \serialize($exception->requirements()));
+        }
+
+        self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $manager->lastDecision()?->reason);
+        self::assertEquals([new StatementReference('step-up', 0, null, 'Export')], $manager->lastDecision()->statements);
+        Event::assertDispatched(
+            AuthorizationFailed::class,
+            static fn (AuthorizationFailed $event): bool => $event->decision->reason === DecisionReason::INSUFFICIENT_AUTHENTICATION,
+        );
+    }
+
+    /**
+     * A met requirement allows, and `authorize()` passes; a permission the
+     * subject holds allows over an unmet one.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
+     */
+    public function testAMetRequirementOrAHeldPermissionAllows(): void
+    {
+        Permission::create(['name' => 'reports:export', 'guard' => 'web']);
+
+        $user = StubIdentity::create(['id' => '1e7b8a2f-6d3c-4fab-9e4d-2c3d4e5f6a71']);
+
+        $met   = new StubRequirementChecker(RequirementResult::met());
+        $unmet = new StubRequirementChecker(RequirementResult::unmet(['multifactor']));
+
+        $this->inSession($user, 'session-1', $met)->withPolicies([self::requiringPolicy()])->authorize('reports:export');
+
+        $user->givePermission('reports:export');
+
+        $decision = $this->inSession($user, 'session-1', $unmet)->withPolicies([self::requiringPolicy()])->check('reports:export');
+
+        self::assertTrue($decision->isAllowed());
+        self::assertSame([], $decision->requirements);
+        self::assertSame(TraceOutcome::HELD, $decision->trace[1]->outcome);
+    }
+
+    /**
+     * A deny that applies wins over an unmet requirement, and `authorize()`
+     * raises the plain denial.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
+     */
+    public function testADenyWinsOverInsufficientAuthentication(): void
+    {
+        $user = StubIdentity::create(['id' => '2f8c9b3a-7e4d-4abc-8f5e-3d4e5f6a7b82']);
+        $deny = EvaluationPolicy::fromArray(['name' => 'block', 'statements' => [['effect' => 'deny', 'actions' => ['reports:export']]]]);
+
+        $this->expectException(AuthorizationException::class);
+
+        $checker = new StubRequirementChecker(RequirementResult::unmet(['multifactor']));
+
+        $this->inSession($user, 'session-1', $checker)->withPolicies([self::requiringPolicy(), $deny])->authorize('reports:export');
+    }
+
+    /**
+     * A subject the caller names has no session, so its requirement is unmet
+     * and the checker is never asked.
+     *
+     * @return void
+     */
+    public function testACallerNamedSubjectMeetsNoRequirement(): void
+    {
+        $checker = new StubRequirementChecker(RequirementResult::met());
+        $user    = StubIdentity::create(['id' => '3a9d0c4b-8f5e-4bcd-9a6f-4e5f6a7b8c93']);
+
+        $decision = $this->inSession($user, 'session-1', $checker)->for($user)->withPolicies([self::requiringPolicy()])->check('reports:export');
+
+        self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $decision->reason);
+        self::assertSame([], $checker->calls);
+    }
+
+    /**
+     * The default checker meets nothing, so an allow stating a requirement
+     * denies as insufficient authentication, every part unmet.
+     *
+     * @return void
+     */
+    public function testTheDefaultCheckerMeetsNothing(): void
+    {
+        $user = StubIdentity::create(['id' => '4b0e1d5c-9a6f-4cde-8b7a-5f6a7b8c9da4']);
+
+        $decision = $this->inSession($user, 'session-1')->withPolicies([self::requiringPolicy()])->check('reports:export');
+
+        self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $decision->reason);
+        self::assertEquals([new UnmetRequirement(self::requirement(), ['multifactor', 'phishing_resistant'])], $decision->requirements);
+    }
+
+    /**
+     * A checker that throws makes the requirement undecidable: the check is a
+     * failed condition, never insufficient authentication.
+     *
+     * @return void
+     */
+    public function testACheckerThatThrowsIsAFailedCondition(): void
+    {
+        $user = StubIdentity::create(['id' => '5c1f2e6d-0b7a-4def-9c8b-6a7b8c9d0eb5']);
+
+        $checker  = new StubRequirementChecker(new \RuntimeException('down'));
+        $decision = $this->inSession($user, 'session-1', $checker)->withPolicies([self::requiringPolicy()])->check('reports:export');
+
+        self::assertSame(DecisionReason::CONDITION_FAILED, $decision->reason);
+        self::assertSame([], $decision->requirements);
+    }
+
+    /**
+     * A decision that read a met requirement is the last decision only until
+     * the requirement stops being met, and only in its own session.
+     *
+     * @return void
+     */
+    public function testTheLastDecisionIsFreshOnlyInItsSessionAndBeforeItsMetUntil(): void
+    {
+        Carbon::setTestNow('2026-11-06 12:00:00');
+
+        $until   = new \DateTimeImmutable('2026-11-06 12:15:00');
+        $user    = StubIdentity::create(['id' => '6d2a3f7e-1c8b-4ef0-8d9c-7b8c9d0e1fc6']);
+        $manager = $this->inSession($user, 'session-1', new StubRequirementChecker(RequirementResult::met($until)));
+
+        $decision = $manager->withPolicies([self::requiringPolicy()])->check('reports:export');
+
+        self::assertTrue($decision->isAllowed());
+        self::assertEquals(new RequirementFreshness('session-1', $until), $decision->freshness);
+        self::assertSame($decision, $manager->lastDecision());
+
+        Carbon::setTestNow('2026-11-06 12:15:00');
+
+        self::assertNull($manager->lastDecision());
+
+        Carbon::setTestNow('2026-11-06 12:00:00');
+
+        self::assertSame($decision, $manager->lastDecision());
+        self::assertNull($this->inSession($user, 'session-2')->lastDecision());
+
+        Carbon::setTestNow();
+    }
+
+    /**
+     * A decision that read no requirement is the last decision whatever the
+     * session.
+     *
+     * @return void
+     */
+    public function testALastDecisionWithoutARequirementIsAlwaysFresh(): void
+    {
+        $user     = StubIdentity::create(['id' => '7e3b4a8f-2d9c-4f01-9eab-8c9d0e1f2ad7']);
+        $policy   = EvaluationPolicy::fromArray(['name' => 'p', 'statements' => [['effect' => 'allow', 'actions' => ['reports:export']]]]);
+        $decision = $this->inSession($user, 'session-1')->withPolicies([$policy])->check('reports:export');
+
+        self::assertNull($decision->freshness);
+        self::assertSame($decision, $this->inSession($user, 'session-2')->lastDecision());
+    }
+
+    /**
      * Assert that exactly one decision event was dispatched, for the check of
      * `posts:create` without a resource, carrying the supplied principal,
      * context and decision, and that no failure event was dispatched.
@@ -1356,6 +1558,57 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame($context, $events[0]->context);
         self::assertSame($decision, $events[0]->decision);
         Event::assertNotDispatched(AuthorizationFailed::class);
+    }
+
+    /**
+     * Return a policy allowing `reports:export` once multifactor and a
+     * phishing-resistant authenticator are proved.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Policy
+     */
+    private static function requiringPolicy(): EvaluationPolicy
+    {
+        return EvaluationPolicy::fromArray(['name' => 'step-up', 'statements' => [[
+            'sid'        => 'Export',
+            'effect'     => 'allow',
+            'actions'    => ['reports:export'],
+            'conditions' => ['authentication_requirement' => ['authentication' => ['multifactor' => ['max_age' => 900], 'phishing_resistant' => []]]],
+        ]]]);
+    }
+
+    /**
+     * Return the requirement the policy states.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement
+     */
+    private static function requirement(): AuthenticationRequirement
+    {
+        return new AuthenticationRequirement(['multifactor' => 900, 'phishing_resistant' => null]);
+    }
+
+    /**
+     * Resolve the user as the subject in the session, with the checker bound
+     * when one is given, and return a manager built afresh.
+     *
+     * @param  \Tests\Feature\Stubs\StubIdentity  $user
+     * @param  string|null  $session
+     * @param  \SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker|null  $checker
+     * @return \SineMacula\Laravel\Authorization\AuthorizationManager
+     */
+    private function inSession(StubIdentity $user, ?string $session, ?AuthenticationRequirementChecker $checker = null): AuthorizationManager
+    {
+        $this->app?->instance(SubjectResolver::class, new FixedSubjectResolver(new Subject($user, $user, session: $session)));
+
+        if ($checker !== null) {
+            $this->app?->instance(AuthenticationRequirementChecker::class, $checker);
+        }
+
+        foreach (['authorization', AuthorizationManager::class, CheckContextFactory::class] as $abstract) {
+            $this->app?->forgetInstance($abstract);
+        }
+
+        /** @var \SineMacula\Laravel\Authorization\AuthorizationManager */
+        return $this->app?->make(AuthorizationManager::class);
     }
 
     /**

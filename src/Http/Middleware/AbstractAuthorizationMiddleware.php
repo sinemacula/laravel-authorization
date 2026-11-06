@@ -23,7 +23,9 @@ use SineMacula\Laravel\Authorization\Support\CheckArguments;
  * nothing, or a third argument, is a mistake in the route and is refused. A
  * request without a subject is unauthenticated (401); a denial throws the
  * package's `AuthorizationException`, which Laravel renders as a 403 with the
- * reason code and a translated message.
+ * reason code and a translated message, and an `insufficient_authentication`
+ * denial throws `InsufficientAuthenticationException`, which the application
+ * maps to its step-up response (a 403 when it does not).
  *
  * Run it after authentication and after any step-up middleware, so a request
  * that is not signed in, or not signed in strongly enough, is answered by those
@@ -55,6 +57,7 @@ abstract class AbstractAuthorizationMiddleware
      *
      * @throws \Illuminate\Auth\AuthenticationException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
      */
     public function handle(Request $request, \Closure $next, string ...$arguments): mixed
@@ -76,6 +79,7 @@ abstract class AbstractAuthorizationMiddleware
      *
      * @throws \Illuminate\Auth\AuthenticationException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
      */
     abstract protected function authorize(Request $request, array $names, ?string $option): void;
@@ -105,6 +109,7 @@ abstract class AbstractAuthorizationMiddleware
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     protected function authorizeAny(array $actions, mixed $resource): void
     {

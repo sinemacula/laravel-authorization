@@ -52,10 +52,16 @@ denied.
 - **Policy documents** of statements with an optional `sid`, an `effect`, `actions` or `not_actions`, `resources` or
   `not_resources`, and operator-first `conditions`: twenty operators (equality, set membership, prefix, suffix and glob,
   numeric and time comparisons, booleans, null tests, IPv4 and IPv6 ranges, and multi-valued keys), every one but
-  `null` with an `_if_exists` form, and `${…}` interpolation from the check's context. A document is refused when it is
-  saved if it is malformed, over the configured limits, reads a context key nobody declared, tests a key with an
-  operator that does not suit its type, or names an action no declared permission matches, and
-  `authorization:policy:validate` checks files or stored policies against the same rules.
+  `null` with an `_if_exists` form, the `authentication_requirement` operator, and `${…}` interpolation from the
+  check's context. A document is refused when it is saved if it is malformed, over the configured limits, reads a
+  context key nobody declared, tests a key with an operator that does not suit its type, tests or references an
+  assurance key, or names an action no declared permission matches, and `authorization:policy:validate` checks files or
+  stored policies against the same rules.
+- **Authentication requirements**: an allow can require additional verification, multifactor authentication,
+  phishing resistance or a minimum assurance level, each with an optional maximum age, judged for the subject's session
+  by a requirement checker you bind. When only that requirement keeps an allow from applying, the check is denied as
+  `insufficient_authentication` with the parts that are unmet, so the application can ask for a step-up rather than
+  refuse.
 - **A namespaced context**: conditions read dot paths such as `request.ip`, `authentication.user_id`,
   `environment.time`, `subject.id`, `resource.owner.id` and `input.post.status`. The trusted namespaces come from their
   own sources, never from the caller, whose values land under `input` alone; the subject's and the resource's attributes
@@ -158,7 +164,7 @@ AUTHORIZATION_LOG_CHANNEL=stderr
 
 `config/authorization.php` documents every other option: models, tables, the default guard, permission providers, the
 Gate conflict mode, the policy store, the policy limits, the context keys and sources, the attribute providers, the
-subject resolver, the cache, and the role hierarchy and rank.
+subject resolver, the authentication requirement checker, the cache, and the role hierarchy and rank.
 
 ## Usage
 
@@ -415,10 +421,11 @@ decided it (`stage`), the statements that did (`statements`) and a trace of ever
 shortcuts over it. A check runs in stages, stopping at the first that decides: the subject (`subject_unresolved`,
 `subject_inactive`), the resource (`resource_unresolved`), its tenant (`tenant_scope`), then the denies in every
 applicable policy (`explicit_deny`, or `invalid_policy` for a statement that cannot be evaluated), then the allows (an
-allow statement, then a permission held), then the implicit deny (`condition_failed` when an allow statement names the
-check but its conditions do not hold, else `no_match`). Each stage assesses its statements in a fixed order, so the
-decision is the same whatever order the policies are read in, and the trace records condition key names and whether each
-held, never their values:
+allow statement, then a permission held), then the implicit deny (`insufficient_authentication` when an allow statement
+names the check and only its [authentication requirement](#authentication-requirements) is unmet, `condition_failed`
+when an allow statement names the check but its conditions do not hold, else `no_match`). Each stage assesses its
+statements in a fixed order, so the decision is the same whatever order the policies are read in, and the trace records
+condition key names and whether each held, never their values:
 
 ```php
 $decision = Authorization::for($user)->check('posts:delete', 'posts/42');
@@ -452,9 +459,10 @@ that cannot be read, or that is over a configured limit, denies every check for 
 `Authorization::authorize()` throws `SineMacula\Laravel\Authorization\Exceptions\AuthorizationException` when the check
 is denied. It extends Laravel's `Illuminate\Auth\Access\AuthorizationException`, so Laravel's handler answers `403`. It
 carries the decision's reason code (`getReason()`) and nothing else: its message is the translated
-`authorization::authorization.denied` line, and the action, the resource and the policies stay out of it. The full
-decision is on the `AuthorizationFailed` event and `Authorization::lastDecision()`. To reword the message or add a
-locale, publish the language files:
+`authorization::authorization.denied` line, and the action, the resource and the policies stay out of it. A denial as
+`insufficient_authentication` throws `InsufficientAuthenticationException` instead (see [Authentication
+requirements](#authentication-requirements)). The full decision is on the `AuthorizationFailed` event and
+`Authorization::lastDecision()`. To reword the message or add a locale, publish the language files:
 
 ```bash
 php artisan vendor:publish --tag=authorization-lang
@@ -523,11 +531,14 @@ Conditions name the operator first, then each context key it tests, as a dot pat
   are literal. A reference reads the same dot paths a condition key does, through the same resolver (`${request.ip}`,
   `${input.post.id}`, `${subject.id}`, `${resource.owner.id}`); a missing, null or non-scalar value leaves it
   unresolved, which makes the test undecidable.
+- `authentication_requirement` tests only the reserved key `authentication`, and its operand is a requirement rather
+  than a value: see [Authentication requirements](#authentication-requirements).
 
 A policy is checked whenever it is saved, through the model or `PolicyService`, and refused with every limit,
 context-key and catalogue reason at once, or, for a malformed document, the first structural fault found and any limit
 it breaks. The reasons are a malformed document; a condition key or `${…}` reference that the context key catalogue
-does not declare; a condition on a key that may not be tested; an operator that does not suit the key's type; an
+does not declare; a condition on a key that may not be tested; a condition on, or a `${…}` reference to, an assurance
+key; an operator that does not suit the key's type; an
 `actions` or `not_actions` pattern that matches no declared permission; or a document over the limits in
 `policies.limits` (`AUTHORIZATION_POLICY_DOCUMENT_BYTES`, `_STATEMENTS`, `_CONDITIONS` and `_PATTERN_LENGTH`: 64 KiB of
 JSON, 100 statements, 50 key tests a statement and 512 characters a pattern or string operand). The limits are checked
@@ -613,9 +624,11 @@ public function boot(): void
 
 A key's type decides the operators a condition may test it with; `null` suits every type, and an `_if_exists` form
 follows its operator. A key may also be declared untestable (`declare($path, $type, isTestable: false)`), so that a
-reference may read it but no condition may test it. Declaring a key again with another type is refused, and so is a key
-under `subject` or `resource`, whose keys come only from the package and the attribute providers. The type is checked
-when the policy is written; a value of the wrong type at evaluation is still undecidable.
+reference may read it but no condition may test it. The assurance keys of the authentication context are always
+untestable, and not even a reference may read them (see [Assurance keys](#assurance-keys)). Declaring a key again
+with another type is refused, and so is a key under `subject` or `resource`, whose keys come only from the package and
+the attribute providers. The type is checked when the policy is written; a value of the wrong type at evaluation is
+still undecidable.
 
 | Type     | Operators                                                       |
 |----------|-----------------------------------------------------------------|
@@ -779,6 +792,170 @@ one. No decision is made, so no decision event is dispatched and the check recor
 the provider's class and the namespace, never an attribute value, and nothing the provider returned or threw reaches a
 decision, an event or the trace.
 
+### Authentication requirements
+
+An allow can require that the subject's session was authenticated strongly enough, and recently enough, for the
+action. State it with the `authentication_requirement` operator on the reserved key `authentication`:
+
+```php
+[
+    'sid'        => 'refund-after-step-up',
+    'effect'     => 'allow',
+    'actions'    => ['invoices:refund'],
+    'conditions' => [
+        'authentication_requirement' => [
+            'authentication' => [
+                'multifactor'        => ['max_age' => 900],
+                'phishing_resistant' => [],
+            ],
+        ],
+        'eq' => ['resource.tenant.id' => '${subject.tenant.id}'],
+    ],
+],
+```
+
+The operand maps one or more parts to their options, `{}` (an empty array) for none:
+
+| Part                      | Requires                                                    | Options                         |
+|---------------------------|-------------------------------------------------------------|---------------------------------|
+| `additional_verification` | A verification beyond the sign-in, such as a password again | `max_age`                       |
+| `multifactor`             | Multifactor authentication                                  | `max_age`                       |
+| `phishing_resistant`      | A phishing-resistant proof, such as a passkey               | `max_age`                       |
+| `assurance_level`         | An assurance level of at least `min`                        | `min` (required), and `max_age` |
+
+`max_age` is a whole number of seconds, at least 1: the proof that meets the part must be no older. `min` is a
+non-empty string, an assurance level your checker knows. Every part named must be met, and the requirement is one test
+judged whole, so it counts as one key test against the `conditions` limit. The policy is refused when it is saved if
+the requirement is on any key but `authentication`, names no part, an unknown part or an unknown option, gives a
+`max_age` that is not a whole number of at least 1, or gives `assurance_level` no `min`. There is no
+`authentication_requirement_if_exists`. `authentication` is not read from the context here, so the requirement needs no
+key declared in the catalogue.
+
+#### The requirement checker
+
+A requirement is judged by the bound
+`SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker`, given the requirement and the check's
+`Subject`. The checker fetches the proofs of the subject's `session` itself, so the newest proof that meets each part
+is judged, never separate scalar tests that a fresh weak proof and a stale strong one could meet together; the package
+never passes proofs or `amr` in. It answers with a `RequirementResult`: met, with the instant until which the
+requirement stays met when it knows one, or unmet, with the parts that are not met:
+
+```php
+use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
+use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
+use SineMacula\Laravel\Authorization\Subject;
+
+final class SessionProofChecker implements AuthenticationRequirementChecker
+{
+    public function __construct(private SessionProofs $proofs) {}
+
+    public function check(AuthenticationRequirement $requirement, Subject $subject): RequirementResult
+    {
+        $proofs = $this->proofs->of($subject->session);
+        $unmet  = array_values(array_filter(
+            $requirement->names(),
+            fn (string $part): bool => !$proofs->meets($part, $requirement->maxAge($part), $requirement->minimumLevel),
+        ));
+
+        return $unmet === []
+            ? RequirementResult::met($proofs->metUntil($requirement))
+            : RequirementResult::unmet($unmet);
+    }
+}
+```
+
+Name it in `config/authorization.php`, where it is checked at boot and built per request or job, or bind the contract
+yourself:
+
+```php
+'requirement_checker' => App\Authorization\SessionProofChecker::class,
+```
+
+The default, `RefusingRequirementChecker`, finds every part of every requirement unmet, so until you bind a checker an
+allow that states a requirement never applies. The checker is asked afresh for every requirement of every check, and
+nothing it answers is remembered. A met result whose instant has already passed counts as unmet, every part with it.
+An unmet result keeps only the parts the requirement names, and one that names none of them leaves every part unmet. A
+checker that throws makes the test undecidable, so an allow it guards does not apply and a deny it guards does; the
+failure is logged at debug level by the checker's class alone, never with anything it held.
+
+#### Sessions
+
+`Subject::$session` is the session the checker judges. The shipped resolver sets it to the current request's session
+id when the subject is the user signed in on its guard, including when the Gate hands it that same user. It is null for
+a subject you name (`Authorization::for($user)`, or `Gate::forUser()` with another user) and outside a session (a
+console command, a queued job, a request without a started session), and a subject without a session meets no
+requirement: every part is unmet and the checker is not asked. A resolver of your own sets `session` to whatever its
+checker knows the proofs by.
+
+#### The decision and the exception
+
+A check is denied as `insufficient_authentication` when no deny applies, no invalid policy blocks it, nothing else
+allows it (no other allow statement and no permission held), and at least one allow statement names the action and the
+resource with every other condition holding and only its requirement unmet. It ranks above `condition_failed`, and
+deny precedence always wins. A requirement that cannot be checked is undecidable, not unmet, so its statement is no
+candidate and, alone, leaves the check `condition_failed`. The decision's
+`requirements` lists each such statement's requirement with its unmet parts, as an `UnmetRequirement`: they are
+alternatives, any one of which met would allow the check. On a deny statement an unmet requirement is a test that does
+not hold, so the deny does not apply, while one that cannot be checked applies it, as any undecidable test does. The
+trace records the requirement as the key `authentication`, with whether it held, and never a proof.
+
+`authorize()`, and the `permission:` and `authorize:` middleware, throw
+`SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException` for it. It extends Laravel's
+`Illuminate\Auth\Access\AuthorizationException`, not the package's, so a handler that maps the package's denials does
+not catch it, and an application that maps it to nothing still answers `403`. It carries the reason code
+(`getReason()`) and the candidate requirements, once each (`requirements()`); never a policy, a statement, the trace or
+a proof. Its message is the translated `authorization::authorization.insufficient_authentication` line. Like any
+denial, it is recorded as the last decision and fires `AuthorizationFailed` first. Map it to your step-up response,
+such as RFC 9470's `insufficient_user_authentication` challenge:
+
+```php
+// bootstrap/app.php
+use Illuminate\Foundation\Configuration\Exceptions;
+use SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement;
+use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
+
+->withExceptions(function (Exceptions $exceptions): void {
+    $exceptions->render(fn (InsufficientAuthenticationException $exception) => response()->json(
+        [
+            'message'      => $exception->getMessage(),
+            'requirements' => array_map(
+                fn (UnmetRequirement $candidate): array => $candidate->toArray(),
+                $exception->requirements(),
+            ),
+        ],
+        401,
+        ['WWW-Authenticate' => 'Bearer error="insufficient_user_authentication"'],
+    ));
+})
+```
+
+A decision that read a requirement is reused only while it still holds. `Authorization::lastDecision()` returns it
+only in the session it was made in and until the earliest instant a met requirement it read stops being met
+(`$decision->freshness`, and `isFreshFor($session)`). Nothing else keeps a decision: `can()`, the Gate, the Blade
+directives and `effectivePermissions()` decide afresh every time, and the resolution cache holds grants and policies,
+never decisions.
+
+#### Under the suite
+
+With `sinemacula/laravel-iam`, the checker is bound to `laravel-mfa`'s requirement check, and the `mfa` namespace comes
+through the authentication context. `laravel-iam` maps `InsufficientAuthenticationException` to MFA's step-up
+exception, which owns the RFC 9470 response and the mapping from assurance levels to `acr` values, so only one package
+produces step-up responses and the application maps nothing itself. This package never reads MFA's tables or a
+session's proofs, never treats `mfa` in `amr` as multifactor authentication, and never decides who must use MFA.
+
+#### Assurance keys
+
+An assurance level, the time of authentication or the seconds since a step-up can sit in the context for your own code
+to show or log, but a policy may not decide on them: separate scalar tests could be met by a fresh weak proof and a
+stale strong one together, which the requirement checker never allows. A key of `authentication`, or of a namespace
+your `AuthenticationContext` adds beside it (such as `mfa`), is an assurance key when any segment of its path after the
+namespace is `assurance_level`, `auth_time`, `seconds_since_step_up`, `last_verified_at`, `verification_age`,
+`multifactor` or `amr`, so `authentication.amr` and `mfa.multifactor.enabled` both are. The package declares none of
+them, and whatever the declaring context or configuration says, the catalogue declares each one untestable. A policy
+with a condition on one, or a `${…}` reference to one in an operand or a resource pattern, is refused when it is
+saved, with a reason that points at `authentication_requirement`.
+
 ### Listening to events
 
 Every event the package dispatches implements `SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent`, so one
@@ -852,8 +1029,9 @@ with an `InvalidCheckArgumentException`. A request without a subject throws Lara
 (`401`). A denial throws the package's `AuthorizationException` (`403`) with the reason code and a translated message.
 A denial of `permission:` or `authorize:` is a decision: it is recorded as the last decision and fires
 `AuthorizationFailed` once, for the list's last action, before the `authorization::authorization.denied` line is
-thrown. A denial of `role:` is not a decision: it carries `no_match` and the
-`authorization::authorization.role_required` line, and records nothing and fires no event.
+thrown, or, when that action is denied as `insufficient_authentication`, an `InsufficientAuthenticationException` (see
+[Authentication requirements](#authentication-requirements)). A denial of `role:` is not a decision: it carries
+`no_match` and the `authorization::authorization.role_required` line, and records nothing and fires no event.
 
 Run the package's middleware after authentication and after any step-up middleware, so a request that is not signed
 in, or not signed in strongly enough, is answered by those (a `401` or a step-up response) before it can be denied:
@@ -929,7 +1107,13 @@ In your tests, `SineMacula\Laravel\Authorization\Testing\Concerns\AuthorizationA
 `assertCannot()`, `assertHasRole()` and `assertHasPermission()`, and `actingAsIdentity($user, $tenant)` and
 `actingAsSubject($subject)`, which make every check without a named subject about that subject, in its tenant. When
 the Gate hands over the subject's principal or identity (for example after `actingAs($identity)`), `@can`, `can:` and
-`Gate::allows()` decide about the same subject.
+`Gate::allows()` decide about the same subject. A subject built without a `session` meets no authentication
+requirement, so to test one give it a session and bind a checker of your own:
+
+```php
+$this->app->instance(AuthenticationRequirementChecker::class, new MetRequirementChecker);
+$this->actingAsSubject(new Subject($user, $user, session: 'session-1'));
+```
 
 ### Design notes
 

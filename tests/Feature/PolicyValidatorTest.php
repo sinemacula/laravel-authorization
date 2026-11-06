@@ -9,6 +9,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Context\DeclaredContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
+use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
@@ -16,6 +17,7 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyValidator;
 use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use Tests\Feature\Stubs\ConfigurablePermissionProvider;
+use Tests\Feature\Stubs\ContributingAuthenticationContext;
 use Tests\Feature\Stubs\Enums\CataloguePermission;
 use Tests\TestCase;
 
@@ -571,6 +573,107 @@ final class PolicyValidatorTest extends TestCase
     {
         self::assertSame('One.', PolicyValidator::joined(['One.']));
         self::assertSame('One; two; three.', PolicyValidator::joined(['One.', 'two', 'three..']));
+    }
+
+    /**
+     * An authentication requirement is accepted without any key declared: the
+     * catalogue is never asked about its key.
+     *
+     * @return void
+     */
+    public function testAcceptsARequirementWithoutDeclaringItsKey(): void
+    {
+        $document = self::document([[
+            'effect'     => 'allow',
+            'actions'    => ['posts:read'],
+            'conditions' => ['authentication_requirement' => ['authentication' => ['multifactor' => ['max_age' => 900], 'phishing_resistant' => []]]],
+        ]]);
+
+        self::assertSame([], $this->declaringKeys([])->errors($document));
+    }
+
+    /**
+     * A malformed requirement is refused as the statement is.
+     *
+     * @return void
+     */
+    public function testRefusesAMalformedRequirement(): void
+    {
+        $document = self::document([[
+            'effect'     => 'allow',
+            'actions'    => ['posts:read'],
+            'conditions' => ['authentication_requirement' => ['authentication' => ['hardware_key' => []]]],
+        ]]);
+
+        self::assertSame(['Policy statement authentication requirement names an unknown part \'hardware_key\'.'], self::validator()->errors($document));
+    }
+
+    /**
+     * Provide documents testing or referencing an assurance key, with the
+     * reason each is refused.
+     *
+     * @return iterable<string, array{list<array<string, mixed>>, string}>
+     */
+    public static function assuranceKeyProvider(): iterable
+    {
+        $point = 'is an assurance key, which no condition may test or reference; '
+            . 'state the requirement with the authentication_requirement operator on the key \'authentication\' instead.';
+
+        yield 'a condition on authentication.amr' => [
+            [['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => ['any_value_in' => ['authentication.amr' => ['otp']]]]],
+            "Policy statement #0 condition key 'authentication.amr' {$point}",
+        ];
+        yield 'a suffixed condition on authentication.assurance_level' => [
+            [['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => ['eq_if_exists' => ['authentication.assurance_level' => 'aal2']]]],
+            "Policy statement #0 condition key 'authentication.assurance_level' {$point}",
+        ];
+        yield 'a condition on a contributed namespace' => [
+            [['effect' => 'deny', 'actions' => ['posts:read'], 'conditions' => ['gt' => ['mfa.seconds_since_step_up' => 900]]]],
+            "Policy statement #0 condition key 'mfa.seconds_since_step_up' {$point}",
+        ];
+        yield 'a reference in an operand' => [
+            [['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => ['eq' => ['input.time' => '${authentication.auth_time}']]]],
+            "Policy statement #0 reference '\${authentication.auth_time}' names 'authentication.auth_time', which {$point}",
+        ];
+        yield 'a reference in a resource pattern' => [
+            [['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['post:${mfa.multifactor}']]],
+            "Policy statement #0 reference '\${mfa.multifactor}' names 'mfa.multifactor', which {$point}",
+        ];
+    }
+
+    /**
+     * A condition on an assurance key, or a reference to one, is refused and
+     * pointed at the requirement operator, even when the catalogue would permit
+     * it.
+     *
+     * @param  list<array<string, mixed>>  $statements
+     * @param  string  $reason
+     * @return void
+     */
+    #[DataProvider('assuranceKeyProvider')]
+    public function testRefusesAssuranceKeys(array $statements, string $reason): void
+    {
+        $this->app?->instance(AuthenticationContext::class, new ContributingAuthenticationContext(['mfa']));
+
+        self::assertSame([$reason], self::validator()->errors(self::document($statements)));
+    }
+
+    /**
+     * Without a contributing authentication context only `authentication` holds
+     * assurance keys, so a key of the same name elsewhere is judged by the
+     * catalogue alone.
+     *
+     * @return void
+     */
+    public function testOnlyAuthenticationHoldsAssuranceKeysByDefault(): void
+    {
+        /** @var \SineMacula\Laravel\Authorization\Contracts\ActionCatalogue $actions */
+        $actions   = $this->app?->make(ActionCatalogue::class);
+        $validator = new PolicyValidator($actions, $this->keyCatalogue());
+        $document  = self::document([['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => ['gt' => ['mfa.seconds_since_step_up' => 900]]]]);
+
+        self::assertSame([], $validator->errors($document));
+        self::assertSame([], self::validator()->errors($document));
     }
 
     /**

@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Context;
 
 use Illuminate\Contracts\Foundation\Application;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
+use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\ContextSource;
 use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
 use SineMacula\Laravel\Authorization\Contracts\RequestContext;
@@ -36,7 +37,9 @@ final class ContextBindings
 
     /**
      * Build the context key catalogue from the package's keys, those of
-     * `authorization.context.keys` and those the attribute providers declare.
+     * `authorization.context.keys` and those the attribute providers declare,
+     * with the namespaces the bound authentication context contributes, whose
+     * assurance keys it never lets a condition test.
      *
      * @param  \Illuminate\Contracts\Foundation\Application  $app
      * @return \SineMacula\Laravel\Authorization\Context\DeclaredContextKeyCatalogue
@@ -49,13 +52,16 @@ final class ContextBindings
         /** @var array<string, array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType|string>> $keys */
         $keys = (array) $app['config']->get('authorization.context.keys', []);
 
-        return new DeclaredContextKeyCatalogue($keys, AttributeProviders::fromConfig($app)->declarations());
+        $namespaces = $app->bound(AuthenticationContext::class) ? $app->make(AuthenticationContext::class)->namespaces() : [];
+
+        return new DeclaredContextKeyCatalogue($keys, AttributeProviders::fromConfig($app)->declarations(), $namespaces);
     }
 
     /**
      * Build the check context factory from the bound trusted sources, the
-     * sources of `authorization.context.sources` and the attribute providers of
-     * `authorization.attributes`, each resolved from the container.
+     * sources of `authorization.context.sources`, the attribute providers of
+     * `authorization.attributes` and the bound authentication requirement
+     * checker, each resolved from the container.
      *
      * @param  \Illuminate\Contracts\Foundation\Application  $app
      * @return \SineMacula\Laravel\Authorization\Context\CheckContextFactory
@@ -74,6 +80,7 @@ final class ContextBindings
             environment: $app->make(EnvironmentContext::class),
             sources: \array_map(static fn (string $class): ContextSource => $app->make($class), $classes),
             attributes: AttributeProviders::fromConfig($app),
+            requirements: $app->make(AuthenticationRequirementChecker::class),
         );
     }
 }

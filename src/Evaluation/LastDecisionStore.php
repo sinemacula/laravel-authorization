@@ -33,13 +33,16 @@ final class LastDecisionStore
 
     /**
      * Return the most recent decision, or null when the current request or job
-     * has not yet evaluated a decision (or the store was explicitly cleared).
+     * has not yet evaluated a decision (or the store was explicitly cleared),
+     * or when an authentication requirement the decision read has since stopped
+     * being met (N37). Whether it was made in the current session is for the
+     * reader to ask, with `Decision::isFreshFor()`.
      *
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision|null
      */
     public function get(): ?Decision
     {
-        return $this->last;
+        return $this->last?->freshness?->hasLapsed() === true ? null : $this->last;
     }
 
     /**

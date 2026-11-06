@@ -26,6 +26,7 @@ final readonly class MatchResult
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome  $outcome
      * @param  string  $detail
      * @param  array<string, bool>|null  $conditions
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement|null  $unmetRequirement
      */
     public function __construct(
 
@@ -37,6 +38,9 @@ final readonly class MatchResult
 
         /** Each condition key a statement tested, with whether it held; null when the statement does not name the action and the resource. */
         public ?array $conditions = null,
+
+        /** The authentication requirement that alone kept an allow statement from applying; null when there is none. */
+        public ?UnmetRequirement $unmetRequirement = null,
     ) {}
 
     /**
@@ -47,7 +51,19 @@ final readonly class MatchResult
      */
     public function withConditions(array $conditions): self
     {
-        return new self($this->outcome, $this->detail, $conditions);
+        return new self($this->outcome, $this->detail, $conditions, $this->unmetRequirement);
+    }
+
+    /**
+     * Return the result with the authentication requirement that alone kept the
+     * statement from applying, or with none.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement|null  $unmetRequirement
+     * @return self
+     */
+    public function withUnmetRequirement(?UnmetRequirement $unmetRequirement): self
+    {
+        return new self($this->outcome, $this->detail, $this->conditions, $unmetRequirement);
     }
 
     /**
@@ -76,6 +92,19 @@ final readonly class MatchResult
         static $shared = [];
 
         return $shared[$detail] ??= new self(MatchOutcome::DOES_NOT_MATCH, $detail);
+    }
+
+    /**
+     * Build a result for an authentication requirement that is not met: a test
+     * that definitely does not hold, carrying the requirement and its unmet
+     * parts.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement  $unmet
+     * @return self
+     */
+    public static function unmet(UnmetRequirement $unmet): self
+    {
+        return new self(MatchOutcome::DOES_NOT_MATCH, 'the authentication requirement is not met', null, $unmet);
     }
 
     /**

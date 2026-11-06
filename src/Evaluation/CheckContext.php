@@ -26,6 +26,12 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
  * present with a null value, which conditions and `${…}` interpolation alike
  * rely on.
  *
+ * The reserved key `authentication` an authentication requirement tests is
+ * never read as a path: the context judges each requirement through its
+ * requirement check, for the check's subject and session, and records what the
+ * decision may be reused for. A context built without one finds every
+ * requirement unmet.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -37,6 +43,9 @@ final class CheckContext
     /** @var array<string, \Closure(): array<array-key, mixed>> The builders not yet run, by each namespace they build. */
     private array $builders;
 
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\RequirementCheck Judges the check's authentication requirements. */
+    private readonly RequirementCheck $requirements;
+
     /**
      * Create a new check context.
      *
@@ -45,11 +54,13 @@ final class CheckContext
      *
      * @param  array<array-key, mixed>  $namespaces
      * @param  array<string, \Closure(): array<array-key, mixed>>  $builders
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\RequirementCheck|null  $requirements
      */
-    public function __construct(array $namespaces = [], array $builders = [])
+    public function __construct(array $namespaces = [], array $builders = [], ?RequirementCheck $requirements = null)
     {
-        $this->namespaces = $namespaces;
-        $this->builders   = \array_diff_key($builders, $namespaces);
+        $this->namespaces   = $namespaces;
+        $this->builders     = \array_diff_key($builders, $namespaces);
+        $this->requirements = $requirements ?? new RequirementCheck;
     }
 
     /**
@@ -99,6 +110,30 @@ final class CheckContext
         }
 
         return [$isPresent, $value];
+    }
+
+    /**
+     * Assess an authentication requirement for the check's subject and session:
+     * it holds when met, definitely does not hold when unmet, and is
+     * undecidable when the checker fails.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement  $requirement
+     * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
+     */
+    public function assessRequirement(AuthenticationRequirement $requirement): MatchResult
+    {
+        return $this->requirements->assess($requirement);
+    }
+
+    /**
+     * Return how long a decision made on the context may be reused, or null
+     * when it read no authentication requirement.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\RequirementFreshness|null
+     */
+    public function requirementFreshness(): ?RequirementFreshness
+    {
+        return $this->requirements->freshness();
     }
 
     /**

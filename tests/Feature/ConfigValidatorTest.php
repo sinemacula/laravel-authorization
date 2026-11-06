@@ -9,6 +9,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
+use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
@@ -19,6 +20,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
+use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 use Tests\Feature\Stubs\ConflictingResourceAttributes;
 use Tests\Feature\Stubs\Contracts\PermissionEnumInterface;
 use Tests\Feature\Stubs\CustomPermission;
@@ -28,6 +30,7 @@ use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\ReservedContextSource;
+use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
@@ -573,6 +576,51 @@ final class ConfigValidatorTest extends TestCase
         unset($config['tenant_tree']);
 
         $this->assertRejected(fn () => ConfigValidator::validate($config, $this->app), 'authorization.tenant_tree', $reason);
+    }
+
+    /**
+     * The shipped refusing checker, any class implementing the contract, and a
+     * config without the key pass validation.
+     *
+     * @return void
+     */
+    public function testRequirementCheckerImplementingTheContractPasses(): void
+    {
+        $config = $this->authorizationConfig();
+
+        self::assertSame(RefusingRequirementChecker::class, $config['requirement_checker']);
+
+        foreach ([RefusingRequirementChecker::class, StubRequirementChecker::class] as $checker) {
+            ConfigValidator::validate(['requirement_checker' => $checker] + $config, $this->app);
+        }
+
+        unset($config['requirement_checker']);
+
+        ConfigValidator::validate($config, $this->app);
+
+        $this->addToAssertionCount(3);
+    }
+
+    /**
+     * An explicit null, or a class that is no checker, is refused under its
+     * key.
+     *
+     * @return void
+     */
+    public function testInvalidRequirementCheckerIsRejected(): void
+    {
+        $config = $this->authorizationConfig();
+
+        $this->assertRejected(
+            fn () => ConfigValidator::validate(['requirement_checker' => null] + $config, $this->app),
+            'authorization.requirement_checker',
+            'a requirement checker class is required; set it to \\' . RefusingRequirementChecker::class . ' to meet no requirement.',
+        );
+        $this->assertRejected(
+            fn () => ConfigValidator::validate(['requirement_checker' => \stdClass::class] + $config, $this->app),
+            'authorization.requirement_checker',
+            'class \'stdClass\' does not implement ' . AuthenticationRequirementChecker::class . '.',
+        );
     }
 
     /**

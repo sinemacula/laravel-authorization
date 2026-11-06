@@ -453,4 +453,47 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
 
         (new DeclaredContextKeyCatalogue)->register('tenant', ['' => 'string']);
     }
+
+    /**
+     * An assurance key of `authentication`, or of a namespace the
+     * authentication context contributes, is declared untestable however it is
+     * declared, so a condition may not test it but a reference may read it.
+     *
+     * @return void
+     */
+    public function testAssuranceKeysAreAlwaysUntestable(): void
+    {
+        $catalogue = new DeclaredContextKeyCatalogue(['authentication' => ['amr' => 'list', 'auth_time' => 'time']], [], ['mfa']);
+
+        $catalogue->declare('mfa.multifactor', ContextKeyType::BOOL);
+        $catalogue->register('mfa', ['seconds_since_step_up' => 'number', 'enrolled' => 'bool']);
+        $catalogue->register('sso', ['assurance_level' => 'string']);
+
+        foreach (['authentication.amr', 'authentication.auth_time', 'mfa.multifactor', 'mfa.seconds_since_step_up'] as $path) {
+            self::assertFalse($catalogue->find($path)?->isTestable, "{$path} is testable.");
+            self::assertFalse($catalogue->permits($path, 'eq'));
+            self::assertTrue($catalogue->permits($path));
+        }
+
+        self::assertTrue($catalogue->find('mfa.enrolled')?->isTestable);
+        self::assertTrue($catalogue->find('sso.assurance_level')?->isTestable);
+        self::assertTrue($catalogue->find('authentication.guard')?->isTestable);
+    }
+
+    /**
+     * Declaring an assurance key again, testable or not, changes nothing and is
+     * not refused.
+     *
+     * @return void
+     */
+    public function testRedeclaringAnAssuranceKeyIsAccepted(): void
+    {
+        $catalogue = new DeclaredContextKeyCatalogue;
+
+        $catalogue->declare('authentication.verification_age', ContextKeyType::NUMBER);
+        $catalogue->declare('authentication.verification_age', ContextKeyType::NUMBER, false);
+        $catalogue->declare('authentication.verification_age', ContextKeyType::NUMBER, true);
+
+        self::assertEquals(new ContextKey('authentication.verification_age', ContextKeyType::NUMBER, false), $catalogue->find('authentication.verification_age'));
+    }
 }

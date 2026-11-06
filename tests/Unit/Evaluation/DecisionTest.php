@@ -6,13 +6,16 @@ namespace Tests\Unit\Evaluation;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementFreshness;
 use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
+use SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement;
 
 /**
  * Unit tests for the decision value object.
@@ -322,5 +325,139 @@ final class DecisionTest extends TestCase
             . '  [allow] permission: not_held',
             $decision->explain(),
         );
+    }
+
+    /**
+     * insufficientAuthentication() returns an insufficient_authentication
+     * denial at the stage, by the statements, with each requirement and its
+     * unmet parts, and no freshness.
+     *
+     * @return void
+     */
+    public function testInsufficientAuthentication(): void
+    {
+        $statements   = [new StatementReference('p', 0), new StatementReference('p', 2)];
+        $requirements = self::requirements();
+        $trace        = [new TraceEntry(DecisionStage::ALLOW, TraceOutcome::CONDITION_FAILED, $statements[0], ['authentication' => false])];
+        $decision     = Decision::insufficientAuthentication(DecisionStage::IMPLICIT, $statements, $requirements, $trace);
+
+        self::assertFalse($decision->isAllowed());
+        self::assertSame(DecisionEffect::DENY, $decision->effect);
+        self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $decision->reason);
+        self::assertSame(DecisionStage::IMPLICIT, $decision->stage);
+        self::assertSame($statements, $decision->statements);
+        self::assertSame($requirements, $decision->requirements);
+        self::assertSame($trace, $decision->trace);
+        self::assertNull($decision->freshness);
+        self::assertSame([], Decision::insufficientAuthentication(DecisionStage::IMPLICIT, [], [])->trace);
+    }
+
+    /**
+     * Allows and plain denials carry no requirements and no freshness.
+     *
+     * @return void
+     */
+    public function testOtherDecisionsCarryNoRequirements(): void
+    {
+        self::assertSame([], Decision::allow(DecisionStage::ALLOW)->requirements);
+        self::assertSame([], Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT)->requirements);
+        self::assertNull(Decision::allow(DecisionStage::ALLOW)->freshness);
+    }
+
+    /**
+     * withFreshness() keeps everything else and adds the freshness, and gives
+     * the decision itself back for none.
+     *
+     * @return void
+     */
+    public function testWithFreshness(): void
+    {
+        $decision  = Decision::insufficientAuthentication(DecisionStage::IMPLICIT, [new StatementReference('p', 0)], self::requirements());
+        $freshness = new RequirementFreshness('session-1');
+        $fresh     = $decision->withFreshness($freshness);
+
+        self::assertSame($decision, $decision->withFreshness(null));
+        self::assertSame($freshness, $fresh->freshness);
+        self::assertSame($decision->reason, $fresh->reason);
+        self::assertSame($decision->stage, $fresh->stage);
+        self::assertSame($decision->statements, $fresh->statements);
+        self::assertSame($decision->requirements, $fresh->requirements);
+        self::assertSame($decision->trace, $fresh->trace);
+    }
+
+    /**
+     * withStep() and withPermission() keep the requirements and the freshness;
+     * a permission held allows with the freshness but no requirements.
+     *
+     * @return void
+     */
+    public function testStepsKeepRequirementsAndFreshness(): void
+    {
+        $freshness = new RequirementFreshness('session-1');
+        $decision  = Decision::insufficientAuthentication(DecisionStage::IMPLICIT, [], self::requirements())->withFreshness($freshness);
+
+        $stepped = $decision->withStep(new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_HELD));
+        $notHeld = $decision->withPermission(false);
+        $held    = $decision->withPermission(true);
+
+        self::assertSame($decision->requirements, $stepped->requirements);
+        self::assertSame($freshness, $stepped->freshness);
+        self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $notHeld->reason);
+        self::assertSame($decision->requirements, $notHeld->requirements);
+        self::assertSame($freshness, $notHeld->freshness);
+        self::assertTrue($held->isAllowed());
+        self::assertSame(DecisionStage::ALLOW, $held->stage);
+        self::assertSame([], $held->requirements);
+        self::assertSame($freshness, $held->freshness);
+    }
+
+    /**
+     * isFreshFor() always holds for a decision that read no requirement, and
+     * otherwise asks its freshness.
+     *
+     * @return void
+     */
+    public function testIsFreshFor(): void
+    {
+        $until    = new \DateTimeImmutable('2026-11-06 12:00:00');
+        $before   = new \DateTimeImmutable('2026-11-06 11:00:00');
+        $decision = Decision::allow(DecisionStage::ALLOW)->withFreshness(new RequirementFreshness('session-1', $until));
+
+        self::assertTrue(Decision::allow(DecisionStage::ALLOW)->isFreshFor(null));
+        self::assertTrue(Decision::allow(DecisionStage::ALLOW)->isFreshFor('any'));
+        self::assertTrue($decision->isFreshFor('session-1', $before));
+        self::assertFalse($decision->isFreshFor('session-2', $before));
+        self::assertFalse($decision->isFreshFor('session-1', $until));
+    }
+
+    /**
+     * explain() renders each requirement an insufficient authentication names,
+     * with its unmet parts, after the verdict.
+     *
+     * @return void
+     */
+    public function testExplainInsufficientAuthentication(): void
+    {
+        $decision = Decision::insufficientAuthentication(DecisionStage::IMPLICIT, [new StatementReference('p', 0), new StatementReference('p', 1)], self::requirements());
+
+        self::assertSame(
+            "DENY (insufficient_authentication: a statement allows it once further authentication is met) at the implicit stage by p#0, p#1.\n"
+            . "  requirement multifactor, phishing_resistant: unmet multifactor\n"
+            . '  requirement assurance_level: unmet assurance_level',
+            $decision->explain(),
+        );
+    }
+
+    /**
+     * Return two candidate requirements.
+     *
+     * @return list<\SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement>
+     */
+    private static function requirements(): array
+    {
+        return [
+            new UnmetRequirement(new AuthenticationRequirement(['multifactor' => 900, 'phishing_resistant' => null]), ['multifactor']),
+            new UnmetRequirement(new AuthenticationRequirement(['assurance_level' => null], 'aal2'), ['assurance_level']),
+        ];
     }
 }

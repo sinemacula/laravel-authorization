@@ -19,4 +19,6 @@ return [
 
     'role_required' => 'This action requires a role you do not have.',
 
+    'insufficient_authentication' => 'This action requires further authentication.',
+
 ];

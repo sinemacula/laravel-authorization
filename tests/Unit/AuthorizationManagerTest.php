@@ -93,6 +93,7 @@ final class AuthorizationManagerTest extends TestCase
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testAnonymousAuthorizeThrows(): void
     {
@@ -806,6 +807,7 @@ final class AuthorizationManagerTest extends TestCase
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testAuthorizeFailsDispatchesBothEvents(): void
     {
@@ -835,6 +837,8 @@ final class AuthorizationManagerTest extends TestCase
      * same decision the check recorded, and throws with the decision's reason.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testAuthorizeReportsTheDecisionAndThrowsWithItsReason(): void
     {
@@ -1086,6 +1090,8 @@ final class AuthorizationManagerTest extends TestCase
      * nor the resource.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testAuthorizeDenialCarriesReasonAndTranslatedMessage(): void
     {
@@ -1114,6 +1120,8 @@ final class AuthorizationManagerTest extends TestCase
      * An anonymous denial carries the `subject_unresolved` reason code.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testAnonymousDenialCarriesSubjectUnresolvedReason(): void
     {
@@ -1126,6 +1134,8 @@ final class AuthorizationManagerTest extends TestCase
      * Without a translator, the denial keeps Laravel's English message.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testAuthorizeDenialWithoutTranslatorKeepsEnglishMessage(): void
     {
@@ -1139,6 +1149,8 @@ final class AuthorizationManagerTest extends TestCase
      * denial keeps the English message rather than showing the key.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testAuthorizeDenialIgnoresAnUntranslatedKey(): void
     {
@@ -1155,6 +1167,8 @@ final class AuthorizationManagerTest extends TestCase
      * denial with the English message.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testAuthorizeDenialIgnoresANonStringTranslation(): void
     {
@@ -1289,6 +1303,8 @@ final class AuthorizationManagerTest extends TestCase
      * The decision events carry the model the subject is about.
      *
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testDecisionEventsCarryTheSubjectsModel(): void
     {
@@ -1422,6 +1438,8 @@ final class AuthorizationManagerTest extends TestCase
      * @param  string  $action
      * @param  string|null  $resource
      * @return \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     private function denialOf(AuthorizationManager $manager, string $action, ?string $resource = null): AuthorizationException
     {

@@ -18,6 +18,11 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
  * operator, an operand of the wrong type or a malformed `${…}` reference. It is
  * not part of the public API.
  *
+ * The `authentication_requirement` operator (N33) tests the reserved key
+ * `authentication` alone, has no `_if_exists` form, and takes a requirement as
+ * its operand (see `AuthenticationRequirement`), which its key test carries
+ * built.
+ *
  * @phpstan-type ConditionTest array{key: string, path: list<string>, operator: string, isOptional: bool, operand: mixed, error: string|null}
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -32,6 +37,9 @@ final class StatementValidator
 
     /** @var string What a statement id may be: 1 to 64 letters, digits, `_`, `-`, `:` and `.`. */
     public const string SID_PATTERN = '/\A[A-Za-z0-9_:.\-]{1,64}\z/';
+
+    /** @var string The name of the `_if_exists` form an authentication requirement does not have. */
+    private const string REQUIREMENT_IF_EXISTS = AuthenticationRequirement::OPERATOR . ConditionEvaluator::IF_EXISTS;
 
     /**
      * Refuse keys a statement does not define.
@@ -214,13 +222,14 @@ final class StatementValidator
         $errors = [];
 
         foreach ($conditions as $name => $tests) {
-            $operator = \is_string($name) ? ConditionEvaluator::operatorOf($name) : null;
+            $operator = \is_string($name) ? self::operatorOf($name) : null;
 
             $error = match (true) {
-                !\is_string($name)        => 'conditions must map operator names to key tests',
-                $operator === null        => "conditions have an unknown operator '{$name}'",
-                !self::isKeyedMap($tests) => "condition operator '{$name}' must map context keys to operands",
-                default                   => null,
+                !\is_string($name)                        => 'conditions must map operator names to key tests',
+                $name     === self::REQUIREMENT_IF_EXISTS => "condition operator '{$name}' is not an operator; an authentication requirement has no _if_exists form",
+                $operator === null                        => "conditions have an unknown operator '{$name}'",
+                !self::isKeyedMap($tests)                 => "condition operator '{$name}' must map context keys to operands",
+                default                                   => null,
             };
 
             if ($error === null) {
@@ -237,7 +246,9 @@ final class StatementValidator
      * Return every key test of the well-formed operator entries, in order: its
      * context key, the key's dot path split into segments, the operator it
      * tests with, whether the `_if_exists` suffix lets a missing key pass, the
-     * operand, and why it cannot be evaluated, or null when it can.
+     * operand, and why it cannot be evaluated, or null when it can. A
+     * well-formed authentication requirement's operand is the requirement,
+     * built.
      *
      * @param  array<array-key, mixed>  $conditions
      * @return list<ConditionTest>
@@ -247,20 +258,22 @@ final class StatementValidator
         $tests = [];
 
         foreach ($conditions as $name => $keyTests) {
-            $operator = ConditionEvaluator::operatorOf((string) $name);
+            $operator = self::operatorOf((string) $name);
 
             if (!\is_string($name) || $operator === null || !self::isKeyedMap($keyTests)) {
                 continue;
             }
 
             foreach ($keyTests as $key => $operand) {
+                $error = self::testError($key, $operator, $operand);
+
                 $tests[] = [
                     'key'        => $key,
                     'path'       => \explode('.', $key),
                     'operator'   => $operator,
                     'isOptional' => $operator !== $name,
-                    'operand'    => $operand,
-                    'error'      => self::testError($key, $operator, $operand),
+                    'operand'    => $operator === AuthenticationRequirement::OPERATOR && $error === null ? AuthenticationRequirement::fromOperand($operand) : $operand,
+                    'error'      => $error,
                 ];
             }
         }
@@ -269,8 +282,22 @@ final class StatementValidator
     }
 
     /**
+     * Return the operator an operator name tests with: the authentication
+     * requirement operator itself, or what `ConditionEvaluator::operatorOf()`
+     * gives for any other name.
+     *
+     * @param  string  $name
+     * @return string|null
+     */
+    private static function operatorOf(string $name): ?string
+    {
+        return $name === AuthenticationRequirement::OPERATOR ? $name : ConditionEvaluator::operatorOf($name);
+    }
+
+    /**
      * Describe why one key test cannot be evaluated: an operand of the wrong
-     * type, or a malformed `${…}` reference in a string operand.
+     * type, a malformed `${…}` reference in a string operand, or a malformed
+     * authentication requirement.
      *
      * @param  string  $key
      * @param  string  $operator
@@ -279,6 +306,10 @@ final class StatementValidator
      */
     private static function testError(string $key, string $operator, mixed $operand): ?string
     {
+        if ($operator === AuthenticationRequirement::OPERATOR) {
+            return self::requirementError($key, $operand);
+        }
+
         $error = ConditionEvaluator::operandError($operator, $operand);
 
         if ($error !== null) {
@@ -288,6 +319,26 @@ final class StatementValidator
         return \is_string($operand) && ContextInterpolator::hasMalformedReference($operand)
             ? "condition '{$key}' has a malformed \${…} reference"
             : null;
+    }
+
+    /**
+     * Describe why an authentication requirement test cannot be evaluated: it
+     * tests a key other than `authentication`, or its operand states no
+     * requirement.
+     *
+     * @param  string  $key
+     * @param  mixed  $operand
+     * @return string|null
+     */
+    private static function requirementError(string $key, mixed $operand): ?string
+    {
+        if ($key !== AuthenticationRequirement::KEY) {
+            return 'condition operator \'' . AuthenticationRequirement::OPERATOR . '\' tests the key \'' . AuthenticationRequirement::KEY . "' alone, not '{$key}'";
+        }
+
+        $error = AuthenticationRequirement::errorOf($operand);
+
+        return $error === null ? null : "authentication {$error}";
     }
 
     /**
