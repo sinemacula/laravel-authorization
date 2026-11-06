@@ -10,11 +10,13 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
+use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use Tests\Feature\Stubs\Contracts\PermissionEnumInterface;
 use Tests\Feature\Stubs\CustomPermission;
 use Tests\Feature\Stubs\CustomPolicy;
@@ -22,6 +24,7 @@ use Tests\Feature\Stubs\CustomRole;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubSubjectResolver;
+use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
 /**
@@ -378,6 +381,55 @@ final class ConfigValidatorTest extends TestCase
     }
 
     /**
+     * The shipped flat tenant tree, and any class implementing the contract,
+     * pass validation.
+     *
+     * @return void
+     */
+    public function testTenantTreeImplementingTheContractPasses(): void
+    {
+        $this->validateWithTenantTree(FlatTenantTree::class);
+        $this->validateWithTenantTree(StubTenantTree::class);
+
+        $this->expectNotToPerformAssertions();
+    }
+
+    /**
+     * Invalid `tenant_tree` values with the reason each is refused for.
+     *
+     * @return iterable<string, array{mixed, string}>
+     */
+    public static function invalidTenantTreeProvider(): iterable
+    {
+        yield 'null' => [null, 'a tenant tree class is required; set it to \\' . FlatTenantTree::class . ' for a flat set of tenants.'];
+        yield 'missing class' => ['App\Tenancy\Missing', 'class \'App\Tenancy\Missing\' does not exist.'];
+        yield 'unrelated class' => [\stdClass::class, 'class \'stdClass\' does not implement ' . TenantTree::class . '.'];
+    }
+
+    /**
+     * Every invalid `tenant_tree` value, null and a missing key included, is
+     * refused with its reason: no tree never means a flat one by accident.
+     *
+     * @param  mixed  $tree
+     * @param  string  $reason
+     * @return void
+     */
+    #[DataProvider('invalidTenantTreeProvider')]
+    public function testInvalidTenantTreeIsRejected(mixed $tree, string $reason): void
+    {
+        $this->assertRejected(fn () => $this->validateWithTenantTree($tree), 'authorization.tenant_tree', $reason);
+
+        if ($tree !== null) {
+            return;
+        }
+
+        $config = $this->authorizationConfig();
+        unset($config['tenant_tree']);
+
+        $this->assertRejected(fn () => ConfigValidator::validate($config, $this->app), 'authorization.tenant_tree', $reason);
+    }
+
+    /**
      * Invalid `subject_resolver` values with the reason each is refused for.
      *
      * @return iterable<string, array{mixed, string}>
@@ -455,6 +507,20 @@ final class ConfigValidatorTest extends TestCase
     {
         $config                     = $this->authorizationConfig();
         $config['subject_resolver'] = $resolver;
+
+        ConfigValidator::validate($config, $this->app);
+    }
+
+    /**
+     * Run the validator over the package config with the given `tenant_tree`.
+     *
+     * @param  mixed  $tree
+     * @return void
+     */
+    private function validateWithTenantTree(mixed $tree): void
+    {
+        $config                = $this->authorizationConfig();
+        $config['tenant_tree'] = $tree;
 
         ConfigValidator::validate($config, $this->app);
     }

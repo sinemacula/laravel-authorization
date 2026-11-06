@@ -6,6 +6,7 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
+use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 
 return [
 
@@ -205,6 +206,26 @@ return [
     */
 
     'subject_resolver' => AuthGuardSubjectResolver::class,
+
+    /*
+    |---------------------------------------------------------------------------
+    | Tenant tree
+    |---------------------------------------------------------------------------
+    |
+    | A class implementing `TenantTree`, which answers a tenant's ancestors,
+    | whether one tenant is within another, and a tenant's subtree as a query.
+    | The package never stores the tree. A grant in a tenant applies there and,
+    | unless it is limited to its own tenant, in every tenant below it; a tenant
+    | sees the roles, permissions and policies its ancestors own. The shipped
+    | default is a flat set of tenants, so a grant applies only in its own
+    | tenant. Report a change to the tree (a tenant moved or deleted) with
+    | `Authorization::treeChanged($tenant)`. Null or a class that does not
+    | implement the contract is refused at boot; like the subject resolver, a
+    | class named here is built per request or job.
+    |
+    */
+
+    'tenant_tree' => FlatTenantTree::class,
 
     /*
     |---------------------------------------------------------------------------

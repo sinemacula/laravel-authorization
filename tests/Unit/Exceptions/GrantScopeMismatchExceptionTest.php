@@ -36,10 +36,13 @@ final class GrantScopeMismatchExceptionTest extends TestCase
         $platform  = new GrantScopeMismatchException('permission', 'posts:edit', $owner, null);
 
         self::assertSame(
-            'The role \'editor\' belongs to tenant \'organisation:org-a\' and can only be granted there, not in tenant \'organisation:org-b\'.',
+            'The role \'editor\' belongs to tenant \'organisation:org-a\' and can only be granted there or in a tenant below it, not in tenant \'organisation:org-b\'.',
             $inAnother->getMessage(),
         );
-        self::assertSame('The permission \'posts:edit\' belongs to tenant \'organisation:org-a\' and can only be granted there, not platform-wide.', $platform->getMessage());
+        self::assertSame(
+            'The permission \'posts:edit\' belongs to tenant \'organisation:org-a\' and can only be granted there or in a tenant below it, not platform-wide.',
+            $platform->getMessage(),
+        );
         self::assertSame('role', $inAnother->getKind());
         self::assertSame('editor', $inAnother->getName());
         self::assertSame($owner, $inAnother->getOwner());

@@ -8,7 +8,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Thrown when a role, permission or policy one tenant owns would be granted
- * anywhere but in that tenant: platform-wide, or in another tenant.
+ * anywhere but in that tenant or a tenant below it: platform-wide, or in a
+ * tenant outside its subtree.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -38,7 +39,7 @@ final class GrantScopeMismatchException extends \InvalidArgumentException
         private readonly ?Reference $scope,
     ) {
         parent::__construct(
-            "The {$kind} '{$name}' belongs to tenant '{$owner->type}:{$owner->id}' and can only be granted there, not "
+            "The {$kind} '{$name}' belongs to tenant '{$owner->type}:{$owner->id}' and can only be granted there or in a tenant below it, not "
                 . ($scope === null ? 'platform-wide' : "in tenant '{$scope->type}:{$scope->id}'") . '.',
         );
     }

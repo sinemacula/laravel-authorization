@@ -9,12 +9,14 @@ use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
 use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
+use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 
 /**
  * Boot-time validator for the shipped authorization config.
@@ -59,6 +61,7 @@ final class ConfigValidator
         self::validatePermissionProviders($config['permission_providers'] ?? []);
         self::validateGateOnConflict($config['gate']['on_conflict'] ?? null);
         self::validateSubjectResolver($config['subject_resolver'] ?? null);
+        self::validateTenantTree($config['tenant_tree'] ?? null);
         self::validatePolicyStore($config['policy_store'] ?? null);
         self::validateCacheStore($config['cache']['store'] ?? null, $container);
         self::validateCacheTtl($config['cache']['ttl'] ?? 300);
@@ -311,6 +314,27 @@ final class ConfigValidator
             SubjectResolver::class,
             'authorization.subject_resolver',
         );
+    }
+
+    /**
+     * Validate that `tenant_tree` resolves to a class implementing
+     * `TenantTree`. Null is refused rather than read as a flat tree, so a
+     * missing tree fails at boot instead of changing where grants apply.
+     *
+     * @param  mixed  $value
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    private static function validateTenantTree(mixed $value): void
+    {
+        if ($value === null) {
+            $reason = 'a tenant tree class is required; set it to \\' . FlatTenantTree::class . ' for a flat set of tenants.';
+
+            throw new InvalidAuthorizationConfigException('authorization.tenant_tree', $reason);
+        }
+
+        self::assertImplementsContract($value, TenantTree::class, 'authorization.tenant_tree');
     }
 
     /**

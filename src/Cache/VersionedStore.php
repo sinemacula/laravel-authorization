@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Cache;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Support\Str;
 use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * The persistent tier of the resolution cache: entries, and the version tokens
@@ -80,6 +81,18 @@ final class VersionedStore
     public function policyKey(string $policy): string
     {
         return "{$this->prefix}:version:policy:{$policy}";
+    }
+
+    /**
+     * Return the key of the tenant's version token, which every entry built in
+     * the tenant or below it records.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
+     * @return string
+     */
+    public function tenantKey(Reference $tenant): string
+    {
+        return "{$this->prefix}:version:tenant:{$tenant->type}:{$tenant->id}";
     }
 
     /**

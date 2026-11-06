@@ -25,6 +25,7 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
@@ -37,6 +38,7 @@ use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
+use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
@@ -50,6 +52,7 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubPolicyStore;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
+use Tests\Feature\Stubs\StubTenantTree;
 use Tests\Feature\Stubs\SwitchableSubjectResolver;
 use Tests\TestCase;
 
@@ -127,6 +130,7 @@ final class AuthorizationServiceProviderTest extends TestCase
         $app       = $this->application();
         $abstracts = [
             SubjectResolver::class,
+            TenantTree::class,
             ResolvedTenant::class,
             ResolutionCache::class,
             PolicyResolver::class,
@@ -219,8 +223,9 @@ final class AuthorizationServiceProviderTest extends TestCase
     }
 
     /**
-     * Rebinding the subject resolver or the held tenant empties the resolution
-     * cache's memo, since its entries were resolved under the tenant they gave.
+     * Rebinding the subject resolver, the held tenant or the tenant tree
+     * empties the resolution cache's memo, since its entries were resolved
+     * under the tenant and ancestors they gave.
      *
      * @return void
      */
@@ -245,8 +250,10 @@ final class AuthorizationServiceProviderTest extends TestCase
         $cache->rememberPermissions($grantee, $resolve);
         $app->instance(ResolvedTenant::class, ResolvedTenant::from(new StubSubjectResolver(null)));
         $cache->rememberPermissions($grantee, $resolve);
+        $app->instance(TenantTree::class, new StubTenantTree);
+        $cache->rememberPermissions($grantee, $resolve);
 
-        self::assertSame(3, $resolutions);
+        self::assertSame(4, $resolutions);
     }
 
     /**
@@ -347,6 +354,31 @@ final class AuthorizationServiceProviderTest extends TestCase
     public function testConfiguredSubjectResolverIsBound(): void
     {
         self::assertInstanceOf(SwitchableSubjectResolver::class, $this->application()->make(SubjectResolver::class));
+    }
+
+    /**
+     * The flat tenant tree is bound by default, and the configured class in its
+     * place.
+     *
+     * @return void
+     */
+    public function testConfiguredTenantTreeIsBound(): void
+    {
+        $app = $this->application();
+
+        $default = $app->make(TenantTree::class);
+
+        self::assertInstanceOf(FlatTenantTree::class, $default);
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $app->make(ConfigRepository::class);
+        $config->set('authorization.tenant_tree', StubTenantTree::class);
+
+        (new AuthorizationServiceProvider($app))->register();
+
+        $configured = $app->make(TenantTree::class);
+
+        self::assertInstanceOf(StubTenantTree::class, $configured);
     }
 
     /**

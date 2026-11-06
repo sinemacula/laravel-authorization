@@ -4,11 +4,14 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Contracts\Database\Query\Builder;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -18,6 +21,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
+use Tests\Feature\Stubs\StubTenantTree;
 use Tests\Feature\Stubs\SwitchableSubjectResolver;
 use Tests\TestCase;
 
@@ -115,6 +119,99 @@ final class TenantScopeTest extends TestCase
 
         self::assertSame(['a-role', 'platform-role'], $this->roleNames());
         self::assertSame(['a-permission', 'platform-permission'], $this->permissionNames());
+    }
+
+    /**
+     * Below another tenant in the bound tree, a tenant sees its ancestors' rows
+     * as well as its own and the platform's, and its chain lists it first.
+     *
+     * @return void
+     */
+    public function testATenantSeesItsAncestorsRows(): void
+    {
+        [$tenantA, $tenantB] = $this->seedRows();
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($tenantA), Reference::of($tenantB)));
+        $this->useSwitchableResolver($tenantA);
+
+        self::assertSame(['a-role', 'b-role', 'platform-role'], $this->roleNames());
+        self::assertSame(['a-permission', 'b-permission', 'platform-permission'], $this->permissionNames());
+        self::assertEquals([Reference::of($tenantA), Reference::of($tenantB)], TenantScope::currentChain()->tenants);
+
+        $this->app?->instance(TenantTree::class, new StubTenantTree);
+
+        self::assertEquals([Reference::of($tenantA)], TenantScope::refreshChain()->tenants);
+        self::assertSame(['a-role', 'platform-role'], $this->roleNames());
+    }
+
+    /**
+     * A query the tenant tree runs while it reads the ancestors sees platform
+     * rows only, the chain it reads is held for the rest of the request, and a
+     * refresh reads it again the same way.
+     *
+     * @return void
+     */
+    public function testAQueryRunWhileReadingTheAncestorsSeesPlatformRowsOnly(): void
+    {
+        [$tenantA] = $this->seedRows();
+
+        $tree = new class implements TenantTree {
+            /** @var list<list<string>> The role names each read of the ancestors saw. */
+            public array $seen = [];
+
+            /**
+             * Query the roles, as a tree over the application's models might.
+             *
+             * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
+             * @return list<\SineMacula\Laravel\Authorization\Support\Reference>
+             */
+            #[\Override]
+            public function ancestors(Reference $tenant): array
+            {
+                /** @var list<string> $names */
+                $names        = Role::query()->orderBy('name')->pluck('name')->all();
+                $this->seen[] = $names;
+
+                return [];
+            }
+
+            /**
+             * Determine whether the tenant is the other.
+             *
+             * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
+             * @param  \SineMacula\Laravel\Authorization\Support\Reference  $ancestor
+             * @return bool
+             */
+            #[\Override]
+            public function isWithin(Reference $tenant, Reference $ancestor): bool
+            {
+                return $tenant === $ancestor;
+            }
+
+            /**
+             * Return no subtree; the test reads none.
+             *
+             * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
+             * @return \Illuminate\Contracts\Database\Query\Builder
+             */
+            #[\Override]
+            public function subtree(Reference $tenant): Builder
+            {
+                return DB::query();
+            }
+        };
+
+        $this->app?->instance(TenantTree::class, $tree);
+        $this->useSwitchableResolver($tenantA);
+
+        self::assertSame(['a-role', 'platform-role'], $this->roleNames());
+        self::assertSame(['a-role', 'platform-role'], $this->roleNames());
+        self::assertSame([['platform-role']], $tree->seen);
+
+        TenantScope::refreshChain();
+
+        self::assertSame([['platform-role'], ['platform-role']], $tree->seen);
+        self::assertEquals([Reference::of($tenantA)], TenantScope::currentChain()->tenants);
     }
 
     /**

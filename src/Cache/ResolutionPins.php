@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Cache;
 
+use SineMacula\Laravel\Authorization\Support\TenantChain;
+
 /**
  * The version tokens a resolution was built from, read as it runs.
  *
@@ -64,6 +66,22 @@ final class ResolutionPins
         }
 
         $this->pin($this->store, \array_map($this->store->roleKey(...), $roles));
+    }
+
+    /**
+     * Pin the versions of the tenant an entry is built in and of its ancestors,
+     * so a change to the tree above it reaches the entry.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\TenantChain  $chain
+     * @return void
+     */
+    public function tenants(TenantChain $chain): void
+    {
+        if ($this->store === null) {
+            return;
+        }
+
+        $this->pin($this->store, \array_map($this->store->tenantKey(...), $chain->tenants));
     }
 
     /**

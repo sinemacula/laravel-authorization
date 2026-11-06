@@ -103,7 +103,7 @@ final class RoleParity
     /**
      * Return the owners of the role and of a permission or parent another
      * tenant owns, or null when the role may take it: the platform owns it, or
-     * the role's own tenant does.
+     * the role's own tenant or one of its ancestors does.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @param  \Illuminate\Database\Eloquent\Model  $related
@@ -114,7 +114,7 @@ final class RoleParity
         $owner        = Reference::tenantOf($role);
         $relatedOwner = Reference::tenantOf($related);
 
-        if ($relatedOwner === null || ($owner?->type === $relatedOwner->type && $owner->id === $relatedOwner->id)) {
+        if ($relatedOwner === null || TenantChain::isWithin($owner, $relatedOwner)) {
             return null;
         }
 

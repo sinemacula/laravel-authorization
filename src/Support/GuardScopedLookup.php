@@ -13,10 +13,10 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  *
  * `RoleService::find()`, `PermissionService::find()` and the grant service's
  * name lookups need an identical query that finds a row by name under a guard.
- * A name is unique within its owner and guard, not globally, so up to four rows
- * can answer: the current tenant's and the platform's, each for the guard or
- * guard-agnostic. This helper owns the single copy of the precedence between
- * them.
+ * A name is unique within its owner and guard, not globally, so several rows
+ * can answer: the current tenant's, each of its ancestors' and the platform's,
+ * each for the guard or guard-agnostic. This helper owns the single copy of the
+ * precedence between them.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -27,10 +27,11 @@ final class GuardScopedLookup
      * Find a row by name under the given guard for the supplied model class.
      *
      * The model's global scopes apply, so the tenant scope limits the
-     * candidates to the platform's rows and the current tenant's. Among them
-     * the current tenant's row wins over the platform's, then a row for the
-     * guard wins over a guard-agnostic one, and the primary key breaks any
-     * remaining tie, so the same row is found every time.
+     * candidates to the platform's rows and those of the current tenant and its
+     * ancestors. Among them the nearest owner's row wins (the tenant's, then
+     * each ancestor's in turn, then the platform's), then a row for the guard
+     * wins over a guard-agnostic one, and the primary key breaks any remaining
+     * tie, so the same row is found every time.
      *
      * The return is typed as `Model|null`; callers validate the concrete class
      * with `instanceof` before using the result. Larastan cannot flow a
@@ -95,41 +96,22 @@ final class GuardScopedLookup
         $grammar  = $instance->getConnection()->getQueryGrammar();
         $column   = static fn (string $column): string => $instance->qualifyColumn($column);
 
-        // @phpstan-ignore staticMethod.dynamicCall
-        return self::visibleIn($instance->newQuery(), $column, $tenant)
-            ->where($column('name'), $name)
-            ->where(static function (Builder $query) use ($column, $guard): void {
-                // @phpstan-ignore staticMethod.dynamicCall
-                $query->where($column('guard'), $guard)->orWhereNull($column('guard'));
-            })
-            ->orderByRaw($grammar->wrap($column('tenant_type')) . ' IS NULL')
-            ->orderByRaw($grammar->wrap($column('guard')) . ' IS NULL')
-            ->orderBy($instance->getQualifiedKeyName());
-    }
+        $chain = $tenant === null ? TenantScope::currentChain() : TenantChain::of($tenant, TenantChain::tree());
+        $query = $instance->newQuery();
 
-    /**
-     * Limit the query to the rows visible in the tenant: the platform's and the
-     * tenant's own, in place of the tenant scope's current tenant. Without a
-     * tenant the tenant scope applies as it is.
-     *
-     * @param  \Illuminate\Database\Eloquent\Builder<\Illuminate\Database\Eloquent\Model>  $query
-     * @param  \Closure(string): string  $column
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
-     * @return \Illuminate\Database\Eloquent\Builder<\Illuminate\Database\Eloquent\Model>
-     */
-    private static function visibleIn(Builder $query, \Closure $column, ?Reference $tenant): Builder
-    {
-        if ($tenant === null) {
-            return $query;
+        if ($tenant !== null) {
+            $chain->owners($query->withoutGlobalScope(TenantScope::class), $column('tenant_type'), $column('tenant_id'));
         }
 
         // @phpstan-ignore staticMethod.dynamicCall
-        return $query->withoutGlobalScope(TenantScope::class)->where(static function (Builder $query) use ($column, $tenant): void {
-            // @phpstan-ignore staticMethod.dynamicCall
-            $query->whereNull($column('tenant_type'))->orWhere(static function (Builder $query) use ($column, $tenant): void {
+        $query->where($column('name'), $name)
+            ->where(static function (Builder $query) use ($column, $guard): void {
                 // @phpstan-ignore staticMethod.dynamicCall
-                $query->where($column('tenant_type'), $tenant->type)->where($column('tenant_id'), $tenant->id);
+                $query->where($column('guard'), $guard)->orWhereNull($column('guard'));
             });
-        });
+
+        return $chain->nearestFirst($query, $grammar->wrap($column('tenant_type')), $grammar->wrap($column('tenant_id')))
+            ->orderByRaw($grammar->wrap($column('guard')) . ' IS NULL')
+            ->orderBy($instance->getQualifiedKeyName());
     }
 }

@@ -24,6 +24,7 @@ use SineMacula\Laravel\Authorization\Console\WhyCanCommand;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
@@ -33,6 +34,7 @@ use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
+use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
@@ -96,6 +98,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
         $this->mergeConfigFrom(__DIR__ . '/../config/authorization.php', 'authorization');
 
         $this->registerSubjectResolver();
+        $this->registerTenantTree();
         $this->registerResolvedTenant();
         $this->registerPolicyStore();
         $this->registerResolutionCache();
@@ -181,6 +184,21 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
         $this->forgetResolutionsOnRebinding(SubjectResolver::class);
         $this->bindScopedDefault(SubjectResolver::class, $class);
+    }
+
+    /**
+     * Bind the configured tenant tree as the default, scoped to the request or
+     * job like the subject resolver.
+     *
+     * @return void
+     */
+    protected function registerTenantTree(): void
+    {
+        /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\TenantTree> $class */
+        $class = $this->app['config']->get('authorization.tenant_tree', FlatTenantTree::class);
+
+        $this->forgetResolutionsOnRebinding(TenantTree::class);
+        $this->bindScopedDefault(TenantTree::class, $class);
     }
 
     /**

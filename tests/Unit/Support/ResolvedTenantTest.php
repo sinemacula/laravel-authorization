@@ -6,8 +6,11 @@ namespace Tests\Unit\Support;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 
 /**
@@ -89,5 +92,58 @@ final class ResolvedTenantTest extends TestCase
 
         self::assertTrue($resolved->isFrom($resolver));
         self::assertFalse($resolved->isFrom($other));
+    }
+
+    /**
+     * The chain is the tenant then its ancestors, read once through a tree and
+     * again when another tree is asked or a refresh is; no tenant has the
+     * platform's empty chain, without asking the tree.
+     *
+     * @return void
+     */
+    public function testTheChainIsReadOncePerTree(): void
+    {
+        $tenant = new class implements AuthorizableTenant {
+            /**
+             * Return the tenant's key.
+             *
+             * @return string
+             */
+            #[\Override]
+            public function getKey(): string
+            {
+                return 'account';
+            }
+
+            /**
+             * Return the tenant's type.
+             *
+             * @return string
+             */
+            #[\Override]
+            public function getMorphClass(): string
+            {
+                return 'stub_tenant';
+            }
+        };
+        $resolver = self::createStub(SubjectResolver::class);
+        $org      = new Reference('stub_tenant', 'org');
+        $first    = $this->createMock(TenantTree::class);
+        $second   = $this->createMock(TenantTree::class);
+
+        $first->expects(self::exactly(2))->method('ancestors')->with(new Reference('stub_tenant', 'account'))->willReturn([$org]);
+        $second->expects(self::once())->method('ancestors')->willReturn([]);
+
+        $resolved = new ResolvedTenant($resolver, $tenant);
+
+        self::assertEquals([new Reference('stub_tenant', 'account'), $org], $resolved->chain($first)->tenants);
+        self::assertSame($resolved->chain($first), $resolved->chain($first));
+        self::assertEquals([new Reference('stub_tenant', 'account')], $resolved->chain($second)->tenants);
+        self::assertEquals([new Reference('stub_tenant', 'account'), $org], $resolved->refreshChain($first)->tenants);
+
+        $unused = $this->createMock(TenantTree::class);
+        $unused->expects(self::never())->method('ancestors');
+
+        self::assertSame([], (new ResolvedTenant($resolver, null))->chain($unused)->tenants);
     }
 }

@@ -13,15 +13,17 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
+use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
  * Global query scope for row-level multi-tenant filtering.
  *
  * When the subject the `SubjectResolver` returns has a tenant, this scope
  * restricts queries to rows that are either platform-wide (null tenant columns)
- * or owned by that tenant. When there is no subject, or the subject has no
- * tenant, only platform-wide rows remain visible: a missing tenant never makes
- * every tenant's rows visible.
+ * or owned by that tenant or one of its ancestors in the bound tenant tree.
+ * When there is no subject, or the subject has no tenant, only platform-wide
+ * rows remain visible: a missing tenant never makes every tenant's rows
+ * visible.
  *
  * The scope keeps no tenant of its own. It reads the tenant from the
  * `ResolvedTenant` holder, which the service provider binds with `scoped()`, so
@@ -56,33 +58,7 @@ final class TenantScope implements Scope
     #[\Override]
     public function apply(Builder $builder, Model $model): void
     {
-        $typeColumn = $model->getTable() . '.tenant_type';
-        $idColumn   = $model->getTable() . '.tenant_id';
-        $tenant     = self::currentTenant();
-
-        // `whereNull` / `orWhere` are declared as `@method static` on the
-        // Eloquent Builder docblock; PHPStan flags dynamic instance calls as
-        // `staticMethod.dynamicCall` even though runtime dispatch is genuinely
-        // dynamic. The same pattern is used in `GuardScopedLookup` —
-        // docblock-soup artefacts, not unsafe calls.
-        if ($tenant === null) {
-            // @phpstan-ignore staticMethod.dynamicCall
-            $builder->whereNull($typeColumn);
-
-            return;
-        }
-
-        [$morphType, $morphId] = $tenant;
-
-        // @phpstan-ignore staticMethod.dynamicCall
-        $builder->where(function ($q) use ($typeColumn, $idColumn, $morphType, $morphId): void {
-            // @phpstan-ignore staticMethod.dynamicCall
-            $q->whereNull($typeColumn)
-                ->orWhere(function ($q2) use ($typeColumn, $idColumn, $morphType, $morphId): void {
-                    $q2->where($typeColumn, $morphType)
-                        ->where($idColumn, $morphId);
-                });
-        });
+        self::currentChain()->owners($builder, $model->getTable() . '.tenant_type', $model->getTable() . '.tenant_id');
     }
 
     /**
@@ -98,9 +74,36 @@ final class TenantScope implements Scope
      */
     public static function currentTenant(): ?array
     {
-        $tenant = self::resolveTenant();
+        $tenant = self::whileResolving(static fn (ResolvedTenant $resolved): ?object => $resolved->tenant);
 
         return $tenant === null ? null : self::extractTenantPair($tenant);
+    }
+
+    /**
+     * Return the tenant the scope limits rows to and its ancestors, through the
+     * bound tenant tree, or the platform's empty chain.
+     *
+     * @return \SineMacula\Laravel\Authorization\Support\TenantChain
+     */
+    public static function currentChain(): TenantChain
+    {
+        return self::whileResolving(static fn (ResolvedTenant $resolved): TenantChain => $resolved->chain(TenantChain::tree())) ?? new TenantChain;
+    }
+
+    /**
+     * Read the current tenant's ancestors again through the bound tenant tree,
+     * in place of the chain held for the request or job, and return the chain
+     * read, or the platform's empty chain.
+     *
+     * The resolution cache reads the chain again once it has pinned its
+     * versions, so a tree change made before the pin is never stored against
+     * the new versions.
+     *
+     * @return \SineMacula\Laravel\Authorization\Support\TenantChain
+     */
+    public static function refreshChain(): TenantChain
+    {
+        return self::whileResolving(static fn (ResolvedTenant $resolved): TenantChain => $resolved->refreshChain(TenantChain::tree())) ?? new TenantChain;
     }
 
     /**
@@ -153,18 +156,23 @@ final class TenantScope implements Scope
     }
 
     /**
-     * Return the tenant resolved for the current request or job, or null for a
-     * query run while the subject is being resolved.
+     * Read from the tenant resolved for the current request or job, or return
+     * null for a query run while the subject, or its tenant's ancestors, are
+     * being resolved.
      *
      * Resolving the subject can itself query a scoped model: the shipped
      * resolver reads the signed-in user, and a user model that eager-loads its
      * roles and permissions queries them. Those queries, on any scoped model,
      * see platform rows only, so the resolver runs once rather than again for
-     * each model, or without end.
+     * each model, or without end. The same holds while the tenant tree reads a
+     * tenant's ancestors.
      *
-     * @return object|null
+     * @template TValue
+     *
+     * @param  \Closure(\SineMacula\Laravel\Authorization\Support\ResolvedTenant): TValue  $read
+     * @return TValue|null
      */
-    private static function resolveTenant(): ?object
+    private static function whileResolving(\Closure $read): mixed
     {
         $container = Container::getInstance();
 
@@ -175,20 +183,21 @@ final class TenantScope implements Scope
         $container->instance(self::RESOLVING, true);
 
         try {
-            return self::readResolvedTenant($container);
+            return $read(self::readResolvedTenant($container));
         } finally {
             $container->forgetInstance(self::RESOLVING);
         }
     }
 
     /**
-     * Return the tenant resolved for the current request or job, resolving it
-     * again when the bound resolver is not the one it was read from.
+     * Return the holder of the tenant resolved for the current request or job,
+     * resolving it again when the bound resolver is not the one it was read
+     * from.
      *
      * @param  \Illuminate\Container\Container  $container
-     * @return object|null
+     * @return \SineMacula\Laravel\Authorization\Support\ResolvedTenant
      */
-    private static function readResolvedTenant(Container $container): ?object
+    private static function readResolvedTenant(Container $container): ResolvedTenant
     {
         /** @var \SineMacula\Laravel\Authorization\Contracts\SubjectResolver $resolver */
         $resolver = $container->make(SubjectResolver::class);
@@ -200,6 +209,6 @@ final class TenantScope implements Scope
             $resolved = $container->instance(ResolvedTenant::class, ResolvedTenant::from($resolver));
         }
 
-        return $resolved->tenant;
+        return $resolved;
     }
 }

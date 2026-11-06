@@ -66,37 +66,12 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
             ->withPivot('expires_at')
             ->withTimestamps()
             ->where(static function (Builder $query) use ($table): void {
-                self::authorizationInScope($query, $table, TenantScope::currentTenant());
+                TenantScope::currentChain()->grants($query, $table);
             });
 
         LiveGrants::only($relation->getQuery(), $table);
 
         return $relation;
-    }
-
-    /**
-     * Limit a grant query to the grants that hold in the tenant: platform-wide
-     * ones, and the tenant's own; only platform-wide ones without a tenant.
-     *
-     * @param  \Illuminate\Database\Eloquent\Builder<\Illuminate\Database\Eloquent\Model>  $query
-     * @param  string  $table
-     * @param  array{0: string, 1: string}|null  $tenant
-     * @return void
-     */
-    private static function authorizationInScope(Builder $query, string $table, ?array $tenant): void
-    {
-        // @phpstan-ignore staticMethod.dynamicCall
-        $query->whereNull($table . '.tenant_type');
-
-        if ($tenant === null) {
-            return;
-        }
-
-        // @phpstan-ignore staticMethod.dynamicCall
-        $query->orWhere(static function (Builder $query) use ($table, $tenant): void {
-            // @phpstan-ignore staticMethod.dynamicCall
-            $query->where($table . '.tenant_type', $tenant[0])->where($table . '.tenant_id', $tenant[1]);
-        });
     }
 
     /**
