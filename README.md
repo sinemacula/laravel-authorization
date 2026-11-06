@@ -386,6 +386,12 @@ tenants below it, or platform-wide, is refused with `GrantScopeMismatchException
 same scope, and a sync replaces the grants of one scope: the tenant named, else the tenant that owns every target, else
 the platform. A grant is for every application unless the call names one.
 
+Tenants, grantees, resources and applications are matched by their exact bytes, on every database: `org`, `ORG` and
+`org` followed by a space are three different tenants. On MySQL the package's migrations give every reference column
+(the tenant, grantee, resource, owner and granted-by types and keys, and the application) the `utf8mb4_0900_bin`
+collation, which neither folds case nor pads trailing spaces, so a check matches rows in SQL as the package compares
+references in PHP. Role, permission and policy names keep the table's collation.
+
 A grant can also be limited to one application (a guard's name, as `laravel-authentication` names it): it counts only
 when the subject resolver reports that application, and a grant for every application counts on all of them. Each
 application is a grant of its own, revoked, synced and reported on its own:

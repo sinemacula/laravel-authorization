@@ -10,6 +10,11 @@
  * platform (null tenant columns) or by one tenant, and its name is unique
  * within its owner and guard.
  *
+ * The tenant columns compare their exact bytes on every database: on MySQL they
+ * are collated `utf8mb4_0900_bin`, which neither folds case nor pads trailing
+ * spaces (`ExactReferences`), so a tenant whose key differs from another's only
+ * by case or a trailing space is a different one.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -20,6 +25,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\ExactReferences;
 use SineMacula\Laravel\Authorization\Database\MigrationCollisionGuard;
 use SineMacula\Laravel\Authorization\Database\NullFoldingUniqueIndex;
 
@@ -37,7 +43,9 @@ return new class extends Migration {
 
         (new MigrationCollisionGuard($schema))->ensureNotExists($table);
 
-        $schema->create($table, static function (Blueprint $blueprint) use ($table): void {
+        $exact = new ExactReferences($schema->getConnection());
+
+        $schema->create($table, static function (Blueprint $blueprint) use ($table, $exact): void {
             $blueprint->uuid('id')->primary();
 
             // Names, tenant types and tenant ids are bounded to 191 characters
@@ -73,6 +81,10 @@ return new class extends Migration {
             // this index serves the two-column lookup.
             $blueprint->index(['name', 'guard'], $table . '_name_guard_index');
             $blueprint->index(['tenant_type', 'tenant_id'], $table . '_tenant_index');
+
+            // On MySQL the reference columns compare their exact bytes, as on
+            // the other databases.
+            $exact->apply($blueprint);
         });
 
         // A name is unique within its owner and guard: at most one row per

@@ -11,6 +11,11 @@
  * policy in use as a guardrail is neither edited nor deleted until the
  * guardrail is removed.
  *
+ * The tenant and granted-by columns compare their exact bytes on every
+ * database: on MySQL they are collated `utf8mb4_0900_bin`, which neither folds
+ * case nor pads trailing spaces (`ExactReferences`), so a tenant whose key
+ * differs from another's only by case or a trailing space is a different one.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -21,6 +26,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\ExactReferences;
 use SineMacula\Laravel\Authorization\Database\MigrationCollisionGuard;
 use SineMacula\Laravel\Authorization\Database\NullFoldingUniqueIndex;
 
@@ -41,7 +47,9 @@ return new class extends Migration {
 
         (new MigrationCollisionGuard($schema))->ensureNotExists($table);
 
-        $schema->create($table, static function (Blueprint $blueprint) use ($table, $policiesTable): void {
+        $exact = new ExactReferences($schema->getConnection());
+
+        $schema->create($table, static function (Blueprint $blueprint) use ($table, $policiesTable, $exact): void {
             $blueprint->uuid('policy_id');
 
             // The scope: both tenant columns null set the guardrail
@@ -64,6 +72,10 @@ return new class extends Migration {
             // the policy observer refuses the delete first, and the key refuses
             // one made past the model.
             $blueprint->foreign('policy_id')->references('id')->on($policiesTable)->restrictOnDelete();
+
+            // On MySQL the reference columns compare their exact bytes, as on
+            // the other databases.
+            $exact->apply($blueprint);
         });
 
         // A policy is set as a guardrail at most once per scope, with null

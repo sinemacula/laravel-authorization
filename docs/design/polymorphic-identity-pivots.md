@@ -42,12 +42,19 @@ scope each grant carries, the temporal-grant mechanism, the pivot class hierarch
    and `owner_id`, a morph with no foreign key for the same reason, kept apart from the policy's tenant columns; its
    deletion with that grantee is the package's work, not the database's (AUTHZ-6.9).
 
+7. **References compare their exact bytes on every database.** The grantee, tenant, application and granted-by
+   columns, like every reference column of the package's tables, are matched byte for byte, as the package compares
+   references in PHP: `org`, `ORG` and `org` followed by a space are three tenants. PostgreSQL and SQLite compare them
+   so already; on MySQL, whose usual collations fold case and pad trailing spaces, the migrations give each reference
+   column `utf8mb4_0900_bin` through `ExactReferences`. Other columns, such as role and permission names, keep the
+   table's collation.
+
 ## Schema
 
 The `authorizable_roles` migration (the other two are structurally identical):
 
 ```php
-$schema->create($table, static function (Blueprint $blueprint) use ($table, $rolesTable): void {
+$schema->create($table, static function (Blueprint $blueprint) use ($table, $rolesTable, $exact): void {
     $blueprint->uuid('role_id');
     $blueprint->string('authorizable_type', 191);
     $blueprint->string('authorizable_id', 191);
@@ -69,6 +76,8 @@ $schema->create($table, static function (Blueprint $blueprint) use ($table, $rol
     $blueprint->index('expires_at', $table . '_expires_at_index');
 
     $blueprint->foreign('role_id')->references('id')->on($rolesTable)->cascadeOnDelete();
+
+    $exact->apply($blueprint);
 });
 
 (new NullFoldingUniqueIndex($schema->getConnection()))->createDigested(
@@ -140,8 +149,10 @@ loaded on the identity, so the lapse holds when the same identity instance is re
   cascading the pivot. Consumers should clean up via model events or a periodic sweep.
 - **String `authorizable_id`.** Slightly wider than a typed integer column, but necessary to accommodate UUID, ULID,
   and integer keys in the same table without schema branching.
-- **A digested key on MySQL.** The scope columns take part in MySQL's unique key as SHA-256 digests, so the key compares
-  their exact bytes, as PostgreSQL and SQLite do, rather than through the column's case-insensitive collation.
+- **A digested key on MySQL.** The scope columns take part in MySQL's unique key as SHA-256 digests, to keep the key
+  within InnoDB's limit. A digest is of the column's bytes, so it keeps apart what the byte-exact collation does.
+- **Byte-exact references on MySQL.** A host query that compares a reference column with one of its own columns
+  compares them by bytes, since MySQL prefers a `_bin` collation over a `_ci` one of the same character set.
 - **No sweeper shipped in v1.0.0.** Expired rows are invisible at query time but remain in the database. The
   `expires_at` index exists so a consumer-side purge job can `DELETE WHERE expires_at < NOW()` efficiently.
 
@@ -154,12 +165,15 @@ loaded on the identity, so the lapse holds when the same identity instance is re
 - `ResolvesPivotExpiry` -- the shared trait that computes nearest-expiry TTL and resolves the grant service.
 - `Services\Support\GrantTable` -- the grant service's scoped row writes and locked read-back.
 - `NullFoldingUniqueIndex` -- the unique key in which a null counts as a value.
+- `ExactReferences` -- the byte-exact collation of the reference columns on MySQL.
 
 ## Authoritative Tests
 
 - `PolymorphicIdentityTest::testTwoDistinctIdentityModelsShareARole` -- two different morph types share a role via the
   same pivot table.
 - `GrantScopeColumnsTest` -- the scope columns, their defaults and the once-per-scope unique key on every grant table.
+- `ExactReferenceMatchingTest` -- grantees and tenants that differ only by case or a trailing space are distinct to a
+  check and to the unique keys, on every database.
 - `TemporalGrantsTest::testFutureExpiryIsPresentThenFiltered` -- a temporal grant is visible before expiry and
   invisible after.
 - `TemporalGrantsTest::testPivotExpiresAtIsCastToCarbon` -- pivot `expires_at` is a `Carbon` instance.
