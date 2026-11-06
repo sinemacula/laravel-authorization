@@ -18,6 +18,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Feature\Stubs\NumberedIdentity;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -36,6 +37,24 @@ use Tests\TestCase;
 #[CoversClass(InlinePolicies::class)]
 final class InlinePoliciesTest extends TestCase
 {
+    /**
+     * A model without soft deletes is always deleted for good, and a soft
+     * deleting one only while it is force deleted.
+     *
+     * @return void
+     */
+    public function testOnlyAForceDeleteOrAModelWithoutSoftDeletesIsForGood(): void
+    {
+        $soft = new NumberedIdentity;
+
+        self::assertTrue(InlinePolicies::isDeletedForGood(new StubIdentity));
+        self::assertFalse(InlinePolicies::isDeletedForGood($soft));
+
+        (fn () => $this->forceDeleting = true)->call($soft);
+
+        self::assertTrue(InlinePolicies::isDeletedForGood($soft));
+    }
+
     /**
      * An inline policy's owner is read from its owner columns; a managed policy
      * has none.

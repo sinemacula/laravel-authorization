@@ -9,13 +9,13 @@ use Illuminate\Database\Eloquent\Relations\MorphToMany;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
-use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePolicyPivot;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Resolvers\GrantResolver;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\RolePolicies;
 
 /**
  * Policy attachment trait for authorizable models and roles.
@@ -199,7 +199,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
      */
     public function getPolicies(): array
     {
-        $resolve = fn (ResolutionPins $pins): Resolution => GrantResolver::policies($this->policies(), $pins, $this->authorizationPolicyRoles());
+        $resolve = fn (ResolutionPins $pins): Resolution => GrantResolver::policies($this->policies(), $pins, RolePolicies::heldBy($this));
 
         return ResolutionCache::instance()?->rememberPolicies($this, $resolve) ?? $resolve(new ResolutionPins)->value;
     }
@@ -213,34 +213,12 @@ trait HasPolicies // @phpstan-ignore trait.unused
     protected static function bootHasPolicies(): void
     {
         static::deleted(static function (self $model): void {
-            if (\method_exists($model, 'isForceDeleting') && !$model->isForceDeleting()) {
+            if (!InlinePolicies::isDeletedForGood($model)) {
                 return;
             }
 
             InlinePolicies::deleteOwnedBy($model);
         });
-    }
-
-    /**
-     * Return the relation onto the roles this grantee holds, whose policies it
-     * also gets, or null for a grantee that holds no roles, such as a role.
-     *
-     * @phpcs:disable Generic.Files.LineLength.TooLong
-     *
-     * @formatter:off
-     *
-     * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>|null
-     *
-     * @formatter:on
-     *
-     * @phpcs:enable Generic.Files.LineLength.TooLong
-     */
-    private function authorizationPolicyRoles(): ?MorphToMany
-    {
-        $roles = $this instanceof SupportsRoles && \method_exists($this, 'roles') ? $this->roles() : null;
-
-        /** @var \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>|null */
-        return $roles instanceof MorphToMany ? $roles : null;
     }
 
     /**
