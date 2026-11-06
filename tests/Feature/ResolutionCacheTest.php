@@ -843,7 +843,9 @@ final class ResolutionCacheTest extends TestCase
 
     /**
      * An entry built just below a tenant, where a grant made in the tenant
-     * counts only when it reaches below, is kept apart from the tenant's own.
+     * counts only when it reaches below, is kept apart from the tenant's own:
+     * each scope writes its own key, and the tenant's never the one kept for
+     * below it.
      *
      * @return void
      */
@@ -851,20 +853,39 @@ final class ResolutionCacheTest extends TestCase
     {
         $tenant = self::createTenant('t-1');
         $cache  = $this->request();
+        $prefix = 'authorization-test:permissions:' . PrincipalCacheKey::for(self::grantee()) . ':' . $tenant->getMorphClass() . ':t-1';
 
         TenantScope::within($tenant, null, fn (): array => $this->permissions($cache));
+
+        self::assertIsArray($this->store->get($prefix . ':every'));
+        self::assertNull($this->store->get($prefix . ':below:every'));
+
         TenantScope::within($tenant, null, fn (): array => $this->permissions($cache), true);
 
         self::assertSame(2, $this->resolutions);
+        self::assertIsArray($this->store->get($prefix . ':below:every'));
 
         TenantScope::within($tenant, null, fn (): array => $this->permissions($this->request()), true);
 
         self::assertSame(2, $this->resolutions);
+    }
 
+    /**
+     * A resolution built only below a tenant writes the entry kept for below
+     * the tenant, and never the one kept for the tenant itself.
+     *
+     * @return void
+     */
+    public function testAnEntryBuiltOnlyBelowATenantIsWrittenUnderTheBelowKey(): void
+    {
+        $tenant = self::createTenant('t-1');
         $prefix = 'authorization-test:permissions:' . PrincipalCacheKey::for(self::grantee()) . ':' . $tenant->getMorphClass() . ':t-1';
 
-        self::assertIsArray($this->store->get($prefix . ':every'));
+        TenantScope::within($tenant, null, fn (): array => $this->permissions($this->request()), true);
+
+        self::assertSame(1, $this->resolutions);
         self::assertIsArray($this->store->get($prefix . ':below:every'));
+        self::assertNull($this->store->get($prefix . ':every'));
     }
 
     /**

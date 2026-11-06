@@ -43,7 +43,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * platform-wide, never one held within the tenant itself, and for the platform
  * a platform-wide grant (see `GuardrailAuthority`). Any other actor is refused
  * with `GuardrailException` before anything is read or written, so a tenant's
- * own administrators never lift the guardrails their tenant is set under.
+ * own administrators never lift the guardrails their tenant is set under. The
+ * right is decided through `check()` with the guardrails left out, as every
+ * check of `authorization:guardrails:manage` is, so no guardrail locks the
+ * guardrails: one that does not allow the permission, or whose document cannot
+ * be read, a platform guardrail included, is still removed through here. Every
+ * other deny and cap that applies to the actor still counts.
  *
  * A scope may have any number of guardrails, a policy at most once in each. A
  * policy one tenant owns is set on that tenant or a tenant below it, and naming
@@ -91,7 +96,11 @@ final class GuardrailService
         GuardrailAuthority::assertPermitted($actor, $named);
 
         return OperationScope::run(Operation::begin($actor), static function (Operation $operation) use ($policy, $named): GrantOutcome {
-            $stored = InlinePolicies::stored($policy->getKey()) ?? throw new InvalidGrantTargetException('policy', $policy);
+            // Read under a lock on the policy's row, so the checks below weigh
+            // the document as committed, and an edit or a deletion of the
+            // policy made meanwhile waits until the guardrail is there to
+            // refuse it.
+            $stored = InlinePolicies::storedForUpdate($policy->getKey()) ?? throw new InvalidGrantTargetException('policy', $policy);
             $name   = PolicyDocument::nameOf($stored->getAttribute('name'));
 
             self::assertSettable($policy, $stored, $name, $named);

@@ -7,9 +7,9 @@ namespace Tests\Feature\Stubs;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 
 /**
- * An action catalogue for tests that covers no pattern, not even `*`: one that
- * declares no action at all, as the declared catalogue never is, since the
- * package declares its own permissions.
+ * An action catalogue for tests that covers no pattern, not even `*`: a custom
+ * catalogue that declares no action at all, as the declared catalogue is with
+ * nothing configured.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

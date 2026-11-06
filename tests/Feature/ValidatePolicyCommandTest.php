@@ -244,9 +244,9 @@ final class ValidatePolicyCommandTest extends TestCase
     }
 
     /**
-     * Files are checked against the bound action catalogue, so with only the
-     * package's own permissions declared a document naming another action is
-     * refused.
+     * Files are checked against the bound action catalogue, so with no
+     * permissions declared a document naming any action but the package's own
+     * is refused with the reason that nothing is declared.
      *
      * @return void
      */
@@ -257,7 +257,7 @@ final class ValidatePolicyCommandTest extends TestCase
         $this->declare([]);
 
         self::assertSame(1, Artisan::call('authorization:policy:validate', ['paths' => [$file]]));
-        self::assertStringContainsString("{$file}: readers: Policy statement #0 actions pattern 'posts:create' matches no declared permission.", Artisan::output());
+        self::assertStringContainsString("{$file}: readers: No permissions are declared to check the policy's actions against;", Artisan::output());
 
         $this->declare([CataloguePermission::class]);
 

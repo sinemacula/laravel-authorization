@@ -19,6 +19,11 @@ use SineMacula\Laravel\Authorization\Models\Policy;
  * refuses a deletion made past the model. A policy not yet saved is a guardrail
  * nowhere, and passes without a query.
  *
+ * The policy's row is locked before its guardrails are read, as the guardrail
+ * service locks it before setting one, so an edit and a guardrail set at the
+ * same moment are serialised: the edit is refused once the guardrail is there,
+ * and a guardrail set after the edit weighs the document as edited.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -67,6 +72,12 @@ final class PolicyGuardrails
             return;
         }
 
+        // The policy's row is locked first, as the guardrail service locks it
+        // before setting a guardrail, so a guardrail set at the same moment is
+        // either committed before the read below, which sees it, or waits until
+        // this change is done.
+        InlinePolicies::storedForUpdate($policy->getKey());
+
         $tenants = self::scopes($policy);
 
         if ($tenants === []) {
@@ -79,7 +90,9 @@ final class PolicyGuardrails
     /**
      * Return every scope the policy is a guardrail on, each a tenant or null
      * for the platform, the platform first and then the tenants in a fixed
-     * order.
+     * order, by a locking read, so a guardrail another transaction committed
+     * since this one began is seen, as a plain read of a MySQL snapshot would
+     * not see it.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return list<\SineMacula\Laravel\Authorization\Support\Reference|null>
@@ -88,7 +101,7 @@ final class PolicyGuardrails
     {
         /** @var string $table */
         $table   = config('authorization.tables.guardrails', 'guardrails');
-        $query   = AuthorizationConnection::connection()->table($table)->useWritePdo()->where('policy_id', $policy->getKey());
+        $query   = AuthorizationConnection::connection()->table($table)->useWritePdo()->where('policy_id', $policy->getKey())->sharedLock();
         $tenants = [];
 
         // The platform's first, then by tenant.

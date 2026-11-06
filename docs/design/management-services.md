@@ -158,8 +158,12 @@ described in [Events](events.md).
     there was one. Before either call reads or writes anything, `Services\Support\GuardrailAuthority` decides through
     `check()` whether the actor holds `authorization:guardrails:manage` from above the scope: for a tenant, just below
     its parent, so a grant held at an ancestor counts only when it reaches below it, a platform-wide grant counts, and
-    one held within the tenant never does; for a root tenant and the platform, at platform scope. An actor refused,
-    and every actor when no authorization manager is bound, is refused with `GuardrailException` (`not_permitted`).
+    one held within the tenant never does; for a root tenant and the platform, at platform scope. The check is exempt
+    from the guardrails, as every check of that exact action is, so no guardrail caps it; every other deny and cap
+    still does. An actor refused, and every actor when no authorization manager is bound, is refused with
+    `GuardrailException` (`not_permitted`). `set()` reads the policy under a lock on its row, which the policy
+    observer takes too before it reads a policy's guardrails, so an edit and a guardrail set at the same moment are
+    serialised and the edit is refused once the guardrail is there.
     An inline policy (`GuardrailException`, `inline`), a policy naming `principals` (`ResourcePolicyException`), a
     policy whose row is gone and one deleted while the row is written (`InvalidGrantTargetException`) and a row a
     concurrent change kept from being written (`UnwrittenGrantException`) are refused as a boundary's are. Each call is
@@ -216,10 +220,11 @@ working: each forwards to the matching service method with no actor.
 - **A guardrail's policy cannot be edited or deleted.** The policy observer refuses either with `GuardrailException`
   (`in_use`), naming every scope the policy caps, and the foreign key on `guardrails.policy_id` restricts a delete made
   past the model; remove each guardrail through `GuardrailService` first, then set the edited policy again.
-- **A guardrail caps the right to change guardrails.** The actor's right is decided through `check()`, so the
-  guardrails above the scope cap it too: a guardrail that does not allow `authorization:guardrails:manage` keeps every
-  actor from changing the guardrails of its scope and of the tenants below it, its own removal included. Every
-  guardrail should allow it.
+- **No guardrail locks the guardrails.** The actor's right is decided through `check()`, but a check of exactly
+  `authorization:guardrails:manage` is exempt from the guardrails: none is read for it, so a guardrail that does not
+  allow the permission, one that denies it and one that cannot be read, a platform guardrail included, keep no actor
+  from changing the guardrails of any scope, its own removal included. The actor's other denies and its boundaries
+  still count.
 - **The commands name no actor by default.** `authorization:grant`, `authorization:revoke` and `authorization:sync`
   take `--actor={morphType}:{key}`, which must name a row that exists; without it they record no actor.
 

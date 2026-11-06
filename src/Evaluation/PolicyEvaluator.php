@@ -28,7 +28,10 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  *    ordinary policy's, conditions included. The guardrails are intersected:
  *    one that does not allow the check, one with no allow statement included,
  *    denies it as `guardrail`, with a step that names it, and with none the
- *    stage caps nothing. A guardrail grants nothing.
+ *    stage caps nothing. A guardrail grants nothing. A check exempt from the
+ *    guardrails, as the caller says by giving none at all, skips the stage: no
+ *    guardrail's deny or allow statement is weighed, and the stage records that
+ *    the check is exempt.
  * 3. *Boundary*: each boundary of the subject's principal and identity must
  *    allow the check, as its allow statements would as an ordinary policy's,
  *    conditions included. The boundaries are intersected: one that does not
@@ -50,7 +53,8 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  *
  * Every stage the decision reaches is recorded in its trace: each statement it
  * assessed, the permission step, a step naming each guardrail and boundary that
- * refused the check, and a step for a cap stage that capped nothing.
+ * refused the check, a step for a cap stage that capped nothing, and one for a
+ * cap stage the check is exempt from.
  *
  * The evaluator fails closed: a deny statement applies when its test cannot be
  * decided (a missing context key, an unresolved `${…}` reference), and a
@@ -105,8 +109,8 @@ final class PolicyEvaluator
     /** @var \SineMacula\Laravel\Authorization\Evaluation\StatementEntries|null Each policy's statements, worked out once per policy. */
     private ?StatementEntries $entries = null;
 
-    /** @var array<string, \SineMacula\Laravel\Authorization\Evaluation\TraceEntry> The step each cap stage adds when it caps nothing, made once. */
-    private array $uncapped = [];
+    /** @var array<string, \SineMacula\Laravel\Authorization\Evaluation\TraceEntry> The step each cap stage adds when it caps nothing, or the check is exempt from it, made once. */
+    private array $passed = [];
 
     /**
      * Decide the check from the statements of the policies, the boundaries and
@@ -120,9 +124,10 @@ final class PolicyEvaluator
      * `resource`; the resource identifier is what resource patterns match.
      *
      * The boundaries are the permission boundaries that apply to the check, and
-     * the guardrails the guardrails that do, each of which must allow it. The
-     * permission callback answers whether the subject holds a permission the
-     * action names; with none, no permission is consulted.
+     * the guardrails the guardrails that do, each of which must allow it; null
+     * guardrails exempt the check from the guardrail stage, their denies
+     * included. The permission callback answers whether the subject holds a
+     * permission the action names; with none, no permission is consulted.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
      * @param  string  $action
@@ -130,7 +135,7 @@ final class PolicyEvaluator
      * @param  array<array-key, mixed>|\SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $boundaries
      * @param  (\Closure(): bool)|null  $permission
-     * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $guardrails
+     * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>|null  $guardrails
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
     public function evaluate(
@@ -140,7 +145,7 @@ final class PolicyEvaluator
         array|CheckContext $context = [],
         array $boundaries = [],
         ?\Closure $permission = null,
-        array $guardrails = [],
+        ?array $guardrails = [],
     ): Decision {
         $context    = CheckContext::from($context);
         $statements = ($this->entries ??= new StatementEntries)->of($policies, $boundaries, $guardrails);
@@ -200,7 +205,7 @@ final class PolicyEvaluator
         }
 
         if ($capped === null) {
-            $trace[] = $this->uncapped(DecisionStage::SESSION);
+            $trace[] = $this->passed(DecisionStage::SESSION, TraceOutcome::UNCAPPED);
         }
 
         return $capped;
@@ -212,11 +217,12 @@ final class PolicyEvaluator
      * passes only when each cap has one that allows it. Each cap that does not
      * adds a step naming it. Return the denial when one does not, with the
      * stage's reason, or as `invalid_policy` when a cap's statement cannot be
-     * evaluated, or null when every cap allows it or there is none.
+     * evaluated, or null when every cap allows it, there is none, or the caps
+     * are null because the check is exempt from the stage.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage  $stage
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason  $reason
-     * @param  list<array{list<StatementEntry>, \SineMacula\Laravel\Authorization\Evaluation\TraceEntry}>  $caps
+     * @param  list<array{list<StatementEntry>, \SineMacula\Laravel\Authorization\Evaluation\TraceEntry}>|null  $caps
      * @param  string  $action
      * @param  string|null  $resource
      * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
@@ -226,10 +232,10 @@ final class PolicyEvaluator
      *
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision|null
      */
-    private function capBy(DecisionStage $stage, DecisionReason $reason, array $caps, string $action, ?string $resource, CheckContext $context, array &$trace): ?Decision
+    private function capBy(DecisionStage $stage, DecisionReason $reason, ?array $caps, string $action, ?string $resource, CheckContext $context, array &$trace): ?Decision
     {
-        if ($caps === []) {
-            $trace[] = $this->uncapped($stage);
+        if ($caps === null || $caps === []) {
+            $trace[] = $this->passed($stage, $caps === null ? TraceOutcome::EXEMPT : TraceOutcome::UNCAPPED);
 
             return null;
         }
@@ -441,14 +447,16 @@ final class PolicyEvaluator
     }
 
     /**
-     * Return the step a cap stage adds when it caps nothing, made once.
+     * Return the step a cap stage adds when it caps nothing, or when the check
+     * is exempt from it, made once for each.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage  $stage
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome  $outcome
      * @return \SineMacula\Laravel\Authorization\Evaluation\TraceEntry
      */
-    private function uncapped(DecisionStage $stage): TraceEntry
+    private function passed(DecisionStage $stage, TraceOutcome $outcome): TraceEntry
     {
-        return $this->uncapped[$stage->value] ??= new TraceEntry($stage, TraceOutcome::UNCAPPED);
+        return $this->passed[$stage->value . ':' . $outcome->value] ??= new TraceEntry($stage, $outcome);
     }
 
     /**

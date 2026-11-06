@@ -10,6 +10,7 @@ use SineMacula\Laravel\Authorization\Exceptions\GuardrailException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Support\PolicyGuardrails;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\RecordsRowLocks;
 use Tests\TestCase;
 
 /**
@@ -26,6 +27,8 @@ use Tests\TestCase;
 #[CoversClass(PolicyGuardrails::class)]
 final class PolicyGuardrailsTest extends TestCase
 {
+    use RecordsRowLocks;
+
     /**
      * A policy that is no guardrail is edited and deleted freely, and one not
      * yet saved passes without a query.
@@ -102,6 +105,40 @@ final class PolicyGuardrailsTest extends TestCase
         PolicyGuardrails::assertDeletable($policy);
 
         self::assertTrue($policy->delete());
+    }
+
+    /**
+     * The policy's row is locked before its guardrails are read, and they are
+     * read under a lock of their own, so an edit and a guardrail set at the
+     * same moment never miss each other.
+     *
+     * @return void
+     */
+    public function testLocksThePolicyBeforeReadingItsGuardrails(): void
+    {
+        $policy = self::policy('rail');
+        $locks  = $this->recordRowLocks();
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        PolicyGuardrails::assertEditable($policy);
+
+        $log = DB::getQueryLog();
+
+        DB::disableQueryLog();
+
+        $share = match (DB::getDriverName()) {
+            'pgsql' => 'for share',
+            'mysql' => 'lock in share mode',
+            default => 'guardrails',
+        };
+
+        self::assertEquals(['policies', [$policy->id]], $locks[0] ?? null);
+        self::assertCount(2, $log);
+        self::assertStringContainsString('policies', $log[0]['query']);
+        self::assertStringContainsString('guardrails', $log[1]['query']);
+        self::assertStringContainsString($share, $log[1]['query']);
     }
 
     /**

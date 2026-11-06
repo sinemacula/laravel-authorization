@@ -25,6 +25,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\ReadsDispatchedEvents;
+use Tests\Concerns\RecordsRowLocks;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
@@ -43,7 +44,7 @@ use Tests\TestCase;
 #[CoversClass(GuardrailService::class)]
 final class GuardrailServiceTest extends TestCase
 {
-    use ActsAsTenant, ComparesReferences, ReadsDispatchedEvents;
+    use ActsAsTenant, ComparesReferences, ReadsDispatchedEvents, RecordsRowLocks;
 
     /**
      * The service is bound once in the container.
@@ -222,6 +223,99 @@ final class GuardrailServiceTest extends TestCase
         $this->expectException(GuardrailException::class);
 
         self::service()->remove($policy, $account, $within);
+    }
+
+    /**
+     * No guardrail locks the guardrails: with a platform guardrail that allows
+     * only `posts:*` in place, guardrails are still set on the platform and on
+     * a tenant, and the guardrail itself is still removed.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGuardrailThatDoesNotAllowManagingGuardrailsIsStillRemoved(): void
+    {
+        $tenant = self::createTenant('tenant-a');
+        $actor  = self::manager();
+        $posts  = self::policy('posts-only', [['effect' => 'allow', 'actions' => ['posts:*']]]);
+        $other  = self::rail('other');
+
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($posts, null, $actor));
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($other, null, $actor));
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($other, $tenant, $actor));
+        self::assertTrue(self::service()->remove($posts, null, $actor));
+        self::assertSame(0, DB::table('guardrails')->where('policy_id', $posts->id)->count());
+    }
+
+    /**
+     * A platform guardrail whose document cannot be read, which denies every
+     * other check as an invalid policy, is still removed through the service.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnUnreadablePlatformGuardrailIsStillRemoved(): void
+    {
+        $actor  = self::manager();
+        $broken = self::rail('broken');
+
+        self::service()->set($broken, null, $actor);
+
+        DB::table('policies')->where('id', $broken->id)->update(['document' => '{"statements": "broken"}']);
+
+        self::assertTrue(self::service()->remove($broken, null, $actor));
+        self::assertSame(0, DB::table('guardrails')->count());
+    }
+
+    /**
+     * A tenant's guardrail that does not allow managing guardrails keeps no one
+     * from changing the guardrails of its own tenant or of the tenants below
+     * it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATenantsGuardrailNeverLocksTheGuardrailsAtOrBelowIt(): void
+    {
+        [$org, $account, $team] = \array_map(self::createTenant(...), ['org', 'account', 'team']);
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)
+            ->put(Reference::of($account), Reference::of($org))
+            ->put(Reference::of($team), Reference::of($account)));
+
+        $actor    = self::manager();
+        $blocking = self::rail('blocking');
+        $other    = self::rail('other');
+
+        self::service()->set($blocking, $account, $actor);
+
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($other, $account, $actor));
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($other, $team, $actor));
+        self::assertTrue(self::service()->remove($other, $team, $actor));
+        self::assertTrue(self::service()->remove($blocking, $account, $actor));
+    }
+
+    /**
+     * Setting a guardrail reads the policy under a lock on its row before
+     * anything else is locked, so an edit of the policy made meanwhile waits
+     * until the guardrail is there to refuse it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testSettingAGuardrailLocksItsPolicyFirst(): void
+    {
+        $actor  = self::manager();
+        $policy = self::rail('cap');
+        $locks  = $this->recordRowLocks();
+
+        self::service()->set($policy, null, $actor);
+
+        self::assertEquals(['policies', [$policy->id]], $locks[0] ?? null);
     }
 
     /**
@@ -460,8 +554,7 @@ final class GuardrailServiceTest extends TestCase
     }
 
     /**
-     * Create a guardrail policy allowing `posts:read` and the package's own
-     * actions, so its actor may still change the guardrails it caps, with the
+     * Create a guardrail policy allowing `posts:read` alone, with the
      * attributes.
      *
      * @param  string  $name
@@ -470,7 +563,7 @@ final class GuardrailServiceTest extends TestCase
      */
     private static function rail(string $name, array $attributes = []): Policy
     {
-        return self::policy($name, [['effect' => 'allow', 'actions' => ['posts:read', 'authorization:*']]], $attributes);
+        return self::policy($name, [['effect' => 'allow', 'actions' => ['posts:read']]], $attributes);
     }
 
     /**

@@ -23,12 +23,13 @@ final class TraceOutcomeTest extends TestCase
 {
     /**
      * The enum defines exactly the six statement outcomes, the two permission
-     * outcomes, the outcome of a boundary that refuses the check and the
-     * outcome of a cap stage that caps nothing, in declaration order.
+     * outcomes, the outcome of a guardrail or boundary that refuses the check,
+     * the outcome of a cap stage that caps nothing and that of a cap stage the
+     * check is exempt from, in declaration order.
      *
      * @return void
      */
-    public function testExactlyTenCases(): void
+    public function testExactlyElevenCases(): void
     {
         self::assertSame(
             [
@@ -42,6 +43,7 @@ final class TraceOutcomeTest extends TestCase
                 TraceOutcome::NOT_HELD,
                 TraceOutcome::REFUSED,
                 TraceOutcome::UNCAPPED,
+                TraceOutcome::EXEMPT,
             ],
             TraceOutcome::cases(),
         );
@@ -64,6 +66,7 @@ final class TraceOutcomeTest extends TestCase
         self::assertSame('not_held', TraceOutcome::NOT_HELD->value);
         self::assertSame('refused', TraceOutcome::REFUSED->value);
         self::assertSame('uncapped', TraceOutcome::UNCAPPED->value);
+        self::assertSame('exempt', TraceOutcome::EXEMPT->value);
     }
 
     /**
@@ -84,6 +87,7 @@ final class TraceOutcomeTest extends TestCase
         self::assertSame(TraceOutcome::NOT_HELD, TraceOutcome::tryFrom('not_held'));
         self::assertSame(TraceOutcome::REFUSED, TraceOutcome::tryFrom('refused'));
         self::assertSame(TraceOutcome::UNCAPPED, TraceOutcome::tryFrom('uncapped'));
+        self::assertSame(TraceOutcome::EXEMPT, TraceOutcome::tryFrom('exempt'));
         self::assertNull(TraceOutcome::tryFrom('skipped'));
         self::assertNull(TraceOutcome::tryFrom('unknown'));
     }

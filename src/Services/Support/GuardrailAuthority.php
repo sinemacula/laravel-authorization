@@ -17,10 +17,13 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * holds `authorization:guardrails:manage` from above it.
  *
  * The right is decided through `check()`, the one decision path (D22), so it is
- * held effectively: every deny, guardrail and boundary that applies to the
- * actor counts, and an inactive actor holds nothing. It is decided in the scope
- * above the one changed, so only a grant whose reach covers that scope from
- * above it counts:
+ * held effectively: every deny and boundary that applies to the actor counts,
+ * and an inactive actor holds nothing. The guardrails never count: a check of
+ * `authorization:guardrails:manage` is exempt from the guardrail stage, so no
+ * guardrail, one that does not allow the permission or cannot be read included,
+ * ever keeps an actor from changing the guardrails, its own removal included.
+ * It is decided in the scope above the one changed, so only a grant whose reach
+ * covers that scope from above it counts:
  *
  * - for a tenant's guardrail, just below the tenant's parent in the tenant
  *   tree, so a grant held at an ancestor counts only when it reaches the

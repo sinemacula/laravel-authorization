@@ -8,6 +8,7 @@ use SineMacula\Laravel\Authorization\Context\AssuranceKeys;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 
 /**
  * Decides whether a policy document may be written (AUTHZ-6.2, AUTHZ-6.10).
@@ -16,9 +17,13 @@ use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
  * statements, operators and operands, and no two statements sharing a sid), is
  * within the configured limits, reads only context keys the bound context key
  * catalogue declares (AUTHZ-8.1), and has every `actions` and `not_actions`
- * pattern cover at least one action of the bound action catalogue, so a policy
- * written at runtime can only refer to actions the code checks and context the
- * application supplies. With no actions declared, no document may be written.
+ * pattern cover at least one action of the bound action catalogue, or one of
+ * the package's own permissions (see `PackagePermissions`), which the catalogue
+ * never holds, so a policy written at runtime can only refer to actions the
+ * code checks and context the application supplies. With no actions declared by
+ * the application, a document whose patterns need any action but the package's
+ * own is refused with the one reason that nothing is declared, and one naming
+ * only the package's own may still be written.
  *
  * Every condition key must be declared, may be tested, and be of a type its
  * operator suits (`ContextKeyType`), and every `${…}` reference in an operand
@@ -51,7 +56,7 @@ final readonly class PolicyValidator
     public const string DECLARE_KEYS = 'declare it in authorization.context.keys or register it with the context key catalogue, '
         . 'or, under subject or resource, on an attribute provider.';
 
-    /** @var string Why no document may be written when the catalogue declares no actions. */
+    /** @var string Why a document needing any action but the package's own may not be written when the catalogue declares no actions. */
     public const string NOTHING_DECLARED = 'No permissions are declared to check the policy\'s actions against; declare them in permission_enums or permission_providers.';
 
     /**
@@ -242,30 +247,39 @@ final readonly class PolicyValidator
 
     /**
      * Return a reason for each `actions` and `not_actions` pattern that covers
-     * no action of the catalogue, or the one reason no document may be written
-     * when the catalogue declares no actions.
+     * neither a permission of the package's own nor an action of the catalogue,
+     * or, when there is one and the catalogue declares no actions, the one
+     * reason that nothing is declared.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $policy
      * @return list<string>
      */
     private function catalogueErrors(Policy $policy): array
     {
-        if (!$this->catalogue->covers('*')) {
-            return [self::NOTHING_DECLARED];
-        }
-
         $errors = [];
 
         foreach ($policy->statements as $index => $statement) {
             $field    = $statement->notActions === null ? 'actions' : 'not_actions';
             $patterns = $statement->notActions === null ? $statement->actions : $statement->notActions;
 
-            foreach (\array_filter($patterns ?? [], fn (string $pattern): bool => !$this->catalogue->covers($pattern)) as $pattern) {
+            foreach (\array_filter($patterns ?? [], $this->isUndeclared(...)) as $pattern) {
                 $errors[] = "Policy statement #{$index} {$field} pattern '{$pattern}' matches no declared permission.";
             }
         }
 
-        return $errors;
+        return $errors !== [] && !$this->catalogue->covers('*') ? [self::NOTHING_DECLARED] : $errors;
+    }
+
+    /**
+     * Determine whether the action pattern covers no permission of the
+     * package's own and no action of the catalogue.
+     *
+     * @param  string  $pattern
+     * @return bool
+     */
+    private function isUndeclared(string $pattern): bool
+    {
+        return !PackagePermissions::covers($pattern) && !$this->catalogue->covers($pattern);
     }
 
     /**

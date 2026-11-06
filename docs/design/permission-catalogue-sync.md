@@ -39,10 +39,12 @@ changes, what it only reports, and how it fails.
 8. **The package's own permissions are always declared.** `Support\PackagePermissions`, the package's own provider,
    comes first in every catalogue, whatever the application configures: today `authorization:guardrails:manage`, the
    right `GuardrailService` checks (AUTHZ-7.6), guard-agnostic and under the `authorization` category. The sync adds and
-   updates it as any declared permission, so it can be granted, and the policy validator's action catalogue holds it,
-   so a policy naming it validates and the catalogue is never empty. It is declared by a provider, so it is no Gate
-   ability. An application declaration of the same name, also guard-agnostic, is merged with it as any duplicate is,
-   and refused when its description or category differ.
+   updates it as any declared permission, so it can be granted, and the policy validator accepts a pattern covering it,
+   so a policy naming it validates. The action catalogue the validator asks (`DeclaredActionCatalogue`) leaves it out,
+   so it holds the application's declarations alone, and with none a policy needing any other action is still refused
+   because nothing is declared (N50). It is declared by a provider, so it is no Gate ability. An application declaration
+   of the same name, also guard-agnostic, is merged with it as any duplicate is, and refused when its description or
+   category differ.
 
 ## Declaring the Catalogue
 

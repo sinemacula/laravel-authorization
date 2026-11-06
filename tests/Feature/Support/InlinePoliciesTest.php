@@ -19,6 +19,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\RecordsRowLocks;
 use Tests\Feature\Stubs\NumberedIdentity;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
@@ -38,6 +39,8 @@ use Tests\TestCase;
 #[CoversClass(InlinePolicies::class)]
 final class InlinePoliciesTest extends TestCase
 {
+    use RecordsRowLocks;
+
     /**
      * A model without soft deletes is always deleted for good, and a soft
      * deleting one only while it is force deleted.
@@ -204,6 +207,25 @@ final class InlinePoliciesTest extends TestCase
         self::assertNull(InlinePolicies::stored('00000000-0000-0000-0000-000000000000'));
         self::assertNull(InlinePolicies::stored(null));
         self::assertNull(InlinePolicies::stored([$inline->id]));
+    }
+
+    /**
+     * The stored read for update returns what the stored read does, under a
+     * lock on the policy's row, and null for a key no policy has.
+     *
+     * @return void
+     */
+    public function testTheStoredReadForUpdateLocksThePolicysRow(): void
+    {
+        $inline = self::policy('mine', ['owner_type' => 'user', 'owner_id' => '1']);
+        $locks  = $this->recordRowLocks();
+        $stored = InlinePolicies::storedForUpdate($inline->id);
+
+        self::assertInstanceOf(Policy::class, $stored);
+        self::assertSame(['id', 'name', 'owner_type', 'owner_id', 'document'], \array_keys($stored->getAttributes()));
+        self::assertSame([$inline->id, 'mine', 'user', '1'], [$stored->id, $stored->name, $stored->owner_type, $stored->owner_id]);
+        self::assertEquals([['policies', [$inline->id]]], $locks->getArrayCopy());
+        self::assertNull(InlinePolicies::storedForUpdate('00000000-0000-0000-0000-000000000000'));
     }
 
     /**

@@ -100,8 +100,8 @@ rather than through it, so a custom resolver controls neither:
   Policies](#resource-policies)).
 
 `withPolicies()` replaces every source, the resource's included; a supplied policy given a resource is evaluated as a
-resource policy. It replaces policies alone: the subject's permission boundaries and the permissions it holds still
-count, so an override never lifts a cap.
+resource policy. It replaces policies alone: the guardrails, the subject's permission boundaries and the permissions it
+holds still count, so an override never lifts a cap.
 
 The subject's permission boundaries are no policy source: they are read apart, through `SubjectGrants::boundaries()`,
 after the bound `PolicyResolver` and outside it, so a custom resolver can never drop them (see [Permission
@@ -214,13 +214,17 @@ A guardrail (AUTHZ-7.6, N41) is a managed policy set on a tenant, or on the plat
   boundary's. It never names `principals`, so its allows apply to every subject.
 - **Who may change them.** Only an actor holding `authorization:guardrails:manage`, a permission the package declares
   in its own catalogue (`Support\PackagePermissions`), from above the scope. The right is decided through `check()`
-  (D22), so every deny, guardrail and boundary that applies to the actor counts, run just below the parent of the
-  tenant changed (`TenantScope::within()` with `isBelow`): a grant held at an ancestor counts only when it reaches
-  below it, a platform-wide grant counts, and one held within the tenant itself never does. A tenant with no parent,
-  and the platform, are decided at platform scope, where only a platform-wide grant counts (`GuardrailAuthority`). An
-  actor refused is refused with `GuardrailException` (`not_permitted`) before anything is read or written. As every
-  guardrail above the scope caps that check too, a guardrail that does not allow the permission keeps every actor
-  from changing the guardrails of its scope and below, its own removal included.
+  (D22), so every deny and boundary that applies to the actor counts, run just below the parent of the tenant changed
+  (`TenantScope::within()` with `isBelow`): a grant held at an ancestor counts only when it reaches below it, a
+  platform-wide grant counts, and one held within the tenant itself never does. A tenant with no parent, and the
+  platform, are decided at platform scope, where only a platform-wide grant counts (`GuardrailAuthority`). An actor
+  refused is refused with `GuardrailException` (`not_permitted`) before anything is read or written.
+- **No guardrail lockout (N49).** A check of exactly `authorization:guardrails:manage`, the guardrail service's or any
+  other, is exempt from the guardrail stage: `AuthorizationManager` reads no guardrail for it and gives the evaluator
+  none at all (`null`), so no guardrail's deny or allow applies, nor does a guardrail that cannot be read, and the
+  stage records `[guardrail] guardrails: exempt`. No guardrail, a platform guardrail included, can therefore keep an
+  actor from changing the guardrails of any scope, its own removal included. Every other source's denies, the
+  boundaries and the session caps still apply, and the grant must still reach the scope from above.
 - **What is refused.** An inline policy (`GuardrailException`, `inline`), a policy naming `principals`
   (`ResourcePolicyException`) and a policy whose row is gone (`InvalidGrantTargetException`) are refused before
   anything is written; a guardrail is reported set only once its row is read back, as a boundary is. A policy in use as
@@ -231,8 +235,8 @@ A guardrail (AUTHZ-7.6, N41) is a managed policy set on a tenant, or on the plat
 The guardrails and their documents are read in one query on the write connection, through the resolution cache
 (`ResolutionCache::rememberGuardrails()`), keyed by the tenant, the application and the policy limits, so a warm check
 reads none. Every guardrail entry pins one shared guardrails version, which setting or removing a guardrail and
-updating or deleting any policy bump. The entries the guardrail service's own check reads, decided just below a
-tenant, are keyed apart (`:below`), so they never stand for a tenant's.
+updating or deleting any policy bump. The guardrail service's own check reads no guardrail, being exempt, but the
+grants it reads, decided just below a tenant, are keyed apart (`:below`), so they never stand for a tenant's.
 
 ## Invariants
 
@@ -260,7 +264,9 @@ tenant, are keyed apart (`:below`), so they never stand for a tenant's.
       evaluated denies as `invalid_policy`; failing that, one with no allow that matches, one with no allow statement
       at all included, denies as `guardrail`, and each guardrail that refuses adds a `refused` step naming it. An allow
       whose authentication requirement is unmet does not allow, so the guardrail denies as `guardrail`, never as a
-      step-up. With no guardrail the stage records `uncapped` and caps nothing.
+      step-up. With no guardrail the stage records `uncapped` and caps nothing. A check of exactly
+      `authorization:guardrails:manage` is exempt: the stage records `exempt`, and the deny stage weighs no guardrail's
+      denies for it (N49).
    4. *Boundary*: every permission boundary of the principal and of its identity that applies must allow the check,
       each through its allow statements, conditions included (see [Permission Boundaries](#permission-boundaries)).
       One whose statement cannot be evaluated denies as `invalid_policy`; failing that, one with no allow that matches,
@@ -368,7 +374,8 @@ tenant, are keyed apart (`:below`), so they never stand for a tenant's.
     resource's when it has one, so a platform-wide permission that admits a resource of another tenant never gets past
     that tenant's guardrails. A guardrail changes only through `GuardrailService`, for an actor holding
     `authorization:guardrails:manage` from above the scope, decided through `check()`, and its policy is neither
-    edited nor deleted while it is one, so a tenant can never lift the guardrails it is set under.
+    edited nor deleted while it is one, so a tenant can never lift the guardrails it is set under. That one check is
+    exempt from the guardrails (N49), so no guardrail can ever lock the guardrails.
 
 ## Trace
 
@@ -377,7 +384,8 @@ guardrail stage for a guardrail's allow statement; in the boundary stage for a b
 allow stage for any other allow statement. Each guardrail or boundary that refuses the check adds one entry naming it
 (`[guardrail] organisation-cap[<key>]: refused`, `[boundary] read-only[<key>]: refused`). A cap stage that caps nothing
 adds one entry with no statement (`[guardrail] guardrails: uncapped`, `[boundary] boundaries: uncapped`, `[session]
-session caps: uncapped`), and the permission step adds one more when it is asked:
+session caps: uncapped`), and so does the guardrail stage for a check exempt from it (`[guardrail] guardrails:
+exempt`); the permission step adds one more when it is asked:
 
 | What the step found                                                 | Outcome              |
 |---------------------------------------------------------------------|----------------------|
@@ -391,6 +399,7 @@ session caps: uncapped`), and the permission step adds one more when it is asked
 | The subject does not hold it                                        | `not_held`           |
 | A cap no allow statement of its own lets the check through          | `refused`            |
 | A cap stage has nothing to cap the check by                         | `uncapped`           |
+| The check is exempt from the cap stage                              | `exempt`             |
 
 An authentication requirement is recorded as the condition key `authentication`, with whether it held, and never a
 proof or anything the checker answered: a statement whose requirement alone is unmet is `condition_failed` with
@@ -478,29 +487,32 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 - **An unreadable guardrail**: a guardrail whose document cannot be hydrated, or is over a limit, denies every check in
   its scope as `invalid_policy` at the deny stage (every check, for a platform guardrail), logged as an unreadable
   policy is. Its policy cannot be edited while it is a guardrail, so it is fixed by removing the guardrail, correcting
-  the policy and setting it again. The right to remove it is decided above the tenant it is on, so a tenant's unreadable
-  guardrail never blocks its own removal, but an unreadable platform guardrail denies that check too, so it can only be
-  removed past the service.
+  the policy and setting it again. The check of `authorization:guardrails:manage` reads no guardrail, so an unreadable
+  guardrail, a platform one included, never blocks its own removal through the service.
 - **A guardrail and `withPolicies()`**: the override replaces the policies, never the guardrails, so an override never
   lifts a guardrail.
 - **A guardrail in another application**: a guardrail has no application, so it holds in every application.
 - **A resource admitted from outside the scope**: a subject admitted at platform scope to another tenant's resource
   through a platform-wide permission is capped by that tenant's guardrails and its ancestors', read in the resource's
   tenant, besides the platform's.
-- **A guardrail that does not allow managing guardrails**: the right to change guardrails is decided through
-  `check()`, so such a guardrail caps it as any check, and no actor can change the guardrails of its scope or below,
-  its own removal included; every guardrail should allow `authorization:guardrails:manage`.
+- **A guardrail that does not allow managing guardrails**: the check of `authorization:guardrails:manage` is exempt
+  from the guardrails, so such a guardrail, or one that denies the permission, caps every other check in its scope but
+  never that one, and keeps no actor from changing the guardrails of any scope, its own removal included.
+- **A check of another `authorization:` action**: only the exact action `authorization:guardrails:manage` is exempt;
+  any other action, one a pattern of it would match included, is capped by the guardrails as ever.
 - **No authorization manager bound**: `GuardrailAuthority` refuses every actor, so no guardrail is changed unchecked.
-- **The catalogue is never empty**: the package declares `authorization:guardrails:manage` whatever the application
-  configures, so the shipped `DeclaredActionCatalogue` always declares something and a policy is refused per pattern
-  that matches nothing declared, never for an empty catalogue.
+- **Nothing declared**: the package declares `authorization:guardrails:manage` whatever the application configures,
+  but the shipped `DeclaredActionCatalogue` holds the application's declarations alone. With none, a policy whose
+  patterns need any action but the package's own is refused with the one reason that nothing is declared
+  (`PolicyValidator::NOTHING_DECLARED`), and one naming only the package's own, such as `authorization:*`, is
+  written (N50).
 
 ## Implementation Anchors
 
 - `AuthorizationManager::check()` -- the core decision; `decide()` -- the subject and resource stages;
   `decideGrants()` -- the check's context (`CheckContextFactory::make()`), `invalid_policy` when the policies, the
   guardrails or the boundaries cannot be gathered, and the evaluator given the policies, the boundaries, the permission
-  callback and the guardrails.
+  callback and the guardrails, or none at all (`null`) for the exempt `authorization:guardrails:manage`.
 - `ResourceReferences::of()` -- every resource argument's reference; `ResourceScope::decide()` -- the tenant stage.
 - `ResourcePolicyResolver::policiesFor()` -- the resource's and its type's policies, in one query;
   `PrincipalSelectors` and `CheckContext::isSubjectNamedBy()` -- whether a selector names the subject;
@@ -519,8 +531,9 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 - `GuardrailResolver::guardrailsFor()` -- the guardrails of the platform, the check's tenant and its ancestors, in the
   resource's tenant when it has one, in one query through `ResolutionCache::rememberGuardrails()`; `GuardrailService`,
   `Services\Support\GuardrailTable` and `Services\Support\GuardrailAuthority` -- setting and removing them and who may;
-  `PolicyGuardrails` -- the refused edit and delete; `Support\PackagePermissions` -- the permission the package
-  declares.
+  `PolicyGuardrails` -- the refused edit and delete, serialised with a guardrail set on the policy's row;
+  `Support\PackagePermissions` -- the permission the package declares, which `PolicyValidator` accepts whatever the
+  action catalogue holds.
 - `SubjectGrants::boundaries()` and `BoundaryResolver::boundariesFor()` -- the boundaries of the principal and the
   identity that hold in the check's tenant, in one query through `ResolutionCache::rememberBoundaries()`;
   `BoundaryService` and `Services\Support\BoundaryTable` -- setting, replacing and removing them; `PolicyBoundaries` --

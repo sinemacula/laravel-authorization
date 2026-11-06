@@ -6,9 +6,13 @@ namespace Tests\Feature\Services;
 
 use Illuminate\Container\Container;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
+use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\GuardrailException;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -198,6 +202,42 @@ final class GuardrailAuthorityTest extends TestCase
 
         self::assertRefused($denied, $this->account);
         self::assertRefused($inactive, $this->account);
+    }
+
+    /**
+     * The guardrails never count: guardrails on the platform and on an ancestor
+     * that deny the right, and one that cannot be read, leave the actor
+     * permitted, and the decision records the guardrail stage as exempt.
+     *
+     * @return void
+     */
+    public function testTheGuardrailsNeverCountAgainstTheRight(): void
+    {
+        $actor   = self::actor('platform-admin');
+        $denying = Policy::create(['name' => 'denying', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['authorization:*']]]]]);
+        $broken  = Policy::create(['name' => 'broken', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
+
+        $actor->givePermission(self::right());
+
+        DB::table('guardrails')->insert([
+            ['policy_id' => $denying->id, 'tenant_type' => null, 'tenant_id' => null],
+            ['policy_id' => $denying->id, 'tenant_type' => $this->org->getMorphClass(), 'tenant_id' => 'org'],
+            ['policy_id' => $broken->id, 'tenant_type' => null, 'tenant_id' => null],
+        ]);
+        DB::table('policies')->where('id', $broken->id)->update(['document' => '{"statements": "broken"}']);
+
+        Event::fake([DecisionEvaluated::class]);
+
+        self::assertPermitted($actor, null);
+        self::assertPermitted($actor, $this->org);
+        self::assertPermitted($actor, $this->team);
+
+        $isExempt = static fn (TraceEntry $entry): bool => $entry->stage === DecisionStage::GUARDRAIL && $entry->outcome === TraceOutcome::EXEMPT;
+        $exempt   = static fn (DecisionEvaluated $event): bool => $event->decision->isAllowed() && \array_filter($event->decision->trace, $isExempt) !== [];
+
+        Event::assertDispatchedTimes(DecisionEvaluated::class, 3);
+        Event::assertDispatched(DecisionEvaluated::class, $exempt);
+        Event::assertNotDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => !$exempt($event));
     }
 
     /**

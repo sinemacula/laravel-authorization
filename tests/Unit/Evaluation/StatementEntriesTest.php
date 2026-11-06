@@ -125,6 +125,7 @@ final class StatementEntriesTest extends TestCase
 
         self::assertSame(['z#0', 'a-rail#0', 'a-boundary#0'], self::labels($gathered['deny']));
         self::assertSame(['z#1'], self::labels($gathered['allow']));
+        self::assertIsArray($gathered['guardrails']);
         self::assertCount(2, $gathered['guardrails']);
         self::assertSame(['a-rail#1', 'a-rail#2'], self::labels($gathered['guardrails'][0][0]));
         self::assertSame(['b-rail#0'], self::labels($gathered['guardrails'][1][0]));
@@ -147,13 +148,16 @@ final class StatementEntriesTest extends TestCase
         $cap     = self::policy('cap', [['effect' => 'deny', 'actions' => ['y']], ['effect' => 'allow', 'actions' => ['x']]])->withId('3');
 
         $gathered = $entries->of([], [$cap], [$cap]);
+        $again    = $entries->of([], [], [$cap]);
 
+        self::assertIsArray($gathered['guardrails']);
+        self::assertIsArray($again['guardrails']);
         self::assertSame(['cap#0'], self::labels($gathered['deny']));
         self::assertSame(DecisionStage::GUARDRAIL, $gathered['guardrails'][0][0][0][2]->stage);
         self::assertSame(DecisionStage::GUARDRAIL, $gathered['guardrails'][0][1]->stage);
         self::assertSame(DecisionStage::BOUNDARY, $gathered['boundaries'][0][0][0][2]->stage);
         self::assertSame(DecisionStage::BOUNDARY, $gathered['boundaries'][0][1]->stage);
-        self::assertSame($gathered['guardrails'][0][1], $entries->of([], [], [$cap])['guardrails'][0][1]);
+        self::assertSame($gathered['guardrails'][0][1], $again['guardrails'][0][1]);
         self::assertSame($gathered['boundaries'][0][1], $entries->of([], [$cap])['boundaries'][0][1]);
     }
 
@@ -269,6 +273,54 @@ final class StatementEntriesTest extends TestCase
         self::assertSame($first['boundaries'][0][0][0][2], $second['boundaries'][0][0][0][2]);
         self::assertSame($first['boundaries'][0][1], $second['boundaries'][0][1]);
         self::assertNotSame($first['allow'][0][2], (new StatementEntries)->of([$policy])['allow'][0][2]);
+    }
+
+    /**
+     * Of two policies that tie on what they are ordered by, the first reached
+     * keeps its place: its deny entries and its guardrail entries are the ones
+     * gathered, whether the second comes as a guardrail too or as a boundary.
+     *
+     * @return void
+     */
+    public function testKeepsTheFirstOfTwoPoliciesThatTie(): void
+    {
+        $entries    = new StatementEntries;
+        $statements = [['effect' => 'deny', 'actions' => ['x']], ['effect' => 'allow', 'actions' => ['y']]];
+        $first      = self::policy('cap', $statements)->withId('1');
+        $second     = self::policy('cap', $statements)->withId('1');
+
+        $alone    = $entries->of([], [], [$first]);
+        $gathered = $entries->of([], [], [$first, $second]);
+        $bounded  = $entries->of([], [$second], [$first]);
+
+        self::assertIsArray($alone['guardrails']);
+        self::assertIsArray($gathered['guardrails']);
+        self::assertCount(1, $gathered['guardrails']);
+        self::assertSame($alone['deny'][0][2], $gathered['deny'][0][2]);
+        self::assertSame($alone['guardrails'][0][1], $gathered['guardrails'][0][1]);
+        self::assertCount(1, $bounded['deny']);
+        self::assertSame($alone['deny'][0][2], $bounded['deny'][0][2]);
+    }
+
+    /**
+     * With the guardrails null, the check is exempt from them: no guardrail is
+     * gathered and the guardrails come out null, while the policies and the
+     * boundaries are gathered as ever. With none given, they come out empty.
+     *
+     * @return void
+     */
+    public function testGathersNoGuardrailsForACheckExemptFromThem(): void
+    {
+        $policy   = self::policy('p', [['effect' => 'deny', 'actions' => ['x']], ['effect' => 'allow', 'actions' => ['x']]]);
+        $boundary = self::policy('cap', [['effect' => 'deny', 'actions' => ['y']], ['effect' => 'allow', 'actions' => ['x']]]);
+
+        $exempt = (new StatementEntries)->of([$policy], [$boundary], null);
+
+        self::assertNull($exempt['guardrails']);
+        self::assertSame(['p#0', 'cap#0'], self::labels($exempt['deny']));
+        self::assertSame(['p#1'], self::labels($exempt['allow']));
+        self::assertCount(1, $exempt['boundaries']);
+        self::assertSame([], (new StatementEntries)->of([$policy], [$boundary])['guardrails']);
     }
 
     /**

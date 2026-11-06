@@ -16,7 +16,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests for `DeclaredActionCatalogue`, the actions the configured
- * permission enums and providers declare.
+ * permission enums and providers declare, the package's own left out.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -64,20 +64,39 @@ final class DeclaredActionCatalogueTest extends TestCase
     }
 
     /**
-     * With nothing configured, only the package's own permissions are declared:
-     * a pattern covering one of them covers the catalogue, and any other
-     * pattern covers nothing.
+     * With nothing configured, no pattern covers the catalogue, not even `*`:
+     * the package's own permissions are not the application's, and are left
+     * out.
      *
      * @return void
      */
-    public function testCoversThePackagesPermissionsAloneWhenNothingIsConfigured(): void
+    public function testCoversNothingWhenNothingIsConfigured(): void
     {
         $catalogue = $this->catalogue([], []);
 
-        self::assertTrue($catalogue->covers('*'));
-        self::assertTrue($catalogue->covers('authorization:guardrails:manage'));
-        self::assertTrue($catalogue->covers('authorization:*'));
+        self::assertFalse($catalogue->covers('*'));
+        self::assertFalse($catalogue->covers('authorization:guardrails:manage'));
         self::assertFalse($catalogue->covers('posts:create'));
+    }
+
+    /**
+     * The package's own permissions are left out beside the application's, also
+     * when the application declares one of them itself.
+     *
+     * @return void
+     */
+    public function testLeavesOutThePackagesOwnPermissions(): void
+    {
+        ConfigurablePermissionProvider::$permissions = [
+            new PermissionDefinition(name: 'authorization:guardrails:manage', description: 'Set and remove guardrails from above the scope they cap.', category: 'authorization'),
+        ];
+
+        $catalogue = $this->catalogue([CataloguePermission::class], [ConfigurablePermissionProvider::class]);
+
+        self::assertTrue($catalogue->covers('*'));
+        self::assertTrue($catalogue->covers('posts:create'));
+        self::assertFalse($catalogue->covers('authorization:guardrails:manage'));
+        self::assertFalse($catalogue->covers('authorization:*'));
     }
 
     /**

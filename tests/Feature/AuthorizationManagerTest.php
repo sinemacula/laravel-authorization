@@ -2334,7 +2334,7 @@ final class AuthorizationManagerTest extends TestCase
 
         self::attachToResource(self::resourcePolicy('sharing', [$sharing]), ['posts', 7]);
 
-        $rail  = self::resourcePolicy('read-only', [['effect' => 'allow', 'actions' => ['posts:read', 'authorization:*']]]);
+        $rail  = self::resourcePolicy('read-only', [['effect' => 'allow', 'actions' => ['posts:read']]]);
         $actor = self::guardrailManager();
 
         self::guardrails()->set($rail, null, $actor);
@@ -2391,8 +2391,8 @@ final class AuthorizationManagerTest extends TestCase
             $user->givePermission(Permission::create(['name' => $action]));
         }
 
-        self::guardrails()->set(self::resourcePolicy('platform', [['effect' => 'allow', 'actions' => [...$actions, 'authorization:*']]]), null, $actor);
-        self::guardrails()->set(self::resourcePolicy('org', [['effect' => 'allow', 'actions' => ['posts:read', 'posts:edit', 'posts:publish', 'authorization:*']]]), $org, $actor);
+        self::guardrails()->set(self::resourcePolicy('platform', [['effect' => 'allow', 'actions' => $actions]]), null, $actor);
+        self::guardrails()->set(self::resourcePolicy('org', [['effect' => 'allow', 'actions' => ['posts:read', 'posts:edit', 'posts:publish']]]), $org, $actor);
         self::guardrails()->set(self::resourcePolicy('account', [['effect' => 'allow', 'actions' => ['posts:read', 'posts:edit']]]), $account, $actor);
 
         $allowed = function (?StubTenant $tenant) use ($user, $actions): array {
@@ -2531,6 +2531,59 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * A check of exactly `authorization:guardrails:manage` is exempt from the
+     * guardrails: none is read for it, so a guardrail that does not allow it,
+     * one that denies it and one that cannot be read leave it allowed, and the
+     * guardrail stage records it as exempt. Any other action is still capped,
+     * and the subject's own denies and boundaries still count for it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheGuardrailManageCheckIsExemptFromTheGuardrails(): void
+    {
+        $user = self::guardrailManager();
+        $rail = self::resourcePolicy('posts-only', [
+            ['effect' => 'allow', 'actions' => ['posts:*']],
+            ['effect' => 'deny', 'actions' => [PackagePermissions::GUARDRAILS_MANAGE]],
+        ]);
+
+        $user->givePermission(Permission::create(['name' => 'authorization:roles:manage']));
+        self::guardrails()->set($rail, null, $user);
+        self::guardrails()->set(self::resourcePolicy('broken', [['effect' => 'allow', 'actions' => ['*']]]), null, $user);
+
+        DB::table('policies')->where('name', 'broken')->update(['document' => '{"statements": "broken"}']);
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        $exempt = Authorization::for($user)->check(PackagePermissions::GUARDRAILS_MANAGE);
+        $read   = \array_filter(DB::getQueryLog(), static fn (array $query): bool => \str_contains($query['query'], 'guardrails'));
+
+        DB::disableQueryLog();
+
+        self::assertTrue($exempt->isAllowed());
+        self::assertSame([], $read);
+        self::assertEquals(new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::EXEMPT), $exempt->trace[0]);
+        self::assertStringContainsString('[guardrail] guardrails: exempt', $exempt->explain());
+        self::assertSame(DecisionReason::INVALID_POLICY, Authorization::for($user)->check('authorization:roles:manage')->reason);
+
+        DB::table('policies')->where('name', 'broken')->update(['document' => '{"statements": []}']);
+        $this->app?->forgetInstance(ResolutionCache::class);
+
+        self::assertSame(DecisionReason::GUARDRAIL, Authorization::for($user)->check('authorization:roles:manage')->reason);
+
+        $user->attachPolicy(self::resourcePolicy('no-guardrails', [['effect' => 'deny', 'actions' => [PackagePermissions::GUARDRAILS_MANAGE]]]));
+
+        self::assertSame(DecisionReason::EXPLICIT_DENY, Authorization::for($user)->check(PackagePermissions::GUARDRAILS_MANAGE)->reason);
+
+        $other = self::boundedGuardrailManager();
+
+        self::assertSame(DecisionReason::BOUNDARY, Authorization::for($other)->check(PackagePermissions::GUARDRAILS_MANAGE)->reason);
+    }
+
+    /**
      * Setting and removing a guardrail each take effect on the next check
      * through a warm persistent cache, and the next request reads the
      * guardrails from the store, not the database.
@@ -2549,7 +2602,7 @@ final class AuthorizationManagerTest extends TestCase
 
         $user  = StubIdentity::create(['id' => 'user-1']);
         $actor = self::guardrailManager();
-        $rail  = self::resourcePolicy('read-cap', [['effect' => 'allow', 'actions' => ['posts:read', 'authorization:*']]]);
+        $rail  = self::resourcePolicy('read-cap', [['effect' => 'allow', 'actions' => ['posts:read']]]);
         $check = static fn (): bool => Authorization::for($user)->can('posts:edit');
 
         $user->givePermission(Permission::create(['name' => 'posts:edit']));
@@ -2596,8 +2649,6 @@ final class AuthorizationManagerTest extends TestCase
         $user  = StubIdentity::create(['id' => 'user-1']);
         $actor = self::guardrailManager();
 
-        // Set from the tenants up, as a guardrail that does not allow managing
-        // guardrails caps the actor's right below it too.
         $user->givePermission(Permission::create(['name' => 'posts:edit']));
         self::guardrails()->set(self::resourcePolicy('account', [['effect' => 'allow', 'actions' => ['posts:edit']]]), $account, $actor);
         self::guardrails()->set(self::resourcePolicy('org', [['effect' => 'allow', 'actions' => ['posts:*']]]), $org, $actor);
@@ -2818,6 +2869,24 @@ final class AuthorizationManagerTest extends TestCase
         $actor = StubIdentity::create(['id' => 'guardrail-admin']);
 
         $actor->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAILS_MANAGE]));
+
+        return $actor;
+    }
+
+    /**
+     * Return an identity that holds the right to manage guardrails
+     * platform-wide, under a permission boundary that does not allow it.
+     *
+     * @return \Tests\Feature\Stubs\StubIdentity
+     *
+     * @throws \Throwable
+     */
+    private static function boundedGuardrailManager(): StubIdentity
+    {
+        $actor = StubIdentity::create(['id' => 'bounded-admin']);
+
+        $actor->givePermission(Permission::query()->firstOrCreate(['name' => PackagePermissions::GUARDRAILS_MANAGE]));
+        self::boundaries()->set($actor, self::resourcePolicy('posts-cap', [['effect' => 'allow', 'actions' => ['posts:*']]]));
 
         return $actor;
     }

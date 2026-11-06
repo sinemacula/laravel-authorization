@@ -7,8 +7,8 @@ namespace SineMacula\Laravel\Authorization\Evaluation\Enums;
 /**
  * What one step of a decision found: a statement's assessment, whether the
  * subject holds the permission named by the action, that a guardrail or a
- * permission boundary does not allow the check, or that a cap stage found
- * nothing to cap the check by.
+ * permission boundary does not allow the check, that a cap stage found nothing
+ * to cap the check by, or that the check is exempt from a cap stage.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -44,4 +44,7 @@ enum TraceOutcome: string
 
     /** No guardrail, boundary or session cap applies at the stage, so it caps nothing. */
     case UNCAPPED = 'uncapped';
+
+    /** The check is exempt from the stage, so none of its caps is read or weighed: the guardrail stage for `authorization:guardrails:manage`. */
+    case EXEMPT = 'exempt';
 }

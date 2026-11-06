@@ -30,6 +30,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationExcept
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceReferences;
@@ -420,7 +421,14 @@ final class AuthorizationManager
      *
      * The guardrails are those of the resource's tenant when it has one, also
      * when a platform-wide grant admitted it from outside the scope, else of
-     * the tenant the check is decided in (see `GuardrailResolver`).
+     * the tenant the check is decided in (see `GuardrailResolver`). A check of
+     * exactly `authorization:guardrails:manage` is exempt from them: no
+     * guardrail is read for it, so none of their denies or allows applies, nor
+     * does one that cannot be read, and the guardrail stage records it as
+     * exempt. A guardrail therefore never keeps anyone from changing the
+     * guardrails, its own removal included; every other deny and cap still
+     * applies, and the guardrail service still asks for the right from above
+     * the scope it changes (see `GuardrailAuthority`).
      *
      * A resource policy's denies apply to everyone, and its allows to the
      * subjects their `principals` name, with no permission held; by now the
@@ -444,7 +452,7 @@ final class AuthorizationManager
     {
         try {
             $policies   = $this->gatherPolicies($subject, $resource);
-            $guardrails = $this->guardrails?->guardrailsFor($resource) ?? [];
+            $guardrails = $action === PackagePermissions::GUARDRAILS_MANAGE ? null : ($this->guardrails?->guardrailsFor($resource) ?? []);
             $boundaries = SubjectGrants::boundaries($subject);
         } catch (InvalidPolicyDocumentException) {
             return Decision::deny(DecisionReason::INVALID_POLICY, DecisionStage::DENY);

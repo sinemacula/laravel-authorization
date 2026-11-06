@@ -1961,6 +1961,36 @@ final class PolicyEvaluatorTest extends TestCase
     }
 
     /**
+     * With the guardrails null, the check is exempt from the guardrail stage:
+     * it records the stage as exempt and caps nothing, and the boundaries and
+     * the allows decide as ever. The step is made once, and kept apart from the
+     * one the stage adds when no guardrail applies.
+     *
+     * @return void
+     */
+    public function testACheckExemptFromTheGuardrailsSkipsTheirStage(): void
+    {
+        $evaluator = new PolicyEvaluator;
+        $allowed   = $evaluator->evaluate([], 'posts:read', null, [], [], static fn (): bool => true, null);
+        $again     = $evaluator->evaluate([], 'posts:read', null, [], [], static fn (): bool => true, null);
+        $uncapped  = $evaluator->evaluate([], 'posts:read', null, [], [], static fn (): bool => true, []);
+        $boundary  = self::policy('cap', [['effect' => 'allow', 'actions' => ['posts:read']]]);
+        $bounded   = $evaluator->evaluate([], 'posts:edit', null, [], [$boundary], static fn (): bool => true, null);
+
+        self::assertTrue($allowed->isAllowed());
+        self::assertEquals([
+            new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::EXEMPT),
+            ...self::uncapped(DecisionStage::BOUNDARY, DecisionStage::SESSION),
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD),
+        ], $allowed->trace);
+        self::assertStringContainsString('[guardrail] guardrails: exempt', $allowed->explain());
+        self::assertSame($allowed->trace[0], $again->trace[0]);
+        self::assertEquals(new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::UNCAPPED), $uncapped->trace[0]);
+        self::assertSame(DecisionReason::BOUNDARY, $bounded->reason);
+        self::assertEquals(new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::EXEMPT), $bounded->trace[0]);
+    }
+
+    /**
      * A guardrail statement that cannot be evaluated denies the check as an
      * invalid policy at the guardrail stage, naming the statement, after every
      * guardrail has been assessed.

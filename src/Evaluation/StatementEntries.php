@@ -72,7 +72,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  *             \SineMacula\Laravel\Authorization\Evaluation\TraceEntry
  *         }>,
  *         \SineMacula\Laravel\Authorization\Evaluation\TraceEntry
- *     }>,
+ *     }>|null,
  *     boundaries: list<array{
  *         list<array{
  *             \SineMacula\Laravel\Authorization\Evaluation\StatementReference,
@@ -106,37 +106,23 @@ final class StatementEntries
      */
     private ?\WeakMap $policies = null;
 
-    /**
-     * Each guardrail's allow statements with the guardrail stage's trace
-     * entries, and the step it adds when it refuses the check, kept while the
-     * policy lives.
-     *
-     * @var \WeakMap<\SineMacula\Laravel\Authorization\Evaluation\Policy, CapEntries>|null
-     */
-    private ?\WeakMap $guardrails = null;
-
-    /**
-     * Each boundary's allow statements with the boundary stage's trace entries,
-     * and the step it adds when it refuses the check, kept while the policy
-     * lives.
-     *
-     * @var \WeakMap<\SineMacula\Laravel\Authorization\Evaluation\Policy, CapEntries>|null
-     */
-    private ?\WeakMap $boundaries = null;
+    /** @var array<string, \WeakMap<\SineMacula\Laravel\Authorization\Evaluation\Policy, CapEntries>> Each cap's entries, kept per cap stage while the policy lives. */
+    private array $caps = [];
 
     /**
      * Return the statements of the policies, the guardrails and the boundaries,
      * in order: every deny statement, the policies', then the guardrails', then
      * the boundaries', every allow statement of the policies, each guardrail's
      * allow statements and each boundary's, each policy gathered once for each
-     * part it plays.
+     * part it plays. With the guardrails null, the check is exempt from them:
+     * no guardrail statement is gathered, and the guardrails are null too.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $boundaries
-     * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $guardrails
+     * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>|null  $guardrails
      * @return Gathered
      */
-    public function of(array $policies, array $boundaries = [], array $guardrails = []): array
+    public function of(array $policies, array $boundaries = [], ?array $guardrails = []): array
     {
         $denies = [];
         $allows = [];
@@ -147,7 +133,7 @@ final class StatementEntries
             $allows[$entries['order']] ??= $entries['allow'];
         }
 
-        foreach ([[DecisionStage::GUARDRAIL, $guardrails], [DecisionStage::BOUNDARY, $boundaries]] as [$stage, $capping]) {
+        foreach ([[DecisionStage::GUARDRAIL, $guardrails ?? []], [DecisionStage::BOUNDARY, $boundaries]] as [$stage, $capping]) {
             foreach ($this->sorted($capping) as [$entries, $cap]) {
                 $denies[$entries['order']]              ??= $entries['deny'];
                 $caps[$stage->value][$entries['order']] ??= $this->capEntriesOf($stage, $cap, $entries['allow']);
@@ -157,7 +143,7 @@ final class StatementEntries
         return [
             'deny'       => \array_merge(...\array_values($denies)),
             'allow'      => \array_merge(...\array_values($allows)),
-            'guardrails' => \array_values($caps[DecisionStage::GUARDRAIL->value]),
+            'guardrails' => $guardrails === null ? null : \array_values($caps[DecisionStage::GUARDRAIL->value]),
             'boundaries' => \array_values($caps[DecisionStage::BOUNDARY->value]),
         ];
     }
@@ -224,7 +210,14 @@ final class StatementEntries
      */
     private function capEntriesOf(DecisionStage $stage, Policy $cap, array $allows): array
     {
-        $caps = $stage === DecisionStage::GUARDRAIL ? $this->guardrails ??= new \WeakMap : $this->boundaries ??= new \WeakMap;
+        if (!isset($this->caps[$stage->value])) {
+            /** @var \WeakMap<\SineMacula\Laravel\Authorization\Evaluation\Policy, CapEntries> $map */
+            $map = new \WeakMap;
+
+            $this->caps[$stage->value] = $map;
+        }
+
+        $caps = $this->caps[$stage->value];
 
         if (!isset($caps[$cap])) {
             $entries = [];

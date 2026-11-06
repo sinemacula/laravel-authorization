@@ -23,7 +23,9 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * `ResourceScope`), so a tenant's guardrails always cap a check on its
  * resources; else it is the tenant the check is decided in. With no tenant,
  * only the platform's apply (AUTHZ-5.7). Every one that applies is intersected
- * at the guardrail stage.
+ * at the guardrail stage. The authorization manager never asks for the
+ * guardrails of a check of `authorization:guardrails:manage`, which is exempt
+ * from them, so no guardrail ever keeps an actor from changing the guardrails.
  *
  * The guardrails and their documents are read in one query, on the write
  * connection, through the resolution cache: kept for the request or job, and in

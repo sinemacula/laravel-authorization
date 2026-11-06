@@ -36,9 +36,9 @@ Blade directives, console commands and test assertions.
 
 Every check runs the same stages (see [How a check is decided](#how-a-check-is-decided)): the subject, the resource and
 its tenant are checked first, then an explicit deny in any policy that applies (the principal's, its roles', the
-resource's, the guardrails' and its boundaries') wins, then the caps (the guardrails on the tenant and the platform,
-then its permission boundaries) must each allow the check, then an explicit allow or a permission held allows it, and
-anything left is denied.
+resource's, the guardrails' and its boundaries') wins, then the caps (the guardrails on the tenant, its ancestors and
+the platform, then its permission boundaries) must each allow the check, then an explicit allow or a permission held
+allows it, and anything left is denied.
 
 ## Features
 
@@ -75,7 +75,7 @@ anything left is denied.
 - **Guardrails**: a managed policy set on a tenant, reaching its subtree, or on the platform caps every check in its
   scope, whoever the subject is, as a boundary caps one grantee's. Every guardrail that applies must allow the check,
   a guardrail grants nothing, and only an actor holding `authorization:guardrails:manage` from above the scope, a
-  permission the package declares itself, may set or remove one.
+  permission the package declares itself and no guardrail caps, may set or remove one.
 - **Authentication requirements**: an allow can require additional verification, multifactor authentication,
   phishing resistance or a minimum assurance level, each with an optional maximum age, judged for the subject's session
   by a requirement checker you bind. When only that requirement keeps an allow from applying, the check is denied as
@@ -165,9 +165,9 @@ List the enums whose cases should become Gate abilities and permissions, and any
 ```
 
 The same declarations are the actions a policy may name: a policy is refused when it is saved if one of its `actions` or
-`not_actions` patterns matches no declared permission. The package declares one permission of its own,
-`authorization:guardrails:manage` (see [Guardrails](#guardrails)), so until you declare yours, only a policy naming
-that permission can be saved.
+`not_actions` patterns matches no declared permission. Until you declare yours, a policy is refused with the reason
+that no permissions are declared, unless it names only the package's own permission, `authorization:guardrails:manage`
+(see [Guardrails](#guardrails)), which a policy may always name.
 
 Booting the package never queries or writes the database, so `config:cache`, `route:cache` and `migrate` run before
 the tables exist. The permissions the enums and providers declare reach the database when you sync them, which belongs
@@ -669,13 +669,13 @@ permission; one whose principals do not name the subject is recorded as `princip
 unmet authentication requirement on it included. A statement that names principals in a policy attached any other way
 (one from the policy store, or supplied through `withPolicies()`) is recorded the same way and never allows. The tenant
 stage runs first, so a resource of a tenant outside the subject's scope is still denied as `tenant_scope` before any
-policy is read: a resource policy never allows across tenants, and the subject's permission boundaries are weighed
-before any allow, so they cap a resource policy's allow as they cap every other. When a subject is admitted to such a
-resource through a platform-wide permission, and the check runs at platform scope, a deny attached to the resource in
-its own tenant still applies: the resource's owner can lock it against everyone, a support user with a platform-wide
-grant included. That tenant's resource-policy allows do not reach the subject there. `withPolicies()` bypasses the
-resource's policies with the rest; give a supplied policy a resource with `Policy::withResource('post:42')` to have it
-evaluated as one.
+policy is read: a resource policy never allows across tenants, and the guardrails and the subject's permission
+boundaries are weighed before any allow, so they cap a resource policy's allow as they cap every other. When a subject
+is admitted to such a resource through a platform-wide permission, and the check runs at platform scope, a deny attached
+to the resource in its own tenant still applies: the resource's owner can lock it against everyone, a support user with
+a platform-wide grant included. That tenant's resource-policy allows do not reach the subject there. `withPolicies()`
+bypasses the resource's policies with the rest; give a supplied policy a resource with `Policy::withResource('post:42')`
+to have it evaluated as one.
 
 The decision, the trace and `explain()` name a resource policy's statements as they name any other, with the resource
 the policy is attached to: `post-42-sharing[<its key>]#0 sid="reviewers-read" on "post:42"`. `authorization:why-can`
@@ -792,23 +792,32 @@ $organisationCap = Policy::create([
     'name'     => 'organisation-cap',
     'document' => [
         'statements' => [
-            ['sid' => 'work', 'effect' => 'allow', 'actions' => ['posts:*', 'comments:*', 'authorization:*']],
+            ['sid' => 'work', 'effect' => 'allow', 'actions' => ['posts:*', 'comments:*']],
             ['sid' => 'no-exports', 'effect' => 'deny', 'actions' => ['posts:export']],
         ],
     ],
 ]);
 
+$platformCap = Policy::create([
+    'name'     => 'platform-cap',
+    'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:*', 'comments:*', 'billing:*']]]],
+]);
+
 $guardrails = app(GuardrailService::class);
 
-$guardrails->set($organisationCap, $organisation, $platformAdmin);    // GrantOutcome::GRANTED, here and below
-$guardrails->set($organisationCap, $organisation, $platformAdmin);    // UNCHANGED: it is already there
-$guardrails->set($platformCap, null, $platformAdmin);                 // GRANTED, on the platform
-$guardrails->remove($organisationCap, $organisation, $platformAdmin); // true: the organisation had it
+$guardrails->set($organisationCap, $organisation, $platformAdmin); // GrantOutcome::GRANTED, here and below
+$guardrails->set($organisationCap, $organisation, $platformAdmin); // UNCHANGED: it is already there
+$guardrails->set($platformCap, null, $platformAdmin);              // GRANTED, on the platform
 
+// $post belongs to $organisation, and $editor is checked in it, so both guardrails apply.
 $editor->givePermission('billing:view');
 
-Authorization::for($editor)->can('posts:export', $post); // false: the guardrail denies it, whatever the editor holds
-Authorization::for($editor)->can('billing:view');        // false in the organisation: no guardrail allows it
+Authorization::for($editor)->can('posts:export', $post); // false: organisation-cap denies it, whatever the editor holds
+Authorization::for($editor)->can('billing:view');        // false: platform-cap allows it, but organisation-cap does not
+
+$guardrails->remove($organisationCap, $organisation, $platformAdmin); // true: the organisation had it
+
+Authorization::for($editor)->can('billing:view'); // true: platform-cap, the one guardrail left, allows it
 ```
 
 **Setting one.** `set($policy, $tenant, $actor)` sets a stored managed policy as a guardrail on the tenant named, a
@@ -843,17 +852,20 @@ check's policies alone, so the guardrails still apply: an override never lifts a
 authentication requirement is unmet does not allow the check, and the denial is `guardrail`, never
 `insufficient_authentication`. A guardrail statement that cannot be evaluated denies as `invalid_policy` at the
 `guardrail` stage, and a guardrail whose document cannot be read denies, as `invalid_policy`, every check in its scope,
-so a broken guardrail never lifts the cap.
+so a broken guardrail never lifts the cap. The one check no guardrail caps is that of `authorization:guardrails:manage`
+(see **Who may change them** below).
 
 **Who may change them.** Only an actor that holds `authorization:guardrails:manage` from above the scope. The right is
-decided through `check()`, so it must be held effectively: every deny, guardrail and boundary that applies to the actor
-counts, and an inactive actor holds nothing. For a tenant's guardrails it is decided just below the tenant's parent, so
-a grant held at an ancestor of the tenant counts when it reaches the tenants below it, a platform-wide grant counts,
-and a grant held within the tenant itself never does: a tenant's own administrators never lift the guardrails their
-tenant is set under. A tenant with no parent, and the platform, are changed only through a platform-wide grant. The
-check keeps the request's application and is recorded and reported like any other decision. An actor without the right
-is refused with `GuardrailException`, whose `getReason()` is `not_permitted` and `getActor()` the actor, before
-anything is read or written.
+decided through `check()`, so it must be held effectively: every deny and boundary that applies to the actor counts, and
+an inactive actor holds nothing. The guardrails never count: a check of exactly `authorization:guardrails:manage`,
+whoever makes it, is exempt from the guardrail stage, so no guardrail is read for it, neither its denies nor its allows
+apply, and the trace records the stage as `[guardrail] guardrails: exempt`. For a tenant's guardrails it is decided just
+below the tenant's parent, so a grant held at an ancestor of the tenant counts when it reaches the tenants below it, a
+platform-wide grant counts, and a grant held within the tenant itself never does: a tenant's own administrators never
+lift the guardrails their tenant is set under. A tenant with no parent, and the platform, are changed only through a
+platform-wide grant. The check keeps the request's application and is recorded and reported like any other decision. An
+actor without the right is refused with `GuardrailException`, whose `getReason()` is `not_permitted` and `getActor()`
+the actor, before anything is read or written.
 
 ```php
 // Every scope, the platform included.
@@ -863,14 +875,17 @@ $platformAdmin->givePermission('authorization:guardrails:manage');
 $organisationAdmin->givePermission('authorization:guardrails:manage', tenant: $organisation);
 ```
 
-Since the guardrails above a scope cap that check too, a guardrail that does not allow
-`authorization:guardrails:manage` keeps every actor from changing the guardrails of its scope and of the tenants below
-it, its own removal included. Give each guardrail an allow that covers it, as `authorization:*` does above.
+So no guardrail can lock the guardrails: one that does not allow `authorization:guardrails:manage`, one that denies it,
+and one whose document cannot be read, a platform guardrail included, keep no actor from changing the guardrails of
+any scope, and each can still be removed through the service. Nothing else is exempt: every other source's denies, the
+actor's permission boundaries and the session caps still apply to the check, and the grant must still reach the scope
+from above.
 
 **The permission.** The package declares `authorization:guardrails:manage` in its own permission catalogue, whatever
 the application configures: guard-agnostic and under the `authorization` category. `authorization:sync` writes it with
-the application's permissions, so it can be granted as any permission can, and a policy naming it validates. It is
-declared by a provider, so it is no Gate ability; it is decided through `check()`.
+the application's permissions, so it can be granted as any permission can, and a policy naming it validates, even
+before the application declares any permission of its own. It is declared by a provider, so it is no Gate ability; it
+is decided through `check()`, exempt from the guardrails.
 
 **Lifecycle.** Setting or removing a guardrail dispatches `Guardrail\GuardrailSet` or `Guardrail\GuardrailRemoved` once
 the call commits, only when it changed something, with the policy, its name, the scope and the actor. Both implement
@@ -897,7 +912,7 @@ is weighed before every deny and every cap has run:
 | `resource`  | Whether the resource argument can be identified                                                                   | `resource_unresolved`                                         |
 | `tenant`    | Whether the resource's tenant is within the check's, or a platform-wide grant of the permission admits it         | `tenant_scope`                                                |
 | `deny`      | Every deny: the subject's, its identity's, their roles', the resource's, the guardrails' and the boundaries'      | `explicit_deny`, `invalid_policy`                             |
-| `guardrail` | Every guardrail on the check's tenant, its ancestors and the platform must allow the check                        | `guardrail`, `invalid_policy`                                 |
+| `guardrail` | Every guardrail on the check's tenant, its ancestors and the platform must allow the check, unless it is exempt   | `guardrail`, `invalid_policy`                                 |
 | `boundary`  | Every permission boundary of the principal and of its identity that applies must allow the check                  | `boundary`, `invalid_policy`                                  |
 | `session`   | The session's caps, such as a credential's scopes (none yet: the stage caps nothing)                              |                                                               |
 | `allow`     | Every allow statement that applies to the subject, a resource policy's naming it included, then a permission held | `invalid_policy`                                              |
@@ -906,8 +921,9 @@ is weighed before every deny and every cap has run:
 Within each stage, the policies are assessed in a fixed order (name, stored key, resource, then document) and each
 statement by its position, so the decision and its trace never depend on the order the policies were read in. The
 decision records the stage that decided it and every step it took: each statement assessed, each guardrail and boundary
-that refused the check as `refused`, naming it, a cap stage that capped nothing as `uncapped`, and the permission step,
-which is asked only when no allow statement matched and none was invalid:
+that refused the check as `refused`, naming it, a cap stage that capped nothing as `uncapped`, the guardrail stage as
+`exempt` for a check of `authorization:guardrails:manage`, whose deny stage weighs no guardrail's denies either, and
+the permission step, which is asked only when no allow statement matched and none was invalid:
 
 ```text
 DENY (boundary: a permission boundary does not allow it) at the boundary stage.
@@ -1472,8 +1488,9 @@ Route::get('/api/admin', ApiAdmin::class)->middleware('role:admin,api');
 ```
 
 - `permission:` decides each listed action on the same full decision as `Authorization::can()`, `@can` and the Gate:
-  policies, explicit denies, the permissions held, the subject's tenant and its permission boundaries. An explicit deny
-  wins over a held permission, a policy allow admits without one, and either is capped by every boundary that applies.
+  policies, explicit denies, the permissions held, the subject's tenant, the guardrails and its permission boundaries.
+  An explicit deny wins over a held permission, a policy allow admits without one, and either is capped by every
+  guardrail and boundary that applies.
   The check has no resource, so only statements with neither `resources` nor `not_resources`, or whose `resources`
   include `*`, apply to it.
 - `authorize:{action},{route parameter}` decides the action on the parameter's bound model, referenced as every check

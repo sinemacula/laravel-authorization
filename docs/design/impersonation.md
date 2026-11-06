@@ -55,9 +55,9 @@ UIs or capability checklists.
 Chaining `for($user)->withPolicies([$hypothetical])` evaluates against only the supplied policies, bypassing the target
 user's own attached policies, any configured policy store and the policies attached to the resource. A supplied policy
 given a resource (`Policy::withResource('post:42')`) is evaluated as a resource policy, so its allows apply only to the
-subjects its `principals` name. `withPolicies()` replaces the policies only: the subject's permission boundaries still
-cap the decision, their deny statements still count at the deny stage, and the target user's held permissions are
-still asked at the allow stage when no allow statement decides, so an override never lifts a cap.
+subjects its `principals` name. `withPolicies()` replaces the policies only: the guardrails and the subject's permission
+boundaries still cap the decision, their deny statements still count at the deny stage, and the target user's held
+permissions are still asked at the allow stage when no allow statement decides, so an override never lifts a cap.
 
 ```php
 $result = Authorization::for($targetUser)
