@@ -14,6 +14,11 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
  * other than `version`, `name` and `statements`, and two statements that share
  * a `sid`.
  *
+ * A policy attached to a resource or a resource type (AUTHZ-7.3) carries the
+ * resource it is attached to, which is not part of its document: its allows
+ * apply only to the subjects their `principals` name, and its denies to
+ * everyone checking the resource.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -32,6 +37,7 @@ final readonly class Policy
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Statement>  $statements
      * @param  int  $version
      * @param  string|null  $id
+     * @param  string|null  $resource
      */
     public function __construct(
 
@@ -46,6 +52,9 @@ final readonly class Policy
 
         /** The stored policy's key, which tells apart policies of one name; null for one built in code. */
         public ?string $id = null,
+
+        /** The resource a resource policy is attached to, `type:id` or `type:*` for its type; null for any other policy. */
+        public ?string $resource = null,
     ) {}
 
     /**
@@ -56,7 +65,20 @@ final readonly class Policy
      */
     public function withId(?string $id): self
     {
-        return new self($this->name, $this->statements, $this->version, $id);
+        return new self($this->name, $this->statements, $this->version, $id, $this->resource);
+    }
+
+    /**
+     * Return the policy as a resource policy attached to the resource, named by
+     * its identifier (`type:id`, or `type:*` for the whole type), or as a
+     * policy attached any other way when it is null.
+     *
+     * @param  string|null  $resource
+     * @return self
+     */
+    public function withResource(?string $resource): self
+    {
+        return new self($this->name, $this->statements, $this->version, $this->id, $resource);
     }
 
     /**

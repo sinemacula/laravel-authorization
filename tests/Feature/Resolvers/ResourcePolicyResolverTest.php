@@ -1,0 +1,492 @@
+<?php
+
+declare(strict_types = 1);
+
+namespace Tests\Feature\Resolvers;
+
+use Illuminate\Cache\ArrayStore;
+use Illuminate\Cache\Repository;
+use Illuminate\Support\Facades\DB;
+use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
+use SineMacula\Laravel\Authorization\Cache\VersionedStore;
+use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
+use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
+use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
+use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use Tests\Concerns\ActsAsTenant;
+use Tests\Feature\Stubs\RecordingLogger;
+use Tests\TestCase;
+
+/**
+ * Feature tests for the resolution of the resource policies a check on a
+ * resource reads: the record's and its type's, in one query, within the scope
+ * the check is decided in, through the resolution cache.
+ *
+ * @author      Ben Carey <bdmc@sinemacula.co.uk>
+ * @copyright   2026 Sine Macula Limited
+ *
+ * @internal
+ *
+ * @SuppressWarnings("php:S1192")
+ */
+#[CoversClass(ResourcePolicyResolver::class)]
+final class ResourcePolicyResolverTest extends TestCase
+{
+    use ActsAsTenant;
+
+    /**
+     * A check on a record reads the policies attached to it and to its type,
+     * each as attached to what it is attached to; one attached to another
+     * record or type is not read.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARecordReadsItsOwnAndItsTypesPolicies(): void
+    {
+        self::service()->attach(self::sharing('record'), ['posts', 7]);
+        self::service()->attach(self::sharing('type'), 'posts');
+        self::service()->attach(self::sharing('other-record'), ['posts', 8]);
+        self::service()->attach(self::sharing('other-type'), 'docs');
+
+        self::assertSame(['record@posts:7', 'type@posts:*'], self::read(ResourceReference::record('posts', '7')));
+    }
+
+    /**
+     * A check on a type alone reads only the policies attached to the type; an
+     * opaque identifier, or no resource, reads none and asks nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATypeAloneReadsOnlyItsTypesPolicies(): void
+    {
+        self::service()->attach(self::sharing('record'), ['posts', 7]);
+        self::service()->attach(self::sharing('type'), 'posts');
+
+        self::assertSame(['type@posts:*'], self::read(ResourceReference::type('posts')));
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        self::assertSame([], (new ResourcePolicyResolver)->policiesFor(new ResourceReference('posts:7')));
+        self::assertSame([], (new ResourcePolicyResolver)->policiesFor(null));
+        self::assertSame([], (new ResourcePolicyResolver)->policiesFor(ResourceReference::type(\str_repeat('p', 192))));
+        self::assertSame([], (new ResourcePolicyResolver)->policiesFor(ResourceReference::record(\str_repeat('p', 192), '7')));
+        self::assertSame([], DB::getQueryLog());
+
+        DB::disableQueryLog();
+    }
+
+    /**
+     * A record whose key no attachment can name, longer than the table stores,
+     * empty, `*` or holding a NUL byte, still reads its type's policies, its
+     * denies included, and never another record's.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARecordOfAKeyNoAttachmentCanNameReadsItsTypesPolicies(): void
+    {
+        self::service()->attach(Policy::create(['name' => 'locked', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:view']]]]]), 'posts');
+        self::service()->attach(self::sharing('record'), ['posts', 7]);
+
+        foreach ([\str_repeat('a', 192), '', '*', "7\0"] as $key) {
+            self::assertSame(['locked@posts:*'], self::read(ResourceReference::record('posts', $key)));
+        }
+
+        self::assertSame(['locked@posts:*'], self::read(ResourceReference::type('posts')));
+        self::assertSame(['locked@posts:*', 'record@posts:7'], self::read(ResourceReference::record('posts', '7')));
+    }
+
+    /**
+     * A type or key of exactly the bytes the table stores names its
+     * attachments.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATypeOrKeyAtTheLimitReadsItsPolicies(): void
+    {
+        $key  = \str_repeat('7', 191);
+        $type = \str_repeat('p', 191);
+
+        self::service()->attach(self::sharing('long-key'), ['posts', $key]);
+        self::service()->attach(self::sharing('long-type'), $type);
+
+        self::assertSame(['long-key@posts:' . $key], self::read(ResourceReference::record('posts', $key)));
+        self::assertSame(['long-type@' . $type . ':*'], self::read(ResourceReference::type($type)));
+    }
+
+    /**
+     * A check on a type alone is kept apart from a check on any record, in the
+     * memo and in the persistent store, so neither is ever served the other's
+     * policies, whichever runs first.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATypeAloneIsCachedApartFromEveryRecord(): void
+    {
+        $store = new Repository(new ArrayStore);
+
+        self::request($store);
+        self::service()->attach(self::sharing('record'), ['posts', 7]);
+        self::service()->attach(self::sharing('type'), 'posts');
+
+        self::assertSame(['type@posts:*'], self::read(ResourceReference::type('posts')));
+        self::assertSame(['record@posts:7', 'type@posts:*'], self::read(ResourceReference::record('posts', '7')));
+        self::assertSame(['type@posts:*'], self::read(ResourceReference::type('posts')));
+
+        self::request($store);
+
+        self::assertSame(['record@posts:7', 'type@posts:*'], self::readWithoutQueries(ResourceReference::record('posts', '7')));
+        self::assertSame(['type@posts:*'], self::readWithoutQueries(ResourceReference::type('posts')));
+    }
+
+    /**
+     * A check on a resource of a tenant decided outside it, at platform scope,
+     * reads the platform-wide attachments and the denies attached in the
+     * resource's own tenant, each once, but not that tenant's allows; a check
+     * decided in the tenant reads all of them.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAResourceDecidedOutsideItsTenantStillReadsThatTenantsDenies(): void
+    {
+        $tenant = self::createTenant('tenant-b');
+        $lock   = Policy::create(['name' => 'lock', 'document' => ['statements' => [
+            ['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']],
+            ['sid' => 'no-delete', 'effect' => 'deny', 'actions' => ['posts:delete']],
+        ]]]);
+
+        self::service()->attach($lock, ['posts', 7], $tenant);
+        self::service()->attach(self::sharing('in-b'), ['posts', 7], $tenant);
+        self::service()->attach(Policy::create(['name' => 'platform', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:purge']]]]]), 'posts');
+
+        $record  = ResourceReference::record('posts', '7', Reference::of($tenant));
+        $outside = self::byName(self::policies($record));
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        $inside  = self::byName(TenantScope::within($tenant, null, static fn (): array => self::policies($record)));
+        $queries = \count(DB::getQueryLog());
+
+        DB::disableQueryLog();
+
+        self::assertSame(1, $queries);
+
+        self::assertSame(['lock', 'platform'], \array_keys($outside));
+        self::assertSame([1], \array_keys($outside['lock']->statements));
+        self::assertSame('no-delete', $outside['lock']->statements[1]->sid);
+        self::assertSame(['posts:7', 'posts:*'], [$outside['lock']->resource, $outside['platform']->resource]);
+        self::assertSame(['in-b', 'lock', 'platform'], \array_keys($inside));
+        self::assertCount(2, $inside['lock']->statements);
+    }
+
+    /**
+     * Without a resolution cache bound, the policies are read straight from the
+     * database.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testReadsFromTheDatabaseWithoutACache(): void
+    {
+        self::service()->attach(self::sharing('record'), ['posts', 7]);
+        self::service()->attach(self::sharing('type'), 'posts');
+
+        $this->app?->forgetInstance(ResolutionCache::class);
+        $this->app?->offsetUnset(ResolutionCache::class);
+
+        self::assertSame(['record@posts:7', 'type@posts:*'], self::read(ResourceReference::record('posts', '7')));
+    }
+
+    /**
+     * A policy attached to the record and to its type is read once, as the
+     * record's, whichever row is read first.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPolicyAttachedTwiceIsReadOnceAsTheRecords(): void
+    {
+        $policy = self::sharing('both');
+
+        self::service()->attach($policy, 'posts');
+        self::service()->attach($policy, ['posts', 7]);
+        self::service()->attach($policy, ['posts', 7], self::createTenant('tenant-a'));
+
+        self::assertSame(['both@posts:7'], self::read(ResourceReference::record('posts', '7')));
+        self::assertSame(['both@posts:*'], self::read(ResourceReference::record('posts', '8')));
+    }
+
+    /**
+     * Only the attachments that hold in the check's tenant and application
+     * count: platform-wide ones, the tenant's own, an ancestor's that reaches
+     * below, and those for every application or the check's.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testOnlyTheAttachmentsOfTheScopeCount(): void
+    {
+        [$tenantA, $tenantB] = \array_map(self::createTenant(...), ['tenant-a', 'tenant-b']);
+
+        self::service()->attach(self::sharing('platform'), 'posts');
+        self::service()->attach(self::sharing('in-a'), 'posts', $tenantA);
+        self::service()->attach(self::sharing('in-b'), 'posts', $tenantB);
+        self::service()->attach(self::sharing('admin-app'), 'posts', application: 'admin');
+
+        $record = ResourceReference::record('posts', '7');
+
+        self::assertSame(['platform@posts:*'], self::read($record));
+        self::assertSame(['in-a@posts:*', 'platform@posts:*'], TenantScope::within($tenantA, null, static fn (): array => self::read($record)));
+        self::assertSame(['admin-app@posts:*', 'in-b@posts:*', 'platform@posts:*'], TenantScope::within($tenantB, 'admin', static fn (): array => self::read($record)));
+    }
+
+    /**
+     * The record's and its type's policies are read in one query, and a check
+     * that reads them again in the request asks nothing more.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testReadsInOneQueryThenFromTheCache(): void
+    {
+        self::service()->attach(self::sharing('record'), ['posts', 7]);
+        self::service()->attach(self::sharing('type'), 'posts');
+
+        $record = ResourceReference::record('posts', '7');
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        self::read($record);
+
+        self::assertCount(1, DB::getQueryLog());
+
+        DB::flushQueryLog();
+
+        self::assertSame(['record@posts:7', 'type@posts:*'], self::read($record));
+        self::assertSame([], DB::getQueryLog());
+
+        DB::disableQueryLog();
+    }
+
+    /**
+     * With a persistent store, the policies are kept across requests and read
+     * afresh once a policy is attached to or detached from a resource of the
+     * type, or any policy is rewritten.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPersistentEntryHoldsUntilAWriteChangesIt(): void
+    {
+        $store  = new Repository(new ArrayStore);
+        $record = ResourceReference::record('posts', '7');
+        $policy = self::sharing('record');
+
+        self::request($store);
+        self::service()->attach($policy, ['posts', 7]);
+
+        self::assertSame(['record@posts:7'], self::read($record));
+
+        self::request($store);
+
+        self::assertSame(['record@posts:7'], self::readWithoutQueries($record));
+
+        self::service()->attach(self::sharing('type'), 'posts');
+        self::request($store);
+
+        self::assertSame(['record@posts:7', 'type@posts:*'], self::read($record));
+
+        $policy->update(['document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:read']]]]]);
+        self::request($store);
+
+        $effects = \array_map(static fn (EvaluationPolicy $read): string => $read->name . ':' . $read->statements[0]->effect->value, self::policies($record));
+
+        \sort($effects);
+
+        self::assertSame(['record:deny', 'type:allow'], $effects);
+
+        self::service()->detach($policy, ['posts', 7]);
+        self::request($store);
+
+        self::assertSame(['type@posts:*'], self::read($record));
+
+        self::service()->attach(self::sharing('docs'), 'docs');
+        self::request($store);
+
+        self::assertSame(['type@posts:*'], self::readWithoutQueries($record));
+    }
+
+    /**
+     * The resolution pins the versions every resource policy and the type's
+     * attachments share before it reads them.
+     *
+     * @return void
+     */
+    public function testPinsTheTypesAndEveryPolicysVersionsFirst(): void
+    {
+        $store = new VersionedStore(new Repository(new ArrayStore), 'authz');
+        $pins  = new ResolutionPins($store);
+
+        ResourcePolicyResolver::resolve('posts', '7', $pins);
+
+        self::assertSame([$store->resourcePoliciesKey(), $store->resourcePoliciesKey('posts')], \array_keys($pins->tokens()));
+    }
+
+    /**
+     * A resource policy whose document cannot be read is written to the log
+     * channel and its exception thrown, so it denies rather than being skipped.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnUnreadablePolicyIsLoggedAndThrown(): void
+    {
+        $logger = new RecordingLogger;
+        $this->app?->instance('log', $logger);
+
+        $policy = self::sharing('broken');
+
+        self::service()->attach($policy, 'posts');
+
+        DB::table('policies')->where('id', $policy->id)->update(['document' => \json_encode(['statements' => [['effect' => 'deny', 'actions' => []]]])]);
+
+        try {
+            ResourcePolicyResolver::resolve('posts', null, new ResolutionPins);
+            self::fail('An unreadable policy was not thrown.');
+        } catch (InvalidPolicyDocumentException $exception) {
+            self::assertStringContainsString('\'broken\'', $exception->getMessage());
+        }
+
+        self::assertCount(1, $logger->records);
+        self::assertSame($policy->id, $logger->records[0]['context']['policy_id'] ?? null);
+    }
+
+    /**
+     * Return the resource policy service the container binds.
+     *
+     * @return \SineMacula\Laravel\Authorization\Services\ResourcePolicyService
+     */
+    private static function service(): ResourcePolicyService
+    {
+        $service = ResourcePolicyService::instance();
+
+        self::assertInstanceOf(ResourcePolicyService::class, $service);
+
+        return $service;
+    }
+
+    /**
+     * Start a new request: a resolution cache with an empty memo over the
+     * persistent store.
+     *
+     * @param  \Illuminate\Cache\Repository  $store
+     * @return void
+     */
+    private static function request(Repository $store): void
+    {
+        app()->instance(ResolutionCache::class, new ResolutionCache($store));
+    }
+
+    /**
+     * Return the resource policies the resource reads.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
+     * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>
+     */
+    private static function policies(ResourceReference $resource): array
+    {
+        return (new ResourcePolicyResolver)->policiesFor($resource);
+    }
+
+    /**
+     * Return each resource policy the resource reads as its name and the
+     * resource it is attached to, sorted.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
+     * @return list<string>
+     */
+    private static function read(ResourceReference $resource): array
+    {
+        $read = \array_map(static fn (EvaluationPolicy $policy): string => $policy->name . '@' . $policy->resource, self::policies($resource));
+
+        \sort($read);
+
+        return $read;
+    }
+
+    /**
+     * Key the policies by name, sorted.
+     *
+     * @param  list<\SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
+     * @return array<string, \SineMacula\Laravel\Authorization\Evaluation\Policy>
+     */
+    private static function byName(array $policies): array
+    {
+        $named = [];
+
+        foreach ($policies as $policy) {
+            $named[$policy->name] = $policy;
+        }
+
+        \ksort($named);
+
+        return $named;
+    }
+
+    /**
+     * Read the resource policies, asserting no query is run.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
+     * @return list<string>
+     */
+    private static function readWithoutQueries(ResourceReference $resource): array
+    {
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        $read = self::read($resource);
+
+        self::assertSame([], DB::getQueryLog());
+
+        DB::disableQueryLog();
+
+        return $read;
+    }
+
+    /**
+     * Create a policy whose allow names its principals.
+     *
+     * @param  string  $name
+     * @return \SineMacula\Laravel\Authorization\Models\Policy
+     */
+    private static function sharing(string $name): Policy
+    {
+        return Policy::create(['name' => $name, 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']]]]]);
+    }
+}

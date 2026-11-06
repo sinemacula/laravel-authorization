@@ -33,8 +33,8 @@ Blade directives, console commands and test assertions.
 | **Decision**   | The answer to one check: allowed or not, with the reason and a trace of the statements that decided it.       |
 
 Every check runs the same stages: the subject, the resource and its tenant are checked first, then an explicit deny in
-any attached policy wins, then an explicit allow, then the principal's role and permission grants, and anything left is
-denied.
+any policy that applies (the principal's, its roles' and the resource's) wins, then an explicit allow, then the
+principal's role and permission grants, and anything left is denied.
 
 ## Features
 
@@ -61,6 +61,10 @@ denied.
 - **Role and inline policies**: a policy attaches to an identity or to a role, whose holders get it where both grants
   hold (tenant, application and expiry) and inherit it down the role hierarchy. An inline policy belongs to one
   grantee, is attached to it alone and is deleted with it; its name is unique among that grantee's.
+- **Resource-based policies**: a managed policy attaches to one record or to a whole resource type. Each of its allows
+  names the subjects it applies to in `principals`, by reference or by a role's key, and allows them without any
+  permission held; its denies apply to everyone checking the resource. The tenant stage still comes first, so a
+  resource policy never reaches across tenants.
 - **Authentication requirements**: an allow can require additional verification, multifactor authentication,
   phishing resistance or a minimum assurance level, each with an optional maximum age, judged for the subject's session
   by a requirement checker you bind. When only that requirement keeps an allow from applying, the check is denied as
@@ -84,14 +88,14 @@ denied.
   cleared unless `forceSystem()` unlocks the next change.
 - **Explanations**: `Authorization::explain()`, the last decision of the request, and `authorization:why-can` on the
   command line.
-- **Management services** that own every write of a role, permission, policy or grant: each call runs in one
-  transaction on the package's connection, through the configured models, and grants are idempotent under
+- **Management services** that own every write of a role, permission, policy, grant or resource attachment: each call
+  runs in one transaction on the package's connection, through the configured models, and grants are idempotent under
   concurrency. The traits, the grant and revoke commands and the Spatie import write through them; only
   `authorization:sync` still writes the permission catalogue through the permission model, in its own transaction.
-- **Events** for every grant, revocation, expiry change and model change that changes something, for each use of the
-  system override, for each decision, and when `authorize()` refuses. All implement one marker interface; the change
-  events are snapshots of plain values that carry the actor the caller named, and are dispatched only once the write
-  commits.
+- **Events** for every grant, revocation, expiry change, resource attachment and model change that changes something,
+  for each use of the system override, for each decision, and when `authorize()` refuses. All implement one marker
+  interface; the change events are snapshots of plain values that carry the actor the caller named, and are dispatched
+  only once the write commits.
 - **Resolution cache** for roles, permissions and policies, in memory and optionally in any cache store, versioned so
   every write takes effect on the next check in every worker, and falling back to the database when the store fails.
 - **Swappable everything**: models, table names, the database connection, the subject resolver and the policy store.
@@ -284,12 +288,14 @@ Gate::forUser($user)->allows('posts:update');
 
 ### Managing roles, permissions and grants
 
-Every write goes through four services, which you inject or resolve from the container: `RoleService`,
-`PermissionService` and `PolicyService` for the records, and `GrantService` for what a grantee holds. Each call runs in
-one transaction on the package's connection (`authorization.connection`), through the models `authorization.models`
-configures, and takes the actor making the call as an optional `actor`, a model or a reference (null for console and
-system work). Every event the call dispatches carries it, and every grant row it writes records it in
-`granted_by_type` and `granted_by_id`; it is never read from the signed-in user:
+Every write goes through five services, which you inject or resolve from the container: `RoleService`,
+`PermissionService` and `PolicyService` for the records, `GrantService` for what a grantee holds, and
+`ResourcePolicyService` for the policies attached to resources (see [Resource-based
+policies](#resource-based-policies)). Each call runs in one transaction on the package's connection
+(`authorization.connection`), through the models `authorization.models` configures, and takes the actor making the call
+as an optional `actor`, a model or a reference (null for console and system work). Every event the call dispatches
+carries it, and every grant row it writes records it in `granted_by_type` and `granted_by_id`; it is never read from the
+signed-in user:
 
 ```php
 use SineMacula\Laravel\Authorization\Services\GrantService;
@@ -538,11 +544,118 @@ grantee deleted without its model events, such as by a raw query, leaves them be
 deletes them, once it has revoked the grantee's grants. `authorization:policy:validate --database` checks inline
 policies with the rest.
 
-A check gathers its policies from three places: the bound policy store (`policy_store`, for policies shipped in code or
-kept elsewhere), the identity's own attachments, managed and inline, and its roles' policies, plus those of a separate
+A check gathers its policies from four places: the bound policy store (`policy_store`, for policies shipped in code or
+kept elsewhere), the identity's own attachments, managed and inline, its roles' policies, and the policies attached to
+the check's resource and to its type (see [Resource-based policies](#resource-based-policies)), plus those of a separate
 identity, own and role-attached alike (see `docs/design/evaluation-order-and-deny-precedence.md`). A policy attached
 both to the identity and to one of its roles counts once. The order they are gathered in never changes the decision:
-each stage assesses them by name, then stored key, then document.
+each stage assesses them by name, then stored key, then the resource a resource policy is attached to, then document.
+
+### Resource-based policies
+
+A policy attached to a resource decides who may do what to that resource, whoever holds which permission. It attaches
+to one record, or to a whole resource type, through `ResourcePolicyService`, and its statements say whom they apply to:
+
+```php
+use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
+
+$sharing = Policy::create([
+    'name'     => 'post-42-sharing',
+    'document' => [
+        'statements' => [
+            [
+                'sid'        => 'reviewers-read',
+                'effect'     => 'allow',
+                'actions'    => ['posts:read', 'posts:comment'],
+                'principals' => ['user:17', 'role:' . $reviewers->id],
+            ],
+            [
+                'sid'     => 'never-delete',
+                'effect'  => 'deny',
+                'actions' => ['posts:delete'],
+            ],
+        ],
+    ],
+]);
+
+$resources = app(ResourcePolicyService::class);
+
+$resources->attach($sharing, $post, actor: $admin);                // GrantOutcome::GRANTED, on post:42
+$resources->attach($archiving, Post::class, tenant: $organisation); // every post, in the organisation
+$resources->detach($sharing, $post, actor: $admin);                // 1, the attachments removed
+
+Authorization::for($user)->can('posts:read', $post);    // true for user 17, with no posts:read permission
+Authorization::for($admin)->can('posts:delete', $post); // false: the deny applies to everyone
+```
+
+The resource is a saved model (that record), a `[type, id]` pair, a `ResourceReference` with a type, a model class (the
+whole type) or a morph type as a string (the whole type). A pair names its record without asking the bound resource
+tenant resolver, since the call says where the attachment holds, so a pair the resolver cannot place is still attached.
+An unsaved model, anything that names no type, a type or key longer than 191 bytes, and a record whose key is `*` (which
+a check on the whole type stands for) are refused with `InvalidResourceException`. An attachment holds in a scope
+exactly as a grant does: a policy a tenant owns is attached in that tenant, or a tenant below it that the call names,
+and naming any other is refused with `GrantScopeMismatchException`; a platform policy is attached in the tenant named,
+else platform-wide. It reaches the tenants below its tenant unless `includeSubtree` is false, and holds in the
+application named, else in every application. Attaching what is already attached changes nothing and returns
+`GrantOutcome::UNCHANGED`, attaching it again with the other reach returns `REACH_CHANGED`, and `detach()` finds the
+attachment in the same scope and returns how many it removed. Each call is one transaction and one operation, and
+dispatches `Resource\PolicyAttached` or `Resource\PolicyDetached` once it commits, only when it changed something,
+carrying the resource's type, its key (null for the whole type), the policy, its name, the scope and the actor. Deleting
+the policy removes its attachments with its row. An attachment names its resource by type and key, so deleting the
+record leaves it in place: detach it when the record goes, with `detachAll($record)`, which detaches every policy
+attached to the record in every scope (never a whole type's), or let `authorization:prune` remove the attachments of
+records that no longer exist (see [Console commands](#console-commands)).
+
+A check on a record (a model, a pair, or an `AuthorizableResource` whose reference names one) reads the policies
+attached to that record and those attached to its type; a check on the type alone (a model class) reads those attached
+to the type; a check on any other string, or on no resource, reads none. A record whose key no attachment can name (one
+longer than 191 bytes, say) still reads its type's policies, its denies included. Only the attachments that hold in the
+tenant and application the check is decided in count, and a policy attached to the record and to its type counts once.
+They are read in one query and cached with the rest of the resolution: attaching or detaching refreshes the cached
+entries of the resource's type, and editing or deleting any policy refreshes every cached resource-policy entry.
+
+**Principals.** Every allow statement of a resource policy carries `principals`, a non-empty list of selectors naming
+whom it applies to:
+
+- `<morph type>:<id>` names a subject by reference: the subject's principal or its identity, by morph class (under
+  your morph map) and key, such as `user:17`.
+- `role:<role id>` names whoever holds that role in the tenant and application the check is decided in. It follows the
+  role hierarchy: with `hierarchy.enabled`, it also names whoever holds a role below that role, as the role's
+  permissions and policies reach them; with the hierarchy disabled, only whoever holds that role itself. The role is
+  named by its key, never its name, so a role of the same name that another tenant owns, or the role held for another
+  application, names no one. The roles a subject holds are read through the resolution cache, as its roles are, so
+  once warm a check that matches a role selector reads no role.
+
+A selector is an exact name, never a pattern: a space, `*` or `${` in one is refused, and each part is 1 to 191 bytes. A
+deny statement takes no `principals` (refused when the policy is saved) and applies to everyone checking the resource,
+wherever the check is decided. A statement that names principals applies only as part of a resource policy, so the rule
+is held at every write:
+
+- Attaching an inline policy to a resource, or a policy with an allow statement that names no principals, is refused
+  with `ResourcePolicyException`.
+- Attaching a policy whose statements name principals to an identity or a role (the trait methods, `GrantService`, a
+  sync and a write through a grantee's `policies()` relation alike) is refused with `ResourcePolicyException`.
+- Rewriting an attached policy's document so that it breaks the rule for where it is attached is refused with
+  `ResourcePolicyException`. `getPolicyName()` and `getStatements()` (the positions, from zero) say what broke it.
+
+**How a check decides with them.** A resource policy's denies count at the deny stage with every other deny, so one that
+matches denies everyone, a subject that holds the permission or an allow in its own policies included. An allow whose
+principals name the subject is an allow source like any other, and allows the check without the subject holding any
+permission; one whose principals do not name the subject is recorded as `principal_mismatch` and counts for nothing, an
+unmet authentication requirement on it included. A statement that names principals in a policy attached any other way
+(one from the policy store, or supplied through `withPolicies()`) is recorded the same way and never allows. The tenant
+stage runs first, so a resource of a tenant outside the subject's scope is still denied as `tenant_scope` before any
+policy is read: a resource policy never allows across tenants. When a subject is admitted to such a resource through a
+platform-wide permission, and the check runs at platform scope, a deny attached to the resource in its own tenant still
+applies: the resource's owner can lock it against everyone, a support user with a platform-wide grant included. That
+tenant's resource-policy allows do not reach the subject there. `withPolicies()` bypasses the resource's policies with
+the rest; give a supplied policy a resource with `Policy::withResource('post:42')` to have it evaluated as one.
+
+The decision, the trace and `explain()` name a resource policy's statements as they name any other, with the resource
+the policy is attached to: `post-42-sharing[<its key>]#0 sid="reviewers-read" on "post:42"`. `authorization:why-can`
+names its resource as an opaque identifier, so it reads no resource policies; explain a check on the model or the pair
+to see them.
 
 ### Writing policies
 
@@ -556,12 +669,15 @@ A policy document is a `version` (1, the default) and a list of `statements`. Ea
 | `not_actions`   | Instead of `actions`: the statement names every action none of these patterns matches     |
 | `resources`     | Optional: the resource patterns the statement names                                       |
 | `not_resources` | Instead of `resources`: the statement names every resource none of these patterns matches |
+| `principals`    | An allow in a resource policy only: whom it applies to, by reference or `role:<role id>`  |
 | `conditions`    | Optional: a map of operator to context key path to operand, every test of which must hold |
 
 A statement takes exactly one of `actions` and `not_actions`, and at most one of `resources` and `not_resources`; each
 is a non-empty list of non-empty strings. Without either resource list a statement names every resource and a check that
 names none. `not_resources` still scopes the statement to resources, so it never covers a check without one. The `sid`
-names the statement in the decision and the trace, and never changes how it is evaluated.
+names the statement in the decision and the trace, and never changes how it is evaluated. `principals` belongs to the
+allow statements of a policy attached to a resource, and to nothing else (see [Resource-based
+policies](#resource-based-policies)).
 
 Conditions name the operator first, then each context key it tests, as a dot path into the check's context:
 
@@ -1063,12 +1179,12 @@ Event::listen(static function (RoleDeleted $event): void {
 ```
 
 The change events (roles, permissions and policies created, updated and deleted; permissions granted to and revoked
-from a role; roles, permissions and policies granted to, revoked from and re-dated on a grantee; and
-`SystemOverrideUsed`) are `final readonly` snapshots of plain values: a record is a `Reference`, its morph class under
-your morph map and its key as a string, never a model, alongside names, the scope, expiries and times. An update
-carries the fields it changed, before and after. A policy event carries its document's version and SHA-256 digest,
-never the document. A delete lists every grantee that held the role, permission or policy, so the evidence says who
-lost access.
+from a role; roles, permissions and policies granted to, revoked from and re-dated on a grantee; policies attached to
+and detached from a resource, `Resource\PolicyAttached` and `Resource\PolicyDetached`; and `SystemOverrideUsed`) are
+`final readonly` snapshots of plain values: a record is a `Reference`, its morph class under your morph map and its key
+as a string, never a model, alongside names, the scope, expiries and times. An update carries the fields it changed,
+before and after. A policy event carries its document's version and SHA-256 digest, never the document. A delete lists
+every grantee that held the role, permission or policy, so the evidence says who lost access.
 
 Each is dispatched only once its write commits on the package's connection: inside your own transaction it waits for
 the outermost commit, and a transaction that rolls back dispatches nothing. Every event of one service call carries
@@ -1176,10 +1292,13 @@ grant rows record; it must name a row that exists, and without it they record no
 `authorization:prune` removes the grants that no longer count: expired grants, reported as `RoleExpired`,
 `PermissionExpired` or `PolicyExpired` with no actor, a role's expired grants of permissions, reported as
 `Role\PermissionExpired`, the grants of a grantee deleted without its model events, such as by a raw query, reported as
-revoked, and then the inline policies of such a grantee, reported as deleted. A soft-deleted grantee keeps its grants
-and its inline policies. Expired grants stop counting at their expiry with or without it, so pruning keeps the tables
-small rather than making checks correct. Like `model:prune`, it takes `--pretend`, which counts exactly what a run would
-remove, and `--chunk`, and is scheduled like any command:
+revoked, then the inline policies of such a grantee, reported as deleted, and last the resource policy attachments of a
+record that no longer exists, reported as `Resource\PolicyDetached`. The record's morph type is resolved to its model
+class as a grantee's is; a type that names no model class is reported and its records' attachments are left, and a whole
+type's attachments are never removed. A soft-deleted grantee keeps its grants and its inline policies, and a
+soft-deleted record its attachments. Expired grants stop counting at their expiry with or without it, so pruning keeps
+the tables small rather than making checks correct. Like `model:prune`, it takes `--pretend`, which counts exactly what
+a run would remove, and `--chunk`, and is scheduled like any command:
 
 ```php
 Schedule::command('authorization:prune')->daily();

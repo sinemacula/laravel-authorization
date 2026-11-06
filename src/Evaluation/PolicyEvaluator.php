@@ -36,6 +36,12 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  * the manager consults when the statements allow nothing, so it allows over an
  * insufficient authentication too.
  *
+ * A policy attached to a resource (AUTHZ-7.3) is decided with the others: its
+ * denies apply to everyone at the deny stage, and its allows only to a subject
+ * their `principals` name, at the allow stage, with no permission held. An
+ * allow that does not apply to the subject is recorded as a principal mismatch
+ * and bears on nothing, an unmet authentication requirement included.
+ *
  * A decision that read a requirement carries how long it may be reused: in the
  * session it was made in, until the earliest instant a met requirement it read
  * stops being met (N37).
@@ -156,6 +162,15 @@ final class PolicyEvaluator
                 continue;
             }
 
+            // An allow applies only to the subjects its source admits.
+            // Boundaries, guardrails and session caps (BL-48 to BL-50) will
+            // rank above a resource policy's allow when they arrive.
+            if ($stage === DecisionStage::ALLOW && !self::isForSubject($reference, $statement, $context)) {
+                $trace[] = new TraceEntry($stage, TraceOutcome::PRINCIPAL_MISMATCH, $reference);
+
+                continue;
+            }
+
             $assessment = $statement->assess($action, $resource, $context, $this->interpolator());
             $outcome    = self::outcomeOf($assessment);
             $unmet      = $stage === DecisionStage::ALLOW ? $assessment->unmetRequirement : null;
@@ -217,7 +232,7 @@ final class PolicyEvaluator
 
             foreach ($policy->statements as $index => $statement) {
                 $isDeny    = $statement->effect === PolicyEffect::DENY;
-                $reference = new StatementReference($policy->name, $index, $policy->id, $statement->sid);
+                $reference = new StatementReference($policy->name, $index, $policy->id, $statement->sid, $policy->resource);
 
                 $stage = $isDeny ? DecisionStage::DENY : DecisionStage::ALLOW;
 
@@ -231,16 +246,37 @@ final class PolicyEvaluator
     }
 
     /**
+     * Determine whether an allow statement applies to the check's subject, as
+     * its source admits: in a resource policy, only when one of its
+     * `principals` names the subject; in a policy attached any other way, only
+     * when it names no principals.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\StatementReference  $reference
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
+     * @return bool
+     */
+    private static function isForSubject(StatementReference $reference, Statement $statement, CheckContext $context): bool
+    {
+        if ($reference->resource === null) {
+            return $statement->principals === null;
+        }
+
+        return $statement->principals !== null && $context->isSubjectNamedBy($statement->principals);
+    }
+
+    /**
      * Return what a policy is ordered by: its name, then its stored key, then
-     * its document, so policies of one name take a fixed order too and two that
-     * tie on all three are the same policy.
+     * the resource it is attached to, then its document, so policies of one
+     * name take a fixed order too and two that tie on all four are the same
+     * policy, attached the same way.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $policy
      * @return string
      */
     private static function orderOf(Policy $policy): string
     {
-        return $policy->name . "\0" . ($policy->id ?? '') . "\0" . \json_encode($policy->toArray(), \JSON_THROW_ON_ERROR);
+        return $policy->name . "\0" . ($policy->id ?? '') . "\0" . ($policy->resource ?? '') . "\0" . \json_encode($policy->toArray(), \JSON_THROW_ON_ERROR);
     }
 
     /**

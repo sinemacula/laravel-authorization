@@ -27,13 +27,13 @@ use SineMacula\Laravel\Authorization\Evaluation\StatementValidator;
 final class StatementValidatorTest extends TestCase
 {
     /**
-     * KEYS lists exactly the seven keys a statement may carry.
+     * KEYS lists exactly the eight keys a statement may carry.
      *
      * @return void
      */
     public function testKeysConstant(): void
     {
-        self::assertSame(['sid', 'effect', 'actions', 'not_actions', 'resources', 'not_resources', 'conditions'], StatementValidator::KEYS);
+        self::assertSame(['sid', 'effect', 'actions', 'not_actions', 'resources', 'not_resources', 'principals', 'conditions'], StatementValidator::KEYS);
     }
 
     /**
@@ -482,6 +482,106 @@ final class StatementValidatorTest extends TestCase
 
         self::assertCount(1, $tests);
         self::assertSame($expected, $tests[0]['error']);
+    }
+
+    /**
+     * Provide principals an allow may name.
+     *
+     * @return iterable<string, array{list<string>}>
+     */
+    public static function validPrincipals(): iterable
+    {
+        yield 'a subject' => [['user:1']];
+        yield 'a role' => [['role:9b2c6f0e-1d2a-4c3b-8e4f-5a6b7c8d9e0f']];
+        yield 'a class morph type' => [['App\Models\User:42']];
+        yield 'an id with a colon' => [['user:a:b']];
+        yield 'the longest parts' => [[\str_repeat('t', 191) . ':' . \str_repeat('i', 191)]];
+        yield 'several' => [['user:1', 'role:2']];
+    }
+
+    /**
+     * An allow's principals are taken when they are a non-empty list of
+     * selectors, each a subject reference or a role by its key, and none is
+     * nothing to check.
+     *
+     * @param  list<string>  $principals
+     * @return void
+     */
+    #[DataProvider('validPrincipals')]
+    public function testAssertPrincipalsAcceptsSelectors(array $principals): void
+    {
+        StatementValidator::assertPrincipals(PolicyEffect::ALLOW, $principals);
+        StatementValidator::assertPrincipals(PolicyEffect::DENY, null);
+
+        self::assertSame(1, \preg_match(StatementValidator::SELECTOR_PATTERN, $principals[0]));
+    }
+
+    /**
+     * Provide principals that are refused, with the reason.
+     *
+     * @return iterable<string, array{\SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect, array<int, mixed>, string}>
+     */
+    public static function invalidPrincipals(): iterable
+    {
+        $list     = 'Policy statement principals must be a non-empty list of selectors.';
+        $selector = static fn (string $selector): string => "Policy statement principal '{$selector}' must be a subject reference <type>:<id> or a role role:<role id>.";
+
+        yield 'on a deny' => [PolicyEffect::DENY, ['user:1'], 'Policy statement principals name whom an allow applies to; a deny takes none, and applies to everyone.'];
+        yield 'empty' => [PolicyEffect::ALLOW, [], $list];
+        yield 'not a list' => [PolicyEffect::ALLOW, [1 => 'user:1'], $list];
+        yield 'an empty selector' => [PolicyEffect::ALLOW, [''], $list];
+        yield 'not a string' => [PolicyEffect::ALLOW, [7], $list];
+        yield 'no colon' => [PolicyEffect::ALLOW, ['user'], $selector('user')];
+        yield 'no type' => [PolicyEffect::ALLOW, [':1'], $selector(':1')];
+        yield 'no id' => [PolicyEffect::ALLOW, ['user:'], $selector('user:')];
+        yield 'a wildcard id' => [PolicyEffect::ALLOW, ['user:*'], $selector('user:*')];
+        yield 'a wildcard type' => [PolicyEffect::ALLOW, ['*:1'], $selector('*:1')];
+        yield 'a space' => [PolicyEffect::ALLOW, ['user:1 2'], $selector('user:1 2')];
+        yield 'a reference' => [PolicyEffect::ALLOW, ['user:${subject.id}'], $selector('user:${subject.id}')];
+        yield 'a NUL byte' => [PolicyEffect::ALLOW, ["user:1\0"], 'Policy statement principal \'user:1'];
+        yield 'a type too long' => [PolicyEffect::ALLOW, [\str_repeat('t', 192) . ':1'], 'must be a subject reference'];
+        yield 'an id too long' => [PolicyEffect::ALLOW, ['user:' . \str_repeat('i', 192)], 'must be a subject reference'];
+        yield 'a valid then an invalid one' => [PolicyEffect::ALLOW, ['user:1', 'role'], $selector('role')];
+    }
+
+    /**
+     * Principals that are not a non-empty list of selectors, a selector that is
+     * not `<type>:<id>` or that holds a space, `*`, `${` or a NUL byte, or
+     * principals on a deny, are refused.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect  $effect
+     * @param  array<int, mixed>  $principals
+     * @param  string  $message
+     * @return void
+     */
+    #[DataProvider('invalidPrincipals')]
+    public function testAssertPrincipalsRefusesMalformedPrincipals(PolicyEffect $effect, array $principals, string $message): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage($message);
+
+        StatementValidator::assertPrincipals($effect, $principals); // @phpstan-ignore argument.type
+    }
+
+    /**
+     * principalsOf() reads no principals as null and a list of selectors as it
+     * is, and refuses anything that is not a non-empty list of strings.
+     *
+     * @return void
+     */
+    public function testPrincipalsOfReadsTheList(): void
+    {
+        self::assertNull(StatementValidator::principalsOf(['effect' => 'allow']));
+        self::assertSame(['user:1', 'role:2'], StatementValidator::principalsOf(['principals' => ['user:1', 'role:2']]));
+
+        foreach ([null, 'user:1', [], ['user:1' => 'x'], [''], [1]] as $principals) {
+            try {
+                StatementValidator::principalsOf(['principals' => $principals]);
+                self::fail('The principals were not refused.');
+            } catch (\InvalidArgumentException $exception) {
+                self::assertSame('Policy statement principals must be a non-empty list of selectors.', $exception->getMessage());
+            }
+        }
     }
 
     /**

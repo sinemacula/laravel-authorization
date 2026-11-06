@@ -19,6 +19,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementFreshness;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\RecordingResourceAttributes;
 use Tests\Feature\Stubs\RecordingSubjectAttributes;
@@ -304,6 +305,22 @@ final class CheckContextFactoryTest extends TestCase
         $context = $this->factory()->make([], new Subject($user, $user, session: 'session-1'));
 
         self::assertSame(MatchOutcome::DOES_NOT_MATCH, $context->assessRequirement(new AuthenticationRequirement(['multifactor' => null]))->outcome);
+    }
+
+    /**
+     * A context made for a subject tells whether a resource policy's principals
+     * name it; one made without a subject is named by none.
+     *
+     * @return void
+     */
+    public function testAContextKnowsWhomItsSubjectIs(): void
+    {
+        $user    = new Reference('user', '1');
+        $context = $this->factory()->make([], new Subject($user, $user));
+
+        self::assertTrue($context->isSubjectNamedBy(['user:1']));
+        self::assertFalse($context->isSubjectNamedBy(['user:2']));
+        self::assertFalse($this->factory()->make()->isSubjectNamedBy(['user:1']));
     }
 
     /**

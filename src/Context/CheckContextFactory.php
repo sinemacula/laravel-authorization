@@ -10,6 +10,7 @@ use SineMacula\Laravel\Authorization\Contracts\ContextSource;
 use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
 use SineMacula\Laravel\Authorization\Contracts\RequestContext;
 use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
+use SineMacula\Laravel\Authorization\Evaluation\PrincipalSelectors;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementCheck;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
@@ -96,7 +97,8 @@ final readonly class CheckContextFactory
     /**
      * Make the context of one check, holding what the caller passes under
      * `input`, and the check's subject and resource under `subject` and
-     * `resource`, judging its authentication requirements for the subject.
+     * `resource`, judging its authentication requirements for the subject, whom
+     * a resource policy's `principals` may name.
      *
      * @param  array<array-key, mixed>  $input
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
@@ -109,6 +111,7 @@ final readonly class CheckContextFactory
             [self::INPUT => $input],
             [...$this->builders, ...$this->attributes->builders($subject, $resource)],
             new RequirementCheck($this->requirements, $subject),
+            $subject === null ? null : new PrincipalSelectors($subject),
         );
     }
 

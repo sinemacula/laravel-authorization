@@ -16,7 +16,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Two-tier cache (in-memory memo plus optional persistent store) for what a
- * grantee resolves to: its roles, its permissions and its policies.
+ * grantee resolves to: its roles, the keys of the roles it reaches, its
+ * permissions and its policies, and for what a resource resolves to: the
+ * policies attached to it and to its type.
  *
  * Persistent entries are keyed by kind, grantee and the tenant the tenant scope
  * applies, since the roles and permissions a grantee resolves to depend on it.
@@ -41,6 +43,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 final readonly class ResolutionCache
 {
     use HasContainerInstance;
+
+    /** @var list<string> The kinds of entry that hold policy documents, hydrated under the policy limits. */
+    private const array POLICY_KINDS = ['policies', 'resource-policies', 'resource-type-policies'];
 
     /** @var \SineMacula\Laravel\Authorization\Cache\ResolutionMemo In-memory tier, keyed by full cache key. */
     private ResolutionMemo $memo;
@@ -107,13 +112,52 @@ final readonly class ResolutionCache
     public function rememberPolicies(object $grantee, \Closure $resolve): array
     {
         /** @var list<\SineMacula\Laravel\Authorization\Evaluation\Policy> */
-        return $this->remember(
-            'policies',
-            $grantee,
-            $resolve,
-            static fn (array $stored): array => self::policies($stored),
-            static fn (Policy $policy): array => ['id' => $policy->id, 'document' => $policy->toArray()],
-        );
+        return $this->remember('policies', $grantee, $resolve, self::policies(...), static fn (Policy $policy): array => self::encodePolicy($policy));
+    }
+
+    /**
+     * Return the keys of the roles the grantee holds in the current scope, with
+     * the keys of the roles above them when the hierarchy is enabled, resolving
+     * them on a miss.
+     *
+     * The entry is keyed and pinned as the grantee's roles are: by the grantee,
+     * the tenant and the application, holding while the grantee's grants, every
+     * role it reaches and the tenant chain are unchanged, so a check that
+     * matches a resource policy's role selector reads no role once it is warm.
+     *
+     * @param  object  $grantee
+     * @param  \Closure(\SineMacula\Laravel\Authorization\Cache\ResolutionPins): \SineMacula\Laravel\Authorization\Cache\Resolution<string>  $resolve
+     * @return list<string>
+     */
+    public function rememberRoleKeys(object $grantee, \Closure $resolve): array
+    {
+        /** @var list<string> */
+        return $this->remember('role-keys', $grantee, $resolve, static fn (array $stored): array => self::names($stored));
+    }
+
+    /**
+     * Return the policies attached to the record of the type with the key, and
+     * to the type, or to the type alone when there is no key, resolving them on
+     * a miss. The persistent tier holds their documents, each with the resource
+     * it is attached to.
+     *
+     * The entry is keyed by the resource, the tenant and the application, and
+     * records no grantee: its resolution pins the versions the resource's type
+     * and every resource policy share before it reads (see `ResolutionPins`). A
+     * type alone is kept under a kind of its own, so its entry is never the
+     * entry of a record, whatever the record's key.
+     *
+     * @param  string  $type
+     * @param  string|null  $id
+     * @param  \Closure(\SineMacula\Laravel\Authorization\Cache\ResolutionPins): \SineMacula\Laravel\Authorization\Cache\Resolution<mixed>  $resolve
+     * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>
+     */
+    public function rememberResourcePolicies(string $type, ?string $id, \Closure $resolve): array
+    {
+        $kind = $id === null ? 'resource-type-policies' : 'resource-policies';
+
+        /** @var list<\SineMacula\Laravel\Authorization\Evaluation\Policy> */
+        return $this->remember($kind, new Reference($type, $id ?? '*'), $resolve, self::policies(...), static fn (Policy $policy): array => self::encodePolicy($policy), false);
     }
 
     /**
@@ -200,16 +244,18 @@ final readonly class ResolutionCache
     /**
      * Return the entry of the kind for the grantee from the memo, then from the
      * store while its versions hold, then from the resolution, storing what the
-     * resolution finds when nothing it read changed as it ran.
+     * resolution finds when nothing it read changed as it ran. The grantee's
+     * version is pinned first, unless the entry is not a grantee's.
      *
      * @param  string  $kind
      * @param  object  $grantee
      * @param  \Closure(\SineMacula\Laravel\Authorization\Cache\ResolutionPins): \SineMacula\Laravel\Authorization\Cache\Resolution<mixed>  $resolve
      * @param  \Closure(array<mixed>): list<mixed>  $decode
      * @param  (\Closure(mixed): mixed)|null  $encode
+     * @param  bool  $isGrantee
      * @return list<mixed>
      */
-    private function remember(string $kind, object $grantee, \Closure $resolve, \Closure $decode, ?\Closure $encode = null): array
+    private function remember(string $kind, object $grantee, \Closure $resolve, \Closure $decode, ?\Closure $encode = null, bool $isGrantee = true): array
     {
         $memoKey = $kind . ':' . PrincipalCacheKey::for($grantee);
 
@@ -221,7 +267,10 @@ final readonly class ResolutionCache
         }
 
         $pins = new ResolutionPins($this->store);
-        $pins->grantee($grantee);
+
+        if ($isGrantee) {
+            $pins->grantee($grantee);
+        }
 
         $held       = $this->isChainHeldOncePinned($pins);
         $resolution = $resolve($pins);
@@ -319,13 +368,13 @@ final readonly class ResolutionCache
      * Return the key of the kind's entry for the grantee under the tenant the
      * tenant scope applies and the subject's application.
      *
-     * A policies entry is also keyed by the policy limits it was hydrated
-     * under. Its documents were checked against the limits when they were read
-     * from the database, and are not checked again when read from the store, so
-     * a change to any limit makes every entry built under the old limits miss,
-     * and the policies are read again and checked against the new ones. The
-     * memo, which lasts one request or job, is keyed without them, so a memo
-     * hit costs nothing more.
+     * A policies entry, a grantee's or a resource's, is also keyed by the
+     * policy limits it was hydrated under. Its documents were checked against
+     * the limits when they were read from the database, and are not checked
+     * again when read from the store, so a change to any limit makes every
+     * entry built under the old limits miss, and the policies are read again
+     * and checked against the new ones. The memo, which lasts one request or
+     * job, is keyed without them, so a memo hit costs nothing more.
      *
      * @param  string  $kind
      * @param  object  $grantee
@@ -339,7 +388,7 @@ final readonly class ResolutionCache
         return "{$this->prefix}:{$kind}:" . PrincipalCacheKey::for($grantee)
             . ':' . ($tenant === null ? 'platform' : \implode(':', $tenant))
             . ':' . ($application === null ? 'every' : 'app:' . $application)
-            . ($kind === 'policies' ? ':limits:' . PolicyLimits::fromConfig()->fingerprint() : '');
+            . (\in_array($kind, self::POLICY_KINDS, true) ? ':limits:' . PolicyLimits::fromConfig()->fingerprint() : '');
     }
 
     /**
@@ -392,8 +441,21 @@ final readonly class ResolutionCache
     }
 
     /**
+     * Return what the persistent tier holds of a policy: its stored key, its
+     * document and, for a resource policy, the resource it is attached to.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $policy
+     * @return array{id: string|null, document: array<string, mixed>, resource: string|null}
+     */
+    private static function encodePolicy(Policy $policy): array
+    {
+        return ['id' => $policy->id, 'document' => $policy->toArray(), 'resource' => $policy->resource];
+    }
+
+    /**
      * Hydrate stored policy documents back into evaluation policies, each with
-     * its stored key.
+     * its stored key and, for a resource policy, the resource it is attached
+     * to.
      *
      * @param  array<mixed>  $stored
      * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>
@@ -405,15 +467,16 @@ final readonly class ResolutionCache
         $policies = [];
 
         foreach ($stored as $entry) {
-            $id = \is_array($entry) ? $entry['id'] ?? null : null;
+            $id       = \is_array($entry) ? $entry['id']       ?? null : null;
+            $resource = \is_array($entry) ? $entry['resource'] ?? null : null;
 
-            if (!\is_array($entry) || !\is_array($entry['document'] ?? null) || ($id !== null && !\is_string($id))) {
+            if (!\is_array($entry) || !\is_array($entry['document'] ?? null) || ($id !== null && !\is_string($id)) || ($resource !== null && !\is_string($resource))) {
                 throw new \UnexpectedValueException('Cached policy entry is not a policy document with its key.');
             }
 
             /** @var array<string, mixed> $document */
             $document   = $entry['document'];
-            $policies[] = Policy::fromArray($document)->withId($id);
+            $policies[] = Policy::fromArray($document)->withId($id)->withResource($resource);
         }
 
         return $policies;

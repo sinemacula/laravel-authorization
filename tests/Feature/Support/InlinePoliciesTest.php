@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyOwnerException;
 use SineMacula\Laravel\Authorization\Exceptions\OwnerChangedException;
+use SineMacula\Laravel\Authorization\Exceptions\ResourcePolicyException;
 use SineMacula\Laravel\Authorization\Exceptions\SystemInlinePolicyException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -186,8 +187,8 @@ final class InlinePoliciesTest extends TestCase
     }
 
     /**
-     * The stored read returns a policy's name and owner columns as stored, and
-     * null for a key no policy has.
+     * The stored read returns a policy's name, owner columns and document as
+     * stored, and null for a key no policy has.
      *
      * @return void
      */
@@ -197,7 +198,9 @@ final class InlinePoliciesTest extends TestCase
         $stored = InlinePolicies::stored($inline->id);
 
         self::assertInstanceOf(Policy::class, $stored);
-        self::assertSame(['id' => $inline->id, 'name' => 'mine', 'owner_type' => 'user', 'owner_id' => '1'], $stored->getAttributes());
+        self::assertSame(['id', 'name', 'owner_type', 'owner_id', 'document'], \array_keys($stored->getAttributes()));
+        self::assertSame([$inline->id, 'mine', 'user', '1'], [$stored->id, $stored->name, $stored->owner_type, $stored->owner_id]);
+        self::assertSame('mine', $stored->document['name'] ?? null);
         self::assertNull(InlinePolicies::stored('00000000-0000-0000-0000-000000000000'));
         self::assertNull(InlinePolicies::stored(null));
         self::assertNull(InlinePolicies::stored([$inline->id]));
@@ -318,6 +321,45 @@ final class InlinePoliciesTest extends TestCase
 
         self::assertSame(0, Policy::query()->count());
         self::assertSame(0, DB::table('authorizable_policies')->count());
+    }
+
+    /**
+     * A policy naming principals is never attached to a grantee or a role,
+     * through the grant service or the `policies()` relation, read from the
+     * stored row: only a resource policy names principals.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPolicyNamingPrincipalsIsNotAttachableToAGrantee(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $sharing = Policy::create(['name' => 'sharing', 'document' => ['statements' => [
+            ['effect' => 'deny', 'actions' => ['posts:delete']],
+            ['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']],
+        ]]]);
+
+        $attachments = [
+            static fn () => InlinePolicies::assertAttachable($sharing, Reference::of($user)),
+            static fn () => $user->attachPolicy($sharing),
+            static fn () => $user->policies()->attach($sharing->id),
+            static fn () => Role::create(['name' => 'editor'])->attachPolicy($sharing),
+        ];
+
+        foreach ($attachments as $attach) {
+            try {
+                $attach();
+                self::fail('The policy was not refused.');
+            } catch (ResourcePolicyException $exception) {
+                self::assertSame('sharing', $exception->getPolicyName());
+                self::assertSame([1], $exception->getStatements());
+            }
+        }
+
+        self::assertSame(0, DB::table('authorizable_policies')->count());
+
+        InlinePolicies::assertAttachable(self::policy('plain'), Reference::of($user));
     }
 
     /**

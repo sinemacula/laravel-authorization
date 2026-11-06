@@ -1487,6 +1487,55 @@ final class StatementTest extends TestCase
     }
 
     /**
+     * An allow statement's principals are read from its document, kept on the
+     * statement and written back with it; a statement without them has none and
+     * writes none.
+     *
+     * @return void
+     */
+    public function testPrincipalsRoundTrip(): void
+    {
+        $data      = ['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1', 'role:2']];
+        $statement = Statement::fromArray($data);
+
+        self::assertSame(['user:1', 'role:2'], $statement->principals);
+        self::assertSame(['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1', 'role:2']], $statement->toArray());
+        self::assertNull(Statement::fromArray(['effect' => 'allow', 'actions' => ['posts:read']])->principals);
+        self::assertArrayNotHasKey('principals', Statement::fromArray(['effect' => 'allow', 'actions' => ['posts:read']])->toArray());
+        $full = Statement::fromArray([...$data, 'resources' => ['*'], 'conditions' => ['eq' => ['input.a' => 'b']]]);
+
+        self::assertSame(['effect', 'actions', 'resources', 'principals', 'conditions'], \array_keys($full->toArray()));
+    }
+
+    /**
+     * Principals on a deny, or malformed principals, are refused, read from a
+     * document or built in code.
+     *
+     * @return void
+     */
+    public function testRefusesPrincipalsOnADenyOrMalformed(): void
+    {
+        $builds = [
+            static fn (): Statement => Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read'], 'principals' => ['user:1']]),
+            static fn (): Statement => Statement::fromArray(['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => 'user:1']),
+            static fn (): Statement => Statement::fromArray(['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user']]),
+            static fn (): Statement => new Statement(PolicyEffect::DENY, ['posts:read'], principals: ['user:1']),
+            static fn (): Statement => new Statement(PolicyEffect::ALLOW, ['posts:read'], principals: []),
+        ];
+
+        foreach ($builds as $build) {
+            try {
+                $build();
+                self::fail('The principals were not refused.');
+            } catch (\InvalidArgumentException $exception) {
+                self::assertStringStartsWith('Policy statement principal', $exception->getMessage());
+            }
+        }
+
+        self::assertSame(['user:1'], (new Statement(PolicyEffect::ALLOW, ['posts:read'], principals: ['user:1']))->principals);
+    }
+
+    /**
      * Assert a match result's outcome and trace detail.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome  $outcome

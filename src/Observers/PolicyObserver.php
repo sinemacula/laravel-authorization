@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Observers\Support\RecordChanges;
 use SineMacula\Laravel\Authorization\Support\DocumentDigest;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
+use SineMacula\Laravel\Authorization\Support\PolicyPrincipals;
 use SineMacula\Laravel\Authorization\Support\RecordOwner;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
@@ -49,7 +50,9 @@ final class PolicyObserver
      * neither, and a tenant fixed once the policy is created (see
      * `RecordOwner`); likewise both owner columns or neither, the grantee an
      * inline policy belongs to fixed once it is created, and an inline policy
-     * never a system one (see `InlinePolicies`).
+     * never a system one (see `InlinePolicies`); and a rewritten document that
+     * keeps the `principals` rule for where the policy is attached (see
+     * `PolicyPrincipals`).
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return void
@@ -58,11 +61,13 @@ final class PolicyObserver
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyOwnerException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\OwnerChangedException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\SystemInlinePolicyException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\ResourcePolicyException
      */
     public function saving(Policy $policy): void
     {
         RecordOwner::assertValid($policy, 'policy');
         InlinePolicies::assertValid($policy);
+        PolicyPrincipals::assertRewritable($policy);
     }
 
     /**

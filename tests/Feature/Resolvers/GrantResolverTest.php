@@ -9,6 +9,7 @@ use Illuminate\Cache\Repository;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Cache\VersionedStore;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
@@ -225,6 +226,69 @@ final class GrantResolverTest extends TestCase
     }
 
     /**
+     * The keys of the roles reached resolve to the roles held and, with the
+     * hierarchy enabled, those above them, each once, pinning every role
+     * reached, expiring with the nearest grant, in three queries.
+     *
+     * @return void
+     */
+    public function testRoleKeysComeThroughTheHierarchyAndPinEachRole(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $parent = Role::create(['name' => 'reader']);
+        $role   = Role::create(['name' => 'writer', 'parent_id' => $parent->id]);
+
+        $user->assignRole($role, Carbon::parse('2026-07-01 12:10:00'));
+        $user->assignRole($parent);
+
+        [$pins, $store] = self::pins();
+
+        $resolution = null;
+        $queries    = self::queriesFor(static function () use ($user, $pins, &$resolution): void {
+            $resolution = GrantResolver::roleKeys($user->roles(), $pins);
+        });
+
+        self::assertInstanceOf(Resolution::class, $resolution);
+        self::assertEqualsCanonicalizing([$role->id, $parent->id], $resolution->value);
+        self::assertCount(2, $resolution->value);
+        self::assertSame(600, $resolution->expiresIn);
+        self::assertTrue($resolution->stable);
+        self::assertSame(3, $queries);
+        self::assertEqualsCanonicalizing([$store->roleKey($role->id), $store->roleKey($parent->id)], \array_keys($pins->tokens()));
+
+        config()->set('authorization.hierarchy.enabled', false);
+
+        self::assertEqualsCanonicalizing([$role->id, $parent->id], GrantResolver::roleKeys($user->roles(), new ResolutionPins)->value);
+
+        $user->revokeRole($parent);
+
+        self::assertSame([$role->id], GrantResolver::roleKeys($user->roles(), new ResolutionPins)->value);
+    }
+
+    /**
+     * A role moved under a parent the resolution had not read still resolves to
+     * the parent's key, read afresh, but is marked unstable so it is not
+     * stored.
+     *
+     * @return void
+     */
+    public function testRoleKeysWhoseHierarchyMovesWhileResolvingAreUnstable(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $parent = Role::create(['name' => 'publisher']);
+        $role   = Role::create(['name' => 'editor']);
+
+        $user->assignRole($role);
+
+        $store = new VersionedStore(new Repository(self::onFirstPin(static fn () => DB::table('roles')->where('id', $role->id)->update(['parent_id' => $parent->id]))), 'authz');
+
+        $resolution = GrantResolver::roleKeys($user->roles(), new ResolutionPins($store));
+
+        self::assertFalse($resolution->stable);
+        self::assertEqualsCanonicalizing([$role->id, $parent->id], $resolution->value);
+    }
+
+    /**
      * Policies resolve in the order they were attached, pinning each, and
      * expire with the nearest attachment.
      *
@@ -382,6 +446,22 @@ final class GrantResolverTest extends TestCase
             'message' => "Authorization: malformed policy '{$policy->id}' denies every check for its holder: {$reason}",
             'context' => ['policy_id' => $policy->id, 'policy_name' => 'broken', 'reason' => $reason],
         ]], $logger->records);
+    }
+
+    /**
+     * One policy is hydrated for evaluation under its stored name and key, as
+     * the resource policy resolver hydrates each it reads.
+     *
+     * @return void
+     */
+    public function testHydratesOnePolicy(): void
+    {
+        $policy = Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'name' => 'other', 'statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
+
+        $hydrated = GrantResolver::hydrate($policy);
+
+        self::assertSame(['readers', $policy->id, null], [$hydrated->name, $hydrated->id, $hydrated->resource]);
+        self::assertSame(['posts:read'], $hydrated->statements[0]->actions);
     }
 
     /**

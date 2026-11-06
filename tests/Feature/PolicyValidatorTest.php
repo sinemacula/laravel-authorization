@@ -100,6 +100,30 @@ final class PolicyValidatorTest extends TestCase
     }
 
     /**
+     * An allow's principals are accepted on write when they are selectors; a
+     * deny naming principals, or a selector that is not a subject reference or
+     * a role by its key, is refused.
+     *
+     * @return void
+     */
+    public function testChecksThePrincipalsOnWrite(): void
+    {
+        self::assertSame([], self::validator()->errors(self::document([['effect' => 'allow', 'actions' => ['a'], 'principals' => ['user:1', 'role:9']]])));
+        self::assertSame(
+            ['Policy statement principals name whom an allow applies to; a deny takes none, and applies to everyone.'],
+            self::validator()->errors(self::document([['effect' => 'deny', 'actions' => ['a'], 'principals' => ['user:1']]])),
+        );
+        self::assertSame(
+            ['Policy statement principal \'admins\' must be a subject reference <type>:<id> or a role role:<role id>.'],
+            self::validator()->errors(self::document([['effect' => 'allow', 'actions' => ['a'], 'principals' => ['admins']]])),
+        );
+        self::assertSame(
+            ['Policy statement principals must be a non-empty list of selectors.'],
+            self::validator()->errors(self::document([['effect' => 'allow', 'actions' => ['a'], 'principals' => []]])),
+        );
+    }
+
+    /**
      * A document over the limits is refused for each limit, alongside any
      * reason it is not a valid policy.
      *

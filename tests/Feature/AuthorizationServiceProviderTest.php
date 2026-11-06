@@ -60,6 +60,7 @@ use SineMacula\Laravel\Authorization\Services\ApplicationAccess;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
+use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -356,7 +357,7 @@ final class AuthorizationServiceProviderTest extends TestCase
      */
     public function testBindsTheManagementServicesAsSingletons(): void
     {
-        foreach ([RoleService::class, PermissionService::class, PolicyService::class, GrantService::class, ApplicationAccess::class] as $service) {
+        foreach ([RoleService::class, PermissionService::class, PolicyService::class, GrantService::class, ResourcePolicyService::class, ApplicationAccess::class] as $service) {
             self::assertTrue($this->app?->isShared($service), $service);
             self::assertInstanceOf($service, $this->app->make($service));
         }

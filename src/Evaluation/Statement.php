@@ -21,6 +21,14 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
  * (every resource, and a check that names none). An optional `sid` names the
  * statement in traces; it never changes how the statement is evaluated.
  *
+ * An allow statement in a policy attached to a resource names the subjects it
+ * applies to in `principals` (AUTHZ-7.3): each a subject reference (`<morph
+ * type>:<id>`) or a role by its key (`role:<role id>`). The evaluator applies
+ * such an allow only to a subject a selector names, applies an allow in a
+ * resource policy that names none to nobody, and an allow that names principals
+ * in a policy attached any other way to nobody either. A deny statement takes
+ * no `principals`.
+ *
  * Conditions map each operator to the context keys it tests and their operands,
  * for example `['eq' => ['input.tenant' => 'org-1']]`, and every test of every
  * operator must hold. A key is a dot path of the check's context, its namespace
@@ -81,6 +89,7 @@ final readonly class Statement
      * @param  string|null  $sid
      * @param  array<int, string>|null  $notActions
      * @param  array<int, string>|null  $notResources
+     * @param  array<int, string>|null  $principals
      *
      * @throws \InvalidArgumentException
      */
@@ -106,8 +115,12 @@ final readonly class Statement
 
         /** Resource patterns naming every resource this statement does not; null when it does not use them. */
         public ?array $notResources = null,
+
+        /** The subjects an allow in a resource policy applies to, each `<type>:<id>` or `role:<role id>`; null when it names none. */
+        public ?array $principals = null,
     ) {
         StatementValidator::assertTargets($actions, $notActions, $resources, $notResources);
+        StatementValidator::assertPrincipals($effect, $principals);
 
         $this->operatorErrors = StatementValidator::operatorErrors($conditions);
         $this->tests          = StatementValidator::conditionTests($conditions);
@@ -133,6 +146,7 @@ final readonly class Statement
             sid: StatementValidator::sidOf($data),
             notActions: StatementValidator::patternsOf($data, 'not_actions'),
             notResources: StatementValidator::patternsOf($data, 'not_resources'),
+            principals: StatementValidator::principalsOf($data),
         );
 
         foreach ([...$statement->operatorErrors, ...\array_column($statement->tests, 'error')] as $error) {
@@ -160,6 +174,7 @@ final readonly class Statement
             'not_actions'   => $this->notActions,
             'resources'     => $this->resources,
             'not_resources' => $this->notResources,
+            'principals'    => $this->principals,
             'conditions'    => $this->conditions === [] ? null : $this->conditions,
         ], static fn (mixed $value): bool => $value !== null);
     }

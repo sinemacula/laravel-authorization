@@ -22,10 +22,12 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
+use SineMacula\Laravel\Authorization\Evaluation\PrincipalSelectors;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
+use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
@@ -64,6 +66,7 @@ final class AuthorizationManager
      * @param  \Illuminate\Contracts\Events\Dispatcher|null  $events
      * @param  \Illuminate\Contracts\Translation\Translator|null  $translator
      * @param  \SineMacula\Laravel\Authorization\Context\CheckContextFactory|null  $contexts
+     * @param  \SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver|null  $resourcePolicies
      */
     public function __construct(
 
@@ -87,6 +90,9 @@ final class AuthorizationManager
 
         /** Makes each check's context from its sources; null gives a check only what the caller passes, under `input`. */
         private readonly ?CheckContextFactory $contexts = null,
+
+        /** Reads the policies attached to a check's resource and its type; null reads none. */
+        private readonly ?ResourcePolicyResolver $resourcePolicies = null,
     ) {}
 
     /**
@@ -295,8 +301,9 @@ final class AuthorizationManager
 
     /**
      * Return a scoped manager that evaluates only the supplied policies,
-     * bypassing the principal's own attached policies and any configured policy
-     * store.
+     * bypassing the principal's own attached policies, any configured policy
+     * store and the policies attached to the resource. A supplied policy given
+     * a resource (`Policy::withResource()`) is evaluated as a resource policy.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
      * @return self
@@ -391,11 +398,16 @@ final class AuthorizationManager
 
     /**
      * Decide the action from the subject's grants: its policies' statements,
-     * and its identity's, by their deny and allow stages, then, when they allow
-     * nothing, a permission the subject holds. A policy document that cannot be
-     * read denies the check as an invalid policy. The subject's identity, when
-     * it is another model, contributes its policies and its grants (see
-     * `SubjectGrants`).
+     * and its identity's, and those of the policies attached to the resource
+     * and its type, by their deny and allow stages, then, when they allow
+     * nothing, a permission the subject holds. A resource policy's denies apply
+     * to everyone, and its allows to the subjects their `principals` name, with
+     * no permission held; by now the tenant stage has admitted the resource, so
+     * a resource policy never allows across tenants, and a deny attached to the
+     * resource in its own tenant applies even once the check falls back to
+     * platform scope. A policy document that cannot be read denies the check as
+     * an invalid policy. The subject's identity, when it is another model,
+     * contributes its policies and its grants (see `SubjectGrants`).
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
@@ -406,7 +418,7 @@ final class AuthorizationManager
     private function decideGrants(Subject $subject, string $action, ?ResourceReference $resource, array $context): Decision
     {
         try {
-            $policies = $this->gatherPolicies($subject);
+            $policies = $this->gatherPolicies($subject, $resource);
         } catch (InvalidPolicyDocumentException) {
             return Decision::deny(DecisionReason::INVALID_POLICY, DecisionStage::DENY);
         }
@@ -417,7 +429,7 @@ final class AuthorizationManager
         // (N27). Without a factory, the subject and resource still supply their
         // built-in keys.
         $checkContext = $this->contexts?->make($context, $subject, $resource)
-            ?? new CheckContext([CheckContextFactory::INPUT => $context], (new AttributeNamespaces)->builders($subject, $resource));
+            ?? new CheckContext([CheckContextFactory::INPUT => $context], (new AttributeNamespaces)->builders($subject, $resource), null, new PrincipalSelectors($subject));
         $decision = $this->evaluator->evaluate($policies, $action, $resource?->identifier, $checkContext);
 
         return $decision->stage === DecisionStage::IMPLICIT ? $decision->withPermission(SubjectGrants::holdsPermission($subject, $action)) : $decision;
@@ -436,26 +448,28 @@ final class AuthorizationManager
     }
 
     /**
-     * Gather the policies applicable to the supplied subject.
+     * Gather the policies applicable to the supplied subject and resource.
      *
      * When a per-call override is in effect, it is returned verbatim. Otherwise
      * the manager delegates to the bound `PolicyResolver` for the subject —
      * consumers swap the resolver to introduce tenant scoping or other
      * gathering strategies without touching the manager — and adds the policies
-     * attached to its identity when that is another model.
+     * attached to its identity when that is another model, and those attached
+     * to the resource and its type (see `ResourcePolicyResolver`).
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
      *
      * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
      */
-    private function gatherPolicies(Subject $subject): array
+    private function gatherPolicies(Subject $subject, ?ResourceReference $resource): array
     {
         if ($this->policyOverride !== null) {
             return $this->policyOverride;
         }
 
-        return [...$this->policyResolver->policiesFor($subject->subject), ...SubjectGrants::identityPolicies($subject)];
+        return [...$this->policyResolver->policiesFor($subject->subject), ...SubjectGrants::identityPolicies($subject), ...$this->resourcePolicies?->policiesFor($resource) ?? []];
     }
 
     /**

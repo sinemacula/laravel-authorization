@@ -16,6 +16,9 @@ enum TraceOutcome: string
     /** The statement does not name the action or the resource. */
     case NOT_APPLICABLE = 'not_applicable';
 
+    /** The allow statement names the action but not the subject: a resource policy's principals do not name it, or a policy attached any other way carries principals. */
+    case PRINCIPAL_MISMATCH = 'principal_mismatch';
+
     /** The statement names the action and the resource, and its conditions hold. */
     case MATCHED = 'matched';
 

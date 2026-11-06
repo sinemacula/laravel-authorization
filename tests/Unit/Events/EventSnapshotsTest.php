@@ -53,11 +53,12 @@ final class EventSnapshotsTest extends TestCase
         self::assertContains('SystemOverrideUsed', $names);
         self::assertContains('Identity/RoleAssigned', $names);
         self::assertContains('Role/PermissionGranted', $names);
-        self::assertCount(28, $names);
+        self::assertCount(30, $names);
     }
 
     /**
-     * Every event class under `src/Events`.
+     * Every event class under `src/Events`, leaving out an abstract class that
+     * events of one kind share, which is never dispatched itself.
      *
      * @return iterable<string, array{class-string}>
      */
@@ -73,6 +74,10 @@ final class EventSnapshotsTest extends TestCase
 
             /** @var class-string $class */
             $class = 'SineMacula\Laravel\Authorization\Events\\' . \str_replace('/', '\\', $relative);
+
+            if ((new \ReflectionClass($class))->isAbstract()) {
+                continue;
+            }
 
             yield $relative => [$class];
         }

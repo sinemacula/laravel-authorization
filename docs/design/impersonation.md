@@ -51,7 +51,9 @@ UIs or capability checklists.
 ### Hypothetical policy evaluation
 
 Chaining `for($user)->withPolicies([$hypothetical])` evaluates against only the supplied policies, bypassing the target
-user's own attached policies and any configured policy store. The RBAC fallback still applies -- if the hypothetical
+user's own attached policies, any configured policy store and the policies attached to the resource. A supplied policy
+given a resource (`Policy::withResource('post:42')`) is evaluated as a resource policy, so its allows apply only to the
+subjects its `principals` name. The RBAC fallback still applies -- if the hypothetical
 policy does not produce a decisive result, the target user's held permissions are consulted.
 
 ```php

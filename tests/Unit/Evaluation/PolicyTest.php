@@ -488,4 +488,25 @@ final class PolicyTest extends TestCase
             ],
         ]);
     }
+
+    /**
+     * A policy is made a resource policy with the resource it is attached to,
+     * which its key and statements keep, and which is no part of its document;
+     * a new key keeps the resource.
+     *
+     * @return void
+     */
+    public function testWithResourceMarksAResourcePolicy(): void
+    {
+        $policy   = Policy::fromArray(['name' => 'sharing', 'statements' => [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']]]]);
+        $attached = $policy->withId('key')->withResource('posts:7');
+
+        self::assertNull($policy->resource);
+        self::assertSame(['posts:7', 'key', 'sharing', 1], [$attached->resource, $attached->id, $attached->name, $attached->version]);
+        self::assertSame($policy->statements, $attached->statements);
+        self::assertSame('posts:7', $attached->withId('other')->resource);
+        self::assertNull($attached->withResource(null)->resource);
+        self::assertSame($policy->toArray(), $attached->toArray());
+        self::assertSame('posts:*', (new Policy('p', [], 1, null, 'posts:*'))->resource);
+    }
 }

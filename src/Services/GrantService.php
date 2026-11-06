@@ -77,7 +77,9 @@ use SineMacula\Laravel\Authorization\Support\RoleParity;
  * whoever holds the role, within both grants' scopes, and to whoever holds a
  * role below it (AUTHZ-7.2). An inline policy is attached only to the grantee
  * it belongs to; attaching or syncing it to any other throws
- * `InlinePolicyAttachmentException` before anything is written (AUTHZ-6.9).
+ * `InlinePolicyAttachmentException` before anything is written (AUTHZ-6.9). A
+ * policy whose statements name `principals` is refused for any grantee with
+ * `ResourcePolicyException` (see `PolicyPrincipals`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -565,6 +567,7 @@ final class GrantService
      * @throws \SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\ResourcePolicyException
      */
     private static function toKeep(GrantTarget $kind, Model|Reference $grantee, array $targets, array $held, ?Reference $scope): array
     {

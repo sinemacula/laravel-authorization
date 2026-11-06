@@ -38,6 +38,8 @@ final class VersionedStoreTest extends TestCase
         self::assertSame('authz:version:role:role-1', $store->roleKey('role-1'));
         self::assertSame('authz:version:policy:policy-1', $store->policyKey('policy-1'));
         self::assertSame('authz:version:role-policies', $store->rolePoliciesKey());
+        self::assertSame('authz:version:resource-policies', $store->resourcePoliciesKey());
+        self::assertSame('authz:version:resource-policies:posts', $store->resourcePoliciesKey('posts'));
         self::assertSame('authz:version:tenant:stub_tenant:tenant-a', $store->tenantKey(new Reference('stub_tenant', 'tenant-a')));
     }
 

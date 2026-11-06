@@ -52,8 +52,9 @@ between wildcards and the RBAC fallback.
 7. **Malformed documents are refused when they are written and when they are read.** `Statement::fromArray()` refuses
    unknown keys, a malformed `sid`, both `actions` and `not_actions` (or neither), both `resources` and `not_resources`,
    a pattern list that is empty or holds anything but non-empty strings, conditions that are not a map of operators to
-   key tests, an unknown operator, a malformed literal operand, a resource pattern holding a NUL byte and a malformed
-   `${…}` reference in a resource pattern or a condition. `Policy::fromArray()` refuses statements that share a `sid`.
+   key tests, an unknown operator, a malformed literal operand, a resource pattern holding a NUL byte, a malformed
+   `${…}` reference in a resource pattern or a condition, and `principals` on a deny or that are not a non-empty list of
+   well-formed selectors. `Policy::fromArray()` refuses statements that share a `sid`.
    On write, `PolicyValidator` adds the limits, the context key catalogue and the action catalogue (see [Writing a
    policy](#writing-a-policy)), so a policy row with any of these faults cannot be saved; on read, a stored document
    over a limit, or one that no longer parses, denies as `invalid_policy`. The evaluation-time `invalid` outcome is the
@@ -118,6 +119,7 @@ A statement is a map of these keys, and any other key is refused:
 | `not_actions`   | Action patterns the statement does not name; it names every action none of them matches    |
 | `resources`     | The resource patterns the statement names                                                  |
 | `not_resources` | Resource patterns the statement does not name; it names every resource none of them match  |
+| `principals`    | An allow in a resource policy only: the subjects it applies to (see below)                 |
 | `conditions`    | Optional: a map of operator to key tests (see [Condition Operators](#condition-operators)) |
 
 A statement takes exactly one of `actions` and `not_actions`, and at most one of `resources` and `not_resources`; with
@@ -126,6 +128,13 @@ of non-empty strings. The `sid` names the statement in the decision: its `Statem
 `toString()` appends it JSON-encoded, as `name[key]#index sid="deny-deletes"`. It never changes how the statement is
 evaluated or in what order. `Statement::toArray()` returns exactly the keys the statement was given, so a statement
 without `resources` stays without them.
+
+`principals` (AUTHZ-7.3) is a non-empty list of selectors, each `<morph type>:<id>` (a subject by reference) or
+`role:<role id>` (whoever holds the role, by its key), and each part 1 to 191 bytes with no space, `*`, `${` or NUL
+byte. A selector is an exact name, never a pattern and never interpolated. A deny takes none and is refused with one,
+since a resource policy's deny applies to everyone. Only an allow of a policy attached to a resource applies through
+its principals; an allow with them in any other policy never applies. How they are matched and where they may be
+attached are in [Evaluation Order and Deny Precedence](evaluation-order-and-deny-precedence.md#resource-policies).
 
 A resource that names a type alone (`post:*`, N6) is covered only by a pattern that covers every record of the type
 (`*`, `post:*`), never by one that needs an id character (`post:?`). The same rule decides `not_resources`: a type alone

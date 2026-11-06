@@ -17,10 +17,12 @@ use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
- * Removes the grants that no longer count: those that have expired, and those
- * whose grantee no longer exists (AUTHZ-3.6, AUTHZ-2.5, AUTHZ-17.6).
+ * Removes the grants that no longer count: those that have expired, those whose
+ * grantee no longer exists, and the resource policy attachments whose record no
+ * longer exists (AUTHZ-3.6, AUTHZ-2.5, AUTHZ-7.3, AUTHZ-17.6).
  *
  * An expired grant already stopped counting at its expiry; removing it keeps
  * the grant tables small. Each is reported with a `RoleExpired`,
@@ -40,10 +42,20 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * deleted last, once the orphaned grants are revoked, so a policy that cannot
  * be deleted never keeps the grants of a grantee that is gone.
  *
+ * The resource policy attachments of a record that no longer exists are
+ * detached too, through `ResourcePolicyService::detachAll()`, so each is
+ * reported as detached: a resource names its record by morph type and key, with
+ * no foreign key, so deleting the record leaves them behind, and a record
+ * created again under the same key would otherwise inherit them. The morph type
+ * is resolved to its model class as a grantee's is; a type that names no model
+ * class is skipped and reported, and a whole type's attachments are never
+ * removed.
+ *
  * Pretending counts exactly what a real run would remove, in the same order: an
  * expired grant once, among the expired, and the grants of a grantee that is
  * gone that are still live, with the attachments of its own inline policies
- * among them, since a real run revokes those before it deletes the policies.
+ * among them, since a real run revokes those before it deletes the policies,
+ * then the attachments of each record that is gone.
  *
  * @phpstan-type ExpiredRow array{
  *     target_id: string,
@@ -66,16 +78,21 @@ final readonly class GrantPruner
      * Create a new grant pruner instance.
      *
      * @param  \SineMacula\Laravel\Authorization\Services\GrantService  $grants
+     * @param  \SineMacula\Laravel\Authorization\Services\ResourcePolicyService  $resourcePolicies
      */
     public function __construct(
 
         /** The grant service the grants of a grantee that is gone are revoked through. */
         private GrantService $grants,
+
+        /** The resource policy service the attachments of a record that is gone are detached through. */
+        private ResourcePolicyService $resourcePolicies,
     ) {}
 
     /**
-     * Remove the expired grants and the grants of grantees that no longer
-     * exist, or, pretending, only count them.
+     * Remove the expired grants, the grants and inline policies of grantees
+     * that no longer exist, and the resource policy attachments of records that
+     * no longer exist, or, pretending, only count them.
      *
      * @param  int  $chunk
      * @param  bool  $pretend
@@ -115,7 +132,14 @@ final readonly class GrantPruner
             $inline += $pretend ? InlinePolicies::countOwnedBy($owner) : InlinePolicies::deleteOwnedBy($owner);
         }
 
-        return new PruneResult($expired, $orphaned, $inline, \array_values($unresolved + $unowned));
+        [$records, $unplaced] = self::missingOwners(self::resourcePoliciesTable(), 'resource', $chunk);
+        $attachments          = 0;
+
+        foreach ($records as $record) {
+            $attachments += $pretend ? self::countAttachments($record) : $this->resourcePolicies->detachAll(ResourceReference::record($record->type, $record->id));
+        }
+
+        return new PruneResult($expired, $orphaned, $inline, \array_values($unresolved + $unowned), $attachments, \array_values($unplaced));
     }
 
     /**
@@ -335,7 +359,9 @@ final readonly class GrantPruner
     /**
      * Return the records a table's morph names that no longer exist, keyed so
      * each is listed once, and the morph types that name no model class: the
-     * grantees of a grant table, or the grantees inline policies belong to.
+     * grantees of a grant table, the grantees inline policies belong to, or the
+     * records resource policies are attached to. A row whose key is null, such
+     * as an attachment to a whole type, names no record and is passed over.
      *
      * @param  string  $table
      * @param  string  $morph
@@ -348,7 +374,13 @@ final readonly class GrantPruner
         $unresolved = [];
 
         /** @var list<string> $types */
-        $types = AuthorizationConnection::connection()->table($table)->whereNotNull($morph . '_type')->distinct()->orderBy($morph . '_type')->pluck($morph . '_type')->all();
+        $types = AuthorizationConnection::connection()->table($table)
+            ->whereNotNull($morph . '_type')
+            ->whereNotNull($morph . '_id')
+            ->distinct()
+            ->orderBy($morph . '_type')
+            ->pluck($morph . '_type')
+            ->all();
 
         foreach ($types as $type) {
             $class = Relation::getMorphedModel($type) ?? $type;
@@ -385,6 +417,7 @@ final readonly class GrantPruner
 
         AuthorizationConnection::connection()->table($table)
             ->where($morph . '_type', $type)
+            ->whereNotNull($column)
             ->select($column)
             ->distinct()
             ->orderBy($column)
@@ -411,6 +444,31 @@ final readonly class GrantPruner
     {
         /** @var string */
         return config('authorization.tables.policies', 'policies');
+    }
+
+    /**
+     * Return the resource policies table, as `authorization.tables` names it.
+     *
+     * @return string
+     */
+    private static function resourcePoliciesTable(): string
+    {
+        /** @var string */
+        return config('authorization.tables.resource_policies', 'resource_policies');
+    }
+
+    /**
+     * Count the resource policy attachments of the record, in every scope.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $record
+     * @return int
+     */
+    private static function countAttachments(Reference $record): int
+    {
+        return AuthorizationConnection::connection()->table(self::resourcePoliciesTable())
+            ->where('resource_type', $record->type)
+            ->where('resource_id', $record->id)
+            ->count();
     }
 
     /**

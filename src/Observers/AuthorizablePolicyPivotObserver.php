@@ -28,14 +28,18 @@ final class AuthorizablePolicyPivotObserver
 {
     /**
      * Refuse the row when it attaches an inline policy to a grantee it does not
-     * belong to. The policy is read on the write connection, so a policy just
-     * created is never missed on a replica that has not caught up, and a row
-     * naming no policy really names none: it is left to the foreign key.
+     * belong to, or a policy whose statements name `principals`, which is
+     * refused for any grantee with `ResourcePolicyException` (see
+     * `PolicyPrincipals`). The policy is read on the write connection, so a
+     * policy just created is never missed on a replica that has not caught up,
+     * and a row naming no policy really names none: it is left to the foreign
+     * key.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePolicyPivot  $pivot
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\ResourcePolicyException
      */
     public function saving(AuthorizablePolicyPivot $pivot): void
     {

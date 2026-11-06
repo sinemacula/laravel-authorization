@@ -32,6 +32,10 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
  * decision may be reused for. A context built without one finds every
  * requirement unmet.
  *
+ * The check's subject answers whether a resource policy's `principals` name it
+ * (see `PrincipalSelectors`); a context built without it is named by none, so
+ * no resource policy's allow applies.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -46,6 +50,9 @@ final class CheckContext
     /** @var \SineMacula\Laravel\Authorization\Evaluation\RequirementCheck Judges the check's authentication requirements. */
     private readonly RequirementCheck $requirements;
 
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\PrincipalSelectors|null Tells whether a resource policy's selectors name the check's subject; null names no one. */
+    private readonly ?PrincipalSelectors $principals;
+
     /**
      * Create a new check context.
      *
@@ -55,12 +62,14 @@ final class CheckContext
      * @param  array<array-key, mixed>  $namespaces
      * @param  array<string, \Closure(): array<array-key, mixed>>  $builders
      * @param  \SineMacula\Laravel\Authorization\Evaluation\RequirementCheck|null  $requirements
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\PrincipalSelectors|null  $principals
      */
-    public function __construct(array $namespaces = [], array $builders = [], ?RequirementCheck $requirements = null)
+    public function __construct(array $namespaces = [], array $builders = [], ?RequirementCheck $requirements = null, ?PrincipalSelectors $principals = null)
     {
         $this->namespaces   = $namespaces;
         $this->builders     = \array_diff_key($builders, $namespaces);
         $this->requirements = $requirements ?? new RequirementCheck;
+        $this->principals   = $principals;
     }
 
     /**
@@ -123,6 +132,20 @@ final class CheckContext
     public function assessRequirement(AuthenticationRequirement $requirement): MatchResult
     {
         return $this->requirements->assess($requirement);
+    }
+
+    /**
+     * Determine whether any of a resource policy's `principals` selectors names
+     * the check's subject: its principal or identity by reference, or a role it
+     * holds in the scope the check is decided in. A context built without the
+     * subject's selectors is named by none.
+     *
+     * @param  array<int, string>  $selectors
+     * @return bool
+     */
+    public function isSubjectNamedBy(array $selectors): bool
+    {
+        return $this->principals?->isNamedByAny($selectors) ?? false;
     }
 
     /**

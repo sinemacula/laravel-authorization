@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
 use SineMacula\Laravel\Authorization\Events\Policy\Deleted as PolicyDeleted;
+use SineMacula\Laravel\Authorization\Events\Resource\PolicyDetached as ResourcePolicyDetached;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionExpired as RolePermissionExpired;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPolicyProtectedException;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -22,15 +23,18 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantPruner;
 use SineMacula\Laravel\Authorization\Services\PruneResult;
+use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Feature\Stubs\NumberedIdentity;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
 /**
- * Feature tests for removing expired grants, and the grants and inline policies
- * of grantees that no longer exist.
+ * Feature tests for removing expired grants, the grants and inline policies of
+ * grantees that no longer exist, and the resource policies of records that no
+ * longer exist.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -418,6 +422,59 @@ final class GrantPrunerTest extends TestCase
             self::assertSame(0, DB::table('authorizable_permissions')->count());
             self::assertSame(1, Policy::query()->count());
         }
+    }
+
+    /**
+     * The resource policy attachments of a record that no longer exists are
+     * detached and reported, in every scope, and pretending only counts them;
+     * those of a record that exists or is soft-deleted stay, a whole type's
+     * attachments are never removed, and a resource type naming no model class
+     * is reported and left.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testDetachesTheResourcePoliciesOfRecordsThatAreGone(): void
+    {
+        Relation::morphMap(['stub_identity' => StubIdentity::class]);
+
+        $tenant  = StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'tenant-a']);
+        $policy  = Policy::create(['name' => 'sharing', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']]]]]);
+        $gone    = StubIdentity::create(['id' => 'record-gone']);
+        $kept    = StubIdentity::create(['id' => 'record-kept']);
+        $soft    = NumberedIdentity::create(['name' => 'Ada']);
+        $service = ResourcePolicyService::instance();
+
+        self::assertInstanceOf(ResourcePolicyService::class, $service);
+
+        foreach ([$gone, $kept, $soft, StubIdentity::class, ['posts', 7]] as $resource) {
+            $service->attach($policy, $resource);
+        }
+
+        $service->attach($policy, $gone, $tenant);
+
+        DB::table('stub_identities')->where('id', 'record-gone')->delete();
+        $soft->delete();
+
+        Event::fake([ResourcePolicyDetached::class]);
+
+        $pretended = self::pruner()->prune(1000, true);
+
+        self::assertSame([2, ['posts']], [$pretended->resourcePolicies, $pretended->unresolvedResourceTypes]);
+        self::assertSame(6, DB::table('resource_policies')->count());
+        Event::assertNotDispatched(ResourcePolicyDetached::class);
+
+        $result = self::pruner()->prune(1000);
+
+        self::assertSame([2, ['posts']], [$result->resourcePolicies, $result->unresolvedResourceTypes]);
+        self::assertSame([], $result->unresolvedTypes);
+        self::assertEqualsCanonicalizing(['record-kept', (string) $soft->id, null, '7'], DB::table('resource_policies')->pluck('resource_id')->all());
+        Event::assertDispatchedTimes(ResourcePolicyDetached::class, 2);
+        Event::assertDispatched(
+            ResourcePolicyDetached::class,
+            static fn (ResourcePolicyDetached $event): bool => [$event->resourceType, $event->resourceId, $event->operation->actor] === ['stub_identity', 'record-gone', null],
+        );
     }
 
     /**

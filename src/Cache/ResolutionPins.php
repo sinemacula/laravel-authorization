@@ -13,8 +13,10 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  * data, so a write that commits while the resolution runs bumps a token after
  * it was pinned and the entry never holds. The cache pins the grantee before
  * the resolution starts; the resolution pins the roles and policies once it
- * knows which they are. Without a persistent store nothing is pinned and every
- * pin is a no-op.
+ * knows which they are. A resource's policies are read in one query, so their
+ * resolution pins the versions every policy attached to the resource's type,
+ * and every policy, share before it reads them. Without a persistent store
+ * nothing is pinned and every pin is a no-op.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -113,6 +115,25 @@ final class ResolutionPins
         }
 
         $this->pin($this->store, [$this->store->rolePoliciesKey()]);
+    }
+
+    /**
+     * Pin the versions the policies attached to the resources of the type
+     * share, and every resource policy entry shares, before reading the
+     * attachments and their documents in one query, so an attachment or
+     * detachment on the type, and a change to any policy, made while the
+     * resolution runs is seen.
+     *
+     * @param  string  $type
+     * @return void
+     */
+    public function resourcePolicies(string $type): void
+    {
+        if ($this->store === null) {
+            return;
+        }
+
+        $this->pin($this->store, [$this->store->resourcePoliciesKey(), $this->store->resourcePoliciesKey($type)]);
     }
 
     /**

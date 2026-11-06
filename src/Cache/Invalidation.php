@@ -11,6 +11,8 @@ use SineMacula\Laravel\Authorization\Events\Permission\Deleted as PermissionDele
 use SineMacula\Laravel\Authorization\Events\Permission\Updated as PermissionUpdated;
 use SineMacula\Laravel\Authorization\Events\Policy\Deleted as PolicyDeleted;
 use SineMacula\Laravel\Authorization\Events\Policy\Updated as PolicyUpdated;
+use SineMacula\Laravel\Authorization\Events\Resource\PolicyAttached as ResourcePolicyAttached;
+use SineMacula\Laravel\Authorization\Events\Resource\PolicyDetached as ResourcePolicyDetached;
 use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionExpired as RolePermissionExpired;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionExpiryChanged as RolePermissionExpiryChanged;
@@ -32,7 +34,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *   its owner) or its deletion bumps the role. Entries record every role they
  *   were built from, ancestors included, so the bump reaches every identity
  *   that holds the role or a role below it.
- * - A change to a policy or its deletion bumps the policy.
+ * - A change to a policy or its deletion bumps the policy, and the version
+ *   every entry of a resource's policies shares, since those entries read the
+ *   documents with the attachments in one query.
+ * - A policy attached to or detached from a resource bumps the version the
+ *   policies attached to the resources of its type share, for a record and for
+ *   the whole type alike.
  * - A deleted permission bumps the roles and grantees that held it, as the
  *   event carries them. A permission renamed or moved to another owner bumps
  *   its holders too, read when the change is made; any other change to a
@@ -84,10 +91,12 @@ final class Invalidation
             $event instanceof RoleUpdated,
             $event instanceof RoleDeleted => [$store->roleKey($event->role->id)],
             $event instanceof PolicyUpdated,
-            $event instanceof PolicyDeleted     => [$store->policyKey($event->policy->id)],
-            $event instanceof PermissionDeleted => self::holderKeys($store, \array_map(static fn (Reference $role): string => $role->id, $event->roles), $event->grantees),
-            $event instanceof PermissionUpdated => self::renamedPermissionKeys($store, $event),
-            default                             => [],
+            $event instanceof PolicyDeleted => [$store->policyKey($event->policy->id), $store->resourcePoliciesKey()],
+            $event instanceof ResourcePolicyAttached,
+            $event instanceof ResourcePolicyDetached => [$store->resourcePoliciesKey($event->resourceType)],
+            $event instanceof PermissionDeleted      => self::holderKeys($store, \array_map(static fn (Reference $role): string => $role->id, $event->roles), $event->grantees),
+            $event instanceof PermissionUpdated      => self::renamedPermissionKeys($store, $event),
+            default                                  => [],
         };
     }
 
