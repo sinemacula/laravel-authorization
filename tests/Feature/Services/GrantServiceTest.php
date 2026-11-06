@@ -25,6 +25,7 @@ use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\GranteeGuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
+use SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
@@ -1521,6 +1522,75 @@ final class GrantServiceTest extends TestCase
         } finally {
             Relation::morphMap([], false);
         }
+    }
+
+    /**
+     * An inline policy is attached to the grantee it belongs to, and attaching
+     * or syncing it to any other grantee, an identity or a role, is refused
+     * before anything is written or reported.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnInlinePolicyIsAttachedOnlyToItsGrantee(): void
+    {
+        $user    = self::user();
+        $other   = new Reference($user->getMorphClass(), 'user-2');
+        $role    = self::role('editor');
+        $inline  = Policy::query()->create(['name' => 'mine', 'document' => ['statements' => []], 'owner_type' => $user->getMorphClass(), 'owner_id' => 'user-1']);
+        $managed = self::policy('shared');
+
+        self::assertSame(GrantOutcome::GRANTED, self::service()->attachPolicy(Reference::of($user), $inline));
+
+        self::service()->attachPolicy($other, $managed);
+
+        Event::fake([PolicyAttached::class, PolicyDetached::class]);
+
+        $refusals = [
+            'attach to another identity' => static fn () => self::service()->attachPolicy($other, $inline),
+            'attach to a role'           => static fn () => self::service()->attachPolicy($role, $inline),
+            'sync to another identity'   => static fn () => self::service()->syncPolicies($other, [$inline]),
+        ];
+
+        foreach ($refusals as $write => $refused) {
+            try {
+                $refused();
+                self::fail("The grant service allowed the write: {$write}.");
+            } catch (InlinePolicyAttachmentException $exception) {
+                self::assertSame('mine', $exception->getPolicyName(), $write);
+                self::assertTrue(self::refersTo($exception->getOwner(), $user), $write);
+            }
+        }
+
+        Event::assertNotDispatched(PolicyAttached::class);
+        Event::assertNotDispatched(PolicyDetached::class);
+        self::assertEqualsCanonicalizing(['user-1', 'user-2'], DB::table('authorizable_policies')->pluck('authorizable_id')->all());
+    }
+
+    /**
+     * A policy attached to and detached from a role is reported with the role
+     * as the grantee, in the scope it was attached in.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPolicyAttachedToARoleIsReportedWithTheRoleAsGrantee(): void
+    {
+        $role   = self::role('editor');
+        $policy = self::policy('editors');
+
+        Event::fake([PolicyAttached::class, PolicyDetached::class]);
+
+        self::assertSame(GrantOutcome::GRANTED, self::service()->attachPolicy($role, $policy, application: 'admin'));
+        self::assertSame(1, self::service()->detachPolicy($role, $policy, application: 'admin'));
+
+        Event::assertDispatched(PolicyAttached::class, static fn (PolicyAttached $event): bool => self::refersTo($event->grantee, $role) && $event->scope->application === 'admin');
+        Event::assertDispatched(
+            PolicyDetached::class,
+            static fn (PolicyDetached $event): bool => self::refersTo($event->grantee, $role) && self::refersTo($event->policy, $policy),
+        );
     }
 
     /**

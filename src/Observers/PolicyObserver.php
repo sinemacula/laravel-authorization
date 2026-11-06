@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Events\Policy\Updated as PolicyUpdated;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Observers\Support\RecordChanges;
 use SineMacula\Laravel\Authorization\Support\DocumentDigest;
+use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\RecordOwner;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -44,18 +45,23 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 final class PolicyObserver
 {
     /**
-     * Enforce the owner rules before any persistence (see `RecordOwner`): both
-     * tenant columns or neither, and an owner fixed once the policy is created.
+     * Enforce the owner rules before any persistence: both tenant columns or
+     * neither, and a tenant fixed once the policy is created (see
+     * `RecordOwner`); likewise both owner columns or neither, and the grantee
+     * an inline policy belongs to fixed once it is created (see
+     * `InlinePolicies`).
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyOwnerException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\OwnerChangedException
      */
     public function saving(Policy $policy): void
     {
         RecordOwner::assertValid($policy, 'policy');
+        InlinePolicies::assertValid($policy);
     }
 
     /**

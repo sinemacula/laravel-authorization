@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Events\Policy\Created as PolicyCreated;
 use SineMacula\Laravel\Authorization\Events\Policy\Deleted as PolicyDeleted;
 use SineMacula\Laravel\Authorization\Events\Policy\Updated as PolicyUpdated;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPolicyProtectedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -20,17 +21,19 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\DocumentDigest;
+use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\CustomPolicy;
 use Tests\Feature\Stubs\Enums\CataloguePermission;
+use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Feature tests for `PolicyService`, which creates, renames, describes,
- * rewrites, deletes and lists policies.
+ * Feature tests for `PolicyService`, which creates managed and inline policies,
+ * and renames, describes, rewrites, deletes and lists them.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -75,6 +78,62 @@ final class PolicyServiceTest extends TestCase
         self::assertSame(['readers', 'Reads posts'], [$policy->fresh()?->name, $policy->fresh()?->description]);
         self::assertSame(['posts:read'], PolicyDocument::hydrate($policy)->statements[0]->actions);
         Event::assertDispatched(PolicyCreated::class);
+    }
+
+    /**
+     * An inline policy is created for its grantee, a model or a reference,
+     * through the configured class, reported by the observer with the actor,
+     * and validated as any policy is.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testCreatesAnInlinePolicy(): void
+    {
+        $this->config()->set('authorization.models.policy', CustomPolicy::class);
+
+        Event::fake([PolicyCreated::class]);
+
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $actor  = new Reference('admin', '1');
+        $policy = self::service()->createInline($user, 'mine', self::READ, 'Mine alone', $actor);
+        $theirs = self::service()->createInline(new Reference('team', '7'), 'theirs', \json_encode(self::READ, \JSON_THROW_ON_ERROR));
+
+        self::assertInstanceOf(CustomPolicy::class, $policy);
+        self::assertSame(['mine', 'Mine alone', $user->getMorphClass(), 'user-1'], [$policy->name, $policy->description, $policy->owner_type, $policy->owner_id]);
+        self::assertEquals(new Reference('team', '7'), InlinePolicies::ownerOf($theirs));
+        self::assertNull(Reference::tenantOf($policy));
+        Event::assertDispatched(PolicyCreated::class, static fn (PolicyCreated $event): bool => $event->name === 'mine' && self::refersTo($event->operation->actor, $actor));
+
+        try {
+            self::service()->createInline($user, 'broken', ['statements' => [['effect' => 'allow']]]);
+            self::fail('The document was not refused.');
+        } catch (InvalidPolicyDocumentException) {
+            self::assertSame(2, Policy::query()->count());
+        }
+    }
+
+    /**
+     * An inline policy is refused for a grantee that is not saved, or a
+     * reference without a type or a key, and nothing is written.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnInlinePolicyNeedsASavedGrantee(): void
+    {
+        foreach ([new StubIdentity(['id' => 'user-1']), new Reference('', '1'), new Reference('user', '')] as $owner) {
+            try {
+                self::service()->createInline($owner, 'mine', self::READ);
+                self::fail('The grantee was not refused.');
+            } catch (InvalidGranteeException $exception) {
+                self::assertStringStartsWith('A grant takes a saved grantee with a type and a key', $exception->getMessage());
+            }
+        }
+
+        self::assertSame(0, Policy::query()->count());
     }
 
     /**

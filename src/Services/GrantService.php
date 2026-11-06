@@ -16,6 +16,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\Support\GrantScopes;
 use SineMacula\Laravel\Authorization\Services\Support\GrantTable;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -71,6 +72,12 @@ use SineMacula\Laravel\Authorization\Support\RoleParity;
  * `UnknownPermissionException`; a target that is not a saved model of the kind
  * granted, such as a policy sync handed another model, throws
  * `InvalidGrantTargetException`.
+ *
+ * A grantee is an identity or a role: a policy attached to a role applies to
+ * whoever holds the role, within both grants' scopes, and to whoever holds a
+ * role below it (AUTHZ-7.2). An inline policy is attached only to the grantee
+ * it belongs to; attaching or syncing it to any other throws
+ * `InlinePolicyAttachmentException` before anything is written (AUTHZ-6.9).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -243,7 +250,9 @@ final class GrantService
     }
 
     /**
-     * Attach a policy to the grantee, until the given expiry or forever.
+     * Attach a policy to the grantee, an identity or a role, until the given
+     * expiry or forever. An inline policy is attached only to the grantee it
+     * belongs to.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
@@ -414,6 +423,7 @@ final class GrantService
             $scope = self::scope(GrantScopes::of($kind, $model, $named->tenant), $named->includeSubtree, $named->application);
 
             RoleParity::assertGrantable($kind->value, $model, self::guard($grantee));
+            InlinePolicies::assertAttachable($model, $reference);
 
             $change = self::table($kind, $reference, $operation, $scope)->grant(self::key($model), $expiresAt);
 
@@ -542,7 +552,7 @@ final class GrantService
     /**
      * Resolve the sync's targets, keyed by key: a named target keeps every held
      * row of the name, else the row the lookup ranks first. Each must be
-     * grantable in the sync's scope.
+     * grantable in the sync's scope, and to the grantee.
      *
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
@@ -552,6 +562,7 @@ final class GrantService
      * @return array<string, \Illuminate\Database\Eloquent\Model>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException
      */
     private static function toKeep(GrantTarget $kind, Model|Reference $grantee, array $targets, array $held, ?Reference $scope): array
     {
@@ -563,6 +574,7 @@ final class GrantService
             foreach ($models as $model) {
                 GrantScopes::assertGrantableIn($kind, $model, $scope);
                 RoleParity::assertGrantable($kind->value, $model, self::guard($grantee));
+                InlinePolicies::assertAttachable($model, Reference::of($grantee));
 
                 $keep[self::key($model)] = $model;
             }

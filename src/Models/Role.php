@@ -9,10 +9,12 @@ use Illuminate\Database\Eloquent\Attributes\ScopedBy;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphTo;
+use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
 use SineMacula\Laravel\Authorization\Concerns\HasRoleHierarchy;
 use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Concerns\ManagesPermissions;
 use SineMacula\Laravel\Authorization\Concerns\ValidatesAuthorizationName;
+use SineMacula\Laravel\Authorization\Contracts\SupportsPolicies;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Exceptions\SystemRoleProtectedException;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
@@ -21,8 +23,14 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 /**
  * Eloquent model for role rows — named buckets of permissions shared across
  * authorizable identities. Behaviour is composed from `HasRoleHierarchy`,
- * `ManagesPermissions`, `HasSystemProtection`, and the `RoleObserver` wired via
- * `#[ObservedBy]`.
+ * `ManagesPermissions`, `HasPolicies`, `HasSystemProtection`, and the
+ * `RoleObserver` wired via `#[ObservedBy]`.
+ *
+ * A role takes policies as an identity does, through the same
+ * `authorizable_policies` table with the role as the grantee (AUTHZ-7.2). They
+ * apply to whoever holds the role, where both the role's grant and the policy's
+ * attachment hold, and are inherited down the hierarchy as the role's
+ * permissions are. A role may own inline policies, deleted with it.
  *
  * @property string $id
  * @property string $name
@@ -41,9 +49,9 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
  */
 #[ObservedBy(RoleObserver::class)]
 #[ScopedBy(TenantScope::class)]
-class Role extends Model
+class Role extends Model implements SupportsPolicies
 {
-    use HasRoleHierarchy, HasSystemProtection, HasUuids, ManagesPermissions, ValidatesAuthorizationName;
+    use HasPolicies, HasRoleHierarchy, HasSystemProtection, HasUuids, ManagesPermissions, ValidatesAuthorizationName;
 
     /** @var list<string> Attributes that are mass assignable. */
     protected $fillable = [

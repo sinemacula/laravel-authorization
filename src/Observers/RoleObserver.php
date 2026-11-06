@@ -15,6 +15,7 @@ use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\Support\RecordChanges;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\RecordOwner;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -157,13 +158,19 @@ final class RoleObserver
 
     /**
      * Report the role deleted, with the grantees and permissions read in the
-     * paired `deleting` hook.
+     * paired `deleting` hook, and detach the policies attached to it, each
+     * reported as detached. The role is a grantee of its policies, a morph with
+     * no foreign key, so the delete does not take those rows with it.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return void
+     *
+     * @throws \Throwable
      */
     public function deleted(Role $role): void
     {
+        GrantService::instance()?->revokeAll(Reference::of($role));
+
         /** @var array{grantees?: list<\SineMacula\Laravel\Authorization\Support\Reference>, permissions?: list<\SineMacula\Laravel\Authorization\Support\Reference>} $held */
         $held = RecordChanges::release($role);
 

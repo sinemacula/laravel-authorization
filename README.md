@@ -57,6 +57,9 @@ denied.
   context key nobody declared, tests a key with an operator that does not suit its type, tests or references an
   assurance key, or names an action no declared permission matches, and `authorization:policy:validate` checks files or
   stored policies against the same rules.
+- **Role and inline policies**: a policy attaches to an identity or to a role, whose holders get it where both grants
+  hold (tenant, application and expiry) and inherit it down the role hierarchy. An inline policy belongs to one
+  grantee, is attached to it alone and is deleted with it; its name is unique among its owner's.
 - **Authentication requirements**: an allow can require additional verification, multifactor authentication,
   phishing resistance or a minimum assurance level, each with an optional maximum age, judged for the subject's session
   by a requirement checker you bind. When only that requirement keeps an allow from applying, the check is denied as
@@ -467,6 +470,68 @@ requirements](#authentication-requirements)). The full decision is on the `Autho
 ```bash
 php artisan vendor:publish --tag=authorization-lang
 ```
+
+### Role and inline policies
+
+A role takes policies as an identity does, through the same trait methods and `GrantService` calls, and they apply to
+whoever holds the role:
+
+```php
+$editor->attachPolicy($noDeletesOffNetwork);                  // for every holder of editor
+$editor->attachPolicy($businessHours, tenant: $organisation); // only in the organisation
+$grants->detachPolicy($editor, $noDeletesOffNetwork, actor: $admin);
+```
+
+A role's policy applies only where both grants hold: the holder's grant of the role and the role's attachment of the
+policy must each hold in the current tenant (or in a tenant above it, when that grant reaches its subtree) and on the
+current application, and neither may have expired. A policy attached to a role in one tenant therefore applies to the
+role's holders there and nowhere else, and a role granted in one tenant brings none of its policies to another. With
+the hierarchy enabled (`hierarchy.enabled`, the default), a role's policies are inherited down the hierarchy exactly as
+its permissions are: whoever holds `editor`, whose parent is `author`, gets the policies of both. A deny in a role's
+policy is an explicit deny like any other, and wins over every allow and every permission held.
+
+Attaching or detaching a role's policy, or changing its expiry, dispatches the same `Identity\PolicyAttached`,
+`Identity\PolicyDetached` and `Identity\PolicyExpiryChanged` events, with the role as the grantee, and takes effect on
+the next check for every holder: a change to any role's policy attachments refreshes every identity's cached policies,
+and moving a role in the hierarchy refreshes those of the identities that reach it. Deleting a role detaches its
+policies, each reported as detached.
+
+An inline policy belongs to one grantee, an identity or a role. It is attached to that grantee alone and is deleted
+with it. Create one through the grantee or `PolicyService::createInline()`, which check its document as any policy's
+is checked, then attach it in the scope it should hold in:
+
+```php
+use SineMacula\Laravel\Authorization\Services\PolicyService;
+
+$policy = $user->createInlinePolicy('own-posts-only', [
+    'statements' => [
+        [
+            'effect'     => 'deny',
+            'actions'    => ['posts:update'],
+            'conditions' => ['neq' => ['resource.owner.id' => '${subject.id}']],
+        ],
+    ],
+]);
+
+$user->attachPolicy($policy);
+
+app(PolicyService::class)->createInline($user, 'own-posts-only', $document, actor: $admin);
+```
+
+Creating an inline policy does not attach it. Attaching it to any grantee but its owner is refused with
+`InlinePolicyAttachmentException`, through the trait methods, `GrantService` (a grant or a sync) and a write through a
+grantee's `policies()` relation alike. Its name is unique among its owner's inline policies, so two users can each have
+an `own-posts-only`, and it never clashes with a managed policy's name. The owner is held in `owner_type` and
+`owner_id`, apart from the policy's tenant: both are set or neither (`InvalidPolicyOwnerException`), and the owner is
+fixed once the policy is created (`OwnerChangedException`). Deleting the owner deletes its inline policies, each
+reported as `Policy\Deleted`, and their attachments with them; a soft-deleted owner keeps them until it is
+force-deleted. An owner deleted without its model events, such as by a raw query, leaves them behind until
+`authorization:prune` deletes them. `authorization:policy:validate --database` checks inline policies with the rest.
+
+A check gathers its policies from three places: the bound policy store (`policy_store`, for policies shipped in code or
+kept elsewhere), the identity's own attachments, managed and inline, and its roles' policies. A policy attached both to
+the identity and to one of its roles counts once. The order they are gathered in never changes the decision: each
+stage assesses them by name, then stored key, then document.
 
 ### Writing policies
 
@@ -1099,10 +1164,11 @@ grant rows record; it must name a row that exists, and without it they record no
 
 `authorization:prune` removes the grants that no longer count: expired grants, reported as `RoleExpired`,
 `PermissionExpired` or `PolicyExpired` with no actor, a role's expired grants of permissions, reported as
-`Role\PermissionExpired`, and the grants of a grantee deleted without its model events, such
-as by a raw query, reported as revoked. A soft-deleted grantee keeps its grants. Expired grants stop counting at their
-expiry with or without it, so pruning keeps the tables small rather than making checks correct. Like `model:prune`, it
-takes `--pretend` and `--chunk`, and is scheduled like any command:
+`Role\PermissionExpired`, the grants of a grantee deleted without its model events, such as by a raw query, reported as
+revoked, and the inline policies of such a grantee, reported as deleted. A soft-deleted grantee keeps its grants and its
+inline policies. Expired grants stop counting at their expiry with or without it, so pruning keeps the tables small
+rather than making checks correct. Like `model:prune`, it takes `--pretend` and `--chunk`, and is scheduled like any
+command:
 
 ```php
 Schedule::command('authorization:prune')->daily();
@@ -1126,18 +1192,18 @@ $this->actingAsSubject(new Subject($user, $user, session: 'session-1'));
 
 The contracts behind the evaluator, for maintainers and reviewers, are in [docs/design](docs/design/README.md):
 
-| Note                                                                                        | Covers                                                      |
-|---------------------------------------------------------------------------------------------|-------------------------------------------------------------|
-| [Evaluation order and deny precedence](docs/design/evaluation-order-and-deny-precedence.md) | The staged decision order and why an explicit deny wins     |
-| [Wildcard and condition semantics](docs/design/wildcard-and-condition-semantics.md)         | Pattern matching, undecidable tests and condition operators |
-| [Polymorphic identity pivots](docs/design/polymorphic-identity-pivots.md)                   | Why grants work for integer, UUID and ULID keys             |
-| [Subject resolver contract](docs/design/subject-resolver-contract.md)                       | The default resolver and how an application binds its own   |
-| [Model extension](docs/design/model-extension.md)                                           | Swapping the shipped models for your own subclasses         |
-| [Impersonation](docs/design/impersonation.md)                                               | Checking as another principal                               |
-| [Spatie compatibility](docs/design/spatie-compatibility.md)                                 | The import from `spatie/laravel-permission` and its aliases |
-| [Permission catalogue sync](docs/design/permission-catalogue-sync.md)                       | Declaring permissions in code and `authorization:sync`      |
-| [Management services](docs/design/management-services.md)                                   | The services every role, permission and grant write uses    |
-| [Events](docs/design/events.md)                                                             | The marker, the snapshots, the actor and after-commit       |
+| Note                                                                                        | Covers                                                         |
+|---------------------------------------------------------------------------------------------|----------------------------------------------------------------|
+| [Evaluation order and deny precedence](docs/design/evaluation-order-and-deny-precedence.md) | The staged decision order, policy sources, and why a deny wins |
+| [Wildcard and condition semantics](docs/design/wildcard-and-condition-semantics.md)         | Pattern matching, undecidable tests and condition operators    |
+| [Polymorphic identity pivots](docs/design/polymorphic-identity-pivots.md)                   | Why grants work for integer, UUID and ULID keys                |
+| [Subject resolver contract](docs/design/subject-resolver-contract.md)                       | The default resolver and how an application binds its own      |
+| [Model extension](docs/design/model-extension.md)                                           | Swapping the shipped models for your own subclasses            |
+| [Impersonation](docs/design/impersonation.md)                                               | Checking as another principal                                  |
+| [Spatie compatibility](docs/design/spatie-compatibility.md)                                 | The import from `spatie/laravel-permission` and its aliases    |
+| [Permission catalogue sync](docs/design/permission-catalogue-sync.md)                       | Declaring permissions in code and `authorization:sync`         |
+| [Management services](docs/design/management-services.md)                                   | The services every role, permission and grant write uses       |
+| [Events](docs/design/events.md)                                                             | The marker, the snapshots, the actor and after-commit          |
 
 ## Requirements
 

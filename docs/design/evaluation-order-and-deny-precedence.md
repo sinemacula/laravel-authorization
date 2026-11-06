@@ -55,6 +55,28 @@ Semantics](wildcard-and-condition-semantics.md).
 and leaves a resource-less `posts:delete` check alone. Only a statement without either resource list, or whose
 `resources` include `*`, covers a resource-less check.
 
+## Where Policies Come From
+
+A check's policies are gathered by the bound `PolicyResolver`. The default, `DefaultPolicyResolver`, unions three
+sources (AUTHZ-6.9, AUTHZ-7.2):
+
+- **The policy store.** The `PolicyStore` bound as `policy_store`, asked on every check, for policies shipped in code
+  or kept outside the package's tables.
+- **The identity's own attachments.** Managed policies, stored once and attached to any number of grantees, and the
+  identity's inline policies, each of which belongs to it alone, attached through `authorizable_policies` in the
+  current scope.
+- **Its roles' policies.** The policies attached to each role the identity holds, through the same table with the role
+  as the grantee, and, with the hierarchy enabled, to every role above it, read through `RoleGraph` exactly as the
+  roles' permissions are. A role's policy applies only where both grants hold: the identity's grant of the role and
+  the role's attachment of the policy each hold in the current tenant (through a tenant above it only when that grant
+  reaches its subtree) and application, and neither has expired.
+
+A policy held more than one way (attached to the identity and to a role, or to two of its roles) is listed once. The
+stored policies are read through the resolution cache; a change to any role's policy attachments refreshes every
+identity's cached policies, and a change to the hierarchy refreshes those of the identities whose roles it reaches.
+The order the sources are read in is never relied on: invariant 2 orders the policies within each stage, so a deny in
+a role's policy is decided exactly as one attached to the identity, and wins over every allow and every permission.
+
 ## Invariants
 
 1. **The stages run in order, and the first that decides ends the decision (AUTHZ-7.1).**
@@ -211,6 +233,10 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   `decideGrants()` -- the check's context (`CheckContextFactory::make()`), `invalid_policy` when policies cannot be
   gathered, the statements, and the permission step.
 - `ResourceReferences::of()` -- every resource argument's reference; `ResourceScope::decide()` -- the tenant stage.
+- `DefaultPolicyResolver::policiesFor()` -- the policy store and the identity's policies;
+  `HasPolicies::getPolicies()` and `GrantResolver::policies()` -- the identity's own attachments and its roles';
+  `RolePolicies` -- where a role's policy applies; `RoleGraph::keysHeldBy()` and `RoleGraph::keysWithin()` -- the roles
+  reached, shared with the permissions; `InlinePolicies` -- an inline policy's owner and the refusals.
 - `PolicyEvaluator::evaluate()` -- the deny, allow and implicit stages, each assessing its statements in a fixed
   order; `conclude()` -- the order of the outcomes, `insufficient_authentication` among them.
 - `RequirementCheck` -- one check's requirements put to the checker, the session rule and the freshness;
@@ -235,6 +261,11 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   exception.
 - `AuthorizationManagerTest` (Unit and Feature) -- the subject stage, the RBAC allow, deny over RBAC and over a role,
   `invalid_policy` over a held permission, and the caller's values under `input` and nowhere else.
+- `RolePoliciesTest` and `GrantResolverTest` -- a role's policy in and out of scope (tenant, application, expiry and
+  subtree), inheritance down the hierarchy, a deny in a role's policy, a policy held several ways listed once, every
+  source in one order, the queries taken and a hierarchy that moves while the policies are read;
+  `InlinePoliciesTest`, `HasPoliciesTest` and `AuthorizablePolicyPivotObserverTest` -- inline policies attached to
+  their owner alone and deleted with it.
 - `FailClosedPolicyHydrationTest` -- an unreadable row, or one over a limit, is never skipped.
 - `PolicyValidatorTest` and `PolicyDocumentTest` -- the write-time checks and the limits on read.
 - `GateRegistrarTest` and `AuthorizeActionTest` -- an argument that cannot be identified denies as
@@ -249,6 +280,8 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 - Letting `insufficient_authentication` win over a deny, an invalid policy or another allow, or reusing a decision that
   read a requirement in another session or past its met-until instant, would violate invariants 7 and 8 and requires a
   design decision before implementation.
+- Adding a source of policies (resource-based policies, AUTHZ-7.3) requires updating the section on where policies come
+  from, and the new source's policies must be ordered with the rest under invariant 2.
 - Changing deny semantics (e.g. deny-unless, deny-with-exception) requires a new invariant entry above.
 - Introducing RBAC-layer deny (negative permissions) would violate invariant 3 and requires a design decision before
   implementation.

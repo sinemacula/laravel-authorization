@@ -13,7 +13,7 @@ named and the operation they belong to, and are dispatched only once the write c
   `Role\PermissionExpiryChanged`, and `Role\PermissionExpired` when `authorization:prune` removes an expired grant.
 - **Grant events.** Under `Identity\`: `RoleAssigned`, `RoleRevoked`, `RoleExpiryChanged`, `PermissionGranted`,
   `PermissionRevoked`, `PermissionExpiryChanged`, `PolicyAttached`, `PolicyDetached` and `PolicyExpiryChanged`. Each
-  also implements `Contracts\IdentityEvent` and names its `grantee`.
+  also implements `Contracts\IdentityEvent` and names its `grantee`, which for a policy attached to a role is the role.
 - **Expiry events.** Under `Identity\`: `RoleExpired`, `PermissionExpired` and `PolicyExpired`, dispatched when
   `authorization:prune` removes an expired grant, with its expiry and an operation that names no actor (the sweep is
   system work).
@@ -54,7 +54,10 @@ named and the operation they belong to, and are dispatched only once the write c
 8. **Deletes say who lost access.** `Role\Deleted` lists every grantee that held the role and every permission it
    carried; `Permission\Deleted` every grantee that held the permission directly and every role that carried it;
    `Policy\Deleted` every grantee it was attached to. Each list is read before the row goes, inside the delete's
-   transaction, in every scope and whether or not the grant had expired; the grantees are ordered by type and key.
+   transaction, in every scope and whether or not the grant had expired; the grantees are ordered by type and key. A
+   deleted role's own policy attachments are each reported as `Identity\PolicyDetached`, as a deleted identity's
+   grants are, and a deleted grantee's inline policies each as `Policy\Deleted`, in an operation of their own with no
+   actor.
 
 9. **Digests, not documents.** A policy event carries its document's version and the SHA-256 of its canonical JSON
    (keys sorted at every depth, lists in order, slashes and Unicode unescaped) as a `DocumentDigest`.

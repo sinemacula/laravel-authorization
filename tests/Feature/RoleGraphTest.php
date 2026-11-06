@@ -338,6 +338,51 @@ final class RoleGraphTest extends TestCase
     }
 
     /**
+     * The keys a holder of the roles gets grants through are the roles' own and
+     * their ancestors', root first, ancestors only while the hierarchy is
+     * enabled.
+     *
+     * @return void
+     */
+    public function testTheKeysHeldByTheRolesRunUpTheHierarchy(): void
+    {
+        [$root, $middle, $leaf] = self::chainOf(3, 'k');
+        $other                  = Role::create(['name' => 'other', 'guard' => 'web']);
+
+        self::assertSame([$leaf->id, $other->id, $root->id, $middle->id], RoleGraph::keysHeldBy([$leaf, $other]));
+        self::assertSame([], RoleGraph::keysHeldBy([]));
+
+        config(['authorization.hierarchy.enabled' => false]);
+
+        self::assertSame([$leaf->id, $other->id], RoleGraph::keysHeldBy([$leaf, $other]));
+    }
+
+    /**
+     * Within the reach read, the keys are the held roles the tenant scope shows
+     * and their ancestors'; none when the hierarchy moved after it was read.
+     *
+     * @return void
+     */
+    public function testTheKeysWithinTheReach(): void
+    {
+        [$root, $leaf] = self::chainOf(2, 'r');
+        $elsewhere     = Role::create(['name' => 'elsewhere', 'guard' => 'web']);
+        $missing       = (string) Str::uuid();
+        $reach         = RoleGraph::reach([$leaf->id, $missing]);
+
+        self::assertSame([$leaf->id, $root->id], RoleGraph::keysWithin($reach, [$leaf->id, $missing]));
+        self::assertSame([], RoleGraph::keysWithin([], []));
+
+        DB::table('roles')->where('id', $leaf->id)->update(['parent_id' => $elsewhere->id]);
+
+        self::assertNull(RoleGraph::keysWithin($reach, [$leaf->id]));
+
+        config(['authorization.hierarchy.enabled' => false]);
+
+        self::assertSame([$leaf->id], RoleGraph::keysWithin(RoleGraph::reach([$leaf->id]), [$leaf->id]));
+    }
+
+    /**
      * Create a chain of roles, root first, each the parent of the next.
      *
      * @param  int  $length

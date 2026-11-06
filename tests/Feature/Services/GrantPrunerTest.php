@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
+use SineMacula\Laravel\Authorization\Events\Policy\Deleted as PolicyDeleted;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionExpired as RolePermissionExpired;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -27,8 +28,8 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
- * Feature tests for removing expired grants and the grants of grantees that no
- * longer exist.
+ * Feature tests for removing expired grants, and the grants and inline policies
+ * of grantees that no longer exist.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -301,6 +302,54 @@ final class GrantPrunerTest extends TestCase
             RoleRevoked::class,
             static fn (RoleRevoked $event): bool => $event->grantee->id === 'user-gone' && $event->grantee->type === 'stub_identity' && $event->operation->actor === null,
         );
+    }
+
+    /**
+     * The inline policies of a grantee that no longer exists are deleted and
+     * reported, with their attachments, and pretending only counts them; those
+     * of a grantee that exists or is soft-deleted stay, and an owner type
+     * naming no model class is reported and left.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testDeletesTheInlinePoliciesOfGranteesThatAreGone(): void
+    {
+        $gone = StubIdentity::create(['id' => 'user-gone']);
+        $kept = StubIdentity::create(['id' => 'user-kept']);
+        $soft = NumberedIdentity::create(['name' => 'Ada']);
+        $role = Role::create(['name' => 'editor']);
+
+        $gone->attachPolicy($gone->createInlinePolicy('gone-first', ['version' => 1, 'statements' => []]));
+        $gone->createInlinePolicy('gone-second', ['version' => 1, 'statements' => []]);
+        $kept->createInlinePolicy('kept', ['version' => 1, 'statements' => []]);
+        $soft->createInlinePolicy('soft', ['version' => 1, 'statements' => []]);
+        $role->createInlinePolicy('role', ['version' => 1, 'statements' => []]);
+        Policy::create(['name' => 'ghost', 'document' => ['version' => 1, 'statements' => []], 'owner_type' => 'ghost_owner', 'owner_id' => '1']);
+        Policy::create(['name' => 'managed', 'document' => ['version' => 1, 'statements' => []]]);
+
+        DB::table('stub_identities')->where('id', 'user-gone')->delete();
+        $soft->delete();
+
+        Event::fake([PolicyDeleted::class]);
+
+        $pretended = self::pruner()->prune(1, true);
+
+        self::assertSame(2, $pretended->inlinePolicies);
+        self::assertSame(1, $pretended->orphaned);
+        self::assertSame(['ghost_owner'], $pretended->unresolvedTypes);
+        self::assertSame(7, Policy::query()->count());
+        Event::assertNotDispatched(PolicyDeleted::class);
+
+        $result = self::pruner()->prune(1);
+
+        self::assertSame(2, $result->inlinePolicies);
+        self::assertSame(0, $result->orphaned);
+        self::assertSame(['ghost_owner'], $result->unresolvedTypes);
+        self::assertSame(['ghost', 'kept', 'managed', 'role', 'soft'], Policy::query()->orderBy('name')->pluck('name')->all());
+        self::assertSame(0, DB::table('authorizable_policies')->count());
+        Event::assertDispatchedTimes(PolicyDeleted::class, 2);
     }
 
     /**

@@ -12,15 +12,20 @@ use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
  * Default policy resolver.
  *
  * Unions the policies returned by an optional external `PolicyStore`, asked on
- * every check, with the policies attached to the principal itself when it is an
- * `AuthorizableIdentity`, which `getPolicies()` reads through the resolution
- * cache. A principal that implements neither contract yields an empty policy
- * list — the evaluator then falls through to implicit deny unless an RBAC grant
+ * every check, such as policies shipped in code, with the policies attached to
+ * the principal itself when it is an `AuthorizableIdentity`, which
+ * `getPolicies()` reads through the resolution cache: its own attachments,
+ * inline policies included, and the policies attached to the roles it holds and
+ * to the roles above them, each where both grants hold (AUTHZ-6.9, AUTHZ-7.2).
+ * A principal that implements neither contract yields an empty policy list —
+ * the evaluator then falls through to implicit deny unless an RBAC grant
  * satisfies the check.
  *
+ * The order of the list never matters: the evaluator assesses the policies by
+ * name, then stored key, then document, wherever they came from.
+ *
  * The resolver is intentionally stateless so consumers can decorate it with
- * cache, tenant-scoping, or role-hierarchy expanders without inheriting any
- * internal state.
+ * cache or tenant-scoping layers without inheriting any internal state.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

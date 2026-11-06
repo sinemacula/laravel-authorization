@@ -5,9 +5,11 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\Authorization\Events\Identity\PolicyDetached;
 use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
 use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
 use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
@@ -18,6 +20,7 @@ use SineMacula\Laravel\Authorization\Exceptions\ReservedRoleNameException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHasChildrenException;
 use SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException;
 use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\RoleObserver;
 use SineMacula\Laravel\Authorization\Services\GrantService;
@@ -485,6 +488,42 @@ final class RoleObserverTest extends TestCase
             && $event->name                      === 'editor'
             && self::keysOf($event->grantees)    === ['admin:1', 'user:10', 'user:2']
             && self::keysOf($event->permissions) === self::keysOf([Reference::of($permission)]));
+    }
+
+    /**
+     * Deleting a role detaches the policies attached to it, in every scope,
+     * each reported as detached from the role, and deletes its inline policies;
+     * a managed policy stays for its other grantees.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testDeletingARoleDetachesItsPolicies(): void
+    {
+        $role    = Role::query()->create(['name' => 'editor']);
+        $other   = Role::query()->create(['name' => 'author']);
+        $managed = Policy::query()->create(['name' => 'shared', 'document' => ['version' => 1, 'statements' => []]]);
+
+        $role->attachPolicy($managed);
+        $role->attachPolicy($managed, application: 'admin');
+        $role->attachPolicy($role->createInlinePolicy('editors', ['version' => 1, 'statements' => []]));
+        $other->attachPolicy($managed);
+
+        Event::fake([PolicyDetached::class]);
+
+        $role->delete();
+
+        $detached = Event::dispatched(
+            PolicyDetached::class,
+            static fn (PolicyDetached $event): bool => self::refersTo($event->grantee, $role) && self::refersTo($event->policy, $managed),
+        );
+
+        self::assertCount(2, $detached);
+        Event::assertNotDispatched(PolicyDetached::class, static fn (PolicyDetached $event): bool => self::refersTo($event->grantee, $other));
+
+        self::assertSame(['shared'], Policy::query()->pluck('name')->all());
+        self::assertSame([$other->id], DB::table('authorizable_policies')->pluck('authorizable_id')->all());
     }
 
     /**

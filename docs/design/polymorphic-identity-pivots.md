@@ -28,12 +28,19 @@ scope each grant carries, the temporal-grant mechanism, the pivot class hierarch
 4. **The entity FK side carries a real foreign key; the authorizable side does not.** The migration adds
    `->foreign('role_id')->references('id')->on($rolesTable)->cascadeOnDelete()` (and the equivalent for permissions and
    policies). No FK constraint is possible on the `authorizable_id` column because the referenced table varies by morph
-   class -- this is the fundamental trade-off of polymorphic pivots.
+   class -- this is the fundamental trade-off of polymorphic pivots. A grantee deleted without its model's events
+   therefore leaves its rows behind, and `authorization:prune` revokes them.
 
 5. **Temporal grants are a pivot-level concern, not a model-level one.** A grant with `expires_at = null` is permanent.
    A grant with a future `expires_at` is live until the clock passes that instant, at which point the relation's
    `where()` clause filters it out on read. No sweeper job is required for correctness -- the package ships query-time
    filtering on every relation access.
+
+6. **A role is a grantee of policies too.** `authorizable_policies` takes a role as its grantee as readily as an
+   identity, with the role's morph class and key, so a role's policies are scoped, expire and are reported like any
+   other attachment (AUTHZ-7.2). An inline policy names the one grantee it belongs to in the policy's own `owner_type`
+   and `owner_id`, a morph with no foreign key for the same reason, kept apart from the policy's tenant columns; its
+   deletion with the owner is the package's work, not the database's (AUTHZ-6.9).
 
 ## Schema
 

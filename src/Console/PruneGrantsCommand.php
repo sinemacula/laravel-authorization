@@ -15,8 +15,9 @@ use SineMacula\Laravel\Authorization\Services\GrantPruner;
  * what would be removed without removing it, and `--chunk` sets how many rows
  * each pass reads. Grants that have expired already stop counting at their
  * expiry, so pruning keeps the grant tables small rather than making checks
- * correct. A grantee type that names no model class is reported and its grants
- * are left.
+ * correct. The inline policies of a grantee that no longer exists are removed
+ * too. A grantee type that names no model class is reported and its grants and
+ * inline policies are left.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,7 +32,7 @@ final class PruneGrantsCommand extends Command
         EOD;
 
     /** @var string The console command description. */
-    protected $description = 'Remove expired grants and the grants of grantees that no longer exist';
+    protected $description = 'Remove expired grants, and the grants and inline policies of grantees that no longer exist';
 
     /**
      * Execute the console command.
@@ -55,14 +56,15 @@ final class PruneGrantsCommand extends Command
         $result  = $pruner->prune($chunk, $pretend);
 
         foreach ($result->unresolvedTypes as $type) {
-            $this->warn("Grantee type '{$type}' names no model class; its grants were left.");
+            $this->warn("Grantee type '{$type}' names no model class; its grants and inline policies were left.");
         }
 
         $this->info(\sprintf(
-            '%s %d expired grant(s) and %d grant(s) of grantees that no longer exist.',
+            '%s %d expired grant(s), %d grant(s) of grantees that no longer exist and %d inline polic(ies) of grantees that no longer exist.',
             $pretend ? 'Would prune' : 'Pruned',
             $result->expired,
             $result->orphaned,
+            $result->inlinePolicies,
         ));
 
         return self::SUCCESS;

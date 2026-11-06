@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionExpired as RolePermissionExpired;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -30,6 +31,11 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * as revoked. A soft-deleted grantee still exists and keeps its grants. A
  * grantee type that names no model class is skipped and reported, so a missing
  * morph map entry never removes grants.
+ *
+ * The inline policies of a grantee that no longer exists are deleted too, each
+ * through the model so it is reported as deleted and its attachments go with it
+ * (AUTHZ-6.9): the owner columns are a morph with no foreign key, so a grantee
+ * removed without its model's `deleted` event leaves them behind.
  *
  * @phpstan-type ExpiredRow array{
  *     target_id: string,
@@ -87,6 +93,13 @@ final readonly class GrantPruner
             );
         }
 
+        [$owners, $unowned] = self::missingOwners(self::policiesTable(), 'owner', $chunk);
+        $inline             = 0;
+
+        foreach ($owners as $owner) {
+            $inline += $pretend ? InlinePolicies::countOwnedBy($owner) : InlinePolicies::deleteOwnedBy($owner);
+        }
+
         [$orphans, $unresolved] = self::orphans($chunk);
         $orphaned               = 0;
 
@@ -94,7 +107,7 @@ final readonly class GrantPruner
             $orphaned += $pretend ? self::countGrants($grantee) : $this->grants->revokeAll($grantee);
         }
 
-        return new PruneResult($expired, $orphaned, \array_values($unresolved));
+        return new PruneResult($expired, $orphaned, $inline, \array_values($unresolved + $unowned));
     }
 
     /**
@@ -302,49 +315,74 @@ final readonly class GrantPruner
         $unresolved = [];
 
         foreach (GrantTarget::cases() as $kind) {
-            /** @var list<string> $types */
-            $types = AuthorizationConnection::connection()->table($kind->table())->distinct()->orderBy('authorizable_type')->pluck('authorizable_type')->all();
+            [$missing, $types] = self::missingOwners($kind->table(), 'authorizable', $chunk);
 
-            foreach ($types as $type) {
-                $class = Relation::getMorphedModel($type) ?? $type;
-
-                if (!\is_a($class, Model::class, true)) {
-                    $unresolved[$type] = $type;
-
-                    continue;
-                }
-
-                foreach (self::missing($kind, $type, $class, $chunk) as $id) {
-                    $orphans["{$type}:{$id}"] = new Reference($type, $id);
-                }
-            }
+            $orphans    += $missing;
+            $unresolved += $types;
         }
 
         return [$orphans, $unresolved];
     }
 
     /**
-     * Return the keys of grantees of one type holding grants of one kind that
-     * the type's model no longer has, soft-deleted rows counting as had.
+     * Return the records a table's morph names that no longer exist, keyed so
+     * each is listed once, and the morph types that name no model class: the
+     * grantees of a grant table, or the grantees inline policies belong to.
      *
-     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
+     * @param  string  $table
+     * @param  string  $morph
+     * @param  int  $chunk
+     * @return array{0: array<string, \SineMacula\Laravel\Authorization\Support\Reference>, 1: array<string, string>}
+     */
+    private static function missingOwners(string $table, string $morph, int $chunk): array
+    {
+        $missing    = [];
+        $unresolved = [];
+
+        /** @var list<string> $types */
+        $types = AuthorizationConnection::connection()->table($table)->whereNotNull($morph . '_type')->distinct()->orderBy($morph . '_type')->pluck($morph . '_type')->all();
+
+        foreach ($types as $type) {
+            $class = Relation::getMorphedModel($type) ?? $type;
+
+            if (!\is_a($class, Model::class, true)) {
+                $unresolved[$type] = $type;
+
+                continue;
+            }
+
+            foreach (self::missing($table, $morph, $type, $class, $chunk) as $id) {
+                $missing["{$type}:{$id}"] = new Reference($type, $id);
+            }
+        }
+
+        return [$missing, $unresolved];
+    }
+
+    /**
+     * Return the keys of the records of one type a table's morph names that the
+     * type's model no longer has, soft-deleted rows counting as had.
+     *
+     * @param  string  $table
+     * @param  string  $morph
      * @param  string  $type
      * @param  class-string<\Illuminate\Database\Eloquent\Model>  $class
      * @param  int  $chunk
      * @return list<string>
      */
-    private static function missing(GrantTarget $kind, string $type, string $class, int $chunk): array
+    private static function missing(string $table, string $morph, string $type, string $class, int $chunk): array
     {
         $missing = [];
+        $column  = $morph . '_id';
 
-        AuthorizationConnection::connection()->table($kind->table())
-            ->where('authorizable_type', $type)
-            ->select('authorizable_id')
+        AuthorizationConnection::connection()->table($table)
+            ->where($morph . '_type', $type)
+            ->select($column)
             ->distinct()
-            ->orderBy('authorizable_id')
-            ->chunk($chunk, static function ($rows) use ($class, &$missing): void {
+            ->orderBy($column)
+            ->chunk($chunk, static function ($rows) use ($class, $column, &$missing): void {
                 /** @var list<string> $ids */
-                $ids = $rows->pluck('authorizable_id')->all();
+                $ids = $rows->pluck($column)->all();
 
                 // `array_diff()` compares as strings, so an integer key matches
                 // the grant's string id.
@@ -354,6 +392,17 @@ final readonly class GrantPruner
             });
 
         return $missing;
+    }
+
+    /**
+     * Return the policies table, as `authorization.tables` names it.
+     *
+     * @return string
+     */
+    private static function policiesTable(): string
+    {
+        /** @var string */
+        return config('authorization.tables.policies', 'policies');
     }
 
     /**

@@ -30,6 +30,12 @@ use SineMacula\Laravel\Authorization\Support\PolicyDocument;
  * policy is owned by the platform (both tenant columns null) or by one tenant
  * (both set), and its name is unique within its owner.
  *
+ * A managed policy (both owner columns null) is attached to any number of
+ * grantees and roles. An inline policy names, in `owner_type` and `owner_id`,
+ * the one grantee it belongs to: it is attached to that grantee alone, its name
+ * is unique among that grantee's inline policies, and it is deleted with the
+ * grantee (see `InlinePolicies`).
+ *
  * @property string $id
  * @property string $name
  * @property string|null $description
@@ -37,6 +43,8 @@ use SineMacula\Laravel\Authorization\Support\PolicyDocument;
  * @property bool $is_system
  * @property string|null $tenant_type
  * @property string|null $tenant_id
+ * @property string|null $owner_type
+ * @property string|null $owner_id
  *
  * @inheritable
  *
@@ -56,6 +64,8 @@ class Policy extends Model
         'is_system',
         'tenant_type',
         'tenant_id',
+        'owner_type',
+        'owner_id',
     ];
 
     /**
@@ -109,6 +119,18 @@ class Policy extends Model
     }
 
     /**
+     * The grantee an inline policy belongs to.
+     *
+     * A null morph pair marks a managed policy, which belongs to no grantee.
+     *
+     * @return \Illuminate\Database\Eloquent\Relations\MorphTo<\Illuminate\Database\Eloquent\Model, $this>
+     */
+    public function owner(): MorphTo
+    {
+        return $this->morphTo('owner');
+    }
+
+    /**
      * The attribute cast map.
      *
      * @return array<string, string>
@@ -123,6 +145,8 @@ class Policy extends Model
             'is_system'   => 'boolean',
             'tenant_type' => 'string',
             'tenant_id'   => 'string',
+            'owner_type'  => 'string',
+            'owner_id'    => 'string',
         ];
     }
 
