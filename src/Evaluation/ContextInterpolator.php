@@ -19,7 +19,7 @@ use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
  *   property on a plain object. Hidden attributes (listed in `$hidden`, or left
  *   out of a non-empty `$visible`) and relations are never read.
  * - `${context.*}`: the caller-supplied context array passed to `can()` or
- *   `evaluate()`, as a dot-notation path (e.g. `${context.request.ip}`).
+ *   `check()`, as a dot-notation path (e.g. `${context.request.ip}`).
  * - `${resource.*}`: derived from the resource string. `resource.type` is the
  *   segment before the first `:` (the whole string when there is none) and
  *   `resource.id` the segment after it (unresolved when there is none).

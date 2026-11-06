@@ -56,28 +56,22 @@ final class WhyCanCommand extends Command
         }
 
         // @phpstan-ignore staticMethod.dynamicCall
-        $result = Authorization::for($model)->evaluate($action, $resource);
-
-        $verdict = $result->allowed ? 'ALLOWED' : 'DENIED';
+        $decision = Authorization::for($model)->check($action, $resource);
+        $verdict  = $decision->isAllowed() ? 'ALLOWED' : 'DENIED';
 
         $this->line('');
-        $this->line("  Result:   <fg={$this->verdictColor($result->allowed)}>{$verdict}</>");
-        $this->line("  Reason:   {$result->reason->value}");
+        $this->line("  Result:   <fg={$this->verdictColor($decision->isAllowed())}>{$verdict}</>");
+        $this->line('  Reason:   ' . ($decision->reason->value ?? '(none)'));
+        $this->line("  Stage:    {$decision->stage->value}");
         $this->line("  Action:   {$action}");
         $this->line('  Resource: ' . ($resource ?? '(none)'));
         $this->line('');
 
-        if ($result->trace !== []) {
+        if ($decision->trace !== []) {
             $this->line('  Trace:');
 
-            foreach ($result->trace as $entry) {
-                $this->line(\sprintf(
-                    '    [%s] %s#%d — %s',
-                    $entry['decision']->value,
-                    $entry['policy'],
-                    $entry['statement_index'],
-                    $entry['reason'],
-                ));
+            foreach ($decision->trace as $entry) {
+                $this->line('    ' . $entry->toString());
             }
 
             $this->line('');

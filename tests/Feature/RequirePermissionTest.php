@@ -120,7 +120,7 @@ final class RequirePermissionTest extends TestCase
 
         $denial = self::denialOf(fn (): Response => $this->handle(self::ACTION));
 
-        self::assertSame(DecisionReason::IMPLICIT_DENY, $denial->getReason());
+        self::assertSame(DecisionReason::NO_MATCH, $denial->getReason());
     }
 
     /**
@@ -135,7 +135,7 @@ final class RequirePermissionTest extends TestCase
         $this->actAs(new RolesOnlyPrincipal);
 
         self::assertSame(200, $this->handle(self::ACTION)->getStatusCode());
-        self::assertSame(DecisionReason::IMPLICIT_DENY, self::denialOf(fn (): Response => $this->handle('posts:delete'))->getReason());
+        self::assertSame(DecisionReason::NO_MATCH, self::denialOf(fn (): Response => $this->handle('posts:delete'))->getReason());
     }
 
     /**

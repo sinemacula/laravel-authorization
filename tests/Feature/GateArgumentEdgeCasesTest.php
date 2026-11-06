@@ -12,6 +12,8 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
+use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -33,8 +35,8 @@ use Tests\TestCase;
  *   index 0.
  * - A non-string, non-object leading entry (integer) that
  *   `ResourceIdentifier::of()` cannot identify as a resource, so the Gate
- *   records an implicit deny rather than treating it as a check about no
- *   resource.
+ *   records a denial at the resource stage rather than treating it as a check
+ *   about no resource.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -99,8 +101,8 @@ final class GateArgumentEdgeCasesTest extends TestCase
 
     /**
      * A non-string, non-object leading entry (integer) cannot be identified as
-     * a resource, so the Gate records an implicit deny even though a
-     * wildcard-resource allow and a held RBAC permission would both allow a
+     * a resource, so the Gate records an unresolved-resource denial even though
+     * a wildcard-resource allow and a held RBAC permission would both allow a
      * resource-less check.
      *
      * @return void
@@ -113,7 +115,7 @@ final class GateArgumentEdgeCasesTest extends TestCase
         $user->givePermission('posts:create');
         $this->actAs($user);
 
-        $user->attachPolicy(Policy::create([
+        $policy = Policy::create([
             'id'       => (string) Str::uuid(),
             'name'     => 'resourceless-allow',
             'document' => [
@@ -121,22 +123,26 @@ final class GateArgumentEdgeCasesTest extends TestCase
                     ['effect' => 'allow', 'actions' => ['posts:create']],
                 ],
             ],
-        ]));
+        ]);
+
+        $user->attachPolicy($policy);
 
         // An integer at index 0 is not a resource identifier; the Gate records
-        // an implicit deny without consulting the policy or the RBAC grant.
+        // a denial at the resource stage without consulting the policy or the
+        // RBAC grant.
         self::assertFalse(Gate::allows('posts:create', [42]));
 
         $refusal = Authorization::lastDecision();
 
         self::assertNotNull($refusal);
-        self::assertSame(DecisionReason::IMPLICIT_DENY, $refusal->reason);
+        self::assertSame(DecisionReason::RESOURCE_UNRESOLVED, $refusal->reason);
+        self::assertSame(DecisionStage::RESOURCE, $refusal->stage);
         self::assertSame([], $refusal->trace);
 
         // The same principal is allowed when no resource is supplied, so the
         // denial above is down to the argument alone.
         self::assertTrue(Gate::allows('posts:create'));
-        self::assertSame(DecisionReason::EXPLICIT_ALLOW, Authorization::lastDecision()?->reason);
+        self::assertEquals([new StatementReference('resourceless-allow', 0, $policy->id)], Authorization::lastDecision()?->statements);
     }
 
     /**

@@ -13,6 +13,7 @@ use Illuminate\Support\Facades\Route;
 use Illuminate\Translation\Translator as TranslatorImplementation;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware;
@@ -123,7 +124,7 @@ final class AuthorizeActionTest extends TestCase
 
         $denial = self::denialOf(fn () => $this->get('/posts/post-2'));
 
-        self::assertSame(DecisionReason::IMPLICIT_DENY, $denial->getReason());
+        self::assertSame(DecisionReason::NO_MATCH, $denial->getReason());
     }
 
     /**
@@ -322,9 +323,9 @@ final class AuthorizeActionTest extends TestCase
     }
 
     /**
-     * Assert the request is refused for an unidentifiable resource: an implicit
-     * deny recorded once, for the last action about no resource, and one
-     * `AuthorizationFailed` event.
+     * Assert the request is refused for an unidentifiable resource: a denial at
+     * the resource stage recorded once, for the last action about no resource,
+     * and one `AuthorizationFailed` event.
      *
      * @param  string  $uri
      * @return void
@@ -337,15 +338,17 @@ final class AuthorizeActionTest extends TestCase
 
         $denial = self::denialOf(fn () => $this->get($uri));
 
-        self::assertSame(DecisionReason::IMPLICIT_DENY, $denial->getReason());
+        self::assertSame(DecisionReason::RESOURCE_UNRESOLVED, $denial->getReason());
         self::assertSame('This action is unauthorized.', $denial->getMessage());
         Event::assertDispatchedTimes(DecisionEvaluated::class, 1);
-        Event::assertDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => $event->action === self::ACTION && $event->resource === null);
+        Event::assertDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => $event->action === self::ACTION
+            && $event->resource                                                                                        === null
+            && $event->decision->stage                                                                                 === DecisionStage::RESOURCE);
         Event::assertDispatchedTimes(AuthorizationFailed::class, 1);
         Event::assertDispatched(AuthorizationFailed::class, static fn (AuthorizationFailed $event): bool => $event->action === self::ACTION
             && $event->resource                                                                                            === null
             && $event->context                                                                                             === []
             && $event->principal instanceof StubIdentity
-            && $event->result->reason === DecisionReason::IMPLICIT_DENY);
+            && $event->decision->reason === DecisionReason::RESOURCE_UNRESOLVED);
     }
 }

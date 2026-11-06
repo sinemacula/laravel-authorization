@@ -17,12 +17,15 @@ use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
 use SineMacula\Laravel\Authorization\Concerns\HasRoles;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
-use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision;
-use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
+use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
+use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted as IdentityPermissionGranted;
@@ -146,15 +149,17 @@ final class AuthorizationManagerTest extends TestCase
 
         $identity->suspended = true;
 
-        self::assertSame(DecisionReason::SUBJECT_INACTIVE, $manager->evaluate('posts:edit')->reason);
+        self::assertSame(DecisionReason::SUBJECT_INACTIVE, $manager->check('posts:edit')->reason);
 
         $identity->suspended  = false;
         $principal->suspended = true;
 
-        $result = $manager->evaluate('posts:edit');
+        $decision = $manager->check('posts:edit');
 
-        self::assertFalse($result->allowed);
-        self::assertSame(DecisionReason::SUBJECT_INACTIVE, $result->reason);
+        self::assertFalse($decision->isAllowed());
+        self::assertSame(DecisionReason::SUBJECT_INACTIVE, $decision->reason);
+        self::assertSame(DecisionStage::SUBJECT, $decision->stage);
+        self::assertSame([], $decision->trace);
     }
 
     /**
@@ -178,19 +183,28 @@ final class AuthorizationManagerTest extends TestCase
         $manager = $this->app?->make(AuthorizationManager::class);
         self::assertNotNull($manager);
 
-        self::assertSame(DecisionReason::RBAC_ALLOW, $manager->evaluate('admin:read')->reason);
-        self::assertSame(DecisionReason::EXPLICIT_DENY, $manager->evaluate('posts:edit')->reason);
+        $held = $manager->check('admin:read');
+
+        self::assertTrue($held->isAllowed());
+        self::assertNull($held->reason);
+        self::assertSame(DecisionStage::ALLOW, $held->stage);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $manager->check('posts:edit')->reason);
     }
 
     /**
-     * Anonymous resolver yields implicit deny on can() and throws from
-     * authorize().
+     * Anonymous resolver yields a `subject_unresolved` denial at the subject
+     * stage on can() and check(), and throws from authorize().
      *
      * @return void
      */
     public function testAnonymousPrincipalIsImplicitlyDenied(): void
     {
         self::assertFalse(Authorization::can('posts:create'));
+
+        $decision = Authorization::check('posts:create');
+
+        self::assertSame(DecisionReason::SUBJECT_UNRESOLVED, $decision->reason);
+        self::assertSame(DecisionStage::SUBJECT, $decision->stage);
 
         $this->expectException(AuthorizationException::class);
         Authorization::authorize('posts:create');
@@ -219,7 +233,8 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * RBAC allow via direct permission.
+     * RBAC allow via direct permission: an allow at the allow stage with no
+     * reason and no statement, its trace ending with the permission held.
      *
      * @return void
      */
@@ -230,9 +245,12 @@ final class AuthorizationManagerTest extends TestCase
         $user = StubIdentity::create(['id' => '1705066a-b10d-4f4a-8aba-73758a3a381a']);
         $user->givePermission('posts:create');
 
-        $decision = Authorization::for($user)->evaluate('posts:create');
-        self::assertTrue($decision->allowed);
-        self::assertSame(DecisionReason::RBAC_ALLOW, $decision->reason);
+        $decision = Authorization::for($user)->check('posts:create');
+        self::assertTrue($decision->isAllowed());
+        self::assertNull($decision->reason);
+        self::assertSame(DecisionStage::ALLOW, $decision->stage);
+        self::assertSame([], $decision->statements);
+        self::assertEquals([new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD)], $decision->trace);
     }
 
     /**
@@ -277,9 +295,11 @@ final class AuthorizationManagerTest extends TestCase
         $user->assignRole('admin');
         $user->attachPolicy($policy);
 
-        $decision = Authorization::for($user)->evaluate('posts:delete');
-        self::assertFalse($decision->allowed);
+        $decision = Authorization::for($user)->check('posts:delete');
+        self::assertFalse($decision->isAllowed());
         self::assertSame(DecisionReason::EXPLICIT_DENY, $decision->reason);
+        self::assertSame(DecisionStage::DENY, $decision->stage);
+        self::assertEquals([new StatementReference('deny-posts-delete', 0, $policy->id)], $decision->statements);
     }
 
     /**
@@ -509,7 +529,8 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * withPolicies scope overrides principal-attached policies.
+     * withPolicies scope overrides principal-attached policies: its allow
+     * statement decides the check at the allow stage.
      *
      * @return void
      */
@@ -522,16 +543,18 @@ final class AuthorizationManagerTest extends TestCase
             'statements' => [['effect' => 'allow', 'actions' => ['ad:hoc']]],
         ]);
 
-        $decision = Authorization::for($user)->withPolicies([$override])->evaluate('ad:hoc');
+        $decision = Authorization::for($user)->withPolicies([$override])->check('ad:hoc');
 
-        self::assertTrue($decision->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $decision->reason);
+        self::assertTrue($decision->isAllowed());
+        self::assertNull($decision->reason);
+        self::assertSame(DecisionStage::ALLOW, $decision->stage);
+        self::assertEquals([new StatementReference('ad-hoc', 0)], $decision->statements);
     }
 
     /**
-     * An invalid statement supplied through `withPolicies()` denies the check
-     * with the `invalid_policy` reason even though the principal holds the
-     * permission: RBAC never overrides an invalid policy.
+     * An invalid allow statement supplied through `withPolicies()` denies the
+     * check with the `invalid_policy` reason at the allow stage even though the
+     * principal holds the permission: RBAC never overrides an invalid policy.
      *
      * @return void
      */
@@ -553,18 +576,14 @@ final class AuthorizationManagerTest extends TestCase
             ],
         );
 
-        $decision = Authorization::for($user)->withPolicies([$invalid])->evaluate('posts:create', null, ['tenant' => 'org-1']);
+        $decision = Authorization::for($user)->withPolicies([$invalid])->check('posts:create', null, ['tenant' => 'org-1']);
 
-        self::assertFalse($decision->allowed);
+        self::assertFalse($decision->isAllowed());
         self::assertSame(DecisionReason::INVALID_POLICY, $decision->reason);
-        self::assertNull($decision->matchedStatement);
-        self::assertSame([
-            [
-                'policy'          => 'broken-override',
-                'statement_index' => 0,
-                'decision'        => TraceDecision::MATCHED,
-                'reason'          => 'invalid statement: condition \'tenant\' has an unknown operator \'nope\'',
-            ],
+        self::assertSame(DecisionStage::ALLOW, $decision->stage);
+        self::assertEquals([new StatementReference('broken-override', 0)], $decision->statements);
+        self::assertEquals([
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::INVALID, new StatementReference('broken-override', 0), ['tenant' => false]),
         ], $decision->trace);
         self::assertFalse(Authorization::for($user)->withPolicies([$invalid])->can('posts:create', null, ['tenant' => 'org-1']));
     }
@@ -596,17 +615,19 @@ final class AuthorizationManagerTest extends TestCase
             'authorizable_id'   => '9a7e3c1d-4b2f-4e8a-b5c6-0f1e2d3c4b04',
         ]);
 
-        $decision = Authorization::for($user)->evaluate('posts:create');
+        $decision = Authorization::for($user)->check('posts:create');
 
-        self::assertFalse($decision->allowed);
+        self::assertFalse($decision->isAllowed());
         self::assertSame(DecisionReason::INVALID_POLICY, $decision->reason);
-        self::assertNull($decision->matchedStatement);
+        self::assertSame(DecisionStage::DENY, $decision->stage);
+        self::assertSame([], $decision->statements);
         self::assertSame([], $decision->trace);
     }
 
     /**
-     * RBAC still applies when no policy decides the check: an implicit deny
-     * falls back to the held permission and keeps the evaluator's trace.
+     * RBAC still applies when no policy decides the check: a `no_match` denial
+     * falls back to the held permission, allowing at the allow stage, and keeps
+     * the evaluator's trace with the permission step after it.
      *
      * @return void
      */
@@ -622,22 +643,20 @@ final class AuthorizationManagerTest extends TestCase
             'statements' => [['effect' => 'allow', 'actions' => ['posts:delete']]],
         ]);
 
-        $decision = Authorization::for($user)->withPolicies([$unrelated])->evaluate('posts:create');
+        $decision = Authorization::for($user)->withPolicies([$unrelated])->check('posts:create');
 
-        self::assertTrue($decision->allowed);
-        self::assertSame(DecisionReason::RBAC_ALLOW, $decision->reason);
-        self::assertSame([
-            [
-                'policy'          => 'unrelated',
-                'statement_index' => 0,
-                'decision'        => TraceDecision::SKIPPED,
-                'reason'          => 'action/resource did not match',
-            ],
+        self::assertTrue($decision->isAllowed());
+        self::assertNull($decision->reason);
+        self::assertSame(DecisionStage::ALLOW, $decision->stage);
+        self::assertSame([], $decision->statements);
+        self::assertEquals([
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_APPLICABLE, new StatementReference('unrelated', 0)),
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD),
         ], $decision->trace);
     }
 
     /**
-     * An allow whose conditions cannot be decided is skipped, so the check
+     * An allow whose conditions cannot be decided allows nothing, so the check
      * falls through to RBAC; a deny whose conditions cannot be decided applies
      * and RBAC does not override it.
      *
@@ -659,23 +678,33 @@ final class AuthorizationManagerTest extends TestCase
             'statements' => [['effect' => 'deny', 'actions' => ['posts:create'], 'conditions' => ['tenant' => ['eq' => 'org-1']]]],
         ]);
 
-        $skipped = Authorization::for($user)->withPolicies([$allow])->evaluate('posts:create');
+        $skipped = Authorization::for($user)->withPolicies([$allow])->check('posts:create');
 
-        self::assertTrue($skipped->allowed);
-        self::assertSame(DecisionReason::RBAC_ALLOW, $skipped->reason);
-        self::assertSame('could not be decided: key \'tenant\' is missing from the context', $skipped->trace[0]['reason'] ?? null);
+        self::assertTrue($skipped->isAllowed());
+        self::assertNull($skipped->reason);
+        self::assertSame(DecisionStage::ALLOW, $skipped->stage);
+        self::assertSame([], $skipped->statements);
+        self::assertEquals([
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::UNDECIDABLE, new StatementReference('conditional-allow', 0), ['tenant' => false]),
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD),
+        ], $skipped->trace);
 
-        $denied = Authorization::for($user)->withPolicies([$deny])->evaluate('posts:create');
+        $denied = Authorization::for($user)->withPolicies([$deny])->check('posts:create');
 
-        self::assertFalse($denied->allowed);
+        self::assertFalse($denied->isAllowed());
         self::assertSame(DecisionReason::EXPLICIT_DENY, $denied->reason);
-        self::assertSame('explicit deny: key \'tenant\' is missing from the context', $denied->trace[0]['reason'] ?? null);
+        self::assertSame(DecisionStage::DENY, $denied->stage);
+        self::assertEquals([new StatementReference('conditional-deny', 0)], $denied->statements);
+        self::assertEquals([
+            new TraceEntry(DecisionStage::DENY, TraceOutcome::UNDECIDABLE, new StatementReference('conditional-deny', 0), ['tenant' => false]),
+        ], $denied->trace);
     }
 
     /**
-     * `refuseUnidentifiedResource()` denies the resolved principal implicitly
-     * without consulting RBAC, records the denial as the last decision and
-     * dispatches exactly one decision event without a resource.
+     * `refuseUnidentifiedResource()` denies the resolved principal as
+     * `resource_unresolved` at the resource stage without consulting RBAC,
+     * records the denial as the last decision and dispatches exactly one
+     * decision event without a resource.
      *
      * @return void
      */
@@ -690,21 +719,23 @@ final class AuthorizationManagerTest extends TestCase
 
         Event::fake();
 
-        $result = Authorization::refuseUnidentifiedResource('posts:create', ['tenant' => 'org-1']);
+        $decision = Authorization::refuseUnidentifiedResource('posts:create', ['tenant' => 'org-1']);
 
-        self::assertFalse($result->allowed);
-        self::assertSame(DecisionReason::IMPLICIT_DENY, $result->reason);
-        self::assertNull($result->matchedStatement);
-        self::assertSame([], $result->trace);
-        self::assertSame($result, Authorization::lastDecision());
+        self::assertFalse($decision->isAllowed());
+        self::assertSame(DecisionReason::RESOURCE_UNRESOLVED, $decision->reason);
+        self::assertSame(DecisionStage::RESOURCE, $decision->stage);
+        self::assertSame([], $decision->statements);
+        self::assertSame([], $decision->trace);
+        self::assertSame($decision, Authorization::lastDecision());
 
-        self::assertSoleDecisionEvent($user, ['tenant' => 'org-1'], $result);
+        self::assertSoleDecisionEvent($user, ['tenant' => 'org-1'], $decision);
     }
 
     /**
      * `refuseUnidentifiedResource()` on a `for()` scope denies that principal
-     * implicitly without consulting RBAC, records the denial as the last
-     * decision and dispatches exactly one decision event without a resource.
+     * as `resource_unresolved` at the resource stage without consulting RBAC,
+     * records the denial as the last decision and dispatches exactly one
+     * decision event without a resource.
      *
      * @return void
      */
@@ -717,15 +748,16 @@ final class AuthorizationManagerTest extends TestCase
 
         Event::fake();
 
-        $result = Authorization::for($user)->refuseUnidentifiedResource('posts:create', ['tenant' => 'org-2']);
+        $decision = Authorization::for($user)->refuseUnidentifiedResource('posts:create', ['tenant' => 'org-2']);
 
-        self::assertFalse($result->allowed);
-        self::assertSame(DecisionReason::IMPLICIT_DENY, $result->reason);
-        self::assertNull($result->matchedStatement);
-        self::assertSame([], $result->trace);
-        self::assertSame($result, Authorization::lastDecision());
+        self::assertFalse($decision->isAllowed());
+        self::assertSame(DecisionReason::RESOURCE_UNRESOLVED, $decision->reason);
+        self::assertSame(DecisionStage::RESOURCE, $decision->stage);
+        self::assertSame([], $decision->statements);
+        self::assertSame([], $decision->trace);
+        self::assertSame($decision, Authorization::lastDecision());
 
-        self::assertSoleDecisionEvent($user, ['tenant' => 'org-2'], $result);
+        self::assertSoleDecisionEvent($user, ['tenant' => 'org-2'], $decision);
     }
 
     /**
@@ -786,7 +818,7 @@ final class AuthorizationManagerTest extends TestCase
 
         self::assertNull(Authorization::currentSubject());
         self::assertFalse(Authorization::can('posts:create'));
-        self::assertFalse(Authorization::refuseUnidentifiedResource('posts:create')->allowed);
+        self::assertFalse(Authorization::refuseUnidentifiedResource('posts:create')->isAllowed());
 
         $this->expectException(AuthorizationException::class);
 
@@ -824,14 +856,14 @@ final class AuthorizationManagerTest extends TestCase
     /**
      * Assert that exactly one decision event was dispatched, for the check of
      * `posts:create` without a resource, carrying the supplied principal,
-     * context and result, and that no failure event was dispatched.
+     * context and decision, and that no failure event was dispatched.
      *
      * @param  object  $principal
      * @param  array<string, mixed>  $context
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult  $result
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
      * @return void
      */
-    private static function assertSoleDecisionEvent(object $principal, array $context, EvaluationResult $result): void
+    private static function assertSoleDecisionEvent(object $principal, array $context, Decision $decision): void
     {
         $events = \array_values(
             Event::dispatched(DecisionEvaluated::class)
@@ -844,7 +876,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame('posts:create', $events[0]->action);
         self::assertNull($events[0]->resource);
         self::assertSame($context, $events[0]->context);
-        self::assertSame($result, $events[0]->result);
+        self::assertSame($decision, $events[0]->decision);
         Event::assertNotDispatched(AuthorizationFailed::class);
     }
 

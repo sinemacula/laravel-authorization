@@ -54,7 +54,8 @@ final class AuthorizationAssertionsTest extends TestCase
     }
 
     /**
-     * `assertCan` fails with a trace-bearing message when denied.
+     * `assertCan` fails when denied, with a message that carries the decision's
+     * explanation: the verdict, its reason and stage, and every trace step.
      *
      * @return void
      */
@@ -63,7 +64,10 @@ final class AuthorizationAssertionsTest extends TestCase
         $user = StubIdentity::create(['id' => '9c92e0cb-686f-4347-8ca8-9033eed62375']);
 
         $this->expectException(AssertionFailedError::class);
-        $this->expectExceptionMessageMatches('/Failed asserting that the principal can perform/');
+        $this->expectExceptionMessage(
+            "Failed asserting that the principal can perform 'docs:view'.\nDecision:\n"
+            . "DENY (no_match: no statement or permission names it) at the implicit stage.\n  [allow] permission: not_held",
+        );
 
         $this->assertCan($user, 'docs:view');
     }
@@ -81,7 +85,8 @@ final class AuthorizationAssertionsTest extends TestCase
     }
 
     /**
-     * `assertCannot` fails when the principal is allowed.
+     * `assertCannot` fails when the principal is allowed, with a message that
+     * carries the decision's explanation.
      *
      * @return void
      */
@@ -93,7 +98,7 @@ final class AuthorizationAssertionsTest extends TestCase
         $user->givePermission('docs:delete');
 
         $this->expectException(AssertionFailedError::class);
-        $this->expectExceptionMessageMatches('/Failed asserting that the principal cannot perform/');
+        $this->expectExceptionMessage("Failed asserting that the principal cannot perform 'docs:delete'.\nDecision:\nALLOW at the allow stage.\n  [allow] permission: held");
 
         $this->assertCannot($user, 'docs:delete');
     }

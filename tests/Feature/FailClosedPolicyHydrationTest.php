@@ -9,6 +9,7 @@ use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
@@ -75,8 +76,9 @@ final class FailClosedPolicyHydrationTest extends TestCase
 
     /**
      * Every check for the holder of a malformed policy denies with the
-     * `invalid_policy` reason, even when an RBAC permission is held and another
-     * valid policy explicitly allows the action.
+     * `invalid_policy` reason at the deny stage, naming no statement and with
+     * an empty trace, even when an RBAC permission is held and another valid
+     * policy explicitly allows the action.
      *
      * @return void
      */
@@ -103,12 +105,13 @@ final class FailClosedPolicyHydrationTest extends TestCase
         self::assertNotNull($fresh);
 
         foreach (['posts:create', 'posts:delete', 'posts:unrelated'] as $action) {
-            $decision = Authorization::for($fresh)->evaluate($action);
+            $decision = Authorization::for($fresh)->check($action);
 
-            self::assertFalse($decision->allowed, $action);
+            self::assertFalse($decision->isAllowed(), $action);
             self::assertSame(DecisionReason::INVALID_POLICY, $decision->reason, $action);
             self::assertSame('invalid_policy', $decision->reason->value, $action);
-            self::assertNull($decision->matchedStatement, $action);
+            self::assertSame(DecisionStage::DENY, $decision->stage, $action);
+            self::assertSame([], $decision->statements, $action);
             self::assertSame([], $decision->trace, $action);
             self::assertFalse(Authorization::for($fresh)->can($action), $action);
         }
@@ -116,8 +119,8 @@ final class FailClosedPolicyHydrationTest extends TestCase
 
     /**
      * `authorize()` raises for the holder of a malformed policy even when the
-     * permission is held, and the raised result carries the `invalid_policy`
-     * reason.
+     * permission is held, and both the raised exception and the recorded
+     * decision carry the `invalid_policy` reason.
      *
      * @return void
      */
@@ -136,12 +139,14 @@ final class FailClosedPolicyHydrationTest extends TestCase
         try {
             Authorization::for($fresh)->authorize('posts:create');
             self::fail('authorize() should raise for the holder of a malformed policy.');
-        } catch (AuthorizationException) {
+        } catch (AuthorizationException $exception) {
             $last = Authorization::lastDecision();
 
+            self::assertSame(DecisionReason::INVALID_POLICY, $exception->getReason());
             self::assertNotNull($last);
-            self::assertFalse($last->allowed);
+            self::assertFalse($last->isAllowed());
             self::assertSame(DecisionReason::INVALID_POLICY, $last->reason);
+            self::assertSame(DecisionStage::DENY, $last->stage);
         }
     }
 

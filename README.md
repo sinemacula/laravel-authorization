@@ -392,6 +392,23 @@ Authorization::for($user)->can('posts:delete', 'posts/42', ['ip' => request()->i
 Authorization::for($user)->explain('posts:delete', 'posts/42', ['ip' => request()->ip()]);
 ```
 
+`Authorization::check()` returns the full `Decision`: `isAllowed()`, the denial's reason code (`reason`), the stage
+that decided it (`stage`), the statements that did (`statements`) and a trace of every step. `can()` and `authorize()`
+are shortcuts over it. A check runs in stages, stopping at the first that decides: the subject (`subject_unresolved`,
+`subject_inactive`), then the denies in every applicable policy (`explicit_deny`, or `invalid_policy` for a statement
+that cannot be evaluated), then the allows (an allow statement, then a permission held), then the implicit deny
+(`condition_failed` when an allow statement names the check but its conditions do not hold, else `no_match`). Each
+stage assesses its statements in a fixed order, so the decision is the same whatever order the policies are read in,
+and the trace records condition key names and whether each held, never their values:
+
+```php
+$decision = Authorization::for($user)->check('posts:delete', 'posts/42', ['ip' => request()->ip()]);
+
+$decision->isAllowed();        // false
+$decision->reason;             // DecisionReason::EXPLICIT_DENY
+$decision->statements;         // [StatementReference('no-deletes-off-network', 0, <its key>)]
+```
+
 Policies fail closed. A deny whose condition cannot be decided, such as a check made without `ip` in its context,
 still applies, while an allow in the same position does not. A check without a resource matches only statements whose
 resources include `*`. A stored policy that cannot be read denies every check for its holder, with the reason
@@ -446,7 +463,7 @@ own with no actor. A change `forceSystem()` unlocked dispatches `SystemOverrideU
 the actor.
 
 `DecisionEvaluated` and `AuthorizationFailed` implement the marker too, but are dispatched when the decision is made,
-not after a commit, and still carry the principal, the context and the result as they were evaluated.
+not after a commit, and still carry the principal, the context and the decision as they were evaluated.
 
 ### Middleware and Blade
 
@@ -481,7 +498,7 @@ with an `InvalidCheckArgumentException`. A request without a subject throws Lara
 (`401`). A denial throws the package's `AuthorizationException` (`403`) with the reason code and a translated message.
 A denial of `permission:` or `authorize:` is a decision: it is recorded as the last decision and fires
 `AuthorizationFailed` once, for the list's last action, before the `authorization::authorization.denied` line is
-thrown. A denial of `role:` is not a decision: it carries `implicit_deny` and the
+thrown. A denial of `role:` is not a decision: it carries `no_match` and the
 `authorization::authorization.role_required` line, and records nothing and fires no event.
 
 Run the package's middleware after authentication and after any step-up middleware, so a request that is not signed

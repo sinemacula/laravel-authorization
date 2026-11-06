@@ -30,6 +30,7 @@ final readonly class Policy
      * @param  string  $name
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Statement>  $statements
      * @param  int  $version
+     * @param  string|null  $id
      */
     public function __construct(
 
@@ -41,7 +42,21 @@ final readonly class Policy
 
         /** Document schema version; defaults to the current constant. */
         public int $version = self::CURRENT_VERSION,
+
+        /** The stored policy's key, which tells apart policies of one name; null for one built in code. */
+        public ?string $id = null,
     ) {}
+
+    /**
+     * Return the policy as the stored policy with the given key.
+     *
+     * @param  string|null  $id
+     * @return self
+     */
+    public function withId(?string $id): self
+    {
+        return new self($this->name, $this->statements, $this->version, $id);
+    }
 
     /**
      * Hydrate a policy from its array representation.

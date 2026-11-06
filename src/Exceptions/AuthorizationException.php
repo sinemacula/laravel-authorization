@@ -21,7 +21,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
  * `permission` and `authorize` middleware, is recorded as the manager's last
  * decision and fires the `AuthorizationFailed` event first, so a consumer that
  * needs the full decision reads it there. A missing role is not a decision: it
- * carries `implicit_deny`, records nothing and fires no event.
+ * carries `no_match`, records nothing and fires no event.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

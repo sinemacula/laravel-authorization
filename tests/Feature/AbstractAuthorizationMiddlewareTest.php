@@ -94,9 +94,9 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
         $action = self::denialOf(fn (): Response => $this->runMiddleware(RequirePermission::class, self::request(), 'posts:delete'));
 
         self::assertSame('This action requires a role you do not have.', $role->getMessage());
-        self::assertSame(DecisionReason::IMPLICIT_DENY, $role->getReason());
+        self::assertSame(DecisionReason::NO_MATCH, $role->getReason());
         self::assertSame('This action is unauthorized.', $action->getMessage());
-        self::assertSame(DecisionReason::IMPLICIT_DENY, $action->getReason());
+        self::assertSame(DecisionReason::NO_MATCH, $action->getReason());
     }
 
     /**

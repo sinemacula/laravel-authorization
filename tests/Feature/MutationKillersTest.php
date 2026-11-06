@@ -258,8 +258,8 @@ final class MutationKillersTest extends TestCase
     /**
      * `authorize()` populates the `LastDecisionStore` on both the success and
      * deny paths — pins the MethodCallRemoval mutant on
-     * `$this->lastDecisionStore->put($collected)` inside the `authorize` branch
-     * (not evaluate).
+     * `$this->lastDecisionStore->put($decision)`, which `authorize()` reaches
+     * through `check()`.
      *
      * @return void
      *
@@ -269,7 +269,7 @@ final class MutationKillersTest extends TestCase
     {
         $this->app->make(LastDecisionStore::class)->forget(); // @phpstan-ignore method.nonObject
 
-        // Deny path — authorize() throws, lastDecision captures the result.
+        // Deny path — authorize() throws, lastDecision captures the decision.
         $role = Role::create(['id' => (string) Str::uuid(), 'name' => 'la', 'guard' => 'web']);
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
@@ -279,7 +279,7 @@ final class MutationKillersTest extends TestCase
         } catch (AuthorizationException) {
             $last = Authorization::lastDecision();
             self::assertNotNull($last);
-            self::assertFalse($last->allowed);
+            self::assertFalse($last->isAllowed());
         }
 
         // Allow path — authorize() returns, lastDecision captures allow.
@@ -291,7 +291,7 @@ final class MutationKillersTest extends TestCase
 
         $last = Authorization::lastDecision();
         self::assertNotNull($last);
-        self::assertTrue($last->allowed);
+        self::assertTrue($last->isAllowed());
     }
 
     /**

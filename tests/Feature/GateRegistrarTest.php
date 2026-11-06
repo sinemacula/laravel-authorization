@@ -18,6 +18,8 @@ use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableResource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
+use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -38,10 +40,11 @@ use Tests\TestCase;
  *
  * An argument that cannot be identified as a resource (an unsaved model, a
  * model without a usable key, a number, a boolean, a list or a plain object) is
- * refused with a recorded implicit deny, without consulting any policy or RBAC
- * grant, so it can never be mistaken for a check about no resource at all. A
- * null argument means no resource; strings, saved models, resource-contract
- * objects and stringable objects are forwarded as their identifiers.
+ * refused at the resource stage as an unresolved resource, without consulting
+ * any policy or RBAC grant, so it can never be mistaken for a check about no
+ * resource at all. A null argument means no resource; strings, saved models,
+ * resource-contract objects and stringable objects are forwarded as their
+ * identifiers.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -108,11 +111,11 @@ final class GateRegistrarTest extends TestCase
 
     /**
      * An unsaved model has no key, so it cannot be identified as a resource and
-     * the Gate refuses it with an implicit deny.
+     * the Gate refuses it as an unresolved resource.
      *
      * @return void
      */
-    public function testUnsavedModelIsRefusedWithImplicitDeny(): void
+    public function testUnsavedModelIsRefusedAsUnresolved(): void
     {
         $user = $this->actAsFullyPermittedPrincipal();
 
@@ -122,11 +125,11 @@ final class GateRegistrarTest extends TestCase
 
     /**
      * A model whose key is the empty string cannot be identified as a resource,
-     * so the Gate refuses it with an implicit deny.
+     * so the Gate refuses it as an unresolved resource.
      *
      * @return void
      */
-    public function testModelWithEmptyStringKeyIsRefusedWithImplicitDeny(): void
+    public function testModelWithEmptyStringKeyIsRefusedAsUnresolved(): void
     {
         $user = $this->actAsFullyPermittedPrincipal();
 
@@ -136,11 +139,11 @@ final class GateRegistrarTest extends TestCase
 
     /**
      * An integer argument is not a resource identifier, so the Gate refuses it
-     * with an implicit deny.
+     * as an unresolved resource.
      *
      * @return void
      */
-    public function testIntegerArgumentIsRefusedWithImplicitDeny(): void
+    public function testIntegerArgumentIsRefusedAsUnresolved(): void
     {
         $user = $this->actAsFullyPermittedPrincipal();
 
@@ -150,12 +153,12 @@ final class GateRegistrarTest extends TestCase
     }
 
     /**
-     * A float argument is not a resource identifier, so the Gate refuses it
-     * with an implicit deny.
+     * A float argument is not a resource identifier, so the Gate refuses it as
+     * an unresolved resource.
      *
      * @return void
      */
-    public function testFloatArgumentIsRefusedWithImplicitDeny(): void
+    public function testFloatArgumentIsRefusedAsUnresolved(): void
     {
         $user = $this->actAsFullyPermittedPrincipal();
 
@@ -165,11 +168,11 @@ final class GateRegistrarTest extends TestCase
 
     /**
      * A boolean argument is not a resource identifier, so the Gate refuses it
-     * with an implicit deny, whichever value it carries.
+     * as an unresolved resource, whichever value it carries.
      *
      * @return void
      */
-    public function testBooleanArgumentIsRefusedWithImplicitDeny(): void
+    public function testBooleanArgumentIsRefusedAsUnresolved(): void
     {
         $user = $this->actAsFullyPermittedPrincipal();
 
@@ -180,11 +183,11 @@ final class GateRegistrarTest extends TestCase
 
     /**
      * A list array at index zero is neither a context map nor a resource
-     * identifier, so the Gate refuses it with an implicit deny.
+     * identifier, so the Gate refuses it as an unresolved resource.
      *
      * @return void
      */
-    public function testListArrayArgumentIsRefusedWithImplicitDeny(): void
+    public function testListArrayArgumentIsRefusedAsUnresolved(): void
     {
         $user = $this->actAsFullyPermittedPrincipal();
 
@@ -195,11 +198,11 @@ final class GateRegistrarTest extends TestCase
 
     /**
      * A plain object without `__toString` cannot be identified as a resource,
-     * so the Gate refuses it with an implicit deny.
+     * so the Gate refuses it as an unresolved resource.
      *
      * @return void
      */
-    public function testPlainObjectArgumentIsRefusedWithImplicitDeny(): void
+    public function testPlainObjectArgumentIsRefusedAsUnresolved(): void
     {
         $user = $this->actAsFullyPermittedPrincipal();
 
@@ -228,7 +231,7 @@ final class GateRegistrarTest extends TestCase
         self::assertTrue(Gate::forUser($user)->allows('posts:create', [null]));
         self::assertSame([null, null], $this->evaluatedResources());
         self::assertSame($user, $this->decisions()[1]->principal);
-        self::assertSame(DecisionReason::EXPLICIT_ALLOW, Authorization::lastDecision()?->reason);
+        self::assertEquals([$this->wildcardAllowReference()], Authorization::lastDecision()?->statements);
     }
 
     /**
@@ -267,7 +270,7 @@ final class GateRegistrarTest extends TestCase
 
         self::assertTrue(Gate::allows('posts:create', [null]));
         self::assertSame([null], $this->evaluatedResources());
-        self::assertSame(DecisionReason::EXPLICIT_ALLOW, Authorization::lastDecision()?->reason);
+        self::assertEquals([$this->wildcardAllowReference()], Authorization::lastDecision()?->statements);
     }
 
     /**
@@ -293,7 +296,7 @@ final class GateRegistrarTest extends TestCase
 
         self::assertFalse(Gate::allows('posts:create', [null]));
         self::assertSame([null], $this->evaluatedResources());
-        self::assertSame(DecisionReason::IMPLICIT_DENY, Authorization::lastDecision()?->reason);
+        self::assertSame(DecisionReason::NO_MATCH, Authorization::lastDecision()?->reason);
     }
 
     /**
@@ -516,7 +519,7 @@ final class GateRegistrarTest extends TestCase
 
     /**
      * Assert the Gate refuses the supplied leading argument with exactly one
-     * recorded implicit deny for the supplied principal.
+     * recorded unresolved-resource refusal for the supplied principal.
      *
      * @param  mixed  $argument
      * @param  \Tests\Feature\Stubs\StubIdentity  $principal
@@ -533,12 +536,12 @@ final class GateRegistrarTest extends TestCase
 
     /**
      * Assert exactly one decision was dispatched after the supplied number of
-     * earlier decisions, and that it is an implicit deny for a check about no
-     * resource that consulted no policy or RBAC grant.
+     * earlier decisions, and that it is a refusal at the resource stage for a
+     * check about no resource that consulted no policy or RBAC grant.
      *
      * A principal with a wildcard-resource allow and the RBAC permission would
-     * be allowed by either, so the implicit deny reason and the empty trace
-     * prove neither was evaluated.
+     * be allowed by either, so the unresolved-resource reason and the empty
+     * trace prove neither was evaluated.
      *
      * @param  int  $previousCount
      * @param  \Tests\Feature\Stubs\StubIdentity  $principal
@@ -557,11 +560,12 @@ final class GateRegistrarTest extends TestCase
         self::assertSame('posts:create', $decision->action);
         self::assertNull($decision->resource);
         self::assertSame($context, $decision->context);
-        self::assertFalse($decision->result->allowed);
-        self::assertSame(DecisionReason::IMPLICIT_DENY, $decision->result->reason);
-        self::assertNull($decision->result->matchedStatement);
-        self::assertSame([], $decision->result->trace);
-        self::assertSame($decision->result, Authorization::lastDecision());
+        self::assertFalse($decision->decision->isAllowed());
+        self::assertSame(DecisionReason::RESOURCE_UNRESOLVED, $decision->decision->reason);
+        self::assertSame(DecisionStage::RESOURCE, $decision->decision->stage);
+        self::assertSame([], $decision->decision->statements);
+        self::assertSame([], $decision->decision->trace);
+        self::assertSame($decision->decision, Authorization::lastDecision());
     }
 
     /**
@@ -580,8 +584,8 @@ final class GateRegistrarTest extends TestCase
 
         self::assertCount($previousCount + 1, $decisions);
         self::assertNull($decisions[$previousCount]->resource);
-        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $decisions[$previousCount]->result->reason);
-        self::assertSame($decisions[$previousCount]->result, Authorization::lastDecision());
+        self::assertEquals([$this->wildcardAllowReference()], $decisions[$previousCount]->decision->statements);
+        self::assertSame($decisions[$previousCount]->decision, Authorization::lastDecision());
     }
 
     /**
@@ -634,6 +638,19 @@ final class GateRegistrarTest extends TestCase
         $this->actAs($user);
 
         return $user;
+    }
+
+    /**
+     * Return the reference to the stored wildcard-resource allow policy's only
+     * statement, carrying the policy's key.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\StatementReference
+     */
+    private function wildcardAllowReference(): StatementReference
+    {
+        $policy = Policy::query()->where('name', 'wildcard-allow')->sole();
+
+        return new StatementReference('wildcard-allow', 0, $policy->id);
     }
 
     /**

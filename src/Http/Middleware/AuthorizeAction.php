@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Http\Middleware;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Translation\Translator;
 use Illuminate\Http\Request;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Subject;
@@ -87,11 +88,11 @@ final class AuthorizeAction extends AbstractAuthorizationMiddleware
      */
     private function refusal(Subject $subject, string $action): AuthorizationException
     {
-        $result = self::manager()->refuseUnidentifiedResource($action);
+        $decision = self::manager()->refuseUnidentifiedResource($action);
 
-        $this->events?->dispatch(new AuthorizationFailed($subject->subject, $action, null, [], $result));
+        $this->events?->dispatch(new AuthorizationFailed($subject->subject, $action, null, [], $decision));
 
-        return $this->denial($result->reason);
+        return $this->denial(DecisionReason::RESOURCE_UNRESOLVED);
     }
 
     /**

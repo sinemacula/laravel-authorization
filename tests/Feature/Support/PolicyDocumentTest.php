@@ -38,6 +38,25 @@ final class PolicyDocumentTest extends TestCase
     }
 
     /**
+     * A stored policy hydrates with the model's key as its id, so policies of
+     * one name are told apart; a key that is not a string is given as text.
+     *
+     * @return void
+     */
+    public function testHydratesWithTheModelsKeyAsItsId(): void
+    {
+        $policy = Policy::query()->create(['name' => 'readers', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
+
+        self::assertNotSame('', $policy->id);
+        self::assertSame($policy->id, PolicyDocument::hydrate($policy)->id);
+
+        $numbered = new Policy;
+        $numbered->setRawAttributes(['id' => 42, 'name' => 'numbered', 'document' => '{"statements":[]}']);
+
+        self::assertSame('42', PolicyDocument::hydrate($numbered)->id);
+    }
+
+    /**
      * A stored document that is not a valid policy is refused under the
      * policy's name, keeping the cause.
      *

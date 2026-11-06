@@ -2,155 +2,137 @@
 
 ## Purpose
 
-Document the four-step decision order used by the policy evaluator, the interaction between policy evaluation and RBAC,
-the invariants that govern deny precedence, and how the evaluator fails closed when a statement cannot be decided or a
-policy cannot be evaluated. This note is the authoritative reference for why the evaluator behaves the way it does --
-the code and tests encode the *what*; this note encodes the *why*.
+Document the staged decision every check goes through, the interaction between policy statements and RBAC, the
+invariants that govern deny precedence, and how a decision fails closed when a statement cannot be decided or a policy
+cannot be evaluated. This note is the authoritative reference for why the decision behaves the way it does -- the
+code and tests encode the *what*; this note encodes the *why*.
+
+## The Decision
+
+`AuthorizationManager::check()` is the one core decision (D22); `can()` reads whether it allows and `authorize()`
+throws when it does not. It returns a `Decision`:
+
+- `effect` -- `DecisionEffect::ALLOW` or `DecisionEffect::DENY`; `isAllowed()` reads it.
+- `reason` -- why it denies, a `DecisionReason` (AUTHZ-7.10); null when it allows.
+- `stage` -- the `DecisionStage` that decided it.
+- `statements` -- the statements that decided it, each a `StatementReference` (the policy's name, its stored key and
+  the statement's position, shown as `name[key]#position`); none for a permission held or a denial no statement made.
+- `trace` -- every step taken, in order, each a `TraceEntry`: its stage, its `TraceOutcome`, the statement it
+  assessed (none for the permission step), and the condition keys it tested with whether each held.
+
+The trace never carries a context or attribute value, only key names and results (AUTHZ-8.8), so a decision is safe to
+log, store and put on an event.
 
 ## Invariants
 
-1. **RBAC is additive / allow-only.** Direct permission grants and role-inherited permissions are unioned on read
-   (`HasPermissions::getPermissions()`). There is no RBAC-layer deny mechanism -- every permission a principal holds
-   (directly or via roles) contributes an allow signal and nothing else.
+1. **The stages run in order, and the first that decides ends the decision (AUTHZ-7.1).**
+   1. *Subject*: no subject denies as `subject_unresolved`; an inactive subject, or one whose identity is inactive,
+      denies as `subject_inactive`. Nothing else is read.
+   2. *Deny*: every deny statement of every applicable policy is assessed. One that matches, or whose test cannot be
+      decided, denies as `explicit_deny`. Failing that, a deny statement that cannot be evaluated denies as
+      `invalid_policy`. A stored policy that cannot be read denies as `invalid_policy` before any statement is
+      assessed.
+   3. *Allow*: only when no deny decided, every allow statement is assessed. One that cannot be evaluated denies as
+      `invalid_policy`; failing that, one that matches allows. Failing that, a permission the subject holds that the
+      action names (directly or through a role) allows.
+   4. *Implicit*: nothing allowed. The denial is `condition_failed` when an allow statement names the action and the
+      resource but its conditions do not hold or cannot be decided, and `no_match` otherwise.
 
-2. **All deny semantics live exclusively in policies.** A consumer who needs "everyone in role X except these three
-   users" must express that exception as a deny policy, not as an RBAC construct. This keeps the role/permission model
-   simple and auditable -- an admin reviewing a principal's effective permissions never has to reason about negative
-   permission grants or RBAC-layer overrides.
+   Guardrails, permission boundaries and session policies take their places between the deny and allow stages as they
+   arrive (BL-48 to BL-50).
 
-3. **The four-step evaluation order is: explicit deny, explicit allow, RBAC, implicit deny.** The evaluator walks every
-   statement from every policy in document order and assesses it as matching, not matching, undecidable or invalid (see
-   [Wildcard and condition semantics](wildcard-and-condition-semantics.md#match-outcomes)). Within that walk:
-   - An **invalid** statement short-circuits immediately -- the evaluator returns `InvalidPolicy` and stops, whatever
-     its effect and whatever was recorded before it.
-   - A **deny** statement that matches, or whose test is undecidable, short-circuits immediately -- the evaluator
-     returns `ExplicitDeny` and stops.
-   - An **allow** statement that matches is recorded but does not short-circuit -- a subsequent deny in the same or a
-     later policy still wins. An allow whose test is undecidable is skipped.
-   - After all statements have been walked: if at least one allow was recorded, the evaluator returns `ExplicitAllow`.
-   - Only when the evaluator returns `ImplicitDeny` does the manager fall back to RBAC: if the principal holds the
-     action as a permission (directly or via a role), the result is `RbacAllow`. An `ExplicitDeny`, an
-     `ExplicitAllow` and an `InvalidPolicy` all stand.
-   - If RBAC also does not match, the result is `ImplicitDeny`.
+2. **The decision is deterministic (AUTHZ-7.9).** Within each stage, policies are assessed in order of name, then stored
+   key, then document, and each statement in order of position, and every statement of the stage is assessed whatever is
+   found first, so the decision, the statements that decided it and the trace are the same whatever order the policies
+   were read in. A stage that decides ends the decision: once a deny decided, no allow statement is assessed (N4).
 
-4. **A deny statement is skipped only when its test definitely fails.** A deny whose conditions definitely do not match
-   is a non-event, not a fallback deny: the trace records it as `skipped` with the reason `conditions not satisfied`. A
-   deny whose test cannot be decided -- a condition key missing from the context, a `${…}` reference that cannot be
-   resolved, a context value or an interpolated operand of the wrong type -- **applies**, and the trace records
-   `explicit deny: <detail>`. This deliberately departs from AWS IAM, where a missing key silently disables a
-   conditional deny: a caller that leaves a key out of the context must never get past a deny written against it. An
-   allow is the mirror image: it applies only when its test definitely matches.
+3. **RBAC is additive / allow-only.** Direct permission grants and role-inherited permissions are unioned on read.
+   There is no RBAC-layer deny: every permission a subject holds contributes an allow and nothing else, and only when no
+   statement has decided the check.
 
-5. **Direct-user-permission grants sit alongside role-inherited permissions as equal citizens.** There is no precedence
-   between them; the union wins. A principal who holds `posts:create` directly and also inherits it from a role sees
-   the same effective decision as one who holds it from either source alone.
+4. **All deny semantics live exclusively in policies.** "Everyone in role X except these three users" is a deny
+   policy, not an RBAC construct, so an administrator reviewing effective permissions never reasons about negative
+   grants.
+
+5. **A deny statement is skipped only when its test definitely fails.** A deny whose conditions definitely do not hold
+   is recorded as `condition_failed` and decides nothing. A deny whose test cannot be decided -- a condition key missing
+   from the context, a `${…}` reference that cannot be resolved, a value or interpolated operand of the wrong type --
+   **applies**. This deliberately departs from AWS IAM, where a missing key silently disables a conditional deny: a
+   caller that leaves a key out of the context never gets past a deny written against it. An allow is the mirror
+   image: it applies only when its test definitely holds.
 
 6. **A policy that cannot be evaluated denies the check; it is never skipped.** Skipping a malformed statement or an
-   unreadable policy row would also drop the denies it carries. An invalid statement, and a stored document that cannot
-   be hydrated, both produce `InvalidPolicy` (`allowed = false`, reason `invalid_policy`, no matched statement), and
-   RBAC never overrides it, even when the principal holds the permission.
+   unreadable policy row would also drop the denies it carries, so both deny as `invalid_policy`, and RBAC never
+   overrides that, even when the subject holds the permission.
 
-## Success Path
+## Trace
 
-A typical evaluation for `Authorization::for($user)->can('posts:create')`:
+Each statement adds one entry, in the deny stage for a deny statement and the allow stage for an allow statement, and
+the permission step adds one more when the statements allowed nothing:
 
-1. The manager resolves the principal (the `$user` override from `for()`).
-2. Policies are gathered via the `PolicyResolver` (which may consult a cache).
-3. The evaluator walks every statement of every policy in order, building a trace.
-4. No deny matches, one allow matches -- the evaluator returns `ExplicitAllow`.
-5. The manager records the result in the `LastDecisionStore` and emits `DecisionEvaluated`.
-
-When no policy matches at all:
-
-1-3. Same as above, but every statement is traced as `skipped`.
-4. The evaluator returns `ImplicitDeny` (no allow, no deny, no invalid statement).
-5. The manager checks RBAC: `$user->hasPermission('posts:create')` returns true (direct grant or role-inherited).
-6. The manager returns `RbacAllow`, preserving the evaluator's trace for audit.
-
-Each statement the evaluator assesses adds one trace entry. The `<detail>` names what decided the outcome (for
-example `key 'ip' is missing from the context`) and never carries a context value:
-
-| Statement outcome                           | Trace decision | Trace reason                     |
-|---------------------------------------------|----------------|----------------------------------|
-| Action or resource does not cover the check | `skipped`      | `action/resource did not match`  |
-| Conditions definitely do not match          | `skipped`      | `conditions not satisfied`       |
-| Allow whose test is undecidable             | `skipped`      | `could not be decided: <detail>` |
-| Allow that matches                          | `matched`      | `explicit allow`                 |
-| Deny that matches                           | `matched`      | `explicit deny`                  |
-| Deny whose test is undecidable              | `matched`      | `explicit deny: <detail>`        |
-| Invalid statement (either effect)           | `matched`      | `invalid statement: <detail>`    |
+| What the step found                                                 | Outcome            |
+|---------------------------------------------------------------------|--------------------|
+| The statement does not name the action or the resource              | `not_applicable`   |
+| It names them and its conditions hold                               | `matched`          |
+| It names them but its conditions do not hold                        | `condition_failed` |
+| It names the action but a value it needs is missing or unresolvable | `undecidable`      |
+| It cannot be evaluated                                              | `invalid`          |
+| The subject holds the permission the action names                   | `held`             |
+| The subject does not hold it                                        | `not_held`         |
 
 Policy names in the trace are the stored policy's name: when a policy row is hydrated, the model's name replaces any
 `name` inside the document, so a document cannot claim another policy's name.
 
 ## Failure / Edge Cases
 
-- **No subject**: the manager short-circuits to `ImplicitDeny` without consulting the evaluator. This covers
-  anonymous requests and a subject resolver that resolves no subject.
+- **No subject**: `subject_unresolved` at the subject stage, without consulting any policy. This covers anonymous
+  requests and a subject resolver that resolves no subject.
 - **Malformed policy document**: writes are refused -- the `Policy` model validates the document on assignment, and
   `Statement::fromArray()` refuses unknown keys, an empty resource list, an empty operator map, a non-string operator
-  key, an unknown operator, a malformed literal operand (including an empty string for `starts_with`, `ends_with` or
-  `string_like`, and `NAN` or an infinity for a numeric comparison) and a malformed `${…}` reference in a resource
-  pattern or a condition. A row that still cannot be hydrated on read (one written around the model, or one an older
-  release accepted) is never skipped: `HasPolicies::getPolicies()` logs a warning on the package's log channel (`authorization.log_channel`)
-  (with `policy_id`, `policy_name` and `reason`) and rethrows, and the manager returns `InvalidPolicy`. Every check for
-  that identity denies, whatever it holds, until the document is fixed. A custom `PolicyResolver` must do the same:
-  throw `InvalidPolicyDocumentException` rather than leave a policy out.
-- **Unknown document version or key**: a document whose `version` is not `1`, or which carries a top-level key other
-  than `version`, `name` and `statements`, is refused like any other malformed document. A document without a
-  `version` is version 1.
-- **Invalid statement at evaluation time**: a directly constructed statement with an unknown operator, a malformed
-  literal operand or a malformed `${…}` reference in a condition returns `InvalidPolicy` as soon as it is assessed,
-  whatever the context holds: a condition's shape is checked before its key is looked up, so a missing key does not
-  turn it into an undecidable test. An interpolated operand that resolves to a value of the wrong type is undecidable,
-  not invalid: a deny applies and an allow is skipped. A statement whose action or resource does not cover the check
-  is skipped before its conditions are looked at, so it never makes the check invalid.
+  key, an unknown operator, a malformed literal operand and a malformed `${…}` reference. A row that still cannot be
+  hydrated on read is never skipped: `HasPolicies::getPolicies()` logs a warning on the package's log channel and
+  rethrows, and the decision is `invalid_policy`. A custom `PolicyResolver` must do the same: throw
+  `InvalidPolicyDocumentException` rather than leave a policy out.
+- **Invalid statement at decision time**: a directly constructed statement with an unknown operator, a malformed
+  literal operand or a malformed `${…}` reference in a condition is `invalid` as soon as it is assessed, whatever the
+  context holds. An interpolated operand that resolves to a value of the wrong type is `undecidable`, not invalid. A
+  statement whose action or resource does not cover the check is `not_applicable` before its conditions are looked
+  at, so it never makes the check invalid.
 - **Resource-less check**: a check without a resource matches only statements whose resources include `*`. Through the
-  Gate, a `null` argument means no resource; an argument that cannot be identified as a resource (an unsaved model, a
-  model with an empty key, a number, a boolean, a list, an object without `__toString()`) denies without evaluating
-  policies or RBAC, rather than becoming a resource-less check. The denial is recorded like any other decision: it is
-  an `ImplicitDeny` (reason `implicit_deny`), it becomes the last decision, and one `DecisionEvaluated` event is
-  dispatched with a `null` resource. An `AuthorizableResource` is identified by `toResourceIdentifier()`, even when it
-  is also an Eloquent model.
+  Gate and the `authorize:` middleware, an argument that cannot be identified as a resource denies as
+  `resource_unresolved` at the resource stage, without reading any policy or permission, rather than becoming a
+  resource-less check; the denial is recorded and reported like any other decision.
 - **Empty statements list**: a policy with zero statements contributes nothing to the trace and does not affect the
-  outcome. It is a no-op, not an error.
+  decision.
 
 ## Implementation Anchors
 
-- `PolicyEvaluator::evaluate()` -- the statement walk, the deny and invalid-statement short-circuits and the trace.
-- `Statement::assess()` -- the four-outcome assessment the walk acts on.
-- `AuthorizationManager::evaluateFor()` -- the RBAC fallback on `ImplicitDeny` only; `evaluatePolicies()` -- the
-  `InvalidPolicy` denial when policies cannot be gathered; `refuseUnidentifiedResource()` -- the recorded
-  `ImplicitDeny` for a Gate argument that cannot be identified as a resource.
-- `HasPolicies::getPolicies()` -- logs and rethrows on a row that cannot be hydrated.
-- `EvaluationResult` factory methods -- one per branch of the four-step order, plus `invalidPolicy()`.
-- `DecisionReason` enum -- typed representation of the five possible outcomes, including `INVALID_POLICY`.
+- `AuthorizationManager::check()` -- the core decision; `decide()` -- the subject stage and the permission step;
+  `decidePolicies()` -- `invalid_policy` when policies cannot be gathered; `refuseUnidentifiedResource()` --
+  `resource_unresolved` for an argument that cannot be identified.
+- `PolicyEvaluator::evaluate()` -- the deny, allow and implicit stages, each assessing its statements in a fixed
+  order.
+- `Statement::assess()` -- the assessment, with each condition key's result.
+- `Decision`, `TraceEntry`, `StatementReference`, and the `DecisionEffect`, `DecisionReason`, `DecisionStage` and
+  `TraceOutcome` enums.
 
 ## Authoritative Tests
 
-- `PolicyEvaluatorTest::testExplicitDenyOverridesAllow` -- deny after allow still returns deny.
-- `PolicyEvaluatorTest::testDenyShortCircuits` -- deny stops the trace at one entry.
-- `PolicyEvaluatorTest::testConditionMismatchSkips` -- a statement whose conditions do not match is skipped.
-- `PolicyEvaluatorTest::testDenyWithMissingConditionKeyApplies` -- an undecidable deny applies.
-- `PolicyEvaluatorTest::testAllowWithMissingConditionKeyIsSkipped` -- an undecidable allow is skipped.
-- `PolicyEvaluatorTest::testDenyWithFalseConditionIsSkippedDespiteUndecidableCondition` -- a definite failure wins.
-- `PolicyEvaluatorTest::testResourceLessCheckDoesNotMatchResourceScopedAllow` -- resource-less checks need `*`.
-- `PolicyEvaluatorTest::testInvalidStatementReturnsInvalidPolicyAndShortCircuits` -- an invalid statement denies.
-- `AuthorizationManagerTest::testRbacAllowedWhenPolicyDoesNotMatch` (Unit) -- RBAC fallback produces `RbacAllow`.
-- `AuthorizationManagerTest::testExplicitDenyOverridesRbac` (Unit) -- deny policy beats RBAC permission.
-- `AuthorizationManagerTest::testExplicitDenyOverridesRoleAllow` (Feature) -- end-to-end deny over role grant.
-- `AuthorizationManagerTest::testMalformedStoredPolicyDeniesDespiteHeldPermission` (Feature) -- `invalid_policy` beats
-  RBAC.
-- `FailClosedPolicyHydrationTest::testMalformedPolicyRowDeniesEveryCheckDespiteRbacAndAllow` -- an unreadable row is
-  never skipped.
-- `GateRegistrarTest` -- a Gate argument that cannot be identified as a resource is recorded as an implicit deny.
+- `PolicyEvaluatorTest` -- every outcome and stage, deny precedence, fail-closed undecidable denies, `invalid_policy`,
+  `condition_failed` and `no_match`, and the same decision whatever order the policies arrive in.
+- `DecisionTest` -- the decision's construction, the permission step and the explanation.
+- `AuthorizationManagerTest` (Unit and Feature) -- the subject stage, the RBAC allow, deny over RBAC and over a role,
+  and `invalid_policy` over a held permission.
+- `FailClosedPolicyHydrationTest` -- an unreadable row is never skipped.
+- `GateRegistrarTest` and `AuthorizeActionTest` -- an argument that cannot be identified denies as
+  `resource_unresolved`.
 
 ## Change Triggers
 
-- Adding a fifth evaluation step (e.g. a conditional RBAC layer) requires updating this note, the `DecisionReason`
-  enum, and the `EvaluationResult` factory set.
+- Adding a stage (guardrails, boundaries, session policies) requires updating this note, `DecisionStage` and, for a
+  new kind of denial, `DecisionReason`.
 - Changing deny semantics (e.g. deny-unless, deny-with-exception) requires a new invariant entry above.
-- Introducing RBAC-layer deny (negative permissions) would violate invariant 1 and requires a design decision before
+- Introducing RBAC-layer deny (negative permissions) would violate invariant 3 and requires a design decision before
   implementation.
-- Letting an undecidable deny, an invalid statement or an unreadable policy be skipped would violate invariants 4 and 6
+- Letting an undecidable deny, an invalid statement or an unreadable policy be skipped would violate invariants 5 and 6
   and requires a design decision before implementation.

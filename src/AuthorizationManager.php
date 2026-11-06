@@ -13,8 +13,9 @@ use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
-use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
@@ -89,7 +90,7 @@ final class AuthorizationManager
      */
     public function can(string $action, ?string $resource = null, array $context = []): bool
     {
-        return $this->evaluate($action, $resource, $context)->allowed;
+        return $this->check($action, $resource, $context)->isAllowed();
     }
 
     /**
@@ -105,33 +106,33 @@ final class AuthorizationManager
      */
     public function authorize(string $action, ?string $resource = null, array $context = []): void
     {
-        $subject = $this->currentSubject();
-        $result  = $this->evaluateFor($subject, $action, $resource, $context);
+        $decision = $this->check($action, $resource, $context);
 
-        $this->lastDecisionStore->put($result);
-        $this->dispatch(new DecisionEvaluated($subject?->subject, $action, $resource, $context, $result));
-
-        if (!$result->allowed) {
-            $this->dispatch(new AuthorizationFailed($subject?->subject, $action, $resource, $context, $result));
-
-            throw AuthorizationException::translated($result->reason, $this->translator);
+        if ($decision->isAllowed()) {
+            return;
         }
+
+        $this->dispatch(new AuthorizationFailed($this->currentSubject()?->subject, $action, $resource, $context, $decision));
+
+        throw AuthorizationException::translated($decision->reason ?? DecisionReason::NO_MATCH, $this->translator);
     }
 
     /**
-     * Evaluate the supplied action for the current subject and return the full
-     * evaluation result.
+     * Decide the action for the current subject, the one core decision every
+     * other form adapts (D22): `can()` reads whether it is allowed and
+     * `authorize()` throws when it is not. The decision is recorded as the last
+     * decision and reported with `DecisionEvaluated`.
      *
      * @param  string  $action
      * @param  string|null  $resource
      * @param  array<string, mixed>  $context
-     * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    public function evaluate(string $action, ?string $resource = null, array $context = []): EvaluationResult
+    public function check(string $action, ?string $resource = null, array $context = []): Decision
     {
         $subject = $this->currentSubject();
 
-        return $this->record($subject, $action, $resource, $context, $this->evaluateFor($subject, $action, $resource, $context));
+        return $this->record($subject, $action, $resource, $context, $this->decide($subject, $action, $resource, $context));
     }
 
     /**
@@ -144,34 +145,33 @@ final class AuthorizationManager
      *
      * @param  string  $action
      * @param  array<string, mixed>  $context
-     * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    public function refuseUnidentifiedResource(string $action, array $context = []): EvaluationResult
+    public function refuseUnidentifiedResource(string $action, array $context = []): Decision
     {
-        return $this->record($this->currentSubject(), $action, null, $context, EvaluationResult::implicitlyDenied());
+        return $this->record($this->currentSubject(), $action, null, $context, Decision::deny(DecisionReason::RESOURCE_UNRESOLVED, DecisionStage::RESOURCE));
     }
 
     /**
-     * Return the most recent evaluation result produced by this process —
-     * across every scoped clone and Gate-dispatched path. Request-layer error
-     * handlers use this to answer "why was the last check denied?" without
-     * re-running the evaluation.
+     * Return the most recent decision produced by this process — across every
+     * scoped clone and Gate-dispatched path. Request-layer error handlers use
+     * this to answer "why was the last check denied?" without re-running the
+     * evaluation.
      *
      * Returns null when the process has not yet produced a decision or when the
      * store was explicitly cleared between requests in a long-running worker.
      *
-     * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult|null
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision|null
      */
-    public function lastDecision(): ?EvaluationResult
+    public function lastDecision(): ?Decision
     {
         return $this->lastDecisionStore->get();
     }
 
     /**
-     * Evaluate the supplied action and return the human-readable explanation
-     * produced by the resulting trace. Convenience shortcut over
-     * `evaluate(...)->explain()` for error-handler output and the future
-     * `authorization:why-can` Artisan command.
+     * Decide the supplied action and return the decision's explanation: the
+     * verdict, the stage and statements that decided it, and every step of its
+     * trace. A shortcut over `check(...)->explain()`.
      *
      * @param  string  $action
      * @param  string|null  $resource
@@ -180,7 +180,7 @@ final class AuthorizationManager
      */
     public function explain(string $action, ?string $resource = null, array $context = []): string
     {
-        return $this->evaluate($action, $resource, $context)->explain();
+        return $this->check($action, $resource, $context)->explain();
     }
 
     /**
@@ -198,10 +198,10 @@ final class AuthorizationManager
      * Return a map of every registered permission to its effective decision for
      * the current subject.
      *
-     * Walks every case of every configured `PermissionEnum` and evaluates each
-     * through the full 4-step evaluator (explicit deny, explicit allow, RBAC,
-     * implicit deny). The result is an associative array keyed by permission
-     * string with boolean values indicating whether the subject is allowed.
+     * Walks every case of every configured `PermissionEnum` and decides each
+     * through the full decision. The result is an associative array keyed by
+     * permission string with boolean values indicating whether the subject is
+     * allowed.
      *
      * Performance note: this method performs N evaluations where N is the total
      * number of registered enum cases. Callers should cache the result when
@@ -335,56 +335,48 @@ final class AuthorizationManager
     }
 
     /**
-     * Evaluate the action against the supplied subject.
-     *
-     * A subject that is inactive, or whose identity is, is denied everything
-     * before any policy is read. RBAC is consulted only when no policy decided
-     * the check: an explicit allow or deny, or an invalid policy, stands. A
-     * policy document that cannot be read denies the check as an invalid
-     * policy. The subject's identity, when it is another model, contributes its
-     * policies and its grants (see `SubjectGrants`).
+     * Decide the action for the supplied subject, stage by stage (AUTHZ-7.1): a
+     * subject that is missing, or inactive (it or its identity), is denied
+     * before any policy is read; then the policies' statements decide by their
+     * deny and allow stages; and when they allow nothing, a permission the
+     * subject holds allows. A policy document that cannot be read denies the
+     * check as an invalid policy. The subject's identity, when it is another
+     * model, contributes its policies and its grants (see `SubjectGrants`).
      *
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @param  string  $action
      * @param  string|null  $resource
      * @param  array<string, mixed>  $context
-     * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    private function evaluateFor(?Subject $subject, string $action, ?string $resource, array $context): EvaluationResult
+    private function decide(?Subject $subject, string $action, ?string $resource, array $context): Decision
     {
-        if ($subject === null) {
-            return EvaluationResult::implicitlyDenied();
+        if ($subject === null || SubjectGrants::isInactive($subject)) {
+            return Decision::deny($subject === null ? DecisionReason::SUBJECT_UNRESOLVED : DecisionReason::SUBJECT_INACTIVE, DecisionStage::SUBJECT);
         }
 
-        if (SubjectGrants::isInactive($subject)) {
-            return EvaluationResult::subjectInactive();
-        }
+        $decision = $this->decidePolicies($subject, $action, $resource, $context);
 
-        $result = $this->evaluatePolicies($subject, $action, $resource, $context);
-
-        if ($result->reason === DecisionReason::IMPLICIT_DENY && SubjectGrants::holdsPermission($subject, $action)) {
-            return EvaluationResult::rbacAllowed($result->trace);
-        }
-
-        return $result;
+        return $decision->stage === DecisionStage::IMPLICIT ? $decision->withPermission(SubjectGrants::holdsPermission($subject, $action)) : $decision;
     }
 
     /**
-     * Evaluate the subject's policies, and its identity's. A policy document
-     * that cannot be read denies the check as an invalid policy.
+     * Decide the action from the subject's policies, and its identity's. A
+     * policy document that cannot be read denies the check as an invalid
+     * policy.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
      * @param  string|null  $resource
      * @param  array<string, mixed>  $context
-     * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    private function evaluatePolicies(Subject $subject, string $action, ?string $resource, array $context): EvaluationResult
+    private function decidePolicies(Subject $subject, string $action, ?string $resource, array $context): Decision
     {
         try {
             $policies = $this->gatherPolicies($subject);
         } catch (InvalidPolicyDocumentException) {
-            return EvaluationResult::invalidPolicy();
+            return Decision::deny(DecisionReason::INVALID_POLICY, DecisionStage::DENY);
         }
 
         return $this->evaluator->evaluate($policies, $action, $resource, $context, $subject->subject);
@@ -420,15 +412,15 @@ final class AuthorizationManager
      * @param  string  $action
      * @param  string|null  $resource
      * @param  array<string, mixed>  $context
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult  $result
-     * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    private function record(?Subject $subject, string $action, ?string $resource, array $context, EvaluationResult $result): EvaluationResult
+    private function record(?Subject $subject, string $action, ?string $resource, array $context, Decision $decision): Decision
     {
-        $this->lastDecisionStore->put($result);
-        $this->dispatch(new DecisionEvaluated($subject?->subject, $action, $resource, $context, $result));
+        $this->lastDecisionStore->put($decision);
+        $this->dispatch(new DecisionEvaluated($subject?->subject, $action, $resource, $context, $decision));
 
-        return $result;
+        return $decision;
     }
 
     /**

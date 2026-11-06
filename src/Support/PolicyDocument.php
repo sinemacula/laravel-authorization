@@ -39,7 +39,9 @@ final class PolicyDocument
         $document = self::named(self::decode($policy->getAttribute('document'), $name), $policy->getAttribute('name'), true);
 
         try {
-            return EvaluationPolicy::fromArray($document);
+            $key = $policy->getKey();
+
+            return EvaluationPolicy::fromArray($document)->withId(\is_scalar($key) && $key !== '' ? (string) $key : null);
         } catch (\Throwable $exception) {
             throw new InvalidPolicyDocumentException(policyName: $name, reason: $exception->getMessage(), previous: $exception);
         }

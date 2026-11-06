@@ -412,6 +412,112 @@ final class StatementTest extends TestCase
     }
 
     /**
+     * assess() reports each condition key the statement tested, in the
+     * statement's order, with whether it held: a key that fails, and a key
+     * missing from the context, are reported as not held.
+     *
+     * @return void
+     */
+    public function testAssessReportsEachConditionKeyWithWhetherItHeld(): void
+    {
+        $statement = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['posts:read'],
+            'conditions' => [
+                'tenant' => ['eq' => 'org-1'],
+                'role'   => ['in' => ['admin', 'staff']],
+                'ip'     => ['cidr' => '10.0.0.0/8'],
+                'active' => true,
+            ],
+        ]);
+
+        $result = $statement->assess('posts:read', null, ['tenant' => 'org-1', 'role' => 'guest', 'active' => true]);
+
+        self::assertSame(MatchOutcome::DOES_NOT_MATCH, $result->outcome);
+        self::assertSame(['tenant' => true, 'role' => false, 'ip' => false, 'active' => true], $result->conditions);
+    }
+
+    /**
+     * assess() reports every condition key as held when the statement matches,
+     * and an empty map, not null, when the statement names the check but has no
+     * conditions.
+     *
+     * @return void
+     */
+    public function testAssessReportsHeldConditionsAndEmptyMapWhenTargetMatches(): void
+    {
+        $conditional = Statement::fromArray([
+            'effect'     => 'deny',
+            'actions'    => ['posts:read'],
+            'conditions' => ['tenant' => 'org-1', 'level' => ['gte' => 2]],
+        ]);
+
+        $unconditional = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read']]);
+
+        $matched = $conditional->assess('posts:read', null, ['tenant' => 'org-1', 'level' => 3]);
+
+        self::assertResult(MatchOutcome::MATCHES, '', $matched);
+        self::assertSame(['tenant' => true, 'level' => true], $matched->conditions);
+        self::assertSame([], $unconditional->assess('posts:read')->conditions);
+    }
+
+    /**
+     * assess() reports no condition keys (null) when the statement does not
+     * name the action or the resource, without testing its conditions.
+     *
+     * @return void
+     */
+    public function testAssessReportsNullConditionsWhenTargetDoesNotMatch(): void
+    {
+        $statement = Statement::fromArray([
+            'effect'     => 'allow',
+            'actions'    => ['posts:read'],
+            'resources'  => ['posts/1'],
+            'conditions' => ['tenant' => 'org-1'],
+        ]);
+
+        $context = ['tenant' => 'org-1'];
+
+        self::assertNull($statement->assess('users:read', 'posts/1', $context)->conditions);
+        self::assertNull($statement->assess('posts:read', 'posts/2', $context)->conditions);
+        self::assertNull($statement->assess('posts:read', null, $context)->conditions);
+        self::assertSame(['tenant' => true], $statement->assess('posts:read', 'posts/1', $context)->conditions);
+    }
+
+    /**
+     * assess() reports the condition keys of a statement whose resource pattern
+     * cannot be resolved, since it names the action, and of a statement whose
+     * condition is malformed, the malformed key as not held.
+     *
+     * @return void
+     */
+    public function testAssessReportsConditionsForUndecidableAndInvalidStatements(): void
+    {
+        $unresolved = Statement::fromArray([
+            'effect'     => 'deny',
+            'actions'    => ['posts:read'],
+            'resources'  => ['tenants/${context.tenant}/*'],
+            'conditions' => ['level' => ['gte' => 2]],
+        ]);
+
+        $undecidable = $unresolved->assess('posts:read', 'tenants/org-1/posts', ['level' => 3], new ContextInterpolator);
+
+        self::assertResult(MatchOutcome::UNDECIDABLE, self::UNRESOLVED_RESOURCE, $undecidable);
+        self::assertSame(['level' => true], $undecidable->conditions);
+
+        $malformed = new Statement(
+            effect: PolicyEffect::DENY,
+            actions: ['posts:read'],
+            conditions: ['tenant' => 'org-1', 'k' => ['bogus' => 1]],
+        );
+
+        $invalid = $malformed->assess('posts:read', null, ['tenant' => 'org-1', 'k' => 1]);
+
+        self::assertSame(MatchOutcome::INVALID, $invalid->outcome);
+        self::assertSame(['tenant' => true, 'k' => false], $invalid->conditions);
+    }
+
+    /**
      * Missing context key makes the condition undecidable, naming the key.
      *
      * @return void

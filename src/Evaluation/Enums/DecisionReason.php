@@ -5,51 +5,53 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation\Enums;
 
 /**
- * Decision-reason codes for the policy evaluator.
+ * Why a check was denied (AUTHZ-7.10); an allowed check carries none.
  *
- * Every evaluation result carries one of these cases, indicating which branch
- * of the four-step decision order produced the outcome, or that a policy could
- * not be evaluated and the check was denied (`invalid_policy`). Backed by
- * strings so serialised audit-log entries remain human-readable while call-site
- * comparisons gain exhaustive `match` coverage at PHPStan level 8.
+ * Each code is 1 to 64 characters of lower-case letters, digits, `_`, `.`, `:`
+ * and `-`, starting with a letter or digit, and any code added later keeps to
+ * that grammar.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
 enum DecisionReason: string
 {
-    /** An explicit allow from a matching policy statement. */
-    case EXPLICIT_ALLOW = 'explicit_allow';
-
-    /** An explicit deny from a matching policy statement. */
+    /** An applicable policy statement denies the check. */
     case EXPLICIT_DENY = 'explicit_deny';
 
-    /** No statement matched; the evaluator fell through to implicit deny. */
-    case IMPLICIT_DENY = 'implicit_deny';
+    /** No statement or permission names the action and the resource. */
+    case NO_MATCH = 'no_match';
 
-    /** RBAC granted the allow after policies were indeterminate. */
-    case RBAC_ALLOW = 'rbac_allow';
+    /** A statement names the action and the resource, but its conditions do not hold. */
+    case CONDITION_FAILED = 'condition_failed';
 
-    /** A policy could not be evaluated (malformed or unreadable); the check denies. */
+    /** An applicable policy cannot be evaluated, so the check is denied. */
     case INVALID_POLICY = 'invalid_policy';
 
-    /** The subject, or the subject's identity, is inactive and is denied everything. */
+    /** The subject, or its identity, is inactive. */
     case SUBJECT_INACTIVE = 'subject_inactive';
 
+    /** There is no subject to decide about. */
+    case SUBJECT_UNRESOLVED = 'subject_unresolved';
+
+    /** The resource the check names cannot be identified. */
+    case RESOURCE_UNRESOLVED = 'resource_unresolved';
+
     /**
-     * Return a human-readable explanation label for the reason.
+     * Return a short description of the reason, for explanations.
      *
      * @return string
      */
     public function label(): string
     {
         return match ($this) {
-            self::EXPLICIT_ALLOW   => 'explicit allow from a policy statement',
-            self::EXPLICIT_DENY    => 'explicit deny from a policy statement',
-            self::RBAC_ALLOW       => 'RBAC grant (direct permission or role-inherited)',
-            self::IMPLICIT_DENY    => 'implicit deny (no statement matched)',
-            self::INVALID_POLICY   => 'invalid policy (a policy could not be evaluated)',
-            self::SUBJECT_INACTIVE => 'subject inactive (the subject or its identity is inactive)',
+            self::EXPLICIT_DENY       => 'an applicable statement denies it',
+            self::NO_MATCH            => 'no statement or permission names it',
+            self::CONDITION_FAILED    => 'a statement names it, but its conditions do not hold',
+            self::INVALID_POLICY      => 'an applicable policy cannot be evaluated',
+            self::SUBJECT_INACTIVE    => 'the subject or its identity is inactive',
+            self::SUBJECT_UNRESOLVED  => 'there is no subject',
+            self::RESOURCE_UNRESOLVED => 'the resource cannot be identified',
         };
     }
 }

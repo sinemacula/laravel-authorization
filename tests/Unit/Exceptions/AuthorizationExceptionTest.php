@@ -35,7 +35,7 @@ final class AuthorizationExceptionTest extends TestCase
      */
     public function testIsLaravelsAuthorizationException(): void
     {
-        $exception = new AuthorizationException(DecisionReason::IMPLICIT_DENY);
+        $exception = new AuthorizationException(DecisionReason::NO_MATCH);
 
         self::assertInstanceOf(LaravelAuthorizationException::class, $exception);
         self::assertFalse($exception->hasStatus());
@@ -61,7 +61,7 @@ final class AuthorizationExceptionTest extends TestCase
      */
     public function testUsesTheGivenMessage(): void
     {
-        $exception = new AuthorizationException(DecisionReason::IMPLICIT_DENY, 'Action non autorisée.');
+        $exception = new AuthorizationException(DecisionReason::NO_MATCH, 'Action non autorisée.');
 
         self::assertSame('Action non autorisée.', $exception->getMessage());
     }
@@ -73,7 +73,7 @@ final class AuthorizationExceptionTest extends TestCase
      */
     public function testDefaultsToLaravelsMessage(): void
     {
-        $exception = new AuthorizationException(DecisionReason::IMPLICIT_DENY);
+        $exception = new AuthorizationException(DecisionReason::NO_MATCH);
 
         self::assertSame('This action is unauthorized.', $exception->getMessage());
     }
@@ -115,12 +115,12 @@ final class AuthorizationExceptionTest extends TestCase
         ]);
 
         $denied = AuthorizationException::translated(DecisionReason::EXPLICIT_DENY, $translator);
-        $role   = AuthorizationException::translated(DecisionReason::IMPLICIT_DENY, $translator, AuthorizationException::ROLE_REQUIRED_KEY);
+        $role   = AuthorizationException::translated(DecisionReason::NO_MATCH, $translator, AuthorizationException::ROLE_REQUIRED_KEY);
 
         self::assertSame('Action non autorisée.', $denied->getMessage());
         self::assertSame(DecisionReason::EXPLICIT_DENY, $denied->getReason());
         self::assertSame('Rôle requis.', $role->getMessage());
-        self::assertSame(DecisionReason::IMPLICIT_DENY, $role->getReason());
+        self::assertSame(DecisionReason::NO_MATCH, $role->getReason());
     }
 
     /**
@@ -139,7 +139,7 @@ final class AuthorizationExceptionTest extends TestCase
         $group->method('get')->willReturn(['denied' => 'Denied.']);
 
         foreach ([null, $missing, $group] as $translator) {
-            self::assertSame('This action is unauthorized.', AuthorizationException::translated(DecisionReason::IMPLICIT_DENY, $translator)->getMessage());
+            self::assertSame('This action is unauthorized.', AuthorizationException::translated(DecisionReason::NO_MATCH, $translator)->getMessage());
         }
     }
 }

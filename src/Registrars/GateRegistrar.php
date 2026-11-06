@@ -129,7 +129,7 @@ final readonly class GateRegistrar
                 // denies, rather than turning the check into one about no
                 // resource at all.
                 return $resource === false
-                    ? $manager->refuseUnidentifiedResource($permission, $context)->allowed
+                    ? $manager->refuseUnidentifiedResource($permission, $context)->isAllowed()
                     : $manager->can($permission, $resource, $context);
             },
         );
