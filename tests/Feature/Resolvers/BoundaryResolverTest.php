@@ -6,6 +6,7 @@ namespace Tests\Feature\Resolvers;
 
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\Repository;
+use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
@@ -20,6 +21,7 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
+use Tests\Feature\Stubs\NarrowContractsGrantee;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
@@ -43,7 +45,7 @@ final class BoundaryResolverTest extends TestCase
 
     /**
      * A grantee with no boundary has none, and a subject that is not a saved
-     * authorizable identity has none and costs no query.
+     * model has none and costs no query.
      *
      * @return void
      */
@@ -59,10 +61,29 @@ final class BoundaryResolverTest extends TestCase
         self::assertSame([], BoundaryResolver::boundariesFor(null));
         self::assertSame([], BoundaryResolver::boundariesFor(new \stdClass));
         self::assertSame([], BoundaryResolver::boundariesFor(new StubIdentity(['id' => 'unsaved'])));
+        self::assertSame([], BoundaryResolver::boundariesFor(new NarrowContractsGrantee(['id' => 'unsaved'])));
         self::assertSame([], BoundaryResolver::boundariesFor(new Reference('user', 'user-1')));
         self::assertSame([], DB::getQueryLog());
 
         DB::disableQueryLog();
+    }
+
+    /**
+     * The boundaries of a saved model are read whichever contracts it
+     * implements: one holding grants through the narrow contracts alone, not an
+     * authorizable identity, has the boundary set on it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheBoundariesOfAModelOfTheNarrowContractsAreRead(): void
+    {
+        $grantee = NarrowContractsGrantee::query()->create(['id' => 'account-1']);
+
+        self::service()->set($grantee, self::cap('narrow'));
+
+        self::assertSame(['narrow'], self::names($grantee));
     }
 
     /**
@@ -287,10 +308,10 @@ final class BoundaryResolverTest extends TestCase
      * Return the names of the grantee's boundaries in the current scope,
      * sorted.
      *
-     * @param  \Tests\Feature\Stubs\StubIdentity  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model  $grantee
      * @return list<string>
      */
-    private static function names(StubIdentity $grantee): array
+    private static function names(Model $grantee): array
     {
         $names = \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, BoundaryResolver::boundariesFor($grantee));
 

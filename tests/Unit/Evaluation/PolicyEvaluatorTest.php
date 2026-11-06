@@ -987,6 +987,27 @@ final class PolicyEvaluatorTest extends TestCase
     }
 
     /**
+     * The step a cap stage adds when it caps nothing is made once per evaluator
+     * and shared by its every decision, and another evaluator makes its own.
+     *
+     * @return void
+     */
+    public function testTheUncappedStepsAreMadeOncePerEvaluator(): void
+    {
+        $evaluator = new PolicyEvaluator;
+        $first     = $evaluator->evaluate([], 'posts:read');
+        $second    = $evaluator->evaluate([], 'posts:edit');
+        $other     = (new PolicyEvaluator)->evaluate([], 'posts:read');
+
+        self::assertEquals(self::uncapped(DecisionStage::GUARDRAIL, DecisionStage::BOUNDARY, DecisionStage::SESSION), \array_slice($first->trace, 0, 3));
+
+        foreach ([0, 1, 2] as $index) {
+            self::assertSame($first->trace[$index], $second->trace[$index]);
+            self::assertNotSame($first->trace[$index], $other->trace[$index]);
+        }
+    }
+
+    /**
      * Each statement's sid reaches its reference, in the decision and in the
      * trace, and a statement without one is referenced without it.
      *
@@ -1572,8 +1593,73 @@ final class PolicyEvaluatorTest extends TestCase
         self::assertEquals([
             ...self::uncapped(DecisionStage::GUARDRAIL),
             new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::NOT_APPLICABLE, self::reference('cap', 0)),
+            self::refused('cap'),
         ], $decision->trace);
         self::assertCount(0, $asked);
+        self::assertStringEndsWith('[boundary] cap: refused', $decision->explain());
+    }
+
+    /**
+     * A boundary with no allow statement, or with deny statements alone, allows
+     * nothing: it denies every check its denies do not as `boundary`, with a
+     * step at the boundary stage that names it.
+     *
+     * @return void
+     */
+    public function testABoundaryWithNoAllowStatementDeniesNamingIt(): void
+    {
+        $allowAll = self::policy('all', [['effect' => 'allow', 'actions' => ['*']]]);
+        $empty    = (new PolicyEvaluator)->evaluate([$allowAll], 'posts:write', null, [], [(new Policy('empty', []))->withId('9')], static fn (): bool => true);
+        $denyOnly = (new PolicyEvaluator)->evaluate([$allowAll], 'posts:read', null, [], [self::policy('donly', [['effect' => 'deny', 'actions' => ['posts:delete']]])]);
+
+        self::assertSame(DecisionReason::BOUNDARY, $empty->reason);
+        self::assertSame(DecisionStage::BOUNDARY, $empty->stage);
+        self::assertEquals([...self::uncapped(DecisionStage::GUARDRAIL), self::refused('empty[9]')], $empty->trace);
+        self::assertStringContainsString('[boundary] empty[9]: refused', $empty->explain());
+
+        self::assertSame(DecisionReason::BOUNDARY, $denyOnly->reason);
+        self::assertSame(DecisionStage::BOUNDARY, $denyOnly->stage);
+        self::assertEquals([
+            self::entry(DecisionStage::DENY, TraceOutcome::NOT_APPLICABLE, 'donly', 0),
+            ...self::uncapped(DecisionStage::GUARDRAIL),
+            self::refused('donly'),
+        ], $denyOnly->trace);
+    }
+
+    /**
+     * A policy held and set as a boundary too, or set as the boundary of both
+     * grantees, is named once in the decision, and still plays each part: its
+     * deny denies once, and as a boundary it still caps the check.
+     *
+     * @return void
+     */
+    public function testAPolicyReachedTwiceIsNamedOnce(): void
+    {
+        $both   = self::policy('both', [['effect' => 'allow', 'actions' => ['*']], ['effect' => 'deny', 'actions' => ['posts:delete']]]);
+        $twin   = self::policy('both', [['effect' => 'allow', 'actions' => ['*']], ['effect' => 'deny', 'actions' => ['posts:delete']]]);
+        $narrow = self::policy('narrow', [['effect' => 'allow', 'actions' => ['posts:read']]]);
+        $denied = (new PolicyEvaluator)->evaluate([$both], 'posts:delete', null, [], [$twin]);
+
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $denied->reason);
+        self::assertEquals([self::reference('both', 1)], $denied->statements);
+        self::assertEquals([self::entry(DecisionStage::DENY, TraceOutcome::MATCHED, 'both', 1)], $denied->trace);
+        self::assertSame('DENY (explicit_deny: an applicable statement denies it) at the deny stage by both#1.', \explode("\n", $denied->explain())[0]);
+
+        $allowed = (new PolicyEvaluator)->evaluate([$both], 'posts:read', null, [], [$both, $twin]);
+
+        self::assertTrue($allowed->isAllowed());
+        self::assertEquals([self::reference('both', 0)], $allowed->statements);
+        self::assertEquals([
+            self::entry(DecisionStage::DENY, TraceOutcome::NOT_APPLICABLE, 'both', 1),
+            ...self::uncapped(DecisionStage::GUARDRAIL),
+            new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::MATCHED, self::reference('both', 0)),
+            ...self::uncapped(DecisionStage::SESSION),
+            self::entry(DecisionStage::ALLOW, TraceOutcome::MATCHED, 'both', 0),
+        ], $allowed->trace);
+
+        $capped = (new PolicyEvaluator)->evaluate([$narrow], 'posts:edit', null, [], [$narrow], static fn (): bool => true);
+
+        self::assertSame(DecisionReason::BOUNDARY, $capped->reason);
     }
 
     /**
@@ -1624,6 +1710,7 @@ final class PolicyEvaluatorTest extends TestCase
                 ...self::uncapped(DecisionStage::GUARDRAIL),
                 new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::MATCHED, self::reference('a-wide', 0)),
                 new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::NOT_APPLICABLE, self::reference('b-narrow', 0)),
+                self::refused('b-narrow'),
             ], $edit->trace);
             self::assertTrue($read->isAllowed());
         }
@@ -1692,7 +1779,12 @@ final class PolicyEvaluatorTest extends TestCase
         self::assertSame(DecisionReason::INVALID_POLICY, $decision->reason);
         self::assertSame(DecisionStage::BOUNDARY, $decision->stage);
         self::assertEquals([self::reference('a-broken', 0)], $decision->statements);
-        self::assertCount(3, $decision->trace);
+        self::assertEquals([
+            ...self::uncapped(DecisionStage::GUARDRAIL),
+            new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::INVALID, self::reference('a-broken', 0)),
+            self::refused('a-broken'),
+            new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::MATCHED, self::reference('b-allowing', 0)),
+        ], $decision->trace);
     }
 
     /**
@@ -1893,6 +1985,17 @@ final class PolicyEvaluatorTest extends TestCase
         $rest   = \array_values(\array_filter($trace, static fn (TraceEntry $entry): bool => $entry->stage !== DecisionStage::DENY));
 
         return [...$denies, ...self::uncapped(DecisionStage::GUARDRAIL, DecisionStage::BOUNDARY, DecisionStage::SESSION), ...$rest];
+    }
+
+    /**
+     * Return the step a boundary adds when it refuses the check.
+     *
+     * @param  string  $boundary
+     * @return \SineMacula\Laravel\Authorization\Evaluation\TraceEntry
+     */
+    private static function refused(string $boundary): TraceEntry
+    {
+        return new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::REFUSED, null, [], $boundary);
     }
 
     /**

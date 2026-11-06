@@ -63,6 +63,7 @@ use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\FailingResourceAttributes;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\FixedSubjectResolver;
+use Tests\Feature\Stubs\NarrowContractsGrantee;
 use Tests\Feature\Stubs\PlanContextSource;
 use Tests\Feature\Stubs\RecordingResourceAttributes;
 use Tests\Feature\Stubs\RecordingSubjectAttributes;
@@ -2109,6 +2110,45 @@ final class AuthorizationManagerTest extends TestCase
         self::assertTrue($manager->can('posts:read'));
         self::assertSame(DecisionReason::BOUNDARY, $manager->check('posts:edit')->reason);
         self::assertSame(DecisionReason::BOUNDARY, $manager->check('posts:publish')->reason);
+    }
+
+    /**
+     * A boundary caps a principal and an identity that hold their grants
+     * through the narrow contracts alone, not as authorizable identities: a
+     * permission either holds is denied as `boundary` when a boundary of either
+     * does not allow it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testABoundaryCapsAGranteeOfTheNarrowContracts(): void
+    {
+        $principal = NarrowContractsGrantee::query()->create(['id' => 'account-1']);
+        $identity  = NarrowContractsGrantee::query()->create(['id' => 'person-1']);
+
+        $principal->givePermission(Permission::create(['name' => 'posts:read']));
+        $principal->givePermission(Permission::create(['name' => 'posts:delete']));
+        $identity->givePermission(Permission::create(['name' => 'posts:edit']));
+
+        $this->app?->instance(SubjectResolver::class, new FixedSubjectResolver(new Subject($principal, $identity)));
+
+        $manager = $this->app?->make(AuthorizationManager::class);
+        self::assertNotNull($manager);
+
+        self::assertTrue($manager->can('posts:delete'));
+
+        self::boundaries()->set($principal, self::resourcePolicy('account-cap', [['effect' => 'allow', 'actions' => ['posts:read', 'posts:edit']]]));
+
+        self::assertTrue($manager->can('posts:read'));
+        self::assertTrue($manager->can('posts:edit'));
+        self::assertSame(DecisionReason::BOUNDARY, $manager->check('posts:delete')->reason);
+
+        self::boundaries()->set($identity, self::resourcePolicy('person-cap', [['effect' => 'allow', 'actions' => ['posts:read']]]));
+
+        self::assertTrue($manager->can('posts:read'));
+        self::assertSame(DecisionReason::BOUNDARY, $manager->check('posts:edit')->reason);
+        self::assertSame(DecisionStage::BOUNDARY, $manager->check('posts:edit')->stage);
     }
 
     /**

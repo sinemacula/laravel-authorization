@@ -10,7 +10,8 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 /**
  * One step of a decision: the stage it belongs to, what it found, the statement
  * it assessed (none for a permission, or for a cap stage that found nothing to
- * cap by), and the condition keys it tested with whether each held.
+ * cap by), the permission boundary it is about when it is about no one
+ * statement, and the condition keys it tested with whether each held.
  *
  * Never a value: only key names and results reach the trace (AUTHZ-8.8).
  *
@@ -26,6 +27,7 @@ final readonly class TraceEntry
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome  $outcome
      * @param  \SineMacula\Laravel\Authorization\Evaluation\StatementReference|null  $statement
      * @param  array<string, bool>  $conditions
+     * @param  string|null  $boundary
      */
     public function __construct(
 
@@ -40,18 +42,21 @@ final readonly class TraceEntry
 
         /** Each condition key tested, with whether it held. */
         public array $conditions = [],
+
+        /** The permission boundary a step about no one statement is about, as `name[key]`, such as one that refused the check; null for none. */
+        public ?string $boundary = null,
     ) {}
 
     /**
      * Return the entry as one line of an explanation: the statement it
-     * assessed, else what its stage weighs, the permission at the allow stage
-     * and the caps at a cap stage.
+     * assessed, else the boundary it is about, else what its stage weighs, the
+     * permission at the allow stage and the caps at a cap stage.
      *
      * @return string
      */
     public function toString(): string
     {
-        $subject = $this->statement?->toString() ?? match ($this->stage) {
+        $subject = $this->statement?->toString() ?? $this->boundary ?? match ($this->stage) {
             DecisionStage::GUARDRAIL => 'guardrails',
             DecisionStage::BOUNDARY  => 'boundaries',
             DecisionStage::SESSION   => 'session caps',

@@ -130,12 +130,18 @@ events themselves are described in [Events](events.md).
     boundary has no application. A null-folding unique key over the grantee and the tenant keeps one boundary per
     scope: the write is insert-or-ignore followed by a locked read-back (`Services\Support\BoundaryTable`), so a
     concurrent duplicate never raises, and returns `GRANTED`, `REPLACED` (another policy was the boundary there),
-    `REACH_CHANGED` or `UNCHANGED`. `remove()` removes the boundary in the tenant named, else the platform-wide one, and
-    returns whether there was one. A role, an inline policy (`BoundaryException`), a policy naming `principals`
+    `REACH_CHANGED` or `UNCHANGED`. An ignored insert that leaves no row to read back is tried once more, and when that
+    leaves none either the call is refused, so it never reports a boundary no row bears out: a policy deleted at the
+    same moment (on MySQL, `INSERT IGNORE` turns the foreign key failure into a warning) with
+    `InvalidGrantTargetException`, any other failure with `UnwrittenGrantException`. `ResourcePolicyService::attach()`
+    reads its attachment back the same way. `remove()` removes the boundary in the tenant named, else the platform-wide
+    one, and returns whether there was one. A grantee that is never a subject's principal or identity (a role, a
+    permission or a policy) and an inline policy (`BoundaryException`), a policy naming `principals`
     (`ResourcePolicyException`), a policy whose row is gone (`InvalidGrantTargetException`) and an unsaved grantee or
     one without a key (`InvalidGranteeException`) are refused before anything is written. `GrantService::revokeAll()`
-    removes the grantee's boundaries in every scope with its grants, so deleting a grantee, or pruning one that is
-    gone, removes them too. Each call is one transaction and one operation, dispatches `Identity\BoundarySet` (with the
+    removes the grantee's boundaries in every scope with its grants, so deleting a grantee removes them too;
+    `removeAll()` removes them alone, which the grant pruner does for a grantee that is gone, counting them apart from
+    its grants. Each call is one transaction and one operation, dispatches `Identity\BoundarySet` (with the
     `previous` policy it replaced) or `Identity\BoundaryRemoved` after commit only when it changed something, and
     refreshes the grantee's cached resolutions through its version.
 
@@ -185,7 +191,7 @@ working: each forwards to the matching service method with no actor.
 - **A boundary's policy cannot be deleted.** The policy observer refuses the delete with `BoundaryException`, naming
   every grantee it bounds, and the foreign key on `authorizable_boundaries.policy_id` restricts a delete made past the
   model; remove each boundary first. A boundary left by a grantee deleted past its model events keeps the policy
-  undeletable until `authorization:prune` finds the grantee gone and removes it.
+  undeletable until `authorization:prune` finds the grantee gone and removes it, counting it apart from the grants.
 - **The commands name no actor by default.** `authorization:grant`, `authorization:revoke` and `authorization:sync`
   take `--actor={morphType}:{key}`, which must name a row that exists; without it they record no actor.
 

@@ -11,9 +11,12 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 /**
  * Explain the evaluation trace for an identity, action, and optional resource.
  *
- * Runs the full four-step evaluation (explicit deny, allow, RBAC, implicit
- * deny) and prints the verdict, reason, and ordered trace so operators can
- * diagnose authorization decisions from the CLI.
+ * Runs the full staged evaluation in AUTHZ-7.1's order (the subject, resource
+ * and tenant, the explicit denies, the guardrails, the permission boundaries,
+ * the session caps, the allows and the implicit deny; see
+ * docs/design/evaluation-order-and-deny-precedence.md) and prints the verdict,
+ * reason, and ordered trace so operators can diagnose authorization decisions
+ * from the CLI.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Events\Resource\PolicyAttached;
 use SineMacula\Laravel\Authorization\Events\Resource\PolicyDetached;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidResourceException;
+use SineMacula\Laravel\Authorization\Exceptions\UnwrittenGrantException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Services\Support\GrantScopes;
 use SineMacula\Laravel\Authorization\Services\Support\ResourcePolicyTable;
@@ -46,7 +47,12 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  * asking the bound resource tenant resolver, since where an attachment holds
  * comes from the call, not from the record's tenant. An inline policy, a policy
  * with an allow statement naming no principals, and a policy whose row is gone
- * are refused before anything is written (see `PolicyPrincipals`).
+ * are refused before anything is written (see `PolicyPrincipals`). A policy
+ * deleted while the attachment is written is refused with
+ * `InvalidGrantTargetException` too, and an attachment whose row could not be
+ * written for another reason with `UnwrittenGrantException`, so an attachment
+ * is only ever reported, and `PolicyAttached` dispatched, once its row is
+ * there.
  *
  * An attachment holds in a scope as a grant does (AUTHZ-5.1): a policy one
  * tenant owns is attached in that tenant, or a tenant below it that the call
@@ -102,7 +108,7 @@ final class ResourcePolicyService
 
             $owner   = GrantScopes::of(GrantTarget::POLICY, $policy, $named->tenant);
             $scope   = new GrantScope($owner, $named->application, $named->includeSubtree || $owner === null);
-            $outcome = self::table($reference, $scope)->attach(self::key($stored));
+            $outcome = self::table($reference, $scope)->attach(self::key($stored)) ?? throw self::unwritten($stored, $reference);
 
             if ($outcome !== GrantOutcome::UNCHANGED) {
                 OperationScope::dispatch(new PolicyAttached($operation, (string) $reference->type, $reference->id, Reference::of($stored), self::name($stored), $scope));
@@ -334,6 +340,24 @@ final class ResourcePolicyService
         }
 
         return $attachments;
+    }
+
+    /**
+     * Return the refusal of an attachment whose row could not be written: the
+     * policy's, when it was deleted while the attachment was written, else that
+     * the attachment was not written.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $stored
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
+     * @return \InvalidArgumentException|\RuntimeException
+     */
+    private static function unwritten(Policy $stored, ResourceReference $resource): \InvalidArgumentException|\RuntimeException
+    {
+        if (InlinePolicies::isGone($stored->getKey())) {
+            return new InvalidGrantTargetException('policy', $stored);
+        }
+
+        return new UnwrittenGrantException('attachment of policy \'' . self::name($stored) . "' to {$resource->identifier}");
     }
 
     /**

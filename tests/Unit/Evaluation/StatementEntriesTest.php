@@ -99,10 +99,100 @@ final class StatementEntriesTest extends TestCase
         self::assertSame(['z#0', 'a-cap#0'], self::labels($gathered['deny']));
         self::assertSame(['z#1'], self::labels($gathered['allow']));
         self::assertCount(2, $gathered['boundaries']);
-        self::assertSame(['a-cap#1', 'a-cap#2'], self::labels($gathered['boundaries'][0]));
-        self::assertSame(['b-cap#0'], self::labels($gathered['boundaries'][1]));
-        self::assertEquals(new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::NOT_APPLICABLE, new StatementReference('a-cap', 1)), $gathered['boundaries'][0][0][2]);
+        self::assertSame(['a-cap#1', 'a-cap#2'], self::labels($gathered['boundaries'][0][0]));
+        self::assertSame(['b-cap#0'], self::labels($gathered['boundaries'][1][0]));
+        self::assertEquals(new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::NOT_APPLICABLE, new StatementReference('a-cap', 1)), $gathered['boundaries'][0][0][0][2]);
         self::assertEquals(new TraceEntry(DecisionStage::DENY, TraceOutcome::NOT_APPLICABLE, new StatementReference('a-cap', 0)), $gathered['deny'][1][2]);
+    }
+
+    /**
+     * Each boundary comes with the step it adds when it refuses the check,
+     * naming it by name and stored key, and a boundary with no allow statement
+     * has the step too.
+     *
+     * @return void
+     */
+    public function testGivesEachBoundaryTheStepItAddsWhenItRefuses(): void
+    {
+        $stored = self::policy('cap', [['effect' => 'allow', 'actions' => ['x']]])->withId('7');
+        $empty  = self::policy('empty', []);
+
+        $gathered = (new StatementEntries)->of([], [$stored, $empty]);
+
+        self::assertEquals(new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::REFUSED, null, [], 'cap[7]'), $gathered['boundaries'][0][1]);
+        self::assertSame([], $gathered['boundaries'][1][0]);
+        self::assertEquals(new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::REFUSED, null, [], 'empty'), $gathered['boundaries'][1][1]);
+    }
+
+    /**
+     * A policy reached more than once is gathered once for each part it plays:
+     * held twice, its statements once; held and set as a boundary, its deny
+     * statements once and its allow statements as a policy and as a boundary;
+     * the boundary of both grantees, one boundary.
+     *
+     * @return void
+     */
+    public function testGathersAPolicyReachedTwiceOnceForEachPart(): void
+    {
+        $policy = self::policy('both', [['effect' => 'allow', 'actions' => ['*']], ['effect' => 'deny', 'actions' => ['x']]])->withId('1');
+        $twin   = self::policy('both', [['effect' => 'allow', 'actions' => ['*']], ['effect' => 'deny', 'actions' => ['x']]])->withId('1');
+        $other  = self::policy('other', [['effect' => 'allow', 'actions' => ['y']]]);
+
+        $held = (new StatementEntries)->of([$policy, $twin]);
+
+        self::assertSame(['both#1'], self::labels($held['deny']));
+        self::assertSame(['both#0'], self::labels($held['allow']));
+
+        $bounded = (new StatementEntries)->of([$policy], [$twin]);
+
+        self::assertSame(['both#1'], self::labels($bounded['deny']));
+        self::assertSame(['both#0'], self::labels($bounded['allow']));
+        self::assertCount(1, $bounded['boundaries']);
+        self::assertSame(['both#0'], self::labels($bounded['boundaries'][0][0]));
+
+        $capped = (new StatementEntries)->of([$other], [$policy, $other, $twin]);
+
+        self::assertSame(['both#1'], self::labels($capped['deny']));
+        self::assertSame(['other#0'], self::labels($capped['allow']));
+        self::assertCount(2, $capped['boundaries']);
+        self::assertSame(['both#0'], self::labels($capped['boundaries'][0][0]));
+        self::assertSame(['other#0'], self::labels($capped['boundaries'][1][0]));
+    }
+
+    /**
+     * Each part of what a policy is ordered by is kept apart from the next, so
+     * a shorter name comes first whatever key follows it, and of one name the
+     * key decides before the resource does.
+     *
+     * @return void
+     */
+    public function testKeepsEachPartOfTheOrderApart(): void
+    {
+        $short = self::policy('a', [['effect' => 'allow', 'actions' => ['x']]])->withId('z');
+        $long  = self::policy('ab', [['effect' => 'allow', 'actions' => ['y']]]);
+
+        self::assertSame(['a#0', 'ab#0'], self::labels((new StatementEntries)->of([$long, $short])['allow']));
+
+        $statements = [['effect' => 'allow', 'actions' => ['x'], 'principals' => ['user:1']]];
+        $one        = self::policy('p', $statements)->withId('1')->withResource('b');
+        $twelve     = self::policy('p', $statements)->withId('12')->withResource('a');
+
+        self::assertSame(['1', '12'], \array_map(static fn (array $entry): ?string => $entry[0]->policyId, (new StatementEntries)->of([$twelve, $one])['allow']));
+    }
+
+    /**
+     * Policies of one name, key and document attached to different resources
+     * come out in the order of their resources.
+     *
+     * @return void
+     */
+    public function testOrdersPoliciesThatDifferOnlyByResource(): void
+    {
+        $statements = [['effect' => 'allow', 'actions' => ['x'], 'principals' => ['user:1']]];
+        $later      = self::policy('p', $statements)->withId('1')->withResource('post:2');
+        $sooner     = self::policy('p', $statements)->withId('1')->withResource('post:1');
+
+        self::assertSame(['post:1', 'post:2'], \array_map(static fn (array $entry): ?string => $entry[0]->resource, (new StatementEntries)->of([$later, $sooner])['allow']));
     }
 
     /**
@@ -124,7 +214,8 @@ final class StatementEntriesTest extends TestCase
         self::assertSame($first['deny'][0][0], $second['deny'][0][0]);
         self::assertSame($first['deny'][0][2], $second['deny'][0][2]);
         self::assertSame($first['allow'][0][2], $second['allow'][0][2]);
-        self::assertSame($first['boundaries'][0][0][2], $second['boundaries'][0][0][2]);
+        self::assertSame($first['boundaries'][0][0][0][2], $second['boundaries'][0][0][0][2]);
+        self::assertSame($first['boundaries'][0][1], $second['boundaries'][0][1]);
         self::assertNotSame($first['allow'][0][2], (new StatementEntries)->of([$policy])['allow'][0][2]);
     }
 

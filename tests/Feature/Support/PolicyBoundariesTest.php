@@ -57,7 +57,8 @@ final class PolicyBoundariesTest extends TestCase
 
     /**
      * A policy in use as a boundary is refused, naming each grantee it bounds
-     * once, in order, however many scopes it bounds it in.
+     * once, in order of type then key, however many scopes it bounds it in, and
+     * telling apart grantees of one key and different types.
      *
      * @return void
      *
@@ -71,6 +72,7 @@ final class PolicyBoundariesTest extends TestCase
         self::service()->set(new Reference('user', 'user-2'), $policy);
         self::service()->set(new Reference('user', 'user-1'), $policy);
         self::service()->set(new Reference('user', 'user-1'), $policy, $tenant);
+        self::service()->set(new Reference('team', 'user-1'), $policy);
 
         self::assertTrue(PolicyBoundaries::isBoundary($policy));
 
@@ -79,7 +81,7 @@ final class PolicyBoundariesTest extends TestCase
             self::fail('The deletion was not refused.');
         } catch (BoundaryException $exception) {
             self::assertSame('cap', $exception->getPolicyName());
-            self::assertEquals([new Reference('user', 'user-1'), new Reference('user', 'user-2')], $exception->getGrantees());
+            self::assertEquals([new Reference('team', 'user-1'), new Reference('user', 'user-1'), new Reference('user', 'user-2')], $exception->getGrantees());
         }
     }
 

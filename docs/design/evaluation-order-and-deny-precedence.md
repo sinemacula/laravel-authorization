@@ -21,8 +21,9 @@ throws when it does not. It returns a `Decision`:
   check names, or another denial no statement made. The
   `sid` only names the statement: it never changes the decision or the order.
 - `trace` -- every step taken, in order, each a `TraceEntry`: its stage, its `TraceOutcome`, the statement it
-  assessed (none for the permission step, or for a cap stage that capped nothing), and the condition keys (their dot
-  paths) it tested with whether each held.
+  assessed (none for the permission step, a boundary that refused the check, or a cap stage that capped nothing), the
+  boundary it names when it is a boundary's refusal (`name[key]`), and the condition keys (their dot paths) it tested
+  with whether each held.
 - `requirements` -- for an `insufficient_authentication` denial, one `UnmetRequirement` for each statement in
   `statements`, in the same order: the authentication requirement that alone kept it from applying and its unmet parts.
   They are alternatives: any one of them met would allow the check. Empty for every other decision.
@@ -107,11 +108,13 @@ Boundaries](#permission-boundaries)).
 
 Within one grantee's resolution, its own attachments and its roles', a policy held more than one way (attached to the
 grantee and to a role, or to two of its roles) is listed once. A policy held by both the subject and its separate
-identity may be listed twice, which never changes the decision. The stored policies are read through the resolution
-cache; a change to any role's policy attachments refreshes every identity's cached policies, and a change to the
-hierarchy refreshes those of the identities whose roles it reaches. The order the sources are read in is never relied
-on: invariant 2 orders the policies within each stage, so a deny in a role's policy, or in the resource's, is decided
-exactly as one attached to the identity, and wins over every allow and every permission.
+identity may be listed twice, and a policy may be held and set as a boundary too, or be the boundary of both: the
+evaluator gathers each policy once for each part it plays (`StatementEntries`), its denies once, its allows once as a
+policy and once as a boundary, so the decision is unchanged and names each statement once. The stored policies are read
+through the resolution cache; a change to any role's policy attachments refreshes every identity's cached policies, and
+a change to the hierarchy refreshes those of the identities whose roles it reaches. The order the sources are read in is
+never relied on: invariant 2 orders the policies within each stage, so a deny in a role's policy, or in the resource's,
+is decided exactly as one attached to the identity, and wins over every allow and every permission.
 
 The resource's policies are read in one query, on the write connection, through the resolution cache, keyed by the
 resource, the tenant, the application and the policy limits; a type alone is kept under a kind of its own, so no
@@ -152,7 +155,8 @@ A permission boundary (AUTHZ-7.4) is a managed policy set on a principal or an i
   is. A boundary has no application column: it holds in every application, since the scope a boundary caps is a
   tenant's.
 - **Which apply.** A check reads the boundaries of the subject's principal and, when it is a separate model, of its
-  identity, that hold in the tenant the check is decided in: the platform-wide one, the tenant's own, and an ancestor's
+  identity, whichever contracts each implements, so a boundary set on a saved model is never ignored. It reads those
+  that hold in the tenant the check is decided in: the platform-wide one, the tenant's own, and an ancestor's
   that reaches down, through `TenantScope::currentChain()->grants()` as a grant reaches (`BoundaryResolver`). A
   tenant-owned resource the tenant stage admits is decided in its own tenant, so that tenant's boundaries apply; a
   check that falls back to platform scope reads the platform-wide ones.
@@ -162,12 +166,17 @@ A permission boundary (AUTHZ-7.4) is a managed policy set on a principal or an i
   policy's allows would be, conditions and `not_actions` included; passing it only lets the allows be weighed. Its deny
   statements are explicit denies at the deny stage, after every policy's. It never names `principals`, so its allows
   apply to every subject it bounds.
-- **What is refused.** A role (whose holders never read its boundary), an inline policy and a policy naming
-  `principals` are refused as boundaries, and a rewrite of a boundary's document that adds `principals` is refused with
-  `ResourcePolicyException`. A policy in use as a boundary is never deleted: `PolicyObserver::deleting` refuses the
-  delete with `BoundaryException`, naming every grantee it bounds, and the table's foreign key restricts a delete made
-  past the model. Removing the boundary, deleting its grantee (`GrantService::revokeAll()`) or pruning a grantee that is
-  gone frees the policy.
+- **What is refused.** A grantee that is never a subject's principal or identity, a role (whose holders never read its
+  boundary), a permission or a policy, is refused with `BoundaryException`, and so is an inline policy, which belongs to
+  one grantee and is deleted with it. A policy naming `principals` is refused as a boundary, and a rewrite of a
+  boundary's document that adds `principals` is refused with `ResourcePolicyException`. A boundary is reported set only
+  once its row is read back on the write connection: an insert that is ignored and leaves no row is tried again, and
+  when that leaves none either, a policy deleted at the same moment is refused with `InvalidGrantTargetException` (on
+  MySQL, `INSERT IGNORE` turns the foreign key failure into a warning) and any other failure with
+  `UnwrittenGrantException`, so `BoundarySet` is never dispatched for a boundary that is not there. A policy in use as a
+  boundary is never deleted: `PolicyObserver::deleting` refuses the delete with `BoundaryException`, naming every
+  grantee it bounds, and the table's foreign key restricts a delete made past the model. Removing the boundary, deleting
+  its grantee (`GrantService::revokeAll()`) or pruning a grantee that is gone frees the policy.
 
 The boundaries and their documents are read in one query on the write connection, through the resolution cache, as a
 grantee's policies are (`ResolutionCache::rememberBoundaries()`), so a warm check reads none. Every boundary entry pins
@@ -200,8 +209,10 @@ its `IdentityEvent`.
       records `uncapped` in the trace and caps nothing.
    4. *Boundary*: every permission boundary of the principal and of its identity that applies must allow the check,
       each through its allow statements, conditions included (see [Permission Boundaries](#permission-boundaries)).
-      One whose statement cannot be evaluated denies as `invalid_policy`; failing that, one with no allow that matches
-      denies as `boundary`. With no boundary the stage records `uncapped` and caps nothing.
+      One whose statement cannot be evaluated denies as `invalid_policy`; failing that, one with no allow that matches,
+      one with no allow statement at all included, denies as `boundary`, and each boundary that refuses adds a
+      `refused` step naming it. An allow whose authentication requirement is unmet does not allow, so the boundary
+      denies as `boundary`, never as a step-up. With no boundary the stage records `uncapped` and caps nothing.
    5. *Session*: the session's caps, such as a credential's scopes (BL-50). None apply yet: the stage records
       `uncapped` and caps nothing.
    6. *Allow*: every allow statement is assessed. An allow applies only to the subjects its source admits (invariant
@@ -214,7 +225,8 @@ its `IdentityEvent`.
       statement names them but its conditions do not hold or cannot be decided; and `no_match` otherwise.
 
    Each cap stage can only deny or let the check through: none allows. A cap stage that is reached is always recorded,
-   so the trace shows that the caps ran even when none applied.
+   so the trace shows that the caps ran even when none applied, and a boundary that refuses is named, so the trace
+   shows which cap refused the check, an empty or deny-only boundary included.
 
 2. **The decision is deterministic (AUTHZ-7.9).** Within each stage, policies are assessed in order of name, then stored
    key, then the resource a resource policy is attached to, then document, and each statement in order of position, and
@@ -297,9 +309,10 @@ its `IdentityEvent`.
 ## Trace
 
 Each statement adds one entry: in the deny stage for a deny statement, a boundary's included; in the boundary stage for
-a boundary's allow statement; and in the allow stage for any other allow statement. A cap stage that caps nothing adds
-one entry with no statement (`[guardrail] guardrails: uncapped`, `[boundary] boundaries: uncapped`, `[session] session
-caps: uncapped`), and the permission step adds one more when it is asked:
+a boundary's allow statement; and in the allow stage for any other allow statement. Each boundary that refuses the
+check adds one entry naming it (`[boundary] read-only[<key>]: refused`). A cap stage that caps nothing adds one entry
+with no statement (`[guardrail] guardrails: uncapped`, `[boundary] boundaries: uncapped`, `[session] session caps:
+uncapped`), and the permission step adds one more when it is asked:
 
 | What the step found                                                 | Outcome              |
 |---------------------------------------------------------------------|----------------------|
@@ -311,6 +324,7 @@ caps: uncapped`), and the permission step adds one more when it is asked:
 | It cannot be evaluated                                              | `invalid`            |
 | The subject holds the permission the action names                   | `held`               |
 | The subject does not hold it                                        | `not_held`           |
+| A boundary no allow statement of its own lets the check through     | `refused`            |
 | A cap stage has nothing to cap the check by                         | `uncapped`           |
 
 An authentication requirement is recorded as the condition key `authentication`, with whether it held, and never a
@@ -371,18 +385,29 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   deny it guards does.
 - **Several candidates**: every allow statement that only its requirement kept from applying is a candidate, so the
   decision lists one requirement per statement, and the exception lists each distinct requirement once.
-- **A boundary with no allow for the check**: a boundary of deny statements alone, or whose allows name other actions,
-  denies every check it does not allow as `boundary`; the decision names no statement, and the trace lists each of its
-  allows as assessed at the boundary stage.
+- **A boundary with no allow for the check**: a boundary with no statement, of deny statements alone, or whose allows
+  name other actions, denies every check it does not allow as `boundary`; the decision names no statement, and the
+  trace lists each of its allows as assessed at the boundary stage, then a `refused` step naming the boundary, so
+  `explain()` says which boundary capped the check.
 - **An unreadable boundary**: a boundary whose document cannot be hydrated, or is over a limit, denies every check about
-  its grantee as `invalid_policy` at the deny stage, logged as an unreadable policy is, until it is fixed or removed.
+  its grantee in the scopes it applies to as `invalid_policy` at the deny stage (every check, for a platform-wide
+  boundary), logged as an unreadable policy is, until it is fixed or removed.
 - **A boundary and `withPolicies()`**: the override replaces the policies, never the boundaries or the permissions, so a
-  test or a caller supplying policies is still capped by the subject's boundaries.
-- **A boundary on a role**: refused with `BoundaryException` when it is set. A role's holders are capped only by their
-  own boundaries; a role's policies are ordinary policies, never a cap.
+  test or a caller supplying policies is still capped by the subject's boundaries: an override never lifts a cap.
+- **A boundary in another application**: a boundary has no application, so it holds in every application the grantee
+  is checked in.
+- **A boundary on a role, a permission or a policy**: refused with `BoundaryException` when it is set, as no check is
+  ever about one. A role's holders are capped only by their own boundaries; a role's policies are ordinary policies,
+  never a cap.
+- **A grantee of the narrow contracts**: a principal or identity that holds grants through `SupportsRoles`,
+  `SupportsPermissions` or `SupportsPolicies` without being an `AuthorizableIdentity` is capped by its boundaries as any
+  saved model is.
+- **A policy reached twice**: a policy held and set as a boundary, or the boundary of both the principal and its
+  identity, denies once at the deny stage, is assessed once as a policy and once as a boundary, and is named once.
 - **A grantee deleted past its model events**: its boundary rows stay until `authorization:prune` finds the grantee
-  gone and revokes its grants and boundaries through `GrantService::revokeAll()`; until then the boundary's policy
-  cannot be deleted.
+  gone, a grantee whose only rows are boundaries included, and removes its boundaries through
+  `BoundaryService::removeAll()`, counted apart from its grants, before it revokes its grants through
+  `GrantService::revokeAll()`; until then the boundary's policy cannot be deleted.
 
 ## Implementation Anchors
 

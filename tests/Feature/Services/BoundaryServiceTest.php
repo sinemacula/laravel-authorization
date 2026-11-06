@@ -15,6 +15,8 @@ use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Exceptions\ResourcePolicyException;
+use SineMacula\Laravel\Authorization\Exceptions\UnwrittenGrantException;
+use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
@@ -23,6 +25,7 @@ use SineMacula\Laravel\Authorization\Support\OperationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\ComparesReferences;
+use Tests\Concerns\InterleavesWrites;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
@@ -41,7 +44,7 @@ use Tests\TestCase;
 #[CoversClass(BoundaryService::class)]
 final class BoundaryServiceTest extends TestCase
 {
-    use ActsAsTenant, ComparesReferences, ReadsDispatchedEvents;
+    use ActsAsTenant, ComparesReferences, InterleavesWrites, ReadsDispatchedEvents;
 
     /**
      * The service is bound once in the container.
@@ -240,6 +243,42 @@ final class BoundaryServiceTest extends TestCase
     }
 
     /**
+     * Removing all of a grantee's boundaries removes each, in every scope, in
+     * one operation for the actor named, dispatching a `BoundaryRemoved` for
+     * each and returning how many there were; a grantee with none removes
+     * nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRemovesAllOfAGranteesBoundaries(): void
+    {
+        $tenant = self::createTenant('tenant-a');
+        $user   = StubIdentity::create(['id' => 'user-1']);
+
+        self::service()->set($user, self::cap('platform'));
+        self::service()->set($user, self::cap('tenant'), $tenant);
+        self::service()->set(StubIdentity::create(['id' => 'user-2']), self::cap('other'));
+
+        Event::fake([BoundaryRemoved::class]);
+
+        self::assertSame(2, self::service()->removeAll(Reference::of($user), new Reference('admin', '1')));
+
+        $events = self::dispatchedEvents(BoundaryRemoved::class);
+        $names  = \array_map(static fn (BoundaryRemoved $event): string => $event->name, $events);
+
+        \sort($names);
+
+        self::assertSame(['platform', 'tenant'], $names);
+        self::assertSame($events[0]->operation->id, $events[1]->operation->id);
+        self::assertSame('admin', $events[0]->operation->actor?->type);
+        self::assertSame(['user-2'], DB::table('authorizable_boundaries')->pluck('authorizable_id')->all());
+        self::assertSame(0, self::service()->removeAll($user));
+        self::assertCount(2, self::dispatchedEvents(BoundaryRemoved::class));
+    }
+
+    /**
      * A policy one tenant owns is set as a boundary in that tenant by default,
      * and refused in any other.
      *
@@ -264,8 +303,10 @@ final class BoundaryServiceTest extends TestCase
     }
 
     /**
-     * An inline policy, a policy naming principals, a policy whose row is gone
-     * and a role are each refused before anything is written.
+     * An inline policy, a policy naming principals, a policy whose row is gone,
+     * and a grantee that is never a subject's principal or identity, a role, a
+     * permission or a policy, by model or by reference, are each refused before
+     * anything is written.
      *
      * @return void
      *
@@ -273,16 +314,21 @@ final class BoundaryServiceTest extends TestCase
      */
     public function testRefusesWhatCannotBeABoundary(): void
     {
-        $user   = StubIdentity::create(['id' => 'user-1']);
-        $inline = $user->createInlinePolicy('mine', ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]);
-        $named  = self::policy('named', [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']]]);
-        $role   = Role::create(['name' => 'editor']);
+        $user       = StubIdentity::create(['id' => 'user-1']);
+        $inline     = $user->createInlinePolicy('mine', ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]);
+        $named      = self::policy('named', [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']]]);
+        $role       = Role::create(['name' => 'editor']);
+        $permission = Permission::create(['name' => 'posts:read']);
+        $policy     = self::cap('held');
 
         $refusals = [
             [static fn () => self::service()->set($user, $inline), BoundaryException::class, 'Inline policy \'mine\''],
             [static fn () => self::service()->set($user, $named), ResourcePolicyException::class, 'Policy \'named\''],
             [static fn () => self::service()->set($user, new Policy(['name' => 'unsaved'])), InvalidGrantTargetException::class, ''],
             [static fn () => self::service()->set($role, self::cap('cap')), BoundaryException::class, "boundary of role '{$role->id}'"],
+            [static fn () => self::service()->set($permission, self::cap('cap-2')), BoundaryException::class, "boundary of permission '{$permission->id}'"],
+            [static fn () => self::service()->set($policy, self::cap('cap-3')), BoundaryException::class, "boundary of policy '{$policy->id}'"],
+            [static fn () => self::service()->set(Reference::of($permission), self::cap('cap-4')), BoundaryException::class, 'never a permission'],
         ];
 
         foreach ($refusals as [$call, $class, $message]) {
@@ -366,6 +412,68 @@ final class BoundaryServiceTest extends TestCase
     }
 
     /**
+     * A policy deleted while its boundary is written, which on MySQL leaves no
+     * row once `INSERT IGNORE` turns the foreign key failure into a warning, is
+     * refused as gone: nothing is reported set, no `BoundarySet` is dispatched,
+     * and the boundary held before is kept.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPolicyDeletedWhileItIsWrittenIsRefused(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $held   = self::cap('held');
+        $policy = self::cap('deleted');
+
+        self::service()->set($user, $held);
+        self::churn($policy->id);
+
+        Event::fake([BoundarySet::class]);
+
+        try {
+            self::service()->set($user, $policy);
+            self::fail('The deleted policy was set as a boundary.');
+        } catch (InvalidGrantTargetException $exception) {
+            self::assertSame('policy', $exception->getKind());
+        }
+
+        self::assertSame([], self::dispatchedEvents(BoundarySet::class));
+        self::assertSame(1, DB::table('authorizable_boundaries')->count());
+        self::assertEquals($held->id, DB::table('authorizable_boundaries')->value('policy_id'));
+    }
+
+    /**
+     * A boundary whose row a concurrent change keeps from being written, even
+     * once the write is tried again, is refused: nothing is reported set and no
+     * `BoundarySet` is dispatched.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testABoundaryThatIsNotWrittenIsRefused(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        self::service()->set($user, self::cap('held'));
+        self::churn();
+
+        Event::fake([BoundarySet::class]);
+
+        try {
+            self::service()->set($user, self::cap('unwritten'));
+            self::fail('The unwritten boundary was reported set.');
+        } catch (UnwrittenGrantException $exception) {
+            self::assertSame('boundary of ' . $user->getMorphClass() . ':user-1', $exception->getGrant());
+        }
+
+        self::assertSame([], self::dispatchedEvents(BoundarySet::class));
+        self::assertSame(1, DB::table('authorizable_boundaries')->count());
+    }
+
+    /**
      * A grantee deleted takes its boundaries with it, each reported, so their
      * policies can be deleted.
      *
@@ -387,6 +495,27 @@ final class BoundaryServiceTest extends TestCase
         self::assertSame(0, DB::table('authorizable_boundaries')->count());
         self::assertCount(1, self::dispatchedEvents(BoundaryRemoved::class));
         self::assertTrue($policy->delete());
+    }
+
+    /**
+     * Interleave a concurrent change with each write of `user-1`'s boundary:
+     * its row is removed once each insert is ignored, and put back once it is
+     * read back, so neither insert writes a row, and the policy with the given
+     * key, when one is given, is deleted with the first removal.
+     *
+     * @param  string|null  $deleted
+     * @return void
+     */
+    private static function churn(?string $deleted = null): void
+    {
+        $row = (array) DB::table('authorizable_boundaries')->where('authorizable_id', 'user-1')->sole();
+
+        self::interleaveWrites('authorizable_boundaries', static function () use ($deleted): void {
+            DB::table('authorizable_boundaries')->where('authorizable_id', 'user-1')->delete();
+            DB::table('policies')->where('id', $deleted)->delete();
+        }, static function () use ($row): void {
+            DB::table('authorizable_boundaries')->insert($row);
+        }, 2, 1);
     }
 
     /**

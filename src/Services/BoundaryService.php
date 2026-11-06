@@ -14,6 +14,8 @@ use SineMacula\Laravel\Authorization\Events\Identity\BoundarySet;
 use SineMacula\Laravel\Authorization\Exceptions\BoundaryException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
+use SineMacula\Laravel\Authorization\Exceptions\UnwrittenGrantException;
+use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\Support\BoundaryTable;
@@ -48,12 +50,20 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * tenant named, else platform-wide.
  *
  * The grantee is a saved model or a reference with a type and a key, else
- * `InvalidGranteeException` is thrown; a role is refused with
- * `BoundaryException`, since a boundary caps a principal or an identity. An
- * inline policy is refused with `BoundaryException`, a policy naming
- * `principals` with `ResourcePolicyException`, and a policy whose row is gone
- * with `InvalidGrantTargetException`, each before anything is written. A policy
- * in use as a boundary cannot be deleted until the boundary is removed.
+ * `InvalidGranteeException` is thrown. A boundary caps a principal or an
+ * identity, and the checks about a subject read the boundaries of any saved
+ * model it is, whichever contracts that implements, so a boundary set is never
+ * ignored; a grantee that is never a subject's principal or identity, a role, a
+ * permission or a policy, is refused with `BoundaryException`. An inline policy
+ * is refused with `BoundaryException`, a policy naming `principals` with
+ * `ResourcePolicyException`, and a policy whose row is gone with
+ * `InvalidGrantTargetException`, each before anything is written. A policy
+ * deleted while the boundary is written is refused with
+ * `InvalidGrantTargetException` too, and a boundary whose row could not be
+ * written for another reason with `UnwrittenGrantException`, so a boundary is
+ * only ever reported set, and `BoundarySet` dispatched, once its row is there.
+ * A policy in use as a boundary cannot be deleted until the boundary is
+ * removed.
  *
  * Every call runs in one transaction on the package's connection, is one
  * operation for the actor the call names (null for console and system work),
@@ -103,7 +113,7 @@ final class BoundaryService
 
             $owner                = GrantScopes::of(GrantTarget::POLICY, $policy, $named);
             $scope                = new GrantScope($owner, null, $includeSubtree || $owner === null);
-            [$outcome, $replaced] = self::table($reference, $operation, $scope)->set(self::key($stored));
+            [$outcome, $replaced] = self::table($reference, $operation, $scope)->set(self::key($stored)) ?? throw self::unwritten($stored, $reference);
 
             if ($outcome !== GrantOutcome::UNCHANGED) {
                 $previous = $replaced === null ? null : new Reference($stored->getMorphClass(), $replaced);
@@ -140,6 +150,32 @@ final class BoundaryService
             }
 
             return $removed !== null;
+        });
+    }
+
+    /**
+     * Remove the grantee's boundaries in every scope, in one transaction and as
+     * one operation, dispatching `BoundaryRemoved` for each once it commits,
+     * and return how many there were: what the grant pruner does for a grantee
+     * that no longer exists.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
+     * @return int
+     *
+     * @throws \Throwable
+     */
+    public function removeAll(Model|Reference $grantee, Model|Reference|null $actor = null): int
+    {
+        $reference = self::grantee($grantee);
+
+        /** @var int<0, max> */
+        return OperationScope::run(Operation::begin($actor), static function (Operation $operation) use ($reference): int {
+            $events = self::removeEverywhere($reference, $operation);
+
+            OperationScope::dispatch(...$events);
+
+            return \count($events);
         });
     }
 
@@ -189,7 +225,9 @@ final class BoundaryService
 
     /**
      * Refuse to set the policy, as stored, as the grantee's boundary: an inline
-     * policy, a policy naming `principals`, or any policy for a role.
+     * policy, a policy naming `principals`, or any policy for a grantee that is
+     * never a subject's principal or identity, a role, a permission or a
+     * policy, as the models `authorization.models` configures name them.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $stored
      * @param  string  $name
@@ -200,11 +238,13 @@ final class BoundaryService
      */
     private static function assertSettable(Policy $stored, string $name, Reference $grantee): void
     {
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Role> $roleClass */
-        $roleClass = config('authorization.models.role', Role::class);
+        foreach (['role' => Role::class, 'permission' => Permission::class, 'policy' => Policy::class] as $kind => $default) {
+            /** @var class-string<\Illuminate\Database\Eloquent\Model> $class */
+            $class = config("authorization.models.{$kind}", $default);
 
-        if ($grantee->type === (new $roleClass)->getMorphClass()) {
-            throw BoundaryException::role($name, $grantee);
+            if ($grantee->type === (new $class)->getMorphClass()) {
+                throw BoundaryException::notASubject($name, $grantee, $kind);
+            }
         }
 
         if (InlinePolicies::ownerOf($stored) !== null) {
@@ -212,6 +252,24 @@ final class BoundaryService
         }
 
         PolicyPrincipals::assertAttachableToGrantee($stored);
+    }
+
+    /**
+     * Return the refusal of a boundary whose row could not be written: the
+     * policy's, when it was deleted while the boundary was written, else that
+     * the boundary was not written.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $stored
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @return \InvalidArgumentException|\RuntimeException
+     */
+    private static function unwritten(Policy $stored, Reference $grantee): \InvalidArgumentException|\RuntimeException
+    {
+        if (InlinePolicies::isGone($stored->getKey())) {
+            return new InvalidGrantTargetException('policy', $stored);
+        }
+
+        return new UnwrittenGrantException("boundary of {$grantee->type}:{$grantee->id}");
     }
 
     /**
@@ -236,14 +294,18 @@ final class BoundaryService
      * @param  string  $policy
      * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
      * @return \SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
      */
     private static function removedEvent(Operation $operation, Reference $grantee, string $policy, GrantScope $scope): BoundaryRemoved
     {
         /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
         $class = config('authorization.models.policy', Policy::class);
 
-        // A boundary's policy cannot be deleted from under it, so it is read.
-        $name = PolicyDocument::nameOf(InlinePolicies::stored($policy)?->getAttribute('name'));
+        // A boundary's policy cannot be deleted from under it, so it is read,
+        // and one that is not refuses the removal rather than name nothing.
+        $stored = InlinePolicies::stored($policy) ?? throw new InvalidGrantTargetException('policy', $policy);
+        $name   = PolicyDocument::nameOf($stored->getAttribute('name'));
 
         return new BoundaryRemoved($operation, $grantee, new Reference((new $class)->getMorphClass(), $policy), $name, $scope);
     }

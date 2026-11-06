@@ -24,8 +24,10 @@ named and the operation they belong to, and are dispatched only once the write c
 - **Boundary events.** Under `Identity\`: `BoundarySet` and `BoundaryRemoved`, when a policy is set as a principal's or
   an identity's permission boundary in a scope, or the boundary there is removed (AUTHZ-7.4), each with the grantee, the
   policy, its name and the scope. `BoundarySet` also carries `previous`, the policy the boundary replaced, or null for a
-  new boundary or one whose reach alone changed; there is no separate replaced event. A grantee's boundaries removed
-  with its other grants, once it is deleted or pruned, are each reported as `BoundaryRemoved` in that operation. Both
+  new boundary or one whose reach alone changed; there is no separate replaced event. `BoundarySet` is dispatched only
+  once the boundary's row is read back, never for an insert that wrote none. A grantee's boundaries removed with its
+  other grants, once it is deleted, are each reported as `BoundaryRemoved` in that operation, and those of a grantee
+  pruned as gone in an operation of their own, before its grants are revoked. Both
   extend `Identity\BoundaryEvent`, the abstract, readonly shape they share, which is never dispatched itself, and
   implement `IdentityEvent`, so the grantee's cached resolutions are refreshed as a grant's are.
 - **Expiry events.** Under `Identity\`: `RoleExpired`, `PermissionExpired` and `PolicyExpired`, dispatched when

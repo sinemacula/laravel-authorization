@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Services\Support\ResourcePolicyTable;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\InterleavesWrites;
 use Tests\TestCase;
 
 /**
@@ -29,6 +30,8 @@ use Tests\TestCase;
 #[CoversClass(ResourcePolicyTable::class)]
 final class ResourcePolicyTableTest extends TestCase
 {
+    use InterleavesWrites;
+
     /**
      * An attachment is written once in its scope with its reach; attaching it
      * again changes nothing, and with another reach changes the reach alone.
@@ -124,6 +127,53 @@ final class ResourcePolicyTableTest extends TestCase
         $this->expectException(QueryException::class);
 
         DB::table('resource_policies')->insert($row);
+    }
+
+    /**
+     * An attachment a concurrent call detached between the ignored insert and
+     * the read back is attached afresh, once more, with the scope's reach.
+     *
+     * @return void
+     */
+    public function testAttachesAfreshARowDetachedConcurrently(): void
+    {
+        $policy = self::policy();
+        $scope  = new GrantScope(null, null, false);
+
+        self::table('7', GrantScope::platform())->attach($policy);
+
+        $inserts = self::interleaveWrites('resource_policies', static function (): void {
+            DB::table('resource_policies')->delete();
+        }, static function (): void {});
+
+        self::assertSame(GrantOutcome::GRANTED, self::table('7', $scope)->attach($policy));
+        self::assertCount(2, $inserts);
+        self::assertFalse((bool) DB::table('resource_policies')->sole()->include_subtree);
+    }
+
+    /**
+     * An attachment that leaves no row, even once tried again, reports nothing
+     * attached, as on MySQL a policy deleted at the same moment does when
+     * `INSERT IGNORE` turns its foreign key failure into a warning.
+     *
+     * @return void
+     */
+    public function testReportsNothingWhenNoRowIsWritten(): void
+    {
+        $policy = self::policy();
+
+        self::table('7', GrantScope::platform())->attach($policy);
+
+        $row     = (array) DB::table('resource_policies')->sole();
+        $inserts = self::interleaveWrites('resource_policies', static function (): void {
+            DB::table('resource_policies')->delete();
+        }, static function () use ($row): void {
+            DB::table('resource_policies')->insert($row);
+        }, 2, 1);
+
+        self::assertNull(self::table('7', GrantScope::platform())->attach($policy));
+        self::assertCount(2, $inserts);
+        self::assertSame(0, DB::table('resource_policies')->count());
     }
 
     /**

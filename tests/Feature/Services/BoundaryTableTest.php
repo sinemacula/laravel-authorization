@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Services\Support\BoundaryTable;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\InterleavesWrites;
 use Tests\TestCase;
 
 /**
@@ -29,6 +30,8 @@ use Tests\TestCase;
 #[CoversClass(BoundaryTable::class)]
 final class BoundaryTableTest extends TestCase
 {
+    use InterleavesWrites;
+
     /**
      * A boundary is written once in its scope with its reach and its actor;
      * setting it again changes nothing, with another reach changes the reach
@@ -88,6 +91,55 @@ final class BoundaryTableTest extends TestCase
     }
 
     /**
+     * A row a concurrent call removed between the ignored insert and the read
+     * back is set afresh, once more, with the writer's policy, reach and actor.
+     *
+     * @return void
+     */
+    public function testSetsAfreshARowRemovedConcurrently(): void
+    {
+        [$first, $second] = [self::policy('first'), self::policy('second')];
+
+        self::table(null)->set($first);
+
+        $inserts = self::interleaveWrites('authorizable_boundaries', static function (): void {
+            DB::table('authorizable_boundaries')->where('authorizable_id', 'user-1')->delete();
+        }, static function (): void {});
+
+        self::assertSame([GrantOutcome::GRANTED, null], self::table(null, false, new Reference('admin', '1'))->set($second));
+        self::assertCount(2, $inserts);
+
+        $row = (array) DB::table('authorizable_boundaries')->sole();
+
+        self::assertSame([$second, false, 'admin', '1'], [(string) $row['policy_id'], (bool) $row['include_subtree'], $row['granted_by_type'], $row['granted_by_id']]);
+    }
+
+    /**
+     * A write that leaves no row, even once tried again, reports nothing set,
+     * as on MySQL a policy deleted at the same moment does when `INSERT IGNORE`
+     * turns its foreign key failure into a warning.
+     *
+     * @return void
+     */
+    public function testReportsNothingWhenNoRowIsWritten(): void
+    {
+        [$first, $second] = [self::policy('first'), self::policy('second')];
+
+        self::table(null)->set($first);
+
+        $row     = (array) DB::table('authorizable_boundaries')->sole();
+        $inserts = self::interleaveWrites('authorizable_boundaries', static function (): void {
+            DB::table('authorizable_boundaries')->where('authorizable_id', 'user-1')->delete();
+        }, static function () use ($row): void {
+            DB::table('authorizable_boundaries')->insert($row);
+        }, 2, 1);
+
+        self::assertNull(self::table(null)->set($second));
+        self::assertCount(2, $inserts);
+        self::assertSame(0, DB::table('authorizable_boundaries')->where('policy_id', $second)->count());
+    }
+
+    /**
      * A removal reports the policy and the scope with the reach the boundary
      * had, and removes only the scope's; a platform-wide boundary always
      * reaches below; nothing there removes nothing.
@@ -111,7 +163,7 @@ final class BoundaryTableTest extends TestCase
 
     /**
      * Removing everywhere removes every scope's boundary of the grantee alone,
-     * reporting each with its scope.
+     * reporting each with its scope and its reach.
      *
      * @return void
      */
@@ -120,7 +172,10 @@ final class BoundaryTableTest extends TestCase
         $policy = self::policy('cap');
         $tenant = new Reference('stub_tenant', 'tenant-a');
 
+        $reaching = new Reference('stub_tenant', 'tenant-b');
+
         self::table($tenant, false)->set($policy);
+        self::table($reaching, true)->set($policy);
         self::table(null)->set($policy);
         (new BoundaryTable(AuthorizationConnection::connection(), 'authorizable_boundaries', new Reference('user', 'user-2')))->set($policy);
 
@@ -128,7 +183,11 @@ final class BoundaryTableTest extends TestCase
 
         \usort($removed, static fn (array $left, array $right): int => \strcmp((string) $left[1]->tenant?->id, (string) $right[1]->tenant?->id));
 
-        self::assertEquals([[$policy, new GrantScope(null, null, true)], [$policy, new GrantScope($tenant, null, false)]], $removed);
+        self::assertEquals([
+            [$policy, new GrantScope(null, null, true)],
+            [$policy, new GrantScope($tenant, null, false)],
+            [$policy, new GrantScope($reaching, null, true)],
+        ], $removed);
         self::assertSame(['user-2'], DB::table('authorizable_boundaries')->pluck('authorizable_id')->all());
         self::assertSame([], self::table(null)->removeEverywhere());
     }

@@ -9,7 +9,6 @@ use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
-use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -26,14 +25,17 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * passes only what each of them allows. With no tenant, only the platform-wide
  * one applies (AUTHZ-5.7).
  *
- * Only an authorizable identity that is a saved model has boundaries, so a
- * subject of any other kind costs no query. The boundaries and their documents
- * are read in one query, on the write connection, through the resolution cache,
- * as a grantee's policies are: kept for the request or job, and in the
- * persistent store when one is configured, so a warm check reads none. A policy
- * set as a boundary in more than one scope is read once. A document that cannot
- * be read is written to the log channel and its exception thrown, so it denies
- * every check for the grantee rather than lifting the cap.
+ * The boundaries of every saved model are read, whichever contracts it
+ * implements, so a boundary set on a grantee always caps the checks about it,
+ * as the boundary service writes one for any saved model but a role, a
+ * permission or a policy; a subject that is not a saved model has none, and
+ * costs no query. The boundaries and their documents are read in one query, on
+ * the write connection, through the resolution cache, as a grantee's policies
+ * are: kept for the request or job, and in the persistent store when one is
+ * configured, so a warm check reads none. A policy set as a boundary in more
+ * than one scope is read once. A document that cannot be read is written to the
+ * log channel and its exception thrown, so it denies every check for the
+ * grantee in a scope the boundary covers, rather than lifting the cap.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -43,7 +45,7 @@ final class BoundaryResolver
     /**
      * Return the boundaries of the grantee that apply in the tenant the check
      * is decided in, each hydrated for evaluation; none for a grantee that is
-     * not a saved authorizable identity.
+     * not a saved model.
      *
      * @param  object|null  $grantee
      * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>
@@ -52,7 +54,7 @@ final class BoundaryResolver
      */
     public static function boundariesFor(?object $grantee): array
     {
-        if (!$grantee instanceof AuthorizableIdentity || !$grantee instanceof Model || !$grantee->exists) {
+        if (!$grantee instanceof Model || !$grantee->exists) {
             return [];
         }
 

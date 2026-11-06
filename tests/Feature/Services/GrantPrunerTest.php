@@ -482,8 +482,10 @@ final class GrantPrunerTest extends TestCase
     /**
      * The boundaries of a grantee that no longer exists, one whose only rows
      * are boundaries included, are removed and reported in every scope, and
-     * pretending only counts them; a grantee that exists keeps its boundary,
-     * and the policy can be deleted once no boundary uses it.
+     * counted apart from its grants, and pretending only counts them; a grantee
+     * that exists keeps its boundary, a grantee type that names no model class
+     * keeps its own and is reported, and the policy can be deleted once no
+     * boundary uses it.
      *
      * @return void
      *
@@ -503,6 +505,8 @@ final class GrantPrunerTest extends TestCase
         $boundaries->set($gone, $policy);
         $boundaries->set($gone, $policy, $tenant);
         $boundaries->set($alive, $kept);
+        $boundaries->set(new Reference('unmapped_type', '1'), $kept);
+        $gone->assignRole(Role::create(['name' => 'editor']));
 
         DB::table('stub_identities')->where('id', 'user-gone')->delete();
 
@@ -510,14 +514,14 @@ final class GrantPrunerTest extends TestCase
 
         $pretended = self::pruner()->prune(1000, true);
 
-        self::assertSame(2, $pretended->orphaned);
-        self::assertSame(3, DB::table('authorizable_boundaries')->count());
+        self::assertSame([1, 2, ['unmapped_type']], [$pretended->orphaned, $pretended->boundaries, $pretended->unresolvedTypes]);
+        self::assertSame(4, DB::table('authorizable_boundaries')->count());
         Event::assertNotDispatched(BoundaryRemoved::class);
 
         $result = self::pruner()->prune(1000);
 
-        self::assertSame(2, $result->orphaned);
-        self::assertSame(['user-kept'], DB::table('authorizable_boundaries')->pluck('authorizable_id')->all());
+        self::assertSame([1, 2, ['unmapped_type']], [$result->orphaned, $result->boundaries, $result->unresolvedTypes]);
+        self::assertSame(['1', 'user-kept'], DB::table('authorizable_boundaries')->orderBy('authorizable_id')->pluck('authorizable_id')->all());
         Event::assertDispatchedTimes(BoundaryRemoved::class, 2);
         Event::assertDispatched(
             BoundaryRemoved::class,

@@ -36,18 +36,24 @@ final class BoundaryExceptionTest extends TestCase
     }
 
     /**
-     * A boundary set on a role is refused, naming the role.
+     * A boundary set on a grantee that is never a subject is refused, naming
+     * the grantee and its kind.
      *
      * @return void
      */
-    public function testRole(): void
+    public function testNotASubject(): void
     {
         $role      = new Reference('role', 'role-1');
-        $exception = BoundaryException::role('cap', $role);
+        $exception = BoundaryException::notASubject('cap', $role, 'role');
 
         self::assertSame('Policy \'cap\' cannot be set as the boundary of role \'role-1\': a boundary caps a principal or an identity, never a role.', $exception->getMessage());
         self::assertSame('cap', $exception->getPolicyName());
         self::assertSame([$role], $exception->getGrantees());
+
+        $permission = BoundaryException::notASubject('cap', new Reference('permission', 'p-1'), 'permission');
+        $message    = 'Policy \'cap\' cannot be set as the boundary of permission \'p-1\': a boundary caps a principal or an identity, never a permission.';
+
+        self::assertSame($message, $permission->getMessage());
     }
 
     /**

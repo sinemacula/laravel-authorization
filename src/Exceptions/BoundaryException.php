@@ -12,8 +12,9 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *
  * A boundary is a managed policy set on a principal or an identity: an inline
  * policy, which belongs to one grantee and is deleted with it, is refused, and
- * so is a role, whose holders' checks never read its boundary. A policy in use
- * as a boundary is never deleted from under it, which would lift the cap
+ * so is a grantee that is never a subject's principal or identity, a role, a
+ * permission or a policy, whose boundary no check would ever read. A policy in
+ * use as a boundary is never deleted from under it, which would lift the cap
  * without a word: its deletion is refused, naming every grantee it bounds,
  * until each boundary is removed through the boundary service.
  *
@@ -55,18 +56,21 @@ final class BoundaryException extends \LogicException
     }
 
     /**
-     * Return the refusal of a boundary set on a role.
+     * Return the refusal of a boundary set on a grantee that is never a
+     * subject's principal or identity: a role, a permission or a policy, the
+     * kind named.
      *
      * @param  string  $policyName
-     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $role
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  string  $kind
      * @return self
      */
-    public static function role(string $policyName, Reference $role): self
+    public static function notASubject(string $policyName, Reference $grantee, string $kind): self
     {
         return new self(
-            "Policy '{$policyName}' cannot be set as the boundary of role '{$role->id}': a boundary caps a principal or an identity, never a role.",
+            "Policy '{$policyName}' cannot be set as the boundary of {$kind} '{$grantee->id}': a boundary caps a principal or an identity, never a {$kind}.",
             $policyName,
-            [$role],
+            [$grantee],
         );
     }
 
@@ -97,8 +101,8 @@ final class BoundaryException extends \LogicException
 
     /**
      * Return the grantees the refusal names: those the policy bounds for a
-     * refused deletion, the role for a boundary refused on one, and none for an
-     * inline policy.
+     * refused deletion, the role, permission or policy a boundary was refused
+     * on, and none for an inline policy.
      *
      * @return list<\SineMacula\Laravel\Authorization\Support\Reference>
      */

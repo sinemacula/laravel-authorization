@@ -28,7 +28,8 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  * 3. *Boundary*: each boundary of the subject's principal and identity must
  *    allow the check, as its allow statements would as an ordinary policy's,
  *    conditions included. The boundaries are intersected: one that does not
- *    allow the check denies it as `boundary`, and with none the stage caps
+ *    allow the check, one with no allow statement included, denies it as
+ *    `boundary`, with a step that names it, and with none the stage caps
  *    nothing. A boundary grants nothing: passing it only lets the allows be
  *    weighed.
  * 4. *Session*: no session cap applies yet (BL-50); the stage records that it
@@ -44,8 +45,8 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  *    otherwise.
  *
  * Every stage the decision reaches is recorded in its trace: each statement it
- * assessed, the permission step, and a step for a cap stage that capped
- * nothing.
+ * assessed, the permission step, a step naming each boundary that refused the
+ * check, and a step for a cap stage that capped nothing.
  *
  * The evaluator fails closed: a deny statement applies when its test cannot be
  * decided (a missing context key, an unresolved `${…}` reference), and a
@@ -173,7 +174,7 @@ final class PolicyEvaluator
      * Guardrails (BL-49) and session caps (BL-50) take their places here as
      * they arrive; until then each records that it capped nothing.
      *
-     * @param  list<list<StatementEntry>>  $boundaries
+     * @param  list<array{list<StatementEntry>, \SineMacula\Laravel\Authorization\Evaluation\TraceEntry}>  $boundaries
      * @param  string  $action
      * @param  string|null  $resource
      * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
@@ -199,11 +200,12 @@ final class PolicyEvaluator
     /**
      * Run the boundary stage: every allow statement of every boundary is
      * assessed, each boundary in turn, and the check passes only when each
-     * boundary has one that allows it. Return the denial when one does not, as
-     * `boundary`, or as `invalid_policy` when a boundary's statement cannot be
-     * evaluated, or null when every boundary allows it or there is none.
+     * boundary has one that allows it. Each boundary that does not adds a step
+     * naming it. Return the denial when one does not, as `boundary`, or as
+     * `invalid_policy` when a boundary's statement cannot be evaluated, or null
+     * when every boundary allows it or there is none.
      *
-     * @param  list<list<StatementEntry>>  $boundaries
+     * @param  list<array{list<StatementEntry>, \SineMacula\Laravel\Authorization\Evaluation\TraceEntry}>  $boundaries
      * @param  string  $action
      * @param  string|null  $resource
      * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
@@ -224,10 +226,19 @@ final class PolicyEvaluator
         $invalid = [];
         $refused = false;
 
-        foreach ($boundaries as $statements) {
+        foreach ($boundaries as [$statements, $refusal]) {
             [$found] = $this->assess($statements, DecisionStage::BOUNDARY, $action, $resource, $context, $trace);
             $invalid = [...$invalid, ...$found[self::INVALID]];
-            $refused = $refused || $found[self::ALLOW] === [];
+
+            if ($found[self::ALLOW] !== []) {
+                continue;
+            }
+
+            // A boundary that does not allow the check, one with no allow
+            // statement included, is named in the trace, so the decision says
+            // which cap refused it.
+            $refused = true;
+            $trace[] = $refusal;
         }
 
         return match (true) {

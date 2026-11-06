@@ -22,6 +22,13 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * unique-constraint violation: the row is read back under a row lock and
  * rewritten when its policy or its reach differs, and left alone otherwise.
  *
+ * An ignored insert is only ever reported once a row is read back: one that
+ * leaves no row, as when a concurrent call removed it in between, is tried
+ * again, and when that leaves none either, nothing is reported set. On MySQL
+ * that is a policy deleted at the same moment, whose foreign key failure
+ * `INSERT IGNORE` turns into a warning, so a boundary is never reported, nor
+ * its event dispatched, with no row to bear it out.
+ *
  * Every row the writer inserts or rewrites records the actor the call names in
  * `granted_by_type` and `granted_by_id`, both null for console and system work.
  *
@@ -66,42 +73,30 @@ final readonly class BoundaryTable
     /**
      * Set the policy with the given key as the grantee's boundary in the scope,
      * with the writer's reach, and report what changed with the key of the
-     * policy it replaced, when it replaced another.
+     * policy it replaced, when it replaced another; null when no row could be
+     * written, even once tried again, so nothing is set.
      *
      * @param  string  $policy
-     * @return array{\SineMacula\Laravel\Authorization\Enums\GrantOutcome, string|null}
+     * @return array{\SineMacula\Laravel\Authorization\Enums\GrantOutcome, string|null}|null
      */
-    public function set(string $policy): array
+    public function set(string $policy): ?array
     {
         // Once the insert is ignored, a locking read: on MySQL a plain read
         // would see the transaction's snapshot rather than the row it has just
         // locked. A row a concurrent call removed in between is set afresh.
-        $inserted = $this->wasInserted($policy);
-        $held     = $inserted ? null : $this->held();
-
-        if ($held === null) {
-            if (!$inserted) {
-                $this->wasInserted($policy);
+        for ($attempt = 0; $attempt < 2; $attempt++) {
+            if ($this->wasInserted($policy)) {
+                return [GrantOutcome::GRANTED, null];
             }
 
-            return [GrantOutcome::GRANTED, null];
+            $held = $this->held();
+
+            if ($held !== null) {
+                return $this->rewritten($policy, ...$held);
+            }
         }
 
-        [$previous, $reach] = $held;
-
-        if ($previous === $policy && $reach === $this->includeSubtree) {
-            return [GrantOutcome::UNCHANGED, null];
-        }
-
-        $this->inScope()->update([
-            'policy_id'       => $policy,
-            'include_subtree' => $this->includeSubtree,
-            'granted_by_type' => $this->grantedBy?->type,
-            'granted_by_id'   => $this->grantedBy?->id,
-            'updated_at'      => Carbon::now(),
-        ]);
-
-        return $previous === $policy ? [GrantOutcome::REACH_CHANGED, null] : [GrantOutcome::REPLACED, $previous];
+        return null;
     }
 
     /**
@@ -145,6 +140,34 @@ final readonly class BoundaryTable
         $this->grantee()->delete();
 
         return $removed;
+    }
+
+    /**
+     * Rewrite the grantee's boundary in the scope, held as the policy with the
+     * previous key and the reach, to the policy with the given key and the
+     * writer's reach, and report what changed with the key of the policy it
+     * replaced, when it replaced another.
+     *
+     * @param  string  $policy
+     * @param  string  $previous
+     * @param  bool  $reach
+     * @return array{\SineMacula\Laravel\Authorization\Enums\GrantOutcome, string|null}
+     */
+    private function rewritten(string $policy, string $previous, bool $reach): array
+    {
+        if ($previous === $policy && $reach === $this->includeSubtree) {
+            return [GrantOutcome::UNCHANGED, null];
+        }
+
+        $this->inScope()->update([
+            'policy_id'       => $policy,
+            'include_subtree' => $this->includeSubtree,
+            'granted_by_type' => $this->grantedBy?->type,
+            'granted_by_id'   => $this->grantedBy?->id,
+            'updated_at'      => Carbon::now(),
+        ]);
+
+        return $previous === $policy ? [GrantOutcome::REACH_CHANGED, null] : [GrantOutcome::REPLACED, $previous];
     }
 
     /**
