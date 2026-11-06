@@ -49,7 +49,10 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  *    of it is weighed at the deny stage.
  * 5. *Allow*: every allow statement is assessed; failing an allow, a permission
  *    the subject holds allows, asked through the callback the caller gives,
- *    once, and only when no statement allowed and none was invalid.
+ *    once, and only when no statement allowed and none was invalid. This is the
+ *    only place a permission held is weighed, so it never allows before every
+ *    deny and cap has let the check through, and its step names the permission
+ *    that allowed.
  * 6. *Implicit*: nothing allowed. The denial is `insufficient_authentication`
  *    when an allow statement names the action and the resource and only its
  *    authentication requirement is unmet (N35), with each such requirement and
@@ -58,10 +61,11 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  *    otherwise.
  *
  * Every stage the decision reaches is recorded in its trace: each statement it
- * assessed, the permission step, a step naming each guardrail and boundary that
- * refused the check, a step naming each session cap and whether it covered the
- * action, a step for a cap stage that capped nothing, and one for a cap stage
- * the check is exempt from.
+ * assessed, the permission step (naming the held permission that allowed, when
+ * one did), a step naming each guardrail and boundary that refused the check, a
+ * step naming each session cap and whether it covered the action, a step for a
+ * cap stage that capped nothing, and one for a cap stage the check is exempt
+ * from.
  *
  * The evaluator fails closed: a deny statement applies when its test cannot be
  * decided (a missing context key, an unresolved `${…}` reference), and a
@@ -136,16 +140,17 @@ final class PolicyEvaluator
      * The boundaries are the permission boundaries that apply to the check, and
      * the guardrails the guardrails that do, each of which must allow it; null
      * guardrails exempt the check from the guardrail stage, their denies
-     * included. The permission callback answers whether the subject holds a
-     * permission the action names; with none, no permission is consulted. The
-     * session caps are those `capped()` gave the evaluator, if any.
+     * included. The permission callback answers the permission the subject
+     * holds that the action names, as it was granted (a pattern included), or
+     * null when it holds none; with no callback, no permission is consulted.
+     * The session caps are those `capped()` gave the evaluator, if any.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
      * @param  string  $action
      * @param  string|null  $resource
      * @param  array<array-key, mixed>|\SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $boundaries
-     * @param  (\Closure(): bool)|null  $permission
+     * @param  (\Closure(): ?string)|null  $permission
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>|null  $guardrails
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
@@ -190,7 +195,7 @@ final class PolicyEvaluator
      * @param  string  $action
      * @param  string|null  $resource
      * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
-     * @param  (\Closure(): bool)|null  $permission
+     * @param  (\Closure(): ?string)|null  $permission
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
     private function decide(array $statements, string $action, ?string $resource, CheckContext $context, ?\Closure $permission): Decision
@@ -325,13 +330,14 @@ final class PolicyEvaluator
      * Run the allow stage, and conclude the decision: an allow statement that
      * matches allows, failing that a permission the subject holds, and failing
      * that the implicit deny decides. The permission is asked only when no
-     * allow statement matched and none was invalid, and its step recorded.
+     * allow statement matched and none was invalid, and its step recorded,
+     * naming the held permission that allowed.
      *
      * @param  list<StatementEntry>  $statements
      * @param  string  $action
      * @param  string|null  $resource
      * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
-     * @param  (\Closure(): bool)|null  $permission
+     * @param  (\Closure(): ?string)|null  $permission
      * @param  list<\SineMacula\Laravel\Authorization\Evaluation\TraceEntry>  $trace
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
@@ -341,9 +347,9 @@ final class PolicyEvaluator
 
         if ($permission !== null && $allows[self::ALLOW] === [] && $allows[self::INVALID] === []) {
             $held    = $permission();
-            $trace[] = new TraceEntry(DecisionStage::ALLOW, $held ? TraceOutcome::HELD : TraceOutcome::NOT_HELD);
+            $trace[] = new TraceEntry(DecisionStage::ALLOW, $held === null ? TraceOutcome::NOT_HELD : TraceOutcome::HELD, null, [], null, $held);
 
-            if ($held) {
+            if ($held !== null) {
                 return Decision::allow(DecisionStage::ALLOW, [], $trace);
             }
         }

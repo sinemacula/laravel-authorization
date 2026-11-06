@@ -447,11 +447,21 @@ final class AuthorizationManager
      * policy's, a resource policy's naming the subject, and a permission the
      * subject holds; then the implicit deny. No allow is weighed before every
      * deny and cap, so a guardrail, a boundary or a session cap caps a resource
-     * policy's allow and a permission held as it caps a policy's. The session
-     * caps are the scopes of the subject's credential, mapped to actions, and
-     * those `capped()` supplied, every one of which must cover the action (see
-     * `SessionCapResolver`); a machine without credential scopes is allowed
-     * nothing.
+     * policy's allow and a permission held as it caps a policy's. A permission
+     * held is asked for at the allow stage alone (AUTHZ-7.7), and its step
+     * names the permission that allowed. It counts only when the grant it came
+     * from reaches the check: the permissions are resolved in the scope the
+     * check is decided in (see `ResourceScope`): for a resource within the
+     * active tenant's subtree, its own tenant, so a grant there, an ancestor's
+     * grant that reaches its subtree, or a platform-wide grant; for a resource
+     * admitted from outside the scope, platform scope, so only a platform-wide
+     * grant; for a resource with no tenant, a type alone, an opaque identifier
+     * or no resource, the grants that hold in the active tenant, or only
+     * platform-wide ones with none. A grant for another application, or one
+     * that has expired, never counts. The session caps are the scopes of the
+     * subject's credential, mapped to actions, and those `capped()` supplied,
+     * every one of which must cover the action (see `SessionCapResolver`); a
+     * machine without credential scopes is allowed nothing.
      *
      * The guardrails are those of the resource's tenant when it has one, also
      * when a platform-wide grant admitted it from outside the scope, else of
@@ -502,7 +512,7 @@ final class AuthorizationManager
         $checkContext = $this->contexts?->make($context, $subject, $resource)
             ?? new CheckContext([CheckContextFactory::INPUT => $context], (new AttributeNamespaces)->builders($subject, $resource), null, new PrincipalSelectors($subject));
 
-        $permission = static fn (): bool => SubjectGrants::holdsPermission($subject, $action);
+        $permission = static fn (): ?string => SubjectGrants::permissionFor($subject, $action);
         $session    = ($this->sessionCaps ?? new SessionCapResolver)->capsFor($subject, $this->caps);
 
         return $this->evaluator->capped($session)->evaluate($policies, $action, $resource?->identifier, $checkContext, $boundaries, $permission, $guardrails);

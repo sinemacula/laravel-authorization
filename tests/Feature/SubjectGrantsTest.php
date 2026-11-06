@@ -106,6 +106,40 @@ final class SubjectGrantsTest extends TestCase
     }
 
     /**
+     * The permission that matches the action is named as it was granted: the
+     * principal's own when it holds one, read before the identity's, else the
+     * identity's, and the action itself before any pattern that covers it; none
+     * when neither holds one, while either is inactive, or when the identity is
+     * of the other kind.
+     *
+     * @return void
+     */
+    public function testThePermissionForTheActionIsNamedAsItWasGranted(): void
+    {
+        $principal = SuspendableIdentity::create(['id' => 'account-1']);
+        $identity  = SuspendableIdentity::create(['id' => 'person-1']);
+        $subject   = new Subject($principal, $identity);
+
+        $principal->givePermission(Permission::create(['name' => 'posts:*']));
+        $identity->givePermission(Permission::create(['name' => 'posts:edit']));
+        $identity->givePermission(Permission::create(['name' => 'admin:*']));
+
+        self::assertSame('posts:*', SubjectGrants::permissionFor($subject, 'posts:edit'));
+        self::assertSame('admin:*', SubjectGrants::permissionFor($subject, 'admin:read'));
+        self::assertSame('posts:edit', SubjectGrants::permissionFor(new Subject($identity, $identity), 'posts:edit'));
+        self::assertNull(SubjectGrants::permissionFor($subject, 'billing:read'));
+
+        $identity->suspended = true;
+
+        self::assertNull(SubjectGrants::permissionFor($subject, 'posts:edit'));
+
+        $machine = StubMachine::create(['id' => 'svc-1']);
+
+        self::assertNull(SubjectGrants::permissionFor(new Subject($machine, $principal), 'posts:edit'));
+        self::assertNull(SubjectGrants::permissionFor(new Subject(new \stdClass), 'posts:edit'));
+    }
+
+    /**
      * A principal or identity that is inactive denies everything, whatever
      * either holds.
      *

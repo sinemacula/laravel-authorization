@@ -21,8 +21,10 @@ use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
+ *
+ * @phpstan-ignore sineMaculaLaravel.modelBehaviour, sineMaculaLaravel.modelBehaviour, sineMaculaLaravel.modelBehaviour, sineMaculaLaravel.modelBehaviour
  */
-final class NarrowContractsGrantee extends Model implements SupportsPermissions, SupportsPolicies, SupportsRoles
+final class NarrowContractsGrantee extends Model implements SupportsPermissions, SupportsPolicies, SupportsRoles // @phpstan-ignore sineMaculaLaravel.modelBehaviour
 {
     use HasPermissions, HasPolicies, HasRoles;
 

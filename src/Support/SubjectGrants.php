@@ -34,7 +34,10 @@ use SineMacula\Laravel\Authorization\Subject;
  * denies the check whatever the identity's kind.
  *
  * The manager, the Blade role helpers and the `role:` middleware all ask here,
- * so they read the same grants.
+ * so they read the same grants. The decision asks for the permission that
+ * allows a check at its allow stage alone, after every deny and cap, and the
+ * tenant stage asks only whether a platform-wide grant admits a resource from
+ * outside the scope, which admits it but never allows it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -86,7 +89,8 @@ final class SubjectGrants
     /**
      * Determine whether the subject or its identity, when it grants to the
      * subject, holds a permission that matches the action, directly or through
-     * a role; never while either is inactive.
+     * a role, in the current scope; never while either is inactive (see
+     * `permissionFor()`).
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
@@ -94,17 +98,41 @@ final class SubjectGrants
      */
     public static function holdsPermission(Subject $subject, string $action): bool
     {
+        return self::permissionFor($subject, $action) !== null;
+    }
+
+    /**
+     * Return the permission the subject, or its identity when it grants to the
+     * subject, holds that matches the action, directly or through a role, as it
+     * was granted (a pattern such as `posts:*` included); null when neither
+     * holds one, or while either is inactive.
+     *
+     * The permissions are those the grantee resolves in the current scope (its
+     * tenant chain and application, see `TenantChain::grants()`), so only a
+     * grant that reaches the scope counts, and one that has expired never does.
+     * The names are matched by the wildcard rules (see `HeldPermissions`), the
+     * subject's first, so the identity's are read only when the subject's own
+     * do not match.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @param  string  $action
+     * @return string|null
+     */
+    public static function permissionFor(Subject $subject, string $action): ?string
+    {
         if (self::isInactive($subject)) {
-            return false;
+            return null;
         }
 
         foreach ([$subject->subject, self::grantingIdentity($subject)] as $grantee) {
-            if ($grantee instanceof SupportsPermissions && $grantee->hasPermission($action)) {
-                return true;
+            $held = $grantee instanceof SupportsPermissions ? HeldPermissions::match($grantee->getPermissions(), $action) : null;
+
+            if ($held !== null) {
+                return $held;
             }
         }
 
-        return false;
+        return null;
     }
 
     /**

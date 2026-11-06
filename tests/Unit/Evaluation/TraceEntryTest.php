@@ -39,6 +39,7 @@ final class TraceEntryTest extends TestCase
         self::assertNull($entry->statement);
         self::assertSame([], $entry->conditions);
         self::assertNull($entry->cap);
+        self::assertNull($entry->permission);
     }
 
     /**
@@ -66,6 +67,23 @@ final class TraceEntryTest extends TestCase
     {
         self::assertSame('[allow] permission: held', (new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD))->toString());
         self::assertSame('[allow] permission: not_held', (new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_HELD))->toString());
+    }
+
+    /**
+     * toString() names the held permission that allowed the check, as it was
+     * granted, pattern included; a statement or a cap it is about is named
+     * before it.
+     *
+     * @return void
+     */
+    public function testToStringNamesTheHeldPermissionThatAllowed(): void
+    {
+        $entry = new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD, null, [], null, 'posts:*');
+
+        self::assertSame('posts:*', $entry->permission);
+        self::assertSame('[allow] permission "posts:*": held', $entry->toString());
+        self::assertSame('[allow] cap: held', (new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD, null, [], 'cap', 'posts:*'))->toString());
+        self::assertSame('[allow] p#0: held', (new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD, new StatementReference('p', 0), [], null, 'posts:*'))->toString());
     }
 
     /**

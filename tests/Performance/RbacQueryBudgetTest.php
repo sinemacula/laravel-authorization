@@ -12,9 +12,18 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubSubjectResolver;
+use Tests\Feature\Stubs\StubTenant;
+use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
 /**
@@ -25,6 +34,14 @@ use Tests\TestCase;
  * invocations on the same principal are expected to hit the memoisation tier of
  * `ResolutionCache` and emit zero additional database queries — regression
  * coverage for §12.2 of the spec.
+ *
+ * A permission allows a check on a resource only where the grant it came from
+ * reaches the resource (AUTHZ-7.7). That reach costs no query of its own: the
+ * permissions are resolved per scope, keyed by the scope's tenant and
+ * application, so each tenant's entry already holds only the grants that reach
+ * it, and a check on a resource of a tenant reads that tenant's entry. The
+ * budgets are unchanged: five queries for one scope's permissions, and none
+ * once every scope a check reads is warm.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -153,6 +170,71 @@ final class RbacQueryBudgetTest extends TestCase
 
         self::assertLessThanOrEqual(5, $deepQueries, 'Permission resolution exceeded its five-query budget.');
         self::assertSame($shallowQueries, $deepQueries, 'Permission resolution grew with the number of roles or the depth of the hierarchy.');
+    }
+
+    /**
+     * Checks on resources of the active tenant, of a tenant below it and of
+     * none, each decided in its own scope, and on one of a sibling tenant,
+     * refused at the tenant stage once the platform scope finds no grant that
+     * admits it, read each scope's resolution once: once every scope is warm,
+     * checking them again in the same request emits no query.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testChecksOnTenantOwnedResourcesEmitNoQueryOnceEachScopeIsWarm(): void
+    {
+        $create                           = static fn (string $id): StubTenant => StubTenant::query()->create(['id' => $id, 'name' => $id]);
+        [$org, $account, $team, $sibling] = \array_map($create, ['org', 'account', 'team', 'sibling']);
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)
+            ->put(Reference::of($account), Reference::of($org))
+            ->put(Reference::of($team), Reference::of($account))
+            ->put(Reference::of($sibling), Reference::of($org)));
+
+        $user = $this->makeEditorWithFivePermissions();
+
+        $user->givePermission(Permission::create(['name' => 'posts:archive', 'guard' => 'web']), null, $org);
+
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($user, $account));
+        $this->app?->forgetInstance(ResolvedTenant::class);
+
+        $resources = [
+            ResourceReference::record('posts', '1', Reference::of($account)),
+            ResourceReference::record('posts', '2', Reference::of($team)),
+            ResourceReference::record('posts', '3'),
+            null,
+        ];
+
+        $check = static function () use ($resources): array {
+            $allowed = [];
+
+            foreach ($resources as $resource) {
+                foreach ([...self::PERMISSION_NAMES, 'posts:archive'] as $action) {
+                    $allowed[] = Authorization::can($action, $resource);
+                }
+            }
+
+            return $allowed;
+        };
+
+        $outside = ResourceReference::record('posts', '4', Reference::of($sibling));
+
+        self::assertNotContains(false, $check());
+        self::assertFalse(Authorization::can('posts:archive', $outside));
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        self::assertNotContains(false, $check());
+        self::assertFalse(Authorization::can('posts:archive', $outside));
+
+        $queries = DB::getQueryLog();
+
+        DB::disableQueryLog();
+
+        self::assertCount(0, $queries, 'Checks on tenant-owned resources hit the database once every scope was warm.');
     }
 
     /**

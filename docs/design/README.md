@@ -26,7 +26,8 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
   and why every guardrail, boundary and session cap that applies must allow a check and none grants anything; which
   guardrails apply to a check and who may change them; the session caps (a credential's scopes through the scope map,
   and the caller's explicit caps), machine principals, which need their credential's scopes and never receive a
-  person's grants, and the scope registry.
+  person's grants, and the scope registry; where a permission held is weighed (the allow stage alone, after every deny
+  and cap) and the resources it reaches by its grant's tenant, subtree, application and expiry.
 - `polymorphic-identity-pivots.md`: why role, permission, and policy pivots use plain `string`
   `authorizable_type`/`authorizable_id` columns so that integer, UUID, and ULID identities all work.
 - `subject-resolver-contract.md`: the one seam with `sinemacula/laravel-authentication` for the subject, its tenant

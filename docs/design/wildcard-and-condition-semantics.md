@@ -102,12 +102,17 @@ compared literally, so a role name containing `*` is migrated.
 
 Wildcard matching applies when the evaluator asks the permission callback. It does so once, at the allow stage, after
 every deny and every cap stage (guardrail, boundary, session) has let the check through, and only when no allow
-statement matched and none was invalid; the callback asks whether the subject or its identity holds the action as a
-permission (`SubjectGrants::holdsPermission()`). A subject holding `posts:*` then satisfies the check for
-`posts:create`, and the decision allows at the allow stage with a `held` permission step. An explicit deny, including
-one applied because its test was undecidable, an `invalid_policy` denial and a `boundary` denial all win -- a subject
-holding `posts:*` under a boundary that does not allow `posts:create` is denied as `boundary`, and its permissions are
-never asked. Wildcard grants never override a policy-layer decision or a cap.
+statement matched and none was invalid; the callback asks for the permission the subject or its identity holds that
+covers the action (`SubjectGrants::permissionFor()`), among the grants that reach the resource (see [Evaluation order
+and deny precedence](evaluation-order-and-deny-precedence.md), invariant 13). A subject holding `posts:*` then
+satisfies the check for `posts:create`, and the decision allows at the allow stage with a `held` permission step that
+names `posts:*`. The subject's own permissions are read first and its granting identity's only when none of the
+subject's covers the action; within that grantee, when several held names cover the action, the step names the action
+itself if it is held, else the first covering pattern in byte order, so the trace never depends on the order the grants
+were read in. An explicit
+deny, including one applied because its test was undecidable, an `invalid_policy` denial and a `boundary` denial all
+win -- a subject holding `posts:*` under a boundary that does not allow `posts:create` is denied as `boundary`, and its
+permissions are never asked. Wildcard grants never override a policy-layer decision or a cap.
 
 ## Statements
 
@@ -575,7 +580,9 @@ document, then a summary, and exits 1 when any is invalid.
 
 ## Implementation Anchors
 
-- `HasPermissions::hasPermission()` -- the RBAC wildcard match loop with `fnmatch($held, $asked, FNM_NOESCAPE)`.
+- `HeldPermissions::match()` -- the RBAC wildcard match, `fnmatch($held, $asked, FNM_NOESCAPE)`, and the held name it
+  picks; shared by `SubjectGrants::permissionFor()` (the decision) and `HasPermissions::hasPermission()` (the report of
+  what is granted). `ManagesPermissions::hasPermission()` applies the same rules to a role's permissions.
 - `Statement::assess()` -- the action, resource and condition walk producing a `MatchResult`; `Statement::matches()` and
   `Statement::conditionsSatisfiedBy()` are its boolean views, true only on `MATCHES`; `Statement::coversAction()` -- the
   `actions` and `not_actions` test, asked first.
@@ -622,6 +629,8 @@ document, then a summary, and exits 1 when any is invalid.
 - `WildcardPermissionTest::testStatementMatchesBackslashBearingResourceLiterally` -- backslashes in a resource pattern
   compare literally.
 - `WildcardPermissionTest::testIdentityInheritsRoleWildcard` -- role-inherited wildcard satisfies narrower ask.
+- `HeldPermissionsTest` -- the action itself named before any pattern, the first covering pattern in byte order
+  otherwise, and a name that covers nothing matching nothing.
 - `PolicyEvaluatorTest::testDenyWithFailedConditionsDecidesNothing` and `testDenyWithMissingConditionKeyApplies` -- a
   deny whose test fails is skipped, and one whose key is missing applies.
 - `PolicyEvaluatorTest::testDenyPassingUnderIfExistsApplies`, `testNotActionsDenyCoversEveryOtherAction` and

@@ -55,7 +55,7 @@ final class WhyCanCommandTest extends TestCase
         self::assertStringContainsString('ALLOWED', $output);
         self::assertStringContainsString('  Reason:   (none)', $output);
         self::assertStringContainsString('  Stage:    allow', $output);
-        self::assertStringContainsString("  Trace:\n" . self::UNCAPPED . "    [allow] permission: held\n", $output);
+        self::assertStringContainsString("  Trace:\n" . self::UNCAPPED . "    [allow] permission \"posts:edit\": held\n", $output);
     }
 
     /**

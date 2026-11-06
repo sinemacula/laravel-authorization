@@ -10,15 +10,16 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationNameExceptio
  * Shared name-format validator for role and permission models.
  *
  * Role and permission names feed `fnmatch` during evaluation — the
- * holder-matches-asker walk in `HasPermissions::hasPermission()` and the action
- * / resource match in `Statement`. Names are letters, digits and `_ - : . *`,
- * so `posts.edit`, `posts:edit` and `posts.*` are all valid and `*` is the only
- * wildcard. Allowing the other glob metacharacters (`?`, `[`, `]`, `{`, `}`) or
- * whitespace would let a malformed name match unrelated permissions, so the
- * mutator enforces this character class at save time. A name is also at most
- * 191 characters (bytes, since every allowed character is ASCII), the bound the
- * `name` column and the suite's events share. The typed exception surfaces
- * immediately, before the row reaches the database.
+ * holder-matches-asker match in `HeldPermissions::match()` (shared by the
+ * decision's `SubjectGrants::permissionFor()` and by `hasPermission()`) and the
+ * action / resource match in `Statement`. A name is made of letters, digits and
+ * `_ - : . *`, so `posts.edit`, `posts:edit` and `posts.*` are all valid and
+ * `*` is the only wildcard. Allowing the other glob metacharacters (`?`, `[`,
+ * `]`, `{`, `}`) or whitespace would let a malformed name match unrelated
+ * permissions, so the mutator enforces this character class at save time. A
+ * name is also at most 191 characters (bytes, since every allowed character is
+ * ASCII), the bound the `name` column and the suite's events share. The typed
+ * exception surfaces immediately, before the row reaches the database.
  *
  * Consumers set `$this->authorizationNameKind` (e.g. `'role'`, `'permission'`)
  * to control the label used in the raised exception; that is the only per-model

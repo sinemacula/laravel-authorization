@@ -11,8 +11,9 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  * One step of a decision: the stage it belongs to, what it found, the statement
  * it assessed (none for a permission, a session cap, or a cap stage that found
  * nothing to cap by), the guardrail, permission boundary or session cap it is
- * about when it is about no one statement, and the condition keys it tested
- * with whether each held.
+ * about when it is about no one statement, the held permission that allowed the
+ * check when the step is the permission's and found one, and the condition keys
+ * it tested with whether each held.
  *
  * Never a value: only key names and results reach the trace (AUTHZ-8.8).
  *
@@ -29,6 +30,7 @@ final readonly class TraceEntry
      * @param  \SineMacula\Laravel\Authorization\Evaluation\StatementReference|null  $statement
      * @param  array<string, bool>  $conditions
      * @param  string|null  $cap
+     * @param  string|null  $permission
      */
     public function __construct(
 
@@ -46,31 +48,46 @@ final readonly class TraceEntry
 
         /** The guardrail or permission boundary a step about no one statement is about, as `name[key]`, or the session cap, by its name (see `SessionCaps`), such as one that refused the check; null for none. */
         public ?string $cap = null,
+
+        /** The held permission, as it was granted (a pattern such as `posts:*` included), that allowed the check at the permission step; null for any other step. */
+        public ?string $permission = null,
     ) {}
 
     /**
      * Return the entry as one line of an explanation: the statement it
      * assessed, else the guardrail, boundary or session cap it is about, else
-     * what its stage weighs, the permission at the allow stage and the caps at
-     * a cap stage.
+     * the held permission that allowed the check, else what its stage weighs,
+     * the permission at the allow stage and the caps at a cap stage.
      *
      * @return string
      */
     public function toString(): string
     {
-        $subject = $this->statement?->toString() ?? $this->cap ?? match ($this->stage) {
-            DecisionStage::GUARDRAIL => 'guardrails',
-            DecisionStage::BOUNDARY  => 'boundaries',
-            DecisionStage::SESSION   => 'session caps',
-            default                  => 'permission',
-        };
-
         $conditions = [];
 
         foreach ($this->conditions as $key => $holds) {
             $conditions[] = $key . ($holds ? ' held' : ' failed');
         }
 
-        return "[{$this->stage->value}] {$subject}: {$this->outcome->value}" . ($conditions === [] ? '' : ' (' . \implode(', ', $conditions) . ')');
+        return "[{$this->stage->value}] {$this->subject()}: {$this->outcome->value}" . ($conditions === [] ? '' : ' (' . \implode(', ', $conditions) . ')');
+    }
+
+    /**
+     * Return what the entry is about, as its explanation names it: the
+     * statement it assessed, else the guardrail, boundary or session cap, else
+     * the held permission that allowed the check, else what its stage weighs.
+     *
+     * @return string
+     */
+    private function subject(): string
+    {
+        $held = $this->permission === null ? null : 'permission "' . $this->permission . '"';
+
+        return $this->statement?->toString() ?? $this->cap ?? $held ?? match ($this->stage) {
+            DecisionStage::GUARDRAIL => 'guardrails',
+            DecisionStage::BOUNDARY  => 'boundaries',
+            DecisionStage::SESSION   => 'session caps',
+            default                  => 'permission',
+        };
     }
 }

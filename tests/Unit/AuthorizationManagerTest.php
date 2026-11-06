@@ -166,7 +166,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertEquals([
             ...self::uncapped(),
             new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_APPLICABLE, new StatementReference('noise', 0)),
-            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD),
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD, null, [], null, 'posts:create'),
         ], $decision->trace);
     }
 
@@ -225,7 +225,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertTrue($allowed->isAllowed());
         self::assertSame(DecisionStage::ALLOW, $allowed->stage);
         self::assertSame([], $allowed->statements);
-        self::assertEquals([...self::uncapped(), $failed, new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD)], $allowed->trace);
+        self::assertEquals([...self::uncapped(), $failed, new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD, null, [], null, 'posts:create')], $allowed->trace);
     }
 
     /**
@@ -1378,7 +1378,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $machine = \Mockery::mock(AuthorizableIdentity::class, AuthorizableMachine::class);
 
-        $machine->shouldReceive('hasPermission')->andReturn(true);
+        $machine->shouldReceive('getPermissions')->andReturn(['*']);
         $machine->shouldReceive('getPolicies')->andReturn([]);
         $machine->shouldReceive('isAuthorizationActive')->andReturn(true);
 
@@ -1540,8 +1540,8 @@ final class AuthorizationManagerTest extends TestCase
     {
         $principal = \Mockery::mock(AuthorizableIdentity::class);
 
-        $principal->shouldReceive('hasPermission')
-            ->andReturnUsing(static fn (mixed $permission): bool => \in_array($permission, $permissions, true));
+        $principal->shouldReceive('getPermissions')
+            ->andReturn($permissions);
 
         $principal->shouldReceive('getPolicies')
             ->andReturn($policies);
