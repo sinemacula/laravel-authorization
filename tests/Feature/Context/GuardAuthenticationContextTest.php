@@ -151,20 +151,38 @@ final class GuardAuthenticationContextTest extends TestCase
     }
 
     /**
-     * A default guard that is empty or not a string names no guard, so the
-     * guard is left out, and with nobody signed in either the namespace is
-     * absent.
+     * A default guard that is empty or not a string names no guard, so no user
+     * is read, even one the factory would return, and the namespace is absent.
      *
      * @return void
      */
     public function testAnUnnamedGuardIsLeftOut(): void
     {
         foreach (['', 42, null] as $default) {
-            $signedIn = new GuardAuthenticationContext($this->factoryReturning(null, new GenericUser(['id' => 3])), $this->configWithDefaultGuard($default));
-            $nobody   = new GuardAuthenticationContext($this->factoryReturning(null, null), $this->configWithDefaultGuard($default));
+            $factory = \Mockery::mock(AuthFactory::class);
+            $factory->shouldReceive('guard')->never();
 
-            self::assertSame(['authentication' => ['user_id' => '3', 'user_type' => GenericUser::class]], $signedIn->values());
-            self::assertSame([], $nobody->values());
+            self::assertSame([], (new GuardAuthenticationContext($factory, $this->configWithDefaultGuard($default)))->values());
+        }
+    }
+
+    /**
+     * With Laravel's own auth manager and no default guard named, the context
+     * reads no guard, which Laravel would refuse as not defined, and the
+     * namespace is absent.
+     *
+     * @return void
+     */
+    public function testNoDefaultGuardOnLaravelsAuthLeavesTheNamespaceAbsent(): void
+    {
+        $app = $this->app;
+
+        self::assertNotNull($app);
+
+        foreach ([null, ''] as $default) {
+            $app->make(ConfigRepository::class)->set('auth.defaults.guard', $default);
+
+            self::assertSame([], $this->context()->values());
         }
     }
 

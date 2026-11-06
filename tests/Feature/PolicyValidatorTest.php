@@ -289,11 +289,47 @@ final class PolicyValidatorTest extends TestCase
         ]);
 
         self::assertSame([
-            'Policy statement #0 reference \'${input.post}\' names no declared context key.',
-            'Policy statement #1 reference \'${context.route}\' names no declared context key.',
-            'Policy statement #1 reference \'${input.post}\' names no declared context key.',
+            'Policy statement #0 reference \'${input.post}\' names no declared context key; ' . PolicyValidator::DECLARE_KEYS,
+            'Policy statement #1 reference \'${context.route}\' names no declared context key; ' . PolicyValidator::DECLARE_KEYS,
+            'Policy statement #1 reference \'${input.post}\' names no declared context key; ' . PolicyValidator::DECLARE_KEYS,
         ], $this->declaringKeys([])->errors($document));
         self::assertSame([], $this->declaringKeys(['input' => ['post' => 'string'], 'context' => ['route' => 'string']])->errors($document));
+    }
+
+    /**
+     * A `${…}` reference in a `not_resources` pattern is checked like one in
+     * `resources`: refused when it names no declared key, accepted when it
+     * names a declared key, the principal or the resource.
+     *
+     * @return void
+     */
+    public function testRefusesAReferenceInANotResourcesPatternToAKeyNotDeclared(): void
+    {
+        $validator = $this->declaringKeys(['input' => ['post' => 'string']]);
+        $statement = static fn (string $pattern): array => self::document([['effect' => 'deny', 'actions' => ['a'], 'not_resources' => [$pattern]]]);
+
+        self::assertSame(
+            ['Policy statement #0 reference \'${input.undeclared}\' names no declared context key; ' . PolicyValidator::DECLARE_KEYS],
+            $validator->errors($statement('post:${input.undeclared}')),
+        );
+        self::assertSame([], $validator->errors($statement('post:${principal.id}')));
+        self::assertSame([], $validator->errors($statement('post:${input.post}')));
+    }
+
+    /**
+     * A `${subject.…}` reference is refused, as no key may be declared under
+     * `subject`, while `${principal.…}` and `${resource.…}` need no declaring.
+     *
+     * @return void
+     */
+    public function testRefusesAReferenceToTheSubjectNamespace(): void
+    {
+        $document = self::document([['effect' => 'allow', 'actions' => ['a'], 'resources' => ['post:${subject.id}', '${resource.type}:${principal.id}']]]);
+
+        self::assertSame(
+            ['Policy statement #0 reference \'${subject.id}\' names no declared context key; ' . PolicyValidator::DECLARE_KEYS],
+            $this->declaringKeys([])->errors($document),
+        );
     }
 
     /**

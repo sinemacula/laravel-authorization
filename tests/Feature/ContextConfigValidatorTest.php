@@ -8,9 +8,11 @@ use Illuminate\Foundation\Application;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Config\ContextConfigValidator;
+use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\ContextSource;
 use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
+use Tests\Feature\Stubs\ContributingAuthenticationContext;
 use Tests\Feature\Stubs\PlanContextSource;
 use Tests\Feature\Stubs\ReservedContextSource;
 use Tests\Feature\Stubs\StubIdentity;
@@ -77,6 +79,12 @@ final class ContextConfigValidatorTest extends TestCase
             ['keys' => ['request' => ['ip' => 'string']]],
             'authorization.context.keys',
             'Context key \'request.ip\' is already declared as ip.',
+        ];
+        yield 'a key under principal' => [
+            ['keys' => ['principal' => ['email' => 'string']]],
+            'authorization.context.keys',
+            'Context key \'principal.email\' is under the namespace \'principal\', which is not part of a check\'s context; '
+                . '`${principal.…}` and `${resource.…}` read the principal and the resource without declaring them.',
         ];
         yield 'sources that are not an array' => [['sources' => PlanContextSource::class], 'authorization.context.sources', 'expected an array of class names, got string.'];
         yield 'a source that is not a class-string' => [['sources' => [42]], 'authorization.context.sources.0', 'entry must be a non-empty class-string, got int.'];
@@ -159,6 +167,71 @@ final class ContextConfigValidatorTest extends TestCase
         $this->expectExceptionMessage('supplies the namespace \'the plan\', which is not a name or is reserved');
 
         ContextConfigValidator::validate(['sources' => [$source::class]], $this->container());
+    }
+
+    /**
+     * A source claiming a namespace the bound authentication context
+     * contributes is refused at boot, naming the context; with no source
+     * claiming it, the config passes.
+     *
+     * @return void
+     */
+    public function testRefusesASourceClaimingANamespaceTheAuthenticationContextContributes(): void
+    {
+        $this->container()->instance(AuthenticationContext::class, new ContributingAuthenticationContext(['plan']));
+
+        ContextConfigValidator::validate(['keys' => ['plan' => ['tier' => 'string']]], $this->container());
+
+        try {
+            ContextConfigValidator::validate(['sources' => [PlanContextSource::class]], $this->container());
+            self::fail('InvalidAuthorizationConfigException was not thrown.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            self::assertSame('authorization.context.sources.0', $exception->getConfigKey());
+            self::assertSame(
+                'source \'' . PlanContextSource::class . '\' supplies the namespace \'plan\', which \'' . ContributingAuthenticationContext::class . '\' supplies too.',
+                $exception->getReason(),
+            );
+        }
+    }
+
+    /**
+     * Provide namespaces an authentication context may not contribute: one that
+     * is not a name, a reserved one, and one listed twice.
+     *
+     * @return iterable<string, array{list<string>, string}>
+     */
+    public static function unclaimableContributions(): iterable
+    {
+        yield 'not a name' => [['the mfa'], 'the mfa'];
+        yield 'reserved' => [['request'], 'request'];
+        yield 'listed twice' => [['mfa', 'sso', 'mfa'], 'mfa'];
+    }
+
+    /**
+     * An authentication context contributing a namespace that is not a name, is
+     * reserved or is listed twice is refused at boot, even with no source
+     * configured.
+     *
+     * @param  list<string>  $contributed
+     * @param  string  $namespace
+     * @return void
+     */
+    #[DataProvider('unclaimableContributions')]
+    public function testRefusesAnUnclaimableContributedNamespace(array $contributed, string $namespace): void
+    {
+        $this->container()->instance(AuthenticationContext::class, new ContributingAuthenticationContext($contributed));
+
+        try {
+            ContextConfigValidator::validate([], $this->container());
+            self::fail('InvalidAuthorizationConfigException was not thrown.');
+        } catch (InvalidAuthorizationConfigException $exception) {
+            self::assertSame('authorization.context', $exception->getConfigKey());
+            self::assertSame(
+                'authentication context \'' . ContributingAuthenticationContext::class . "' contributes the namespace '{$namespace}', which is not a name, is reserved ("
+                    . \implode(', ', ContextSource::RESERVED_NAMESPACES) . ') or is listed twice.',
+                $exception->getReason(),
+            );
+        }
     }
 
     /**

@@ -11,7 +11,8 @@ namespace SineMacula\Laravel\Authorization\Contracts;
  * values never come from what the caller passes, and only rebinding this
  * contract replaces it.
  *
- * The shipped default supplies the current time, read once for the check.
+ * The shipped default supplies the current time, fixed the first time the check
+ * reads `environment`, then kept for the rest of the check.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

@@ -41,6 +41,18 @@ final readonly class ContextKey
      */
     public function namespace(): string
     {
-        return \explode('.', $this->path, 2)[0];
+        return self::namespaceOf($this->path);
+    }
+
+    /**
+     * Return the namespace a dot path belongs to: its first segment, or the
+     * whole path when it has only one.
+     *
+     * @param  string  $path
+     * @return string
+     */
+    public static function namespaceOf(string $path): string
+    {
+        return \explode('.', $path)[0];
     }
 }

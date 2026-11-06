@@ -47,4 +47,19 @@ final class ContextKeyTest extends TestCase
         self::assertSame('input', (new ContextKey('input.post.status', ContextKeyType::STRING))->namespace());
         self::assertSame('flag', (new ContextKey('flag', ContextKeyType::BOOL))->namespace());
     }
+
+    /**
+     * Any dot path's namespace is its first segment, the whole path when it has
+     * only one, and empty when the path starts with a dot or is empty.
+     *
+     * @return void
+     */
+    public function testAPathsNamespaceIsItsFirstSegment(): void
+    {
+        self::assertSame('input', ContextKey::namespaceOf('input.post.status'));
+        self::assertSame('principal', ContextKey::namespaceOf('principal'));
+        self::assertSame('0', ContextKey::namespaceOf('0.x'));
+        self::assertSame('', ContextKey::namespaceOf('.a'));
+        self::assertSame('', ContextKey::namespaceOf(''));
+    }
 }

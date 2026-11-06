@@ -1292,34 +1292,6 @@ final class StatementTest extends TestCase
     }
 
     /**
-     * The namespaces a statement reads are worked out on construction, once
-     * each, in order of first read: its condition keys, then the references of
-     * its operands and resource patterns, leaving out `${principal.…}` and
-     * `${resource.…}`.
-     *
-     * @return void
-     */
-    public function testTheNamespacesAStatementReads(): void
-    {
-        $statement = Statement::fromArray([
-            'effect'     => 'allow',
-            'actions'    => ['x'],
-            'resources'  => ['tenants/${tenant.id}/${resource.type}:*'],
-            'conditions' => [
-                'eq'   => ['request.ip' => '${input.ip}', 'input.n' => 1],
-                'like' => ['input.name' => '${principal.id}*', 'request.route' => '${environment.time}'],
-                'in'   => ['input.tag' => ['${device.id}']],
-            ],
-        ]);
-        $negated = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'not_resources' => ['posts:${tenant.id}']]);
-
-        self::assertSame(['request', 'input', 'environment', 'tenant'], $statement->namespaces);
-        self::assertSame(['tenant'], $negated->namespaces);
-        self::assertSame([], self::allowOn('posts:${principal.id}')->namespaces);
-        self::assertSame([], (new Statement(PolicyEffect::ALLOW, ['x']))->namespaces);
-    }
-
-    /**
      * Assert a match result's outcome and trace detail.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome  $outcome

@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Config;
 use Illuminate\Contracts\Container\Container;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Context\DeclaredContextKeyCatalogue;
+use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\ContextSource;
 use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
@@ -21,6 +22,11 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigExcept
  * type. `context.sources` must list classes implementing `ContextSource`, each
  * resolved from the container to read its namespace, which must be a name, not
  * reserved and claimed by no other source.
+ *
+ * The bound `AuthenticationContext` is resolved too, to read the namespaces it
+ * contributes beside `authentication`: each must be a name, not reserved and
+ * listed once, and no source may claim one, so a clash is refused at boot
+ * rather than on the first check.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -89,8 +95,8 @@ final class ContextConfigValidator
 
     /**
      * Validate that every entry of `context.sources` is a class implementing
-     * `ContextSource`, and that the namespaces they supply are names, not
-     * reserved and supplied once.
+     * `ContextSource`, and that the namespaces they and the authentication
+     * context supply are names, not reserved and supplied once.
      *
      * @param  mixed  $value
      * @param  \Illuminate\Contracts\Container\Container  $container
@@ -104,12 +110,12 @@ final class ContextConfigValidator
             throw new InvalidAuthorizationConfigException(self::SOURCES, 'expected an array of class names, got ' . \get_debug_type($value) . '.');
         }
 
-        $claimed = [];
+        $claimed = self::contributedNamespaces($container);
 
         foreach ($value as $index => $class) {
             $namespace = self::namespaceOf("{$index}", $class, $container);
 
-            if (\preg_match(CheckContextFactory::NAMESPACE_PATTERN, $namespace) !== 1 || \in_array($namespace, ContextSource::RESERVED_NAMESPACES, true)) {
+            if (!self::isClaimable($namespace)) {
                 $reason = "source '{$class}' supplies the namespace '{$namespace}', which is not a name or is reserved ("
                     . \implode(', ', ContextSource::RESERVED_NAMESPACES) . ').';
 
@@ -124,6 +130,54 @@ final class ContextConfigValidator
 
             $claimed[$namespace] = $class;
         }
+    }
+
+    /**
+     * Return each namespace the bound authentication context contributes beside
+     * `authentication`, mapped to the context's class, refusing one that is not
+     * a name, is reserved or is listed twice. A container with no
+     * authentication context bound, as in library-mode embedding, contributes
+     * none.
+     *
+     * @param  \Illuminate\Contracts\Container\Container  $container
+     * @return array<string, string>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    private static function contributedNamespaces(Container $container): array
+    {
+        if (!$container->bound(AuthenticationContext::class)) {
+            return [];
+        }
+
+        /** @var \SineMacula\Laravel\Authorization\Contracts\AuthenticationContext $authentication */
+        $authentication = $container->make(AuthenticationContext::class);
+        $claimed        = [];
+
+        foreach (\array_diff($authentication->namespaces(), ['authentication']) as $namespace) {
+            if (!self::isClaimable($namespace) || isset($claimed[$namespace])) {
+                $reason = 'authentication context \'' . $authentication::class . "' contributes the namespace '{$namespace}', which is not a name, is reserved ("
+                    . \implode(', ', ContextSource::RESERVED_NAMESPACES) . ') or is listed twice.';
+
+                throw new InvalidAuthorizationConfigException('authorization.context', $reason);
+            }
+
+            $claimed[$namespace] = $authentication::class;
+        }
+
+        return $claimed;
+    }
+
+    /**
+     * Determine whether the namespace may be claimed: it is a name and is not
+     * reserved.
+     *
+     * @param  string  $namespace
+     * @return bool
+     */
+    private static function isClaimable(string $namespace): bool
+    {
+        return \preg_match(CheckContextFactory::NAMESPACE_PATTERN, $namespace) === 1 && !\in_array($namespace, ContextSource::RESERVED_NAMESPACES, true);
     }
 
     /**

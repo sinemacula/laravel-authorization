@@ -63,7 +63,8 @@ final readonly class GuardAuthenticationContext implements AuthenticationContext
 
     /**
      * Return the guard's name and the signed-in user's key and morph type,
-     * under `authentication`.
+     * under `authentication`. With no guard named no user is read, and the
+     * namespace is absent.
      *
      * @return array<string, array<string, mixed>>
      */
@@ -71,7 +72,7 @@ final readonly class GuardAuthenticationContext implements AuthenticationContext
     public function values(): array
     {
         $guard  = $this->guardName();
-        $user   = $this->auth->guard($guard)->user();
+        $user   = $guard === null ? null : $this->auth->guard($guard)->user();
         $values = ($guard === null ? [] : ['guard' => $guard]) + ($user === null ? [] : self::userValues($user));
 
         return $values === [] ? [] : [self::NAMESPACE => $values];

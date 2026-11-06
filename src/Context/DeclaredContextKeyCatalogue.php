@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Context;
 
 use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
+use SineMacula\Laravel\Authorization\Contracts\ContextSource;
 use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyValidator;
 
@@ -17,7 +18,8 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyValidator;
  * static state: what one registers is seen by every policy written after it. A
  * key is a full dot path of at least two segments, the namespace first, each in
  * the condition key syntax, of at most `PolicyValidator::KEY_LENGTH`
- * characters.
+ * characters, and never under `principal`, `resource` or `subject`, which are
+ * not part of a check's context.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -75,6 +77,8 @@ final class DeclaredContextKeyCatalogue implements ContextKeyCatalogue
 
             throw new \InvalidArgumentException("Context key '{$path}' must be {$syntax}, and at most " . PolicyValidator::KEY_LENGTH . ' characters.');
         }
+
+        self::assertInContext($path);
 
         $declared = $this->keys[$path] ?? null;
 
@@ -154,7 +158,7 @@ final class DeclaredContextKeyCatalogue implements ContextKeyCatalogue
     #[\Override]
     public function namespaces(): array
     {
-        $namespaces = \array_values(\array_unique(\array_map(static fn (ContextKey $key): string => $key->namespace(), $this->keys)));
+        $namespaces = \array_unique(\array_map(static fn (ContextKey $key): string => $key->namespace(), $this->keys));
 
         \sort($namespaces, \SORT_STRING);
 
@@ -180,6 +184,28 @@ final class DeclaredContextKeyCatalogue implements ContextKeyCatalogue
         $types = \implode(', ', \array_column(ContextKeyType::cases(), 'value'));
 
         return ContextKeyType::tryFrom($type) ?? throw new \InvalidArgumentException("Context key '{$path}' has an unknown type '{$type}'; use one of {$types}.");
+    }
+
+    /**
+     * Refuse a path under a namespace that is not part of a check's context
+     * (`principal`, `resource` or `subject`), which no source supplies, so a
+     * condition on it could only ever find it missing.
+     *
+     * @param  string  $path
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function assertInContext(string $path): void
+    {
+        $namespace = ContextKey::namespaceOf($path);
+
+        if (\in_array($namespace, ContextSource::NON_CONTEXT_NAMESPACES, true)) {
+            $reason = "is under the namespace '{$namespace}', which is not part of a check's context; "
+                . '`${principal.…}` and `${resource.…}` read the principal and the resource without declaring them.';
+
+            throw new \InvalidArgumentException("Context key '{$path}' {$reason}");
+        }
     }
 
     /**

@@ -152,10 +152,13 @@ final class CheckContextTest extends TestCase
 
             return ['authentication' => ['guard' => 'web'], 'mfa' => ['enrolled' => true], 'stray' => ['x' => 1]];
         };
-        $context = new CheckContext([], ['authentication' => $builder, 'mfa' => $builder, 'sso' => $builder]);
+        $context = new CheckContext([], ['authentication' => $builder, 'sso' => $builder, 'mfa' => $builder]);
 
-        self::assertSame([true, true], $context->lookup('mfa.enrolled'));
+        // The namespace the builder leaves out comes before one it builds, so
+        // the first read keeps every namespace the builder builds, not only
+        // those before the one it leaves out.
         self::assertSame([true, 'web'], $context->lookup('authentication.guard'));
+        self::assertSame([true, true], $context->lookup('mfa.enrolled'));
         self::assertSame([false, null], $context->lookup('sso.provider'));
         self::assertSame([false, null], $context->lookup('stray.x'));
         self::assertSame(1, $calls);

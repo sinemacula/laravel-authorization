@@ -34,7 +34,9 @@ interface ContextKeyCatalogue
      *
      * Declaring a key again as it was declared changes nothing; declaring it
      * with another type or testability is refused, so one declaration never
-     * silently changes what another relies on.
+     * silently changes what another relies on. A key under `principal`,
+     * `resource` or `subject`, which are not part of a check's context, is
+     * refused.
      *
      * @param  string  $path
      * @param  \SineMacula\Laravel\Authorization\Enums\ContextKeyType  $type

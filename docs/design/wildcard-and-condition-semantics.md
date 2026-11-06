@@ -199,22 +199,24 @@ The context a check's statements read is nested namespaces (N24), each made by o
   user's key as a string and morph type; with nobody signed in only `guard`. An `AuthenticationContext` may supply
   further namespaces beside it (`mfa`, `sso`), named by its `namespaces()`. `request` holds Laravel's trusted-proxy
   `ip()`, the method and the route name, and only when the container's request has a route, so in a queued job or a
-  console command the namespace is absent. `environment.time` is `now()` in UTC as `Y-m-d\TH:i:s\Z`, read the first
-  time a statement of the check reads `environment` and then fixed for the rest of the check. Each is replaced only by
-  rebinding its contract.
+  console command the namespace is absent. `environment.time` is `now()` in UTC as `Y-m-d\TH:i:s\Z`, fixed the first
+  time the check reads `environment`, then kept for the rest of the check. Each is replaced only by rebinding its
+  contract.
 - **Caller values** (N27). The `$context` of `check()` and every helper over it (`can()`, `authorize()`, `explain()`,
   `effectivePermissions()`, the Gate's string-keyed and associative arguments and the testing assertions) is wrapped
   under `input` once, where the manager builds the check's context. A caller passing
   `['request' => ['ip' => '10.0.0.1']]` supplies `input.request.ip`, never `request.ip`.
 - **Application namespaces** (N26). A `ContextSource` names one namespace and returns its values, nested by key. A
   source that does not implement the contract, one claiming a reserved namespace (`authentication`, `request`,
-  `environment`, `input`, `principal`, `resource`, `subject`) and two sources claiming one namespace are refused at
-  boot. A source returning nothing leaves its namespace absent.
-- **Lazy and once a check.** Each statement works out, when it is built, the namespaces it reads: the first segment of
-  each condition key and of each `${…}` reference in its operands and resource patterns, `principal` and `resource`
-  aside. A namespace is built only when a statement under evaluation reads it, and at most once for the check, so every
-  statement of one check sees the same values and a check that reads nothing of the request never builds it. Each
-  check has a context of its own.
+  `environment`, `input`, `principal`, `resource`, `subject`), two sources claiming one namespace, and a source claiming
+  a namespace the `AuthenticationContext` contributes are refused at boot, as is an `AuthenticationContext` contributing
+  a namespace that is not a name, is reserved or is listed twice. A source returning nothing leaves its namespace
+  absent.
+- **Lazy and once a check.** A namespace is built the first time a check reads a path in it, through a condition key
+  or a `${…}` reference in an operand or a resource pattern (`principal` and `resource` aside), by
+  `CheckContext::find()` and `lookup()`, and kept for the rest of the check. So every statement of one check sees the
+  same values, a namespace is built at most once for the check, and a check that reads nothing of the request never
+  builds it. Each check has a context of its own.
 
 A condition key is a dot path read one segment at a time over these namespaces: `request.ip` reads the `ip` key of the
 `request` namespace. It is never a literal key: a context whose top level holds a key named `request.ip` does not supply
@@ -231,7 +233,10 @@ whether a condition may test it (by default it may). The default, `DeclaredConte
 container and has no static state. It declares the package's seven keys and those of `authorization.context.keys`
 (`namespace => [path => type]`, checked by the configuration validator at boot), and a service provider registers more
 with `register($namespace, [$path => $type])` or `declare($path, $type, $isTestable)`. Keys of `input` are declared like
-any other. Declaring a key again as it was changes nothing; with another type or testability it is refused.
+any other. Declaring a key again as it was changes nothing; with another type or testability it is refused. A key under
+`principal`, `resource` or `subject` is refused too: none is part of a check's context, so no source supplies it and a
+condition on it would always find it missing, while `${principal.…}` and `${resource.…}` read the principal and the
+resource without declaring them (`ContextSource::NON_CONTEXT_NAMESPACES`).
 
 A key's type decides the operators a condition may test it with. The `_if_exists` form of an operator follows it, and
 `null` suits every type:
@@ -422,7 +427,7 @@ reasons into one `InvalidPolicyDocumentException` message, separated by semicolo
   except to `principal` and `resource`, must name a declared key (see [The key catalogue](#the-key-catalogue)). A
   declared key is always a valid path: a letter or `_`, then letters, digits and `_`, then any number of `.`-separated
   segments of letters, digits, `_` and `-`, at most 128 characters, so a malformed key is refused as undeclared. Each
-  reason is given once for its statement, with how to declare the key.
+  reason is given once for its statement; a reason naming an undeclared key says how to declare it.
 - **Actions** (N19): every `actions` and `not_actions` pattern must match at least one permission the code declares in
   `permission_enums` or `permission_providers`, compared with `fnmatch($pattern, $name, FNM_NOESCAPE)` or as the same
   string, so a misspelt action cannot be stored. The bound `ActionCatalogue` answers; the default,
@@ -473,10 +478,9 @@ document, then a summary, and exits 1 when any is invalid.
 - `PolicyValidator`, `PolicyLimits` and the `ActionCatalogue` contract -- the write-time checks, and the limits on read.
 - `CheckContext::lookup()` and `find()` -- the one strict dot-path resolver for conditions and references, and the
   per-check memo of built namespaces; `CheckContextFactory::make()` -- a check's context, the caller's values under
-  `input` and every other namespace from its source; `AuthorizationManager::check()` -- where the caller's values are
-  wrapped.
-- `Statement::$namespaces` -- the namespaces a statement reads, worked out when it is built;
-  `ContextInterpolator::references()` -- the paths a string references.
+  `input` and every other namespace from its source; `AuthorizationManager::decideGrants()` -- where the caller's values
+  are wrapped.
+- `ContextInterpolator::references()` -- the paths a string references.
 - The `ContextKeyCatalogue` contract, `DeclaredContextKeyCatalogue`, `ContextKey` and `ContextKeyType::suits()` -- the
   declared keys and the type and operator rules; `ContextConfigValidator` -- `authorization.context` at boot.
 - The `AuthenticationContext`, `RequestContext`, `EnvironmentContext` and `ContextSource` contracts and their defaults,

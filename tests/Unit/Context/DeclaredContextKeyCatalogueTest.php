@@ -156,13 +156,19 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
     public function testDeclaringAKeyAgainAlikeChangesNothing(): void
     {
         $catalogue = new DeclaredContextKeyCatalogue(['request' => ['ip' => 'ip']]);
+        $ip        = $catalogue->find('request.ip');
 
         $catalogue->declare('request.ip', ContextKeyType::IP);
         $catalogue->declare('authentication.level', ContextKeyType::NUMBER, false);
+
+        $level = $catalogue->find('authentication.level');
+
         $catalogue->declare('authentication.level', ContextKeyType::NUMBER, false);
 
         self::assertEquals(new ContextKey('request.ip', ContextKeyType::IP), $catalogue->find('request.ip'));
         self::assertEquals(new ContextKey('authentication.level', ContextKeyType::NUMBER, false), $catalogue->find('authentication.level'));
+        self::assertSame($ip, $catalogue->find('request.ip'));
+        self::assertSame($level, $catalogue->find('authentication.level'));
     }
 
     /**
@@ -243,6 +249,53 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
         );
 
         (new DeclaredContextKeyCatalogue)->declare($path, ContextKeyType::STRING);
+    }
+
+    /**
+     * Provide the namespaces that are not part of a check's context.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function nonContextNamespaceProvider(): iterable
+    {
+        yield 'principal' => ['principal'];
+        yield 'resource' => ['resource'];
+        yield 'subject' => ['subject'];
+    }
+
+    /**
+     * A key under a namespace that is not part of a check's context is refused,
+     * whether declared or registered, and is not declared.
+     *
+     * @param  string  $namespace
+     * @return void
+     */
+    #[DataProvider('nonContextNamespaceProvider')]
+    public function testRefusesAKeyOutsideTheChecksContext(string $namespace): void
+    {
+        $reason = "is under the namespace '{$namespace}', which is not part of a check's context; "
+            . '`${principal.…}` and `${resource.…}` read the principal and the resource without declaring them.';
+        $catalogue = new DeclaredContextKeyCatalogue;
+
+        try {
+            $catalogue->declare("{$namespace}.email", ContextKeyType::STRING);
+
+            self::fail('A key outside the check\'s context is refused on declare.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertSame("Context key '{$namespace}.email' {$reason}", $exception->getMessage());
+        }
+
+        try {
+            $catalogue->register($namespace, ['id' => 'string']);
+
+            self::fail('A key outside the check\'s context is refused on register.');
+        } catch (\InvalidArgumentException $exception) {
+            self::assertSame("Context key '{$namespace}.id' {$reason}", $exception->getMessage());
+        }
+
+        self::assertNull($catalogue->find("{$namespace}.email"));
+        self::assertNull($catalogue->find("{$namespace}.id"));
+        self::assertNotContains($namespace, $catalogue->namespaces());
     }
 
     /**

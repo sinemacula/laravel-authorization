@@ -24,7 +24,8 @@ interface AuthenticationContext
 {
     /**
      * Return the namespaces the context supplies, `authentication` among them.
-     * None may be another reserved namespace or one a context source supplies.
+     * None may be another reserved namespace or one a context source supplies,
+     * which is checked at boot.
      *
      * @return list<string>
      */

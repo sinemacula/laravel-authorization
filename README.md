@@ -560,8 +560,8 @@ The shipped defaults supply what Laravel knows. `authentication` holds the defau
 signed in on it, the user's key as a string and morph type (the morph alias, or the class name); with nobody signed in
 only `guard` is present. `request` holds Laravel's `ip()`, resolved through your trusted proxies, the method and the
 route's name, and only once the request has been routed: in a queued job or a console command the namespace is absent,
-so every `request` key is missing. `environment.time` is `now()` in UTC as `Y-m-d\TH:i:s\Z`, read once a check, so
-`Carbon::setTestNow()` freezes it in tests.
+so every `request` key is missing. `environment.time` is `now()` in UTC as `Y-m-d\TH:i:s\Z`, fixed the first time the
+check reads `environment`, then kept for the rest of the check, so `Carbon::setTestNow()` freezes it in tests.
 
 What the caller passes lands under `input`, and only there: the `$context` of `check()`, `can()`, `authorize()`,
 `explain()` and `effectivePermissions()`, the string-keyed and associative arguments of a Gate check, and the context
@@ -580,7 +580,12 @@ each path within its namespace:
 ```php
 'context' => [
     'keys' => [
-        'input'  => ['post.status' => 'string', 'post.tenant' => 'string', 'groups' => 'list'],
+        'input'  => [
+            'post.status'      => 'string',
+            'post.tenant'      => 'string',
+            'post.archived_at' => 'time',
+            'groups'           => 'list',
+        ],
         'tenant' => ['plan' => 'string', 'seats' => 'number'],
     ],
     'sources' => [App\Authorization\TenantContext::class],
@@ -604,8 +609,10 @@ public function boot(): void
 
 A key's type decides the operators a condition may test it with; `null` suits every type, and an `_if_exists` form
 follows its operator. A key may also be declared untestable (`declare($path, $type, isTestable: false)`), so that a
-reference may read it but no condition may test it. Declaring a key again with another type is refused. The type is
-checked when the policy is written; a value of the wrong type at evaluation is still undecidable.
+reference may read it but no condition may test it. Declaring a key again with another type is refused, and so is a key
+under `principal`, `resource` or `subject`, which are not part of a check's context: `${principal.…}` and
+`${resource.…}` read the principal and the resource without declaring them. The type is checked when the policy is
+written; a value of the wrong type at evaluation is still undecidable.
 
 | Type     | Operators                                                       |
 |----------|-----------------------------------------------------------------|
@@ -642,11 +649,13 @@ final class TenantContext implements ContextSource
 ```
 
 A source that does not implement the contract, one that claims a reserved namespace (`authentication`, `request`,
-`environment`, `input`, `principal`, `resource` or `subject`), and two sources claiming one namespace are refused at
-boot. The trusted namespaces are replaced only by rebinding their own contracts. To supply `authentication` from your
-authentication layer, along with any namespace it adds beside it such as `mfa` or `sso`, bind your own
-`AuthenticationContext`. Its `namespaces()` lists every namespace it supplies and `values()` returns their values
-keyed by namespace; declare the keys of any namespace it adds in the catalogue:
+`environment`, `input`, `principal`, `resource` or `subject`), two sources claiming one namespace, and a source claiming
+a namespace your `AuthenticationContext` adds are refused at boot. The trusted namespaces are replaced only by rebinding
+their own contracts. To supply `authentication` from your authentication layer, along with any namespace it adds
+beside it such as `mfa` or `sso`, bind your own `AuthenticationContext`. Its `namespaces()` lists every namespace it
+supplies and `values()` returns their values keyed by namespace; declare the keys of any namespace it adds in the
+catalogue. It is resolved at boot, which refuses a namespace it adds that is not a name, is reserved or is listed twice.
+Bind it in a service provider's `register()`:
 
 ```php
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;

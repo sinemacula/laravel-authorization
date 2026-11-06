@@ -4,8 +4,10 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
+use SineMacula\Laravel\Authorization\Context\ContextKey;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
+use SineMacula\Laravel\Authorization\Contracts\ContextSource;
 
 /**
  * Decides whether a policy document may be written (AUTHZ-6.2, AUTHZ-6.10).
@@ -44,9 +46,6 @@ final readonly class PolicyValidator
 
     /** @var string Why no document may be written when the catalogue declares no actions. */
     public const string NOTHING_DECLARED = 'No permissions are declared to check the policy\'s actions against; declare them in permission_enums or permission_providers.';
-
-    /** @var list<string> The namespaces a `${…}` reference reads without their keys being declared: they are not the check's context. */
-    private const array UNDECLARED_NAMESPACES = ['principal', 'resource'];
 
     /**
      * Create a new policy validator.
@@ -173,7 +172,7 @@ final readonly class PolicyValidator
         }
 
         foreach (self::referencesOf($subjects) as $path) {
-            $errors[] = $this->keys->permits($path) ? null : "{$prefix} reference '\${{$path}}' names no declared context key.";
+            $errors[] = $this->keys->permits($path) ? null : "{$prefix} reference '\${{$path}}' names no declared context key; " . self::DECLARE_KEYS;
         }
 
         return \array_values(\array_filter($errors, static fn (?string $error): bool => $error !== null));
@@ -247,7 +246,7 @@ final readonly class PolicyValidator
 
         foreach (\array_filter($subjects, \is_string(...)) as $subject) {
             foreach (ContextInterpolator::references($subject) as $path) {
-                $paths[$path] = !\in_array(\explode('.', $path, 2)[0], self::UNDECLARED_NAMESPACES, true);
+                $paths[$path] = !\in_array(ContextKey::namespaceOf($path), ContextSource::INTERPOLATED_NAMESPACES, true);
             }
         }
 

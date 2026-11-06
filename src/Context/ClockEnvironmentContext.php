@@ -12,8 +12,9 @@ use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
  *
  * Supplies `time`, the instant Laravel's `now()` gives (so a test that freezes
  * or travels in time decides as of that time), in UTC as ISO 8601
- * (`2026-01-31T09:30:00Z`). It is read once for the check, so every statement
- * of the check reads the same time.
+ * (`2026-01-31T09:30:00Z`). It is fixed the first time the check reads
+ * `environment`, then kept for the rest of the check, so every statement of the
+ * check reads the same time.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

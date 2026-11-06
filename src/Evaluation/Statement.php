@@ -35,9 +35,10 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
  * `false` does not. A key present with a null value is not missing: every
  * operator but `null` tests the null.
  *
- * The namespaces a statement reads, through its condition keys and its `${…}`
- * references, are worked out once on construction; the check's context builds a
- * namespace only when a statement that reads it is assessed.
+ * A statement reads the check's context through its condition keys and its
+ * `${…}` references. A namespace is built the first time a check reads a path
+ * in it, through `CheckContext`, and kept for the rest of the check, so a
+ * namespace no statement reads is never built.
  *
  * Documents are validated on hydration: unknown keys, a malformed sid, an empty
  * pattern list, conditions that do not map operators to key tests, an unknown
@@ -55,9 +56,6 @@ final readonly class Statement
 {
     /** @var string Trace detail for a statement whose action or resource patterns do not cover the check. */
     public const string TARGET_MISMATCH = 'action/resource did not match';
-
-    /** @var list<string> The namespaces of the check's context the statement reads, through its condition keys and `${…}` references, in order of first read. */
-    public array $namespaces;
 
     /** @var list<string> Why the conditions cannot be evaluated as a whole, worked out once on construction. */
     private array $operatorErrors;
@@ -105,7 +103,6 @@ final readonly class Statement
 
         $this->operatorErrors = StatementValidator::operatorErrors($conditions);
         $this->tests          = StatementValidator::conditionTests($conditions);
-        $this->namespaces     = self::namespacesOf($this->tests, $resources ?? $notResources ?? []);
     }
 
     /**
@@ -444,31 +441,6 @@ final readonly class Statement
         }
 
         return $unresolved ? null : false;
-    }
-
-    /**
-     * Return the namespaces of the check's context the statement reads, once
-     * each, in order of first read: the first segment of each condition key,
-     * and of each `${…}` reference in a string operand or a resource pattern,
-     * except `${principal.…}` and `${resource.…}`, which the interpolator reads
-     * from the principal and the resource.
-     *
-     * @param  list<ConditionTest>  $tests
-     * @param  array<int, string>  $patterns
-     * @return list<string>
-     */
-    private static function namespacesOf(array $tests, array $patterns): array
-    {
-        $paths = \array_column($tests, 'key');
-
-        foreach ([...\array_filter(\array_column($tests, 'operand'), \is_string(...)), ...$patterns] as $subject) {
-            $paths = [...$paths, ...\array_filter(
-                ContextInterpolator::references($subject),
-                static fn (string $path): bool => !\in_array(\explode('.', $path, 2)[0], ['principal', 'resource'], true),
-            )];
-        }
-
-        return \array_values(\array_unique(\array_map(static fn (string $path): string => \explode('.', $path, 2)[0], $paths)));
     }
 
     /**
