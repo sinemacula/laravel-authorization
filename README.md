@@ -24,21 +24,23 @@ Blade directives, console commands and test assertions.
 
 ## Core Concept
 
-| Concept        | What it is                                                                                                    |
-|----------------|---------------------------------------------------------------------------------------------------------------|
-| **Principal**  | Who a decision is about: any Eloquent model that implements `AuthorizableIdentity`, usually your user model.  |
-| **Role**       | A named set of permissions, granted as one. Roles can inherit from a parent role.                             |
-| **Permission** | A named action, such as `posts:update` or `posts.update`, or a wildcard pattern of them, such as `posts:*`.   |
-| **Policy**     | A JSON document of statements, each allowing or denying actions on resources, optionally under conditions.    |
-| **Boundary**   | A policy set on a principal or an identity that caps what it may do, whatever its grants allow.               |
-| **Guardrail**  | A policy set on a tenant or the platform that caps what anyone may do there, whatever their grants allow.     |
-| **Decision**   | The answer to one check: allowed or not, with the reason and a trace of the statements that decided it.       |
+| Concept         | What it is                                                                                                   |
+|-----------------|--------------------------------------------------------------------------------------------------------------|
+| **Principal**   | Who a decision is about: any Eloquent model that implements `AuthorizableIdentity`, usually your user model. |
+| **Role**        | A named set of permissions, granted as one. Roles can inherit from a parent role.                            |
+| **Permission**  | A named action, such as `posts:update` or `posts.update`, or a wildcard pattern of them, such as `posts:*`.  |
+| **Policy**      | A JSON document of statements, each allowing or denying actions on resources, optionally under conditions.   |
+| **Boundary**    | A policy set on a principal or an identity that caps what it may do, whatever its grants allow.              |
+| **Guardrail**   | A policy set on a tenant or the platform that caps what anyone may do there, whatever their grants allow.    |
+| **Session cap** | A set of actions, a credential's scopes or the caller's, that bounds what one check may allow.               |
+| **Machine**     | A principal that acts for no person, such as a service account, capped by its credential's scopes.           |
+| **Decision**    | The answer to one check: allowed or not, with the reason and a trace of the statements that decided it.      |
 
 Every check runs the same stages (see [How a check is decided](#how-a-check-is-decided)): the subject, the resource and
 its tenant are checked first, then an explicit deny in any policy that applies (the principal's, its roles', the
 resource's, the guardrails' and its boundaries') wins, then the caps (the guardrails on the tenant, its ancestors and
-the platform, then its permission boundaries) must each allow the check, then an explicit allow or a permission held
-allows it, and anything left is denied.
+the platform, then its permission boundaries, then the session caps: its credential's scopes and any the caller passes)
+must each allow the check, then an explicit allow or a permission held allows it, and anything left is denied.
 
 ## Features
 
@@ -76,6 +78,11 @@ allows it, and anything left is denied.
   scope, whoever the subject is, as a boundary caps one grantee's. Every guardrail that applies must allow the check,
   a guardrail grants nothing, and only an actor holding `authorization:guardrails:manage` from above the scope, a
   permission the package declares itself and no guardrail caps, may set or remove one.
+- **Session caps and machines**: a check is capped by the scopes of the subject's credential, from a session policy
+  source you bind and mapped to actions through a scope map checked at boot, and by any actions the caller passes to
+  `Authorization::capped()`. Every cap must cover the action, a cap grants nothing, and an empty cap allows nothing. A
+  machine principal is allowed nothing without its credential's scopes, and a person's grants never reach it, nor its
+  a person. A scope registry backed by the permission catalogue tells which scopes a credential may carry.
 - **Authentication requirements**: an allow can require additional verification, multifactor authentication,
   phishing resistance or a minimum assurance level, each with an optional maximum age, judged for the subject's session
   by a requirement checker you bind. When only that requirement keeps an allow from applying, the check is denied as
@@ -187,7 +194,8 @@ AUTHORIZATION_LOG_CHANNEL=stderr
 
 `config/authorization.php` documents every other option: models, tables, the default guard, permission providers, the
 Gate conflict mode, the policy store, the policy limits, the context keys and sources, the attribute providers, the
-subject resolver, the authentication requirement checker, the cache, and the role hierarchy and rank.
+subject resolver, the authentication requirement checker, the session policy source and the scope map, the cache, and
+the role hierarchy and rank.
 
 ## Usage
 
@@ -450,13 +458,13 @@ shortcuts over it. A check runs in stages, stopping at the first that decides: t
 applicable policy, a guardrail's and a permission boundary's included (`explicit_deny`, or `invalid_policy` for a
 statement that cannot be evaluated), then the caps: the [guardrails](#guardrails) and the [permission
 boundaries](#permission-boundaries), each of which must allow the check (`guardrail` or `boundary`, or `invalid_policy`
-for a cap's statement that cannot be evaluated), and the session caps (none yet), then the allows (an allow statement,
-then a permission held), then the implicit deny (`insufficient_authentication` when an allow statement names the check
-and only its [authentication requirement](#authentication-requirements) is unmet, `condition_failed` when an allow
-statement names the check but its conditions do not hold, else `no_match`). [How a check is
-decided](#how-a-check-is-decided) sets the stages out in full. Each stage assesses its statements in a fixed order, so
-the decision is the same whatever order the policies are read in, and the trace records condition key names and whether
-each held, never their values:
+for a cap's statement that cannot be evaluated), and the [session caps](#session-caps-and-machines), every one of which
+must cover the action (`session_policy`), then the allows (an allow statement, then a permission held), then the
+implicit deny (`insufficient_authentication` when an allow statement names the check and only its [authentication
+requirement](#authentication-requirements) is unmet, `condition_failed` when an allow statement names the check but its
+conditions do not hold, else `no_match`). [How a check is decided](#how-a-check-is-decided) sets the stages out in full.
+Each stage assesses its statements in a fixed order, so the decision is the same whatever order the policies are read
+in, and the trace records condition key names and whether each held, never their values:
 
 ```php
 $decision = Authorization::for($user)->check('posts:delete', 'posts/42');
@@ -899,6 +907,163 @@ for its allows.
 The guardrails that apply are read in one query, apart from the policies, so a custom `PolicyResolver` never drops
 them, and are cached with the rest of the resolution: once warm, a check reads none.
 
+### Session caps and machines
+
+A session cap bounds what a check may allow, whatever the subject's grants allow. It is a set of actions and action
+patterns, not a policy: every cap present must cover the action, so the caps intersect, and an action a cap does not
+cover is denied as `session_policy` at the `session` stage. A cap grants nothing: an action it covers is still decided
+by every other stage, and needs an allow statement or a permission held. A check can be capped in two ways:
+
+- **The credential's scopes.** The bound `SessionPolicySource` answers the scopes the credential of the check's subject
+  carries, such as an API token's or a service account's, or null when it carries no cap.
+- **An explicit cap.** `Authorization::capped([...])` returns a scoped manager, as `for()` does, whose checks are capped
+  by the actions given, for a delegated or a restricted call.
+
+```php
+$user->givePermission('posts:read');
+$user->givePermission('posts:edit');
+
+// The credential the user signed in with carries the scopes ['posts:read'].
+Authorization::for($user)->can('posts:read'); // true: the scope covers it, and the permission allows it
+Authorization::for($user)->can('posts:edit'); // false: session_policy, whatever the user holds
+
+$readOnly = Authorization::for($user)->capped(['posts:read', 'comments:*']);
+
+$readOnly->can('posts:read');                         // true: both caps cover it
+$readOnly->can('comments:read');                      // false: the credential's scopes do not cover it
+$readOnly->capped(['comments:*'])->can('posts:read'); // false: nested caps intersect
+```
+
+**No cap and an empty cap.** No cap at all caps nothing: a source answering null, and a manager never capped, leave
+the check to the other stages, and the trace records `[session] session caps: uncapped`. An empty cap allows nothing: a
+credential carrying no scopes (`[]`), and `capped([])`, deny every check as `session_policy`.
+
+**Intersection.** The credential's cap and each explicit cap must all cover the action; one never replaces another, so
+`capped()` can only narrow what a credential allows, and capping a capped manager narrows it further. A cap covers an
+action when one of its patterns is the action, or matches it as a statement's `actions` pattern does (`posts:*`,
+`*:read`, `*`). Each cap adds a step to the trace naming it, `covered` or `refused`: `credential` for the credential's
+scopes and `capped[1]`, `capped[2]` and so on for the explicit caps, outermost first:
+
+```php
+echo Authorization::for($user)->capped(['posts:edit'])->explain('posts:read');
+```
+
+```text
+DENY (session_policy: a session cap does not allow it) at the session stage.
+  [guardrail] guardrails: uncapped
+  [boundary] boundaries: uncapped
+  [session] credential: covered
+  [session] capped[1]: refused
+```
+
+**What they cap.** The session stage runs after every deny, the guardrails and the permission boundaries, and before
+any allow, so a session cap caps every allow source alike: a permission held directly or through a role, an allow in
+the subject's own or its roles' policies, and a resource policy's allow naming the subject. `withPolicies()` replaces
+the check's policies alone, so the caps still apply. An action a cap refuses is never a step-up: the denial is
+`session_policy`, never `insufficient_authentication`. A cap has no deny statements, so it adds nothing to the deny
+stage, and a deny decides before any cap is weighed. The credential's scopes cap every check about the subject: the
+Gate, the middleware, the directives and `effectivePermissions()` included. An explicit cap caps only the checks made
+through the manager `capped()` returned, so the Gate and the middleware never see it. `hasPermission()` and `hasRole()`
+report what is granted, not what a cap lets through.
+
+**The source.** A class implementing `SineMacula\Laravel\Authorization\Contracts\SessionPolicySource` answers
+`scopesFor(Subject $subject): ?array`, the scopes as a list of strings or null. It is asked once for each check that
+gets past the subject, resource and tenant stages, with the check's `Subject`, also one named with `for()`, so answer
+null for a subject the credential does not belong to. A source that throws aborts the check, so no decision is made.
+
+```php
+use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
+use SineMacula\Laravel\Authorization\Subject;
+
+final class CredentialScopes implements SessionPolicySource
+{
+    public function __construct(private CurrentCredential $credential) {}
+
+    public function scopesFor(Subject $subject): ?array
+    {
+        return $this->credential->isHeldBy($subject->subject) ? $this->credential->scopes() : null;
+    }
+}
+```
+
+Name it in `config/authorization.php`, where it is checked at boot and built per request or job, or bind the contract
+yourself. The default, `NoSessionPolicy`, answers null for every subject, so no credential caps a person's checks. Under
+the suite, `sinemacula/laravel-iam` binds a source that reads the scopes of the caller's credential from
+`laravel-authentication`.
+
+```php
+'session' => [
+    'source' => App\Authorization\CredentialScopes::class,
+    'scopes' => [],
+],
+```
+
+**The scope map.** By default a scope names an action or an action pattern itself, so a credential carrying
+`posts:read` and `comments:*` is capped to those. `authorization.session.scopes` maps a scope to the action patterns it
+stands for instead; a scope listed on its own names itself, as one the map does not name does:
+
+```php
+'scopes' => [
+    'posts:read',                                // names itself
+    'editor'  => ['posts:*', 'comments:read'],   // stands for both patterns
+    'billing' => ['invoices:*'],
+],
+```
+
+The map is checked when the application boots: each scope must be a string that is not empty, named once and mapped to
+a list of one pattern or more, and every pattern, a scope listed on its own included, must cover at least one
+permission the package or the application declares, as a policy's `actions` must. A bad map is refused with
+`InvalidAuthorizationConfigException`. To check it, the permission enums and providers are read at boot, but only when
+the map names a scope, and the package's tables never are. A scope that is a whole number, such as `42`, can only be
+listed on its own, since PHP turns such a key into an integer.
+
+**Machines.** A model implementing `SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine` is a machine
+principal: a service account, an integration, a client acting for no person. Its grants work as a person's, capped by
+its credential's scopes, which it must have: when the source answers null for a machine, the check is denied as
+`session_policy` (`[session] credential:missing: refused`), whatever it holds, and `capped()` never stands in for the
+missing scopes, it only narrows them further. With the default source, a machine is therefore allowed nothing.
+
+```php
+use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Concerns\HasAuthorization;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
+
+class ServiceAccount extends Model implements AuthorizableIdentity, AuthorizableMachine
+{
+    use HasAuthorization;
+}
+```
+
+A machine is never treated as a person. A subject's identity contributes its roles, permissions and policies only when
+the subject and its identity are both machines or neither is, so a person's grants never reach a machine principal
+acting for them, and a machine's grants never reach a person; a resource policy naming the identity by reference does
+not name such a principal either. What only narrows a check still holds across the two: the identity's permission
+boundaries cap the principal, and an inactive identity denies it everything.
+
+**The scope registry.** `SineMacula\Laravel\Authorization\Contracts\ScopeRegistry` answers which scopes a credential may
+carry, so that one is issued only scopes naming real permissions: `isValid($scope)` and `scopes()`. The package ships
+`CatalogueScopeRegistry`, backed by the permission catalogue and the scope map, and binds none. It accepts every scope
+the map names and every other scope that names a declared permission, the package's own included, or a pattern
+covering at least one; `scopes()` lists the mapped scopes, then the declared permissions. Bind it where your
+credentials' scopes are issued; under the suite, `sinemacula/laravel-iam` binds it as `laravel-authentication`'s scope
+registry:
+
+```php
+use SineMacula\Laravel\Authorization\Contracts\ScopeRegistry;
+use SineMacula\Laravel\Authorization\Support\CatalogueScopeRegistry;
+
+$this->app->bind(ScopeRegistry::class, CatalogueScopeRegistry::class);
+
+app(ScopeRegistry::class)->isValid('editor');     // true: the map names it
+app(ScopeRegistry::class)->isValid('posts:*');    // true: it covers a declared permission
+app(ScopeRegistry::class)->isValid('payroll:*');  // false: it covers none
+```
+
+The registry reads the catalogue the first time it is asked, and keeps it for its lifetime. The caps read nothing from
+the database: a check a cap covers runs the same queries as one with no cap, and one a cap refuses never reads the
+permissions.
+
 ### How a check is decided
 
 `Authorization::check()` is the one decision behind `can()`, `authorize()`, `explain()`, the Gate, the `permission:` and
@@ -914,16 +1079,17 @@ is weighed before every deny and every cap has run:
 | `deny`      | Every deny: the subject's, its identity's, their roles', the resource's, the guardrails' and the boundaries'      | `explicit_deny`, `invalid_policy`                             |
 | `guardrail` | Every guardrail on the check's tenant, its ancestors and the platform must allow the check, unless it is exempt   | `guardrail`, `invalid_policy`                                 |
 | `boundary`  | Every permission boundary of the principal and of its identity that applies must allow the check                  | `boundary`, `invalid_policy`                                  |
-| `session`   | The session's caps, such as a credential's scopes (none yet: the stage caps nothing)                              |                                                               |
+| `session`   | Every session cap, the credential's scopes and each set of actions `capped()` was given, must cover the action    | `session_policy`                                              |
 | `allow`     | Every allow statement that applies to the subject, a resource policy's naming it included, then a permission held | `invalid_policy`                                              |
 | `implicit`  | Nothing allowed                                                                                                   | `insufficient_authentication`, `condition_failed`, `no_match` |
 
 Within each stage, the policies are assessed in a fixed order (name, stored key, resource, then document) and each
 statement by its position, so the decision and its trace never depend on the order the policies were read in. The
 decision records the stage that decided it and every step it took: each statement assessed, each guardrail and boundary
-that refused the check as `refused`, naming it, a cap stage that capped nothing as `uncapped`, the guardrail stage as
-`exempt` for a check of `authorization:guardrails:manage`, whose deny stage weighs no guardrail's denies either, and
-the permission step, which is asked only when no allow statement matched and none was invalid:
+that refused the check as `refused`, naming it, each session cap as `covered` or `refused`, naming it, a cap stage that
+capped nothing as `uncapped`, the guardrail stage as `exempt` for a check of `authorization:guardrails:manage`, whose
+deny stage weighs no guardrail's denies either, and the permission step, which is asked only when no allow statement
+matched and none was invalid:
 
 ```text
 DENY (boundary: a permission boundary does not allow it) at the boundary stage.

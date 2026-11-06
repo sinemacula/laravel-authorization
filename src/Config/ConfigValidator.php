@@ -75,6 +75,7 @@ final class ConfigValidator
         self::validatePolicyLimits($config['policies']['limits'] ?? []);
         ContextConfigValidator::validate($config['context'] ?? [], $container);
         AttributeConfigValidator::validate($config['attributes'] ?? [], $container);
+        SessionConfigValidator::validate($config['session'] ?? [], $container);
     }
 
     /**

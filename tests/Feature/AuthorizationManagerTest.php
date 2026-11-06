@@ -20,6 +20,7 @@ use SineMacula\Laravel\Authorization\Concerns\HasRoles;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
+use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
@@ -61,6 +62,7 @@ use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use SineMacula\Laravel\Authorization\Support\SessionScopes;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
@@ -73,8 +75,10 @@ use Tests\Feature\Stubs\RecordingResourceAttributes;
 use Tests\Feature\Stubs\RecordingSubjectAttributes;
 use Tests\Feature\Stubs\ReservedContextSource;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Feature\Stubs\StubSecondIdentity;
+use Tests\Feature\Stubs\StubSessionPolicySource;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
@@ -2679,6 +2683,295 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * The scopes of the subject's credential cap every check: an action they
+     * cover is decided by the grants, and one they do not is denied as
+     * `session_policy` at the session stage, the trace naming the credential's
+     * cap as refusing it.
+     *
+     * @return void
+     */
+    public function testTheCredentialsScopesCapEveryCheck(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']));
+        $user->givePermission(Permission::create(['name' => 'posts:edit']));
+        $this->withCredential(['posts:read']);
+
+        $read = Authorization::for($user)->check('posts:read');
+        $edit = Authorization::for($user)->check('posts:edit');
+
+        self::assertTrue($read->isAllowed());
+        self::assertContainsEquals(new TraceEntry(DecisionStage::SESSION, TraceOutcome::COVERED, null, [], 'credential'), $read->trace);
+        self::assertSame(DecisionReason::SESSION_POLICY, $edit->reason);
+        self::assertSame(DecisionStage::SESSION, $edit->stage);
+        self::assertSame([], $edit->statements);
+        self::assertEquals(new TraceEntry(DecisionStage::SESSION, TraceOutcome::REFUSED, null, [], 'credential'), $edit->trace[\count($edit->trace) - 1]);
+        self::assertStringContainsString('[session] credential: refused', $edit->explain());
+    }
+
+    /**
+     * A scope the scope map names stands for its patterns, and a scope it does
+     * not name stands for itself as an action or an action pattern.
+     *
+     * @return void
+     */
+    public function testTheScopeMapMapsAScopeToItsActions(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        foreach (['posts:edit', 'comments:read', 'users:read'] as $name) {
+            $user->givePermission(Permission::create(['name' => $name]));
+        }
+
+        $this->withCredential(['editor', 'comments:*'], ['editor' => ['posts:edit', 'posts:read']]);
+
+        self::assertTrue(Authorization::for($user)->can('posts:edit'));
+        self::assertTrue(Authorization::for($user)->can('comments:read'));
+        self::assertSame(DecisionReason::SESSION_POLICY, Authorization::for($user)->check('users:read')->reason);
+        self::assertSame(DecisionReason::SESSION_POLICY, Authorization::for($user)->check('editor')->reason);
+    }
+
+    /**
+     * An explicit cap passed to `capped()` caps the scoped manager's checks
+     * alone, and capping a capped manager intersects the caps, the trace naming
+     * each cap by its position, outermost first.
+     *
+     * @return void
+     */
+    public function testAnExplicitCapCapsTheScopedChecksAndNestedCapsIntersect(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:*']));
+
+        $outer  = Authorization::for($user)->capped(['posts:*']);
+        $nested = $outer->capped(['posts:read', 'comments:read']);
+
+        self::assertTrue($outer->can('posts:edit'));
+        self::assertTrue($nested->can('posts:read'));
+        self::assertTrue(Authorization::for($user)->can('posts:edit'));
+
+        $denied = $nested->check('posts:edit');
+
+        self::assertSame(DecisionReason::SESSION_POLICY, $denied->reason);
+        self::assertEquals(
+            [
+                new TraceEntry(DecisionStage::SESSION, TraceOutcome::COVERED, null, [], 'capped[1]'),
+                new TraceEntry(DecisionStage::SESSION, TraceOutcome::REFUSED, null, [], 'capped[2]'),
+            ],
+            \array_slice($denied->trace, -2),
+        );
+        self::assertSame(DecisionReason::SESSION_POLICY, $nested->check('comments:read')->reason);
+        self::assertTrue($nested->for($user)->can('posts:read'));
+        self::assertFalse($nested->for($user)->can('posts:edit'));
+        self::assertFalse(Authorization::capped(['posts:read'])->for($user)->can('posts:edit'));
+        self::assertTrue(Authorization::capped(['posts:read'])->for($user)->can('posts:read'));
+    }
+
+    /**
+     * The credential's cap and an explicit cap intersect: only what both cover
+     * passes, whichever of them refuses being named.
+     *
+     * @return void
+     */
+    public function testTheCredentialAndAnExplicitCapIntersect(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        $user->givePermission(Permission::create(['name' => '*']));
+        $this->withCredential(['posts:*']);
+
+        $capped  = Authorization::for($user)->capped(['posts:read', 'comments:read']);
+        $edit    = $capped->check('posts:edit');
+        $comment = $capped->check('comments:read');
+
+        self::assertTrue($capped->can('posts:read'));
+        self::assertSame(DecisionReason::SESSION_POLICY, $edit->reason);
+        self::assertEquals(new TraceEntry(DecisionStage::SESSION, TraceOutcome::REFUSED, null, [], 'capped[1]'), $edit->trace[\count($edit->trace) - 1]);
+        self::assertSame(DecisionReason::SESSION_POLICY, $comment->reason);
+        self::assertContainsEquals(new TraceEntry(DecisionStage::SESSION, TraceOutcome::REFUSED, null, [], 'credential'), $comment->trace);
+    }
+
+    /**
+     * No cap differs from an empty one: a credential carrying no cap caps
+     * nothing, and the session stage says so, while a credential carrying no
+     * scopes, or an empty explicit cap, allows nothing.
+     *
+     * @return void
+     */
+    public function testNoCapDiffersFromAnEmptyCap(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']));
+        $this->withCredential(null);
+
+        $uncapped = Authorization::for($user)->check('posts:read');
+
+        self::assertTrue($uncapped->isAllowed());
+        self::assertContainsEquals(new TraceEntry(DecisionStage::SESSION, TraceOutcome::UNCAPPED), $uncapped->trace);
+        self::assertSame(DecisionReason::SESSION_POLICY, Authorization::for($user)->capped([])->check('posts:read')->reason);
+
+        $this->withCredential([]);
+
+        self::assertSame(DecisionReason::SESSION_POLICY, Authorization::for($user)->check('posts:read')->reason);
+    }
+
+    /**
+     * A session cap caps every allow source: a permission held directly or
+     * through a role, an identity policy's allow, a role policy's allow, a
+     * resource policy's allow naming the subject and a policy override are each
+     * denied at the session stage when the cap does not cover the action; and a
+     * cap grants nothing, so an action it covers that nothing allows is denied.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASessionCapBlocksEveryAllowSourceAndGrantsNothing(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+        $role = Role::create(['name' => 'editor']);
+        $post = ResourceReference::record('posts', '7');
+
+        $user->givePermission(Permission::create(['name' => 'posts:edit']));
+        $role->givePermission(Permission::create(['name' => 'posts:review']));
+        $role->attachPolicy(self::resourcePolicy('role-allow', [['effect' => 'allow', 'actions' => ['posts:archive']]]));
+        $user->assignRole($role);
+        $user->attachPolicy(self::resourcePolicy('own-allow', [['effect' => 'allow', 'actions' => ['posts:publish']]]));
+        $sharing = ['effect' => 'allow', 'actions' => ['posts:delete'], 'principals' => [$user->getMorphClass() . ':user-1']];
+
+        self::attachToResource(self::resourcePolicy('sharing', [$sharing]), ['posts', 7]);
+
+        $capped = Authorization::for($user)->capped(['posts:read']);
+
+        foreach (['posts:edit', 'posts:review', 'posts:archive', 'posts:publish', 'posts:delete'] as $action) {
+            $decision = $capped->check($action, $post);
+
+            self::assertSame(DecisionReason::SESSION_POLICY, $decision->reason, $action);
+            self::assertSame(DecisionStage::SESSION, $decision->stage, $action);
+            self::assertNotContains(DecisionStage::ALLOW, \array_map(static fn (TraceEntry $entry): DecisionStage => $entry->stage, $decision->trace), $action);
+            self::assertTrue(Authorization::for($user)->can($action, $post), $action);
+        }
+
+        $everything = EvaluationPolicy::fromArray(['name' => 'all', 'statements' => [['effect' => 'allow', 'actions' => ['*']]]]);
+
+        self::assertSame(DecisionReason::SESSION_POLICY, $capped->withPolicies([$everything])->check('posts:edit')->reason);
+        self::assertTrue($capped->withPolicies([$everything])->can('posts:read'));
+        self::assertSame(DecisionReason::NO_MATCH, $capped->check('posts:read', $post)->reason);
+    }
+
+    /**
+     * A machine principal without credential scopes is allowed nothing, the
+     * default source's included, whatever it holds, and an explicit cap never
+     * stands in for its missing scopes; with scopes it is allowed what its
+     * grants allow within them, and an explicit cap narrows them further.
+     *
+     * @return void
+     */
+    public function testAMachineIsAllowedOnlyWithinItsCredentialsScopes(): void
+    {
+        $machine = StubMachine::create(['id' => 'svc-1']);
+
+        $machine->givePermission(Permission::create(['name' => 'posts:edit']));
+        $machine->givePermission(Permission::create(['name' => 'posts:read']));
+
+        $missing = Authorization::for($machine)->check('posts:edit');
+
+        self::assertSame(DecisionReason::SESSION_POLICY, $missing->reason);
+        self::assertSame(DecisionStage::SESSION, $missing->stage);
+        self::assertEquals(new TraceEntry(DecisionStage::SESSION, TraceOutcome::REFUSED, null, [], 'credential:missing'), $missing->trace[\count($missing->trace) - 1]);
+        self::assertSame(DecisionReason::SESSION_POLICY, Authorization::for($machine)->capped(['posts:edit'])->check('posts:edit')->reason);
+        self::assertSame(DecisionReason::SESSION_POLICY, Authorization::for($machine)->capped(['*'])->check('posts:read')->reason);
+
+        $this->withCredential(['posts:*']);
+
+        self::assertTrue(Authorization::for($machine)->can('posts:edit'));
+        self::assertTrue(Authorization::for($machine)->capped(['posts:read'])->can('posts:read'));
+        self::assertSame(DecisionReason::SESSION_POLICY, Authorization::for($machine)->capped(['posts:read'])->check('posts:edit')->reason);
+        self::assertSame(DecisionReason::NO_MATCH, Authorization::for($machine)->check('posts:delete')->reason);
+
+        $this->withCredential([]);
+
+        self::assertSame(DecisionReason::SESSION_POLICY, Authorization::for($machine)->check('posts:edit')->reason);
+    }
+
+    /**
+     * A person's grants and policies never reach a machine principal whose
+     * identity is that person, and a machine's never reach a person whose
+     * identity is that machine, however broad the credential's scopes.
+     *
+     * @return void
+     */
+    public function testIdentityGrantsNeverCrossBetweenAMachineAndAPerson(): void
+    {
+        $machine = StubMachine::create(['id' => 'svc-1']);
+        $person  = StubIdentity::create(['id' => 'user-1']);
+
+        $person->givePermission(Permission::create(['name' => 'posts:edit']));
+        $person->attachPolicy(self::resourcePolicy('person-allow', [['effect' => 'allow', 'actions' => ['posts:publish']]]));
+        $machine->givePermission(Permission::create(['name' => 'deploys:run']));
+
+        $this->withCredential(['*']);
+        $this->resolveSubject(new Subject($machine, $person));
+
+        self::assertSame(DecisionReason::NO_MATCH, Authorization::check('posts:edit')->reason);
+        self::assertSame(DecisionReason::NO_MATCH, Authorization::check('posts:publish')->reason);
+        self::assertTrue(Authorization::can('deploys:run'));
+
+        $this->resolveSubject(new Subject($person, $machine));
+
+        self::assertSame(DecisionReason::NO_MATCH, Authorization::check('deploys:run')->reason);
+        self::assertTrue(Authorization::can('posts:edit'));
+        self::assertTrue(Authorization::can('posts:publish'));
+    }
+
+    /**
+     * The credential's source is asked once per check, about the check's
+     * subject, and a session cap reads nothing from the database: a check a cap
+     * covers runs the same queries as one with no cap, and one a cap refuses
+     * never reads the permissions.
+     *
+     * @return void
+     */
+    public function testASessionCapIsReadOncePerCheckAndAddsNoQuery(): void
+    {
+        $permission = Permission::create(['name' => 'posts:edit']);
+        $users      = [];
+
+        foreach (['warm', 'plain', 'covered', 'refused'] as $id) {
+            $users[$id] = StubIdentity::create(['id' => $id]);
+            $users[$id]->givePermission($permission);
+        }
+
+        $source = $this->withCredential(['posts:*']);
+        $counts = [];
+
+        // What every check reads once, whoever it is about, is read first.
+        Authorization::for($users['warm'])->check('posts:edit');
+
+        DB::enableQueryLog();
+
+        foreach (['plain' => [], 'covered' => ['posts:edit'], 'refused' => ['posts:read']] as $id => $cap) {
+            DB::flushQueryLog();
+
+            $manager = Authorization::for($users[$id]);
+
+            ($cap === [] ? $manager : $manager->capped($cap))->check('posts:edit');
+
+            $counts[$id] = \count(DB::getQueryLog());
+        }
+
+        DB::disableQueryLog();
+
+        self::assertSame($counts['plain'], $counts['covered']);
+        self::assertLessThan($counts['plain'], $counts['refused']);
+        self::assertCount(4, $source->calls);
+        self::assertSame($users['refused'], $source->calls[3]->subject);
+    }
+
+    /**
      * Assert that exactly one decision event was dispatched, for the check of
      * `posts:create` without a resource, carrying the supplied principal,
      * context and decision, and that no failure event was dispatched.
@@ -2754,6 +3047,45 @@ final class AuthorizationManagerTest extends TestCase
 
         /** @var \SineMacula\Laravel\Authorization\AuthorizationManager */
         return $this->app?->make(AuthorizationManager::class);
+    }
+
+    /**
+     * Bind a session policy source answering every check with the scopes given,
+     * or null for no cap, and the scope map given, for the next facade call.
+     *
+     * @param  list<string>|null  $scopes
+     * @param  array<string, list<string>>  $map
+     * @return \Tests\Feature\Stubs\StubSessionPolicySource
+     */
+    private function withCredential(?array $scopes, array $map = []): StubSessionPolicySource
+    {
+        $source = new StubSessionPolicySource($scopes);
+
+        $this->app?->instance(SessionPolicySource::class, $source);
+        $this->app?->make(ConfigRepository::class)->set('authorization.session.scopes', $map); // @phpstan-ignore method.nonObject
+
+        foreach (['authorization', AuthorizationManager::class, SessionScopes::class] as $abstract) {
+            $this->app?->forgetInstance($abstract);
+        }
+
+        Authorization::clearResolvedInstance('authorization');
+
+        return $source;
+    }
+
+    /**
+     * Resolve the subject given for the next facade call.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @return void
+     */
+    private function resolveSubject(Subject $subject): void
+    {
+        $this->app?->instance(SubjectResolver::class, new FixedSubjectResolver($subject));
+        $this->app?->forgetInstance('authorization');
+        $this->app?->forgetInstance(AuthorizationManager::class);
+
+        Authorization::clearResolvedInstance('authorization');
     }
 
     /**

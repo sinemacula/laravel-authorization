@@ -11,21 +11,24 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
 use SineMacula\Laravel\Authorization\Resolvers\GrantResolver;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 
 /**
  * Tells whether a resource policy's `principals` selectors name the subject of
  * one check (AUTHZ-7.3).
  *
  * A selector names the subject when it is the subject's principal or identity
- * by reference (`<morph type>:<id>`, the morph class and key), or a role by its
- * key (`role:<role id>`) that the principal or identity holds in the scope the
- * check is decided in: the tenant and application the check runs under, read
- * through the grantee's `roles()` relation, as every other grant is. With the
- * hierarchy enabled, a role selector also names whoever holds a role below that
- * role, as the role's permissions and policies reach them; with it disabled,
- * only whoever holds that role itself. A role is named by its key, never its
- * name, so a role of the same name owned by another tenant, or held for another
- * application, names no one. A selector of the type `role` always names a role.
+ * (only one whose grants reach the principal: a person's never names a machine,
+ * nor a machine's a person) by reference (`<morph type>:<id>`, the morph class
+ * and key), or a role by its key (`role:<role id>`) that the principal or
+ * identity holds in the scope the check is decided in: the tenant and
+ * application the check runs under, read through the grantee's `roles()`
+ * relation, as every other grant is. With the hierarchy enabled, a role
+ * selector also names whoever holds a role below that role, as the role's
+ * permissions and policies reach them; with it disabled, only whoever holds
+ * that role itself. A role is named by its key, never its name, so a role of
+ * the same name owned by another tenant, or held for another application, names
+ * no one. A selector of the type `role` always names a role.
  *
  * The roles are read at most once for the check, and only when a selector names
  * a role and no selector names the subject by reference, through the resolution
@@ -157,15 +160,16 @@ final class PrincipalSelectors
 
     /**
      * Return the subject's principal, and its identity when that is another
-     * object.
+     * object whose grants reach the principal: both machines or neither (see
+     * `SubjectGrants::grantingIdentity()`).
      *
      * @return list<object>
      */
     private function grantees(): array
     {
-        $identity = $this->subject->identity;
+        $identity = SubjectGrants::grantingIdentity($this->subject);
 
-        return $identity === null || $identity === $this->subject->subject ? [$this->subject->subject] : [$this->subject->subject, $identity];
+        return $identity === null ? [$this->subject->subject] : [$this->subject->subject, $identity];
     }
 
     /**

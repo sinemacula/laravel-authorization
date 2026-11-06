@@ -23,8 +23,10 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
   policies down the hierarchy, and the policies attached to the resource and its type) and why their order never
   matters; resource policies' `principals`, their denies for everyone and why their allows come after the tenant stage
   and every deny; the cap stages (guardrails, permission boundaries and session caps) between the denies and the allows,
-  and why every guardrail and boundary that applies must allow a check and none grants anything; which guardrails apply
-  to a check and who may change them.
+  and why every guardrail, boundary and session cap that applies must allow a check and none grants anything; which
+  guardrails apply to a check and who may change them; the session caps (a credential's scopes through the scope map,
+  and the caller's explicit caps), machine principals, which need their credential's scopes and never receive a
+  person's grants, and the scope registry.
 - `polymorphic-identity-pivots.md`: why role, permission, and policy pivots use plain `string`
   `authorizable_type`/`authorizable_id` columns so that integer, UUID, and ULID identities all work.
 - `subject-resolver-contract.md`: the one seam with `sinemacula/laravel-authentication` for the subject, its tenant

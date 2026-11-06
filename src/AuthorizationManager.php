@@ -29,6 +29,7 @@ use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
+use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -43,9 +44,9 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
  * Coordinates subject resolution, the gathering of policies, guardrails,
  * boundaries and permissions, and evaluation into a single API. The manager
  * admits the check (the subject, resource and tenant stages) and gathers every
- * source; the policy evaluator runs the rest of the stages in AUTHZ-7.1's
- * order, the denies, the caps, the allows and the implicit deny, each recorded
- * in the decision's trace for audit consumers.
+ * source, the session caps included; the policy evaluator runs the rest of the
+ * stages in AUTHZ-7.1's order, the denies, the caps, the allows and the
+ * implicit deny, each recorded in the decision's trace for audit consumers.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -60,6 +61,9 @@ final class AuthorizationManager
     /** @var array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>|null  Per-call policy override supplied via `withPolicies()`. */
     private ?array $policyOverride = null;
 
+    /** @var list<list<string>> The explicit session caps supplied via `capped()`, outermost first, every one of which must cover the action. */
+    private array $caps = [];
+
     /**
      * Create a new manager instance.
      *
@@ -72,6 +76,7 @@ final class AuthorizationManager
      * @param  \SineMacula\Laravel\Authorization\Context\CheckContextFactory|null  $contexts
      * @param  \SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver|null  $resourcePolicies
      * @param  \SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver|null  $guardrails
+     * @param  \SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver|null  $sessionCaps
      */
     public function __construct(
 
@@ -101,6 +106,9 @@ final class AuthorizationManager
 
         /** Reads the guardrails that apply to a check; null reads none. */
         private readonly ?GuardrailResolver $guardrails = null,
+
+        /** Makes the session caps of a check; null reads no credential's scopes, so only `capped()` and a machine's missing scopes cap it. */
+        private readonly ?SessionCapResolver $sessionCaps = null,
     ) {}
 
     /**
@@ -143,7 +151,7 @@ final class AuthorizationManager
             return;
         }
 
-        $this->dispatch(new AuthorizationFailed($this->currentSubject()?->subject, $action, self::identifierOf($reference), $context, $decision));
+        $this->dispatch(new AuthorizationFailed($this->currentSubject()?->subject, $action, ResourceReferences::identifierOf($reference), $context, $decision));
 
         $reason = $decision->reason ?? DecisionReason::NO_MATCH;
         $denial = $reason === DecisionReason::INSUFFICIENT_AUTHENTICATION ? InsufficientAuthenticationException::translated($decision->requirements, $this->translator) : null;
@@ -182,7 +190,7 @@ final class AuthorizationManager
         $subject   = $this->currentSubject();
         $reference = ResourceReferences::of($resource);
 
-        return $this->record($subject, $action, self::identifierOf($reference), $context, $this->decide($subject, $action, $reference, $context));
+        return $this->record($subject, $action, ResourceReferences::identifierOf($reference), $context, $this->decide($subject, $action, $reference, $context));
     }
 
     /**
@@ -312,8 +320,8 @@ final class AuthorizationManager
      * bypassing the principal's own attached policies, any configured policy
      * store and the policies attached to the resource. A supplied policy given
      * a resource (`Policy::withResource()`) is evaluated as a resource policy.
-     * The guardrails, the subject's permission boundaries and its permissions
-     * still count, so an override never lifts a cap.
+     * The guardrails, the subject's permission boundaries, the session caps and
+     * its permissions still count, so an override never lifts a cap.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
      * @return self
@@ -322,6 +330,28 @@ final class AuthorizationManager
     {
         $scoped                 = clone $this;
         $scoped->policyOverride = \array_values($policies);
+
+        return $scoped;
+    }
+
+    /**
+     * Return a scoped manager whose checks are capped by the supplied actions,
+     * each an action or an action pattern, as a delegated or restricted call is
+     * (AUTHZ-7.5): an action none of them covers is denied at the session stage
+     * as `session_policy`, and an empty list allows nothing.
+     *
+     * A cap grants nothing, so an action it covers is still decided by every
+     * other stage. Capping a capped manager intersects the caps, and the
+     * credential's scopes cap the check too. For a machine without credential
+     * scopes, which is allowed nothing, a cap never stands in for them.
+     *
+     * @param  array<array-key, string>  $actions
+     * @return self
+     */
+    public function capped(array $actions): self
+    {
+        $scoped         = clone $this;
+        $scoped->caps[] = \array_values($actions);
 
         return $scoped;
     }
@@ -416,8 +446,12 @@ final class AuthorizationManager
      * the boundaries of the subject and its identity; then every allow, a
      * policy's, a resource policy's naming the subject, and a permission the
      * subject holds; then the implicit deny. No allow is weighed before every
-     * deny and cap, so a guardrail or a boundary caps a resource policy's allow
-     * and a permission held as it caps a policy's.
+     * deny and cap, so a guardrail, a boundary or a session cap caps a resource
+     * policy's allow and a permission held as it caps a policy's. The session
+     * caps are the scopes of the subject's credential, mapped to actions, and
+     * those `capped()` supplied, every one of which must cover the action (see
+     * `SessionCapResolver`); a machine without credential scopes is allowed
+     * nothing.
      *
      * The guardrails are those of the resource's tenant when it has one, also
      * when a platform-wide grant admitted it from outside the scope, else of
@@ -467,20 +501,9 @@ final class AuthorizationManager
             ?? new CheckContext([CheckContextFactory::INPUT => $context], (new AttributeNamespaces)->builders($subject, $resource), null, new PrincipalSelectors($subject));
 
         $permission = static fn (): bool => SubjectGrants::holdsPermission($subject, $action);
+        $session    = ($this->sessionCaps ?? new SessionCapResolver)->capsFor($subject, $this->caps);
 
-        return $this->evaluator->evaluate($policies, $action, $resource?->identifier, $checkContext, $boundaries, $permission, $guardrails);
-    }
-
-    /**
-     * Return the identifier a resolved reference carries, or null for no
-     * resource or one that cannot be identified.
-     *
-     * @param  false|\SineMacula\Laravel\Authorization\Support\ResourceReference|null  $reference
-     * @return string|null
-     */
-    private static function identifierOf(false|ResourceReference|null $reference): ?string
-    {
-        return $reference === false ? null : $reference?->identifier;
+        return $this->evaluator->capped($session)->evaluate($policies, $action, $resource?->identifier, $checkContext, $boundaries, $permission, $guardrails);
     }
 
     /**

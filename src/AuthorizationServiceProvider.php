@@ -30,6 +30,7 @@ use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
+use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
@@ -44,8 +45,10 @@ use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
+use SineMacula\Laravel\Authorization\Resolvers\NoSessionPolicy;
 use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
+use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\ApplicationAccess;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
@@ -57,6 +60,7 @@ use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
+use SineMacula\Laravel\Authorization\Support\SessionScopes;
 
 /**
  * Service provider for the authorization package.
@@ -86,10 +90,11 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
  *
  * The contracts an application may bind itself (the subject resolver, the
  * policy store, the policy resolver, the action catalogue, the authentication
- * requirement checker and the trusted context sources) resolve through a
- * package-owned key that holds the scoped default. An application's own binding
- * of the contract therefore replaces the default without being scoped itself,
- * and an instance it binds survives the reset between jobs.
+ * requirement checker, the session policy source and the trusted context
+ * sources) resolve through a package-owned key that holds the scoped default.
+ * An application's own binding of the contract therefore replaces the default
+ * without being scoped itself, and an instance it binds survives the reset
+ * between jobs.
  *
  * Row-lifecycle behaviour for `Role` / `Permission` / `Policy` is attached via
  * the `#[ObservedBy]` attribute on each model; the service provider does not
@@ -97,8 +102,9 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
  *
  * Booting never queries or writes the database, so `config:cache`,
  * `route:cache` and `migrate` run before the package's tables exist, and a
- * configured permission provider is never read at boot. The permission
- * catalogue the enums and providers declare reaches the database only when
+ * configured permission provider is read at boot only to check the scope map,
+ * when `authorization.session.scopes` names a scope. The permission catalogue
+ * the enums and providers declare reaches the database only when
  * `authorization:sync` runs.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -346,19 +352,29 @@ final class AuthorizationServiceProvider extends ServiceProvider
      * those of `authorization.context.keys`. The trusted context sources
      * (authentication, request and environment) and the check context factory
      * that holds them with the sources of `authorization.context.sources` are
-     * built per request or job, and so is the authentication requirement
-     * checker `authorization.requirement_checker` names. Each contract is bound
-     * as a default an application may replace.
+     * built per request or job, and so are the authentication requirement
+     * checker `authorization.requirement_checker` names, the session policy
+     * source `authorization.session.source` names and the scope map of
+     * `authorization.session.scopes`. Each contract is bound as a default an
+     * application may replace.
      *
      * @return void
      */
     protected function registerPolicyEvaluator(): void
     {
         $this->app->scoped(PolicyEvaluator::class);
+        $this->app->scoped(SessionScopes::class, static fn (Application $app): SessionScopes => SessionScopes::fromConfig($app['config']->get('authorization.session.scopes', [])));
 
         /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker> $checker */
-        $checker  = $this->app['config']->get('authorization.requirement_checker', RefusingRequirementChecker::class);
-        $defaults = [ActionCatalogue::class => DeclaredActionCatalogue::class, AuthenticationRequirementChecker::class => $checker, ...ContextBindings::DEFAULTS];
+        $checker = $this->app['config']->get('authorization.requirement_checker', RefusingRequirementChecker::class);
+        /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\SessionPolicySource> $source */
+        $source   = $this->app['config']->get('authorization.session.source', NoSessionPolicy::class);
+        $defaults = [
+            ActionCatalogue::class                  => DeclaredActionCatalogue::class,
+            AuthenticationRequirementChecker::class => $checker,
+            SessionPolicySource::class              => $source,
+            ...ContextBindings::DEFAULTS,
+        ];
 
         foreach ($defaults as $contract => $concrete) {
             $this->bindScopedDefault($contract, $concrete);
@@ -386,6 +402,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
             contexts: $app->make(CheckContextFactory::class),
             resourcePolicies: new ResourcePolicyResolver,
             guardrails: new GuardrailResolver,
+            sessionCaps: new SessionCapResolver($app->make(SessionPolicySource::class), $app->make(SessionScopes::class)),
         ));
 
         $this->app->alias('authorization', AuthorizationManager::class);

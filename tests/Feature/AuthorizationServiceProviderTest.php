@@ -36,8 +36,10 @@ use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\RequestContext;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
+use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
@@ -54,6 +56,7 @@ use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
+use SineMacula\Laravel\Authorization\Resolvers\NoSessionPolicy;
 use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\ApplicationAccess;
@@ -67,6 +70,7 @@ use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
+use SineMacula\Laravel\Authorization\Support\SessionScopes;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\CustomRoleMiddlewareDouble;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
@@ -74,6 +78,7 @@ use Tests\Feature\Stubs\InjectedRequirementChecker;
 use Tests\Feature\Stubs\PermissiveActionCatalogue;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubPolicyStore;
+use Tests\Feature\Stubs\StubSessionPolicySource;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
@@ -160,6 +165,8 @@ final class AuthorizationServiceProviderTest extends TestCase
             TenantTree::class,
             ResourceTenantResolver::class,
             AuthenticationRequirementChecker::class,
+            SessionPolicySource::class,
+            SessionScopes::class,
             ResolvedTenant::class,
             ResolutionCache::class,
             PolicyResolver::class,
@@ -579,6 +586,51 @@ final class AuthorizationServiceProviderTest extends TestCase
         $this->startNextJob();
 
         self::assertSame($bound, $app->make(AuthenticationRequirementChecker::class));
+    }
+
+    /**
+     * The session policy source carrying no cap is bound by default, and the
+     * configured class in its place; a source the application binds itself
+     * survives the reset between jobs, and the manager caps its checks by the
+     * source's scopes through the configured scope map.
+     *
+     * @return void
+     */
+    public function testConfiguredSessionPolicySourceIsBound(): void
+    {
+        $app = $this->application();
+
+        $default = $app->make(SessionPolicySource::class);
+
+        self::assertInstanceOf(NoSessionPolicy::class, $default);
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $app->make(ConfigRepository::class);
+        $config->set('authorization.session.source', StubSessionPolicySource::class);
+
+        (new AuthorizationServiceProvider($app))->register();
+
+        $configured = $app->make(SessionPolicySource::class);
+
+        self::assertInstanceOf(StubSessionPolicySource::class, $configured);
+
+        $bound = new StubSessionPolicySource(['editor']);
+
+        $app->instance(SessionPolicySource::class, $bound);
+        $config->set('authorization.session.scopes', ['editor' => ['posts:read']]);
+
+        $this->startNextJob();
+
+        self::assertSame($bound, $app->make(SessionPolicySource::class));
+        self::assertSame(['posts:read'], $app->make(SessionScopes::class)->patternsFor(['editor']));
+
+        /** @var \SineMacula\Laravel\Authorization\AuthorizationManager $manager */
+        $manager = $app->make(AuthorizationManager::class);
+        $user    = new \stdClass;
+
+        self::assertSame(DecisionReason::SESSION_POLICY, $manager->for($user)->check('posts:edit')->reason);
+        self::assertSame(DecisionReason::NO_MATCH, $manager->for($user)->check('posts:read')->reason);
+        self::assertCount(2, $bound->calls);
     }
 
     /**

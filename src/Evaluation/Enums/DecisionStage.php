@@ -37,7 +37,7 @@ enum DecisionStage: string
     /** A permission boundary of the subject's principal or identity does not allow the check. */
     case BOUNDARY = 'boundary';
 
-    /** A session cap, the credential's scopes, does not allow the check (BL-50; none apply yet). */
+    /** A session cap, the credential's scopes or a set of actions the caller passed, does not allow the check. */
     case SESSION = 'session';
 
     /** An allow from a policy statement, a resource policy naming the subject, or a permission the subject holds. */

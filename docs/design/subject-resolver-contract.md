@@ -54,6 +54,13 @@ interface SubjectResolver
 
 Evaluation and RBAC run against `subject`; the decision events carry it in their `principal` field.
 
+A subject that implements `AuthorizableMachine` is a machine principal (AUTHZ-2.4): it is allowed nothing without its
+credential's scopes, which the bound `SessionPolicySource` answers for the `Subject` (see [Evaluation Order and Deny
+Precedence](evaluation-order-and-deny-precedence.md#session-caps)). A machine is never treated as a person: when a
+resolver pairs a machine with a person as its `identity`, or a person with a machine, the identity's roles,
+permissions and policies never reach the subject, while its boundaries and its inactivity still do. The shipped
+resolver makes the user its own identity, so it never pairs the two.
+
 ## Shipped Implementation
 
 `AuthGuardSubjectResolver` is the default binding, configured in `authorization.subject_resolver`. It reads the user

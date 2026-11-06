@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
 use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
@@ -35,9 +36,11 @@ use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
+use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubSessionPolicySource;
 use Tests\Feature\Stubs\StubSubjectResolver;
 
 /**
@@ -1328,6 +1331,75 @@ final class AuthorizationManagerTest extends TestCase
         $exception = $this->denialOf($manager, 'posts:create');
 
         self::assertSame(DecisionReason::NO_MATCH, $exception->getReason());
+    }
+
+    /**
+     * capped() returns a scoped manager whose checks are capped, leaving the
+     * manager it came from uncapped; capping it again intersects the caps, and
+     * a manager with no session cap resolver still applies them.
+     *
+     * @return void
+     */
+    public function testCappedReturnsAScopedManagerWhoseCapsIntersect(): void
+    {
+        $manager = $this->managerResolving(new StubSubjectResolver($this->stubAuthorizable(['posts:read', 'posts:edit'])));
+        $capped  = $manager->capped(['key' => 'posts:*']);
+        $nested  = $capped->capped(['posts:read']);
+
+        self::assertNotSame($manager, $capped);
+        self::assertNotSame($capped, $nested);
+        self::assertTrue($capped->can('posts:edit'));
+        self::assertTrue($nested->can('posts:read'));
+        self::assertTrue($manager->can('posts:edit'));
+
+        $denied = $nested->check('posts:edit');
+
+        self::assertSame(DecisionReason::SESSION_POLICY, $denied->reason);
+        self::assertSame(DecisionStage::SESSION, $denied->stage);
+        self::assertEquals(
+            [
+                new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::UNCAPPED),
+                new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::UNCAPPED),
+                new TraceEntry(DecisionStage::SESSION, TraceOutcome::COVERED, null, [], 'capped[1]'),
+                new TraceEntry(DecisionStage::SESSION, TraceOutcome::REFUSED, null, [], 'capped[2]'),
+            ],
+            $denied->trace,
+        );
+    }
+
+    /**
+     * The session cap resolver the manager is given makes each check's caps,
+     * the credential's included, asked about the check's subject; without one a
+     * machine is still allowed nothing, as no credential gives it scopes.
+     *
+     * @return void
+     */
+    public function testTheSessionCapResolverCapsEachCheck(): void
+    {
+        $machine = \Mockery::mock(AuthorizableIdentity::class, AuthorizableMachine::class);
+
+        $machine->shouldReceive('hasPermission')->andReturn(true);
+        $machine->shouldReceive('getPolicies')->andReturn([]);
+        $machine->shouldReceive('isAuthorizationActive')->andReturn(true);
+
+        $source = new StubSessionPolicySource(['posts:*']);
+        $capped = new AuthorizationManager(
+            evaluator: new PolicyEvaluator,
+            subjectResolver: new StubSubjectResolver($machine),
+            policyResolver: new DefaultPolicyResolver,
+            lastDecisionStore: new LastDecisionStore,
+            sessionCaps: new SessionCapResolver($source),
+        );
+
+        self::assertTrue($capped->can('posts:edit'));
+        self::assertSame(DecisionReason::SESSION_POLICY, $capped->check('users:read')->reason);
+        self::assertCount(2, $source->calls);
+        self::assertSame($machine, $source->calls[0]->subject);
+
+        $uncredentialed = $this->managerResolving(new StubSubjectResolver($machine));
+
+        self::assertSame(DecisionReason::SESSION_POLICY, $uncredentialed->check('posts:edit')->reason);
+        self::assertSame(DecisionReason::SESSION_POLICY, $uncredentialed->capped(['*'])->check('posts:edit')->reason);
     }
 
     /**

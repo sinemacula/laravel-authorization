@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Support;
 
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableMachine;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPolicies;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
@@ -13,13 +14,18 @@ use SineMacula\Laravel\Authorization\Subject;
 
 /**
  * The grants a decision about a subject considers: the subject's own, and its
- * identity's when the identity is another model.
+ * identity's when the identity is another model of the same kind.
  *
  * An identity's grants hold in every principal of that identity, a principal's
  * only in that principal, and nothing reaches a principal through another
- * principal of the same identity. The permission boundaries of both cap every
- * check about the subject. A subject or identity that reports itself inactive
- * is denied everything, whatever either holds.
+ * principal of the same identity. A machine is never treated as a person
+ * (AUTHZ-2.4): the identity's roles, permissions and policies reach the subject
+ * only when both are machines (see `AuthorizableMachine`) or neither is, so a
+ * person's grants never reach a machine principal and a machine's never reach a
+ * person. What only narrows a check still holds across the two: the permission
+ * boundaries of both cap every check about the subject, and a subject or
+ * identity that reports itself inactive is denied everything, whatever either
+ * holds.
  *
  * The manager, the Blade role helpers and the `role:` middleware all ask here,
  * so they read the same grants.
@@ -47,8 +53,9 @@ final class SubjectGrants
     }
 
     /**
-     * Determine whether the subject or its identity holds the role, under the
-     * guard when one is given; never while either is inactive.
+     * Determine whether the subject or its identity, when it grants to the
+     * subject, holds the role, under the guard when one is given; never while
+     * either is inactive.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $role
@@ -61,7 +68,7 @@ final class SubjectGrants
             return false;
         }
 
-        foreach (self::grantees($subject) as $grantee) {
+        foreach ([$subject->subject, self::grantingIdentity($subject)] as $grantee) {
             if ($grantee instanceof SupportsRoles && $grantee->hasRole($role, $guard)) {
                 return true;
             }
@@ -71,9 +78,9 @@ final class SubjectGrants
     }
 
     /**
-     * Determine whether the subject or its identity holds a permission that
-     * matches the action, directly or through a role; never while either is
-     * inactive.
+     * Determine whether the subject or its identity, when it grants to the
+     * subject, holds a permission that matches the action, directly or through
+     * a role; never while either is inactive.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
@@ -85,7 +92,7 @@ final class SubjectGrants
             return false;
         }
 
-        foreach (self::grantees($subject) as $grantee) {
+        foreach ([$subject->subject, self::grantingIdentity($subject)] as $grantee) {
             if ($grantee instanceof SupportsPermissions && $grantee->hasPermission($action)) {
                 return true;
             }
@@ -95,15 +102,15 @@ final class SubjectGrants
     }
 
     /**
-     * Return the policies attached to the subject's identity when it is another
-     * model; the subject's own come through the policy resolver.
+     * Return the policies attached to the subject's identity when it grants to
+     * the subject; the subject's own come through the policy resolver.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
      */
     public static function identityPolicies(Subject $subject): array
     {
-        $identity = self::separateIdentity($subject);
+        $identity = self::grantingIdentity($subject);
 
         return $identity instanceof SupportsPolicies ? $identity->getPolicies() : [];
     }
@@ -121,6 +128,21 @@ final class SubjectGrants
     public static function boundaries(Subject $subject): array
     {
         return [...BoundaryResolver::boundariesFor($subject->subject), ...BoundaryResolver::boundariesFor(self::separateIdentity($subject))];
+    }
+
+    /**
+     * Return the subject's identity when it is another model than the subject
+     * and of the same kind, both machines or neither, so its grants reach the
+     * subject; null otherwise, which holds nothing.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @return object|null
+     */
+    public static function grantingIdentity(Subject $subject): ?object
+    {
+        $identity = self::separateIdentity($subject);
+
+        return $identity instanceof AuthorizableMachine === $subject->subject instanceof AuthorizableMachine ? $identity : null;
     }
 
     /**

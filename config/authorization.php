@@ -8,6 +8,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
+use SineMacula\Laravel\Authorization\Resolvers\NoSessionPolicy;
 use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 
 return [
@@ -137,12 +138,13 @@ return [
     | sets without the host application editing a central enum. The classes
     | are validated at boot, but a provider is read only by
     | `authorization:sync`, which writes its permissions alongside the enums',
-    | and by the policy validator, which accepts a policy pattern that matches
-    | one of them. A provider's permissions can be checked through the
-    | `Authorization` facade and `hasPermission()`, but they are not
-    | registered as Gate abilities and do not appear in
-    | `effectivePermissions()`; declare a permission as an enum case when it
-    | must work with `Gate`, `@can` or the `can:` middleware.
+    | by the policy validator, which accepts a policy pattern that matches
+    | one of them, and at boot when the session scope map names a scope, to
+    | check its patterns (see Session policies below). A provider's
+    | permissions can be checked through the `Authorization` facade and
+    | `hasPermission()`, but they are not registered as Gate abilities and do
+    | not appear in `effectivePermissions()`; declare a permission as an enum
+    | case when it must work with `Gate`, `@can` or the `can:` middleware.
     |
     */
 
@@ -406,6 +408,43 @@ return [
     */
 
     'requirement_checker' => RefusingRequirementChecker::class,
+
+    /*
+    |---------------------------------------------------------------------------
+    | Session policies
+    |---------------------------------------------------------------------------
+    |
+    | A check may be capped (AUTHZ-7.5): by the scopes of the subject's
+    | credential, and by the actions the caller passes to
+    | `Authorization::capped([...])` for a delegated or restricted call. Every
+    | cap present must cover the action, or it is denied as `session_policy`.
+    | A cap grants nothing. No cap differs from an empty one, which allows
+    | nothing.
+    |
+    | `source` is a class implementing `SessionPolicySource`, which answers
+    | the scopes the subject's credential carries, or null for no cap. The
+    | shipped default carries none; under the suite `sinemacula/laravel-iam`
+    | binds one reading the caller's credential. A machine principal
+    | (`AuthorizableMachine`) without credential scopes is allowed nothing.
+    | Null or a class that does not implement the contract is refused at
+    | boot; a class named here is built per request or job.
+    |
+    | `scopes` maps a scope to the action patterns it names, for example
+    | `['editor' => ['posts:*', 'comments:read']]`. A scope listed on its own
+    | (`['posts:read']`), like a scope the map does not name, names itself as
+    | an action or an action pattern. Each pattern must cover at least one
+    | declared permission, so the permission enums and providers are read at
+    | boot when the map names a scope, and a bad map is refused there.
+    | `CatalogueScopeRegistry`, which an application may bind as the
+    | `ScopeRegistry`, accepts the scopes named here and those naming a
+    | declared permission.
+    |
+    */
+
+    'session' => [
+        'source' => NoSessionPolicy::class,
+        'scopes' => [],
+    ],
 
     /*
     |---------------------------------------------------------------------------

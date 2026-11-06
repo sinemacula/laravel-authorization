@@ -23,13 +23,14 @@ final class TraceOutcomeTest extends TestCase
 {
     /**
      * The enum defines exactly the six statement outcomes, the two permission
-     * outcomes, the outcome of a guardrail or boundary that refuses the check,
-     * the outcome of a cap stage that caps nothing and that of a cap stage the
-     * check is exempt from, in declaration order.
+     * outcomes, the outcome of a guardrail, boundary or session cap that
+     * refuses the check, that of a session cap that covers it, the outcome of a
+     * cap stage that caps nothing and that of a cap stage the check is exempt
+     * from, in declaration order.
      *
      * @return void
      */
-    public function testExactlyElevenCases(): void
+    public function testExactlyTwelveCases(): void
     {
         self::assertSame(
             [
@@ -42,6 +43,7 @@ final class TraceOutcomeTest extends TestCase
                 TraceOutcome::HELD,
                 TraceOutcome::NOT_HELD,
                 TraceOutcome::REFUSED,
+                TraceOutcome::COVERED,
                 TraceOutcome::UNCAPPED,
                 TraceOutcome::EXEMPT,
             ],
@@ -65,6 +67,7 @@ final class TraceOutcomeTest extends TestCase
         self::assertSame('held', TraceOutcome::HELD->value);
         self::assertSame('not_held', TraceOutcome::NOT_HELD->value);
         self::assertSame('refused', TraceOutcome::REFUSED->value);
+        self::assertSame('covered', TraceOutcome::COVERED->value);
         self::assertSame('uncapped', TraceOutcome::UNCAPPED->value);
         self::assertSame('exempt', TraceOutcome::EXEMPT->value);
     }
@@ -86,6 +89,7 @@ final class TraceOutcomeTest extends TestCase
         self::assertSame(TraceOutcome::HELD, TraceOutcome::tryFrom('held'));
         self::assertSame(TraceOutcome::NOT_HELD, TraceOutcome::tryFrom('not_held'));
         self::assertSame(TraceOutcome::REFUSED, TraceOutcome::tryFrom('refused'));
+        self::assertSame(TraceOutcome::COVERED, TraceOutcome::tryFrom('covered'));
         self::assertSame(TraceOutcome::UNCAPPED, TraceOutcome::tryFrom('uncapped'));
         self::assertSame(TraceOutcome::EXEMPT, TraceOutcome::tryFrom('exempt'));
         self::assertNull(TraceOutcome::tryFrom('skipped'));
