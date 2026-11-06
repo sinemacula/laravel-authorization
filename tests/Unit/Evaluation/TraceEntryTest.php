@@ -98,6 +98,18 @@ final class TraceEntryTest extends TestCase
     }
 
     /**
+     * toString() names the session cap a session step is about, by its name,
+     * whether it covered the action or refused it.
+     *
+     * @return void
+     */
+    public function testToStringNamesTheSessionCap(): void
+    {
+        self::assertSame('[session] credential: covered', (new TraceEntry(DecisionStage::SESSION, TraceOutcome::COVERED, null, [], 'credential'))->toString());
+        self::assertSame('[session] capped[2]: refused', (new TraceEntry(DecisionStage::SESSION, TraceOutcome::REFUSED, null, [], 'capped[2]'))->toString());
+    }
+
+    /**
      * toString() names the statement assessed before the boundary it belongs
      * to.
      *

@@ -10,8 +10,8 @@ use Illuminate\Support\Facades\Facade;
  * Authorization facade.
  *
  * Static proxy to the container-bound authorization manager. Every call is
- * forwarded to a fresh manager scope so `for()` / `withPolicies()` chains do
- * not leak between requests.
+ * forwarded to a fresh manager scope so `for()` / `withPolicies()` / `capped()`
+ * chains do not leak between requests.
  *
  * @phpcs:disable Generic.Files.LineLength.TooLong
  *
@@ -21,6 +21,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static \SineMacula\Laravel\Authorization\AuthorizationManager for(object $subject)
  * @method static \SineMacula\Laravel\Authorization\AuthorizationManager forUser(object $user)
  * @method static \SineMacula\Laravel\Authorization\AuthorizationManager withPolicies(array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy> $policies)
+ * @method static \SineMacula\Laravel\Authorization\AuthorizationManager capped(list<string> $actions)
  * @method static \SineMacula\Laravel\Authorization\Evaluation\Decision|null lastDecision()
  * @method static void forgetLastDecision()
  * @method static string explain(string $action, mixed $resource = null, array<string, mixed> $context = [])

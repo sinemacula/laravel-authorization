@@ -12,8 +12,9 @@ namespace SineMacula\Laravel\Authorization\Contracts;
  * config array. `authorization:sync` resolves each provider through the
  * container and writes the definitions it returns to the permission catalogue,
  * alongside the cases of the configured permission enums. The service provider
- * validates the configured classes at boot but never reads a provider there, so
- * booting writes no `Permission` rows.
+ * validates the configured classes at boot, and reads a provider there only to
+ * check the scope map when `authorization.session.scopes` names a scope;
+ * booting never writes `Permission` rows either way.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

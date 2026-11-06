@@ -22,12 +22,12 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 final class DecisionReasonTest extends TestCase
 {
     /**
-     * The enum defines exactly the eleven denial reasons, in declaration order:
+     * The enum defines exactly the twelve denial reasons, in declaration order:
      * an allowed check carries no reason, so there is no allow case.
      *
      * @return void
      */
-    public function testExactlyElevenCases(): void
+    public function testExactlyTwelveCases(): void
     {
         self::assertSame(
             [
@@ -42,6 +42,7 @@ final class DecisionReasonTest extends TestCase
                 DecisionReason::INSUFFICIENT_AUTHENTICATION,
                 DecisionReason::GUARDRAIL,
                 DecisionReason::BOUNDARY,
+                DecisionReason::SESSION_POLICY,
             ],
             DecisionReason::cases(),
         );
@@ -65,6 +66,7 @@ final class DecisionReasonTest extends TestCase
         self::assertSame('insufficient_authentication', DecisionReason::INSUFFICIENT_AUTHENTICATION->value);
         self::assertSame('guardrail', DecisionReason::GUARDRAIL->value);
         self::assertSame('boundary', DecisionReason::BOUNDARY->value);
+        self::assertSame('session_policy', DecisionReason::SESSION_POLICY->value);
     }
 
     /**
@@ -98,6 +100,7 @@ final class DecisionReasonTest extends TestCase
         self::assertSame('a statement allows it once further authentication is met', DecisionReason::INSUFFICIENT_AUTHENTICATION->label());
         self::assertSame('a guardrail does not allow it', DecisionReason::GUARDRAIL->label());
         self::assertSame('a permission boundary does not allow it', DecisionReason::BOUNDARY->label());
+        self::assertSame('a session cap does not allow it', DecisionReason::SESSION_POLICY->label());
     }
 
     /**
@@ -130,6 +133,7 @@ final class DecisionReasonTest extends TestCase
         self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, DecisionReason::tryFrom('insufficient_authentication'));
         self::assertSame(DecisionReason::GUARDRAIL, DecisionReason::tryFrom('guardrail'));
         self::assertSame(DecisionReason::BOUNDARY, DecisionReason::tryFrom('boundary'));
+        self::assertSame(DecisionReason::SESSION_POLICY, DecisionReason::tryFrom('session_policy'));
     }
 
     /**

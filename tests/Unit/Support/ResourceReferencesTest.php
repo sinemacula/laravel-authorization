@@ -82,6 +82,20 @@ final class ResourceReferencesTest extends TestCase
     }
 
     /**
+     * The identifier of a resolved reference is the one it carries, and there
+     * is none for no resource or one that cannot be identified.
+     *
+     * @return void
+     */
+    public function testTheIdentifierOfAReferenceIsTheOneItCarries(): void
+    {
+        self::assertSame('post:42', ResourceReferences::identifierOf(ResourceReference::record('post', '42')));
+        self::assertSame('post:*', ResourceReferences::identifierOf(ResourceReference::type('post')));
+        self::assertNull(ResourceReferences::identifierOf(null));
+        self::assertNull(ResourceReferences::identifierOf(false));
+    }
+
+    /**
      * A saved model is a record of its morph class and key, with no tenant when
      * the resolver knows none, and keeps the model itself.
      *

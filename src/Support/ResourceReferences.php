@@ -64,6 +64,19 @@ final class ResourceReferences
     }
 
     /**
+     * Return the identifier a resolved reference carries, or null for no
+     * resource or one that cannot be identified, as a decision's events report
+     * it.
+     *
+     * @param  false|\SineMacula\Laravel\Authorization\Support\ResourceReference|null  $reference
+     * @return string|null
+     */
+    public static function identifierOf(false|ResourceReference|null $reference): ?string
+    {
+        return $reference === false ? null : $reference?->identifier;
+    }
+
+    /**
      * Return the reference to the record a `(type, id)` pair names, without a
      * tenant and without asking the bound resource tenant resolver, or false
      * when it is not a type and a non-empty string or number, either holds a

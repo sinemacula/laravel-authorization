@@ -3,8 +3,9 @@
 The application declares its platform permissions in code: the cases of string-backed enums implementing
 `PermissionEnum`, and the definitions returned by classes implementing `PermissionProvider`. `authorization:sync`
 writes that catalogue to the `permissions` table on deploy, with the permissions the package declares for its own
-services. Booting the package never reads a provider or touches the database. This note documents what the sync
-changes, what it only reports, and how it fails.
+services. Booting the package never touches the database, and reads a provider only to check the session scope map
+when `authorization.session.scopes` names a scope. This note documents what the sync changes, what it only reports,
+and how it fails.
 
 ## Invariants
 

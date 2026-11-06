@@ -49,6 +49,9 @@ enum DecisionReason: string
     /** A permission boundary of the subject's principal or identity does not allow the check. */
     case BOUNDARY = 'boundary';
 
+    /** A session cap, the scopes of the subject's credential or a set of actions the caller passed, does not allow the check. */
+    case SESSION_POLICY = 'session_policy';
+
     /**
      * Return a short description of the reason, for explanations.
      *
@@ -68,6 +71,7 @@ enum DecisionReason: string
             self::INSUFFICIENT_AUTHENTICATION => 'a statement allows it once further authentication is met',
             self::GUARDRAIL                   => 'a guardrail does not allow it',
             self::BOUNDARY                    => 'a permission boundary does not allow it',
+            self::SESSION_POLICY              => 'a session cap does not allow it',
         };
     }
 }

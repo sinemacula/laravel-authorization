@@ -6,19 +6,22 @@ namespace Tests\Feature;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
+use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\SubjectGrants;
+use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\Feature\Stubs\SuspendableIdentity;
 use Tests\TestCase;
 
 /**
  * Feature tests for the grants a decision about a subject considers: its own
- * and its identity's, never while either is inactive.
+ * and its identity's, only when both are machines or neither is, and never
+ * while either is inactive.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -129,6 +132,108 @@ final class SubjectGrantsTest extends TestCase
         self::assertTrue(SubjectGrants::isInactive($subject));
         self::assertFalse(SubjectGrants::holdsRole($subject, 'editor'));
         self::assertFalse(SubjectGrants::holdsPermission($subject, 'posts:edit'));
+    }
+
+    /**
+     * A person's grants never reach a machine principal: the roles, permissions
+     * and allow statements of a person identity count for nothing about the
+     * machine, while its deny statements, its boundary and its being inactive
+     * still narrow every check.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPersonsGrantsNeverReachAMachine(): void
+    {
+        $machine = StubMachine::create(['id' => 'svc-1']);
+        $person  = SuspendableIdentity::create(['id' => 'person-1']);
+        $subject = new Subject($machine, $person);
+        $service = BoundaryService::instance();
+
+        self::assertNotNull($service);
+
+        $person->assignRole(Role::create(['name' => 'staff']));
+        $person->givePermission(Permission::create(['name' => 'admin:read']));
+        $person->attachPolicy(Policy::create(['name' => 'person', 'document' => ['version' => 1, 'statements' => []]]));
+        $person->attachPolicy(Policy::create(['name' => 'person-allow', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['admin:*']]]]]));
+        $person->attachPolicy(Policy::create(['name' => 'person-mixed', 'document' => ['statements' => [
+            ['effect' => 'allow', 'actions' => ['posts:*']],
+            ['effect' => 'deny', 'actions' => ['exports:*']],
+            ['effect' => 'allow', 'actions' => ['comments:*']],
+            ['effect' => 'deny', 'actions' => ['billing:*']],
+        ]]]));
+        $service->set($person, Policy::create(['name' => 'person-cap', 'document' => ['version' => 1, 'statements' => []]]));
+
+        $denials = SubjectGrants::identityPolicies($subject);
+
+        self::assertNull(SubjectGrants::grantingIdentity($subject));
+        self::assertFalse(SubjectGrants::holdsRole($subject, 'staff'));
+        self::assertFalse(SubjectGrants::holdsPermission($subject, 'admin:read'));
+        self::assertCount(1, $denials);
+        self::assertSame('person-mixed', $denials[0]->name);
+        self::assertSame([1, 3], \array_keys($denials[0]->statements));
+        self::assertSame([['exports:*'], ['billing:*']], \array_values(\array_map(static fn (Statement $statement): ?array => $statement->actions, $denials[0]->statements)));
+        self::assertCount(1, SubjectGrants::boundaries($subject));
+
+        $person->suspended = true;
+
+        self::assertTrue(SubjectGrants::isInactive($subject));
+    }
+
+    /**
+     * A machine's grants never reach a person: the roles, permissions and allow
+     * statements of a machine identity count for nothing about a person
+     * principal, and a policy of it with no deny statement gives nothing.
+     *
+     * @return void
+     */
+    public function testAMachinesGrantsNeverReachAPerson(): void
+    {
+        $person  = SuspendableIdentity::create(['id' => 'account-1']);
+        $machine = StubMachine::create(['id' => 'svc-1']);
+        $subject = new Subject($person, $machine);
+
+        $machine->assignRole(Role::create(['name' => 'deployer']));
+        $machine->givePermission(Permission::create(['name' => 'deploys:run']));
+        $machine->attachPolicy(Policy::create(['name' => 'machine', 'document' => ['version' => 1, 'statements' => []]]));
+
+        self::assertNull(SubjectGrants::grantingIdentity($subject));
+        self::assertFalse(SubjectGrants::holdsRole($subject, 'deployer'));
+        self::assertFalse(SubjectGrants::holdsPermission($subject, 'deploys:run'));
+        self::assertSame([], SubjectGrants::identityPolicies($subject));
+    }
+
+    /**
+     * A machine identity's grants reach a machine principal, as a person
+     * identity's reach a person principal; a subject that is its own identity,
+     * or has none, has no other identity to grant to it.
+     *
+     * @return void
+     */
+    public function testAnIdentityOfTheSameKindGrantsToTheSubject(): void
+    {
+        $machine = StubMachine::create(['id' => 'svc-1']);
+        $owner   = StubMachine::create(['id' => 'svc-owner']);
+        $subject = new Subject($machine, $owner);
+
+        $owner->assignRole(Role::create(['name' => 'deployer']));
+        $owner->givePermission(Permission::create(['name' => 'deploys:run']));
+        $owner->attachPolicy(Policy::create(['name' => 'owner', 'document' => ['version' => 1, 'statements' => []]]));
+
+        $names = static fn (array $policies): array => \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $policies);
+
+        self::assertSame($owner, SubjectGrants::grantingIdentity($subject));
+        self::assertTrue(SubjectGrants::holdsRole($subject, 'deployer'));
+        self::assertTrue(SubjectGrants::holdsPermission($subject, 'deploys:run'));
+        self::assertSame(['owner'], $names(SubjectGrants::identityPolicies($subject)));
+        self::assertNull(SubjectGrants::grantingIdentity(new Subject($machine, $machine)));
+        self::assertNull(SubjectGrants::grantingIdentity(new Subject($machine)));
+
+        $person   = SuspendableIdentity::create(['id' => 'account-1']);
+        $identity = StubSecondIdentity::create(['id' => 'person-1']);
+
+        self::assertSame($identity, SubjectGrants::grantingIdentity(new Subject($person, $identity)));
     }
 
     /**

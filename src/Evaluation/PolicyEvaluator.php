@@ -39,8 +39,14 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  *    `boundary`, with a step that names it, and with none the stage caps
  *    nothing. A boundary grants nothing: passing it only lets the allows be
  *    weighed.
- * 4. *Session*: no session cap applies yet (BL-50); the stage records that it
- *    capped nothing.
+ * 4. *Session*: each session cap the evaluator was given through `capped()`
+ *    (see `SessionCaps`), the scopes of the subject's credential and each set
+ *    of actions the caller passed, must cover the action. The caps are
+ *    intersected: one that does not cover it, an empty one included, denies the
+ *    check as `session_policy`, with a step that names it, and each that does
+ *    adds a step naming it as covering the action. With none the stage caps
+ *    nothing. A session cap grants nothing, and has no statements, so nothing
+ *    of it is weighed at the deny stage.
  * 5. *Allow*: every allow statement is assessed; failing an allow, a permission
  *    the subject holds allows, asked through the callback the caller gives,
  *    once, and only when no statement allowed and none was invalid.
@@ -53,8 +59,9 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  *
  * Every stage the decision reaches is recorded in its trace: each statement it
  * assessed, the permission step, a step naming each guardrail and boundary that
- * refused the check, a step for a cap stage that capped nothing, and one for a
- * cap stage the check is exempt from.
+ * refused the check, a step naming each session cap and whether it covered the
+ * action, a step for a cap stage that capped nothing, and one for a cap stage
+ * the check is exempt from.
  *
  * The evaluator fails closed: a deny statement applies when its test cannot be
  * decided (a missing context key, an unresolved `${…}` reference), and a
@@ -109,12 +116,15 @@ final class PolicyEvaluator
     /** @var \SineMacula\Laravel\Authorization\Evaluation\StatementEntries|null Each policy's statements, worked out once per policy. */
     private ?StatementEntries $entries = null;
 
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\SessionCaps|null The session caps every check is decided under, given through `capped()`; null caps nothing. */
+    private ?SessionCaps $session = null;
+
     /** @var array<string, \SineMacula\Laravel\Authorization\Evaluation\TraceEntry> The step each cap stage adds when it caps nothing, or the check is exempt from it, made once. */
     private array $passed = [];
 
     /**
      * Decide the check from the statements of the policies, the boundaries and
-     * the guardrails.
+     * the guardrails, and from the session caps.
      *
      * The context is the check's own: every statement of the check reads the
      * same one, which builds each namespace the first time a statement reads
@@ -127,7 +137,8 @@ final class PolicyEvaluator
      * the guardrails the guardrails that do, each of which must allow it; null
      * guardrails exempt the check from the guardrail stage, their denies
      * included. The permission callback answers whether the subject holds a
-     * permission the action names; with none, no permission is consulted.
+     * permission the action names; with none, no permission is consulted. The
+     * session caps are those `capped()` gave the evaluator, if any.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
      * @param  string  $action
@@ -151,6 +162,24 @@ final class PolicyEvaluator
         $statements = ($this->entries ??= new StatementEntries)->of($policies, $boundaries, $guardrails);
 
         return $this->decide($statements, $action, $resource, $context, $permission)->withFreshness($context->requirementFreshness());
+    }
+
+    /**
+     * Return an evaluator deciding every check it evaluates under the session
+     * caps, every one of which must cover the action, sharing this evaluator's
+     * statements already worked out. No cap at all caps nothing, while an empty
+     * cap allows nothing.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\SessionCaps  $session
+     * @return self
+     */
+    public function capped(SessionCaps $session): self
+    {
+        $scoped          = clone $this;
+        $scoped->entries = $this->entries ??= new StatementEntries;
+        $scoped->session = $session;
+
+        return $scoped;
     }
 
     /**
@@ -183,9 +212,6 @@ final class PolicyEvaluator
      * and return the denial of the first that does not allow the check, or null
      * when none caps it, adding each stage's steps to the trace.
      *
-     * Session caps (BL-50) take their place here as they arrive; until then the
-     * stage records that it capped nothing.
-     *
      * @param  Gathered  $statements
      * @param  string  $action
      * @param  string|null  $resource
@@ -204,21 +230,51 @@ final class PolicyEvaluator
             $capped = $this->capBy(DecisionStage::BOUNDARY, DecisionReason::BOUNDARY, $statements['boundaries'], $action, $resource, $context, $trace);
         }
 
-        if ($capped === null) {
-            $trace[] = $this->passed(DecisionStage::SESSION, TraceOutcome::UNCAPPED);
-        }
-
-        return $capped;
+        return $capped ?? $this->capBySession($action, $trace);
     }
 
     /**
-     * Run one cap stage, the guardrails' or the boundaries': every allow
-     * statement of every cap is assessed, each cap in turn, and the check
-     * passes only when each cap has one that allows it. Each cap that does not
-     * adds a step naming it. Return the denial when one does not, with the
-     * stage's reason, or as `invalid_policy` when a cap's statement cannot be
-     * evaluated, or null when every cap allows it, there is none, or the caps
-     * are null because the check is exempt from the stage.
+     * Run the session stage: every session cap must cover the action, each
+     * adding a step that names it, as covering the action or refusing it.
+     * Return the denial, as `session_policy`, when one does not, or null when
+     * every cap covers it or there is none.
+     *
+     * @param  string  $action
+     * @param  list<\SineMacula\Laravel\Authorization\Evaluation\TraceEntry>  $trace
+     *
+     * @param-out list<\SineMacula\Laravel\Authorization\Evaluation\TraceEntry>  $trace
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision|null
+     */
+    private function capBySession(string $action, array &$trace): ?Decision
+    {
+        $session = $this->session;
+
+        if ($session === null || $session->caps === []) {
+            $trace[] = $this->passed(DecisionStage::SESSION, TraceOutcome::UNCAPPED);
+
+            return null;
+        }
+
+        $refused = false;
+
+        foreach ($session->caps as [$name, $patterns]) {
+            $covers  = SessionCaps::covers($patterns, $action);
+            $refused = $refused || !$covers;
+            $trace[] = new TraceEntry(DecisionStage::SESSION, $covers ? TraceOutcome::COVERED : TraceOutcome::REFUSED, null, [], $name);
+        }
+
+        return $refused ? Decision::deny(DecisionReason::SESSION_POLICY, DecisionStage::SESSION, [], $trace) : null;
+    }
+
+    /**
+     * Run one cap stage of statements, the guardrails' or the boundaries':
+     * every allow statement of every cap is assessed, each cap in turn, and the
+     * check passes only when each cap has one that allows it. Each cap that
+     * does not adds a step naming it. Return the denial when one does not, with
+     * the stage's reason, or as `invalid_policy` when a cap's statement cannot
+     * be evaluated, or null when every cap allows it, there is none, or the
+     * caps are null because the check is exempt from the stage.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage  $stage
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason  $reason

@@ -9,8 +9,10 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
+use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
+use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
@@ -20,12 +22,14 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
+use SineMacula\Laravel\Authorization\Resolvers\NoSessionPolicy;
 use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 use Tests\Feature\Stubs\ConflictingResourceAttributes;
 use Tests\Feature\Stubs\Contracts\PermissionEnumInterface;
 use Tests\Feature\Stubs\CustomPermission;
 use Tests\Feature\Stubs\CustomPolicy;
 use Tests\Feature\Stubs\CustomRole;
+use Tests\Feature\Stubs\EmptyActionCatalogue;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
@@ -620,6 +624,41 @@ final class ConfigValidatorTest extends TestCase
             fn () => ConfigValidator::validate(['requirement_checker' => \stdClass::class] + $config, $this->app),
             'authorization.requirement_checker',
             'class \'stdClass\' does not implement ' . AuthenticationRequirementChecker::class . '.',
+        );
+    }
+
+    /**
+     * The `session` config is validated with the rest: the shipped source and
+     * an empty scope map pass, as does a config without the key, and a source
+     * that is no source, or a scope map naming a pattern that covers no
+     * declared permission, is refused under its key.
+     *
+     * @return void
+     */
+    public function testTheSessionConfigIsValidated(): void
+    {
+        $config = $this->authorizationConfig();
+
+        self::assertSame(['source' => NoSessionPolicy::class, 'scopes' => []], $config['session']);
+
+        ConfigValidator::validate($config, $this->app);
+
+        unset($config['session']);
+
+        ConfigValidator::validate($config, $this->app);
+
+        $this->assertRejected(
+            fn () => ConfigValidator::validate(['session' => ['source' => \stdClass::class]] + $config, $this->app),
+            'authorization.session.source',
+            'class \'stdClass\' does not implement ' . SessionPolicySource::class . '.',
+        );
+
+        $this->app?->instance(ActionCatalogue::class, new EmptyActionCatalogue);
+
+        $this->assertRejected(
+            fn () => ConfigValidator::validate(['session' => ['scopes' => ['editor' => ['posts:*']]]] + $config, $this->app),
+            'authorization.session.scopes',
+            'the scope \'editor\' names \'posts:*\', which covers no declared permission.',
         );
     }
 

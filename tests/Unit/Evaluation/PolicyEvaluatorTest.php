@@ -20,6 +20,7 @@ use SineMacula\Laravel\Authorization\Evaluation\PrincipalSelectors;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementCheck;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementFreshness;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
+use SineMacula\Laravel\Authorization\Evaluation\SessionCaps;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
@@ -2076,6 +2077,168 @@ final class PolicyEvaluatorTest extends TestCase
     }
 
     /**
+     * A session cap that does not cover the action denies it as
+     * `session_policy` at the session stage, naming the cap, before any allow
+     * statement or permission is weighed.
+     *
+     * @return void
+     */
+    public function testASessionCapThatDoesNotCoverDeniesBeforeTheAllows(): void
+    {
+        $asked    = new \ArrayObject;
+        $policy   = self::policy('p', [['effect' => 'allow', 'actions' => ['posts:edit']]]);
+        $session  = SessionCaps::of(null, [['posts:read']]);
+        $decision = (new PolicyEvaluator)->capped($session)->evaluate([$policy], 'posts:edit', null, [], [], static function () use ($asked): bool {
+            $asked->append(true);
+
+            return true;
+        });
+
+        self::assertFalse($decision->isAllowed());
+        self::assertSame(DecisionReason::SESSION_POLICY, $decision->reason);
+        self::assertSame(DecisionStage::SESSION, $decision->stage);
+        self::assertSame([], $decision->statements);
+        self::assertEquals([
+            ...self::uncapped(DecisionStage::GUARDRAIL, DecisionStage::BOUNDARY),
+            self::sessionStep(TraceOutcome::REFUSED, 'capped[1]'),
+        ], $decision->trace);
+        self::assertCount(0, $asked);
+        self::assertStringEndsWith('[session] capped[1]: refused', $decision->explain());
+    }
+
+    /**
+     * Every session cap must cover the action: the credential's and each
+     * explicit one intersect, each adding a step naming it as covering the
+     * action or refusing it.
+     *
+     * @return void
+     */
+    public function testEverySessionCapMustCoverTheAction(): void
+    {
+        $session = SessionCaps::of(['posts:*'], [['posts:read', 'comments:read']]);
+        $read    = (new PolicyEvaluator)->capped($session)->evaluate([], 'posts:read', null, [], [], static fn (): bool => true);
+        $edit    = (new PolicyEvaluator)->capped($session)->evaluate([], 'posts:edit', null, [], [], static fn (): bool => true);
+        $comment = (new PolicyEvaluator)->capped($session)->evaluate([], 'comments:read', null, [], [], static fn (): bool => true);
+
+        self::assertTrue($read->isAllowed());
+        self::assertEquals([
+            ...self::uncapped(DecisionStage::GUARDRAIL, DecisionStage::BOUNDARY),
+            self::sessionStep(TraceOutcome::COVERED, 'credential'),
+            self::sessionStep(TraceOutcome::COVERED, 'capped[1]'),
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD),
+        ], $read->trace);
+
+        self::assertSame(DecisionReason::SESSION_POLICY, $edit->reason);
+        self::assertEquals([self::sessionStep(TraceOutcome::COVERED, 'credential'), self::sessionStep(TraceOutcome::REFUSED, 'capped[1]')], \array_slice($edit->trace, 2));
+
+        self::assertSame(DecisionReason::SESSION_POLICY, $comment->reason);
+        self::assertEquals([self::sessionStep(TraceOutcome::REFUSED, 'credential'), self::sessionStep(TraceOutcome::COVERED, 'capped[1]')], \array_slice($comment->trace, 2));
+    }
+
+    /**
+     * No session cap caps nothing, whether the evaluator was given none or an
+     * empty set of caps, while an empty cap covers nothing, so it allows
+     * nothing.
+     *
+     * @return void
+     */
+    public function testAnEmptySessionCapAllowsNothingWhereNoCapCapsNothing(): void
+    {
+        $evaluate = static fn (SessionCaps $session): Decision => (new PolicyEvaluator)->capped($session)->evaluate([], 'posts:read', null, [], [], static fn (): bool => true);
+
+        self::assertTrue((new PolicyEvaluator)->evaluate([], 'posts:read', null, [], [], static fn (): bool => true)->isAllowed());
+        self::assertTrue($evaluate(new SessionCaps)->isAllowed());
+        self::assertEquals(self::uncapped(DecisionStage::SESSION), \array_slice($evaluate(new SessionCaps)->trace, 2, 1));
+
+        $empty = $evaluate(SessionCaps::of([]));
+
+        self::assertSame(DecisionReason::SESSION_POLICY, $empty->reason);
+        self::assertEquals([self::sessionStep(TraceOutcome::REFUSED, 'credential')], \array_slice($empty->trace, 2));
+    }
+
+    /**
+     * capped() returns another evaluator, sharing the statements this one
+     * already worked out, and leaves this one uncapped.
+     *
+     * @return void
+     */
+    public function testCappedReturnsAnotherEvaluatorSharingTheStatements(): void
+    {
+        $evaluator = new PolicyEvaluator;
+        $policy    = self::policy('p', [['effect' => 'allow', 'actions' => ['posts:*']]]);
+        $capped    = $evaluator->capped(SessionCaps::of(['posts:read']));
+
+        self::assertNotSame($evaluator, $capped);
+        self::assertSame(DecisionReason::SESSION_POLICY, $capped->evaluate([$policy], 'posts:edit')->reason);
+        self::assertTrue($evaluator->evaluate([$policy], 'posts:edit')->isAllowed());
+
+        $entries = new \ReflectionProperty(PolicyEvaluator::class, 'entries');
+
+        self::assertSame($entries->getValue($evaluator), $entries->getValue($capped));
+        self::assertSame($entries->getValue($evaluator), $entries->getValue($evaluator->capped(new SessionCaps)));
+    }
+
+    /**
+     * A session cap grants nothing: an action it covers that nothing allows is
+     * denied at the implicit stage.
+     *
+     * @return void
+     */
+    public function testASessionCapGrantsNothing(): void
+    {
+        $decision = (new PolicyEvaluator)->capped(SessionCaps::of(['posts:read']))->evaluate([], 'posts:read', null, [], [], static fn (): bool => false);
+
+        self::assertSame(DecisionReason::NO_MATCH, $decision->reason);
+        self::assertSame(DecisionStage::IMPLICIT, $decision->stage);
+        self::assertContainsEquals(self::sessionStep(TraceOutcome::COVERED, 'credential'), $decision->trace);
+    }
+
+    /**
+     * A deny ends the decision before the session stage, and a guardrail or a
+     * boundary that refuses the check does too: no session step is recorded.
+     *
+     * @return void
+     */
+    public function testTheDeniesAndTheOtherCapsComeBeforeTheSessionCaps(): void
+    {
+        $deny     = self::policy('d', [['effect' => 'deny', 'actions' => ['posts:read']]]);
+        $boundary = self::policy('cap', [['effect' => 'allow', 'actions' => ['posts:edit']]]);
+        $session  = SessionCaps::of([]);
+        $stages   = static fn (Decision $decision): array => \array_map(static fn (TraceEntry $entry): DecisionStage => $entry->stage, $decision->trace);
+
+        $denied  = (new PolicyEvaluator)->capped($session)->evaluate([$deny], 'posts:read');
+        $bounded = (new PolicyEvaluator)->capped($session)->evaluate([], 'posts:read', null, [], [$boundary]);
+        $railed  = (new PolicyEvaluator)->capped($session)->evaluate([], 'posts:read', null, [], [], null, [$boundary]);
+
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $denied->reason);
+        self::assertSame(DecisionReason::BOUNDARY, $bounded->reason);
+        self::assertSame(DecisionReason::GUARDRAIL, $railed->reason);
+
+        foreach ([$denied, $bounded, $railed] as $decision) {
+            self::assertNotContains(DecisionStage::SESSION, $stages($decision));
+        }
+    }
+
+    /**
+     * An insufficient authentication is reached only once the session caps
+     * pass: a cap that refuses the check is never answered with a step-up.
+     *
+     * @return void
+     */
+    public function testInsufficientAuthenticationIsReachedOnlyOnceTheSessionCapsPass(): void
+    {
+        $policy = self::policy('p', [self::requiringAllow(self::MULTIFACTOR)]);
+        $unmet  = static fn (): CheckContext => self::requirementContext(RequirementResult::unmet(['multifactor']));
+
+        $open   = (new PolicyEvaluator)->capped(SessionCaps::of(['posts:read']))->evaluate([$policy], 'posts:read', null, $unmet());
+        $capped = (new PolicyEvaluator)->capped(SessionCaps::of(['posts:edit']))->evaluate([$policy], 'posts:read', null, $unmet());
+
+        self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $open->reason);
+        self::assertSame(DecisionReason::SESSION_POLICY, $capped->reason);
+        self::assertSame([], $capped->requirements);
+    }
+
+    /**
      * Build a check context with `request`, `tenant` and `environment`
      * namespaces, each built on demand, counting each build.
      *
@@ -2197,6 +2360,18 @@ final class PolicyEvaluatorTest extends TestCase
     private static function refused(string $boundary): TraceEntry
     {
         return new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::REFUSED, null, [], $boundary);
+    }
+
+    /**
+     * Return the step a session cap adds, naming it.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome  $outcome
+     * @param  string  $cap
+     * @return \SineMacula\Laravel\Authorization\Evaluation\TraceEntry
+     */
+    private static function sessionStep(TraceOutcome $outcome, string $cap): TraceEntry
+    {
+        return new TraceEntry(DecisionStage::SESSION, $outcome, null, [], $cap);
     }
 
     /**

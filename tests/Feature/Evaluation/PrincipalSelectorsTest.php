@@ -16,6 +16,7 @@ use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\NumberedIdentity;
 use Tests\Feature\Stubs\RolesOnlyPrincipal;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubMachine;
 use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\TestCase;
 
@@ -54,6 +55,31 @@ final class PrincipalSelectorsTest extends TestCase
         self::assertFalse($selectors->isNamedByAny([]));
         self::assertTrue((new PrincipalSelectors(new Subject($principal)))->isNamedByAny([$principal->getMorphClass() . ':p-1']));
         self::assertTrue((new PrincipalSelectors(new Subject(new Reference('user', '7'))))->isNamedByAny(['user:7']));
+    }
+
+    /**
+     * A selector naming a person identity never names a machine principal, nor
+     * one naming a machine identity a person, by reference or by a role the
+     * identity holds; the principal itself is still named.
+     *
+     * @return void
+     */
+    public function testAnIdentityOfAnotherKindIsNamedByNone(): void
+    {
+        $machine = StubMachine::create(['id' => 'svc-1']);
+        $person  = StubIdentity::create(['id' => 'user-1']);
+        $role    = Role::create(['name' => 'staff']);
+
+        $person->assignRole($role);
+        $machine->assignRole(Role::create(['name' => 'deployer']));
+
+        $ofMachine = new PrincipalSelectors(new Subject($machine, $person));
+        $ofPerson  = new PrincipalSelectors(new Subject($person, $machine));
+
+        self::assertFalse($ofMachine->isNamedByAny([$person->getMorphClass() . ':user-1', 'role:' . $role->id]));
+        self::assertTrue($ofMachine->isNamedByAny([$machine->getMorphClass() . ':svc-1']));
+        self::assertFalse($ofPerson->isNamedByAny([$machine->getMorphClass() . ':svc-1']));
+        self::assertTrue($ofPerson->isNamedByAny(['role:' . $role->id]));
     }
 
     /**
