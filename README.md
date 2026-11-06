@@ -1745,7 +1745,8 @@ AUTHORIZATION_GATE_ENABLED=false
 
 Then nothing is registered and the Gate knows none of the package's permissions; the package's own API, middleware and
 directives still decide them. Only true or false is accepted: any other value of `authorization.gate.enabled` is
-refused at boot. `authorization:check` reports whether the hook is enabled.
+refused at boot. `authorization:check` reports whether the hook is enabled. The contract behind the hook is in
+[Gate authority](docs/design/gate-authority.md).
 
 ### Middleware and Blade
 
@@ -1874,11 +1875,12 @@ Schedule::command('authorization:prune')->daily();
 
 In your tests, `SineMacula\Laravel\Authorization\Testing\Concerns\AuthorizationAssertions` adds `assertCan()`,
 `assertCannot()`, `assertHasRole()` and `assertHasPermission()`, and `actingAsIdentity($user, $tenant)` and
-`actingAsSubject($subject)`, which make every check without a named subject about that subject, in its tenant. When
-the Gate hands over the subject's principal or identity (for example after `actingAs($identity)`), `@can`, `can:` and
-`Gate::allows()` decide about the same subject; with no user signed in, the Gate's checks are a guest's, and denied. A
-subject built without a `session` meets no authentication requirement, so to test one give it a session and bind a
-checker of your own:
+`actingAsSubject($subject)`, which make every check without a named subject about that subject, in its tenant. They also
+make the subject's identity, or its principal when it has none, the Gate's user, so `Gate::allows()`, `@can` and `can:`
+decide about the same subject as the facade without a user signed in; `Gate::forUser()` with the subject's principal or
+identity does too. The Gate they bind keeps every ability, policy and callback registered before, and lives in the
+test's container, so nothing carries over to the next test. A subject built without a `session` meets no authentication
+requirement, so to test one give it a session and bind a checker of your own:
 
 ```php
 $this->app->instance(AuthenticationRequirementChecker::class, new MetRequirementChecker);
@@ -1901,6 +1903,7 @@ The contracts behind the evaluator, for maintainers and reviewers, are in [docs/
 | [Permission catalogue sync](docs/design/permission-catalogue-sync.md)                       | Declaring permissions in code and `authorization:sync`         |
 | [Management services](docs/design/management-services.md)                                   | The services every role, permission and grant write uses       |
 | [Events](docs/design/events.md)                                                             | The marker, the snapshots, the actor and after-commit          |
+| [Gate authority](docs/design/gate-authority.md)                                             | The `Gate::before` hook, what falls through and the switch     |
 
 ## Requirements
 

@@ -85,10 +85,14 @@ final readonly class GateRegistrar
             return;
         }
 
-        $this->app->scoped(DeclaredAbilities::class);
+        $app = $this->app;
 
-        Gate::before(static function (?object $user, string $ability, array $arguments): ?bool {
-            if (DeclaredAbilities::instance()?->holds($ability) !== true) {
+        $app->scoped(DeclaredAbilities::class);
+
+        // The declared abilities are bound just above, so the hook resolves
+        // them directly: it never runs without them.
+        Gate::before(static function (?object $user, string $ability, array $arguments) use ($app): ?bool {
+            if (!$app->make(DeclaredAbilities::class)->holds($ability)) {
                 return null;
             }
 

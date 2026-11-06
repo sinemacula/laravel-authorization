@@ -111,16 +111,19 @@ final class DeclaredAbilitiesTest extends TestCase
     {
         config(['authorization.permission_providers' => [RecordingPermissionProvider::class]]);
 
-        $first = DeclaredAbilities::instance();
+        $app = $this->app;
 
-        self::assertNotNull($first);
-        self::assertSame($first, DeclaredAbilities::instance());
+        self::assertNotNull($app);
+
+        $first = $app->make(DeclaredAbilities::class);
+
+        self::assertSame($first, $app->make(DeclaredAbilities::class));
         self::assertTrue($first->holds('reports:export'));
 
-        $this->app?->forgetScopedInstances();
+        $app->forgetScopedInstances();
         config(['authorization.permission_providers' => []]);
 
-        $second = DeclaredAbilities::instance();
+        $second = $app->make(DeclaredAbilities::class);
 
         self::assertNotSame($first, $second);
         self::assertFalse($second->holds('reports:export'));

@@ -289,10 +289,8 @@ final class ConfigValidator
             throw new InvalidAuthorizationConfigException('authorization.gate', 'expected an array, got ' . self::describe($value) . '.');
         }
 
-        $enabled = \array_key_exists('enabled', $value) ? $value['enabled'] : true;
-
-        if (!\is_bool($enabled)) {
-            throw new InvalidAuthorizationConfigException('authorization.gate.enabled', 'expected true or false, got ' . self::describe($enabled) . '.');
+        if (\array_key_exists('enabled', $value) && !\is_bool($value['enabled'])) {
+            throw new InvalidAuthorizationConfigException('authorization.gate.enabled', 'expected true or false, got ' . self::describe($value['enabled']) . '.');
         }
     }
 

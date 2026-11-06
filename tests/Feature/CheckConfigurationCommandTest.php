@@ -53,6 +53,20 @@ final class CheckConfigurationCommandTest extends TestCase
     }
 
     /**
+     * A `gate` block without the switch reports the Gate hook enabled, as the
+     * switch is on unless it is false.
+     *
+     * @return void
+     */
+    public function testReportsTheGateHookEnabledWithoutTheSwitch(): void
+    {
+        config(['authorization.gate' => []]);
+
+        self::assertSame(0, Artisan::call('authorization:check'));
+        self::assertSame([self::ENABLED], $this->lines());
+    }
+
+    /**
      * Return each line the last command wrote.
      *
      * @return list<string>

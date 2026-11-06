@@ -36,7 +36,8 @@ registration order that decides precedence, whom a Gate check is about, and the 
 7. **Cheap on every call.** The hook runs on every Gate check, the application's own included. The declared names are
    read through the permission catalogue on the first check of a request or job and kept as a set
    (`DeclaredAbilities`, bound with `scoped()`), so an undeclared ability costs one set lookup, and booting reads no
-   enum or provider.
+   enum or provider for the hook (a provider is read at boot only to check the session scope map, see
+   `permission-catalogue-sync.md`).
 
 8. **The switch is explicit.** `authorization.gate.enabled` (default true) is validated strictly as a boolean at boot;
    any other value is refused. When false no hook is registered and nothing is bound for it. `authorization:check`

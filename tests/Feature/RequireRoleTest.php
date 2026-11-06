@@ -45,6 +45,10 @@ final class RequireRoleTest extends TestCase
      * identity that is inactive is denied as `subject_inactive`.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testTheIdentitysRolesCountUnlessInactive(): void
     {
@@ -65,6 +69,10 @@ final class RequireRoleTest extends TestCase
      * A held role admits the request.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testHeldRoleIsAllowed(): void
     {
@@ -95,6 +103,10 @@ final class RequireRoleTest extends TestCase
      *
      * @param  string  $list
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     #[TestWith(['admin|editor'])]
     #[TestWith(['editor|admin'])]
@@ -111,6 +123,10 @@ final class RequireRoleTest extends TestCase
      *
      * @param  string  $list
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     #[TestWith([''])]
     #[TestWith([' | '])]
@@ -130,6 +146,10 @@ final class RequireRoleTest extends TestCase
      * without the role.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testPoliciesDoNotDecideARole(): void
     {
@@ -163,6 +183,10 @@ final class RequireRoleTest extends TestCase
      * guard-agnostic ones.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testAGuardLimitsTheRolesThatCount(): void
     {
@@ -185,6 +209,10 @@ final class RequireRoleTest extends TestCase
      * subject, so a comma-separated list is never read as a role and a guard.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testAnUnknownGuardIsRefused(): void
     {
@@ -202,6 +230,10 @@ final class RequireRoleTest extends TestCase
      * the guard.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testAGuardNamingARoleIsRefusedUnlessPrefixed(): void
     {
@@ -229,6 +261,10 @@ final class RequireRoleTest extends TestCase
      * `hasRole()` does, and not another tenant's.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testTheSubjectsTenantScopesTheRoles(): void
     {
@@ -249,6 +285,10 @@ final class RequireRoleTest extends TestCase
      * A request without a subject is unauthenticated.
      *
      * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     public function testARequestWithoutASubjectIsUnauthenticated(): void
     {
@@ -264,6 +304,10 @@ final class RequireRoleTest extends TestCase
      *
      * @param  string  ...$arguments
      * @return \Illuminate\Http\Response
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
      */
     private function handle(string ...$arguments): Response
     {

@@ -4,8 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Support;
 
-use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
-
 /**
  * The abilities the package answers through Laravel's Gate (AUTHZ-9.1): the
  * exact name of every permission the permission catalogue holds, whatever its
@@ -27,8 +25,6 @@ use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
  */
 final class DeclaredAbilities
 {
-    use HasContainerInstance;
-
     /** @var array<string, true>|null The name of every permission declared, as the keys of a set, once read. */
     private ?array $names = null;
 

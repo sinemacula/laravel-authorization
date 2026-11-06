@@ -900,6 +900,53 @@ final class GateRegistrarTest extends TestCase
     }
 
     /**
+     * The switch is on unless it is false: the hook is enabled when
+     * `authorization.gate.enabled` is true or absent, and only false turns it
+     * off.
+     *
+     * @return void
+     */
+    public function testTheSwitchIsOnUnlessItIsFalse(): void
+    {
+        $config = config();
+
+        $config->set('authorization.gate', ['enabled' => true]);
+        self::assertTrue(GateRegistrar::isEnabled($config));
+
+        $config->set('authorization.gate', ['enabled' => false]);
+        self::assertFalse(GateRegistrar::isEnabled($config));
+
+        $config->set('authorization.gate', []);
+        self::assertTrue(GateRegistrar::isEnabled($config));
+    }
+
+    /**
+     * A `gate` block without the switch keeps the hook on: registering on a
+     * fresh Gate answers a declared ability through the package, over a define
+     * that would refuse it.
+     *
+     * @return void
+     */
+    public function testAGateBlockWithoutTheSwitchRegistersTheHook(): void
+    {
+        $this->freshGate();
+
+        config(['authorization.gate' => []]);
+        $this->app?->forgetInstance(DeclaredAbilities::class);
+        $this->app?->offsetUnset(DeclaredAbilities::class);
+
+        (new GateRegistrar($this->app))->register(); // @phpstan-ignore argument.type
+
+        $this->actAsFullyPermittedPrincipal();
+
+        Gate::define('posts:create', static fn (?object $user = null): bool => false);
+
+        self::assertTrue($this->app?->bound(DeclaredAbilities::class));
+        self::assertTrue(Gate::allows('posts:create'));
+        self::assertSame(['posts:create'], $this->evaluatedActions());
+    }
+
+    /**
      * With the shipped resolver, the user Laravel signed in is the Gate's user
      * and the subject of the check.
      *

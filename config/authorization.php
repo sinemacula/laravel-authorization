@@ -98,10 +98,11 @@ return [
     |
     | String-backed enums implementing `PermissionEnum`; each case's value is
     | the permission name, and an enum backed by integers is refused at boot.
-    | The package answers every case through Laravel's Gate (see Gate below),
-    | so a permission defined here is decided by the package wherever it is
-    | asked: `Gate::allows(...)`, `$user->can(...)`, `@can(...)`, a policy
-    | class's `authorize()` and the `can:` route middleware.
+    | The package answers every case through Laravel's Gate (see Gate below), so
+    | a permission defined here is decided by the package wherever it is asked:
+    | `Gate::allows(...)`, `$user->can(...)`, `@can(...)`,
+    | `Gate::authorize(...)`, a controller's `authorize()` and the `can:` route
+    | middleware.
     |
     | The cases are also the permission catalogue: `authorization:sync` writes
     | each one to the database, with the description, category and guards of
@@ -127,16 +128,18 @@ return [
     |
     | Class-strings implementing `PermissionProvider`. Each provider returns
     | `PermissionDefinition` objects, each a permission's name, description,
-    | category and guard, so modular packages can ship their own permission
-    | sets without the host application editing a central enum. The classes
-    | are validated at boot, but a provider is read only by
-    | `authorization:sync`, which writes its permissions alongside the enums',
-    | by the policy validator, which accepts a policy pattern that matches
-    | one of them, and at boot when the session scope map names a scope, to
-    | check its patterns (see Session policies below). A provider's
-    | permissions are answered through Laravel's Gate like an enum's (see Gate
-    | below), and checked through the `Authorization` facade and
-    | `hasPermission()`, but they do not appear in `effectivePermissions()`.
+    | category and guard, so modular packages can ship their own permission sets
+    | without the host application editing a central enum. The classes are
+    | validated at boot, but a provider is read only by `authorization:sync`,
+    | which writes its permissions alongside the enums', by the policy
+    | validator, which accepts a policy pattern that matches one of them, at
+    | boot when the session scope map names a scope, to check its patterns (see
+    | Session policies below), and, while the Gate hook is enabled, on the first
+    | Gate check of each request or job, to learn which abilities the package
+    | answers (see Gate below). A provider's permissions are answered through
+    | Laravel's Gate like an enum's, and checked through the `Authorization`
+    | facade and `hasPermission()`, but they do not appear in
+    | `effectivePermissions()`.
     |
     */
 
@@ -149,12 +152,14 @@ return [
     |
     | The package is the authority of Laravel's Gate. Booting registers one
     | `Gate::before` hook that answers every ability whose exact name a
-    | permission enum, a permission provider or the package itself declares:
-    | it returns the package's allow or deny, and both stand, so no
-    | `Gate::define` callback or Laravel policy class can override either. Any
-    | other ability, a permission row that exists only in the database among
-    | them, is left to Laravel unchanged. The Gate's user is the subject the
-    | subject resolver's `forUser()` returns, and a guest is denied.
+    | permission enum, a permission provider or the package itself declares: it
+    | returns the package's allow or deny, and both stand, so no `Gate::define`
+    | callback or Laravel policy class can override either. Any other ability, a
+    | permission row that exists only in the database among them, is left to
+    | Laravel unchanged. The hook learns the declared names on the first Gate
+    | check of each request or job, so every configured provider is read then.
+    | The Gate's user is the subject the subject resolver's `forUser()` returns,
+    | and a guest is denied.
     |
     | Laravel runs before-callbacks in the order they are registered and the
     | first answer wins. The hook is registered first thing in the package's

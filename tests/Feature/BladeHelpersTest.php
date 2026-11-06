@@ -287,7 +287,7 @@ final class BladeHelpersTest extends TestCase
      */
     public function testThePermissionHelpersAndTheGateAgree(): void
     {
-        $this->registerPermissionGates();
+        $this->declarePermissionEnum();
 
         $identity = self::identityHolding(permissions: ['posts:create', 'posts:delete']);
         self::attachStatement($identity, 'deny', ['posts:delete']);
