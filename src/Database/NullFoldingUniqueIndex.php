@@ -21,9 +21,11 @@ use Illuminate\Database\Connection;
  * folded value on MySQL instead, where InnoDB caps a key at 3072 bytes and
  * reserves four bytes for each character of a `utf8mb4` column: a grant's key,
  * with the grantee, the tenant and the application in it, would not fit
- * otherwise. The digest compares the exact bytes, as PostgreSQL and SQLite
- * compare those columns. The other databases have no such cap and compare the
- * folded value itself.
+ * otherwise. The digest is of the folded value's bytes, so it keeps apart the
+ * same values as the byte-exact collation MySQL gives the reference columns
+ * (`ExactReferences`), through which an index that is not digested compares
+ * them. The other databases have no such cap and compare the folded value
+ * itself.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

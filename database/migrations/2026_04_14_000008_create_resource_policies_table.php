@@ -9,6 +9,12 @@
  * optionally one application. The same policy may be attached to the same
  * resource once per scope (AUTHZ-7.3).
  *
+ * The resource, tenant and application columns compare their exact bytes on
+ * every database: on MySQL they are collated `utf8mb4_0900_bin`, which neither
+ * folds case nor pads trailing spaces (`ExactReferences`), so a resource or
+ * tenant whose key differs from another's only by case or a trailing space is a
+ * different one.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -19,6 +25,7 @@ use Illuminate\Database\Migrations\Migration;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\ExactReferences;
 use SineMacula\Laravel\Authorization\Database\MigrationCollisionGuard;
 use SineMacula\Laravel\Authorization\Database\NullFoldingUniqueIndex;
 
@@ -36,26 +43,19 @@ return new class extends Migration {
         $policiesTable = config('authorization.tables.policies', 'policies');
 
         $schema = Schema::connection($this->getConnection());
-        $mysql  = $schema->getConnection()->getDriverName() === 'mysql';
 
         (new MigrationCollisionGuard($schema))->ensureNotExists($table);
 
-        $schema->create($table, static function (Blueprint $blueprint) use ($table, $policiesTable, $mysql): void {
+        $exact = new ExactReferences($schema->getConnection());
+
+        $schema->create($table, static function (Blueprint $blueprint) use ($table, $policiesTable, $exact): void {
             $blueprint->uuid('policy_id');
 
             // The resource: its morph type, and its key, or null for every
             // record of the type and a check on the type alone. References are
-            // bounded to 191 characters, as the suite bounds them. On MySQL
-            // both compare as exact bytes, as the unique index's digest and the
-            // other databases do, so a key that differs only in case names
-            // another record.
-            $type = $blueprint->string('resource_type', 191);
-            $id   = $blueprint->string('resource_id', 191)->nullable();
-
-            if ($mysql) {
-                $type->collation('utf8mb4_bin');
-                $id->collation('utf8mb4_bin');
-            }
+            // bounded to 191 characters, as the suite bounds them.
+            $blueprint->string('resource_type', 191);
+            $blueprint->string('resource_id', 191)->nullable();
 
             // The scope: both tenant columns null attach platform-wide, a pair
             // attaches within that tenant, and its subtree unless
@@ -72,6 +72,10 @@ return new class extends Migration {
             $blueprint->index(['tenant_type', 'tenant_id'], $table . '_tenant_index');
 
             $blueprint->foreign('policy_id')->references('id')->on($policiesTable)->cascadeOnDelete();
+
+            // On MySQL the reference columns compare their exact bytes, as on
+            // the other databases.
+            $exact->apply($blueprint);
         });
 
         // A policy is attached to a resource at most once per scope, with a
