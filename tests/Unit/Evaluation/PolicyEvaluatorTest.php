@@ -6,6 +6,7 @@ namespace Tests\Unit\Evaluation;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
@@ -202,17 +203,17 @@ final class PolicyEvaluatorTest extends TestCase
             'statements' => [
                 ['effect' => 'allow', 'actions' => ['users:*']],
                 ['effect' => 'allow', 'actions' => ['posts:create']],
-                ['effect' => 'deny', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['tenant' => 'org-1']]],
+                ['effect' => 'deny', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['input.tenant' => 'org-1']]],
             ],
         ]);
 
-        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:create', null, ['tenant' => 'org-2']);
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:create', null, ['input' => ['tenant' => 'org-2']]);
 
         self::assertTrue($decision->isAllowed());
         self::assertCount(3, $decision->trace);
 
         $expected = [
-            [DecisionStage::DENY, TraceOutcome::CONDITION_FAILED, 2, ['tenant' => false]],
+            [DecisionStage::DENY, TraceOutcome::CONDITION_FAILED, 2, ['input.tenant' => false]],
             [DecisionStage::ALLOW, TraceOutcome::NOT_APPLICABLE, 0, []],
             [DecisionStage::ALLOW, TraceOutcome::MATCHED, 1, []],
         ];
@@ -274,14 +275,14 @@ final class PolicyEvaluatorTest extends TestCase
                 'name'       => 'reader',
                 'statements' => [
                     ['effect' => 'allow', 'actions' => ['posts:read']],
-                    ['effect' => 'allow', 'actions' => ['posts:update'], 'conditions' => ['eq' => ['owner' => true]]],
+                    ['effect' => 'allow', 'actions' => ['posts:update'], 'conditions' => ['eq' => ['input.owner' => true]]],
                 ],
             ]),
             Policy::fromArray([
                 'name'       => 'blocker',
                 'statements' => [
                     ['effect' => 'deny', 'actions' => ['posts:delete']],
-                    ['effect' => 'deny', 'actions' => ['posts:*'], 'conditions' => ['eq' => ['banned' => true]]],
+                    ['effect' => 'deny', 'actions' => ['posts:*'], 'conditions' => ['eq' => ['input.banned' => true]]],
                 ],
             ]),
             Policy::fromArray([
@@ -289,16 +290,16 @@ final class PolicyEvaluatorTest extends TestCase
                 'statements' => [['effect' => 'allow', 'actions' => ['posts:*']]],
             ]),
             new Policy('broken', [
-                new Statement(PolicyEffect::ALLOW, ['posts:archive'], ['*'], ['eq' => ['k' => [1]]]),
+                new Statement(PolicyEffect::ALLOW, ['posts:archive'], ['*'], ['eq' => ['input.k' => [1]]]),
             ]),
         ];
 
         $checks = [
-            ['posts:read', ['banned' => false, 'k' => 1]],
-            ['posts:update', ['owner' => false, 'banned' => false]],
-            ['posts:delete', ['banned' => false]],
-            ['posts:read', ['banned' => true]],
-            ['posts:archive', ['banned' => false, 'k' => 1]],
+            ['posts:read', ['input' => ['banned' => false, 'k' => 1]]],
+            ['posts:update', ['input' => ['owner' => false, 'banned' => false]]],
+            ['posts:delete', ['input' => ['banned' => false]]],
+            ['posts:read', ['input' => ['banned' => true]]],
+            ['posts:archive', ['input' => ['banned' => false, 'k' => 1]]],
             ['users:read', []],
         ];
 
@@ -464,18 +465,18 @@ final class PolicyEvaluatorTest extends TestCase
             'statements' => [[
                 'effect'     => 'allow',
                 'actions'    => ['posts:create'],
-                'conditions' => ['eq' => ['tenant' => 'org-1']],
+                'conditions' => ['eq' => ['input.tenant' => 'org-1']],
             ]],
         ]);
 
-        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:create', null, ['tenant' => 'org-2']);
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:create', null, ['input' => ['tenant' => 'org-2']]);
 
         self::assertFalse($decision->isAllowed());
         self::assertSame(DecisionReason::CONDITION_FAILED, $decision->reason);
         self::assertSame(DecisionStage::IMPLICIT, $decision->stage);
         self::assertSame([], $decision->statements);
         self::assertEquals([
-            self::entry(DecisionStage::ALLOW, TraceOutcome::CONDITION_FAILED, 'cond-pol', 0, ['tenant' => false]),
+            self::entry(DecisionStage::ALLOW, TraceOutcome::CONDITION_FAILED, 'cond-pol', 0, ['input.tenant' => false]),
         ], $decision->trace);
     }
 
@@ -491,16 +492,16 @@ final class PolicyEvaluatorTest extends TestCase
             'name'       => 'p',
             'statements' => [
                 ['effect' => 'allow', 'actions' => ['users:read']],
-                ['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => ['eq' => ['tenant' => 'org-1']]],
+                ['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => ['eq' => ['input.tenant' => 'org-1']]],
                 ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['posts/1']],
             ],
         ]);
 
-        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, ['tenant' => 'org-2']);
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, ['input' => ['tenant' => 'org-2']]);
 
         self::assertEquals(Decision::deny(DecisionReason::CONDITION_FAILED, DecisionStage::IMPLICIT, [], [
             self::entry(DecisionStage::ALLOW, TraceOutcome::NOT_APPLICABLE, 'p', 0),
-            self::entry(DecisionStage::ALLOW, TraceOutcome::CONDITION_FAILED, 'p', 1, ['tenant' => false]),
+            self::entry(DecisionStage::ALLOW, TraceOutcome::CONDITION_FAILED, 'p', 1, ['input.tenant' => false]),
             self::entry(DecisionStage::ALLOW, TraceOutcome::NOT_APPLICABLE, 'p', 2),
         ]), $decision);
     }
@@ -543,14 +544,14 @@ final class PolicyEvaluatorTest extends TestCase
             'statements' => [[
                 'effect'     => 'deny',
                 'actions'    => ['posts:read'],
-                'conditions' => ['eq' => ['tenant' => 'org-1']],
+                'conditions' => ['eq' => ['input.tenant' => 'org-1']],
             ]],
         ]);
 
-        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, ['tenant' => 'org-2']);
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, ['input' => ['tenant' => 'org-2']]);
 
         self::assertEquals(Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT, [], [
-            self::entry(DecisionStage::DENY, TraceOutcome::CONDITION_FAILED, 'p', 0, ['tenant' => false]),
+            self::entry(DecisionStage::DENY, TraceOutcome::CONDITION_FAILED, 'p', 0, ['input.tenant' => false]),
         ]), $decision);
     }
 
@@ -570,7 +571,7 @@ final class PolicyEvaluatorTest extends TestCase
                 [
                     'effect'     => 'deny',
                     'actions'    => ['posts:read'],
-                    'conditions' => ['eq' => ['x' => 'blocked']],
+                    'conditions' => ['eq' => ['input.x' => 'blocked']],
                 ],
             ],
         ]);
@@ -578,7 +579,7 @@ final class PolicyEvaluatorTest extends TestCase
         $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read');
 
         self::assertEquals(Decision::deny(DecisionReason::EXPLICIT_DENY, DecisionStage::DENY, [self::reference('deny-missing', 1)], [
-            self::entry(DecisionStage::DENY, TraceOutcome::UNDECIDABLE, 'deny-missing', 1, ['x' => false]),
+            self::entry(DecisionStage::DENY, TraceOutcome::UNDECIDABLE, 'deny-missing', 1, ['input.x' => false]),
         ]), $decision);
     }
 
@@ -595,14 +596,14 @@ final class PolicyEvaluatorTest extends TestCase
             'statements' => [[
                 'effect'     => 'allow',
                 'actions'    => ['posts:read'],
-                'conditions' => ['eq' => ['x' => 'yes']],
+                'conditions' => ['eq' => ['input.x' => 'yes']],
             ]],
         ]);
 
-        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, ['y' => 'yes']);
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, ['input' => ['y' => 'yes']]);
 
         self::assertEquals(Decision::deny(DecisionReason::CONDITION_FAILED, DecisionStage::IMPLICIT, [], [
-            self::entry(DecisionStage::ALLOW, TraceOutcome::UNDECIDABLE, 'allow-missing', 0, ['x' => false]),
+            self::entry(DecisionStage::ALLOW, TraceOutcome::UNDECIDABLE, 'allow-missing', 0, ['input.x' => false]),
         ]), $decision);
     }
 
@@ -619,7 +620,7 @@ final class PolicyEvaluatorTest extends TestCase
             'statements' => [[
                 'effect'    => 'deny',
                 'actions'   => ['posts:read'],
-                'resources' => ['tenants/${context.tenant}/*'],
+                'resources' => ['tenants/${input.tenant}/*'],
             ]],
         ]);
 
@@ -643,7 +644,7 @@ final class PolicyEvaluatorTest extends TestCase
             'statements' => [[
                 'effect'    => 'allow',
                 'actions'   => ['posts:read'],
-                'resources' => ['tenants/${context.tenant}/*'],
+                'resources' => ['tenants/${input.tenant}/*'],
             ]],
         ]);
 
@@ -669,16 +670,16 @@ final class PolicyEvaluatorTest extends TestCase
                 [
                     'effect'     => 'deny',
                     'actions'    => ['posts:read'],
-                    'conditions' => ['gt' => ['n' => '${context.limit}']],
+                    'conditions' => ['gt' => ['input.n' => '${input.limit}']],
                 ],
                 ['effect' => 'allow', 'actions' => ['posts:read']],
             ],
         ]);
 
-        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, ['n' => 5, 'limit' => 'abc']);
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, ['input' => ['n' => 5, 'limit' => 'abc']]);
 
         self::assertEquals(Decision::deny(DecisionReason::EXPLICIT_DENY, DecisionStage::DENY, [self::reference('deny-substituted', 0)], [
-            self::entry(DecisionStage::DENY, TraceOutcome::UNDECIDABLE, 'deny-substituted', 0, ['n' => false]),
+            self::entry(DecisionStage::DENY, TraceOutcome::UNDECIDABLE, 'deny-substituted', 0, ['input.n' => false]),
         ]), $decision);
     }
 
@@ -696,14 +697,14 @@ final class PolicyEvaluatorTest extends TestCase
             'statements' => [[
                 'effect'     => 'allow',
                 'actions'    => ['posts:read'],
-                'conditions' => ['gt' => ['n' => '${context.limit}']],
+                'conditions' => ['gt' => ['input.n' => '${input.limit}']],
             ]],
         ]);
 
-        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, ['n' => 5, 'limit' => 'abc']);
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, ['input' => ['n' => 5, 'limit' => 'abc']]);
 
         self::assertEquals(Decision::deny(DecisionReason::CONDITION_FAILED, DecisionStage::IMPLICIT, [], [
-            self::entry(DecisionStage::ALLOW, TraceOutcome::UNDECIDABLE, 'allow-substituted', 0, ['n' => false]),
+            self::entry(DecisionStage::ALLOW, TraceOutcome::UNDECIDABLE, 'allow-substituted', 0, ['input.n' => false]),
         ]), $decision);
     }
 
@@ -748,7 +749,7 @@ final class PolicyEvaluatorTest extends TestCase
         ]);
 
         $broken = new Policy('broken', [
-            new Statement(PolicyEffect::ALLOW, ['posts:read'], ['*'], ['eq' => ['k' => [1]]]),
+            new Statement(PolicyEffect::ALLOW, ['posts:read'], ['*'], ['eq' => ['input.k' => [1]]]),
             new Statement(PolicyEffect::ALLOW, ['posts:read']),
         ]);
 
@@ -757,11 +758,11 @@ final class PolicyEvaluatorTest extends TestCase
             'statements' => [['effect' => 'deny', 'actions' => ['users:read']]],
         ]);
 
-        $decision = (new PolicyEvaluator)->evaluate([$first, $broken, $last], 'posts:read', null, ['k' => 1]);
+        $decision = (new PolicyEvaluator)->evaluate([$first, $broken, $last], 'posts:read', null, ['input' => ['k' => 1]]);
 
         self::assertEquals(Decision::deny(DecisionReason::INVALID_POLICY, DecisionStage::ALLOW, [self::reference('broken', 0)], [
             self::entry(DecisionStage::DENY, TraceOutcome::NOT_APPLICABLE, 'last', 0),
-            self::entry(DecisionStage::ALLOW, TraceOutcome::INVALID, 'broken', 0, ['k' => false]),
+            self::entry(DecisionStage::ALLOW, TraceOutcome::INVALID, 'broken', 0, ['input.k' => false]),
             self::entry(DecisionStage::ALLOW, TraceOutcome::MATCHED, 'broken', 1),
             self::entry(DecisionStage::ALLOW, TraceOutcome::MATCHED, 'first', 0),
         ]), $decision);
@@ -778,13 +779,13 @@ final class PolicyEvaluatorTest extends TestCase
     {
         $policy = new Policy('broken', [
             new Statement(PolicyEffect::ALLOW, ['posts:read']),
-            new Statement(PolicyEffect::DENY, ['posts:read'], ['*'], ['eq' => ['k' => [1]]]),
+            new Statement(PolicyEffect::DENY, ['posts:read'], ['*'], ['eq' => ['input.k' => [1]]]),
         ]);
 
-        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, ['k' => 1]);
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, ['input' => ['k' => 1]]);
 
         self::assertEquals(Decision::deny(DecisionReason::INVALID_POLICY, DecisionStage::DENY, [self::reference('broken', 1)], [
-            self::entry(DecisionStage::DENY, TraceOutcome::INVALID, 'broken', 1, ['k' => false]),
+            self::entry(DecisionStage::DENY, TraceOutcome::INVALID, 'broken', 1, ['input.k' => false]),
         ]), $decision);
     }
 
@@ -803,7 +804,7 @@ final class PolicyEvaluatorTest extends TestCase
         ]);
 
         $broken = new Policy('broken', [
-            new Statement(PolicyEffect::DENY, ['posts:read'], ['*'], ['eq' => ['k' => [1]]]),
+            new Statement(PolicyEffect::DENY, ['posts:read'], ['*'], ['eq' => ['input.k' => [1]]]),
             new Statement(PolicyEffect::DENY, ['posts:read']),
         ]);
 
@@ -812,10 +813,10 @@ final class PolicyEvaluatorTest extends TestCase
             'statements' => [['effect' => 'deny', 'actions' => ['posts:read']]],
         ]);
 
-        $decision = (new PolicyEvaluator)->evaluate([$first, $broken, $last], 'posts:read', null, ['k' => 1]);
+        $decision = (new PolicyEvaluator)->evaluate([$first, $broken, $last], 'posts:read', null, ['input' => ['k' => 1]]);
 
         self::assertEquals(Decision::deny(DecisionReason::EXPLICIT_DENY, DecisionStage::DENY, [self::reference('broken', 1), self::reference('last', 0)], [
-            self::entry(DecisionStage::DENY, TraceOutcome::INVALID, 'broken', 0, ['k' => false]),
+            self::entry(DecisionStage::DENY, TraceOutcome::INVALID, 'broken', 0, ['input.k' => false]),
             self::entry(DecisionStage::DENY, TraceOutcome::MATCHED, 'broken', 1),
             self::entry(DecisionStage::DENY, TraceOutcome::MATCHED, 'last', 0),
         ]), $decision);
@@ -831,11 +832,11 @@ final class PolicyEvaluatorTest extends TestCase
     public function testInvalidStatementWithNonMatchingActionIsNotApplicable(): void
     {
         $policy = new Policy('broken', [
-            new Statement(PolicyEffect::DENY, ['users:*'], ['*'], ['eq' => ['k' => [1]]]),
+            new Statement(PolicyEffect::DENY, ['users:*'], ['*'], ['eq' => ['input.k' => [1]]]),
             new Statement(PolicyEffect::ALLOW, ['posts:read']),
         ]);
 
-        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, ['k' => 1]);
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, ['input' => ['k' => 1]]);
 
         self::assertEquals(Decision::allow(DecisionStage::ALLOW, [self::reference('broken', 1)], [
             self::entry(DecisionStage::DENY, TraceOutcome::NOT_APPLICABLE, 'broken', 0),
@@ -859,29 +860,29 @@ final class PolicyEvaluatorTest extends TestCase
                     'effect'     => 'deny',
                     'actions'    => ['posts:read'],
                     'conditions' => [
-                        'eq' => ['missing' => 'a', 'tenant' => 'org-1'],
+                        'eq' => ['input.missing' => 'a', 'input.tenant' => 'org-1'],
                     ],
                 ],
                 [
                     'effect'     => 'deny',
                     'actions'    => ['posts:read'],
                     'conditions' => [
-                        'eq' => ['tenant' => 'org-1', 'missing' => 'a'],
+                        'eq' => ['input.tenant' => 'org-1', 'input.missing' => 'a'],
                     ],
                 ],
                 ['effect' => 'allow', 'actions' => ['posts:read']],
             ],
         ]);
 
-        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, ['tenant' => 'org-2']);
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, ['input' => ['tenant' => 'org-2']]);
 
         self::assertEquals(Decision::allow(DecisionStage::ALLOW, [self::reference('deny-mixed', 2)], [
-            self::entry(DecisionStage::DENY, TraceOutcome::CONDITION_FAILED, 'deny-mixed', 0, ['missing' => false, 'tenant' => false]),
-            self::entry(DecisionStage::DENY, TraceOutcome::CONDITION_FAILED, 'deny-mixed', 1, ['tenant' => false, 'missing' => false]),
+            self::entry(DecisionStage::DENY, TraceOutcome::CONDITION_FAILED, 'deny-mixed', 0, ['input.missing' => false, 'input.tenant' => false]),
+            self::entry(DecisionStage::DENY, TraceOutcome::CONDITION_FAILED, 'deny-mixed', 1, ['input.tenant' => false, 'input.missing' => false]),
             self::entry(DecisionStage::ALLOW, TraceOutcome::MATCHED, 'deny-mixed', 2),
         ]), $decision);
-        self::assertSame(['missing', 'tenant'], \array_keys($decision->trace[0]->conditions));
-        self::assertSame(['tenant', 'missing'], \array_keys($decision->trace[1]->conditions));
+        self::assertSame(['input.missing', 'input.tenant'], \array_keys($decision->trace[0]->conditions));
+        self::assertSame(['input.tenant', 'input.missing'], \array_keys($decision->trace[1]->conditions));
     }
 
     /**
@@ -899,7 +900,7 @@ final class PolicyEvaluatorTest extends TestCase
                 [
                     'effect'     => 'deny',
                     'actions'    => ['posts:read'],
-                    'conditions' => ['ip_in' => ['ip' => '2001:db8::/32']],
+                    'conditions' => ['ip_in' => ['input.ip' => '2001:db8::/32']],
                 ],
                 ['effect' => 'allow', 'actions' => ['posts:read']],
             ],
@@ -907,16 +908,16 @@ final class PolicyEvaluatorTest extends TestCase
 
         $evaluator = new PolicyEvaluator;
 
-        $inside = $evaluator->evaluate([$policy], 'posts:read', null, ['ip' => '2001:db8::1']);
+        $inside = $evaluator->evaluate([$policy], 'posts:read', null, ['input' => ['ip' => '2001:db8::1']]);
 
         self::assertEquals(Decision::deny(DecisionReason::EXPLICIT_DENY, DecisionStage::DENY, [self::reference('deny-ipv6', 0)], [
-            self::entry(DecisionStage::DENY, TraceOutcome::MATCHED, 'deny-ipv6', 0, ['ip' => true]),
+            self::entry(DecisionStage::DENY, TraceOutcome::MATCHED, 'deny-ipv6', 0, ['input.ip' => true]),
         ]), $inside);
 
-        $outside = $evaluator->evaluate([$policy], 'posts:read', null, ['ip' => '2001:db9::1']);
+        $outside = $evaluator->evaluate([$policy], 'posts:read', null, ['input' => ['ip' => '2001:db9::1']]);
 
         self::assertEquals(Decision::allow(DecisionStage::ALLOW, [self::reference('deny-ipv6', 1)], [
-            self::entry(DecisionStage::DENY, TraceOutcome::CONDITION_FAILED, 'deny-ipv6', 0, ['ip' => false]),
+            self::entry(DecisionStage::DENY, TraceOutcome::CONDITION_FAILED, 'deny-ipv6', 0, ['input.ip' => false]),
             self::entry(DecisionStage::ALLOW, TraceOutcome::MATCHED, 'deny-ipv6', 1),
         ]), $outside);
     }
@@ -934,13 +935,13 @@ final class PolicyEvaluatorTest extends TestCase
             'statements' => [[
                 'effect'     => 'allow',
                 'actions'    => ['posts:read'],
-                'conditions' => ['eq' => ['tenant' => 'org-1'], 'in' => ['role' => ['admin']]],
+                'conditions' => ['eq' => ['input.tenant' => 'org-1'], 'in' => ['input.role' => ['admin']]],
             ]],
         ]);
 
-        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, ['tenant' => 'org-1', 'role' => 'guest']);
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, ['input' => ['tenant' => 'org-1', 'role' => 'guest']]);
 
-        self::assertSame(['tenant' => true, 'role' => false], $decision->trace[0]->conditions);
+        self::assertSame(['input.tenant' => true, 'input.role' => false], $decision->trace[0]->conditions);
         self::assertSame(TraceOutcome::CONDITION_FAILED, $decision->trace[0]->outcome);
     }
 
@@ -1009,13 +1010,13 @@ final class PolicyEvaluatorTest extends TestCase
     {
         $statements = [
             ['effect' => 'allow', 'actions' => ['posts:read']],
-            ['effect' => 'deny', 'actions' => ['posts:read'], 'conditions' => ['eq' => ['tenant' => 'org-1']]],
+            ['effect' => 'deny', 'actions' => ['posts:read'], 'conditions' => ['eq' => ['input.tenant' => 'org-1']]],
         ];
 
         $plain = Policy::fromArray(['name' => 'p', 'statements' => $statements]);
         $named = Policy::fromArray(['name' => 'p', 'statements' => [['sid' => 'Z', ...$statements[0]], ['sid' => 'A', ...$statements[1]]]]);
 
-        foreach ([['tenant' => 'org-1'], ['tenant' => 'org-2']] as $context) {
+        foreach ([['input' => ['tenant' => 'org-1']], ['input' => ['tenant' => 'org-2']]] as $context) {
             $left  = (new PolicyEvaluator)->evaluate([$plain], 'posts:read', null, $context);
             $right = (new PolicyEvaluator)->evaluate([$named], 'posts:read', null, $context);
 
@@ -1097,7 +1098,7 @@ final class PolicyEvaluatorTest extends TestCase
         $policy = Policy::fromArray([
             'name'       => 'network',
             'statements' => [
-                ['effect' => 'deny', 'actions' => ['posts:read'], 'conditions' => ['ip_not_in_if_exists' => ['ip' => '10.0.0.0/8']]],
+                ['effect' => 'deny', 'actions' => ['posts:read'], 'conditions' => ['ip_not_in_if_exists' => ['input.ip' => '10.0.0.0/8']]],
                 ['effect' => 'allow', 'actions' => ['posts:read']],
             ],
         ]);
@@ -1105,11 +1106,100 @@ final class PolicyEvaluatorTest extends TestCase
         $evaluator = new PolicyEvaluator;
 
         self::assertEquals(Decision::deny(DecisionReason::EXPLICIT_DENY, DecisionStage::DENY, [self::reference('network', 0)], [
-            self::entry(DecisionStage::DENY, TraceOutcome::MATCHED, 'network', 0, ['ip' => true]),
+            self::entry(DecisionStage::DENY, TraceOutcome::MATCHED, 'network', 0, ['input.ip' => true]),
         ]), $evaluator->evaluate([$policy], 'posts:read'));
-        self::assertTrue($evaluator->evaluate([$policy], 'posts:read', null, ['ip' => '10.1.1.1'])->isAllowed());
-        self::assertSame(DecisionReason::EXPLICIT_DENY, $evaluator->evaluate([$policy], 'posts:read', null, ['ip' => '8.8.8.8'])->reason);
-        self::assertSame(DecisionReason::EXPLICIT_DENY, $evaluator->evaluate([$policy], 'posts:read', null, ['ip' => 'not-an-ip'])->reason);
+        self::assertTrue($evaluator->evaluate([$policy], 'posts:read', null, ['input' => ['ip' => '10.1.1.1']])->isAllowed());
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $evaluator->evaluate([$policy], 'posts:read', null, ['input' => ['ip' => '8.8.8.8']])->reason);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $evaluator->evaluate([$policy], 'posts:read', null, ['input' => ['ip' => 'not-an-ip']])->reason);
+    }
+
+    /**
+     * The check's context is read through dot paths, and a top-level key named
+     * like a path never stands in for one.
+     *
+     * @return void
+     */
+    public function testConditionsReadTheContextByDotPath(): void
+    {
+        $policy = Policy::fromArray([
+            'name'       => 'by-path',
+            'statements' => [[
+                'effect'     => 'allow',
+                'actions'    => ['posts:read'],
+                'conditions' => ['eq' => ['input.post.status' => 'draft']],
+            ]],
+        ]);
+        $evaluator = new PolicyEvaluator;
+
+        self::assertTrue($evaluator->evaluate([$policy], 'posts:read', null, ['input' => ['post' => ['status' => 'draft']]])->isAllowed());
+        self::assertEquals(Decision::deny(DecisionReason::CONDITION_FAILED, DecisionStage::IMPLICIT, [], [
+            self::entry(DecisionStage::ALLOW, TraceOutcome::UNDECIDABLE, 'by-path', 0, ['input.post.status' => false]),
+        ]), $evaluator->evaluate([$policy], 'posts:read', null, ['input.post.status' => 'draft']));
+    }
+
+    /**
+     * Within one check a namespace is built only when a statement that names
+     * the action reads it, once however many statements of either stage read
+     * it, and a namespace no statement reads is never built; the next check
+     * builds its own.
+     *
+     * @return void
+     */
+    public function testNamespacesAreBuiltLazilyAndOncePerCheck(): void
+    {
+        $policy = Policy::fromArray([
+            'name'       => 'lazy',
+            'statements' => [
+                ['effect' => 'deny', 'actions' => ['posts:read'], 'conditions' => ['ip_in' => ['request.ip' => '192.168.0.0/16']]],
+                ['effect' => 'deny', 'actions' => ['posts:delete'], 'conditions' => ['eq' => ['tenant.plan' => 'free']]],
+                ['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => ['tenants/${tenant.id}/*'], 'conditions' => ['eq' => ['request.method' => 'GET']]],
+            ],
+        ]);
+        $calls     = [];
+        $evaluator = new PolicyEvaluator;
+
+        $first = $evaluator->evaluate([$policy], 'posts:read', 'tenants/org-1/posts', self::countingContext($calls), null);
+
+        self::assertTrue($first->isAllowed());
+        self::assertSame(['request' => 1, 'tenant' => 1], $calls);
+
+        $evaluator->evaluate([$policy], 'posts:read', 'tenants/org-1/posts', self::countingContext($calls), null);
+
+        self::assertSame(['request' => 2, 'tenant' => 2], $calls);
+
+        $evaluator->evaluate([$policy], 'posts:list', null, self::countingContext($calls), null);
+
+        self::assertSame(['request' => 2, 'tenant' => 2], $calls);
+    }
+
+    /**
+     * Build a check context with `request`, `tenant` and `environment`
+     * namespaces, each built on demand, counting each build.
+     *
+     * @param  array<string, int>  $calls
+     *
+     * @param-out array<string, int>  $calls
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\CheckContext
+     */
+    private static function countingContext(array &$calls): CheckContext
+    {
+        $values = [
+            'request'     => ['ip' => '10.0.0.1', 'method' => 'GET'],
+            'tenant'      => ['id' => 'org-1', 'plan' => 'pro'],
+            'environment' => ['time' => '2026-01-31T09:30:00Z'],
+        ];
+        $builders = [];
+
+        foreach ($values as $namespace => $namespaceValues) {
+            $builders[$namespace] = static function () use (&$calls, $namespace, $namespaceValues): array {
+                $calls[$namespace] = ($calls[$namespace] ?? 0) + 1;
+
+                return [$namespace => $namespaceValues];
+            };
+        }
+
+        return new CheckContext(['input' => []], $builders);
     }
 
     /**

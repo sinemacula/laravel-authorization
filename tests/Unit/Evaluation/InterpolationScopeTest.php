@@ -6,6 +6,7 @@ namespace Tests\Unit\Evaluation;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
 use SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator;
 use SineMacula\Laravel\Authorization\Evaluation\InterpolationScope;
 
@@ -35,7 +36,8 @@ final class InterpolationScopeTest extends TestCase
         self::assertNull($scope->interpolator);
         self::assertNull($scope->principal);
         self::assertNull($scope->resource);
-        self::assertSame([], $scope->context);
+        self::assertEquals(new CheckContext, $scope->context);
+        self::assertSame([false, null], $scope->context->lookup('input.a'));
     }
 
     /**
@@ -48,12 +50,26 @@ final class InterpolationScopeTest extends TestCase
         $interpolator = new ContextInterpolator;
         $principal    = new \stdClass;
 
-        $scope = new InterpolationScope($interpolator, $principal, 'posts:9', ['env' => 'prod']);
+        $scope = new InterpolationScope($interpolator, $principal, 'posts:9', ['input' => ['env' => 'prod']]);
 
         self::assertSame($interpolator, $scope->interpolator);
         self::assertSame($principal, $scope->principal);
         self::assertSame('posts:9', $scope->resource);
-        self::assertSame(['env' => 'prod'], $scope->context);
+        self::assertSame([true, 'prod'], $scope->context->lookup('input.env'));
+    }
+
+    /**
+     * A check context given to the constructor is held as it is, so every
+     * statement of the check reads the one context and its namespaces are built
+     * once.
+     *
+     * @return void
+     */
+    public function testConstructorHoldsTheCheckContextGiven(): void
+    {
+        $context = new CheckContext(['input' => ['env' => 'prod']]);
+
+        self::assertSame($context, (new InterpolationScope(null, null, null, $context))->context);
     }
 
     /**
@@ -64,10 +80,10 @@ final class InterpolationScopeTest extends TestCase
      */
     public function testLiteralWithoutInterpolatorReturnsSubjectUnchanged(): void
     {
-        $scope = new InterpolationScope(null, null, 'posts:9', ['a' => 'value']);
+        $scope = new InterpolationScope(null, null, 'posts:9', ['input' => ['a' => 'value']]);
 
-        self::assertSame('App\Models\Post:${context.a}', $scope->literal('App\Models\Post:${context.a}'));
-        self::assertSame('\${context.a}:${context-a}', $scope->literal('\${context.a}:${context-a}'));
+        self::assertSame('App\Models\Post:${input.a}', $scope->literal('App\Models\Post:${input.a}'));
+        self::assertSame('\${input.a}:${input-a}', $scope->literal('\${input.a}:${input-a}'));
         self::assertSame('', $scope->literal(''));
     }
 
@@ -79,12 +95,12 @@ final class InterpolationScopeTest extends TestCase
      */
     public function testPatternWithoutInterpolatorDoublesBackslashes(): void
     {
-        $scope = new InterpolationScope(null, null, 'posts:9', ['a' => 'value']);
+        $scope = new InterpolationScope(null, null, 'posts:9', ['input' => ['a' => 'value']]);
 
-        $pattern = $scope->pattern('App\Models\*:${context.a}?[ab]');
+        $pattern = $scope->pattern('App\Models\*:${input.a}?[ab]');
 
-        self::assertSame('App\\\Models\\\*:${context.a}?[ab]', $pattern);
-        self::assertTrue(\fnmatch($pattern, 'App\Models\Post:${context.a}xa'));
+        self::assertSame('App\\\Models\\\*:${input.a}?[ab]', $pattern);
+        self::assertTrue(\fnmatch($pattern, 'App\Models\Post:${input.a}xa'));
         self::assertFalse(\fnmatch($pattern, 'App\Models\Post:value?[ab]'));
     }
 
@@ -96,10 +112,10 @@ final class InterpolationScopeTest extends TestCase
      */
     public function testLiteralWithInterpolatorSubstitutesTokens(): void
     {
-        $scope = new InterpolationScope(new ContextInterpolator, null, null, ['a' => 'value*']);
+        $scope = new InterpolationScope(new ContextInterpolator, null, null, ['input' => ['a' => 'value*']]);
 
-        self::assertSame('App\Models\Post:value*', $scope->literal('App\Models\Post:${context.a}'));
-        self::assertSame('${context.a}:value*', $scope->literal('\${context.a}:${context.a}'));
+        self::assertSame('App\Models\Post:value*', $scope->literal('App\Models\Post:${input.a}'));
+        self::assertSame('${input.a}:value*', $scope->literal('\${input.a}:${input.a}'));
     }
 
     /**
@@ -110,9 +126,9 @@ final class InterpolationScopeTest extends TestCase
      */
     public function testPatternWithInterpolatorEscapesSubstitutedValues(): void
     {
-        $scope = new InterpolationScope(new ContextInterpolator, null, null, ['a' => 'v*']);
+        $scope = new InterpolationScope(new ContextInterpolator, null, null, ['input' => ['a' => 'v*']]);
 
-        $pattern = $scope->pattern('App\Models\*:${context.a}');
+        $pattern = $scope->pattern('App\Models\*:${input.a}');
 
         self::assertSame('App\\\Models\\\*:v\*', $pattern);
         self::assertTrue(\fnmatch($pattern, 'App\Models\Post:v*'));
@@ -127,9 +143,9 @@ final class InterpolationScopeTest extends TestCase
      */
     public function testUnresolvedTokenIsNull(): void
     {
-        $scope = new InterpolationScope(new ContextInterpolator, null, 'global', ['a' => 'value']);
+        $scope = new InterpolationScope(new ContextInterpolator, null, 'global', ['input' => ['a' => 'value']]);
 
-        self::assertNull($scope->literal('${context.a}:${context.missing}'));
+        self::assertNull($scope->literal('${input.a}:${input.missing}'));
         self::assertNull($scope->pattern('docs:${resource.id}'));
     }
 
@@ -141,10 +157,10 @@ final class InterpolationScopeTest extends TestCase
      */
     public function testMalformedReferenceIsNull(): void
     {
-        $scope = new InterpolationScope(new ContextInterpolator, null, null, ['a' => 'value']);
+        $scope = new InterpolationScope(new ContextInterpolator, null, null, ['input' => ['a' => 'value']]);
 
-        self::assertNull($scope->literal('${context.a}:${context.tenant-id}'));
-        self::assertNull($scope->pattern('${context.a}/${}*'));
+        self::assertNull($scope->literal('${input.a}:${input.tenant-id}'));
+        self::assertNull($scope->pattern('${input.a}/${}*'));
     }
 
     /**
@@ -158,16 +174,16 @@ final class InterpolationScopeTest extends TestCase
         $principal     = new \stdClass;
         $principal->id = 'p1';
 
-        $scope = new InterpolationScope(new ContextInterpolator, $principal, 'posts:9', ['env' => 'prod']);
+        $scope = new InterpolationScope(new ContextInterpolator, $principal, 'posts:9', ['input' => ['env' => 'prod']]);
 
         self::assertSame('p1', $scope->literal('${principal.id}'));
         self::assertSame('9', $scope->literal('${resource.id}'));
-        self::assertSame('prod', $scope->literal('${context.env}'));
-        self::assertSame('p1|posts|prod', $scope->literal('${principal.id}|${resource.type}|${context.env}'));
+        self::assertSame('prod', $scope->literal('${input.env}'));
+        self::assertSame('p1|posts|prod', $scope->literal('${principal.id}|${resource.type}|${input.env}'));
 
         self::assertSame('p1', $scope->pattern('${principal.id}'));
         self::assertSame('9', $scope->pattern('${resource.id}'));
-        self::assertSame('prod', $scope->pattern('${context.env}'));
-        self::assertSame('p1/posts/prod/*', $scope->pattern('${principal.id}/${resource.type}/${context.env}/*'));
+        self::assertSame('prod', $scope->pattern('${input.env}'));
+        self::assertSame('p1/posts/prod/*', $scope->pattern('${principal.id}/${resource.type}/${input.env}/*'));
     }
 }

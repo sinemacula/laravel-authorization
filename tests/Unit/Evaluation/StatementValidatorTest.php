@@ -305,7 +305,7 @@ final class StatementValidatorTest extends TestCase
      */
     public function testConditionsOf(): void
     {
-        self::assertSame(['eq' => ['k' => 1]], StatementValidator::conditionsOf(['conditions' => ['eq' => ['k' => 1]]]));
+        self::assertSame(['eq' => ['input.k' => 1]], StatementValidator::conditionsOf(['conditions' => ['eq' => ['input.k' => 1]]]));
         self::assertSame([], StatementValidator::conditionsOf([]));
 
         foreach (['nope', null, 1] as $conditions) {
@@ -324,7 +324,7 @@ final class StatementValidatorTest extends TestCase
      */
     public static function operatorErrorProvider(): iterable
     {
-        yield 'well formed' => [['eq' => ['tenant' => 'org-1'], 'ip_in_if_exists' => ['ip' => '10.0.0.0/8']], []];
+        yield 'well formed' => [['eq' => ['input.tenant' => 'org-1'], 'ip_in_if_exists' => ['input.ip' => '10.0.0.0/8']], []];
         yield 'empty' => [[], []];
         yield 'key-first shape' => [['tenant' => ['eq' => 'org-1']], ['conditions have an unknown operator \'tenant\'']];
         yield 'bare value' => [['tenant' => 'org-1'], ['conditions have an unknown operator \'tenant\'']];
@@ -332,13 +332,13 @@ final class StatementValidatorTest extends TestCase
         yield 'string_like' => [['string_like' => ['name' => 'a*']], ['conditions have an unknown operator \'string_like\'']];
         yield 'not_null' => [['not_null' => ['name' => true]], ['conditions have an unknown operator \'not_null\'']];
         yield 'null_if_exists' => [['null_if_exists' => ['name' => true]], ['conditions have an unknown operator \'null_if_exists\'']];
-        yield 'list of conditions' => [[['eq' => ['k' => 1]]], ['conditions must map operator names to key tests']];
+        yield 'list of conditions' => [[['eq' => ['input.k' => 1]]], ['conditions must map operator names to key tests']];
         yield 'operator without tests' => [['eq' => []], ['condition operator \'eq\' must map context keys to operands']];
         yield 'operator with a value' => [['eq' => 'org-1'], ['condition operator \'eq\' must map context keys to operands']];
         yield 'operator with a list' => [['in' => ['a', 'b']], ['condition operator \'in\' must map context keys to operands']];
-        yield 'operator with a numeric key' => [['eq' => ['tenant' => 'a', 0 => 'b']], ['condition operator \'eq\' must map context keys to operands']];
+        yield 'operator with a numeric key' => [['eq' => ['input.tenant' => 'a', 0 => 'b']], ['condition operator \'eq\' must map context keys to operands']];
         yield 'several faults in order' => [
-            ['bogus' => ['k' => 1], 'eq' => ['k' => 1], 'gt' => 5],
+            ['bogus' => ['k' => 1], 'eq' => ['input.k' => 1], 'gt' => 5],
             ['conditions have an unknown operator \'bogus\'', 'condition operator \'gt\' must map context keys to operands'],
         ];
     }
@@ -359,27 +359,28 @@ final class StatementValidatorTest extends TestCase
 
     /**
      * conditionTests() lists every key test of the well-formed operator entries
-     * in order, with the operator it tests with and whether a missing key
-     * passes it, and leaves out the malformed entries.
+     * in order, with its key split into the segments of its dot path, the
+     * operator it tests with and whether a missing key passes it, and leaves
+     * out the malformed entries.
      *
      * @return void
      */
     public function testConditionTestsListsEveryKeyTest(): void
     {
         $tests = StatementValidator::conditionTests([
-            'eq'              => ['tenant' => 'org-1', 'role' => 'admin'],
-            'bogus'           => ['tenant' => 'x'],
-            'ip_in_if_exists' => ['ip' => '10.0.0.0/8'],
+            'eq'              => ['input.tenant' => 'org-1', 'input.post.role' => 'admin'],
+            'bogus'           => ['input.tenant' => 'x'],
+            'ip_in_if_exists' => ['request.ip' => '10.0.0.0/8'],
             'gt'              => 5,
-            'null'            => ['deleted_at' => true],
-            0                 => ['eq' => ['k' => 1]],
+            'null'            => ['input.deleted_at' => true],
+            0                 => ['eq' => ['input.k' => 1]],
         ]);
 
         self::assertSame([
-            ['key' => 'tenant', 'operator' => 'eq', 'isOptional' => false, 'operand' => 'org-1', 'error' => null],
-            ['key' => 'role', 'operator' => 'eq', 'isOptional' => false, 'operand' => 'admin', 'error' => null],
-            ['key' => 'ip', 'operator' => 'ip_in', 'isOptional' => true, 'operand' => '10.0.0.0/8', 'error' => null],
-            ['key' => 'deleted_at', 'operator' => 'null', 'isOptional' => false, 'operand' => true, 'error' => null],
+            ['key' => 'input.tenant', 'path' => ['input', 'tenant'], 'operator' => 'eq', 'isOptional' => false, 'operand' => 'org-1', 'error' => null],
+            ['key' => 'input.post.role', 'path' => ['input', 'post', 'role'], 'operator' => 'eq', 'isOptional' => false, 'operand' => 'admin', 'error' => null],
+            ['key' => 'request.ip', 'path' => ['request', 'ip'], 'operator' => 'ip_in', 'isOptional' => true, 'operand' => '10.0.0.0/8', 'error' => null],
+            ['key' => 'input.deleted_at', 'path' => ['input', 'deleted_at'], 'operator' => 'null', 'isOptional' => false, 'operand' => true, 'error' => null],
         ], $tests);
     }
 
@@ -391,18 +392,18 @@ final class StatementValidatorTest extends TestCase
      */
     public static function keyTestErrorProvider(): iterable
     {
-        yield 'valid operand' => [['eq' => ['k' => 'x']], null];
-        yield 'valid interpolated operand' => [['eq' => ['k' => '${context.k}']], null];
-        yield 'valid suffixed operand' => [['eq_if_exists' => ['k' => 'x']], null];
-        yield 'list operand for eq' => [['eq' => ['k' => ['x']]], 'condition \'k\' has an invalid operand for operator \'eq\''];
-        yield 'list operand for suffixed eq' => [['eq_if_exists' => ['k' => ['x']]], 'condition \'k\' has an invalid operand for operator \'eq\''];
-        yield 'string operand for in' => [['in' => ['k' => 'x']], 'condition \'k\' has an invalid operand for operator \'in\''];
-        yield 'empty set for any_value_in' => [['any_value_in' => ['k' => []]], 'condition \'k\' has an invalid operand for operator \'any_value_in\''];
-        yield 'string operand for null' => [['null' => ['k' => 'true']], 'condition \'k\' has an invalid operand for operator \'null\''];
-        yield 'empty set for ip_in' => [['ip_in' => ['k' => []]], 'condition \'k\' has an invalid operand for operator \'ip_in\''];
-        yield 'malformed reference' => [['eq' => ['k' => '${foo']], 'condition \'k\' has a malformed ${…} reference'];
-        yield 'malformed reference in a pattern' => [['like' => ['k' => 'a-${context.tenant-id}*']], 'condition \'k\' has a malformed ${…} reference'];
-        yield 'malformed reference in a number' => [['gt' => ['k' => '${context.tenant-id}']], 'condition \'k\' has an invalid operand for operator \'gt\''];
+        yield 'valid operand' => [['eq' => ['input.k' => 'x']], null];
+        yield 'valid interpolated operand' => [['eq' => ['input.k' => '${input.k}']], null];
+        yield 'valid suffixed operand' => [['eq_if_exists' => ['input.k' => 'x']], null];
+        yield 'list operand for eq' => [['eq' => ['input.k' => ['x']]], 'condition \'input.k\' has an invalid operand for operator \'eq\''];
+        yield 'list operand for suffixed eq' => [['eq_if_exists' => ['input.k' => ['x']]], 'condition \'input.k\' has an invalid operand for operator \'eq\''];
+        yield 'string operand for in' => [['in' => ['input.k' => 'x']], 'condition \'input.k\' has an invalid operand for operator \'in\''];
+        yield 'empty set for any_value_in' => [['any_value_in' => ['input.k' => []]], 'condition \'input.k\' has an invalid operand for operator \'any_value_in\''];
+        yield 'string operand for null' => [['null' => ['input.k' => 'true']], 'condition \'input.k\' has an invalid operand for operator \'null\''];
+        yield 'empty set for ip_in' => [['ip_in' => ['input.k' => []]], 'condition \'input.k\' has an invalid operand for operator \'ip_in\''];
+        yield 'malformed reference' => [['eq' => ['input.k' => '${foo']], 'condition \'input.k\' has a malformed ${…} reference'];
+        yield 'malformed reference in a pattern' => [['like' => ['input.k' => 'a-${input.tenant-id}*']], 'condition \'input.k\' has a malformed ${…} reference'];
+        yield 'malformed reference in a number' => [['gt' => ['input.k' => '${input.tenant-id}']], 'condition \'input.k\' has an invalid operand for operator \'gt\''];
     }
 
     /**

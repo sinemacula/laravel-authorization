@@ -288,7 +288,8 @@ final class AuthorizationAssertionsTest extends TestCase
     }
 
     /**
-     * `assertCan` passes when allowed via policy with resource context.
+     * `assertCan` passes when allowed via policy with resource context, which
+     * the check reads under `input`.
      *
      * @return void
      */
@@ -304,13 +305,14 @@ final class AuthorizationAssertionsTest extends TestCase
                     'effect'     => 'allow',
                     'actions'    => ['posts:edit'],
                     'resources'  => ['post:42'],
-                    'conditions' => ['eq' => ['tenant' => 'org-1']],
+                    'conditions' => ['eq' => ['input.tenant' => 'org-1']],
                 ]],
             ],
         ]));
 
         $this->assertCan($user, 'posts:edit', 'post:42', ['tenant' => 'org-1']);
         $this->assertCannot($user, 'posts:edit', 'post:42', ['tenant' => 'org-2']);
+        $this->assertCannot($user, 'posts:edit', 'post:42', ['input' => ['tenant' => 'org-1']]);
     }
 
     /**

@@ -11,9 +11,13 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
+use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
+use SineMacula\Laravel\Authorization\Contracts\RequestContext;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
@@ -200,10 +204,10 @@ final class AuthorizationManagerTest extends TestCase
     {
         $policy = Policy::fromArray([
             'name'       => 'tenant-only',
-            'statements' => [['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['tenant' => 'org-1']]]],
+            'statements' => [['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['input.tenant' => 'org-1']]]],
         ]);
 
-        $failed = new TraceEntry(DecisionStage::ALLOW, TraceOutcome::CONDITION_FAILED, new StatementReference('tenant-only', 0), ['tenant' => false]);
+        $failed = new TraceEntry(DecisionStage::ALLOW, TraceOutcome::CONDITION_FAILED, new StatementReference('tenant-only', 0), ['input.tenant' => false]);
 
         $denied  = $this->manager()->for($this->stubAuthorizable([], [$policy]))->check('posts:create', null, ['tenant' => 'org-2']);
         $allowed = $this->manager()->for($this->stubAuthorizable(['posts:create'], [$policy]))->check('posts:create', null, ['tenant' => 'org-2']);
@@ -216,6 +220,88 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame(DecisionStage::ALLOW, $allowed->stage);
         self::assertSame([], $allowed->statements);
         self::assertEquals([$failed, new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD)], $allowed->trace);
+    }
+
+    /**
+     * Without a check context factory, what the caller passes is read under
+     * `input` alone: `['request' => ['ip' => …]]` supplies `input.request.ip`
+     * and never `request.ip`, and a top-level key named `request.ip` is never
+     * the path `request.ip`.
+     *
+     * @return void
+     */
+    public function testCallerValuesAreReadUnderInputAlone(): void
+    {
+        $principal = $this->stubAuthorizable([], [Policy::fromArray([
+            'name'       => 'caller-values',
+            'statements' => [
+                ['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['input.request.ip' => '10.0.0.1']]],
+                ['effect' => 'allow', 'actions' => ['posts:update'], 'conditions' => ['eq' => ['request.ip' => '10.0.0.1']]],
+            ],
+        ])]);
+
+        $manager = $this->manager()->for($principal);
+
+        self::assertTrue($manager->can('posts:create', null, ['request' => ['ip' => '10.0.0.1']]));
+        self::assertFalse($manager->can('posts:create', null, ['input.request.ip' => '10.0.0.1']));
+        self::assertFalse($manager->can('posts:update', null, ['request' => ['ip' => '10.0.0.1']]));
+        self::assertFalse($manager->can('posts:update', null, ['request.ip' => '10.0.0.1']));
+        self::assertSame(TraceOutcome::UNDECIDABLE, $manager->check('posts:update', null, ['request' => ['ip' => '10.0.0.1']])->trace[1]->outcome);
+    }
+
+    /**
+     * With a check context factory, each check's context holds the sources'
+     * namespaces beside the caller's `input`, so a caller can never stand in
+     * for the request, and a source is read once per check that reads it.
+     *
+     * @return void
+     */
+    public function testTheCheckContextComesFromTheFactorysSources(): void
+    {
+        $request = new class implements RequestContext {
+            /** @var int How many times the request's values were read. */
+            public int $reads = 0;
+
+            /**
+             * Return the request's values.
+             *
+             * @return array<string, mixed>
+             */
+            #[\Override]
+            public function values(): array
+            {
+                $this->reads++;
+
+                return ['ip' => '10.0.0.9', 'method' => 'GET'];
+            }
+        };
+
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator,
+            subjectResolver: new StubSubjectResolver,
+            policyResolver: new DefaultPolicyResolver,
+            lastDecisionStore: new LastDecisionStore,
+            contexts: new CheckContextFactory(self::authentication(), $request, self::environment()),
+        );
+
+        $principal = $this->stubAuthorizable([], [Policy::fromArray([
+            'name'       => 'request-values',
+            'statements' => [
+                ['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['request.ip' => '10.0.0.9', 'request.method' => 'GET', 'input.post' => '1']]],
+                ['effect' => 'allow', 'actions' => ['posts:update'], 'conditions' => ['eq' => ['request.ip' => '10.0.0.1']]],
+                ['effect' => 'allow', 'actions' => ['posts:delete']],
+            ],
+        ])]);
+
+        $scoped = $manager->for($principal);
+
+        self::assertTrue($scoped->can('posts:create', null, ['post' => '1']));
+        self::assertFalse($scoped->can('posts:create', null, ['post' => '2']));
+        self::assertFalse($scoped->can('posts:update', null, ['request' => ['ip' => '10.0.0.1']]));
+        self::assertSame(3, $request->reads);
+
+        self::assertTrue($scoped->can('posts:delete'));
+        self::assertSame(3, $request->reads);
     }
 
     /**
@@ -1247,6 +1333,59 @@ final class AuthorizationManagerTest extends TestCase
             lastDecisionStore: new LastDecisionStore,
             translator: $translator,
         );
+    }
+
+    /**
+     * Return an authentication context that supplies nothing.
+     *
+     * @return \SineMacula\Laravel\Authorization\Contracts\AuthenticationContext
+     */
+    private static function authentication(): AuthenticationContext
+    {
+        return new class implements AuthenticationContext {
+            /**
+             * Return the namespaces the context supplies.
+             *
+             * @return list<string>
+             */
+            #[\Override]
+            public function namespaces(): array
+            {
+                return ['authentication'];
+            }
+
+            /**
+             * Return no values.
+             *
+             * @return array<string, array<string, mixed>>
+             */
+            #[\Override]
+            public function values(): array
+            {
+                return [];
+            }
+        };
+    }
+
+    /**
+     * Return an environment context that supplies nothing.
+     *
+     * @return \SineMacula\Laravel\Authorization\Contracts\EnvironmentContext
+     */
+    private static function environment(): EnvironmentContext
+    {
+        return new class implements EnvironmentContext {
+            /**
+             * Return no values.
+             *
+             * @return array<string, mixed>
+             */
+            #[\Override]
+            public function values(): array
+            {
+                return [];
+            }
+        };
     }
 
     /**

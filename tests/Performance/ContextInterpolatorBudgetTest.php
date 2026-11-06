@@ -82,8 +82,8 @@ final class ContextInterpolatorBudgetTest extends TestCase
     private static function buildTwentyTokenPattern(): string
     {
         $ten = '${principal.id}:${principal.type}:${resource.type}:${resource.id}'
-            . ':${context.tenant}:${context.request.ip}:${context.request.method}'
-            . ':${context.request.path}:${context.request.country}:${context.environment}';
+            . ':${input.tenant}:${request.ip}:${request.method}'
+            . ':${request.path}:${request.country}:${environment.tier}';
 
         return $ten . ':' . $ten;
     }
@@ -96,7 +96,7 @@ final class ContextInterpolatorBudgetTest extends TestCase
     private static function buildContext(): array
     {
         return [
-            'tenant'  => 'tenant-99',
+            'input'   => ['tenant' => 'tenant-99'],
             'request' => [
                 'ip'         => '10.0.0.42',
                 'method'     => 'POST',
@@ -105,7 +105,7 @@ final class ContextInterpolatorBudgetTest extends TestCase
                 'referrer'   => 'https://example.test/dashboard',
                 'user_agent' => 'Mozilla/5.0',
             ],
-            'environment' => 'production',
+            'environment' => ['tier' => 'production'],
         ];
     }
 }

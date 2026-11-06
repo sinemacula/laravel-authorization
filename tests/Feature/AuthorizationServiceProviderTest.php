@@ -22,13 +22,23 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
+use SineMacula\Laravel\Authorization\Context\ClockEnvironmentContext;
+use SineMacula\Laravel\Authorization\Context\DeclaredContextKeyCatalogue;
+use SineMacula\Laravel\Authorization\Context\GuardAuthenticationContext;
+use SineMacula\Laravel\Authorization\Context\RoutedRequestContext;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
+use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
+use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
+use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
+use SineMacula\Laravel\Authorization\Contracts\RequestContext;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
+use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
@@ -147,6 +157,10 @@ final class AuthorizationServiceProviderTest extends TestCase
             PolicyResolver::class,
             LastDecisionStore::class,
             PolicyEvaluator::class,
+            AuthenticationContext::class,
+            RequestContext::class,
+            EnvironmentContext::class,
+            CheckContextFactory::class,
             'authorization',
             AuthorizationManager::class,
         ];
@@ -378,6 +392,78 @@ final class AuthorizationServiceProviderTest extends TestCase
         $this->startNextJob();
 
         self::assertSame($bound, $app->make(ActionCatalogue::class));
+    }
+
+    /**
+     * The context key catalogue declares the package's keys and those of
+     * `authorization.context.keys`, and is one per application: a key a service
+     * provider registers on it is kept across the reset between jobs.
+     *
+     * @return void
+     */
+    public function testBindsOneContextKeyCataloguePerApplication(): void
+    {
+        $app = $this->application();
+        $app->forgetExtenders(ContextKeyCatalogue::class);
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $app->make(ConfigRepository::class);
+        $config->set('authorization.context.keys', ['input' => ['post.status' => 'string']]);
+
+        $catalogue = $app->make(ContextKeyCatalogue::class);
+
+        self::assertInstanceOf(DeclaredContextKeyCatalogue::class, $catalogue);
+        self::assertTrue($catalogue->permits('input.post.status', 'eq'));
+        self::assertTrue($catalogue->permits('request.ip', 'ip_in'));
+
+        $catalogue->register('tenant', ['plan' => 'string']);
+
+        $this->startNextJob();
+
+        self::assertSame($catalogue, $app->make(ContextKeyCatalogue::class));
+        self::assertTrue($app->make(ContextKeyCatalogue::class)->permits('tenant.plan'));
+    }
+
+    /**
+     * The trusted context sources default to Laravel's guard, routed request
+     * and clock, and the manager builds each check's context from them; one the
+     * application binds itself replaces the default and survives the reset
+     * between jobs.
+     *
+     * @return void
+     */
+    public function testBindsTheTrustedContextSources(): void
+    {
+        $app = $this->application();
+
+        self::assertInstanceOf(GuardAuthenticationContext::class, $app->make(AuthenticationContext::class));
+        self::assertInstanceOf(RoutedRequestContext::class, $app->make(RequestContext::class));
+        self::assertInstanceOf(ClockEnvironmentContext::class, $app->make(EnvironmentContext::class));
+
+        $environment = new class implements EnvironmentContext {
+            /**
+             * Return a region the check runs in.
+             *
+             * @return array<string, mixed>
+             */
+            #[\Override]
+            public function values(): array
+            {
+                return ['region' => 'eu'];
+            }
+        };
+
+        $app->instance(EnvironmentContext::class, $environment);
+
+        $this->startNextJob();
+
+        self::assertSame($environment, $app->make(EnvironmentContext::class));
+
+        $policy = EvaluationPolicy::fromArray(['name' => 'eu-only', 'statements' => [
+            ['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['environment.region' => 'eu']]],
+        ]]);
+
+        self::assertTrue(Authorization::for(new StubIdentity(['id' => 'eu']))->withPolicies([$policy])->can('posts:create', null, ['environment' => ['region' => 'us']]));
     }
 
     /**

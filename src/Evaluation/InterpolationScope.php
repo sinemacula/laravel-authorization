@@ -5,9 +5,9 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
 /**
- * The inputs a statement interpolates its patterns and operands against: the
- * interpolator (null to leave `${…}` tokens literal), the principal, the
- * resource and the context of one check.
+ * The inputs a statement interpolates its patterns and operands against, and
+ * tests its conditions against: the interpolator (null to leave `${…}` tokens
+ * literal), the principal, the resource and the context of one check.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -16,13 +16,17 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
  */
 final readonly class InterpolationScope
 {
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\CheckContext Context the conditions are tested against and `${…}` tokens read. */
+    public CheckContext $context;
+
     /**
-     * Create a new interpolation scope.
+     * Create a new interpolation scope. A context given as an array is the
+     * check's namespaces, already built.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null  $interpolator
      * @param  object|null  $principal
      * @param  string|null  $resource
-     * @param  array<string, mixed>  $context
+     * @param  array<array-key, mixed>|\SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
      */
     public function __construct(
 
@@ -35,9 +39,11 @@ final readonly class InterpolationScope
         /** Resource the check names, if any. */
         public ?string $resource = null,
 
-        /** Context the conditions are tested against. */
-        public array $context = [],
-    ) {}
+        // Context of the check; an array is its namespaces, already built.
+        array|CheckContext $context = [],
+    ) {
+        $this->context = CheckContext::from($context);
+    }
 
     /**
      * Interpolate a literal string, or null when a reference cannot be

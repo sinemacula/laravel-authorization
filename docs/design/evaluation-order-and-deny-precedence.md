@@ -19,7 +19,7 @@ throws when it does not. It returns a `Decision`:
   statement's position and its `sid` when it has one, shown as `name[key]#position sid="…"`); none for a permission held
   or a denial no statement made. The `sid` only names the statement: it never changes the decision or the order.
 - `trace` -- every step taken, in order, each a `TraceEntry`: its stage, its `TraceOutcome`, the statement it
-  assessed (none for the permission step), and the condition keys it tested with whether each held.
+  assessed (none for the permission step), and the condition keys (their dot paths) it tested with whether each held.
 
 The trace never carries a context or attribute value, only key names and results (AUTHZ-8.8), so a decision is safe to
 log, store and put on an event.
@@ -28,10 +28,16 @@ log, store and put on an event.
 
 A statement names its actions with `actions`, or with `not_actions` (every action none of its patterns matches), and its
 resources with `resources`, with `not_resources` (every resource none of its patterns matches), or with neither (every
-resource, and a check that names none). Its `conditions` map each operator to the context keys it tests, and every test
-must hold: `{"ip_not_in": {"request.ip": ["10.0.0.0/8"]}, "eq": {"tenant": "${principal.tenant}"}}`. A key the context
-lacks makes a test undecidable, except under the `_if_exists` suffix, which passes it, and for `null`, which decides it.
-The shape, the operators and the operands are in
+resource, and a check that names none). Its `conditions` map each operator to the context keys it tests, each a dot
+path into the check's context, and every test must hold:
+`{"ip_not_in": {"request.ip": ["10.0.0.0/8"]}, "eq": {"input.tenant": "${principal.tenant}"}}`. A key the context lacks
+makes a test undecidable, except under the `_if_exists` suffix, which passes it, and for `null`, which decides it.
+
+The check's context is built once a check, in `AuthorizationManager`, after the subject and resource stages: the
+caller's values under `input`, and the `authentication`, `request` and `environment` namespaces and those of the
+application's sources from their own sources, each built only when a statement assessed reads it and then kept for the
+rest of the check, so a deny stage and an allow stage reading `request.ip` see one value. A decision that ends before
+the statements are assessed builds none of them. The shape, the operators, the operands and the namespaces are in
 [Wildcard and Condition Semantics](wildcard-and-condition-semantics.md).
 
 `not_resources` counts as resource scoping: a statement with it never covers a check that names no resource, so
@@ -81,8 +87,10 @@ and leaves a resource-less `posts:delete` check alone. Only a statement without 
    is recorded as `condition_failed` and decides nothing. A deny whose test cannot be decided -- a condition key missing
    from the context, a `${…}` reference that cannot be resolved, a value or interpolated operand of the wrong type --
    **applies**. This deliberately departs from AWS IAM, where a missing key silently disables a conditional deny: a
-   caller that leaves a key out of the context never gets past a deny written against it. An allow is the mirror
-   image: it applies only when its test definitely holds.
+   caller that leaves a key out of the context never gets past a deny written against it, and since the caller's values
+   are held under `input` alone, no caller can supply a trusted key such as `request.ip` to get past one either. A check
+   outside a routed request has no `request` namespace, so a deny on `request.ip` applies to it unless written with
+   `_if_exists`. An allow is the mirror image: it applies only when its test definitely holds.
 
 6. **A policy that cannot be evaluated denies the check; it is never skipped.** Skipping a malformed statement or an
    unreadable policy row would also drop the denies it carries, so both deny as `invalid_policy`, and RBAC never
@@ -114,8 +122,9 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   `PolicyValidator`, which refuses whatever `Policy::fromArray()` and `Statement::fromArray()` refuse (unknown keys, a
   malformed or repeated `sid`, both or neither of `actions` and `not_actions`, both `resources` and `not_resources`, an
   empty pattern list, conditions that do not map operators to key tests, an unknown operator, a malformed literal
-  operand and a malformed `${…}` reference), a document over the configured limits, a condition key outside the key
-  syntax, and an `actions` or `not_actions` pattern that matches no declared permission. A row that still cannot be
+  operand and a malformed `${…}` reference), a document over the configured limits, a condition key or `${…}` reference
+  the context key catalogue does not declare, a condition on an untestable key or with an operator its type does not
+  suit, and an `actions` or `not_actions` pattern that matches no declared permission. A row that still cannot be
   hydrated on read is never skipped: `HasPolicies::getPolicies()` logs a warning on the package's log channel and
   rethrows, and the decision is `invalid_policy`. A custom `PolicyResolver` must do the same: throw
   `InvalidPolicyDocumentException` rather than leave a policy out.
@@ -151,7 +160,8 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 ## Implementation Anchors
 
 - `AuthorizationManager::check()` -- the core decision; `decide()` -- the subject and resource stages;
-  `decideGrants()` -- `invalid_policy` when policies cannot be gathered, the statements, and the permission step.
+  `decideGrants()` -- the check's context (`CheckContextFactory::make()`), `invalid_policy` when policies cannot be
+  gathered, the statements, and the permission step.
 - `ResourceReferences::of()` -- every resource argument's reference; `ResourceScope::decide()` -- the tenant stage.
 - `PolicyEvaluator::evaluate()` -- the deny, allow and implicit stages, each assessing its statements in a fixed
   order.
@@ -166,7 +176,7 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   `condition_failed` and `no_match`, and the same decision whatever order the policies arrive in.
 - `DecisionTest` -- the decision's construction, the permission step and the explanation.
 - `AuthorizationManagerTest` (Unit and Feature) -- the subject stage, the RBAC allow, deny over RBAC and over a role,
-  and `invalid_policy` over a held permission.
+  `invalid_policy` over a held permission, and the caller's values under `input` and nowhere else.
 - `FailClosedPolicyHydrationTest` -- an unreadable row, or one over a limit, is never skipped.
 - `PolicyValidatorTest` and `PolicyDocumentTest` -- the write-time checks and the limits on read.
 - `GateRegistrarTest` and `AuthorizeActionTest` -- an argument that cannot be identified denies as

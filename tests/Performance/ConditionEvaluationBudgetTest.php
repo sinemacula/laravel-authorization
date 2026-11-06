@@ -75,31 +75,32 @@ final class ConditionEvaluationBudgetTest extends TestCase
     private static function buildConditionChain(): array
     {
         return [
-            'eq'            => ['tenant' => 'tenant-99'],
-            'neq'           => ['role' => 'guest'],
-            'in'            => ['country' => ['US', 'GB', 'CA']],
-            'not_in'        => ['blocklist' => ['blocked', 'banned']],
-            'starts_with'   => ['path' => '/admin'],
-            'ends_with'     => ['file' => '.json'],
-            'like'          => ['agent' => 'Mozilla/*'],
-            'gt'            => ['age' => 17],
-            'gte'           => ['quota' => 0],
-            'lt'            => ['strikes' => 3],
-            'lte'           => ['priority' => 10],
-            'before'        => ['scheduled_at' => '2099-01-01T00:00:00Z'],
-            'after'         => ['created_at' => '2000-01-01T00:00:00Z'],
-            'between'       => ['window' => ['2000-01-01T00:00:00Z', '2099-01-01T00:00:00Z']],
-            'bool'          => ['verified' => true],
-            'null'          => ['deleted_at' => true, 'email' => false],
-            'ip_in'         => ['ip' => '10.0.0.0/8'],
-            'ip_not_in'     => ['ip' => ['192.168.0.0/16', '2001:db8::/32']],
-            'any_value_in'  => ['groups' => ['admins', 'editors']],
-            'all_values_in' => ['scopes' => ['posts:read', 'posts:write', 'posts:delete']],
+            'eq'            => ['input.tenant' => 'tenant-99'],
+            'neq'           => ['input.role' => 'guest'],
+            'in'            => ['input.country' => ['US', 'GB', 'CA']],
+            'not_in'        => ['input.blocklist' => ['blocked', 'banned']],
+            'starts_with'   => ['input.path' => '/admin'],
+            'ends_with'     => ['input.file' => '.json'],
+            'like'          => ['input.agent' => 'Mozilla/*'],
+            'gt'            => ['input.age' => 17],
+            'gte'           => ['input.quota' => 0],
+            'lt'            => ['input.strikes' => 3],
+            'lte'           => ['input.priority' => 10],
+            'before'        => ['input.scheduled_at' => '2099-01-01T00:00:00Z'],
+            'after'         => ['input.created_at' => '2000-01-01T00:00:00Z'],
+            'between'       => ['input.window' => ['2000-01-01T00:00:00Z', '2099-01-01T00:00:00Z']],
+            'bool'          => ['input.verified' => true],
+            'null'          => ['input.deleted_at' => true, 'input.email' => false],
+            'ip_in'         => ['input.ip' => '10.0.0.0/8'],
+            'ip_not_in'     => ['input.ip' => ['192.168.0.0/16', '2001:db8::/32']],
+            'any_value_in'  => ['input.groups' => ['admins', 'editors']],
+            'all_values_in' => ['input.scopes' => ['posts:read', 'posts:write', 'posts:delete']],
         ];
     }
 
     /**
-     * Build the matching context — every operator resolves truthy so the full
+     * Build the matching context, every key under the `input` namespace, so
+     * each test reads a dot path — every operator resolves truthy so the full
      * chain runs to completion.
      *
      * @return array<string, mixed>
@@ -107,26 +108,28 @@ final class ConditionEvaluationBudgetTest extends TestCase
     private static function buildContext(): array
     {
         return [
-            'tenant'       => 'tenant-99',
-            'role'         => 'member',
-            'country'      => 'US',
-            'blocklist'    => 'allowed',
-            'ip'           => '10.0.0.42',
-            'path'         => '/admin/posts',
-            'file'         => 'report.json',
-            'scheduled_at' => '2026-06-01T00:00:00Z',
-            'created_at'   => '2026-01-01T00:00:00Z',
-            'window'       => '2026-06-01T00:00:00Z',
-            'agent'        => 'Mozilla/5.0',
-            'deleted_at'   => null,
-            'email'        => 'alice@example.test',
-            'age'          => 42,
-            'quota'        => 10,
-            'strikes'      => 0,
-            'priority'     => 5,
-            'verified'     => true,
-            'groups'       => ['members', 'editors'],
-            'scopes'       => ['posts:read', 'posts:write'],
+            'input' => [
+                'tenant'       => 'tenant-99',
+                'role'         => 'member',
+                'country'      => 'US',
+                'blocklist'    => 'allowed',
+                'ip'           => '10.0.0.42',
+                'path'         => '/admin/posts',
+                'file'         => 'report.json',
+                'scheduled_at' => '2026-06-01T00:00:00Z',
+                'created_at'   => '2026-01-01T00:00:00Z',
+                'window'       => '2026-06-01T00:00:00Z',
+                'agent'        => 'Mozilla/5.0',
+                'deleted_at'   => null,
+                'email'        => 'alice@example.test',
+                'age'          => 42,
+                'quota'        => 10,
+                'strikes'      => 0,
+                'priority'     => 5,
+                'verified'     => true,
+                'groups'       => ['members', 'editors'],
+                'scopes'       => ['posts:read', 'posts:write'],
+            ],
         ];
     }
 }

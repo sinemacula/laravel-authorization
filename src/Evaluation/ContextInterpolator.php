@@ -5,33 +5,34 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Support\Arr;
 use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
 
 /**
- * Resolve `${namespace.key}` tokens in policy statement strings.
- *
- * Three namespaces are supported:
+ * Resolve `${namespace.path}` tokens in policy statement strings.
  *
  * - `${principal.*}`: attributes of the resolved principal. `principal.id` is
  *   the model's key and `principal.type` its morph class (or class name). Other
  *   keys read the model's attribute through `getAttribute()`, or a public
  *   property on a plain object. Hidden attributes (listed in `$hidden`, or left
  *   out of a non-empty `$visible`) and relations are never read.
- * - `${context.*}`: the caller-supplied context array passed to `can()` or
- *   `check()`, as a dot-notation path (e.g. `${context.request.ip}`).
  * - `${resource.*}`: derived from the resource string. `resource.type` is the
  *   segment before the first `:` (the whole string when there is none) and
  *   `resource.id` the segment after it (unresolved when there is none).
+ * - Any other token is a dot path of the check's context, read by the same
+ *   resolver as condition keys: `${request.ip}`, `${input.post}`,
+ *   `${environment.time}`. The namespace is built the first time the check
+ *   reads it. A namespace the context does not hold, such as `context`, is
+ *   unresolved.
  *
- * A token that cannot be resolved to a scalar makes the whole string
- * unresolved: `interpolate()` and `interpolatePattern()` return null, and the
- * statement treats the test as undecidable (a deny applies, an allow does not),
- * never as an empty string. The escape sequence `\${` stands for a literal
- * `${`; any other `${` that does not open a well-formed token (letters, digits,
- * `_` and `.`, starting with a letter or `_`) is malformed and also makes the
- * string unresolved. Every substituted value is a string: numbers are cast and
- * booleans become `true` or `false`.
+ * A token that cannot be resolved to a scalar (a missing key, a null, a list or
+ * map) makes the whole string unresolved: `interpolate()` and
+ * `interpolatePattern()` return null, and the statement treats the test as
+ * undecidable (a deny applies, an allow does not), never as an empty string.
+ * The escape sequence `\${` stands for a literal `${`; any other `${` that does
+ * not open a well-formed token (letters, digits, `_` and `.`, starting with a
+ * letter or `_`) is malformed and also makes the string unresolved. Every
+ * substituted value is a string: numbers are cast and booleans become `true` or
+ * `false`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -55,12 +56,12 @@ final class ContextInterpolator
      * @param  string  $subject
      * @param  object|null  $principal
      * @param  string|null  $resource
-     * @param  array<string, mixed>  $context
+     * @param  array<array-key, mixed>|\SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
      * @return string|null
      */
-    public function interpolate(string $subject, ?object $principal, ?string $resource, array $context): ?string
+    public function interpolate(string $subject, ?object $principal, ?string $resource, array|CheckContext $context = []): ?string
     {
-        return $this->render($subject, $principal, $resource, $context, false);
+        return $this->render($subject, $principal, $resource, CheckContext::from($context), false);
     }
 
     /**
@@ -75,12 +76,12 @@ final class ContextInterpolator
      * @param  string  $pattern
      * @param  object|null  $principal
      * @param  string|null  $resource
-     * @param  array<string, mixed>  $context
+     * @param  array<array-key, mixed>|\SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
      * @return string|null
      */
-    public function interpolatePattern(string $pattern, ?object $principal, ?string $resource, array $context): ?string
+    public function interpolatePattern(string $pattern, ?object $principal, ?string $resource, array|CheckContext $context = []): ?string
     {
-        return $this->render($pattern, $principal, $resource, $context, true);
+        return $this->render($pattern, $principal, $resource, CheckContext::from($context), true);
     }
 
     /**
@@ -92,18 +93,33 @@ final class ContextInterpolator
      */
     public static function containsReference(string $subject): bool
     {
+        return self::references($subject) !== [];
+    }
+
+    /**
+     * Return the path of every well-formed `${…}` reference in the string, in
+     * order (an escaped `\${` is not one), such as `request.ip` for
+     * `${request.ip}`.
+     *
+     * @param  string  $subject
+     * @return list<string>
+     */
+    public static function references(string $subject): array
+    {
+        $references = [];
+
         foreach (self::split($subject) as $part) {
             if (\preg_match(self::TOKEN_PATTERN, $part) === 1) {
-                return true;
+                $references[] = \substr($part, 2, -1);
             }
         }
 
-        return false;
+        return $references;
     }
 
     /**
      * Determine whether the string contains a `${` that is neither escaped nor
-     * the start of a well-formed reference, such as `${context.tenant-id}`.
+     * the start of a well-formed reference, such as `${input.tenant-id}`.
      *
      * @param  string  $subject
      * @return bool
@@ -141,11 +157,11 @@ final class ContextInterpolator
      * @param  string  $subject
      * @param  object|null  $principal
      * @param  string|null  $resource
-     * @param  array<string, mixed>  $context
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
      * @param  bool  $asPattern
      * @return string|null
      */
-    private function render(string $subject, ?object $principal, ?string $resource, array $context, bool $asPattern): ?string
+    private function render(string $subject, ?object $principal, ?string $resource, CheckContext $context, bool $asPattern): ?string
     {
         $rendered = '';
 
@@ -196,11 +212,11 @@ final class ContextInterpolator
      * @param  string  $part
      * @param  object|null  $principal
      * @param  string|null  $resource
-     * @param  array<string, mixed>  $context
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
      * @param  bool  $asPattern
      * @return string|null
      */
-    private function renderPart(string $part, ?object $principal, ?string $resource, array $context, bool $asPattern): ?string
+    private function renderPart(string $part, ?object $principal, ?string $resource, CheckContext $context, bool $asPattern): ?string
     {
         if ($part === '\${' || self::isMalformed($part)) {
             return $part === '\${' ? '${' : null;
@@ -222,10 +238,10 @@ final class ContextInterpolator
      * @param  string  $token
      * @param  object|null  $principal
      * @param  string|null  $resource
-     * @param  array<string, mixed>  $context
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
      * @return string|null
      */
-    private function resolveToken(string $token, ?object $principal, ?string $resource, array $context): ?string
+    private function resolveToken(string $token, ?object $principal, ?string $resource, CheckContext $context): ?string
     {
         $dotPos    = \strpos($token, '.');
         $namespace = $dotPos === false ? $token : \substr($token, 0, $dotPos);
@@ -233,9 +249,8 @@ final class ContextInterpolator
 
         $value = match ($namespace) {
             'principal' => $this->resolvePrincipal($principal, $key),
-            'context'   => $this->resolveContext($context, $key),
             'resource'  => $this->resolveResource($resource, $key),
-            default     => null,
+            default     => self::resolveContext($context, $token),
         };
 
         if ($value === null) {
@@ -329,20 +344,16 @@ final class ContextInterpolator
     }
 
     /**
-     * Resolve a dot-notation key from the context array.
+     * Resolve a dot path of the check's context, or null when its key is
+     * missing or its value is not a scalar.
      *
-     * @param  array<string, mixed>  $context
-     * @param  string  $key
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
+     * @param  string  $path
      * @return scalar|null
      */
-    private function resolveContext(array $context, string $key): bool|float|int|string|null
+    private static function resolveContext(CheckContext $context, string $path): bool|float|int|string|null
     {
-        if ($key === '') {
-            return null;
-        }
-
-        /** @var mixed $value */
-        $value = Arr::get($context, $key);
+        $value = $context->lookup($path)[1];
 
         return \is_scalar($value) ? $value : null;
     }

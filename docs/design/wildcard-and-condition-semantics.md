@@ -2,8 +2,9 @@
 
 Permission checks and policy statement matching both use `fnmatch` for pattern evaluation, and policy statements support
 a condition operator catalogue for context-sensitive decisions. This note documents the wildcard matching direction, how
-backslashes and substituted values are kept literal, the four outcomes a statement test can have, the condition operator
-set, `${…}` interpolation, and the interaction between wildcards and the RBAC fallback.
+backslashes and substituted values are kept literal, the four outcomes a statement test can have, the check's context
+and the keys a policy may read from it, the condition operator set, `${…}` interpolation, and the interaction between
+wildcards and the RBAC fallback.
 
 ## Invariants
 
@@ -35,7 +36,7 @@ set, `${…}` interpolation, and the interaction between wildcards and the RBAC 
 
 5. **A substituted value only ever matches itself.** When a resource pattern or a `like` operand contains a `${…}`
    reference, the resolved value is escaped (`\`, `*`, `?`, `[` and `]`) before it is spliced into the pattern. A
-   context value of `*` therefore matches only a literal `*`; it never turns `posts:${context.post}` into `posts:*`. The
+   context value of `*` therefore matches only a literal `*`; it never turns `posts:${input.post}` into `posts:*`. The
    pattern's own glob characters keep their meaning.
 
 6. **Every statement test has one of four outcomes, and none of them skips a deny by accident.** A test that cannot be
@@ -52,11 +53,17 @@ set, `${…}` interpolation, and the interaction between wildcards and the RBAC 
    a pattern list that is empty or holds anything but non-empty strings, conditions that are not a map of operators to
    key tests, an unknown operator, a malformed literal operand, a resource pattern holding a NUL byte and a malformed
    `${…}` reference in a resource pattern or a condition. `Policy::fromArray()` refuses statements that share a `sid`.
-   On write, `PolicyValidator` adds the limits, the condition key syntax and the action catalogue (see [Writing a
+   On write, `PolicyValidator` adds the limits, the context key catalogue and the action catalogue (see [Writing a
    policy](#writing-a-policy)), so a policy row with any of these faults cannot be saved; on read, a stored document
    over a limit, or one that no longer parses, denies as `invalid_policy`. The evaluation-time `invalid` outcome is the
    backstop for statements constructed directly; an operand whose value is known only after interpolation is never
    invalid, only undecidable.
+
+8. **A condition key is a dot path, and the caller supplies only `input`.** The context of a check is nested
+   namespaces, and a condition key or a `${…}` reference is read one segment at a time through them by one strict
+   resolver, never as a literal key. Whatever the caller passes is held under `input` and never promoted into another
+   namespace, so `authentication`, `request` and `environment` hold only what their trusted sources supply (see [The
+   check's context](#the-checks-context)).
 
 ## Wildcard Matching
 
@@ -141,9 +148,9 @@ being looked at, so only a statement that covers the check (or whose resource te
 Otherwise the resource test and every key test of every operator are combined as a conjunction in which the strongest
 outcome wins, in the order **invalid, does not match, undecidable, matches**. One part that definitely fails decides the
 conjunction even when another could not be decided: a deny with the conditions
-`{"eq": {"tenant": "org-1"}, "bool": {"mfa": false}}` is skipped for a check in `org-2`, whether or not the context
-carries `mfa`. A test's shape is checked before its key is looked up, so a malformed test is invalid even when its key
-is missing from the context.
+`{"eq": {"input.tenant": "org-1"}, "bool": {"input.mfa": false}}` is skipped for a check in `org-2`, whether or not the
+context carries `input.mfa`. A test's shape is checked before its key is looked up, so a malformed test is invalid even
+when its key is missing from the context.
 
 A test is **undecidable** when:
 
@@ -173,31 +180,92 @@ each of these):
 
 The detail of an invalid test names it and the fault, in the same words `Statement::fromArray()` uses to refuse it: for
 example `conditions have an unknown operator 'unknown_op'` or
-`condition 'tenant' has an invalid operand for operator 'eq'`. A fault of the operator entry as a whole has no key to
-name, so it adds no key to the trace; a fault in one key's operand records that key as not held.
+`condition 'input.tenant' has an invalid operand for operator 'eq'`. A fault of the operator entry as a whole has no key
+to name, so it adds no key to the trace; a fault in one key's operand records that key as not held.
+
+## The Check's Context
+
+The context a check's statements read is nested namespaces (N24), each made by one source:
+
+| Namespace        | Keys the package declares                 | Source                                                |
+|------------------|-------------------------------------------|-------------------------------------------------------|
+| `authentication` | `guard`, `user_id`, `user_type` (strings) | `AuthenticationContext`; `GuardAuthenticationContext` |
+| `request`        | `ip` (ip), `method`, `route` (strings)    | `RequestContext`; `RoutedRequestContext`              |
+| `environment`    | `time` (time)                             | `EnvironmentContext`; `ClockEnvironmentContext`       |
+| `input`          | none                                      | What the caller passes                                |
+| Any other        | none                                      | A `ContextSource` in `authorization.context.sources`  |
+
+- **Trusted namespaces.** `authentication` holds the default guard's name and, when someone is signed in on it, the
+  user's key as a string and morph type; with nobody signed in only `guard`. An `AuthenticationContext` may supply
+  further namespaces beside it (`mfa`, `sso`), named by its `namespaces()`. `request` holds Laravel's trusted-proxy
+  `ip()`, the method and the route name, and only when the container's request has a route, so in a queued job or a
+  console command the namespace is absent. `environment.time` is `now()` in UTC as `Y-m-d\TH:i:s\Z`, read the first
+  time a statement of the check reads `environment` and then fixed for the rest of the check. Each is replaced only by
+  rebinding its contract.
+- **Caller values** (N27). The `$context` of `check()` and every helper over it (`can()`, `authorize()`, `explain()`,
+  `effectivePermissions()`, the Gate's string-keyed and associative arguments and the testing assertions) is wrapped
+  under `input` once, where the manager builds the check's context. A caller passing
+  `['request' => ['ip' => '10.0.0.1']]` supplies `input.request.ip`, never `request.ip`.
+- **Application namespaces** (N26). A `ContextSource` names one namespace and returns its values, nested by key. A
+  source that does not implement the contract, one claiming a reserved namespace (`authentication`, `request`,
+  `environment`, `input`, `principal`, `resource`, `subject`) and two sources claiming one namespace are refused at
+  boot. A source returning nothing leaves its namespace absent.
+- **Lazy and once a check.** Each statement works out, when it is built, the namespaces it reads: the first segment of
+  each condition key and of each `${…}` reference in its operands and resource patterns, `principal` and `resource`
+  aside. A namespace is built only when a statement under evaluation reads it, and at most once for the check, so every
+  statement of one check sees the same values and a check that reads nothing of the request never builds it. Each
+  check has a context of its own.
+
+A condition key is a dot path read one segment at a time over these namespaces: `request.ip` reads the `ip` key of the
+`request` namespace. It is never a literal key: a context whose top level holds a key named `request.ip` does not supply
+`request.ip`, and an `input` of `['post.status' => 'draft']` does not supply `input.post.status`. A key is **missing**
+when its namespace is absent, when a segment is absent, or when a segment is read through a value that is not an array;
+a key present with a `null` value is not missing. A missing key makes a test undecidable, passes under `_if_exists`, and
+is decided by `null`. `${…}` references to any namespace but `principal` and `resource` go through the same resolver,
+so a condition and a reference naming one path always see the same value.
+
+### The key catalogue
+
+Every key a policy reads must be declared in the bound `ContextKeyCatalogue` (N25), as a full dot path with a type and
+whether a condition may test it (by default it may). The default, `DeclaredContextKeyCatalogue`, is held by the
+container and has no static state. It declares the package's seven keys and those of `authorization.context.keys`
+(`namespace => [path => type]`, checked by the configuration validator at boot), and a service provider registers more
+with `register($namespace, [$path => $type])` or `declare($path, $type, $isTestable)`. Keys of `input` are declared like
+any other. Declaring a key again as it was changes nothing; with another type or testability it is refused.
+
+A key's type decides the operators a condition may test it with. The `_if_exists` form of an operator follows it, and
+`null` suits every type:
+
+| Type     | Operators                                                       |
+|----------|-----------------------------------------------------------------|
+| `string` | `eq`, `neq`, `in`, `not_in`, `starts_with`, `ends_with`, `like` |
+| `number` | `eq`, `neq`, `in`, `not_in`, `gt`, `gte`, `lt`, `lte`           |
+| `bool`   | `eq`, `neq`, `bool`                                             |
+| `time`   | `before`, `after`, `between`                                    |
+| `ip`     | `eq`, `neq`, `in`, `not_in`, `ip_in`, `ip_not_in`               |
+| `list`   | `any_value_in`, `all_values_in`                                 |
+
+The type is a write-time rule only: at evaluation a value is checked exactly as the operator table below says, so a
+value of the wrong type is undecidable whatever the key was declared as. An untestable key may be read by a `${…}`
+reference but not tested by a condition.
 
 ## Condition Operators
 
-Conditions are a map of operator to key tests, and each key test maps a context key to an operand:
+Conditions are a map of operator to key tests, and each key test maps a context key, a dot path, to an operand:
 
 ```json
 {
   "ip_not_in": { "request.ip": ["10.0.0.0/8", "192.168.0.0/16"] },
-  "eq": { "tenant": "${principal.tenant}" },
-  "gte": { "mfa.level": 2 }
+  "eq": { "input.post.tenant": "${principal.tenant}" },
+  "gte": { "input.post.revision": 2 }
 }
 ```
 
-A condition key is looked up as one literal key of the context array, not as a dot path into it, unlike a
-`${context.<path>}` reference: `request.ip` tests the entry `$context['request.ip']`, and a context of
-`['request' => ['ip' => '10.1.2.3']]` lacks that key, so its test is undecidable, or passes under `_if_exists`. Pass
-each tested value under its full key.
-
 When a statement's action and resource patterns match, the evaluator assesses every key test before committing the
 effect, and every one must hold for an allow to apply. One key may be tested by several operators
-(`{"gte": {"age": 18}, "lt": {"age": 65}}`); the trace records each key once, held only when all of its tests held. A
-literal operand that is not of the listed type makes the statement invalid; a context value, or an operand produced by
-interpolation, that is not of the listed type makes the test undecidable.
+(`{"gte": {"input.age": 18}, "lt": {"input.age": 65}}`); the trace records each key once, held only when all of its
+tests held. A literal operand that is not of the listed type makes the statement invalid; a context value, or an operand
+produced by interpolation, that is not of the listed type makes the test undecidable.
 
 | Operator        | Operand                     | Context value   | Holds when                                             |
 |-----------------|-----------------------------|-----------------|--------------------------------------------------------|
@@ -237,8 +305,8 @@ interpolation, that is not of the listed type makes the test undecidable.
   `fnmatch()` cannot test it.
 - **Boolean forms** are `true`, `false`, `1`, `0`, `'1'`, `'0'`, `'true'` and `'false'`, on both sides.
 - **`null`** takes strictly `true` or `false` (N20), and decides a missing key rather than finding it undecidable:
-  `{"null": {"deleted_at": true}}` holds when the context lacks `deleted_at` or carries it as `null`, and
-  `{"null": {"email": false}}` holds only when `email` is present and not `null`.
+  `{"null": {"input.post.deleted_at": true}}` holds when the context lacks `input.post.deleted_at` or carries it as
+  `null`, and `{"null": {"input.user.email": false}}` holds only when `input.user.email` is present and not `null`.
 - **`ip_in` and `ip_not_in`** take one IPv4 or IPv6 address or CIDR range, or a non-empty list of them read as one set
   of ranges. An operand without `/` is an exact address match; the prefix length must be digits no greater than 32 for
   IPv4 or 128 for IPv6. An address of the other family is within none of a range's addresses (it is decided, not
@@ -264,29 +332,30 @@ unknown operator, as `null` already decides a missing key.
 { "ip_in_if_exists": { "request.ip": "10.0.0.0/8" } }
 ```
 
-holds for a check from `10.1.2.3` and for a queued job whose context carries no `request.ip`, does not hold for a check
-from `203.0.113.7`, and is undecidable for a `request.ip` of `unknown`. It also holds for a context of
-`['request' => ['ip' => '203.0.113.7']]`, which lacks the key `request.ip`: a condition key is never read as a path, so
-a nested value goes untested.
+holds for a check from `10.1.2.3` and for a queued job, whose context has no `request` namespace, does not hold for a
+check from `203.0.113.7`, and is undecidable for a `request.ip` of `unknown`. A caller passing
+`['request' => ['ip' => '203.0.113.7']]` changes nothing: it supplies `input.request.ip`, which the test never reads.
 
 ### Interpolation
 
 Resource patterns and string operands may reference the check through `${namespace.key}`:
 
-| Token                | Resolves to                                                                    |
-|----------------------|--------------------------------------------------------------------------------|
-| `${principal.id}`    | `getKey()` for an Eloquent model, the public `id` property for other objects   |
-| `${principal.type}`  | `getMorphClass()` when the object has it, otherwise its class name             |
-| `${principal.<key>}` | A model attribute or a public property; never a hidden attribute or a relation |
-| `${context.<path>}`  | A dot-notation path into the context array                                     |
-| `${resource.type}`   | The resource before its first `:`, or the whole resource when it has none      |
-| `${resource.id}`     | The resource after its first `:`; unresolved when it has none                  |
+| Token                   | Resolves to                                                                    |
+|-------------------------|--------------------------------------------------------------------------------|
+| `${principal.id}`       | `getKey()` for an Eloquent model, the public `id` property for other objects   |
+| `${principal.type}`     | `getMorphClass()` when the object has it, otherwise its class name             |
+| `${principal.<key>}`    | A model attribute or a public property; never a hidden attribute or a relation |
+| `${resource.type}`      | The resource before its first `:`, or the whole resource when it has none      |
+| `${resource.id}`        | The resource after its first `:`; unresolved when it has none                  |
+| `${<namespace>.<path>}` | The context key at that dot path, as a condition reads it (`${request.ip}`)    |
 
 A token is `${`, a body matching `[a-zA-Z_][a-zA-Z0-9_.]*`, and `}`. The namespace is the body up to its first `.` and
-the key everything after it, so `${context.request.ip}` reads the context path `request.ip`: the key `request.ip` when
-the context has it, else `ip` within `request`. A condition key is never read this way. A well-formed token whose
-namespace is not `principal`, `context` or `resource`, or which has no key (`${context}`, `${context.}`), is accepted
-when written and unresolved when evaluated. Any other `${` that is not the `\${` escape -- `${context.tenant-id}`,
+the path everything after it. `principal` and `resource` are read as the table says; every other namespace is read from
+the check's context by the resolver condition keys use, so `${request.ip}` reads `ip` within `request` and never a
+top-level key named `request.ip`, and reading it builds the namespace like a condition would. There is no `context`
+namespace. A well-formed token naming a key the catalogue does not declare, `${context.…}` and a token without a path
+(`${input}`, `${input.}`) among them, is refused by `PolicyValidator` when a policy is written, and is unresolved when a
+statement built without the validator is evaluated. Any other `${` that is not the `\${` escape -- `${input.tenant-id}`,
 `${}`, `${1x}`, an unclosed `${foo` -- is a **malformed reference**: `Statement::fromArray()` refuses it in a resource
 pattern or a string operand, and on a directly constructed statement it makes a resource pattern unresolved
 (undecidable) and a condition invalid.
@@ -299,11 +368,11 @@ A token that does not resolve to a scalar (an unknown namespace or key, a missin
 a principal or resource) makes the **whole string** unresolved: the test is undecidable, never compared against an empty
 substitution. Every substituted value is a string: numbers are cast (`42` becomes `'42'`) and booleans become `'true'`
 or `'false'`. An interpolated `eq` or `neq` operand is therefore compared strictly against a string, so
-`{"eq": {"owner": "${principal.id}"}}` matches a context `owner` of `'42'` but not the integer `42`: pass such context
-values as strings. The numeric, time and `bool` operators read a substituted string as they read any other (`'true'` and
-`'false'` are boolean forms). Write `\${` for a literal `${`; the escape is undone only in the string's own text, never
-inside a substituted value. An operand holding only the escape contains no reference, so it is checked as written: a
-`gt` operand of `\${x}` is refused.
+`{"eq": {"input.owner": "${principal.id}"}}` matches an `input.owner` of `'42'` but not the integer `42`: pass such
+context values as strings. The numeric, time and `bool` operators read a substituted string as they read any other
+(`'true'` and `'false'` are boolean forms). Write `\${` for a literal `${`; the escape is undone only in the string's
+own text, never inside a substituted value. An operand holding only the escape contains no reference, so it is checked
+as written: a `gt` operand of `\${x}` is refused.
 
 Only a string operand is interpolated. The operands of `in`, `not_in`, `between`, `null`, `any_value_in` and
 `all_values_in` are never interpolated, and neither are the members of an `ip_in` or `ip_not_in` list, so each of them
@@ -317,15 +386,16 @@ is checked as written.
   "effect": "allow",
   "actions": ["billing:*"],
   "conditions": {
-    "eq": { "tenant": "org-42" },
-    "ip_in": { "source_ip": ["10.0.0.0/8", "2001:db8::/32"] }
+    "eq": { "input.tenant": "org-42" },
+    "ip_in": { "request.ip": ["10.0.0.0/8", "2001:db8::/32"] }
   }
 }
 ```
 
-This statement allows any `billing:*` action, on any resource or none, but only when the context carries
-`tenant = 'org-42'` and a `source_ip` within one of the two ranges. If either test fails, or the context lacks either
-key or carries a `source_ip` that is not an address, the statement is skipped. Written with `"effect": "deny"`, the same
+This statement allows any `billing:*` action, on any resource or none, but only when the caller passes
+`tenant = 'org-42'` (read as `input.tenant`) and the request comes from an address within one of the two ranges. If
+either test fails, or either key is missing (a check outside a routed request has no `request.ip`), or the address
+cannot be read, the statement is skipped. Written with `"effect": "deny"`, the same
 statement would apply when a key is missing or the address cannot be read, and be skipped only when a test definitely
 fails.
 
@@ -337,7 +407,7 @@ reasons into one `InvalidPolicyDocumentException` message, separated by semicolo
 
 - **Structure**: whatever `Policy::fromArray()` refuses, including statements sharing a `sid`. This reason stops the
   check: when `Policy::fromArray()` refuses the document, only its first fault and the limits it breaks are reported,
-  and the condition-key and catalogue checks do not run. Every other reason is reported at once.
+  and the context-key and catalogue checks do not run. Every other reason is reported at once.
 - **Limits** (AUTHZ-6.10), from `authorization.policies.limits`: `document_bytes` (65536) on the document's JSON
   encoding, `statements` (100), `conditions` (50) on the key tests of one statement, each key of each operator counting
   as one, and `pattern_length` (512) on the characters of any action or resource pattern and any string operand, strings
@@ -347,9 +417,12 @@ reasons into one `InvalidPolicyDocumentException` message, separated by semicolo
   stored document over a limit denies as `invalid_policy` and is never skipped or partly evaluated. The resolution
   cache keys cached policies by the limits they were checked under, so a changed limit makes them be read and checked
   again. Lowering a limit therefore makes every stored document over it deny until it is fixed.
-- **Condition keys**: a letter or `_`, then letters, digits and `_`, then any number of `.`-separated segments of
-  letters, digits, `_` and `-`, at most 128 characters (`request.ip`, `mfa.level`, `token.scopes`). Each names one
-  literal key of the context, not a dot path into it (see [Condition Operators](#condition-operators)).
+- **Context keys** (N25): every condition key must be declared in the context key catalogue, may not be one declared
+  untestable, and must be of a type its operator suits; every `${…}` reference in an operand or a resource pattern,
+  except to `principal` and `resource`, must name a declared key (see [The key catalogue](#the-key-catalogue)). A
+  declared key is always a valid path: a letter or `_`, then letters, digits and `_`, then any number of `.`-separated
+  segments of letters, digits, `_` and `-`, at most 128 characters, so a malformed key is refused as undeclared. Each
+  reason is given once for its statement, with how to declare the key.
 - **Actions** (N19): every `actions` and `not_actions` pattern must match at least one permission the code declares in
   `permission_enums` or `permission_providers`, compared with `fnmatch($pattern, $name, FNM_NOESCAPE)` or as the same
   string, so a misspelt action cannot be stored. The bound `ActionCatalogue` answers; the default,
@@ -398,6 +471,17 @@ document, then a summary, and exits 1 when any is invalid.
   suffix, `PATTERN_OPERATORS` the operators whose operand is a glob; `ConditionOperands::isValid()` -- each operator's
   literal operand rule; `IpRanges` -- the ranges of `ip_in` and `ip_not_in`.
 - `PolicyValidator`, `PolicyLimits` and the `ActionCatalogue` contract -- the write-time checks, and the limits on read.
+- `CheckContext::lookup()` and `find()` -- the one strict dot-path resolver for conditions and references, and the
+  per-check memo of built namespaces; `CheckContextFactory::make()` -- a check's context, the caller's values under
+  `input` and every other namespace from its source; `AuthorizationManager::check()` -- where the caller's values are
+  wrapped.
+- `Statement::$namespaces` -- the namespaces a statement reads, worked out when it is built;
+  `ContextInterpolator::references()` -- the paths a string references.
+- The `ContextKeyCatalogue` contract, `DeclaredContextKeyCatalogue`, `ContextKey` and `ContextKeyType::suits()` -- the
+  declared keys and the type and operator rules; `ContextConfigValidator` -- `authorization.context` at boot.
+- The `AuthenticationContext`, `RequestContext`, `EnvironmentContext` and `ContextSource` contracts and their defaults,
+  `GuardAuthenticationContext`, `RoutedRequestContext` and `ClockEnvironmentContext`; `ContextBindings` -- the
+  bindings.
 - `ContextInterpolator::containsReference()` and `hasMalformedReference()` -- the token grammar as the validator sees
   it.
 - `MatchOutcome::precedence()` and `MatchResult::and()` -- the conjunction order.
@@ -424,13 +508,25 @@ document, then a summary, and exits 1 when any is invalid.
   resource-less matching, `not_resources`, the per-operator outcomes, `_if_exists`, and interpolation and escaping.
 - `PolicyValidatorTest`, `PolicyLimitsTest`, `DeclaredActionCatalogueTest`, `ValidatePolicyCommandTest` and
   `PolicyDocumentTest` -- the write-time checks, the limits on read, and the command.
+- `CheckContextTest::testALiteralDottedTopLevelKeyIsNotAPath` and `testANamespaceIsBuiltOnFirstReadAndOnce` -- the
+  strict resolver and the memo; `CheckContextFactoryTest::testCallerValuesStayUnderInput` and
+  `testSourcesAreReadLazilyAndOncePerCheck` -- the factory.
+- `AuthorizationManagerTest::testCallerValuesLandUnderInputAndNeverInTheRequest`,
+  `GateArgumentForwardingTest::testGateArgumentsLandUnderInputAndNeverInAnotherNamespace` and `AuthorizeActionTest` --
+  caller values under `input` through every entry point, and the `request` namespace of a routed request.
+- `DeclaredContextKeyCatalogueTest`, `ContextKeyTypeTest` and `ContextConfigValidatorTest` -- the catalogue, the type
+  rules and the configuration; `GuardAuthenticationContextTest`, `RoutedRequestContextTest` and
+  `ClockEnvironmentContextTest` -- the trusted sources.
 
 ## Change Triggers
 
 - Adding a new condition operator requires a new entry in `ConditionEvaluator::OPERATORS` and `FAMILIES`, its evaluation
   in `ConditionEvaluator::evaluate()`, its operand rule in `ConditionOperands`, an entry in `PATTERN_OPERATORS` when its
-  operand is a glob or in `LITERAL_OPERAND_OPERATORS` when its operand is never interpolated, and a new row in the
-  operator catalogue above, including which operands are invalid and which context values are undecidable.
+  operand is a glob or in `LITERAL_OPERAND_OPERATORS` when its operand is never interpolated, the key types it suits in
+  `ContextKeyType`, and a new row in the operator catalogue above, including which operands are invalid and which
+  context values are undecidable.
+- Letting a caller's value reach a namespace other than `input`, or reading a condition key as a literal flat key,
+  would violate invariant 8 and requires a design decision before implementation.
 - Changing the matching direction (e.g. allowing the caller to supply wildcards) would violate invariant 1 and requires
   a design decision before implementation.
 - Letting an undecidable test skip a deny, or letting a resource-less check match a resource-scoped statement, would

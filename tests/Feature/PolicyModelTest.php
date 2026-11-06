@@ -6,7 +6,9 @@ namespace Tests\Feature;
 
 use Illuminate\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Context\DeclaredContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
+use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyValidator;
@@ -147,13 +149,16 @@ final class PolicyModelTest extends TestCase
     }
 
     /**
-     * A condition key outside the key syntax is refused at write time.
+     * A condition key the context key catalogue does not declare, such as one
+     * outside the key syntax, is refused at write time.
      *
      * @return void
      */
-    public function testRejectsAMalformedConditionKeyOnWrite(): void
+    public function testRejectsAnUndeclaredConditionKeyOnWrite(): void
     {
-        $this->expectExceptionMessage('Invalid policy document \'keyed\': Policy statement #0 condition key \'request ip\' must be');
+        $this->app?->instance(ContextKeyCatalogue::class, new DeclaredContextKeyCatalogue);
+
+        $this->expectExceptionMessage('Invalid policy document \'keyed\': Policy statement #0 condition key \'request ip\' is not a declared context key');
 
         Policy::create(['name' => 'keyed', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['a'], 'conditions' => ['eq' => ['request ip' => 'x']]]]]]);
     }

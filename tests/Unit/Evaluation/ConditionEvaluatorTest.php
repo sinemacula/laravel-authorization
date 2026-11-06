@@ -772,7 +772,7 @@ final class ConditionEvaluatorTest extends TestCase
             yield "{$operator} int" => [$operator, 1, null];
             yield "{$operator} float" => [$operator, 1.5, null];
             yield "{$operator} bool" => [$operator, false, null];
-            yield "{$operator} interpolated" => [$operator, '${context.tenant}', null];
+            yield "{$operator} interpolated" => [$operator, '${input.tenant}', null];
             yield "{$operator} list" => [$operator, ['x'], $error];
             yield "{$operator} null" => [$operator, null, $error];
             yield "{$operator} object" => [$operator, new \stdClass, $error];
@@ -792,7 +792,7 @@ final class ConditionEvaluatorTest extends TestCase
             yield "{$operator} list" => [$operator, ['a', 1, 1.5, true], null];
             yield "{$operator} empty list" => [$operator, [], $error];
             yield "{$operator} string" => [$operator, 'a', $error];
-            yield "{$operator} interpolated string" => [$operator, '${context.list}', $error];
+            yield "{$operator} interpolated string" => [$operator, '${input.list}', $error];
             yield "{$operator} null member" => [$operator, ['a', null], $error];
             yield "{$operator} nested member" => [$operator, ['a', ['b']], $error];
             yield "{$operator} map" => [$operator, ['x' => 'a'], $error];
@@ -815,8 +815,8 @@ final class ConditionEvaluatorTest extends TestCase
             yield "{$operator} ipv6 /128" => [$operator, '::1/128', null];
             yield "{$operator} ipv6 address" => [$operator, '2001:db8::1', null];
             yield "{$operator} range set" => [$operator, ['10.0.0.0/8', '2001:db8::/32'], null];
-            yield "{$operator} interpolated" => [$operator, '${context.network}', null];
-            yield "{$operator} interpolated prefix" => [$operator, '${context.network}/8', null];
+            yield "{$operator} interpolated" => [$operator, '${input.network}', null];
+            yield "{$operator} interpolated prefix" => [$operator, '${input.network}/8', null];
             yield "{$operator} ipv4 /33" => [$operator, '10.0.0.0/33', $error];
             yield "{$operator} ipv6 /129" => [$operator, '::1/129', $error];
             yield "{$operator} empty prefix" => [$operator, '10.0.0.0/', $error];
@@ -824,15 +824,15 @@ final class ConditionEvaluatorTest extends TestCase
             yield "{$operator} malformed" => [$operator, 'bad', $error];
             yield "{$operator} non-string" => [$operator, 42, $error];
             yield "{$operator} double prefix" => [$operator, '10.0.0.0/8/8', $error];
-            yield "{$operator} escaped reference" => [$operator, '\${context.network}', $error];
+            yield "{$operator} escaped reference" => [$operator, '\${input.network}', $error];
             yield "{$operator} empty set" => [$operator, [], $error];
             yield "{$operator} set with a bad range" => [$operator, ['10.0.0.0/8', 'bad'], $error];
-            yield "{$operator} set with an interpolated range" => [$operator, ['${context.network}'], $error];
+            yield "{$operator} set with an interpolated range" => [$operator, ['${input.network}'], $error];
             yield "{$operator} zone id" => [$operator, 'fe80::1%en0', $error];
             yield "{$operator} leading-zero address" => [$operator, '010.0.0.1', $error];
             yield "{$operator} leading-zero range" => [$operator, '010.0.0.0/8', $error];
             yield "{$operator} nul byte" => [$operator, "10.0.0.0\0/8", $error];
-            yield "{$operator} interpolated with a nul byte" => [$operator, "\${context.network}\0", $error];
+            yield "{$operator} interpolated with a nul byte" => [$operator, "\${input.network}\0", $error];
         }
     }
 
@@ -872,17 +872,17 @@ final class ConditionEvaluatorTest extends TestCase
             yield "{$operator} int" => [$operator, 1000, null];
             yield "{$operator} float" => [$operator, 1000.5, null];
             yield "{$operator} date-time" => [$operator, new \DateTimeImmutable('@1000'), null];
-            yield "{$operator} interpolated" => [$operator, '${context.deadline}', null];
+            yield "{$operator} interpolated" => [$operator, '${input.deadline}', null];
             yield "{$operator} unparseable" => [$operator, 'not-a-time', $error];
             yield "{$operator} empty" => [$operator, '', $error];
             yield "{$operator} null" => [$operator, null, $error];
             yield "{$operator} list" => [$operator, ['2026-01-01'], $error];
-            yield "{$operator} escaped reference" => [$operator, '\${context.deadline}', $error];
+            yield "{$operator} escaped reference" => [$operator, '\${input.deadline}', $error];
             yield "{$operator} NaN" => [$operator, \NAN, $error];
             yield "{$operator} INF" => [$operator, \INF, $error];
             yield "{$operator} -INF" => [$operator, -\INF, $error];
             yield "{$operator} nul byte" => [$operator, "2026-01-01\0", $error];
-            yield "{$operator} interpolated with a nul byte" => [$operator, "\${context.deadline}\0", $error];
+            yield "{$operator} interpolated with a nul byte" => [$operator, "\${input.deadline}\0", $error];
         }
 
         $error = 'invalid operand for operator \'between\'';
@@ -895,8 +895,8 @@ final class ConditionEvaluatorTest extends TestCase
         yield 'between bad lower bound' => ['between', ['bad', 200], $error];
         yield 'between bad upper bound' => ['between', [100, 'bad'], $error];
         yield 'between string' => ['between', '2026-01-01', $error];
-        yield 'between interpolated list' => ['between', ['${context.from}', '${context.to}'], $error];
-        yield 'between interpolated string' => ['between', '${context.window}', $error];
+        yield 'between interpolated list' => ['between', ['${input.from}', '${input.to}'], $error];
+        yield 'between interpolated string' => ['between', '${input.window}', $error];
         yield 'between NaN lower bound' => ['between', [\NAN, 200], $error];
         yield 'between INF upper bound' => ['between', [100, \INF], $error];
         yield 'between nul byte in a bound' => ['between', ['2026-01-01', "2026-02-01\0"], $error];
@@ -915,7 +915,7 @@ final class ConditionEvaluatorTest extends TestCase
             yield "{$operator} int" => [$operator, 5, null];
             yield "{$operator} float" => [$operator, 1.5, null];
             yield "{$operator} numeric string" => [$operator, '5.5', null];
-            yield "{$operator} interpolated" => [$operator, '${context.limit}', null];
+            yield "{$operator} interpolated" => [$operator, '${input.limit}', null];
             yield "{$operator} word" => [$operator, 'abc', $error];
             yield "{$operator} bool" => [$operator, true, $error];
             yield "{$operator} null" => [$operator, null, $error];
@@ -924,10 +924,10 @@ final class ConditionEvaluatorTest extends TestCase
             yield "{$operator} INF" => [$operator, \INF, $error];
             yield "{$operator} -INF" => [$operator, -\INF, $error];
             yield "{$operator} overflowing string" => [$operator, '1e999', $error];
-            yield "{$operator} escaped reference" => [$operator, '\${context.limit}', $error];
-            yield "{$operator} escaped reference beside one" => [$operator, '\${x}${context.limit}', null];
-            yield "{$operator} embedded reference" => [$operator, '1${context.digits}', null];
-            yield "{$operator} malformed reference" => [$operator, '${context.tenant-id}', $error];
+            yield "{$operator} escaped reference" => [$operator, '\${input.limit}', $error];
+            yield "{$operator} escaped reference beside one" => [$operator, '\${x}${input.limit}', null];
+            yield "{$operator} embedded reference" => [$operator, '1${input.digits}', null];
+            yield "{$operator} malformed reference" => [$operator, '${input.tenant-id}', $error];
         }
     }
 
@@ -938,11 +938,11 @@ final class ConditionEvaluatorTest extends TestCase
      */
     private static function boolOperandCases(): iterable
     {
-        foreach ([true, false, 1, 0, '1', '0', 'true', 'false', '${context.flag}'] as $form) {
+        foreach ([true, false, 1, 0, '1', '0', 'true', 'false', '${input.flag}'] as $form) {
             yield 'bool ' . \var_export($form, true) => ['bool', $form, null];
         }
 
-        foreach (['yes', 'TRUE', 2, 1.0, null, '', '\${context.flag}'] as $form) {
+        foreach (['yes', 'TRUE', 2, 1.0, null, '', '\${input.flag}'] as $form) {
             yield 'bool ' . \var_export($form, true) => ['bool', $form, 'invalid operand for operator \'bool\''];
         }
     }
@@ -958,7 +958,7 @@ final class ConditionEvaluatorTest extends TestCase
         yield 'null true' => ['null', true, null];
         yield 'null false' => ['null', false, null];
 
-        foreach (['string true' => 'true', 'one' => 1, 'zero' => 0, 'null' => null, 'interpolated' => '${context.flag}', 'list' => [true]] as $label => $operand) {
+        foreach (['string true' => 'true', 'one' => 1, 'zero' => 0, 'null' => null, 'interpolated' => '${input.flag}', 'list' => [true]] as $label => $operand) {
             yield "null {$label}" => ['null', $operand, 'invalid operand for operator \'null\''];
         }
     }

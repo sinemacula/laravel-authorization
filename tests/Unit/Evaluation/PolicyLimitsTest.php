@@ -117,8 +117,8 @@ final class PolicyLimitsTest extends TestCase
     public function testLimitsTheConditionsOfEachStatement(): void
     {
         $document = ['statements' => [
-            ['conditions' => ['eq' => ['a' => 1, 'b' => 2], 'in' => ['a' => [1, 2, 3]]]],
-            ['conditions' => ['eq' => ['a' => 1]]],
+            ['conditions' => ['eq' => ['input.a' => 1, 'input.b' => 2], 'in' => ['input.a' => [1, 2, 3]]]],
+            ['conditions' => ['eq' => ['input.a' => 1]]],
         ]];
 
         self::assertSame([], (new PolicyLimits(conditions: 3))->violations($document));
@@ -132,7 +132,7 @@ final class PolicyLimitsTest extends TestCase
      */
     public function testAMalformedOperatorEntryCountsAsOneTest(): void
     {
-        $document = ['statements' => [['conditions' => ['eq' => 'x', 'neq' => ['a' => 1]]]]];
+        $document = ['statements' => [['conditions' => ['eq' => 'x', 'neq' => ['input.a' => 1]]]]];
 
         self::assertSame([], (new PolicyLimits(conditions: 2))->violations($document));
         self::assertSame(['Policy statement #0 has 2 conditions, more than the 1 allowed.'], (new PolicyLimits(conditions: 1))->violations($document));
@@ -150,10 +150,10 @@ final class PolicyLimitsTest extends TestCase
             yield $key => [[$key => ['@@@@']]];
         }
 
-        yield 'a string operand' => [['conditions' => ['eq' => ['a' => '@@@@']]]];
-        yield 'a string in a list operand' => [['conditions' => ['in' => ['a' => [1, '@@@@']]]]];
-        yield 'a multibyte string operand' => [['conditions' => ['like' => ['a' => 'éééé']]]];
-        yield 'a string in a map operand' => [['conditions' => ['in' => ['a' => ['k' => '@@@@']]]]];
+        yield 'a string operand' => [['conditions' => ['eq' => ['input.a' => '@@@@']]]];
+        yield 'a string in a list operand' => [['conditions' => ['in' => ['input.a' => [1, '@@@@']]]]];
+        yield 'a multibyte string operand' => [['conditions' => ['like' => ['input.a' => 'éééé']]]];
+        yield 'a string in a map operand' => [['conditions' => ['in' => ['input.a' => ['k' => '@@@@']]]]];
         yield 'a map of actions' => [['actions' => ['x' => '@@@@']]];
     }
 
@@ -182,9 +182,9 @@ final class PolicyLimitsTest extends TestCase
     public function testCountsEveryLongStringOfAStatement(): void
     {
         $document = ['statements' => [
-            ['actions' => ['abcd', 'ab'], 'resources' => ['abcd'], 'conditions' => ['gt' => ['a' => 12345], 'eq' => ['b' => 'abcd']]],
+            ['actions' => ['abcd', 'ab'], 'resources' => ['abcd'], 'conditions' => ['gt' => ['input.a' => 12345], 'eq' => ['input.b' => 'abcd']]],
             ['actions' => ['ab']],
-            ['actions' => ['abcd'], 'conditions' => ['in' => ['a' => [true, 'abcd']]]],
+            ['actions' => ['abcd'], 'conditions' => ['in' => ['input.a' => [true, 'abcd']]]],
         ]];
 
         self::assertSame([
@@ -200,10 +200,10 @@ final class PolicyLimitsTest extends TestCase
      */
     public function testReportsEveryLimitTheDocumentIsOver(): void
     {
-        $document = ['statements' => [['actions' => ['abcd'], 'conditions' => ['eq' => ['a' => 1, 'b' => 2]]], ['actions' => ['a']]]];
+        $document = ['statements' => [['actions' => ['abcd'], 'conditions' => ['eq' => ['input.a' => 1, 'input.b' => 2]]], ['actions' => ['a']]]];
 
         self::assertSame([
-            'Policy document is 89 bytes, more than the 1 allowed.',
+            'Policy document is 101 bytes, more than the 1 allowed.',
             'Policy document has 2 statements, more than the 1 allowed.',
             'Policy statement #0 has 2 conditions, more than the 1 allowed.',
             'Policy statement #0 has 1 patterns or operands longer than the 1 characters allowed.',
@@ -234,7 +234,7 @@ final class PolicyLimitsTest extends TestCase
      */
     public static function unencodableDocuments(): iterable
     {
-        $statement = static fn (mixed $operand): array => ['statements' => [['effect' => 'allow', 'actions' => ['a'], 'conditions' => ['eq' => ['x' => $operand]]]]];
+        $statement = static fn (mixed $operand): array => ['statements' => [['effect' => 'allow', 'actions' => ['a'], 'conditions' => ['eq' => ['input.x' => $operand]]]]];
 
         yield 'nan' => [$statement(\NAN), 'Inf and NaN cannot be JSON encoded'];
         yield 'infinity' => [$statement(\INF), 'Inf and NaN cannot be JSON encoded'];

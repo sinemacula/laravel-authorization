@@ -22,14 +22,22 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
  * statement in traces; it never changes how the statement is evaluated.
  *
  * Conditions map each operator to the context keys it tests and their operands,
- * for example `['eq' => ['tenant' => 'org-1']]`, and every test of every
- * operator must hold. A test that cannot be decided (a missing context key, a
- * `${…}` reference that cannot be resolved, a context value of the wrong type)
- * is undecidable rather than false, and a malformed test is invalid; see
- * `assess()`. The evaluator applies a deny whose test is undecidable and denies
- * the whole check on an invalid one, so neither ever skips a deny. A missing
- * key passes a test whose operator carries the `_if_exists` suffix, and the
- * `null` operator decides it: `true` holds, `false` does not.
+ * for example `['eq' => ['input.tenant' => 'org-1']]`, and every test of every
+ * operator must hold. A key is a dot path of the check's context, its namespace
+ * first, read segment by segment (`request.ip` is the `ip` key of the `request`
+ * namespace, never a top-level key named `request.ip`). A test that cannot be
+ * decided (a missing context key, a `${…}` reference that cannot be resolved, a
+ * context value of the wrong type) is undecidable rather than false, and a
+ * malformed test is invalid; see `assess()`. The evaluator applies a deny whose
+ * test is undecidable and denies the whole check on an invalid one, so neither
+ * ever skips a deny. A missing key passes a test whose operator carries the
+ * `_if_exists` suffix, and the `null` operator decides it: `true` holds,
+ * `false` does not. A key present with a null value is not missing: every
+ * operator but `null` tests the null.
+ *
+ * The namespaces a statement reads, through its condition keys and its `${…}`
+ * references, are worked out once on construction; the check's context builds a
+ * namespace only when a statement that reads it is assessed.
  *
  * Documents are validated on hydration: unknown keys, a malformed sid, an empty
  * pattern list, conditions that do not map operators to key tests, an unknown
@@ -47,6 +55,9 @@ final readonly class Statement
 {
     /** @var string Trace detail for a statement whose action or resource patterns do not cover the check. */
     public const string TARGET_MISMATCH = 'action/resource did not match';
+
+    /** @var list<string> The namespaces of the check's context the statement reads, through its condition keys and `${…}` references, in order of first read. */
+    public array $namespaces;
 
     /** @var list<string> Why the conditions cannot be evaluated as a whole, worked out once on construction. */
     private array $operatorErrors;
@@ -94,6 +105,7 @@ final readonly class Statement
 
         $this->operatorErrors = StatementValidator::operatorErrors($conditions);
         $this->tests          = StatementValidator::conditionTests($conditions);
+        $this->namespaces     = self::namespacesOf($this->tests, $resources ?? $notResources ?? []);
     }
 
     /**
@@ -162,10 +174,10 @@ final readonly class Statement
      * @param  string|null  $resource
      * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null  $interpolator
      * @param  object|null  $principal
-     * @param  array<string, mixed>  $context
+     * @param  array<array-key, mixed>|\SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
      * @return bool
      */
-    public function matches(string $action, ?string $resource = null, ?ContextInterpolator $interpolator = null, ?object $principal = null, array $context = []): bool
+    public function matches(string $action, ?string $resource = null, ?ContextInterpolator $interpolator = null, ?object $principal = null, array|CheckContext $context = []): bool
     {
         return $this->coversAction($action)
             && $this->matchesTarget(new InterpolationScope($interpolator, $principal, $resource, $context))->holds();
@@ -176,13 +188,15 @@ final readonly class Statement
      * context. A condition that cannot be decided does not hold here: use
      * `assess()` for the undecidable outcome.
      *
-     * @param  array<string, mixed>  $context
+     * A context given as an array is the check's namespaces, already built.
+     *
+     * @param  array<array-key, mixed>|\SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
      * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null  $interpolator
      * @param  object|null  $principal
      * @param  string|null  $resource
      * @return bool
      */
-    public function conditionsSatisfiedBy(array $context, ?ContextInterpolator $interpolator = null, ?object $principal = null, ?string $resource = null): bool
+    public function conditionsSatisfiedBy(array|CheckContext $context, ?ContextInterpolator $interpolator = null, ?object $principal = null, ?string $resource = null): bool
     {
         return $this->assessConditions(new InterpolationScope($interpolator, $principal, $resource, $context))->holds();
     }
@@ -191,15 +205,22 @@ final readonly class Statement
      * Assess the statement against a check: whether its patterns and conditions
      * match, definitively do not, cannot be decided, or are malformed.
      *
+     * A context given as an array is the check's namespaces, already built.
+     *
      * @param  string  $action
      * @param  string|null  $resource
-     * @param  array<string, mixed>  $context
+     * @param  array<array-key, mixed>|\SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
      * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null  $interpolator
      * @param  object|null  $principal
      * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
      */
-    public function assess(string $action, ?string $resource = null, array $context = [], ?ContextInterpolator $interpolator = null, ?object $principal = null): MatchResult
-    {
+    public function assess(
+        string $action,
+        ?string $resource = null,
+        array|CheckContext $context = [],
+        ?ContextInterpolator $interpolator = null,
+        ?object $principal = null,
+    ): MatchResult {
         // Most statements of a policy do not name the action, so that case
         // returns before the scope is built.
         if (!$this->coversAction($action)) {
@@ -294,14 +315,17 @@ final readonly class Statement
     private static function assessTest(array $test, InterpolationScope $scope): MatchResult
     {
         // A malformed test is invalid whatever the context holds, so its shape
-        // (worked out on construction) is checked before the key is looked up.
-        $problem = match (true) {
-            $test['error'] !== null                           => MatchResult::invalid($test['error']),
-            !\array_key_exists($test['key'], $scope->context) => self::assessMissingKey($test),
-            default                                           => null,
-        };
+        // (worked out on construction) is checked before the key is looked up,
+        // and its namespace is never built for it.
+        if ($test['error'] !== null) {
+            return MatchResult::invalid($test['error']);
+        }
 
-        return $problem ?? self::assessOperator($test['key'], $test['operator'], $test['operand'], $scope);
+        [$isPresent, $actual] = $scope->context->find($test['path']);
+
+        return $isPresent
+            ? self::assessOperator($test['key'], $test['operator'], $test['operand'], $actual, $scope)
+            : self::assessMissingKey($test);
     }
 
     /**
@@ -322,8 +346,8 @@ final readonly class Statement
     }
 
     /**
-     * Assess one key test whose shape has been validated, against a key the
-     * context carries.
+     * Assess one key test whose shape has been validated, against the value of
+     * a key the context carries.
      *
      * A literal operand of the wrong type was refused with the condition, so an
      * operand the evaluator still finds malformed came from a substituted
@@ -332,10 +356,11 @@ final readonly class Statement
      * @param  string  $key
      * @param  string  $operator
      * @param  mixed  $operand
+     * @param  mixed  $actual
      * @param  \SineMacula\Laravel\Authorization\Evaluation\InterpolationScope  $scope
      * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
      */
-    private static function assessOperator(string $key, string $operator, mixed $operand, InterpolationScope $scope): MatchResult
+    private static function assessOperator(string $key, string $operator, mixed $operand, mixed $actual, InterpolationScope $scope): MatchResult
     {
         $resolved = \is_string($operand) ? self::resolveOperand($operator, $operand, $scope) : $operand;
 
@@ -343,7 +368,7 @@ final readonly class Statement
             return MatchResult::undecidable("condition '{$key}' references a value that cannot be resolved");
         }
 
-        $result  = ConditionEvaluator::evaluate($operator, $resolved, $scope->context[$key]);
+        $result  = ConditionEvaluator::evaluate($operator, $resolved, $actual);
         $outcome = $result->outcome === MatchOutcome::INVALID ? MatchOutcome::UNDECIDABLE : $result->outcome;
         $detail  = $result->outcome === MatchOutcome::INVALID ? "the substituted operand is an {$result->detail}" : $result->detail;
 
@@ -419,6 +444,31 @@ final readonly class Statement
         }
 
         return $unresolved ? null : false;
+    }
+
+    /**
+     * Return the namespaces of the check's context the statement reads, once
+     * each, in order of first read: the first segment of each condition key,
+     * and of each `${…}` reference in a string operand or a resource pattern,
+     * except `${principal.…}` and `${resource.…}`, which the interpolator reads
+     * from the principal and the resource.
+     *
+     * @param  list<ConditionTest>  $tests
+     * @param  array<int, string>  $patterns
+     * @return list<string>
+     */
+    private static function namespacesOf(array $tests, array $patterns): array
+    {
+        $paths = \array_column($tests, 'key');
+
+        foreach ([...\array_filter(\array_column($tests, 'operand'), \is_string(...)), ...$patterns] as $subject) {
+            $paths = [...$paths, ...\array_filter(
+                ContextInterpolator::references($subject),
+                static fn (string $path): bool => !\in_array(\explode('.', $path, 2)[0], ['principal', 'resource'], true),
+            )];
+        }
+
+        return \array_values(\array_unique(\array_map(static fn (string $path): string => \explode('.', $path, 2)[0], $paths)));
     }
 
     /**

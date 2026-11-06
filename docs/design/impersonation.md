@@ -57,7 +57,7 @@ policy does not produce a decisive result, the target user's held permissions ar
 ```php
 $result = Authorization::for($targetUser)
     ->withPolicies([$hypothetical])
-    ->check('reports:generate', null, ['tenant' => 'org-42']);
+    ->check('reports:generate', null, ['tenant' => 'org-42']); // a policy reads it as input.tenant
 ```
 
 ## Scoped Clone Semantics

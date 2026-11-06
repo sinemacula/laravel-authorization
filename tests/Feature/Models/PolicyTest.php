@@ -7,8 +7,11 @@ namespace Tests\Feature\Models;
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Eloquent\Model;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Context\DeclaredContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
+use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
+use SineMacula\Laravel\Authorization\Evaluation\PolicyValidator;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
@@ -129,17 +132,16 @@ final class PolicyTest extends StringCastsTestCase
     }
 
     /**
-     * Writing a condition key outside the key syntax is refused through the
-     * policy validator.
+     * Writing a condition key the context key catalogue does not declare is
+     * refused through the policy validator.
      *
      * @return void
      */
-    public function testWritingAMalformedConditionKeyIsRefused(): void
+    public function testWritingAnUndeclaredConditionKeyIsRefused(): void
     {
-        $this->expectRefusal(
-            'Invalid policy document \'readers\': Policy statement #0 condition key \'1bad\' must be letters, digits and \'_\', then any \'.\'-separated'
-            . ' segments that may also hold \'-\', and at most 128 characters.',
-        );
+        $this->app?->instance(ContextKeyCatalogue::class, new DeclaredContextKeyCatalogue);
+
+        $this->expectRefusal('Invalid policy document \'readers\': Policy statement #0 condition key \'1bad\' is not a declared context key; ' . PolicyValidator::DECLARE_KEYS);
 
         self::write(['statements' => [['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['1bad' => 'x']]]]]);
     }

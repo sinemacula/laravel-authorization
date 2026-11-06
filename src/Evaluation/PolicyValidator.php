@@ -5,17 +5,24 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
+use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
 
 /**
  * Decides whether a policy document may be written (AUTHZ-6.2, AUTHZ-6.10).
  *
  * A document may be written only when it is a valid policy (its keys, version,
  * statements, operators and operands, and no two statements sharing a sid), is
- * within the configured limits, names every condition key in the key syntax,
- * and has every `actions` and `not_actions` pattern cover at least one action
- * of the bound action catalogue, so a policy written at runtime can only refer
- * to actions the code checks. With no actions declared, no document may be
- * written.
+ * within the configured limits, reads only context keys the bound context key
+ * catalogue declares (AUTHZ-8.1), and has every `actions` and `not_actions`
+ * pattern cover at least one action of the bound action catalogue, so a policy
+ * written at runtime can only refer to actions the code checks and context the
+ * application supplies. With no actions declared, no document may be written.
+ *
+ * Every condition key must be declared, may be tested, and be of a type its
+ * operator suits (`ContextKeyType`), and every `${…}` reference in an operand
+ * or a resource pattern must name a declared key, but for one to `principal` or
+ * `resource`, which are not the check's context. A value of the wrong type is
+ * still undecidable at evaluation, whatever the key declares.
  *
  * The policy model's `document` attribute writes through here, and so does
  * every write of the policy service, and `authorization:policy:validate` checks
@@ -32,24 +39,34 @@ final readonly class PolicyValidator
     /** @var int The most characters a condition key may have. */
     public const int KEY_LENGTH = 128;
 
+    /** @var string How to declare a context key a policy reads. */
+    public const string DECLARE_KEYS = 'declare it in authorization.context.keys or register it with the context key catalogue.';
+
     /** @var string Why no document may be written when the catalogue declares no actions. */
     public const string NOTHING_DECLARED = 'No permissions are declared to check the policy\'s actions against; declare them in permission_enums or permission_providers.';
+
+    /** @var list<string> The namespaces a `${…}` reference reads without their keys being declared: they are not the check's context. */
+    private const array UNDECLARED_NAMESPACES = ['principal', 'resource'];
 
     /**
      * Create a new policy validator.
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\ActionCatalogue  $catalogue
+     * @param  \SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue  $keys
      */
     public function __construct(
 
         /** The actions a policy may name. */
         private ActionCatalogue $catalogue,
+
+        /** The context keys a policy may read. */
+        private ContextKeyCatalogue $keys,
     ) {}
 
     /**
      * Return the reasons the document cannot be written; none when it can.
      *
-     * Every limit, condition-key and catalogue reason is given at once, but a
+     * Every limit, context key and catalogue reason is given at once, but a
      * structural fault stops the check: when the document is not a valid
      * policy, only the first fault found and the limits it breaks are given.
      *
@@ -74,7 +91,7 @@ final readonly class PolicyValidator
             return [...$errors, $exception->getMessage()];
         }
 
-        return [...$errors, ...self::keyErrors($policy), ...$this->catalogueErrors($policy)];
+        return [...$errors, ...$this->contextErrors($policy), ...$this->catalogueErrors($policy)];
     }
 
     /**
@@ -109,26 +126,57 @@ final readonly class PolicyValidator
     }
 
     /**
-     * Return a reason for each condition key of each statement that is not in
-     * the key syntax or is too long.
+     * Return a reason for each condition test and `${…}` reference of each
+     * statement the key catalogue does not permit: a condition key not
+     * declared, a condition on a key that may not be tested, an operator that
+     * does not suit the key's type, and a reference to a key not declared. A
+     * reference to `principal` or `resource` is not to the check's context, so
+     * it needs no declaring.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $policy
      * @return list<string>
      */
-    private static function keyErrors(Policy $policy): array
+    private function contextErrors(Policy $policy): array
     {
         $errors = [];
 
         foreach ($policy->statements as $index => $statement) {
-            // The keys are checked for their syntax only, not yet against a
-            // declared catalogue of context keys.
-            foreach (\array_filter(self::keysOf($statement), static fn (string $key): bool => !self::isValidKey($key)) as $key) {
-                $errors[] = "Policy statement #{$index} condition key '{$key}' must be letters, digits and '_', then any '.'-separated"
-                    . ' segments that may also hold \'-\', and at most ' . self::KEY_LENGTH . ' characters.';
+            $errors = [...$errors, ...$this->statementContextErrors("Policy statement #{$index}", $statement)];
+        }
+
+        return \array_values(\array_unique($errors));
+    }
+
+    /**
+     * Return a reason, after the prefix naming the statement, for each of its
+     * condition tests and `${…}` references the key catalogue does not permit.
+     *
+     * @param  string  $prefix
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
+     * @return list<string>
+     */
+    private function statementContextErrors(string $prefix, Statement $statement): array
+    {
+        $errors   = [];
+        $subjects = $statement->resources ?? $statement->notResources ?? [];
+
+        // A statement's conditions have been checked to map operators to keyed
+        // maps, so every entry is an array keyed by context key.
+        /** @var array<string, array<string, mixed>> $conditions */
+        $conditions = $statement->conditions;
+
+        foreach ($conditions as $operator => $tests) {
+            foreach ($tests as $key => $operand) {
+                $errors[]   = $this->keys->permits($key, $operator) ? null : "{$prefix} " . $this->testError($key, $operator);
+                $subjects[] = $operand;
             }
         }
 
-        return $errors;
+        foreach (self::referencesOf($subjects) as $path) {
+            $errors[] = $this->keys->permits($path) ? null : "{$prefix} reference '\${{$path}}' names no declared context key.";
+        }
+
+        return \array_values(\array_filter($errors, static fn (?string $error): bool => $error !== null));
     }
 
     /**
@@ -160,38 +208,49 @@ final readonly class PolicyValidator
     }
 
     /**
-     * Return every context key the statement's conditions test, once each.
+     * Describe why a condition may not test the key with the operator: the key
+     * is not declared, may not be tested, or is of a type the operator does not
+     * suit.
      *
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
-     * @return list<string>
+     * @param  string  $key
+     * @param  string  $operator
+     * @return string
      */
-    private static function keysOf(Statement $statement): array
+    private function testError(string $key, string $operator): string
     {
-        $keys = [];
+        $declared = $this->keys->find($key);
 
-        // A statement's conditions have been checked to map operators to keyed
-        // maps, so every entry is an array keyed by context key.
-        /** @var array<string, array<string, mixed>> $conditions */
-        $conditions = $statement->conditions;
-
-        foreach ($conditions as $tests) {
-            foreach (\array_keys($tests) as $key) {
-                $keys[$key] = true;
-            }
+        if ($declared === null) {
+            return "condition key '{$key}' is not a declared context key; " . self::DECLARE_KEYS;
         }
 
-        return \array_keys($keys);
+        if (!$declared->isTestable) {
+            return "condition key '{$key}' may not be tested by a condition.";
+        }
+
+        $operators = \implode(', ', [...$declared->type->operators(), 'null']);
+
+        return "condition operator '{$operator}' does not suit the {$declared->type->value} key '{$key}'; use one of {$operators}, or their _if_exists forms.";
     }
 
     /**
-     * Determine whether the condition key is in the key syntax and not too
-     * long.
+     * Return the path of every `${…}` reference in the string operands and
+     * resource patterns that reads the check's context, once each: every one
+     * but a reference to `principal` or `resource`.
      *
-     * @param  string  $key
-     * @return bool
+     * @param  list<mixed>  $subjects
+     * @return list<string>
      */
-    private static function isValidKey(string $key): bool
+    private static function referencesOf(array $subjects): array
     {
-        return \strlen($key) <= self::KEY_LENGTH && \preg_match(self::KEY_PATTERN, $key) === 1;
+        $paths = [];
+
+        foreach (\array_filter($subjects, \is_string(...)) as $subject) {
+            foreach (ContextInterpolator::references($subject) as $path) {
+                $paths[$path] = !\in_array(\explode('.', $path, 2)[0], self::UNDECLARED_NAMESPACES, true);
+            }
+        }
+
+        return \array_keys(\array_filter($paths));
     }
 }

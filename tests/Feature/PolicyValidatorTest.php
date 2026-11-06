@@ -7,7 +7,10 @@ namespace Tests\Feature;
 use Illuminate\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\Authorization\Context\DeclaredContextKeyCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
+use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
+use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyValidator;
 use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
@@ -18,8 +21,8 @@ use Tests\TestCase;
 
 /**
  * Feature tests for `PolicyValidator`, which decides whether a policy document
- * may be written: its structure, its limits, its condition keys and the
- * catalogue coverage of its action patterns.
+ * may be written: its structure, its limits, the context keys its conditions
+ * and references read, and the catalogue coverage of its action patterns.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -56,7 +59,7 @@ final class PolicyValidatorTest extends TestCase
                 'sid'        => 'Read',
                 'effect'     => 'allow',
                 'actions'    => ['posts:read'],
-                'conditions' => ['eq' => ['tenant' => '${subject.tenant}'], 'ip_in' => ['request.ip' => '10.0.0.0/8']],
+                'conditions' => ['eq' => ['input.tenant' => '${principal.tenant}'], 'ip_in' => ['request.ip' => '10.0.0.0/8']],
             ],
             ['sid' => 'Write', 'effect' => 'deny', 'not_actions' => ['posts:read'], 'not_resources' => ['post:1']],
         ]);
@@ -117,84 +120,180 @@ final class PolicyValidatorTest extends TestCase
     }
 
     /**
-     * Return condition keys in the key syntax.
+     * A condition on a declared key with an operator its type suits, an
+     * `_if_exists` form of one, or `null`, is accepted, and so is a `${…}`
+     * reference to a declared key, to the principal or to the resource.
      *
-     * @return iterable<string, array{string}>
-     */
-    public static function validKeys(): iterable
-    {
-        yield 'a name' => ['tenant'];
-        yield 'a name with an underscore' => ['_request_ip'];
-        yield 'dotted segments' => ['request.ip'];
-        yield 'segments with digits and -' => ['subject.attr-1.2_b'];
-        yield 'the longest key' => [\str_repeat('k', 128)];
-    }
-
-    /**
-     * A condition key in the key syntax, of at most 128 characters, is
-     * accepted.
-     *
-     * @param  string  $key
      * @return void
      */
-    #[DataProvider('validKeys')]
-    public function testAcceptsAConditionKeyInTheKeySyntax(string $key): void
+    public function testAcceptsDeclaredKeysTestedWithOperatorsTheirTypesSuit(): void
     {
-        self::assertSame([], self::validator()->errors(self::document([['effect' => 'allow', 'actions' => ['a'], 'conditions' => ['eq' => [$key => 'x']]]])));
+        $validator = $this->declaringKeys(['input' => ['post.status' => 'string', 'post.words' => 'number', 'groups' => 'list', 'owner' => 'string', 'draft' => 'bool']]);
+
+        self::assertSame([], $validator->errors(self::document([[
+            'effect'     => 'allow',
+            'actions'    => ['a'],
+            'resources'  => ['post:${input.owner}', 'user:${principal.id}', '${resource.type}:*'],
+            'conditions' => [
+                'eq'              => ['input.post.status' => '${input.owner}', 'authentication.guard' => 'web', 'input.draft' => true],
+                'gte'             => ['input.post.words' => 100],
+                'ip_in_if_exists' => ['request.ip' => '10.0.0.0/8'],
+                'starts_with'     => ['request.route' => 'posts.', 'authentication.user_type' => '${principal.type}'],
+                'before'          => ['environment.time' => '2030-01-01T00:00:00Z'],
+                'null'            => ['environment.time' => false, 'input.groups' => false, 'request.ip' => false],
+                'any_value_in'    => ['input.groups' => ['editors']],
+                'bool'            => ['input.draft' => true],
+                'in'              => ['request.method' => ['GET', 'HEAD'], 'authentication.user_id' => ['${principal.id}']],
+            ],
+        ]])));
     }
 
     /**
-     * Return condition keys outside the key syntax.
+     * Provide condition keys no catalogue declares: flat, a namespace alone, a
+     * path below a declared key, one outside the key syntax, and one too long.
      *
      * @return iterable<string, array{string}>
      */
-    public static function invalidKeys(): iterable
+    public static function undeclaredKeys(): iterable
     {
+        yield 'a flat key' => ['tenant'];
+        yield 'a namespace alone' => ['request'];
+        yield 'a path below a declared key' => ['request.ip.v4'];
+        yield 'an undeclared input key' => ['input.post.status'];
+        yield 'the removed context namespace' => ['context.tenant'];
         yield 'a leading digit' => ['1tenant'];
-        yield 'a dash in the first name' => ['request-ip'];
         yield 'an empty segment' => ['request..ip'];
-        yield 'a trailing dot' => ['request.'];
-        yield 'a leading dot' => ['.request'];
         yield 'a space' => ['request ip'];
-        yield 'an interpolation' => ['${subject.id}'];
-        yield 'a trailing newline' => ["tenant\n"];
-        yield 'a key that is too long' => [\str_repeat('k', 129)];
+        yield 'an interpolation' => ['${request.ip}'];
+        yield 'a key that is too long' => ['input.' . \str_repeat('k', 129)];
     }
 
     /**
-     * A condition key outside the key syntax, or longer than 128 characters, is
-     * refused, once for its statement however many operators test it.
+     * A condition key the catalogue does not declare is refused, once for its
+     * statement however many operators test it.
      *
      * @param  string  $key
      * @return void
      */
-    #[DataProvider('invalidKeys')]
-    public function testRefusesAConditionKeyOutsideTheKeySyntax(string $key): void
+    #[DataProvider('undeclaredKeys')]
+    public function testRefusesAConditionKeyNotDeclared(string $key): void
     {
         $document = self::document([
             ['effect' => 'allow', 'actions' => ['a']],
-            ['effect' => 'allow', 'actions' => ['a'], 'conditions' => ['eq' => ['tenant' => 'x', $key => 'x'], 'neq' => [$key => 'y']]],
+            ['effect' => 'allow', 'actions' => ['a'], 'conditions' => ['eq' => ['request.method' => 'GET', $key => 'x'], 'neq' => [$key => 'y']]],
         ]);
 
-        self::assertSame([
-            "Policy statement #1 condition key '{$key}' must be letters, digits and '_', then any '.'-separated segments that may also hold '-', and at most 128 characters.",
-        ], self::validator()->errors($document));
+        self::assertSame(
+            ["Policy statement #1 condition key '{$key}' is not a declared context key; " . PolicyValidator::DECLARE_KEYS],
+            $this->declaringKeys([])->errors($document),
+        );
     }
 
     /**
-     * A condition key outside the key syntax is refused when only an earlier
-     * operator of the statement tests it, so the keys of every operator are
-     * checked, not only the last one's.
+     * A condition key the catalogue does not declare is refused when only an
+     * earlier operator of the statement tests it, so the keys of every operator
+     * are checked, not only the last one's.
      *
      * @return void
      */
     public function testRefusesAConditionKeyTestedOnlyByAnEarlierOperator(): void
     {
-        $document = self::document([['effect' => 'allow', 'actions' => ['a'], 'conditions' => ['eq' => ['1bad' => 'x'], 'neq' => ['tenant' => 'y']]]]);
+        $document = self::document([['effect' => 'allow', 'actions' => ['a'], 'conditions' => ['eq' => ['tenant' => 'x'], 'neq' => ['request.method' => 'GET']]]]);
+
+        self::assertSame(
+            ['Policy statement #0 condition key \'tenant\' is not a declared context key; ' . PolicyValidator::DECLARE_KEYS],
+            $this->declaringKeys([])->errors($document),
+        );
+    }
+
+    /**
+     * A condition on a key declared untestable is refused, whatever its
+     * operator, while a `${…}` reference may still read it.
+     *
+     * @return void
+     */
+    public function testRefusesAConditionOnAnUntestableKey(): void
+    {
+        $validator = $this->declaringKeys([]);
+
+        $this->keyCatalogue()->declare('mfa.assurance', ContextKeyType::STRING, false);
+
+        self::assertSame(
+            ['Policy statement #0 condition key \'mfa.assurance\' may not be tested by a condition.'],
+            $validator->errors(self::document([
+                ['effect' => 'allow', 'actions' => ['a'], 'conditions' => ['eq' => ['mfa.assurance' => 'high'], 'null' => ['mfa.assurance' => false]]],
+            ])),
+        );
+        self::assertSame([], $validator->errors(self::document([['effect' => 'allow', 'actions' => ['a'], 'conditions' => ['eq' => ['request.route' => '${mfa.assurance}']]]])));
+    }
+
+    /**
+     * Provide operators that do not suit a declared key's type, with the key,
+     * the key's type and the operators that do suit it.
+     *
+     * @return iterable<string, array{0: string, 1: string, 2: mixed, 3: string, 4: string}>
+     */
+    public static function unsuitedOperators(): iterable
+    {
+        $string = 'eq, neq, in, not_in, starts_with, ends_with, like, null';
+        $ip     = 'eq, neq, in, not_in, ip_in, ip_not_in, null';
+        $time   = 'before, after, between, null';
+
+        yield 'gt on an ip' => ['gt', 'request.ip', 1, 'ip', $ip];
+        yield 'like on an ip' => ['like', 'request.ip', '10.*', 'ip', $ip];
+        yield 'ip_in on a string' => ['ip_in', 'request.method', '10.0.0.0/8', 'string', $string];
+        yield 'an _if_exists form on a string' => ['ip_in_if_exists', 'request.route', '10.0.0.0/8', 'string', $string];
+        yield 'eq on a time' => ['eq', 'environment.time', '2030-01-01T00:00:00Z', 'time', $time];
+        yield 'gt on a string' => ['gt', 'authentication.user_id', 1, 'string', $string];
+        yield 'before on a number' => ['before', 'input.words', '2030-01-01', 'number', 'eq, neq, in, not_in, gt, gte, lt, lte, null'];
+        yield 'eq on a list' => ['eq', 'input.groups', 'editors', 'list', 'any_value_in, all_values_in, null'];
+        yield 'like on a bool' => ['like', 'input.draft', 'tr*', 'bool', 'eq, neq, bool, null'];
+        yield 'any_value_in on a string' => ['any_value_in', 'request.method', ['GET'], 'string', $string];
+    }
+
+    /**
+     * A condition testing a declared key with an operator its type does not
+     * suit is refused, naming the operators that do.
+     *
+     * @param  string  $operator
+     * @param  string  $key
+     * @param  mixed  $operand
+     * @param  string  $type
+     * @param  string  $operators
+     * @return void
+     */
+    #[DataProvider('unsuitedOperators')]
+    public function testRefusesAnOperatorThatDoesNotSuitTheKeysType(string $operator, string $key, mixed $operand, string $type, string $operators): void
+    {
+        $validator = $this->declaringKeys(['input' => ['words' => 'number', 'groups' => 'list', 'draft' => 'bool']]);
+
+        self::assertSame(
+            ["Policy statement #0 condition operator '{$operator}' does not suit the {$type} key '{$key}'; use one of {$operators}, or their _if_exists forms."],
+            $validator->errors(self::document([['effect' => 'deny', 'actions' => ['a'], 'conditions' => [$operator => [$key => $operand]]]])),
+        );
+    }
+
+    /**
+     * A `${…}` reference to a key the catalogue does not declare is refused,
+     * once for its statement, in an operand or a resource pattern, and so is
+     * the removed `${context.…}` namespace; references to the principal and the
+     * resource need no declaring.
+     *
+     * @return void
+     */
+    public function testRefusesAReferenceToAKeyNotDeclared(): void
+    {
+        $document = self::document([
+            ['effect' => 'allow', 'actions' => ['a'], 'resources' => ['post:${input.post}', '${resource.type}:${principal.id}']],
+            ['effect' => 'allow', 'actions' => ['a'], 'conditions' => ['eq' => ['request.route' => '${context.route}', 'request.method' => '${input.post}-${context.route}']]],
+        ]);
 
         self::assertSame([
-            'Policy statement #0 condition key \'1bad\' must be letters, digits and \'_\', then any \'.\'-separated segments that may also hold \'-\', and at most 128 characters.',
-        ], self::validator()->errors($document));
+            'Policy statement #0 reference \'${input.post}\' names no declared context key.',
+            'Policy statement #1 reference \'${context.route}\' names no declared context key.',
+            'Policy statement #1 reference \'${input.post}\' names no declared context key.',
+        ], $this->declaringKeys([])->errors($document));
+        self::assertSame([], $this->declaringKeys(['input' => ['post' => 'string'], 'context' => ['route' => 'string']])->errors($document));
     }
 
     /**
@@ -207,13 +306,13 @@ final class PolicyValidatorTest extends TestCase
     {
         yield 'like with a nul byte' => ['like', "curl\0*"];
         yield 'starts_with with a nul byte' => ['starts_with', "/a\0"];
-        yield 'ends_with with a nul byte and a reference' => ['ends_with', "\${context.suffix}\0"];
+        yield 'ends_with with a nul byte and a reference' => ['ends_with', "\${input.suffix}\0"];
         yield 'ip_in with a nul byte' => ['ip_in', "10.0.0.0\0/8"];
         yield 'ip_not_in with a nul byte' => ['ip_not_in', "10.0.0.1\0"];
         yield 'ip_in with a zone id' => ['ip_in', 'fe80::1%en0'];
         yield 'ip_in with a leading zero' => ['ip_in', '010.0.0.0/8'];
         yield 'before with a nul byte' => ['before', "2026-01-01\0"];
-        yield 'after with a nul byte and a reference' => ['after', "\${context.deadline}\0"];
+        yield 'after with a nul byte and a reference' => ['after', "\${input.deadline}\0"];
     }
 
     /**
@@ -268,14 +367,14 @@ final class PolicyValidatorTest extends TestCase
     #[DataProvider('unencodableOperands')]
     public function testRefusesADocumentThatCannotBeEncoded(mixed $operand, string $reason): void
     {
-        $document = self::document([['effect' => 'allow', 'actions' => ['a'], 'conditions' => ['eq' => ['x' => $operand]]]]);
+        $document = self::document([['effect' => 'allow', 'actions' => ['a'], 'conditions' => ['eq' => ['input.x' => $operand]]]]);
 
         self::assertSame(["Policy document cannot be encoded as JSON: {$reason}."], self::validator()->errors($document));
     }
 
     /**
      * A structural fault stops the check: only it and the limits the document
-     * breaks are given, and the condition-key and catalogue checks do not run.
+     * breaks are given, and the context key and catalogue checks do not run.
      *
      * @return void
      */
@@ -366,7 +465,7 @@ final class PolicyValidatorTest extends TestCase
     }
 
     /**
-     * Every limit, condition-key and catalogue reason is given together.
+     * Every limit, context key and catalogue reason is given together.
      *
      * @return void
      */
@@ -374,11 +473,13 @@ final class PolicyValidatorTest extends TestCase
     {
         $this->config()->set('authorization.policies.limits.pattern_length', 12);
 
+        $this->declaringKeys([]);
+
         $validator = $this->declaring([CataloguePermission::class], []);
 
         self::assertSame([
             'Policy statement #0 has 1 patterns or operands longer than the 12 characters allowed.',
-            'Policy statement #0 condition key \'1st\' must be letters, digits and \'_\', then any \'.\'-separated segments that may also hold \'-\', and at most 128 characters.',
+            'Policy statement #0 condition key \'1st\' is not a declared context key; ' . PolicyValidator::DECLARE_KEYS,
             'Policy statement #0 actions pattern \'comments:create\' matches no declared permission.',
         ], $validator->errors(self::document([['effect' => 'allow', 'actions' => ['comments:create'], 'conditions' => ['eq' => ['1st' => 'x']]]])));
     }
@@ -454,6 +555,31 @@ final class PolicyValidatorTest extends TestCase
         $this->app?->instance(ActionCatalogue::class, $this->app->make(DeclaredActionCatalogue::class));
 
         return self::validator();
+    }
+
+    /**
+     * Declare the context keys, bind the declared context key catalogue in
+     * place of the test suite's permissive one, and return the validator.
+     *
+     * @param  array<string, array<string, string>>  $keys
+     * @return \SineMacula\Laravel\Authorization\Evaluation\PolicyValidator
+     */
+    private function declaringKeys(array $keys): PolicyValidator
+    {
+        $this->app?->instance(ContextKeyCatalogue::class, new DeclaredContextKeyCatalogue($keys));
+
+        return self::validator();
+    }
+
+    /**
+     * Return the bound context key catalogue.
+     *
+     * @return \SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue
+     */
+    private function keyCatalogue(): ContextKeyCatalogue
+    {
+        /** @var \SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue */
+        return $this->app?->make(ContextKeyCatalogue::class);
     }
 
     /**

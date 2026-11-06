@@ -294,9 +294,9 @@ final class PolicyTest extends TestCase
                     'actions'    => ['posts:create', 'posts:update'],
                     'resources'  => ['arn:posts:*'],
                     'conditions' => [
-                        'eq'              => ['tenant' => 'org-1'],
+                        'eq'              => ['input.tenant' => 'org-1'],
                         'ip_in_if_exists' => ['request.ip' => ['10.0.0.0/8', '2001:db8::/32']],
-                        'all_values_in'   => ['tags' => ['draft', 'review']],
+                        'all_values_in'   => ['input.tags' => ['draft', 'review']],
                     ],
                 ],
                 [

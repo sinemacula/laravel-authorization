@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\AbstractLogger;
+use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
 use SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator;
 
 /**
@@ -57,41 +58,116 @@ final class ContextInterpolatorTest extends TestCase
     }
 
     // ------------------------------------------------------------------
-    // Context namespace
+    // Context namespaces
     // ------------------------------------------------------------------
 
     /**
-     * `${context.tenant_id}` resolves from the context array.
+     * `${input.tenant_id}` resolves from the check's `input` namespace.
      *
      * @return void
      */
     public function testContextKeyResolvesFromArray(): void
     {
         $interpolated = $this->interpolator->interpolate(
-            'tenant:${context.tenant_id}',
+            'tenant:${input.tenant_id}',
             null,
             null,
-            ['tenant_id' => 'org-42'],
+            ['input' => ['tenant_id' => 'org-42']],
         );
 
         self::assertSame('tenant:org-42', $interpolated);
     }
 
     /**
-     * Nested dot-notation `${context.request.ip}` works.
+     * A nested dot path such as `${input.request.ip}` is read segment by
+     * segment.
      *
      * @return void
      */
     public function testNestedDotNotationContext(): void
     {
         $interpolated = $this->interpolator->interpolate(
-            'ip:${context.request.ip}',
+            'ip:${input.request.ip}',
             null,
             null,
-            ['request' => ['ip' => '10.0.0.1']],
+            ['input' => ['request' => ['ip' => '10.0.0.1']]],
         );
 
         self::assertSame('ip:10.0.0.1', $interpolated);
+    }
+
+    /**
+     * A token of any namespace but `principal` and `resource` reads the check's
+     * context: `${request.ip}`, `${environment.time}` and an application's own
+     * namespace alike.
+     *
+     * @return void
+     */
+    public function testEveryOtherNamespaceIsReadFromTheContext(): void
+    {
+        $context = [
+            'request'     => ['ip' => '10.0.0.1'],
+            'environment' => ['time' => '2026-01-31T09:30:00Z'],
+            'tenant'      => ['plan' => ['tier' => 'pro']],
+        ];
+
+        self::assertSame('10.0.0.1', $this->interpolator->interpolate('${request.ip}', null, null, $context));
+        self::assertSame('2026-01-31T09:30:00Z', $this->interpolator->interpolate('${environment.time}', null, null, $context));
+        self::assertSame('pro', $this->interpolator->interpolate('${tenant.plan.tier}', null, null, $context));
+        self::assertSame('10.0.0.1', $this->interpolator->interpolatePattern('${request.ip}', null, null, new CheckContext($context)));
+    }
+
+    /**
+     * A token is a dot path, never a literal flat key: a top-level key named
+     * `request.ip` does not resolve `${request.ip}`, and neither does a caller
+     * value under `input`.
+     *
+     * @return void
+     */
+    public function testALiteralDottedKeyIsNotAPath(): void
+    {
+        $context = ['request.ip' => '10.0.0.1', 'input' => ['request' => ['ip' => '10.0.0.2']]];
+
+        self::assertNull($this->interpolator->interpolate('${request.ip}', null, null, $context));
+        self::assertSame('10.0.0.2', $this->interpolator->interpolate('${input.request.ip}', null, null, $context));
+    }
+
+    /**
+     * The removed `${context.…}` namespace no longer reads what the caller
+     * passes: it is a namespace the context does not hold, so it is unresolved.
+     *
+     * @return void
+     */
+    public function testTheContextNamespaceIsUnresolved(): void
+    {
+        self::assertNull($this->interpolator->interpolate('${context.tenant_id}', null, null, ['input' => ['tenant_id' => 'org-1'], 'tenant_id' => 'org-1']));
+    }
+
+    /**
+     * A token builds only the namespace it reads, once for the context it is
+     * given, however many tokens read it.
+     *
+     * @return void
+     */
+    public function testATokenBuildsOnlyTheNamespaceItReads(): void
+    {
+        $calls   = ['request' => 0, 'environment' => 0];
+        $context = new CheckContext([], [
+            'request' => static function () use (&$calls): array {
+                $calls['request']++;
+
+                return ['request' => ['ip' => '10.0.0.1', 'method' => 'GET']];
+            },
+            'environment' => static function () use (&$calls): array {
+                $calls['environment']++;
+
+                return ['environment' => ['time' => '2026-01-31T09:30:00Z']];
+            },
+        ]);
+
+        self::assertSame('10.0.0.1/GET', $this->interpolator->interpolate('${request.ip}/${request.method}', null, null, $context));
+        self::assertSame('10.0.0.1', $this->interpolator->interpolatePattern('${request.ip}', null, null, $context));
+        self::assertSame(['request' => 1, 'environment' => 0], $calls);
     }
 
     /**
@@ -102,12 +178,12 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testScalarContextValuesAreCastToStrings(): void
     {
-        $context = ['count' => 42, 'ratio' => 2.5, 'yes' => true, 'no' => false];
+        $context = ['input' => ['count' => 42, 'ratio' => 2.5, 'yes' => true, 'no' => false]];
 
-        self::assertSame('42', $this->interpolator->interpolate('${context.count}', null, null, $context));
-        self::assertSame('2.5', $this->interpolator->interpolate('${context.ratio}', null, null, $context));
-        self::assertSame('true', $this->interpolator->interpolate('${context.yes}', null, null, $context));
-        self::assertSame('[false]', $this->interpolator->interpolate('[${context.no}]', null, null, $context));
+        self::assertSame('42', $this->interpolator->interpolate('${input.count}', null, null, $context));
+        self::assertSame('2.5', $this->interpolator->interpolate('${input.ratio}', null, null, $context));
+        self::assertSame('true', $this->interpolator->interpolate('${input.yes}', null, null, $context));
+        self::assertSame('[false]', $this->interpolator->interpolate('[${input.no}]', null, null, $context));
     }
 
     /**
@@ -118,26 +194,26 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testMissingNullAndNonScalarContextValuesAreUnresolved(): void
     {
-        $context = ['nested' => ['a' => 'b'], 'object' => new \stdClass, 'nothing' => null];
+        $context = ['input' => ['nested' => ['a' => 'b'], 'object' => new \stdClass, 'nothing' => null]];
 
-        self::assertNull($this->interpolator->interpolate('v:${context.absent}', null, null, $context));
-        self::assertNull($this->interpolator->interpolate('v:${context.nested}', null, null, $context));
-        self::assertNull($this->interpolator->interpolate('v:${context.object}', null, null, $context));
-        self::assertNull($this->interpolator->interpolate('v:${context.nothing}', null, null, $context));
+        self::assertNull($this->interpolator->interpolate('v:${input.absent}', null, null, $context));
+        self::assertNull($this->interpolator->interpolate('v:${input.nested}', null, null, $context));
+        self::assertNull($this->interpolator->interpolate('v:${input.object}', null, null, $context));
+        self::assertNull($this->interpolator->interpolate('v:${input.nothing}', null, null, $context));
     }
 
     /**
-     * A bare `${context}` token or one with an empty key is unresolved, even
-     * when the context holds an entry under the empty key.
+     * A bare `${input}` token or one with an empty key is unresolved, even when
+     * the context holds an entry under the empty key.
      *
      * @return void
      */
     public function testContextTokenWithoutKeyIsUnresolved(): void
     {
-        $context = ['' => 'leak', 'key' => 'value'];
+        $context = ['input' => ['' => 'leak', 'key' => 'value']];
 
-        self::assertNull($this->interpolator->interpolate('${context}', null, null, $context));
-        self::assertNull($this->interpolator->interpolate('${context.}', null, null, $context));
+        self::assertNull($this->interpolator->interpolate('${input}', null, null, $context));
+        self::assertNull($this->interpolator->interpolate('${input.}', null, null, $context));
     }
 
     // ------------------------------------------------------------------
@@ -519,10 +595,10 @@ final class ContextInterpolatorTest extends TestCase
         $principal->id = 7;
 
         $interpolated = $this->interpolator->interpolate(
-            '${principal.id}:${context.env}:${resource.type}:${resource.id}',
+            '${principal.id}:${input.env}:${resource.type}:${resource.id}',
             $principal,
             'posts:1',
-            ['env' => 'prod'],
+            ['input' => ['env' => 'prod']],
         );
 
         self::assertSame('7:prod:posts:1', $interpolated);
@@ -536,11 +612,11 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testOneUnresolvedTokenMakesWholeResultNull(): void
     {
-        $context = ['env' => 'prod'];
+        $context = ['input' => ['env' => 'prod']];
 
-        self::assertNull($this->interpolator->interpolate('${context.env}:${context.missing}:${resource.type}', null, 'posts:1', $context));
-        self::assertNull($this->interpolator->interpolate('${context.missing}:${context.env}', null, null, $context));
-        self::assertNull($this->interpolator->interpolatePattern('${context.env}/${context.missing}/*', null, null, $context));
+        self::assertNull($this->interpolator->interpolate('${input.env}:${input.missing}:${resource.type}', null, 'posts:1', $context));
+        self::assertNull($this->interpolator->interpolate('${input.missing}:${input.env}', null, null, $context));
+        self::assertNull($this->interpolator->interpolatePattern('${input.env}/${input.missing}/*', null, null, $context));
     }
 
     /**
@@ -550,7 +626,7 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testUnknownNamespaceIsUnresolved(): void
     {
-        self::assertNull($this->interpolator->interpolate('prefix:${unknown.key}:suffix', null, null, ['key' => 'value']));
+        self::assertNull($this->interpolator->interpolate('prefix:${unknown.key}:suffix', null, null, ['input' => ['key' => 'value']]));
         self::assertNull($this->interpolator->interpolate('${_private.key}', null, null, []));
     }
 
@@ -562,12 +638,12 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testTokenGrammar(): void
     {
-        $context = ['Key_9' => 'ok', 'a' => ['b2' => 'deep']];
+        $context = ['input' => ['Key_9' => 'ok', 'a' => ['b2' => 'deep']]];
 
-        self::assertSame('ok', $this->interpolator->interpolate('${context.Key_9}', null, null, $context));
-        self::assertSame('deep', $this->interpolator->interpolate('${context.a.b2}', null, null, $context));
-        self::assertSame('$context.a', $this->interpolator->interpolate('$context.a', null, null, $context));
-        self::assertSame('$ {context.a}', $this->interpolator->interpolate('$ {context.a}', null, null, $context));
+        self::assertSame('ok', $this->interpolator->interpolate('${input.Key_9}', null, null, $context));
+        self::assertSame('deep', $this->interpolator->interpolate('${input.a.b2}', null, null, $context));
+        self::assertSame('$input.a', $this->interpolator->interpolate('$input.a', null, null, $context));
+        self::assertSame('$ {input.a}', $this->interpolator->interpolate('$ {input.a}', null, null, $context));
     }
 
     /**
@@ -579,18 +655,18 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testMalformedReferenceMakesWholeResultNull(): void
     {
-        $context = ['Key_9' => 'ok', 'a' => 'value'];
+        $context = ['input' => ['Key_9' => 'ok', 'a' => 'value']];
 
-        self::assertNull($this->interpolator->interpolate('x:${1context.a}', null, null, $context));
-        self::assertNull($this->interpolator->interpolate('x:${context-a}', null, null, $context));
+        self::assertNull($this->interpolator->interpolate('x:${1input.a}', null, null, $context));
+        self::assertNull($this->interpolator->interpolate('x:${input-a}', null, null, $context));
         self::assertNull($this->interpolator->interpolate('x:${}', null, null, $context));
-        self::assertNull($this->interpolator->interpolate('${context.tenant-id}', null, null, $context));
-        self::assertNull($this->interpolator->interpolate('${context-a}', null, null, $context));
+        self::assertNull($this->interpolator->interpolate('${input.tenant-id}', null, null, $context));
+        self::assertNull($this->interpolator->interpolate('${input-a}', null, null, $context));
         self::assertNull($this->interpolator->interpolate('${}', null, null, $context));
         self::assertNull($this->interpolator->interpolate('${1x}', null, null, $context));
         self::assertNull($this->interpolator->interpolate('${foo', null, null, $context));
-        self::assertNull($this->interpolator->interpolate('${context.Key_9}${-}', null, null, $context));
-        self::assertNull($this->interpolator->interpolate('${-}${context.Key_9}', null, null, $context));
+        self::assertNull($this->interpolator->interpolate('${input.Key_9}${-}', null, null, $context));
+        self::assertNull($this->interpolator->interpolate('${-}${input.Key_9}', null, null, $context));
     }
 
     /**
@@ -601,17 +677,32 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testContainsReference(): void
     {
-        self::assertTrue(ContextInterpolator::containsReference('${context.a}'));
+        self::assertTrue(ContextInterpolator::containsReference('${input.a}'));
         self::assertTrue(ContextInterpolator::containsReference('tenant:${unknown.key}:x'));
-        self::assertTrue(ContextInterpolator::containsReference('\${literal}:${context.a}'));
-        self::assertTrue(ContextInterpolator::containsReference('${context-a}:${context.a}'));
+        self::assertTrue(ContextInterpolator::containsReference('\${literal}:${input.a}'));
+        self::assertTrue(ContextInterpolator::containsReference('${input-a}:${input.a}'));
 
-        self::assertFalse(ContextInterpolator::containsReference('\${context.a}'));
-        self::assertFalse(ContextInterpolator::containsReference('${context-a}'));
+        self::assertFalse(ContextInterpolator::containsReference('\${input.a}'));
+        self::assertFalse(ContextInterpolator::containsReference('${input-a}'));
         self::assertFalse(ContextInterpolator::containsReference('${}'));
-        self::assertFalse(ContextInterpolator::containsReference('$context.a'));
+        self::assertFalse(ContextInterpolator::containsReference('$input.a'));
         self::assertFalse(ContextInterpolator::containsReference('static:pattern'));
         self::assertFalse(ContextInterpolator::containsReference(''));
+    }
+
+    /**
+     * `references()` lists the path of every well-formed reference, in order,
+     * leaving out escaped and malformed ones.
+     *
+     * @return void
+     */
+    public function testReferences(): void
+    {
+        self::assertSame(['request.ip', 'principal.id', 'request.ip'], ContextInterpolator::references('${request.ip}:${principal.id}/${request.ip}'));
+        self::assertSame(['input.a'], ContextInterpolator::references('\${literal}:${input-a}:${input.a}'));
+        self::assertSame(['environment'], ContextInterpolator::references('${environment}'));
+        self::assertSame([], ContextInterpolator::references('\${input.a}:${}:static'));
+        self::assertSame([], ContextInterpolator::references(''));
     }
 
     /**
@@ -622,18 +713,18 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testHasMalformedReference(): void
     {
-        self::assertTrue(ContextInterpolator::hasMalformedReference('${context.tenant-id}'));
+        self::assertTrue(ContextInterpolator::hasMalformedReference('${input.tenant-id}'));
         self::assertTrue(ContextInterpolator::hasMalformedReference('${}'));
         self::assertTrue(ContextInterpolator::hasMalformedReference('${1x}'));
         self::assertTrue(ContextInterpolator::hasMalformedReference('${foo'));
-        self::assertTrue(ContextInterpolator::hasMalformedReference('${context.a}${-}'));
+        self::assertTrue(ContextInterpolator::hasMalformedReference('${input.a}${-}'));
         self::assertTrue(ContextInterpolator::hasMalformedReference('\${x}:${-}'));
 
-        self::assertFalse(ContextInterpolator::hasMalformedReference('${context.a}'));
-        self::assertFalse(ContextInterpolator::hasMalformedReference('\${context.a}'));
-        self::assertFalse(ContextInterpolator::hasMalformedReference('\${context-a}'));
-        self::assertFalse(ContextInterpolator::hasMalformedReference('\${x}:${context.a}'));
-        self::assertFalse(ContextInterpolator::hasMalformedReference('$context.a'));
+        self::assertFalse(ContextInterpolator::hasMalformedReference('${input.a}'));
+        self::assertFalse(ContextInterpolator::hasMalformedReference('\${input.a}'));
+        self::assertFalse(ContextInterpolator::hasMalformedReference('\${input-a}'));
+        self::assertFalse(ContextInterpolator::hasMalformedReference('\${x}:${input.a}'));
+        self::assertFalse(ContextInterpolator::hasMalformedReference('$input.a'));
         self::assertFalse(ContextInterpolator::hasMalformedReference('static:pattern'));
         self::assertFalse(ContextInterpolator::hasMalformedReference(''));
     }
@@ -657,13 +748,13 @@ final class ContextInterpolatorTest extends TestCase
     public function testEscapedTokenPassesThroughAsLiteral(): void
     {
         $interpolated = $this->interpolator->interpolate(
-            'literal:\${context.a}',
+            'literal:\${input.a}',
             null,
             null,
-            ['a' => 'resolved'],
+            ['input' => ['a' => 'resolved']],
         );
 
-        self::assertSame('literal:${context.a}', $interpolated);
+        self::assertSame('literal:${input.a}', $interpolated);
     }
 
     /**
@@ -675,10 +766,10 @@ final class ContextInterpolatorTest extends TestCase
     public function testEscapedAndUnescapedTokensInSameString(): void
     {
         $interpolated = $this->interpolator->interpolate(
-            '${context.a}:\${literal}:${context.a}',
+            '${input.a}:\${literal}:${input.a}',
             null,
             null,
-            ['a' => 'resolved'],
+            ['input' => ['a' => 'resolved']],
         );
 
         self::assertSame('resolved:${literal}:resolved', $interpolated);
@@ -692,10 +783,10 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testSubstitutedValueIsNotRewritten(): void
     {
-        $context = ['escaped' => 'a\${b}', 'token' => '${context.other}', 'other' => 'leak'];
+        $context = ['input' => ['escaped' => 'a\${b}', 'token' => '${input.other}', 'other' => 'leak']];
 
-        self::assertSame('a\${b}', $this->interpolator->interpolate('${context.escaped}', null, null, $context));
-        self::assertSame('x:${context.other}', $this->interpolator->interpolate('x:${context.token}', null, null, $context));
+        self::assertSame('a\${b}', $this->interpolator->interpolate('${input.escaped}', null, null, $context));
+        self::assertSame('x:${input.other}', $this->interpolator->interpolate('x:${input.token}', null, null, $context));
     }
 
     /**
@@ -706,10 +797,10 @@ final class ContextInterpolatorTest extends TestCase
     public function testInterpolateKeepsLiteralBackslashes(): void
     {
         $interpolated = $this->interpolator->interpolate(
-            'App\Models\Post:${context.id}',
+            'App\Models\Post:${input.id}',
             null,
             null,
-            ['id' => '1'],
+            ['input' => ['id' => '1']],
         );
 
         self::assertSame('App\Models\Post:1', $interpolated);
@@ -727,9 +818,9 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testInterpolatePatternEscapesSubstitutedValues(): void
     {
-        $context = ['name' => 'a*b?c[d]e\f'];
+        $context = ['input' => ['name' => 'a*b?c[d]e\f']];
 
-        $pattern = $this->interpolator->interpolatePattern('files/${context.name}', null, null, $context);
+        $pattern = $this->interpolator->interpolatePattern('files/${input.name}', null, null, $context);
 
         self::assertSame('files/a\*b\?c\[d\]e\\\f', $pattern);
         self::assertTrue(\fnmatch($pattern, 'files/a*b?c[d]e\f'));
@@ -744,7 +835,7 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testInterpolatePatternWildcardValueMatchesOnlyItself(): void
     {
-        $pattern = $this->interpolator->interpolatePattern('docs:${context.id}', null, null, ['id' => '*']);
+        $pattern = $this->interpolator->interpolatePattern('docs:${input.id}', null, null, ['input' => ['id' => '*']]);
 
         self::assertSame('docs:\*', $pattern);
         self::assertTrue(\fnmatch($pattern, 'docs:*'));
@@ -759,7 +850,7 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testInterpolatePatternDoublesLiteralBackslashes(): void
     {
-        $pattern = $this->interpolator->interpolatePattern('App\Models\*:${context.id}', null, null, ['id' => '1']);
+        $pattern = $this->interpolator->interpolatePattern('App\Models\*:${input.id}', null, null, ['input' => ['id' => '1']]);
 
         self::assertSame('App\\\Models\\\*:1', $pattern);
         self::assertTrue(\fnmatch($pattern, 'App\Models\Post:1'));
@@ -774,11 +865,11 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testInterpolatePatternHandlesEscapeSequence(): void
     {
-        $context = ['escaped' => 'a\${b}'];
+        $context = ['input' => ['escaped' => 'a\${b}']];
 
-        self::assertSame('${context.x}*', $this->interpolator->interpolatePattern('\${context.x}*', null, null, $context));
+        self::assertSame('${input.x}*', $this->interpolator->interpolatePattern('\${input.x}*', null, null, $context));
 
-        $pattern = $this->interpolator->interpolatePattern('${context.escaped}', null, null, $context);
+        $pattern = $this->interpolator->interpolatePattern('${input.escaped}', null, null, $context);
 
         self::assertSame('a\\\${b}', $pattern);
         self::assertTrue(\fnmatch($pattern, 'a\${b}'));
@@ -804,11 +895,11 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testInterpolatePatternMalformedReferenceIsNull(): void
     {
-        $context = ['a' => 'value'];
+        $context = ['input' => ['a' => 'value']];
 
-        self::assertNull($this->interpolator->interpolatePattern('${context-a}', null, null, $context));
-        self::assertNull($this->interpolator->interpolatePattern('docs:${context.tenant-id}*', null, null, $context));
-        self::assertNull($this->interpolator->interpolatePattern('${context.a}/${}', null, null, $context));
+        self::assertNull($this->interpolator->interpolatePattern('${input-a}', null, null, $context));
+        self::assertNull($this->interpolator->interpolatePattern('docs:${input.tenant-id}*', null, null, $context));
+        self::assertNull($this->interpolator->interpolatePattern('${input.a}/${}', null, null, $context));
     }
 
     /**
@@ -820,7 +911,7 @@ final class ContextInterpolatorTest extends TestCase
     public function testLiteralPatternDoublesBackslashes(): void
     {
         self::assertSame('App\\\Models\\\*', ContextInterpolator::literalPattern('App\Models\*'));
-        self::assertSame('docs:${context.id}?[a]', ContextInterpolator::literalPattern('docs:${context.id}?[a]'));
+        self::assertSame('docs:${input.id}?[a]', ContextInterpolator::literalPattern('docs:${input.id}?[a]'));
         self::assertTrue(\fnmatch(ContextInterpolator::literalPattern('App\Models\*'), 'App\Models\Post'));
     }
 
@@ -859,10 +950,10 @@ final class ContextInterpolatorTest extends TestCase
         $container->instance('log', $logger);
         Container::setInstance($container);
 
-        self::assertNull($this->interpolator->interpolate('${context.a}:${context.first}:${context.second}', null, null, ['a' => 'x']));
-        self::assertSame(['debug: Unresolved interpolation token \'${context.first}\': the test is undecidable.'], $logger->messages);
+        self::assertNull($this->interpolator->interpolate('${input.a}:${input.first}:${input.second}', null, null, ['input' => ['a' => 'x']]));
+        self::assertSame(['debug: Unresolved interpolation token \'${input.first}\': the test is undecidable.'], $logger->messages);
 
-        self::assertSame('x', $this->interpolator->interpolate('${context.a}', null, null, ['a' => 'x']));
+        self::assertSame('x', $this->interpolator->interpolate('${input.a}', null, null, ['input' => ['a' => 'x']]));
         self::assertCount(1, $logger->messages);
     }
 
@@ -896,8 +987,8 @@ final class ContextInterpolatorTest extends TestCase
         $container->instance('log', $logger);
         Container::setInstance($container);
 
-        self::assertNull($this->interpolator->interpolate('${context.missing}', null, null, []));
-        self::assertNull($this->interpolator->interpolatePattern('${context.missing}', null, null, []));
+        self::assertNull($this->interpolator->interpolate('${input.missing}', null, null, []));
+        self::assertNull($this->interpolator->interpolatePattern('${input.missing}', null, null, []));
     }
 
     /**
@@ -910,6 +1001,6 @@ final class ContextInterpolatorTest extends TestCase
     {
         Container::setInstance(new Container);
 
-        self::assertNull($this->interpolator->interpolate('${context.missing}', null, null, []));
+        self::assertNull($this->interpolator->interpolate('${input.missing}', null, null, []));
     }
 }

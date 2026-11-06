@@ -183,13 +183,43 @@ final class GateArgumentForwardingTest extends TestCase
                 'statements' => [[
                     'effect'     => 'allow',
                     'actions'    => ['posts:create'],
-                    'conditions' => ['eq' => ['tenant' => 'org-1']],
+                    'conditions' => ['eq' => ['input.tenant' => 'org-1']],
                 ]],
             ],
         ]));
 
         self::assertTrue(Gate::allows('posts:create', ['tenant' => 'org-1']));
         self::assertFalse(Gate::allows('posts:create', ['tenant' => 'org-2']));
+    }
+
+    /**
+     * The Gate's associative and string-keyed arguments are the caller's
+     * values, held under `input` alone: a caller passing a `request` supplies
+     * `input.request.ip`, never the request's own `request.ip`.
+     *
+     * @return void
+     */
+    public function testGateArgumentsLandUnderInputAndNeverInAnotherNamespace(): void
+    {
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $this->actAs($user);
+
+        $user->attachPolicy(Policy::create([
+            'id'       => (string) Str::uuid(),
+            'name'     => 'caller-request',
+            'document' => [
+                'statements' => [
+                    ['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['input.request.ip' => '10.0.0.1']]],
+                    ['effect' => 'allow', 'actions' => ['posts:delete'], 'conditions' => ['eq' => ['request.ip' => '10.0.0.1']]],
+                ],
+            ],
+        ]));
+
+        self::assertTrue(Gate::allows('posts:create', ['request' => ['ip' => '10.0.0.1']]));
+        self::assertTrue(Gate::allows('posts:create', ['arn:post:42', 'request' => ['ip' => '10.0.0.1']]));
+        self::assertFalse(Gate::allows('posts:create', ['request.ip' => '10.0.0.1']));
+        self::assertFalse(Gate::allows('posts:delete', ['request' => ['ip' => '10.0.0.1']]));
+        self::assertFalse(Gate::allows('posts:delete', ['input' => ['request' => ['ip' => '10.0.0.1']]]));
     }
 
     /**
@@ -211,7 +241,7 @@ final class GateArgumentForwardingTest extends TestCase
                     'effect'     => 'allow',
                     'actions'    => ['posts:create'],
                     'resources'  => ['arn:post:42'],
-                    'conditions' => ['eq' => ['tenant' => 'org-1']],
+                    'conditions' => ['eq' => ['input.tenant' => 'org-1']],
                 ]],
             ],
         ]));
