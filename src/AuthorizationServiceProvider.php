@@ -35,6 +35,7 @@ use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
@@ -216,7 +217,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
             /** @var \SineMacula\Laravel\Authorization\Contracts\SubjectResolver $resolver */
             $resolver = $app->make(SubjectResolver::class);
 
-            return ResolvedTenant::from($resolver);
+            return ResolvedTenant::from($resolver, TenantScope::defaultGuard($app));
         });
     }
 

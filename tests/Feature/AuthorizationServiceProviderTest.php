@@ -366,6 +366,8 @@ final class AuthorizationServiceProviderTest extends TestCase
     {
         $app = $this->application();
 
+        self::assertSame('web', $app->make(ResolvedTenant::class)->guard);
+
         $default = $app->make(TenantTree::class);
 
         self::assertInstanceOf(FlatTenantTree::class, $default);

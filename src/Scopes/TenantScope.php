@@ -168,6 +168,20 @@ final class TenantScope implements Scope
     }
 
     /**
+     * Return the name of the default authentication guard, which the default
+     * resolver names the application after.
+     *
+     * @param  \Illuminate\Container\Container  $container
+     * @return string|null
+     */
+    public static function defaultGuard(Container $container): ?string
+    {
+        $guard = $container->make('config')->get('auth.defaults.guard');
+
+        return \is_string($guard) ? $guard : null;
+    }
+
+    /**
      * Read from the tenant resolved for the current request or job, or return
      * null for a query run while the subject, or its tenant's ancestors, are
      * being resolved.
@@ -203,8 +217,8 @@ final class TenantScope implements Scope
 
     /**
      * Return the holder of the tenant resolved for the current request or job,
-     * resolving it again when the bound resolver is not the one it was read
-     * from.
+     * resolving it again when the bound resolver, or the default guard, is not
+     * the one it was read under.
      *
      * @param  \Illuminate\Container\Container  $container
      * @return \SineMacula\Laravel\Authorization\Support\ResolvedTenant
@@ -217,8 +231,10 @@ final class TenantScope implements Scope
         /** @var \SineMacula\Laravel\Authorization\Support\ResolvedTenant $resolved */
         $resolved = $container->make(ResolvedTenant::class);
 
-        if (!$resolved->isFrom($resolver)) {
-            $resolved = $container->instance(ResolvedTenant::class, ResolvedTenant::from($resolver));
+        $guard = self::defaultGuard($container);
+
+        if (!$resolved->isFrom($resolver, $guard)) {
+            $resolved = $container->instance(ResolvedTenant::class, ResolvedTenant::from($resolver, $guard));
         }
 
         return $resolved;

@@ -457,6 +457,26 @@ final class GrantServiceTest extends TestCase
     }
 
     /**
+     * A sync in a named tenant works there, not in the tenant its targets
+     * share, so a target that other tenant owns is refused.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASyncInANamedTenantRefusesATargetOwnedByAnother(): void
+    {
+        $user  = self::user();
+        $owner = self::createTenant('tenant-a');
+
+        Role::query()->create(['name' => 'editor', ...self::ownedBy($owner)]);
+
+        $this->expectException(GrantScopeMismatchException::class);
+
+        self::service()->syncRoles($user, [Role::query()->withoutGlobalScopes()->sole()], tenant: Reference::of(self::createTenant('tenant-b')));
+    }
+
+    /**
      * A sync writes its reach to what it grants and re-arms, reporting each,
      * and leaves a live grant it keeps as it is; by default it reaches below.
      *

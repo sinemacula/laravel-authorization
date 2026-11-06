@@ -41,9 +41,8 @@ trait HasRoles // @phpstan-ignore trait.unused
      * assignments disappear from the relation automatically at expiry without
      * requiring a sweeper run. The pivot's `expires_at` column is surfaced via
      * `withPivot()` so consumers can inspect remaining lifetime on the cast
-     * `pivot` attribute, and the grant's timestamps are kept. The scope columns
-     * keep their defaults: every grant made here is platform-wide, for every
-     * application.
+     * `pivot` attribute, and the grant's timestamps are kept. Only the grants
+     * that hold in the current tenant and application count.
      *
      * @return \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role,
      *     $this, \SineMacula\Laravel\Authorization\Models\Pivots\AuthorizableRolePivot, 'pivot'>

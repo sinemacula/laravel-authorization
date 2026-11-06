@@ -40,6 +40,7 @@ final class ResolvedTenant
      * @param  \SineMacula\Laravel\Authorization\Contracts\SubjectResolver  $resolver
      * @param  object|null  $tenant
      * @param  string|null  $application
+     * @param  string|null  $guard
      */
     public function __construct(
 
@@ -51,30 +52,38 @@ final class ResolvedTenant
 
         /** The application the subject is on, or null for none. */
         public readonly ?string $application = null,
+
+        /** The default authentication guard when the subject was resolved. */
+        public readonly ?string $guard = null,
     ) {}
 
     /**
      * Resolve the subject's tenant and application through the given resolver.
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\SubjectResolver  $resolver
+     * @param  string|null  $guard
      * @return self
      */
-    public static function from(SubjectResolver $resolver): self
+    public static function from(SubjectResolver $resolver, ?string $guard = null): self
     {
         $subject = $resolver->resolve();
 
-        return new self($resolver, $subject?->tenant, $subject?->application);
+        return new self($resolver, $subject?->tenant, $subject?->application, $guard);
     }
 
     /**
-     * Determine whether the tenant was read from the given resolver.
+     * Determine whether the tenant was read from the given resolver under the
+     * given default guard. The default resolver names the application after the
+     * default guard, which Laravel's `auth:` middleware changes during a
+     * request, so a holder read under another guard is read again.
      *
      * @param  \SineMacula\Laravel\Authorization\Contracts\SubjectResolver  $resolver
+     * @param  string|null  $guard
      * @return bool
      */
-    public function isFrom(SubjectResolver $resolver): bool
+    public function isFrom(SubjectResolver $resolver, ?string $guard = null): bool
     {
-        return $this->resolver === $resolver;
+        return $this->resolver === $resolver && $this->guard === $guard;
     }
 
     /**
