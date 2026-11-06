@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionExpired as RolePermissionExpired;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
@@ -35,7 +36,14 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * The inline policies of a grantee that no longer exists are deleted too, each
  * through the model so it is reported as deleted and its attachments go with it
  * (AUTHZ-6.9): the owner columns are a morph with no foreign key, so a grantee
- * removed without its model's `deleted` event leaves them behind.
+ * removed without its model's `deleted` event leaves them behind. They are
+ * deleted last, once the orphaned grants are revoked, so a policy that cannot
+ * be deleted never keeps the grants of a grantee that is gone.
+ *
+ * Pretending counts exactly what a real run would remove, in the same order: an
+ * expired grant once, among the expired, and the grants of a grantee that is
+ * gone that are still live, with the attachments of its own inline policies
+ * among them, since a real run revokes those before it deletes the policies.
  *
  * @phpstan-type ExpiredRow array{
  *     target_id: string,
@@ -93,18 +101,18 @@ final readonly class GrantPruner
             );
         }
 
+        [$orphans, $unresolved] = self::orphans($chunk);
+        $orphaned               = 0;
+
+        foreach ($orphans as $grantee) {
+            $orphaned += $pretend ? self::countLiveGrants($grantee) : $this->grants->revokeAll($grantee);
+        }
+
         [$owners, $unowned] = self::missingOwners(self::policiesTable(), 'owner', $chunk);
         $inline             = 0;
 
         foreach ($owners as $owner) {
             $inline += $pretend ? InlinePolicies::countOwnedBy($owner) : InlinePolicies::deleteOwnedBy($owner);
-        }
-
-        [$orphans, $unresolved] = self::orphans($chunk);
-        $orphaned               = 0;
-
-        foreach ($orphans as $grantee) {
-            $orphaned += $pretend ? self::countGrants($grantee) : $this->grants->revokeAll($grantee);
         }
 
         return new PruneResult($expired, $orphaned, $inline, \array_values($unresolved + $unowned));
@@ -406,17 +414,19 @@ final readonly class GrantPruner
     }
 
     /**
-     * Count the grants of every kind the grantee holds, in every scope.
+     * Count the grants of every kind the grantee holds, in every scope, that
+     * have not expired: a real run removes an expired one among the expired,
+     * before it revokes the grantee's grants.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @return int
      */
-    private static function countGrants(Reference $grantee): int
+    private static function countLiveGrants(Reference $grantee): int
     {
         $count = 0;
 
         foreach (GrantTarget::cases() as $kind) {
-            $count += AuthorizationConnection::connection()->table($kind->table())
+            $count += LiveGrants::only(AuthorizationConnection::connection()->table($kind->table()), $kind->table())
                 ->where('authorizable_type', $grantee->type)
                 ->where('authorizable_id', $grantee->id)
                 ->count();

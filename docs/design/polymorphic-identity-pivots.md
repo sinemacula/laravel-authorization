@@ -40,7 +40,7 @@ scope each grant carries, the temporal-grant mechanism, the pivot class hierarch
    identity, with the role's morph class and key, so a role's policies are scoped, expire and are reported like any
    other attachment (AUTHZ-7.2). An inline policy names the one grantee it belongs to in the policy's own `owner_type`
    and `owner_id`, a morph with no foreign key for the same reason, kept apart from the policy's tenant columns; its
-   deletion with the owner is the package's work, not the database's (AUTHZ-6.9).
+   deletion with that grantee is the package's work, not the database's (AUTHZ-6.9).
 
 ## Schema
 

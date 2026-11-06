@@ -4,10 +4,11 @@
  * Create the `policies` table.
  *
  * Policies are JSON documents of allow and deny statements attached to
- * authorizable identities and roles. A policy is owned by the platform (null
- * tenant columns) or by one tenant, and its name is unique within its owner. An
- * inline policy also names the one grantee it belongs to, and its name is
- * unique among that grantee's inline policies.
+ * authorizable identities and roles. A policy belongs to the platform (null
+ * tenant columns) or to one tenant; a managed policy's name is unique within
+ * its tenant. An inline policy names the one grantee it belongs to, and its
+ * name is unique among that grantee's inline policies (it may share a managed
+ * policy's name).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

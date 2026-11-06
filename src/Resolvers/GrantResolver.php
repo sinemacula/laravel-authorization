@@ -17,6 +17,7 @@ use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
 use SineMacula\Laravel\Authorization\Support\GrantExpiry;
 use SineMacula\Laravel\Authorization\Support\InheritedPermissions;
 use SineMacula\Laravel\Authorization\Support\InheritedPolicies;
+use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
 use SineMacula\Laravel\Authorization\Support\RolePolicies;
@@ -129,7 +130,10 @@ final class GrantResolver
         [$own, $throughRoles] = self::attached($grants, $roles);
 
         $inherited = $roles !== null && $throughRoles ? RolePolicies::heldThrough(self::held($roles), $roles, $pins) : new InheritedPolicies;
-        $keys      = \array_values(\array_unique([...\array_column($own, 'policy_id'), ...$inherited->keys]));
+
+        // Flipping the keys and back lists each policy once, in the order it
+        // was first reached.
+        $keys = \array_keys(\array_flip([...\array_column($own, 'policy_id'), ...$inherited->keys]));
 
         $pins->policies($keys);
 
@@ -165,16 +169,19 @@ final class GrantResolver
     /**
      * Read the grantee's own attachments of policies, each with its expiry, on
      * the write connection, and, given the relation onto its roles, whether any
-     * role holds a policy in the current scope, in the same query.
+     * role holds a policy in the current scope, in the same query. An
+     * attachment of an inline policy that belongs to another grantee is left
+     * out.
      *
      * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Policy, \Illuminate\Database\Eloquent\Model>  $grants
      * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>|null  $roles
-     * @return array{0: list<array{policy_id: string, authorizable_type: string, expires_at: string|null}>, 1: bool}
+     * @return array{0: array<int, array{policy_id: string, authorizable_type: string, expires_at: string|null}>, 1: bool}
      */
     private static function attached(MorphToMany $grants, ?MorphToMany $roles): array
     {
         $columns = ['policy_id', 'authorizable_type', 'expires_at'];
-        $query   = (clone $grants->getQuery())->toBase()->select(\array_map($grants->qualifyPivotColumn(...), $columns));
+        $query   = InlinePolicies::attachedToTheirGrantee((clone $grants->getQuery())->toBase(), $grants->getTable())
+            ->select(\array_map($grants->qualifyPivotColumn(...), $columns));
 
         if ($roles !== null) {
             $query->unionAll(RolePolicies::probe($roles, $columns));
@@ -183,7 +190,7 @@ final class GrantResolver
         /** @var list<array{policy_id: string, authorizable_type: string, expires_at: string|null}> $rows */
         $rows = $query->useWritePdo()->get()->map(static fn (object $row): array => (array) $row)->all();
         $role = $roles?->getRelated()->getMorphClass();
-        $own  = \array_values(\array_filter($rows, static fn (array $row): bool => $row['authorizable_type'] !== $role));
+        $own  = \array_filter($rows, static fn (array $row): bool => $row['authorizable_type'] !== $role);
 
         return [$own, \count($own) !== \count($rows)];
     }

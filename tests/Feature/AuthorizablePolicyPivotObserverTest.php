@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Observers\AuthorizablePolicyPivotObserver;
+use Tests\Feature\Stubs\NumberedIdentity;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -75,6 +76,27 @@ final class AuthorizablePolicyPivotObserverTest extends TestCase
         }
 
         self::assertSame(0, DB::table('authorizable_policies')->count());
+    }
+
+    /**
+     * A grantee with an integer key attaches its own inline policy through the
+     * relation, and another such grantee is refused it.
+     *
+     * @return void
+     */
+    public function testTheRelationMatchesAnIntegerKeyedGrantee(): void
+    {
+        $owner  = NumberedIdentity::create(['name' => 'Ada']);
+        $other  = NumberedIdentity::create(['name' => 'Grace']);
+        $inline = $owner->createInlinePolicy('mine', self::document());
+
+        $owner->policies()->attach($inline->id);
+
+        self::assertSame([(string) $owner->id], DB::table('authorizable_policies')->pluck('authorizable_id')->all());
+
+        $this->expectException(InlinePolicyAttachmentException::class);
+
+        $other->policies()->attach($inline->id);
     }
 
     /**

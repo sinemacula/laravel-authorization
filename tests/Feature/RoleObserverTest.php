@@ -527,6 +527,25 @@ final class RoleObserverTest extends TestCase
     }
 
     /**
+     * Without the grant service bound, deleting a role throws rather than
+     * leaving its policy attachments behind.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testDeletingARoleWithoutTheGrantServiceThrows(): void
+    {
+        $role = Role::query()->create(['name' => 'editor']);
+
+        unset($this->app[GrantService::class]);
+
+        $this->expectExceptionObject(new \LogicException('The authorization grant service is not bound; register the package\'s service provider.'));
+
+        $role->delete();
+    }
+
+    /**
      * A role written through the role service reports the service call's actor.
      *
      * @return void

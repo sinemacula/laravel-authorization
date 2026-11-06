@@ -57,8 +57,8 @@ and leaves a resource-less `posts:delete` check alone. Only a statement without 
 
 ## Where Policies Come From
 
-A check's policies are gathered by the bound `PolicyResolver`. The default, `DefaultPolicyResolver`, unions three
-sources (AUTHZ-6.9, AUTHZ-7.2):
+A check's policies are gathered by the bound `PolicyResolver`, and then from the subject's identity when that is a
+separate model. The default resolver, `DefaultPolicyResolver`, unions three sources (AUTHZ-6.9, AUTHZ-7.2):
 
 - **The policy store.** The `PolicyStore` bound as `policy_store`, asked on every check, for policies shipped in code
   or kept outside the package's tables.
@@ -71,11 +71,21 @@ sources (AUTHZ-6.9, AUTHZ-7.2):
   the role's attachment of the policy each hold in the current tenant (through a tenant above it only when that grant
   reaches its subtree) and application, and neither has expired.
 
-A policy held more than one way (attached to the identity and to a role, or to two of its roles) is listed once. The
-stored policies are read through the resolution cache; a change to any role's policy attachments refreshes every
-identity's cached policies, and a change to the hierarchy refreshes those of the identities whose roles it reaches.
-The order the sources are read in is never relied on: invariant 2 orders the policies within each stage, so a deny in
-a role's policy is decided exactly as one attached to the identity, and wins over every allow and every permission.
+An attachment of an inline policy to any grantee but the one it belongs to is left out of the resolution, should one
+reach the table past the write paths that refuse it.
+
+A fourth source follows the resolver's. When the subject's identity is a separate model,
+`AuthorizationManager::gatherPolicies()` appends that identity's own and role-attached policies through
+`SubjectGrants::identityPolicies()`. This happens after the bound `PolicyResolver`, not through it, so a custom
+resolver does not control it.
+
+Within one grantee's resolution, its own attachments and its roles', a policy held more than one way (attached to the
+grantee and to a role, or to two of its roles) is listed once. A policy held by both the subject and its separate
+identity may be listed twice, which never changes the decision. The stored policies are read through the resolution
+cache; a change to any role's policy attachments refreshes every identity's cached policies, and a change to the
+hierarchy refreshes those of the identities whose roles it reaches. The order the sources are read in is never relied
+on: invariant 2 orders the policies within each stage, so a deny in a role's policy is decided exactly as one attached
+to the identity, and wins over every allow and every permission.
 
 ## Invariants
 
@@ -236,7 +246,8 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 - `DefaultPolicyResolver::policiesFor()` -- the policy store and the identity's policies;
   `HasPolicies::getPolicies()` and `GrantResolver::policies()` -- the identity's own attachments and its roles';
   `RolePolicies` -- where a role's policy applies; `RoleGraph::keysHeldBy()` and `RoleGraph::keysWithin()` -- the roles
-  reached, shared with the permissions; `InlinePolicies` -- an inline policy's owner and the refusals.
+  reached, shared with the permissions; `InlinePolicies` -- the grantee an inline policy belongs to and the refusals;
+  `SubjectGrants::identityPolicies()` -- the policies of a separate identity, appended after the resolver's.
 - `PolicyEvaluator::evaluate()` -- the deny, allow and implicit stages, each assessing its statements in a fixed
   order; `conclude()` -- the order of the outcomes, `insufficient_authentication` among them.
 - `RequirementCheck` -- one check's requirements put to the checker, the session rule and the freshness;
@@ -265,7 +276,7 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   subtree), inheritance down the hierarchy, a deny in a role's policy, a policy held several ways listed once, every
   source in one order, the queries taken and a hierarchy that moves while the policies are read;
   `InlinePoliciesTest`, `HasPoliciesTest` and `AuthorizablePolicyPivotObserverTest` -- inline policies attached to
-  their owner alone and deleted with it.
+  their grantee alone, left out when attached to another, and deleted with their grantee.
 - `FailClosedPolicyHydrationTest` -- an unreadable row, or one over a limit, is never skipped.
 - `PolicyValidatorTest` and `PolicyDocumentTest` -- the write-time checks and the limits on read.
 - `GateRegistrarTest` and `AuthorizeActionTest` -- an argument that cannot be identified denies as

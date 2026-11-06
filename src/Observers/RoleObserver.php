@@ -160,7 +160,8 @@ final class RoleObserver
      * Report the role deleted, with the grantees and permissions read in the
      * paired `deleting` hook, and detach the policies attached to it, each
      * reported as detached. The role is a grantee of its policies, a morph with
-     * no foreign key, so the delete does not take those rows with it.
+     * no foreign key, so the delete does not take those rows with it. With no
+     * grant service bound, the delete throws rather than leaving them silently.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return void
@@ -169,7 +170,9 @@ final class RoleObserver
      */
     public function deleted(Role $role): void
     {
-        GrantService::instance()?->revokeAll(Reference::of($role));
+        $grants = GrantService::instance() ?? throw new \LogicException('The authorization grant service is not bound; register the package\'s service provider.');
+
+        $grants->revokeAll(Reference::of($role));
 
         /** @var array{grantees?: list<\SineMacula\Laravel\Authorization\Support\Reference>, permissions?: list<\SineMacula\Laravel\Authorization\Support\Reference>} $held */
         $held = RecordChanges::release($role);

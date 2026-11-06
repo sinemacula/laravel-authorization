@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Events\Policy\Updated as PolicyUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyOwnerException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\OwnerChangedException;
+use SineMacula\Laravel\Authorization\Exceptions\SystemInlinePolicyException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
 use SineMacula\Laravel\Authorization\Services\GrantService;
@@ -136,15 +137,42 @@ final class PolicyObserverTest extends TestCase
         $inline  = Policy::query()->create(['name' => 'mine', 'document' => self::document(), 'owner_type' => 'user', 'owner_id' => '1']);
         $managed = Policy::query()->create(['name' => 'shared', 'document' => self::document()]);
 
-        foreach ([[$inline, ['owner_id' => '2']], [$managed, ['owner_type' => 'user', 'owner_id' => '2']]] as [$policy, $change]) {
+        foreach ([[$inline, ['owner_id' => '2']], [$inline, ['owner_type' => 'team']], [$managed, ['owner_type' => 'user', 'owner_id' => '2']]] as [$policy, $change]) {
             $refusal = self::refusalOf(static fn () => $policy->update($change));
 
             self::assertInstanceOf(OwnerChangedException::class, $refusal);
             self::assertSame($policy->name, $refusal->getName());
+
+            $policy->refresh();
         }
 
+        self::assertSame('user', Policy::query()->findOrFail($inline->id)->owner_type);
         self::assertSame('1', Policy::query()->findOrFail($inline->id)->owner_id);
         self::assertNull(Policy::query()->findOrFail($managed->id)->owner_id);
+    }
+
+    /**
+     * An inline policy is refused as a system policy, whether it is created as
+     * one or flagged later, and nothing is written.
+     *
+     * @return void
+     */
+    public function testAnInlinePolicyCannotBeASystemPolicy(): void
+    {
+        $owner  = ['owner_type' => 'user', 'owner_id' => '1'];
+        $inline = Policy::query()->create(['name' => 'mine', 'document' => self::document()] + $owner);
+
+        $refusals = [
+            'created as a system policy' => static fn () => Policy::query()->create(['name' => 'root', 'document' => self::document(), 'is_system' => true] + $owner),
+            'flagged later'              => static fn () => $inline->update(['is_system' => true]),
+        ];
+
+        foreach ($refusals as $case => $refused) {
+            self::assertInstanceOf(SystemInlinePolicyException::class, self::refusalOf($refused), $case);
+        }
+
+        self::assertSame(['mine'], Policy::query()->pluck('name')->all());
+        self::assertFalse(Policy::query()->findOrFail($inline->id)->is_system);
     }
 
     /**

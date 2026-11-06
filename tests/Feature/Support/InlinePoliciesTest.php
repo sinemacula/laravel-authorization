@@ -9,8 +9,10 @@ use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Events\Policy\Deleted as PolicyDeleted;
 use SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyOwnerException;
 use SineMacula\Laravel\Authorization\Exceptions\OwnerChangedException;
+use SineMacula\Laravel\Authorization\Exceptions\SystemInlinePolicyException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -75,6 +77,8 @@ final class InlinePoliciesTest extends TestCase
 
         self::assertNull(InlinePolicies::ownerOf($managed));
         self::assertEquals(new Reference('user', '1'), InlinePolicies::ownerOf($inline));
+        self::assertNull(InlinePolicies::ownerOf(new Policy(['owner_type' => 'user'])));
+        self::assertNull(InlinePolicies::ownerOf(new Policy(['owner_id' => '1'])));
     }
 
     /**
@@ -86,20 +90,131 @@ final class InlinePoliciesTest extends TestCase
     public function testTheOwnerIsFixedOnceCreated(): void
     {
         $inline  = self::policy('mine', ['owner_type' => 'user', 'owner_id' => '1']);
+        $typed   = self::policy('typed', ['owner_type' => 'user', 'owner_id' => '1']);
         $managed = self::policy('shared');
 
         $inline->forceFill(['owner_id' => '2']);
+        $typed->forceFill(['owner_type' => 'team']);
         $managed->forceFill(['owner_type' => 'user', 'owner_id' => '2']);
 
-        foreach ([$inline, $managed] as $policy) {
+        foreach ([$inline, $typed, $managed] as $policy) {
             try {
                 InlinePolicies::assertValid($policy);
                 self::fail('A changed owner was accepted.');
             } catch (OwnerChangedException $exception) {
                 self::assertSame('policy', $exception->getKind());
                 self::assertSame($policy->name, $exception->getName());
+                self::assertSame('grantee', $exception->getOwnerKind());
             }
         }
+    }
+
+    /**
+     * An inline policy is never a system policy, created so or flagged later; a
+     * managed policy may be one.
+     *
+     * @return void
+     */
+    public function testAnInlinePolicyIsNeverASystemPolicy(): void
+    {
+        $flagged = self::policy('flagged', ['owner_type' => 'user', 'owner_id' => '1']);
+
+        $flagged->forceFill(['is_system' => true]);
+
+        foreach ([new Policy(['name' => 'created', 'is_system' => true, 'owner_type' => 'user', 'owner_id' => '1']), $flagged] as $policy) {
+            try {
+                InlinePolicies::assertValid($policy);
+                self::fail('A system inline policy was accepted.');
+            } catch (SystemInlinePolicyException $exception) {
+                self::assertSame($policy->name, $exception->getPolicyName());
+            }
+        }
+
+        InlinePolicies::assertValid(new Policy(['name' => 'platform', 'is_system' => true]));
+        InlinePolicies::assertValid(new Policy(['name' => 'plain', 'is_system' => false, 'owner_type' => 'user', 'owner_id' => '1']));
+    }
+
+    /**
+     * The grantee an inline policy belongs to is read from its stored row, so a
+     * policy loaded without its owner columns, or with them changed and not
+     * saved, is refused for another grantee, and a policy whose row is gone is
+     * refused.
+     *
+     * @return void
+     */
+    public function testTheGranteeIsReadFromTheStoredRow(): void
+    {
+        $inline  = self::policy('mine', ['owner_type' => 'user', 'owner_id' => '1']);
+        $partial = Policy::query()->select(['id', 'name'])->whereKey($inline->id)->sole();
+        $changed = Policy::query()->whereKey($inline->id)->sole()->forceFill(['owner_type' => 'user', 'owner_id' => '2']);
+
+        foreach (['partially loaded' => $partial, 'changed in memory' => $changed] as $case => $policy) {
+            try {
+                InlinePolicies::assertAttachable($policy, new Reference('user', '2'));
+                self::fail("An inline policy {$case} was attachable to another grantee.");
+            } catch (InlinePolicyAttachmentException $exception) {
+                self::assertEquals(new Reference('user', '1'), $exception->getOwner(), $case);
+            }
+        }
+
+        InlinePolicies::assertAttachable($changed, new Reference('user', '1'));
+
+        DB::table('policies')->where('id', $inline->id)->delete();
+
+        $this->expectException(InvalidGrantTargetException::class);
+
+        InlinePolicies::assertAttachable($inline, new Reference('user', '1'));
+    }
+
+    /**
+     * The stored read returns a policy's name and owner columns as stored, and
+     * null for a key no policy has.
+     *
+     * @return void
+     */
+    public function testTheStoredReadReturnsTheOwnerColumns(): void
+    {
+        $inline = self::policy('mine', ['owner_type' => 'user', 'owner_id' => '1']);
+        $stored = InlinePolicies::stored($inline->id);
+
+        self::assertInstanceOf(Policy::class, $stored);
+        self::assertSame(['id' => $inline->id, 'name' => 'mine', 'owner_type' => 'user', 'owner_id' => '1'], $stored->getAttributes());
+        self::assertNull(InlinePolicies::stored('00000000-0000-0000-0000-000000000000'));
+        self::assertNull(InlinePolicies::stored(null));
+        self::assertNull(InlinePolicies::stored([$inline->id]));
+    }
+
+    /**
+     * The attachments query keeps the rows of a managed policy and of an inline
+     * policy attached to its own grantee, and leaves out an inline policy
+     * attached to a grantee of the same type with another key, or of another
+     * type with the same key.
+     *
+     * @return void
+     */
+    public function testTheAttachmentsQueryLeavesOutAnotherGranteesInlinePolicy(): void
+    {
+        $inline  = self::policy('mine', ['owner_type' => 'user', 'owner_id' => '1']);
+        $managed = self::policy('shared');
+
+        // Rows the write paths refuse, written past them.
+        DB::table('authorizable_policies')->insert([
+            ['policy_id' => $inline->id, 'authorizable_type' => 'user', 'authorizable_id' => '1'],
+            ['policy_id' => $inline->id, 'authorizable_type' => 'user', 'authorizable_id' => '2'],
+            ['policy_id' => $inline->id, 'authorizable_type' => 'team', 'authorizable_id' => '1'],
+            ['policy_id' => $managed->id, 'authorizable_type' => 'team', 'authorizable_id' => '2'],
+        ]);
+
+        $rows = InlinePolicies::attachedToTheirGrantee(DB::table('authorizable_policies'), 'authorizable_policies')
+            ->orderBy('authorizable_type')
+            ->get(['policy_id', 'authorizable_type', 'authorizable_id'])
+            ->map(static fn (object $row): array => (array) $row)
+            ->all();
+
+        self::assertSame([
+            ['policy_id' => $managed->id, 'authorizable_type' => 'team', 'authorizable_id' => '2'],
+            ['policy_id' => $inline->id, 'authorizable_type' => 'user', 'authorizable_id' => '1'],
+        ], $rows);
     }
 
     /**

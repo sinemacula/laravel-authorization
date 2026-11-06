@@ -24,8 +24,10 @@ use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ChecksGrantExpiry;
+use Tests\Feature\Stubs\NonMorphRolesGrantee;
 use Tests\Feature\Stubs\NumberedIdentity;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\UndeclaredRolesGrantee;
 use Tests\TestCase;
 
 /**
@@ -435,6 +437,34 @@ final class HasPoliciesTest extends TestCase
 
         self::assertEqualsCanonicalizing(['own', 'editors', 'staff'], $names);
         self::assertSame(['editors'], \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $role->getPolicies()));
+    }
+
+    /**
+     * A grantee gets its roles' policies only when it declares that it supports
+     * roles and its `roles()` relation is the morph onto the role grants: one
+     * with such a relation that does not declare it, and one that declares it
+     * with another kind of relation, get only their own.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testOnlyAGranteeThatSupportsRolesGetsItsRolesPolicies(): void
+    {
+        $role = Role::create(['name' => 'editor']);
+
+        $role->attachPolicy($this->policy('editors'));
+
+        $undeclared = UndeclaredRolesGrantee::query()->create(['id' => 'undeclared']);
+        $nonMorph   = NonMorphRolesGrantee::query()->create(['id' => 'non-morph']);
+
+        $undeclared->roles()->attach($role->id);
+        $undeclared->attachPolicy($this->policy('undeclared-own'));
+        $nonMorph->attachPolicy($this->policy('non-morph-own'));
+
+        self::assertSame(1, $undeclared->roles()->count());
+        self::assertSame(['undeclared-own'], \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $undeclared->getPolicies()));
+        self::assertSame(['non-morph-own'], \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $nonMorph->getPolicies()));
     }
 
     /**

@@ -7,7 +7,8 @@ namespace SineMacula\Laravel\Authorization\Contracts;
 use SineMacula\Laravel\Authorization\Models\Policy as PolicyModel;
 
 /**
- * Narrow contract for identities that carry attached policies.
+ * Narrow contract for grantees, identities or roles, that carry attached
+ * policies.
  *
  * Split from the composite `AuthorizableIdentity` so a consumer who only needs
  * policy attachment — no direct RBAC grants — can typehint on the minimum
@@ -21,7 +22,7 @@ use SineMacula\Laravel\Authorization\Models\Policy as PolicyModel;
 interface SupportsPolicies
 {
     /**
-     * Attach the given policy to this identity.
+     * Attach the given policy to this grantee.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return static
@@ -29,7 +30,7 @@ interface SupportsPolicies
     public function attachPolicy(PolicyModel $policy): static;
 
     /**
-     * Detach the given policy from this identity.
+     * Detach the given policy from this grantee.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return static
@@ -37,7 +38,7 @@ interface SupportsPolicies
     public function detachPolicy(PolicyModel $policy): static;
 
     /**
-     * Replace the identity's attached policies with the supplied set.
+     * Replace the grantee's attached policies with the supplied set.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Policy>  $policies
      * @return static
@@ -46,7 +47,7 @@ interface SupportsPolicies
 
     /**
      * Return the evaluation-ready policy value objects attached to this
-     * identity.
+     * grantee.
      *
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
      */

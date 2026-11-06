@@ -47,9 +47,9 @@ final class PolicyObserver
     /**
      * Enforce the owner rules before any persistence: both tenant columns or
      * neither, and a tenant fixed once the policy is created (see
-     * `RecordOwner`); likewise both owner columns or neither, and the grantee
-     * an inline policy belongs to fixed once it is created (see
-     * `InlinePolicies`).
+     * `RecordOwner`); likewise both owner columns or neither, the grantee an
+     * inline policy belongs to fixed once it is created, and an inline policy
+     * never a system one (see `InlinePolicies`).
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return void
@@ -57,6 +57,7 @@ final class PolicyObserver
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyOwnerException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\OwnerChangedException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\SystemInlinePolicyException
      */
     public function saving(Policy $policy): void
     {

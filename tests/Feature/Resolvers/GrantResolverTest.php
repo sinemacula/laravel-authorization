@@ -310,6 +310,45 @@ final class GrantResolverTest extends TestCase
     }
 
     /**
+     * Resolving leaves the grantee's relation as it was, so it reads the
+     * policies afterwards as before.
+     *
+     * @return void
+     */
+    public function testResolvingLeavesTheRelationAsItWas(): void
+    {
+        $user     = StubIdentity::create(['id' => 'user-1']);
+        $relation = $user->policies();
+
+        $user->attachPolicy(Policy::create(['name' => 'writers', 'document' => ['version' => 1, 'statements' => []]]));
+        Role::create(['name' => 'editor'])->attachPolicy(Policy::create(['name' => 'editors', 'document' => ['version' => 1, 'statements' => []]]));
+
+        GrantResolver::policies($relation, new ResolutionPins, $user->roles());
+
+        self::assertSame(['writers'], $relation->pluck('name')->all());
+    }
+
+    /**
+     * An attachment of another grantee's inline policy, written past the write
+     * paths, never resolves; the grantee's own inline policy does.
+     *
+     * @return void
+     */
+    public function testAnotherGranteesInlinePolicyNeverResolves(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $other  = StubIdentity::create(['id' => 'user-2']);
+        $theirs = $other->createInlinePolicy('theirs', ['version' => 1, 'statements' => []]);
+
+        $user->attachPolicy($user->createInlinePolicy('mine', ['version' => 1, 'statements' => []]));
+        DB::table('authorizable_policies')->insert(['policy_id' => $theirs->id, 'authorizable_type' => $user->getMorphClass(), 'authorizable_id' => 'user-1']);
+
+        $resolution = GrantResolver::policies($user->policies(), new ResolutionPins, $user->roles());
+
+        self::assertSame(['mine'], \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $resolution->value));
+    }
+
+    /**
      * A policy whose document cannot be read is written to the log channel and
      * its exception thrown, so it denies rather than being skipped.
      *

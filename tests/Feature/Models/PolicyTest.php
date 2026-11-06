@@ -47,6 +47,7 @@ final class PolicyTest extends StringCastsTestCase
         $platform = Policy::query()->create(['name' => 'readers', 'document' => $document]);
 
         self::assertTrue($tenant->is($owned->tenant));
+        self::assertTrue($tenant->is($owned->tenant()->first()));
         self::assertNull($platform->tenant);
     }
 
@@ -64,6 +65,8 @@ final class PolicyTest extends StringCastsTestCase
         $managed  = Policy::query()->create(['name' => 'shared', 'document' => $document]);
 
         self::assertTrue($user->is($inline->owner));
+        self::assertTrue($user->is($inline->owner()->first()));
+        self::assertTrue($user->is(Policy::query()->with('owner')->whereKey($inline->getKey())->sole()->getRelation('owner')));
         self::assertNull($managed->owner);
     }
 

@@ -4,7 +4,6 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Support;
 
-use Illuminate\Contracts\Database\Query\Builder as QueryBuilder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
@@ -54,7 +53,7 @@ final class RolePolicies
     {
         $table = self::table();
 
-        return self::scoped(AuthorizationConnection::connection()->table($table), $table)
+        return self::scoped($table)
             ->where($table . '.authorizable_type', $roles->getRelated()->getMorphClass())
             ->select(\array_map(static fn (string $column): string => "{$table}.{$column}", $columns))
             ->limit(1);
@@ -77,23 +76,19 @@ final class RolePolicies
      */
     public static function heldThrough(EloquentCollection $held, MorphToMany $roles, ResolutionPins $pins): InheritedPolicies
     {
+        // With no role held, every read below returns at once, without a query.
         /** @var list<string> $keys */
-        $keys = \array_map(\strval(...), \array_keys($held->getDictionary()));
-
-        if ($keys === []) {
-            return new InheritedPolicies;
-        }
-
+        $keys  = \array_keys($held->getDictionary());
         $reach = RoleGraph::reach($keys);
 
-        $pins->roles(\array_map(\strval(...), \array_keys($reach)));
+        $pins->roles(\array_keys($reach));
 
         $within = RoleGraph::keysWithin($reach, $keys);
         $rows   = self::attachments($roles->getRelated()->getMorphClass(), $within ?? self::afresh($roles, $keys));
         $grants = $rows === [] ? [] : $held->map(static fn (Model $role): mixed => self::grantExpiry($role))->all();
 
         return new InheritedPolicies(
-            \array_values(\array_unique(\array_column($rows, 'policy_id'))),
+            \array_column($rows, 'policy_id'),
             GrantExpiry::nearest(GrantExpiry::nearest(null, \array_column($rows, 'expires_at')), $grants),
             $within !== null,
         );
@@ -134,8 +129,9 @@ final class RolePolicies
 
     /**
      * Read the attachments of policies to the roles with the given keys that
-     * hold in the current scope, in one query on the write connection, in order
-     * of policy and role.
+     * hold in the current scope, in one query on the write connection, in no
+     * particular order: the evaluator orders the policies, and a policy
+     * attached to more than one of the roles is listed once by the resolution.
      *
      * @param  string  $type
      * @param  list<string>  $keys
@@ -150,36 +146,32 @@ final class RolePolicies
         $table = self::table();
 
         /** @var list<array{policy_id: string, expires_at: string|null}> */
-        return self::scoped(AuthorizationConnection::connection()->table($table), $table)
+        return self::scoped($table)
             ->useWritePdo()
             ->where($table . '.authorizable_type', $type)
-            ->whereIn($table . '.authorizable_id', \array_values(\array_unique($keys)))
-            ->orderBy($table . '.policy_id')
-            ->orderBy($table . '.authorizable_id')
-            ->get([$table . '.policy_id as policy_id', $table . '.expires_at as expires_at'])
+            ->whereIn($table . '.authorizable_id', $keys)
+            ->get(['policy_id', 'expires_at'])
             ->map(static fn (object $row): array => (array) $row)
             ->all();
     }
 
     /**
-     * Limit a query of the attachments table to the rows that hold in the
-     * current tenant and application and have not expired, as a grantee's
-     * relation reads them.
+     * Query the attachments table for the rows that hold in the current tenant
+     * and application and have not expired, as a grantee's relation reads them,
+     * leaving out an attachment of an inline policy to a role it does not
+     * belong to.
      *
-     * @template TQuery of \Illuminate\Contracts\Database\Query\Builder
-     *
-     * @param  TQuery  $query
      * @param  string  $table
-     * @return TQuery
+     * @return \Illuminate\Database\Query\Builder
      */
-    private static function scoped(QueryBuilder $query, string $table): QueryBuilder
+    private static function scoped(string $table): Builder
     {
-        $query->where(static function (QueryBuilder $query) use ($table): void {
+        $query = AuthorizationConnection::connection()->table($table)->where(static function (Builder $query) use ($table): void {
             TenantScope::currentChain()->grants($query, $table);
             GrantApplications::only($query, $table, TenantScope::currentApplication());
         });
 
-        return LiveGrants::only($query, $table);
+        return LiveGrants::only(InlinePolicies::attachedToTheirGrantee($query, $table), $table);
     }
 
     /**

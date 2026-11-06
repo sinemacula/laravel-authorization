@@ -42,9 +42,10 @@ denied.
   UUID and ULID keys all work), each grant with an optional expiry, stored in UTC whatever zone it is given in. A
   role's grant of a permission can expire too.
 - **Owned records**: a role, permission or policy belongs to the platform or to one tenant, and its name is unique
-  within its owner (and, for roles and permissions, its guard), so two tenants can each have their own `manager`. A
-  tenant cannot take the name of a platform system role, revoking a name removes every held grant of it (the
-  platform's and the tenant's), and `hasRole()` given a role model matches only that row.
+  within its tenant (and, for roles and permissions, its guard; an inline policy's name is unique among its grantee's
+  instead), so two tenants can each have their own `manager`. A tenant cannot take the name of a platform system role,
+  revoking a name removes every held grant of it (the platform's and the tenant's), and `hasRole()` given a role model
+  matches only that row.
 - **Role and permission names** of letters, digits and `_ - : . *`, so `posts:edit`, `posts.edit` and
   `sso.connection.trust` are all valid; anything else is refused when the name is saved.
 - **Wildcard permissions** (`posts:*`, `posts.*`, `*:create`, and `*` for everything; `*:*` matches only names with a
@@ -59,7 +60,7 @@ denied.
   stored policies against the same rules.
 - **Role and inline policies**: a policy attaches to an identity or to a role, whose holders get it where both grants
   hold (tenant, application and expiry) and inherit it down the role hierarchy. An inline policy belongs to one
-  grantee, is attached to it alone and is deleted with it; its name is unique among its owner's.
+  grantee, is attached to it alone and is deleted with it; its name is unique among that grantee's.
 - **Authentication requirements**: an allow can require additional verification, multifactor authentication,
   phishing resistance or a minimum assurance level, each with an optional maximum age, judged for the subject's session
   by a requirement checker you bind. When only that requirement keeps an allow from applying, the check is denied as
@@ -368,8 +369,8 @@ A role takes only the platform's permissions and parent roles, its own tenant's 
 platform role takes only the platform's; anything else is refused with `OwnerMismatchException`. Guards follow the same
 rule as a role and its permissions: two concrete guards must match, and a guard-agnostic side suits any. A parent of
 another guard is refused with `ParentGuardMismatchException`, and a role or permission granted to a grantee of another
-guard with `GranteeGuardMismatchException`. A role's, permission's or policy's owner is fixed once it is created
-(`OwnerChangedException`): to move one, create it in the new owner and grant it again.
+guard with `GranteeGuardMismatchException`. The tenant that owns a role, permission or policy is fixed once it is
+created (`OwnerChangedException`): to move one, create it in the new tenant and grant it again.
 
 Tenants can form a tree (an organisation above its accounts, say). The package never stores it: bind a class
 implementing `SineMacula\Laravel\Authorization\Contracts\TenantTree` as `tenant_tree` in `config/authorization.php`,
@@ -503,7 +504,7 @@ is checked, then attach it in the scope it should hold in:
 ```php
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 
-$policy = $user->createInlinePolicy('own-posts-only', [
+$document = [
     'statements' => [
         [
             'effect'     => 'deny',
@@ -511,27 +512,37 @@ $policy = $user->createInlinePolicy('own-posts-only', [
             'conditions' => ['neq' => ['resource.owner.id' => '${subject.id}']],
         ],
     ],
-]);
+];
+
+$policy = $user->createInlinePolicy('own-posts-only', $document);
 
 $user->attachPolicy($policy);
 
-app(PolicyService::class)->createInline($user, 'own-posts-only', $document, actor: $admin);
+// Or through the service, with an actor, here for a role:
+$editors = app(PolicyService::class)->createInline($editor, 'own-posts-only', $document, actor: $admin);
+
+$editor->attachPolicy($editors);
 ```
 
-Creating an inline policy does not attach it. Attaching it to any grantee but its owner is refused with
+Creating an inline policy does not attach it. Attaching it to any grantee but the one it belongs to is refused with
 `InlinePolicyAttachmentException`, through the trait methods, `GrantService` (a grant or a sync) and a write through a
-grantee's `policies()` relation alike. Its name is unique among its owner's inline policies, so two users can each have
-an `own-posts-only`, and it never clashes with a managed policy's name. The owner is held in `owner_type` and
-`owner_id`, apart from the policy's tenant: both are set or neither (`InvalidPolicyOwnerException`), and the owner is
-fixed once the policy is created (`OwnerChangedException`). Deleting the owner deletes its inline policies, each
-reported as `Policy\Deleted`, and their attachments with them; a soft-deleted owner keeps them until it is
-force-deleted. An owner deleted without its model events, such as by a raw query, leaves them behind until
-`authorization:prune` deletes them. `authorization:policy:validate --database` checks inline policies with the rest.
+grantee's `policies()` relation alike. Each reads that grantee from the stored row, so a policy loaded without its
+`owner_type` and `owner_id`, or with them changed and not saved, is judged as it is stored, and a policy whose row is
+gone is refused with `InvalidGrantTargetException`. Its name is unique among that grantee's inline policies, so two
+users can each have an `own-posts-only`, and it never clashes with a managed policy's name. The grantee is held in
+`owner_type` and `owner_id`, apart from the policy's tenant: both are set or neither (`InvalidPolicyOwnerException`),
+the grantee is fixed once the policy is created (`OwnerChangedException`), and an inline policy is never a system
+policy (`SystemInlinePolicyException`). Deleting the grantee deletes its inline policies, each reported as
+`Policy\Deleted`, and their attachments with them; a soft-deleted grantee keeps them until it is force-deleted. A
+grantee deleted without its model events, such as by a raw query, leaves them behind until `authorization:prune`
+deletes them, once it has revoked the grantee's grants. `authorization:policy:validate --database` checks inline
+policies with the rest.
 
 A check gathers its policies from three places: the bound policy store (`policy_store`, for policies shipped in code or
-kept elsewhere), the identity's own attachments, managed and inline, and its roles' policies. A policy attached both to
-the identity and to one of its roles counts once. The order they are gathered in never changes the decision: each
-stage assesses them by name, then stored key, then document.
+kept elsewhere), the identity's own attachments, managed and inline, and its roles' policies, plus those of a separate
+identity, own and role-attached alike (see `docs/design/evaluation-order-and-deny-precedence.md`). A policy attached
+both to the identity and to one of its roles counts once. The order they are gathered in never changes the decision:
+each stage assesses them by name, then stored key, then document.
 
 ### Writing policies
 
@@ -1165,10 +1176,10 @@ grant rows record; it must name a row that exists, and without it they record no
 `authorization:prune` removes the grants that no longer count: expired grants, reported as `RoleExpired`,
 `PermissionExpired` or `PolicyExpired` with no actor, a role's expired grants of permissions, reported as
 `Role\PermissionExpired`, the grants of a grantee deleted without its model events, such as by a raw query, reported as
-revoked, and the inline policies of such a grantee, reported as deleted. A soft-deleted grantee keeps its grants and its
-inline policies. Expired grants stop counting at their expiry with or without it, so pruning keeps the tables small
-rather than making checks correct. Like `model:prune`, it takes `--pretend` and `--chunk`, and is scheduled like any
-command:
+revoked, and then the inline policies of such a grantee, reported as deleted. A soft-deleted grantee keeps its grants
+and its inline policies. Expired grants stop counting at their expiry with or without it, so pruning keeps the tables
+small rather than making checks correct. Like `model:prune`, it takes `--pretend`, which counts exactly what a run would
+remove, and `--chunk`, and is scheduled like any command:
 
 ```php
 Schedule::command('authorization:prune')->daily();

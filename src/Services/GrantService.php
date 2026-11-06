@@ -331,7 +331,8 @@ final class GrantService
      * Revoke every role, permission and policy the grantee holds, in one
      * transaction and as one operation, dispatching a revoked or detached event
      * for each. The `HasAuthorization` trait calls this once a grantee is
-     * deleted.
+     * deleted, `RoleObserver` once a role is deleted, and the grant pruner for
+     * a grantee that no longer exists.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
@@ -563,6 +564,7 @@ final class GrantService
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
      */
     private static function toKeep(GrantTarget $kind, Model|Reference $grantee, array $targets, array $held, ?Reference $scope): array
     {

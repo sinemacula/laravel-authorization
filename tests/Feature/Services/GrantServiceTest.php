@@ -1569,6 +1569,72 @@ final class GrantServiceTest extends TestCase
     }
 
     /**
+     * The grantee an inline policy belongs to is read from its stored row, so
+     * attaching or syncing one loaded without its owner columns, or with them
+     * changed in memory, to another grantee is refused and writes nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnInlinePolicyIsCheckedAgainstItsStoredGrantee(): void
+    {
+        $user    = self::user();
+        $other   = new Reference($user->getMorphClass(), 'user-2');
+        $inline  = Policy::query()->create(['name' => 'mine', 'document' => ['statements' => []], 'owner_type' => $user->getMorphClass(), 'owner_id' => 'user-1']);
+        $partial = Policy::query()->select(['id', 'name'])->whereKey($inline->id)->sole();
+        $changed = Policy::query()->whereKey($inline->id)->sole()->forceFill(['owner_id' => 'user-2']);
+
+        Event::fake([PolicyAttached::class]);
+
+        $refusals = [
+            'attach a partially loaded policy'  => static fn () => self::service()->attachPolicy($other, $partial),
+            'sync a partially loaded policy'    => static fn () => self::service()->syncPolicies($other, [$partial]),
+            'attach a policy changed in memory' => static fn () => self::service()->attachPolicy($other, $changed),
+            'sync a policy changed in memory'   => static fn () => self::service()->syncPolicies($other, [$changed]),
+        ];
+
+        foreach ($refusals as $write => $refused) {
+            try {
+                $refused();
+                self::fail("The grant service allowed the write: {$write}.");
+            } catch (InlinePolicyAttachmentException $exception) {
+                self::assertTrue(self::refersTo($exception->getOwner(), $user), $write);
+            }
+        }
+
+        Event::assertNotDispatched(PolicyAttached::class);
+        self::assertSame(0, DB::table('authorizable_policies')->count());
+    }
+
+    /**
+     * Attaching or syncing a policy whose row is gone is refused rather than
+     * taken for a managed policy.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPolicyWhoseRowIsGoneIsRefused(): void
+    {
+        $user   = self::user();
+        $policy = self::policy('gone');
+
+        DB::table('policies')->where('id', $policy->id)->delete();
+
+        foreach ([static fn () => self::service()->attachPolicy($user, $policy), static fn () => self::service()->syncPolicies($user, [$policy])] as $refused) {
+            try {
+                $refused();
+                self::fail('The grant service attached a policy whose row is gone.');
+            } catch (InvalidGrantTargetException $exception) {
+                self::assertSame('policy', $exception->getKind());
+            }
+        }
+
+        self::assertSame(0, DB::table('authorizable_policies')->count());
+    }
+
+    /**
      * A policy attached to and detached from a role is reported with the role
      * as the grantee, in the scope it was attached in.
      *

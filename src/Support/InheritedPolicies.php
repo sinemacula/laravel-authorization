@@ -23,7 +23,7 @@ final readonly class InheritedPolicies
      */
     public function __construct(
 
-        /** The keys of the policies, each once. */
+        /** The keys of the policies; one held through several roles repeats. */
         public array $keys = [],
 
         /** The seconds until the nearest grant expires; null when none does. */

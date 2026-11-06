@@ -40,7 +40,7 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
   database, and what `authorization:sync` adds, updates, reports as stale or protected, and prunes.
 - `management-services.md`: the services every role, permission, policy and grant write goes through, their
   transaction, idempotent grants, re-armed expiries, the locked hierarchy check, the scope each grant holds in, a
-  role's policies as its grants, and inline policies attached to their owner alone and deleted with it.
+  role's policies as its grants, and inline policies attached to their grantee alone and deleted with it.
 - `events.md`: the one marker every event implements, the snapshot payloads, the actor the caller passes, one
   operation id per call, dispatch after commit, the grantees a delete reports and the document digests.
 

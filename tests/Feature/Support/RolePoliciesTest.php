@@ -6,6 +6,7 @@ namespace Tests\Feature\Support;
 
 use Illuminate\Cache\ArrayStore;
 use Illuminate\Cache\Repository;
+use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -25,6 +26,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\GrantResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Support\InheritedPolicies;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\RolePolicies;
 use Tests\Concerns\ActsAsTenant;
@@ -173,6 +175,87 @@ final class RolePoliciesTest extends TestCase
         Carbon::setTestNow('2026-07-01 12:06:00');
 
         self::assertSame([], self::policyNames($user));
+    }
+
+    /**
+     * The resolution lasts no longer than a role's attachment of a policy when
+     * that attachment expires first, before the role's grant and the holder's
+     * own attachment.
+     *
+     * @return void
+     */
+    public function testARolesAttachmentBoundsTheResolution(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+        $role = Role::create(['name' => 'editor']);
+
+        $role->attachPolicy(self::policy('soon'), Carbon::parse('2026-07-01 12:02:00'));
+        $user->assignRole($role, Carbon::parse('2026-07-01 12:10:00'));
+        $user->attachPolicy(self::policy('own'), Carbon::parse('2026-07-01 12:20:00'));
+
+        self::assertSame(120, GrantResolver::policies($user->policies(), new ResolutionPins, $user->roles())->expiresIn);
+    }
+
+    /**
+     * The probe reads at most one attachment, however many roles hold a policy
+     * in the scope.
+     *
+     * @return void
+     */
+    public function testTheProbeReadsAtMostOneAttachment(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        foreach (['first', 'second', 'third'] as $name) {
+            Role::create(['name' => $name])->attachPolicy(self::policy($name));
+        }
+
+        self::assertCount(1, RolePolicies::probe($user->roles(), ['policy_id', 'authorizable_type', 'expires_at'])->get());
+    }
+
+    /**
+     * With no role held, nothing is read and nothing applies.
+     *
+     * @return void
+     */
+    public function testNoHeldRoleReadsNothing(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        Role::create(['name' => 'editor'])->attachPolicy(self::policy('editors'));
+
+        $inherited = null;
+
+        self::assertSame(0, self::queriesFor(static function () use ($user, &$inherited): void {
+            $inherited = RolePolicies::heldThrough(new EloquentCollection, $user->roles(), new ResolutionPins);
+        }));
+        self::assertEquals(new InheritedPolicies, $inherited);
+    }
+
+    /**
+     * An attachment of an inline policy to a role other than the one it belongs
+     * to, written past the write paths, never applies to the role's holders,
+     * nor makes the resolution read the roles.
+     *
+     * @return void
+     */
+    public function testAnotherRolesInlinePolicyNeverApplies(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $owner  = Role::create(['name' => 'owner']);
+        $holder = Role::create(['name' => 'holder']);
+        $inline = $owner->createInlinePolicy('owners', ['version' => 1, 'statements' => []]);
+
+        DB::table('authorizable_policies')->insert(['policy_id' => $inline->id, 'authorizable_type' => $holder->getMorphClass(), 'authorizable_id' => $holder->id]);
+        $user->assignRole($holder);
+
+        self::assertSame(1, self::queriesFor(static fn () => GrantResolver::policies($user->policies(), new ResolutionPins, $user->roles())));
+        self::assertSame([], self::policyNames($user));
+
+        $user->assignRole($owner);
+        $owner->attachPolicy($inline);
+
+        self::assertSame(['owners'], self::policyNames($user));
     }
 
     /**

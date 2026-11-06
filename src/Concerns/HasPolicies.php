@@ -83,7 +83,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * An optional `$expiresAt` makes the attachment temporal — the row is
      * filtered out of `$user->policies` the moment the clock passes the
      * supplied instant, without requiring a sweeper run. Passing null (the
-     * default) creates a forever attachment. Attaching a policy the identity
+     * default) creates a forever attachment. Attaching a policy the grantee
      * holds with the same expiry and reach changes nothing and dispatches no
      * event; an attachment that has expired is re-armed with the new expiry.
      *
@@ -112,7 +112,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
     }
 
     /**
-     * Detach the given policy from this identity, through the grant service.
+     * Detach the given policy from this grantee, through the grant service.
      * `IdentityPolicyDetached` fires only when the policy was attached.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
@@ -130,7 +130,7 @@ trait HasPolicies // @phpstan-ignore trait.unused
     }
 
     /**
-     * Replace the identity's attached policies with the supplied set, through
+     * Replace the grantee's attached policies with the supplied set, through
      * the grant service.
      *
      * Each entry must be a saved policy model; anything else is refused with
@@ -182,14 +182,15 @@ trait HasPolicies // @phpstan-ignore trait.unused
      *
      * The policies are read through the resolution cache: memoised for the
      * request or job, and kept in the persistent store when one is configured,
-     * for no longer than the nearest attachment expiry or the configured
-     * maximum. An attachment, detachment or change to an attached policy takes
-     * effect on the next check.
+     * for no longer than the nearest expiry of an attachment, or of a grant of
+     * a role a policy is held through, or the configured maximum. An
+     * attachment, detachment or change to an attached policy takes effect on
+     * the next check.
      *
      * A row whose document cannot be read is never skipped, because skipping it
      * would also drop its denies. The row is logged and the exception is
      * rethrown; the authorization manager turns it into a denial of the check
-     * with the `invalid_policy` reason, so every check for this identity denies
+     * with the `invalid_policy` reason, so every check for this grantee denies
      * until the document is fixed.
      *
      * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>

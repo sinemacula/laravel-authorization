@@ -5,7 +5,6 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Observers;
 
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePolicyPivot;
-use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
@@ -16,7 +15,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * belongs to when the row is written through a grantee's `policies()` relation
  * (`attach()`, `sync()` and the like), which saves the pivot model. The grant
  * service writes the table directly and refuses it itself, so the rule holds on
- * every write path the package offers.
+ * every write path the package offers. Both read the policy's grantee from the
+ * stored row, on the write connection (see `InlinePolicies::stored()`).
  *
  * Registered via `#[ObservedBy(AuthorizablePolicyPivotObserver::class)]` on the
  * pivot model.
@@ -28,7 +28,9 @@ final class AuthorizablePolicyPivotObserver
 {
     /**
      * Refuse the row when it attaches an inline policy to a grantee it does not
-     * belong to. A row naming no policy that exists is left to the foreign key.
+     * belong to. The policy is read on the write connection, so a policy just
+     * created is never missed on a replica that has not caught up, and a row
+     * naming no policy really names none: it is left to the foreign key.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePolicyPivot  $pivot
      * @return void
@@ -37,15 +39,13 @@ final class AuthorizablePolicyPivotObserver
      */
     public function saving(AuthorizablePolicyPivot $pivot): void
     {
-        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
-        $class  = config('authorization.models.policy', Policy::class);
-        $policy = $class::query()->withoutGlobalScopes()->find($pivot->getAttribute('policy_id'));
+        $policy = InlinePolicies::stored($pivot->getAttribute('policy_id'));
 
-        if (!$policy instanceof Policy) {
+        if ($policy === null) {
             return;
         }
 
-        InlinePolicies::assertAttachable($policy, new Reference(self::text($pivot->getAttribute('authorizable_type')), self::text($pivot->getAttribute('authorizable_id'))));
+        InlinePolicies::assertStoredAttachable($policy, new Reference(self::text($pivot->getAttribute('authorizable_type')), self::text($pivot->getAttribute('authorizable_id'))));
     }
 
     /**
