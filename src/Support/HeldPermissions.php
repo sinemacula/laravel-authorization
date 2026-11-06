@@ -37,7 +37,7 @@ final class HeldPermissions
             return $action;
         }
 
-        $covering = \array_values(\array_filter($held, static fn (string $name): bool => \fnmatch($name, $action, \FNM_NOESCAPE)));
+        $covering = \array_filter($held, static fn (string $name): bool => \fnmatch($name, $action, \FNM_NOESCAPE));
 
         \sort($covering, \SORT_STRING);
 

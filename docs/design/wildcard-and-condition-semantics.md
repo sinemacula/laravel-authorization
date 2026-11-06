@@ -106,8 +106,10 @@ statement matched and none was invalid; the callback asks for the permission the
 covers the action (`SubjectGrants::permissionFor()`), among the grants that reach the resource (see [Evaluation order
 and deny precedence](evaluation-order-and-deny-precedence.md), invariant 13). A subject holding `posts:*` then
 satisfies the check for `posts:create`, and the decision allows at the allow stage with a `held` permission step that
-names `posts:*`. When several held names cover the action, the step names the action itself if it is held, else the
-first covering pattern in byte order, so the trace never depends on the order the grants were read in. An explicit
+names `posts:*`. The subject's own permissions are read first and its granting identity's only when none of the
+subject's covers the action; within that grantee, when several held names cover the action, the step names the action
+itself if it is held, else the first covering pattern in byte order, so the trace never depends on the order the grants
+were read in. An explicit
 deny, including one applied because its test was undecidable, an `invalid_policy` denial and a `boundary` denial all
 win -- a subject holding `posts:*` under a boundary that does not allow `posts:create` is denied as `boundary`, and its
 permissions are never asked. Wildcard grants never override a policy-layer decision or a cap.

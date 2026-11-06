@@ -370,12 +370,14 @@ $user->assignRole('viewer', tenant: $organisationB);
 ```
 
 A check counts the grants made platform-wide, those made in the current tenant and those made in its ancestors that
-reach the tenants below them; without a tenant, only platform-wide grants. A check on a resource of a tenant counts the
-grants that reach that tenant instead (see [Permissions held and the resources they
+reach the tenants below them; without a tenant, only platform-wide grants. A check on a resource of the current tenant,
+or of a tenant below it, counts the grants that reach that tenant instead; a check on a resource of any other tenant (or
+of any tenant when none is active) is denied as `tenant_scope` unless a platform-wide grant admits it, and then counts
+only platform-wide grants (see [Permissions held and the resources they
 reach](#permissions-held-and-the-resources-they-reach)). Granting a tenant's own role outside that tenant and the
-tenants below it, or platform-wide, is refused with `GrantScopeMismatchException`. A revocation removes the grant in
-the same scope, and a sync replaces the grants of one scope: the tenant named, else the tenant that owns every target,
-else the platform. A grant is for every application unless the call names one.
+tenants below it, or platform-wide, is refused with `GrantScopeMismatchException`. A revocation removes the grant in the
+same scope, and a sync replaces the grants of one scope: the tenant named, else the tenant that owns every target, else
+the platform. A grant is for every application unless the call names one.
 
 A grant can also be limited to one application (a guard's name, as `laravel-authentication` names it): it counts only
 when the subject resolver reports that application, and a grant for every application counts on all of them. Each
@@ -1128,8 +1130,9 @@ ALLOW at the allow stage.
   [allow] permission "posts:*": held
 ```
 
-When the action itself is held it is the one named, and otherwise the first covering pattern in byte order, so the
-trace is the same whatever order the grants were read in.
+The subject's own permissions are read first and its granting identity's only when none of the subject's covers the
+action; within that grantee, the action itself is named when held, else the first covering pattern in byte order, so
+the trace is the same whatever order the grants were read in.
 
 A permission allows a check on a resource only when the grant it came from reaches the resource:
 

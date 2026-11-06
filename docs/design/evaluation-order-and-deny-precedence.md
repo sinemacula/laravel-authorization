@@ -374,8 +374,9 @@ refuses never reads the permissions, since the session stage runs before the all
    a subject holds contributes an allow and nothing else, and only when no statement has decided the check and every
    cap has let it through: a guardrail, a boundary or a session cap caps a permission held as it caps a policy's allow.
    A held name is matched against the action by the wildcard rules (`HeldPermissions`), and the trace names the one
-   that allowed: the action itself when it is held, else the first covering pattern in byte order, so the trace does
-   not depend on the order the grants were read in.
+   that allowed. The subject's own permissions are read first and its granting identity's only when none of the
+   subject's covers the action; within that grantee, the action itself is named when held, else the first covering
+   pattern in byte order, so the trace does not depend on the order the grants were read in.
 
 4. **All deny semantics live exclusively in policies.** "Everyone in role X except these three users" is a deny
    policy, not an RBAC construct, so an administrator reviewing effective permissions never reasons about negative

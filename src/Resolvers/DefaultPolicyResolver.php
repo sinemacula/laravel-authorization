@@ -17,9 +17,12 @@ use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
  * `getPolicies()` reads through the resolution cache: its own attachments,
  * inline policies included, and the policies attached to the roles it holds and
  * to the roles above them, each where both grants hold (AUTHZ-6.9, AUTHZ-7.2).
- * A principal that implements neither contract yields an empty policy list —
- * the evaluator then falls through to implicit deny unless an RBAC grant
- * satisfies the check.
+ * A principal that implements neither contract contributes no policies of its
+ * own. The evaluator still weighs the identity's and the resource's policies,
+ * the guardrails, the boundaries and the session caps. A permission the subject
+ * holds then allows only at the allow stage, after every deny and cap, and only
+ * where the grant it came from reaches the check; otherwise the check is an
+ * implicit deny.
  *
  * The order of the list never matters: the evaluator assesses the policies by
  * name, then stored key, then document, wherever they came from.

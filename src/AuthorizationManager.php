@@ -451,17 +451,17 @@ final class AuthorizationManager
      * held is asked for at the allow stage alone (AUTHZ-7.7), and its step
      * names the permission that allowed. It counts only when the grant it came
      * from reaches the check: the permissions are resolved in the scope the
-     * check is decided in, which for a resource of a tenant is that tenant (see
-     * `ResourceScope`), so a grant there, an ancestor's grant that reaches its
-     * subtree, or, for a resource admitted from outside the scope, a
-     * platform-wide grant; for a resource with no tenant, a type alone, an
-     * opaque identifier or no resource, the grants that hold in the active
-     * tenant, or only platform-wide ones with none. A grant for another
-     * application, or one that has expired, never counts. The session caps are
-     * the scopes of the subject's credential, mapped to actions, and those
-     * `capped()` supplied, every one of which must cover the action (see
-     * `SessionCapResolver`); a machine without credential scopes is allowed
-     * nothing.
+     * check is decided in (see `ResourceScope`): for a resource within the
+     * active tenant's subtree, its own tenant, so a grant there, an ancestor's
+     * grant that reaches its subtree, or a platform-wide grant; for a resource
+     * admitted from outside the scope, platform scope, so only a platform-wide
+     * grant; for a resource with no tenant, a type alone, an opaque identifier
+     * or no resource, the grants that hold in the active tenant, or only
+     * platform-wide ones with none. A grant for another application, or one
+     * that has expired, never counts. The session caps are the scopes of the
+     * subject's credential, mapped to actions, and those `capped()` supplied,
+     * every one of which must cover the action (see `SessionCapResolver`); a
+     * machine without credential scopes is allowed nothing.
      *
      * The guardrails are those of the resource's tenant when it has one, also
      * when a platform-wide grant admitted it from outside the scope, else of
