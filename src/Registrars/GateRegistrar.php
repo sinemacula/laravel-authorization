@@ -4,21 +4,39 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Registrars;
 
+use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Foundation\Application;
 use Illuminate\Support\Facades\Gate;
-use SineMacula\Laravel\Authorization\Config\ConfigValidator;
-use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
-use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
-use SineMacula\Laravel\Authorization\Exceptions\GateConflictException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
-use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
+use SineMacula\Laravel\Authorization\Support\DeclaredAbilities;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 
 /**
- * Walk every configured permission enum and register a matching Laravel Gate.
- * With no enums configured the registrar is a no-op and the Gate surface stays
- * silent; the `Authorization` facade continues to work.
+ * Make the package the authority of Laravel's Gate (AUTHZ-9.1) through a single
+ * `Gate::before` hook.
+ *
+ * The hook answers every ability whose exact name the declared catalogue holds
+ * (see `DeclaredAbilities`): the permissions the configured enums and providers
+ * declare, and the package's own. For those it returns the decision of
+ * `check()`, true for an allow and false for a deny, and both stand: Laravel
+ * stops at the first before-callback that answers, so no `Gate::define`
+ * callback, Laravel policy class or after-callback the application registers
+ * can override either. For every other ability, permission rows that exist only
+ * in the database among them, it answers null, and Laravel decides it
+ * unchanged.
+ *
+ * Laravel runs the before-callbacks in the order they were registered, and the
+ * first that answers wins. The service provider registers the hook first thing
+ * in its boot, so an application's `Gate::before` registered later never
+ * pre-empts it; one registered before the package boots still can.
+ *
+ * The Gate's user is translated into the subject through `forUser()`, and a
+ * guest (no user) is decided as no subject, which denies, never as the subject
+ * of the current request.
+ *
+ * With `authorization.gate.enabled` false nothing is registered and the Gate is
+ * left to Laravel entirely.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,115 +55,63 @@ final readonly class GateRegistrar
     ) {}
 
     /**
-     * Walk every configured permission enum and register a Gate per case.
+     * Determine whether the configuration turns the Gate hook on: unless
+     * `authorization.gate.enabled` is false, it does.
+     *
+     * @param  \Illuminate\Contracts\Config\Repository  $config
+     * @return bool
+     */
+    public static function isEnabled(ConfigRepository $config): bool
+    {
+        return $config->get('authorization.gate.enabled', true) !== false;
+    }
+
+    /**
+     * Register the Gate hook, and the declared abilities it reads, scoped to
+     * the request or job, unless the configuration turns the hook off.
+     *
+     * The hook answers an ability the package declares for the Gate's user,
+     * with whether `check()` allows it, and leaves every other ability to
+     * Laravel by answering null.
      *
      * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\GateConflictException
      */
     public function register(): void
     {
-        /** @var array<int, mixed> $enums */
-        $enums = $this->app['config']->get('authorization.permission_enums', []);
+        /** @var \Illuminate\Contracts\Config\Repository $config */
+        $config = $this->app['config'];
 
-        $onConflict = $this->resolveConflictMode();
-
-        foreach ($enums as $enumClass) {
-            if (!ConfigValidator::isStringBackedPermissionEnum($enumClass)) {
-                continue;
-            }
-
-            /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\PermissionEnum> $className */
-            $className = $enumClass;
-
-            foreach ($className::cases() as $case) {
-                $this->registerEnumGate($case, $onConflict);
-            }
-        }
-    }
-
-    /**
-     * Resolve the configured gate-conflict mode, defaulting to `THROW` when the
-     * raw value is missing or malformed.
-     *
-     * @return \SineMacula\Laravel\Authorization\Enums\GateConflictMode
-     */
-    private function resolveConflictMode(): GateConflictMode
-    {
-        /** @var mixed $rawMode */
-        $rawMode = $this->app['config']->get('authorization.gate.on_conflict', GateConflictMode::THROW->value);
-
-        return match (true) {
-            $rawMode instanceof GateConflictMode => $rawMode,
-            \is_string($rawMode)                 => GateConflictMode::tryFrom($rawMode) ?? GateConflictMode::THROW,
-            default                              => GateConflictMode::THROW,
-        };
-    }
-
-    /**
-     * Register a single Gate for the supplied enum case, honouring the
-     * configured conflict mode.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Contracts\PermissionEnum  $case
-     * @param  \SineMacula\Laravel\Authorization\Enums\GateConflictMode  $onConflict
-     * @return void
-     *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\GateConflictException
-     */
-    private function registerEnumGate(PermissionEnum $case, GateConflictMode $onConflict): void
-    {
-        // register() skips an enum not backed by strings.
-        /** @var string $permission */
-        $permission = $case->value;
-
-        if (Gate::has($permission)) {
-            // Exhaustive match over GateConflictMode: Throw short-circuits,
-            // Overwrite falls through to redefine, Log records and bails.
-            $shouldDefine = match ($onConflict) {
-                GateConflictMode::THROW     => throw new GateConflictException($permission),
-                GateConflictMode::OVERWRITE => true,
-                GateConflictMode::LOG       => (function () use ($permission): bool {
-                    $this->logGateConflict($permission);
-
-                    return false;
-                })(),
-            };
-
-            if (!$shouldDefine) {
-                return;
-            }
+        if (!self::isEnabled($config)) {
+            return;
         }
 
-        Gate::define(
-            $permission,
-            static function (?object $user = null, mixed ...$arguments) use ($permission): bool {
-                [$resource, $context] = self::translateGateArguments($arguments);
+        $this->app->scoped(DeclaredAbilities::class);
 
-                // The subject resolver translates the Gate's user into the
-                // subject; with no user, the request's own subject decides.
-                /** @var \SineMacula\Laravel\Authorization\AuthorizationManager $manager */
-                $manager = $user === null ? Authorization::getFacadeRoot() : Authorization::forUser($user);
+        Gate::before(static function (?object $user, string $ability, array $arguments): ?bool {
+            if (DeclaredAbilities::instance()?->holds($ability) !== true) {
+                return null;
+            }
 
-                // An argument that cannot be identified as a resource denies as
-                // `resource_unresolved`, rather than turning the check into one
-                // about no resource at all.
-                return $manager->can($permission, $resource, $context);
-            },
-        );
+            [$resource, $context] = self::translateGateArguments($arguments);
+
+            // The subject resolver translates the Gate's user into the subject;
+            // a guest is no subject, so the check denies.
+            return Authorization::forUser($user)->can($ability, $resource, $context);
+        });
     }
 
     /**
-     * Translate the arguments Laravel hands to a Gate callback into the
+     * Translate the arguments Laravel hands to the Gate hook into the
      * `(resource, context)` pair the authorization manager accepts. String keys
      * and string-keyed arrays merge into the caller's values, which the check
      * holds under `input` and nowhere else (`Gate::allows('posts:update',
      * [$post, 'request' => [...]])` supplies `input.request`, never `request`);
-     * every other argument names the resource. Laravel spreads an argument
-     * array, so `Gate::allows('posts:update', ['post', 42])` arrives as two
-     * arguments, which name the `(type, id)` pair they spell; one argument
-     * names the resource it is, and any other set of arguments names no
-     * resource the check can identify (false), so none is ever silently
-     * dropped.
+     * every other argument names the resource. Laravel takes an argument array
+     * as the list of arguments, so `Gate::allows('posts:update', ['post', 42])`
+     * arrives as two arguments, which name the `(type, id)` pair they spell;
+     * one argument names the resource it is, and any other set of arguments
+     * names no resource the check can identify (false), so none is ever
+     * silently dropped.
      *
      * @param  array<int|string, mixed>  $arguments
      * @return array{0: false|\SineMacula\Laravel\Authorization\Support\ResourceReference|null, 1: array<string, mixed>}
@@ -184,16 +150,5 @@ final readonly class GateRegistrar
             1       => ResourceReferences::of($arguments[0]),
             default => ResourceReferences::of($arguments),
         };
-    }
-
-    /**
-     * Emit the configured conflict warning.
-     *
-     * @param  string  $permission
-     * @return void
-     */
-    private function logGateConflict(string $permission): void
-    {
-        AuthorizationLog::warning("Authorization gate '{$permission}' already registered; existing Gate preserved.");
     }
 }

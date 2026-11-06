@@ -11,7 +11,6 @@ use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
-use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyLimits;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -63,7 +62,7 @@ final class ConfigValidator
         self::validateModels($config['models'] ?? []);
         self::validatePermissionEnums($config['permission_enums'] ?? []);
         self::validatePermissionProviders($config['permission_providers'] ?? []);
-        self::validateGateOnConflict($config['gate']['on_conflict'] ?? null);
+        self::validateGate(\array_key_exists('gate', $config) ? $config['gate'] : []);
         self::validateSubjectResolver($config['subject_resolver'] ?? null);
         self::validateTenantTree($config['tenant_tree'] ?? null);
         self::validateApplicationAccess($config['application_access'] ?? []);
@@ -83,9 +82,8 @@ final class ConfigValidator
      * `PermissionEnum` contract and is backed by strings: an entry of
      * `permission_enums` the validation accepts.
      *
-     * The Gate registrar and the manager read the configured enums at run time,
-     * after boot, so they skip an entry for which this is false rather than
-     * fail on it.
+     * The manager reads the configured enums at run time, after boot, so it
+     * skips an entry for which this is false rather than fail on it.
      *
      * @param  mixed  $class
      * @return bool
@@ -275,29 +273,26 @@ final class ConfigValidator
     }
 
     /**
-     * Validate that `gate.on_conflict` is one of the three accepted sentinels
-     * backing `GateConflictMode`.
+     * Validate that `gate` is an array whose `enabled` switch, when present, is
+     * strictly true or false. Anything else, `null`, `0`, `'false'` or `'off'`
+     * among it, is refused rather than read as either, since it decides whether
+     * the package answers the Gate at all.
      *
      * @param  mixed  $value
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
      */
-    private static function validateGateOnConflict(mixed $value): void
+    private static function validateGate(mixed $value): void
     {
-        if ($value === null || $value instanceof GateConflictMode) {
-            return;
+        if (!\is_array($value)) {
+            throw new InvalidAuthorizationConfigException('authorization.gate', 'expected an array, got ' . self::describe($value) . '.');
         }
 
-        if (!\is_string($value) || GateConflictMode::tryFrom($value) === null) {
-            $accepted = \array_map(
-                static fn (GateConflictMode $case): string => "'{$case->value}'",
-                GateConflictMode::cases(),
-            );
+        $enabled = \array_key_exists('enabled', $value) ? $value['enabled'] : true;
 
-            $reason = 'expected one of [' . \implode(', ', $accepted) . '], got ' . self::describe($value) . '.';
-
-            throw new InvalidAuthorizationConfigException('authorization.gate.on_conflict', $reason);
+        if (!\is_bool($enabled)) {
+            throw new InvalidAuthorizationConfigException('authorization.gate.enabled', 'expected true or false, got ' . self::describe($enabled) . '.');
         }
     }
 

@@ -144,8 +144,7 @@ final class ConfigValidatorEdgeCasesTest extends TestCase
 
     /**
      * The `describe` formatter renders non-scalars as their debug type —
-     * reached via a non-scalar `gate.on_conflict` that drops through to the
-     * error branch.
+     * reached via a non-scalar `gate.enabled` switch, which is refused.
      *
      * @return void
      */
@@ -153,7 +152,7 @@ final class ConfigValidatorEdgeCasesTest extends TestCase
     {
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.gate.on_conflict', new \stdClass);
+        $config->set('authorization.gate.enabled', new \stdClass);
 
         try {
             ConfigValidator::validate((array) $config->get('authorization'), $this->app);

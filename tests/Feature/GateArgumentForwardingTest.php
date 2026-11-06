@@ -21,14 +21,14 @@ use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
 
 /**
- * Feature coverage for the Gate closure's argument forwarding.
+ * Feature coverage for the Gate hook's argument forwarding.
  *
- * Laravel dispatches the full argument tail to a Gate callback —
- * `Gate::allows('posts:create', $post)` reaches the closure as `(?$user,
- * $post)`. The service provider must translate that tail into the authorization
- * manager's `(resource, context)` pair so policies that condition on resources
- * or context are reachable via `$user->can()`, `@can`, `Gate::allows`, and the
- * `can:` middleware.
+ * Laravel hands the full argument list to a before-callback —
+ * `Gate::allows('posts:create', $post)` reaches the hook as `(?$user,
+ * 'posts:create', [$post])`. The hook must translate that list into the
+ * authorization manager's `(resource, context)` pair so policies that condition
+ * on resources or context are reachable via `$user->can()`, `@can`,
+ * `Gate::allows`, and the `can:` middleware.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -44,8 +44,8 @@ use Tests\TestCase;
 final class GateArgumentForwardingTest extends TestCase
 {
     /**
-     * Boot the provider with the demo permission enum so the Gate is wired for
-     * each test.
+     * Boot the provider with the demo permission enum so the Gate asks the
+     * package about its cases in each test.
      *
      * @return void
      */
@@ -316,5 +316,9 @@ final class GateArgumentForwardingTest extends TestCase
         $this->app->instance(SubjectResolver::class, $resolver); // @phpstan-ignore method.nonObject
         $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
         $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
+
+        // The Gate decides about the user it hands over, as a signed-in user's
+        // would be, since a guest is decided as no subject.
+        Gate::swap(Gate::forUser($user));
     }
 }

@@ -7,7 +7,7 @@ namespace Tests\Feature\Stubs\Enums;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum as PermissionEnumContract;
 
 /**
- * Demo permission enum used to exercise Gate auto-wiring in tests.
+ * Demo permission enum used to exercise the Gate hook in tests.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

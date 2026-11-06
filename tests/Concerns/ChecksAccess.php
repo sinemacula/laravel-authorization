@@ -201,17 +201,15 @@ trait ChecksAccess
     }
 
     /**
-     * Register a Gate for every case of the stub permission enum, as an
-     * application configuring it would.
+     * Declare the stub permission enum, as an application configuring it would,
+     * and boot the provider again, so the Gate asks the package about every
+     * case.
      *
      * @return void
      */
     protected function registerPermissionGates(): void
     {
-        config([
-            'authorization.permission_enums' => [PermissionEnum::class],
-            'authorization.gate.on_conflict' => 'overwrite',
-        ]);
+        config(['authorization.permission_enums' => [PermissionEnum::class]]);
 
         if ($this->app === null) {
             return;

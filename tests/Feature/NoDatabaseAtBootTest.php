@@ -81,10 +81,6 @@ final class NoDatabaseAtBootTest extends OrchestraTestCase
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
         $config->set('authorization.permission_providers', [RecordingPermissionProvider::class]);
 
-        // The test boots the provider a second time, under a query listener, so
-        // the Gates the first boot registered are redefined.
-        $config->set('authorization.gate.on_conflict', 'overwrite');
-
         RecordingPermissionProvider::$reads = 0;
     }
 }

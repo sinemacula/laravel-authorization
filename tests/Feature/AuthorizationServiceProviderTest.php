@@ -67,6 +67,7 @@ use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
+use SineMacula\Laravel\Authorization\Support\DeclaredAbilities;
 use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
@@ -176,6 +177,7 @@ final class AuthorizationServiceProviderTest extends TestCase
             RequestContext::class,
             EnvironmentContext::class,
             CheckContextFactory::class,
+            DeclaredAbilities::class,
             'authorization',
             AuthorizationManager::class,
         ];
@@ -385,7 +387,7 @@ final class AuthorizationServiceProviderTest extends TestCase
 
     /**
      * Every package command is registered in the console, the catalogue sync,
-     * the prune and the policy validation included.
+     * the prune, the policy validation and the configuration check included.
      *
      * @return void
      */
@@ -393,7 +395,7 @@ final class AuthorizationServiceProviderTest extends TestCase
     {
         $commands = \array_keys(Artisan::all());
 
-        foreach (['list-roles', 'list-permissions', 'grant', 'revoke', 'why-can', 'migrate-spatie', 'sync', 'prune', 'policy:validate'] as $name) {
+        foreach (['list-roles', 'list-permissions', 'grant', 'revoke', 'why-can', 'migrate-spatie', 'sync', 'prune', 'policy:validate', 'check'] as $name) {
             self::assertContains("authorization:{$name}", $commands);
         }
     }

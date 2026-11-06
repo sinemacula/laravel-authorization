@@ -13,6 +13,7 @@ use Illuminate\Routing\Middleware\SubstituteBindings;
 use Illuminate\Support\ServiceProvider;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
+use SineMacula\Laravel\Authorization\Console\CheckConfigurationCommand;
 use SineMacula\Laravel\Authorization\Console\GrantRoleCommand;
 use SineMacula\Laravel\Authorization\Console\ListPermissionsCommand;
 use SineMacula\Laravel\Authorization\Console\ListRolesCommand;
@@ -69,8 +70,9 @@ use SineMacula\Laravel\Authorization\Support\SessionScopes;
  * command registration, and boot-time wiring. Delegates the bulkier
  * responsibilities to dedicated registrars:
  *
- * - `GateRegistrar` — walks every configured permission enum and registers a
- *   matching Laravel Gate.
+ * - `GateRegistrar` — registers the single `Gate::before` hook through which
+ *   the package answers every ability it declares, unless
+ *   `authorization.gate.enabled` is false.
  * - `BladeDirectiveRegistrar` — wires the `@role` / `@permission` directive
  *   quartet and Spatie-compat aliases.
  *
@@ -141,19 +143,21 @@ final class AuthorizationServiceProvider extends ServiceProvider
     /**
      * Boot the provider.
      *
-     * @return void
+     * The Gate hook is registered right after the configuration is validated,
+     * before anything else, so it runs before every `Gate::before` callback an
+     * application registers once the package has booted.
      *
-     * @throws \SineMacula\Laravel\Authorization\Exceptions\GateConflictException
+     * @return void
      */
     public function boot(): void
     {
         $this->validateConfig();
-        $this->loadTranslationsFrom(__DIR__ . '/../lang', 'authorization');
-        $this->offerPublishing();
-        $this->registerCommands();
 
         (new GateRegistrar($this->app))->register();
 
+        $this->loadTranslationsFrom(__DIR__ . '/../lang', 'authorization');
+        $this->offerPublishing();
+        $this->registerCommands();
         $this->registerRouteMiddleware();
 
         (new BladeDirectiveRegistrar($this->app))->register();
@@ -198,6 +202,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
             SyncPermissionsCommand::class,
             PruneGrantsCommand::class,
             ValidatePolicyCommand::class,
+            CheckConfigurationCommand::class,
         ]);
     }
 

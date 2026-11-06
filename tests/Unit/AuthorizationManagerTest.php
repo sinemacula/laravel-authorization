@@ -1306,6 +1306,32 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * `forUser(null)` decides about a guest, which is no subject: every check
+     * denies as `subject_unresolved`, the resolver is never asked who the
+     * request is about, and a `for()` from the guest's manager names its
+     * subject afresh.
+     *
+     * @return void
+     */
+    public function testForUserWithNoUserDecidesAboutNoSubject(): void
+    {
+        $principal = $this->stubAuthorizable(['posts:create']);
+
+        $resolver = \Mockery::mock(SubjectResolver::class);
+        $resolver->shouldReceive('resolve')->once()->andReturn(new Subject($principal, $principal));
+        $resolver->shouldNotReceive('forUser');
+
+        $manager = $this->managerResolving($resolver);
+        $guest   = $manager->forUser(null);
+
+        self::assertNotSame($manager, $guest);
+        self::assertNull($guest->currentSubject());
+        self::assertSame(DecisionReason::SUBJECT_UNRESOLVED, $guest->check('posts:create')->reason);
+        self::assertSame($principal, $guest->for($principal)->currentSubject()?->subject);
+        self::assertSame($principal, $manager->currentSubject()?->subject);
+    }
+
+    /**
      * The decision events carry the model the subject is about.
      *
      * @return void

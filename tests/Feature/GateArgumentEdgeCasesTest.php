@@ -30,9 +30,8 @@ use Tests\TestCase;
  *
  * - A list-shaped `$arguments` whose leading entry is itself an associative
  *   array. Gate consumers who build arguments programmatically — e.g.
- *   `Gate::allows('x', [$context])` — land here because the outer list is
- *   expanded into the variadic but the inner assoc array is retained at numeric
- *   index 0.
+ *   `Gate::allows('x', [$context])` — land here because the outer list is the
+ *   argument list but the inner assoc array is retained at numeric index 0.
  * - A non-string, non-object leading entry (integer) that
  *   `ResourceReferences::of()` cannot identify as a resource, so the decision
  *   denies it at the resource stage rather than treating it as a check about no
@@ -52,8 +51,8 @@ use Tests\TestCase;
 final class GateArgumentEdgeCasesTest extends TestCase
 {
     /**
-     * Boot the provider with the demo permission enum so the Gate is wired for
-     * each test.
+     * Boot the provider with the demo permission enum so the Gate asks the
+     * package about its cases in each test.
      *
      * @return void
      */
@@ -187,5 +186,9 @@ final class GateArgumentEdgeCasesTest extends TestCase
         $this->app->instance(SubjectResolver::class, $resolver); // @phpstan-ignore method.nonObject
         $this->app->forgetInstance('authorization'); // @phpstan-ignore method.nonObject
         $this->app->forgetInstance(AuthorizationManager::class); // @phpstan-ignore method.nonObject
+
+        // The Gate decides about the user it hands over, as a signed-in user's
+        // would be, since a guest is decided as no subject.
+        Gate::swap(Gate::forUser($user));
     }
 }

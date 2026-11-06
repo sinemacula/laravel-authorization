@@ -11,7 +11,6 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
-use SineMacula\Laravel\Authorization\Exceptions\GateConflictException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
@@ -21,7 +20,7 @@ use Tests\TestCase;
 
 /**
  * Feature tests exercising the service provider's container bindings, config
- * publishing, and Gate auto-wiring.
+ * publishing, and the Gate hook.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -64,93 +63,29 @@ final class ServiceProviderTest extends TestCase
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
 
         self::assertSame('web', $config->get('authorization.defaults.guard'));
-        self::assertSame('throw', $config->get('authorization.gate.on_conflict'));
+        self::assertTrue($config->get('authorization.gate.enabled'));
         self::assertSame(AuthGuardSubjectResolver::class, $config->get('authorization.subject_resolver'));
         self::assertFalse($config->has('authorization.principal_resolver'));
         self::assertFalse($config->has('authorization.tenant_resolver'));
     }
 
     /**
-     * Permission enum is wired into a Gate per case.
+     * Booting registers the Gate hook, so a configured enum's cases are the
+     * package's to answer, over a define registered for one of them, while
+     * nothing is defined on the Gate.
      *
      * @return void
      */
-    public function testRegistersGateForEachEnumCase(): void
+    public function testBootRegistersTheGateHook(): void
     {
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
         $config->set('authorization.permission_enums', [PermissionEnum::class]);
 
-        // Re-boot the provider so the new config is picked up.
-        $provider = new AuthorizationServiceProvider($this->app);
-        $provider->boot();
-
-        self::assertTrue(Gate::has('posts:create'));
-        self::assertTrue(Gate::has('posts:delete'));
-    }
-
-    /**
-     * Gate conflict policy = throw raises a dedicated exception.
-     *
-     * @return void
-     */
-    public function testGateConflictThrowMode(): void
-    {
-        Gate::define('posts:create', static fn (): bool => true);
-
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.gate.on_conflict', 'throw');
-        $config->set('authorization.permission_enums', [PermissionEnum::class]);
-
-        $provider = new AuthorizationServiceProvider($this->app);
-
-        $this->expectException(GateConflictException::class);
-        $provider->boot();
-    }
-
-    /**
-     * Gate conflict policy = log preserves the existing Gate.
-     *
-     * @return void
-     */
-    public function testGateConflictLogMode(): void
-    {
         Gate::define('posts:create', static fn (?object $user = null): bool => true);
 
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.gate.on_conflict', 'log');
-        $config->set('authorization.permission_enums', [PermissionEnum::class]);
-
-        $provider = new AuthorizationServiceProvider($this->app);
-        $provider->boot();
-
-        self::assertTrue(Gate::has('posts:create'));
-        // Existing closure still in effect — returns true regardless of user.
-        self::assertTrue(Gate::forUser((object) [])->allows('posts:create'));
-    }
-
-    /**
-     * Gate conflict policy = overwrite replaces the existing Gate.
-     *
-     * @return void
-     */
-    public function testGateConflictOverwriteMode(): void
-    {
-        Gate::define('posts:create', static fn (): bool => true);
-
-        /** @var \Illuminate\Config\Repository $config */
-        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
-        $config->set('authorization.gate.on_conflict', 'overwrite');
-        $config->set('authorization.permission_enums', [PermissionEnum::class]);
-
-        $provider = new AuthorizationServiceProvider($this->app);
-        $provider->boot();
-
-        // The overwritten Gate now goes through the authorization manager,
-        // which returns false for the anonymous null resolver.
-        self::assertFalse(Gate::allows('posts:create'));
+        self::assertFalse(Gate::has('posts:delete'));
+        self::assertFalse(Gate::forUser((object) [])->allows('posts:create'));
     }
 
     /**
