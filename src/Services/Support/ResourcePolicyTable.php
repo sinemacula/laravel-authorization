@@ -23,6 +23,13 @@ use SineMacula\Laravel\Authorization\Support\GrantScope;
  * the reach when that differs, read back under a row lock, and nothing
  * otherwise.
  *
+ * An ignored insert is only ever reported once a row is read back: one that
+ * leaves no row, as when a concurrent call detached it in between, is tried
+ * again, and when that leaves none either, nothing is reported attached. On
+ * MySQL that is a policy deleted at the same moment, whose foreign key failure
+ * `INSERT IGNORE` turns into a warning, so an attachment is never reported, nor
+ * its event dispatched, with no row to bear it out.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -60,41 +67,31 @@ final readonly class ResourcePolicyTable
     /**
      * Attach the policy with the given key in the scope, with the scope's
      * reach, and report what changed: a new attachment, its reach alone, or
-     * nothing.
+     * nothing; null when no row could be written, even once tried again, so
+     * nothing is attached.
      *
      * @param  string  $policy
-     * @return \SineMacula\Laravel\Authorization\Enums\GrantOutcome
+     * @return \SineMacula\Laravel\Authorization\Enums\GrantOutcome|null
      */
-    public function attach(string $policy): GrantOutcome
+    public function attach(string $policy): ?GrantOutcome
     {
-        $now = Carbon::now();
+        // Once the insert is ignored, a locking read: on MySQL a plain read
+        // would see the transaction's snapshot rather than the row it has just
+        // locked. A row a concurrent call detached in between is attached
+        // afresh.
+        for ($attempt = 0; $attempt < 2; $attempt++) {
+            if ($this->wasInserted($policy)) {
+                return GrantOutcome::GRANTED;
+            }
 
-        $inserted = $this->connection->table($this->table)->insertOrIgnore([
-            'policy_id'       => $policy,
-            'resource_type'   => $this->resourceType,
-            'resource_id'     => $this->resourceId,
-            'tenant_type'     => $this->scope->tenant?->type,
-            'tenant_id'       => $this->scope->tenant?->id,
-            'include_subtree' => $this->scope->includeSubtree,
-            'application'     => $this->scope->application,
-            'created_at'      => $now,
-            'updated_at'      => $now,
-        ]) === 1;
+            $reach = $this->inScope()->where('policy_id', $policy)->lockForUpdate()->value('include_subtree');
 
-        if ($inserted) {
-            return GrantOutcome::GRANTED;
+            if ($reach !== null) {
+                return $this->withReach($policy, (bool) $reach);
+            }
         }
 
-        if ($this->hasTheReach($policy)) {
-            return GrantOutcome::UNCHANGED;
-        }
-
-        $this->inScope()->where('policy_id', $policy)->update([
-            'include_subtree' => $this->scope->includeSubtree,
-            'updated_at'      => Carbon::now(),
-        ]);
-
-        return GrantOutcome::REACH_CHANGED;
+        return null;
     }
 
     /**
@@ -120,17 +117,49 @@ final readonly class ResourcePolicyTable
     }
 
     /**
-     * Determine whether the attachment the resource holds in the scope already
-     * has the scope's reach.
+     * Insert the attachment in the scope unless the resource holds it there,
+     * and report whether it was inserted.
      *
      * @param  string  $policy
      * @return bool
      */
-    private function hasTheReach(string $policy): bool
+    private function wasInserted(string $policy): bool
     {
-        // A locking read: on MySQL a plain read would see the transaction's
-        // snapshot rather than the row it has just locked.
-        return (bool) $this->inScope()->where('policy_id', $policy)->lockForUpdate()->value('include_subtree') === $this->scope->includeSubtree;
+        $now = Carbon::now();
+
+        return $this->connection->table($this->table)->insertOrIgnore([
+            'policy_id'       => $policy,
+            'resource_type'   => $this->resourceType,
+            'resource_id'     => $this->resourceId,
+            'tenant_type'     => $this->scope->tenant?->type,
+            'tenant_id'       => $this->scope->tenant?->id,
+            'include_subtree' => $this->scope->includeSubtree,
+            'application'     => $this->scope->application,
+            'created_at'      => $now,
+            'updated_at'      => $now,
+        ]) === 1;
+    }
+
+    /**
+     * Give the attachment the resource holds in the scope, with the reach it
+     * has, the scope's reach, and report whether that changed it.
+     *
+     * @param  string  $policy
+     * @param  bool  $reach
+     * @return \SineMacula\Laravel\Authorization\Enums\GrantOutcome
+     */
+    private function withReach(string $policy, bool $reach): GrantOutcome
+    {
+        if ($reach === $this->scope->includeSubtree) {
+            return GrantOutcome::UNCHANGED;
+        }
+
+        $this->inScope()->where('policy_id', $policy)->update([
+            'include_subtree' => $this->scope->includeSubtree,
+            'updated_at'      => Carbon::now(),
+        ]);
+
+        return GrantOutcome::REACH_CHANGED;
     }
 
     /**

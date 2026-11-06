@@ -5,7 +5,7 @@ a condition operator catalogue for context-sensitive decisions. This note docume
 backslashes and substituted values are kept literal, the four outcomes a statement test can have, the check's context
 (the subject and resource attributes among it) and the keys a policy may read from it, the condition operator set,
 the authentication requirement and the assurance keys no condition may test, `${…}` interpolation, and the interaction
-between wildcards and the RBAC fallback.
+between wildcards and the permission step.
 
 ## Invariants
 
@@ -100,12 +100,14 @@ compared literally, so a role name containing `*` is migrated.
 
 ### RBAC interaction
 
-Wildcard matching applies at the permission step of the allow stage. The manager consults RBAC only when the policies
-leave the check at the implicit stage (`no_match` or `condition_failed`: no deny and no allow statement decided it); it
-then checks whether the subject holds the action as a permission. A subject holding `posts:*` satisfies the check for
-`posts:create`, and the decision allows at the allow stage with a `held` permission step. An explicit deny from a policy
-statement, including one applied because its test was undecidable, and an `invalid_policy` denial still win --
-wildcard grants never override a policy-layer decision.
+Wildcard matching applies when the evaluator asks the permission callback. It does so once, at the allow stage, after
+every deny and every cap stage (guardrail, boundary, session) has let the check through, and only when no allow
+statement matched and none was invalid; the callback asks whether the subject or its identity holds the action as a
+permission (`SubjectGrants::holdsPermission()`). A subject holding `posts:*` then satisfies the check for
+`posts:create`, and the decision allows at the allow stage with a `held` permission step. An explicit deny, including
+one applied because its test was undecidable, an `invalid_policy` denial and a `boundary` denial all win -- a subject
+holding `posts:*` under a boundary that does not allow `posts:create` is denied as `boundary`, and its permissions are
+never asked. Wildcard grants never override a policy-layer decision or a cap.
 
 ## Statements
 

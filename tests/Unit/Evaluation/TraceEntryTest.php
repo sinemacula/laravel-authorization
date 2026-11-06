@@ -38,6 +38,7 @@ final class TraceEntryTest extends TestCase
         self::assertSame(TraceOutcome::HELD, $entry->outcome);
         self::assertNull($entry->statement);
         self::assertSame([], $entry->conditions);
+        self::assertNull($entry->boundary);
     }
 
     /**
@@ -65,6 +66,45 @@ final class TraceEntryTest extends TestCase
     {
         self::assertSame('[allow] permission: held', (new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD))->toString());
         self::assertSame('[allow] permission: not_held', (new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_HELD))->toString());
+    }
+
+    /**
+     * toString() names the caps a cap stage weighs when it capped nothing.
+     *
+     * @return void
+     */
+    public function testToStringWithoutStatementNamesTheCapsOfACapStage(): void
+    {
+        self::assertSame('[guardrail] guardrails: uncapped', (new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::UNCAPPED))->toString());
+        self::assertSame('[boundary] boundaries: uncapped', (new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::UNCAPPED))->toString());
+        self::assertSame('[session] session caps: uncapped', (new TraceEntry(DecisionStage::SESSION, TraceOutcome::UNCAPPED))->toString());
+    }
+
+    /**
+     * toString() names the boundary a step about no one statement is about,
+     * such as one that refused the check.
+     *
+     * @return void
+     */
+    public function testToStringNamesTheBoundaryOfAStepAboutNoStatement(): void
+    {
+        $entry = new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::REFUSED, null, [], 'cap[7]');
+
+        self::assertSame('cap[7]', $entry->boundary);
+        self::assertSame('[boundary] cap[7]: refused', $entry->toString());
+    }
+
+    /**
+     * toString() names the statement assessed before the boundary it belongs
+     * to.
+     *
+     * @return void
+     */
+    public function testToStringNamesTheStatementBeforeTheBoundary(): void
+    {
+        $entry = new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::MATCHED, new StatementReference('cap', 0), [], 'cap');
+
+        self::assertSame('[boundary] cap#0: matched', $entry->toString());
     }
 
     /**

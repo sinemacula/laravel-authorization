@@ -156,70 +156,6 @@ final class DecisionTest extends TestCase
     }
 
     /**
-     * withPermission(true) turns a denial into an allow at the allow stage,
-     * with no reason and no statements, its trace kept and a held step for the
-     * permission appended.
-     *
-     * @return void
-     */
-    public function testWithPermissionHeldAllowsAtTheAllowStage(): void
-    {
-        $entry    = new TraceEntry(DecisionStage::ALLOW, TraceOutcome::CONDITION_FAILED, new StatementReference('p', 0), ['owner' => false]);
-        $original = Decision::deny(DecisionReason::CONDITION_FAILED, DecisionStage::IMPLICIT, [new StatementReference('p', 0)], [$entry]);
-
-        $decision = $original->withPermission(true);
-
-        self::assertSame(DecisionEffect::ALLOW, $decision->effect);
-        self::assertTrue($decision->isAllowed());
-        self::assertNull($decision->reason);
-        self::assertSame(DecisionStage::ALLOW, $decision->stage);
-        self::assertSame([], $decision->statements);
-        self::assertCount(2, $decision->trace);
-        self::assertSame($entry, $decision->trace[0]);
-        self::assertEquals(new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD), $decision->trace[1]);
-        self::assertSame([$entry], $original->trace);
-        self::assertFalse($original->isAllowed());
-    }
-
-    /**
-     * withPermission(true) on a decision with an empty trace leaves the held
-     * step as its only entry.
-     *
-     * @return void
-     */
-    public function testWithPermissionHeldOnEmptyTrace(): void
-    {
-        $decision = Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT)->withPermission(true);
-
-        self::assertEquals([new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD)], $decision->trace);
-    }
-
-    /**
-     * withPermission(false) keeps the denial, its reason, stage and statements,
-     * and appends a not-held step for the permission.
-     *
-     * @return void
-     */
-    public function testWithPermissionNotHeldKeepsTheDenial(): void
-    {
-        $statements = [new StatementReference('p', 0)];
-        $entry      = new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_APPLICABLE, $statements[0]);
-        $original   = Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT, $statements, [$entry]);
-
-        $decision = $original->withPermission(false);
-
-        self::assertSame(DecisionEffect::DENY, $decision->effect);
-        self::assertFalse($decision->isAllowed());
-        self::assertSame(DecisionReason::NO_MATCH, $decision->reason);
-        self::assertSame(DecisionStage::IMPLICIT, $decision->stage);
-        self::assertSame($statements, $decision->statements);
-        self::assertCount(2, $decision->trace);
-        self::assertSame($entry, $decision->trace[0]);
-        self::assertEquals(new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_HELD), $decision->trace[1]);
-        self::assertSame([$entry], $original->trace);
-    }
-
-    /**
      * explain() renders an allow with the stage and every statement that
      * decided it, separated by commas.
      *
@@ -308,8 +244,8 @@ final class DecisionTest extends TestCase
     }
 
     /**
-     * explain() renders a permission step appended by withPermission() as the
-     * last trace line.
+     * explain() renders a permission step appended by withStep() as the last
+     * trace line.
      *
      * @return void
      */
@@ -317,7 +253,7 @@ final class DecisionTest extends TestCase
     {
         $decision = Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT, [], [
             new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_APPLICABLE, new StatementReference('p', 0)),
-        ])->withPermission(false);
+        ])->withStep(new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_HELD));
 
         self::assertSame(
             "DENY (no_match: no statement or permission names it) at the implicit stage.\n"
@@ -386,8 +322,7 @@ final class DecisionTest extends TestCase
     }
 
     /**
-     * withStep() and withPermission() keep the requirements and the freshness;
-     * a permission held allows with the freshness but no requirements.
+     * withStep() keeps the reason, the requirements and the freshness.
      *
      * @return void
      */
@@ -397,18 +332,10 @@ final class DecisionTest extends TestCase
         $decision  = Decision::insufficientAuthentication(DecisionStage::IMPLICIT, [], self::requirements())->withFreshness($freshness);
 
         $stepped = $decision->withStep(new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_HELD));
-        $notHeld = $decision->withPermission(false);
-        $held    = $decision->withPermission(true);
 
+        self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $stepped->reason);
         self::assertSame($decision->requirements, $stepped->requirements);
         self::assertSame($freshness, $stepped->freshness);
-        self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $notHeld->reason);
-        self::assertSame($decision->requirements, $notHeld->requirements);
-        self::assertSame($freshness, $notHeld->freshness);
-        self::assertTrue($held->isAllowed());
-        self::assertSame(DecisionStage::ALLOW, $held->stage);
-        self::assertSame([], $held->requirements);
-        self::assertSame($freshness, $held->freshness);
     }
 
     /**

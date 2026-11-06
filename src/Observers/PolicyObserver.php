@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Observers\Support\RecordChanges;
 use SineMacula\Laravel\Authorization\Support\DocumentDigest;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
+use SineMacula\Laravel\Authorization\Support\PolicyBoundaries;
 use SineMacula\Laravel\Authorization\Support\PolicyPrincipals;
 use SineMacula\Laravel\Authorization\Support\RecordOwner;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -32,7 +33,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * the management service call that made it, with its actor, or a write of its
  * own with no actor. The document is reported by its version and digest, never
  * its body, and a delete reads, before the row goes, every grantee the policy
- * was attached to.
+ * was attached to. A policy in use as a permission boundary is never deleted:
+ * the delete is refused until every boundary it is has been removed.
  *
  * A policy is owned by the platform (both tenant columns null) or by one tenant
  * (both set), as roles and permissions are. Unlike theirs, policy reads are not
@@ -128,14 +130,19 @@ final class PolicyObserver
     }
 
     /**
-     * Read, before the row goes, every grantee the policy is attached to, which
-     * the delete takes with it.
+     * Refuse the delete of a policy in use as a permission boundary (see
+     * `PolicyBoundaries`), then read, before the row goes, every grantee the
+     * policy is attached to, which the delete takes with it.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\BoundaryException
      */
     public function deleting(Policy $policy): void
     {
+        PolicyBoundaries::assertDeletable($policy);
+
         RecordChanges::hold($policy, ['grantees' => GrantTarget::POLICY->holders(Reference::of($policy)->id)]);
     }
 

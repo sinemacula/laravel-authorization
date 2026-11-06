@@ -27,8 +27,9 @@ use Tests\TestCase;
 final class ResolutionPinsTest extends TestCase
 {
     /**
-     * The grantee, roles, policies, the version role policies share and the
-     * tenants are pinned under their own keys, in the order they were pinned.
+     * The grantee, roles, policies, the versions role policies, resource
+     * policies and boundaries share and the tenants are pinned under their own
+     * keys, in the order they were pinned.
      *
      * @return void
      */
@@ -42,6 +43,7 @@ final class ResolutionPinsTest extends TestCase
         $pins->policies(['policy-1']);
         $pins->rolePolicies();
         $pins->resourcePolicies('posts');
+        $pins->boundaries();
         $pins->tenants(new TenantChain([new Reference('stub_tenant', 'account'), new Reference('stub_tenant', 'org')]));
         $pins->roles([]);
 
@@ -53,6 +55,7 @@ final class ResolutionPinsTest extends TestCase
             'authz:version:role-policies',
             'authz:version:resource-policies',
             'authz:version:resource-policies:posts',
+            'authz:version:boundaries',
             'authz:version:tenant:stub_tenant:account',
             'authz:version:tenant:stub_tenant:org',
         ], \array_keys($pins->tokens()));
@@ -74,6 +77,7 @@ final class ResolutionPinsTest extends TestCase
         $pins->policies(['policy-1']);
         $pins->rolePolicies();
         $pins->resourcePolicies('posts');
+        $pins->boundaries();
         $pins->tenants(new TenantChain([new Reference('stub_tenant', 'account')]));
 
         self::assertSame([], $pins->tokens());

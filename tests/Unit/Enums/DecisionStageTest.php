@@ -22,12 +22,13 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 final class DecisionStageTest extends TestCase
 {
     /**
-     * The enum defines exactly the six stages, in the order a decision runs
-     * them: subject, resource, tenant, deny, allow, implicit.
+     * The enum defines exactly the nine stages, in the order a decision runs
+     * them (AUTHZ-7.1): subject, resource, tenant, deny, guardrail, boundary,
+     * session, allow, implicit.
      *
      * @return void
      */
-    public function testExactlySixCasesInRunOrder(): void
+    public function testExactlyNineCasesInRunOrder(): void
     {
         self::assertSame(
             [
@@ -35,6 +36,9 @@ final class DecisionStageTest extends TestCase
                 DecisionStage::RESOURCE,
                 DecisionStage::TENANT,
                 DecisionStage::DENY,
+                DecisionStage::GUARDRAIL,
+                DecisionStage::BOUNDARY,
+                DecisionStage::SESSION,
                 DecisionStage::ALLOW,
                 DecisionStage::IMPLICIT,
             ],
@@ -53,6 +57,9 @@ final class DecisionStageTest extends TestCase
         self::assertSame('resource', DecisionStage::RESOURCE->value);
         self::assertSame('tenant', DecisionStage::TENANT->value);
         self::assertSame('deny', DecisionStage::DENY->value);
+        self::assertSame('guardrail', DecisionStage::GUARDRAIL->value);
+        self::assertSame('boundary', DecisionStage::BOUNDARY->value);
+        self::assertSame('session', DecisionStage::SESSION->value);
         self::assertSame('allow', DecisionStage::ALLOW->value);
         self::assertSame('implicit', DecisionStage::IMPLICIT->value);
     }
@@ -69,6 +76,9 @@ final class DecisionStageTest extends TestCase
         self::assertSame(DecisionStage::RESOURCE, DecisionStage::tryFrom('resource'));
         self::assertSame(DecisionStage::TENANT, DecisionStage::tryFrom('tenant'));
         self::assertSame(DecisionStage::DENY, DecisionStage::tryFrom('deny'));
+        self::assertSame(DecisionStage::GUARDRAIL, DecisionStage::tryFrom('guardrail'));
+        self::assertSame(DecisionStage::BOUNDARY, DecisionStage::tryFrom('boundary'));
+        self::assertSame(DecisionStage::SESSION, DecisionStage::tryFrom('session'));
         self::assertSame(DecisionStage::ALLOW, DecisionStage::tryFrom('allow'));
         self::assertSame(DecisionStage::IMPLICIT, DecisionStage::tryFrom('implicit'));
         self::assertNull(DecisionStage::tryFrom('unknown'));

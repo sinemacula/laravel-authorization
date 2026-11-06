@@ -40,11 +40,11 @@ return [
     | The connection the package's tables live on. Every package model and
     | pivot reads and writes on it, the shipped migrations create and drop
     | their tables on it, and the package's own transactions run on it: each
-    | call to the role, permission, policy, grant and resource policy services
-    | runs in one transaction here. Point it at the connection the application
-    | keeps its identity tables on, so a transaction that creates a principal
-    | and its grants commits or rolls back as one. Null uses the application's
-    | default connection.
+    | call to the role, permission, policy, grant, resource policy and
+    | boundary services runs in one transaction here. Point it at the
+    | connection the application keeps its identity tables on, so a
+    | transaction that creates a principal and its grants commits or rolls
+    | back as one. Null uses the application's default connection.
     |
     */
 
@@ -70,6 +70,7 @@ return [
         'authorizable_permissions' => env('AUTHORIZATION_TABLE_AUTHORIZABLE_PERMISSIONS', 'authorizable_permissions'),
         'authorizable_policies'    => env('AUTHORIZATION_TABLE_AUTHORIZABLE_POLICIES', 'authorizable_policies'),
         'resource_policies'        => env('AUTHORIZATION_TABLE_RESOURCE_POLICIES', 'resource_policies'),
+        'authorizable_boundaries'  => env('AUTHORIZATION_TABLE_AUTHORIZABLE_BOUNDARIES', 'authorizable_boundaries'),
     ],
 
     /*
@@ -409,16 +410,18 @@ return [
     | Resolution cache
     |---------------------------------------------------------------------------
     |
-    | Two-tier cache for what an identity's roles, permissions and policies
-    | come to, and for the policies attached to a resource and its type. The
-    | in-memory tier is always on and memoises results per request or job. The
-    | optional persistent tier is used when `store` names one of the configured
-    | cache stores; any store works, with or without tags. Entries are keyed by
-    | identity (or resource) and tenant, and record a version of the identity
-    | and of every role and policy they were built from; every write bumps the
-    | versions it affects, so a change takes effect on the next check in every
-    | worker. A store that fails is skipped for the rest of the request or job,
-    | and checks read the database.
+    | Two-tier cache for what an identity's roles, permissions, policies and
+    | permission boundaries come to, and for the policies attached to a resource
+    | and its type. The in-memory tier is always on and memoises results per
+    | request or job. The optional persistent tier is used when `store` names
+    | one of the configured cache stores; any store works, with or without tags.
+    | Entries are keyed by identity (or resource) and tenant, and record a
+    | version of the identity and of every role and policy they were built from
+    | (a boundary entry records one version every boundary entry shares, which
+    | updating or deleting any policy bumps); every write bumps the versions it
+    | affects, so a change takes effect on the next check in every worker. A
+    | store that fails is skipped for the rest of the request or job, and checks
+    | read the database.
     |
     | `ttl` is the longest, in seconds, any entry lives in either tier; an
     | entry also lapses a second before the nearest grant it counts expires.

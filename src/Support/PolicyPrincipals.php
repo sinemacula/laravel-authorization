@@ -73,9 +73,10 @@ final class PolicyPrincipals
     /**
      * Refuse a rewrite of a saved policy's document that breaks the rule for
      * where the policy is attached: principals while it is attached to a
-     * grantee or a role, or an allow naming none while it is attached to a
-     * resource. A policy not yet saved, or whose document is unchanged, is
-     * attached nowhere new, and passes without a query.
+     * grantee or a role, or set as a grantee's boundary, or an allow naming
+     * none while it is attached to a resource. A policy not yet saved, or whose
+     * document is unchanged, is attached nowhere new, and passes without a
+     * query.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return void
@@ -88,7 +89,7 @@ final class PolicyPrincipals
             return;
         }
 
-        if (self::withPrincipals($policy) !== [] && self::isAttachedIn('authorizable_policies', $policy)) {
+        if (self::withPrincipals($policy) !== [] && (self::isAttachedIn('authorizable_policies', $policy) || PolicyBoundaries::isBoundary($policy))) {
             self::assertAttachableToGrantee($policy);
         }
 

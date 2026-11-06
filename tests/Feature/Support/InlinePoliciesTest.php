@@ -207,6 +207,37 @@ final class InlinePoliciesTest extends TestCase
     }
 
     /**
+     * A policy is gone once its row is, read under a shared lock on the write
+     * connection: one that is there is not gone, one deleted by a raw query is,
+     * and so is a key no policy has.
+     *
+     * @return void
+     */
+    public function testAPolicyIsGoneOnceItsRowIs(): void
+    {
+        $policy = self::policy('cap');
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        self::assertFalse(InlinePolicies::isGone($policy->id));
+
+        $lock = match (DB::getDriverName()) {
+            'pgsql' => 'for share',
+            'mysql' => 'lock in share mode',
+            default => 'select',
+        };
+
+        self::assertStringContainsString($lock, DB::getQueryLog()[0]['query']);
+
+        DB::disableQueryLog();
+        DB::table('policies')->where('id', $policy->id)->delete();
+
+        self::assertTrue(InlinePolicies::isGone($policy->id));
+        self::assertTrue(InlinePolicies::isGone('00000000-0000-0000-0000-000000000000'));
+    }
+
+    /**
      * The attachments query keeps the rows of a managed policy and of an inline
      * policy attached to its own grantee, and leaves out an inline policy
      * attached to a grantee of the same type with another key, or of another

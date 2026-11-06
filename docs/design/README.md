@@ -15,14 +15,15 @@ Each note is intentionally short and follows the same structure:
 
 The planned note set (populated during implementation — see `ISSUES.md` item #7) is:
 
-- `evaluation-order-and-deny-precedence.md`: the staged decision order (subject, resource, tenant, then the AWS IAM
-  deny, allow and implicit order), why an explicit DENY always wins over
-  an RBAC allow, and why an undecidable deny applies and a malformed, unreadable or over-limit policy denies
-  (`invalid_policy`) instead of being skipped; `insufficient_authentication`, where it ranks, and how long a decision
-  that read an authentication requirement may be reused; where a check's policies come from (the policy store, the
-  identity's own and inline policies, its roles' policies down the hierarchy, and the policies attached to the resource
-  and its type) and why their order never matters; resource policies' `principals`, their denies for everyone and why
-  their allows come after the tenant stage and every deny.
+- `evaluation-order-and-deny-precedence.md`: the staged decision order (subject, resource, tenant, then the denies, the
+  caps, the allows and the implicit deny), why an explicit DENY always wins over an RBAC allow, and why an undecidable
+  deny applies and a malformed, unreadable or over-limit policy denies (`invalid_policy`) instead of being skipped;
+  `insufficient_authentication`, where it ranks, and how long a decision that read an authentication requirement may be
+  reused; where a check's policies come from (the policy store, the identity's own and inline policies, its roles'
+  policies down the hierarchy, and the policies attached to the resource and its type) and why their order never
+  matters; resource policies' `principals`, their denies for everyone and why their allows come after the tenant stage
+  and every deny; the cap stages (guardrails, permission boundaries and session caps) between the denies and the allows,
+  and why every boundary that applies must allow a check and none grants anything.
 - `polymorphic-identity-pivots.md`: why role, permission, and policy pivots use plain `string`
   `authorizable_type`/`authorizable_id` columns so that integer, UUID, and ULID identities all work.
 - `subject-resolver-contract.md`: the one seam with `sinemacula/laravel-authentication` for the subject, its tenant
@@ -43,9 +44,10 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
 - `management-services.md`: the services every role, permission, policy and grant write goes through, their
   transaction, idempotent grants, re-armed expiries, the locked hierarchy check, the scope each grant holds in, a
   role's policies as its grants, inline policies attached to their grantee alone and deleted with it, and policies
-  attached to resources and resource types.
+  attached to resources and resource types, and permission boundaries set on principals and identities.
 - `events.md`: the one marker every event implements, the snapshot payloads, the actor the caller passes, one
-  operation id per call, dispatch after commit, the grantees a delete reports and the document digests.
+  operation id per call, dispatch after commit, the grantees a delete reports, the boundary events and the document
+  digests.
 
 These documents are secondary to the code and tests, not a replacement for them. If a note and a cited test disagree,
 the test should be treated as authoritative until the mismatch is resolved.

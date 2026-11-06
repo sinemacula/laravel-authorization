@@ -44,7 +44,9 @@ $canEdit = Authorization::for($targetUser)->can('posts:edit');
 $permissions = Authorization::for($targetUser)->effectivePermissions();
 ```
 
-`effectivePermissions()` walks every case of every configured `PermissionEnum` through the full four-step evaluator and
+`effectivePermissions()` walks every case of every configured `PermissionEnum` through the full staged evaluation (the
+subject, resource and tenant, the explicit denies, the guardrails, the permission boundaries, the session caps, the
+allows and the implicit deny; see [Evaluation order and deny precedence](evaluation-order-and-deny-precedence.md)) and
 returns an associative array keyed by permission string with boolean values -- suitable for rendering permission-picker
 UIs or capability checklists.
 
@@ -53,8 +55,9 @@ UIs or capability checklists.
 Chaining `for($user)->withPolicies([$hypothetical])` evaluates against only the supplied policies, bypassing the target
 user's own attached policies, any configured policy store and the policies attached to the resource. A supplied policy
 given a resource (`Policy::withResource('post:42')`) is evaluated as a resource policy, so its allows apply only to the
-subjects its `principals` name. The RBAC fallback still applies -- if the hypothetical
-policy does not produce a decisive result, the target user's held permissions are consulted.
+subjects its `principals` name. `withPolicies()` replaces the policies only: the subject's permission boundaries still
+cap the decision, their deny statements still count at the deny stage, and the target user's held permissions are
+still asked at the allow stage when no allow statement decides, so an override never lifts a cap.
 
 ```php
 $result = Authorization::for($targetUser)
@@ -80,9 +83,10 @@ it hands over.
 - **No dedicated impersonation event.** The `DecisionEvaluated` event carries the principal, so an audit listener can
   detect that the evaluated principal differs from `$request->user()`. Consumers who need an explicit "admin X previewed
   user Y" signal should emit their own event at the call site.
-- **RBAC fallback uses the target principal's permissions.** When `for($user)` is active and no policy produces a
-  decisive result, the RBAC fallback calls `$user->hasPermission($action)` -- the target user's permissions, not the
-  caller's.
+- **The permission step uses the target principal's permissions.** When `for($user)` is active, the held-permission
+  check is made at the allow stage, after the caps and only when no allow statement decides, through
+  `SubjectGrants::holdsPermission()` over the target subject's grantees, its principal and its identity -- the target
+  user's permissions, not the caller's, capped by the target user's boundaries.
 
 ## Implementation Anchors
 

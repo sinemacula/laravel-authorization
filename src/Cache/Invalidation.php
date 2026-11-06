@@ -34,9 +34,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *   its owner) or its deletion bumps the role. Entries record every role they
  *   were built from, ancestors included, so the bump reaches every identity
  *   that holds the role or a role below it.
- * - A change to a policy or its deletion bumps the policy, and the version
- *   every entry of a resource's policies shares, since those entries read the
- *   documents with the attachments in one query.
+ * - A change to a policy or its deletion bumps the policy, and the versions
+ *   every entry of a resource's policies and every entry of a grantee's
+ *   boundaries share, since those entries read the documents with the
+ *   attachments in one query.
+ * - Setting, replacing or removing a grantee's boundary bumps the grantee, as
+ *   any grant of it does.
  * - A policy attached to or detached from a resource bumps the version the
  *   policies attached to the resources of its type share, for a record and for
  *   the whole type alike.
@@ -91,7 +94,7 @@ final class Invalidation
             $event instanceof RoleUpdated,
             $event instanceof RoleDeleted => [$store->roleKey($event->role->id)],
             $event instanceof PolicyUpdated,
-            $event instanceof PolicyDeleted => [$store->policyKey($event->policy->id), $store->resourcePoliciesKey()],
+            $event instanceof PolicyDeleted => [$store->policyKey($event->policy->id), $store->resourcePoliciesKey(), $store->boundariesKey()],
             $event instanceof ResourcePolicyAttached,
             $event instanceof ResourcePolicyDetached => [$store->resourcePoliciesKey($event->resourceType)],
             $event instanceof PermissionDeleted      => self::holderKeys($store, \array_map(static fn (Reference $role): string => $role->id, $event->roles), $event->grantees),

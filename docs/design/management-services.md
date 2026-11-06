@@ -1,10 +1,11 @@
 # Management Services
 
-Every write of a role, permission, policy or grant goes through one of four injectable services, so each write runs
-in one transaction on the package's connection, reads the configured models and reports only what it changed. The
-identity traits, the role's permission helpers, the grant and revoke commands and the Spatie import all delegate to
-them. The one exception today is `authorization:sync`, which writes the permission catalogue through the permission
-model in its own transaction on the package's connection; it moves onto `PermissionService` later.
+Every write of a role, permission, policy, grant, resource attachment or permission boundary goes through one of six
+injectable services, so each write runs in one transaction on the package's connection, reads the configured models and
+reports only what it changed. The identity traits, the role's permission helpers, the grant and revoke commands and the
+Spatie import all delegate to them. The one exception today is `authorization:sync`, which writes the permission
+catalogue through the permission model in its own transaction on the package's connection; it moves onto
+`PermissionService` later.
 
 ## Purpose
 
@@ -17,6 +18,8 @@ model in its own transaction on the package's connection; it moves onto `Permiss
   optional expiry.
 - `ResourcePolicyService`: attach a policy to a resource, a record or a whole resource type, and detach it
   (AUTHZ-7.3).
+- `BoundaryService`: set, replace and remove the permission boundary of a principal or an identity, platform-wide or in
+  a tenant (AUTHZ-7.4).
 
 Each is a final class bound as a singleton (it holds no state), resolved from the container or injected. Every public
 method takes the actor making the call as an optional `$actor`, a model or a `Support\Reference`: null for console and
@@ -120,6 +123,28 @@ events themselves are described in [Events](events.md).
     something, and refreshes the resolution cache for the resource's type. The rows carry no actor column; the events
     carry the actor.
 
+13. **A boundary is one row per grantee per scope (AUTHZ-7.4).** `BoundaryService::set()` writes a row of
+    `authorizable_boundaries`: the grantee's morph type and key, the policy, the tenant (null platform-wide) with its
+    `include_subtree`, and the actor. The scope is worked out as a grant's is (`GrantScopes::of()`), so a tenant's
+    policy is set in that tenant or below it and anywhere else is refused with `GrantScopeMismatchException`; a
+    boundary has no application. A null-folding unique key over the grantee and the tenant keeps one boundary per
+    scope: the write is insert-or-ignore followed by a locked read-back (`Services\Support\BoundaryTable`), so a
+    concurrent duplicate never raises, and returns `GRANTED`, `REPLACED` (another policy was the boundary there),
+    `REACH_CHANGED` or `UNCHANGED`. An ignored insert that leaves no row to read back is tried once more, and when that
+    leaves none either the call is refused, so it never reports a boundary no row bears out: a policy deleted at the
+    same moment (on MySQL, `INSERT IGNORE` turns the foreign key failure into a warning) with
+    `InvalidGrantTargetException`, any other failure with `UnwrittenGrantException`. `ResourcePolicyService::attach()`
+    reads its attachment back the same way. `remove()` removes the boundary in the tenant named, else the platform-wide
+    one, and returns whether there was one. A grantee that is never a subject's principal or identity (a role, a
+    permission or a policy) and an inline policy (`BoundaryException`), a policy naming `principals`
+    (`ResourcePolicyException`), a policy whose row is gone (`InvalidGrantTargetException`) and an unsaved grantee or
+    one without a key (`InvalidGranteeException`) are refused before anything is written. `GrantService::revokeAll()`
+    removes the grantee's boundaries in every scope with its grants, so deleting a grantee removes them too;
+    `removeAll()` removes them alone, which the grant pruner does for a grantee that is gone, counting them apart from
+    its grants. Each call is one transaction and one operation, dispatches `Identity\BoundarySet` (with the
+    `previous` policy it replaced) or `Identity\BoundaryRemoved` after commit only when it changed something, and
+    refreshes the grantee's cached resolutions through its version.
+
 ## Success Path
 
 ```php
@@ -163,6 +188,10 @@ working: each forwards to the matching service method with no actor.
   detaches those of every record that no longer exists, resolving the morph type to its model class as it does a
   grantee's, and reports each as `Resource\PolicyDetached`; a type that names no model class is reported and left, and
   a whole type's attachments are never pruned. Deleting the policy removes them with its row.
+- **A boundary's policy cannot be deleted.** The policy observer refuses the delete with `BoundaryException`, naming
+  every grantee it bounds, and the foreign key on `authorizable_boundaries.policy_id` restricts a delete made past the
+  model; remove each boundary first. A boundary left by a grantee deleted past its model events keeps the policy
+  undeletable until `authorization:prune` finds the grantee gone and removes it, counting it apart from the grants.
 - **The commands name no actor by default.** `authorization:grant`, `authorization:revoke` and `authorization:sync`
   take `--actor={morphType}:{key}`, which must name a row that exists; without it they record no actor.
 
@@ -176,6 +205,8 @@ working: each forwards to the matching service method with no actor.
   refusals and its deletion with that grantee.
 - `Services\ResourcePolicyService`, `Services\Support\ResourcePolicyTable` and `Support\PolicyPrincipals`: a
   resource's attachments, their scoped writes and the principals rule.
+- `Services\BoundaryService`, `Services\Support\BoundaryTable` and `Support\PolicyBoundaries`: a grantee's boundaries,
+  their scoped writes and the refused delete of a boundary's policy.
 - `Enums\GrantOutcome` and `Services\SyncResult`: what a call changed.
 - `Observers\RoleObserver::assertNoHierarchyCycle()`: the locked, unscoped ancestor walk.
 
@@ -190,6 +221,9 @@ working: each forwards to the matching service method with no actor.
   `GrantPrunerTest` and `PruneGrantsCommandTest` also pin the pruning of a gone record's resource policies.
 - `ResourcePolicyServiceTest`, `ResourcePolicyTableTest`, `PolicyPrincipalsTest`: a resource's attachments, their
   scope, idempotency, events and refusals.
+- `BoundaryServiceTest`, `BoundaryTableTest`, `PolicyBoundariesTest`: a grantee's boundaries, their scope, one per
+  scope, the replacement, events and refusals; `GrantServiceTest` and `GrantPrunerTest`: their removal with a deleted
+  or pruned grantee.
 - `HasRolesTest`, `HasPermissionsTest`, `HasPoliciesTest`, `ManagesPermissionsTest`: the traits delegate.
 
 ## Change Triggers

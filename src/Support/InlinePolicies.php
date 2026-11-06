@@ -155,6 +155,20 @@ final class InlinePolicies
     }
 
     /**
+     * Determine whether the policy with the given key is gone, by a locking
+     * read on the write connection outside any global scope, so a deletion
+     * another transaction committed since this one began is seen, as a plain
+     * read of a MySQL snapshot would not see it.
+     *
+     * @param  mixed  $key
+     * @return bool
+     */
+    public static function isGone(mixed $key): bool
+    {
+        return self::policyClass()::query()->withoutGlobalScopes()->useWritePdo()->whereKey($key)->sharedLock()->doesntExist();
+    }
+
+    /**
      * Limit a query of the attachments table to the rows whose policy is
      * managed, or is inline and belongs to the grantee the row names, so a
      * resolution never applies an inline policy that reached another grantee. A

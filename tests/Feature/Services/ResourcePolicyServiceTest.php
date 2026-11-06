@@ -17,6 +17,7 @@ use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidResourceException;
 use SineMacula\Laravel\Authorization\Exceptions\ResourcePolicyException;
+use SineMacula\Laravel\Authorization\Exceptions\UnwrittenGrantException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
@@ -24,6 +25,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\ComparesReferences;
+use Tests\Concerns\InterleavesWrites;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\StubIdentity;
@@ -44,7 +46,7 @@ use Tests\TestCase;
 #[CoversClass(ResourcePolicyService::class)]
 final class ResourcePolicyServiceTest extends TestCase
 {
-    use ActsAsTenant, ComparesReferences, ReadsDispatchedEvents;
+    use ActsAsTenant, ComparesReferences, InterleavesWrites, ReadsDispatchedEvents;
 
     /**
      * The service is bound once in the container.
@@ -265,6 +267,48 @@ final class ResourcePolicyServiceTest extends TestCase
         $this->expectException(InvalidGrantTargetException::class);
 
         self::service()->attach(new Policy(['name' => 'unsaved']), 'posts');
+    }
+
+    /**
+     * A policy deleted while it is attached, which on MySQL leaves no row once
+     * `INSERT IGNORE` turns the foreign key failure into a warning, is refused
+     * as gone, with nothing reported attached and no `PolicyAttached`
+     * dispatched; an attachment a concurrent change keeps from being written
+     * for another reason is refused as not written.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnAttachmentThatIsNotWrittenIsRefused(): void
+    {
+        $policy = self::sharing();
+
+        self::service()->attach($policy, ['posts', '7']);
+
+        Event::fake([PolicyAttached::class]);
+
+        $messages = [];
+
+        foreach ([InvalidGrantTargetException::class => true, UnwrittenGrantException::class => false] as $refusal => $isDeleted) {
+            self::churn($policy, $isDeleted);
+
+            try {
+                self::service()->attach($policy, ['posts', '7'], null, false);
+                self::fail("{$refusal} was not thrown.");
+            } catch (\Throwable $exception) {
+                self::assertInstanceOf($refusal, $exception);
+
+                $messages[] = $exception->getMessage();
+            }
+        }
+
+        $unwritten = 'The attachment of policy \'sharing\' to posts:7 was not written: no row was stored or found once the write was tried again; retry the call.';
+
+        self::assertSame($unwritten, $messages[1]);
+        self::assertSame([], self::dispatchedEvents(PolicyAttached::class));
+        self::assertTrue((bool) DB::table('resource_policies')->sole()->include_subtree);
+        self::assertNotNull(Policy::query()->find($policy->id));
     }
 
     /**
@@ -591,6 +635,36 @@ final class ResourcePolicyServiceTest extends TestCase
     private static function identifierOf(object $row): string
     {
         return $row->resource_type . ':' . ($row->resource_id ?? '*');
+    }
+
+    /**
+     * Interleave a concurrent change with each write of the policy's attachment
+     * to `posts:7`: the row is removed once each insert is ignored and put back
+     * once it is read back, so neither insert writes a row, and, when the
+     * policy is to be deleted, it is deleted with the second removal, once
+     * nothing refers to it.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @param  bool  $isDeleted
+     * @return void
+     */
+    private static function churn(Policy $policy, bool $isDeleted): void
+    {
+        $row     = (array) DB::table('resource_policies')->sole();
+        $removed = new \ArrayObject;
+
+        self::interleaveWrites('resource_policies', static function () use ($policy, $isDeleted, $removed): void {
+            DB::table('resource_policies')->delete();
+            $removed->append(true);
+
+            if (!$isDeleted || $removed->count() !== 2) {
+                return;
+            }
+
+            DB::table('policies')->where('id', $policy->id)->delete();
+        }, static function () use ($row): void {
+            DB::table('resource_policies')->insert($row);
+        }, 2, 1);
     }
 
     /**

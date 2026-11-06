@@ -440,6 +440,33 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
+     * A grantee's boundaries are stored as their documents under a kind of
+     * their own, keyed by the policy limits too, so they are never the
+     * grantee's policies, and are hydrated back with their keys.
+     *
+     * @return void
+     */
+    public function testBoundariesAreKeptApartFromPolicies(): void
+    {
+        $boundary = EvaluationPolicy::fromArray(['name' => 'cap', 'statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]])->withId('cap-key');
+        $policy   = EvaluationPolicy::fromArray(['name' => 'readers', 'statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]);
+
+        $this->request()->rememberBoundaries(self::grantee(), fn (): Resolution => $this->resolve([$boundary]));
+        $this->request()->rememberPolicies(self::grantee(), fn (): Resolution => $this->resolve([$policy]));
+
+        $entry = $this->store->get(\str_replace(':policies:', ':boundaries:', self::policiesKey()));
+        self::assertIsArray($entry);
+        self::assertSame([['id' => 'cap-key', 'document' => $boundary->toArray(), 'resource' => null]], $entry['value']);
+
+        $read = $this->request()->rememberBoundaries(self::grantee(), fn (): Resolution => $this->resolve([]));
+
+        self::assertSame(2, $this->resolutions);
+        self::assertEquals([$boundary], $read);
+        self::assertSame('cap-key', $read[0]->id);
+        self::assertEquals([$policy], $this->request()->rememberPolicies(self::grantee(), fn (): Resolution => $this->resolve([])));
+    }
+
+    /**
      * A cached policy keeps its stored key across a round trip through the
      * store, which holds each policy as its key beside its document; a policy
      * without a key comes back without one.

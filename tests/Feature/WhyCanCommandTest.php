@@ -27,6 +27,9 @@ use Tests\TestCase;
 #[CoversClass(WhyCanCommand::class)]
 final class WhyCanCommandTest extends TestCase
 {
+    /** @var string The lines the cap stages add to a trace when none of them caps the check. */
+    private const string UNCAPPED = "    [guardrail] guardrails: uncapped\n    [boundary] boundaries: uncapped\n    [session] session caps: uncapped\n";
+
     /**
      * Reports ALLOWED when the identity holds the permission through a role: no
      * reason, the allow stage, and a trace ending in the permission held.
@@ -52,7 +55,7 @@ final class WhyCanCommandTest extends TestCase
         self::assertStringContainsString('ALLOWED', $output);
         self::assertStringContainsString('  Reason:   (none)', $output);
         self::assertStringContainsString('  Stage:    allow', $output);
-        self::assertStringContainsString("  Trace:\n    [allow] permission: held\n", $output);
+        self::assertStringContainsString("  Trace:\n" . self::UNCAPPED . "    [allow] permission: held\n", $output);
     }
 
     /**
@@ -76,7 +79,7 @@ final class WhyCanCommandTest extends TestCase
         self::assertStringContainsString('DENIED', $output);
         self::assertStringContainsString('  Reason:   no_match', $output);
         self::assertStringContainsString('  Stage:    implicit', $output);
-        self::assertStringContainsString("  Trace:\n    [allow] permission: not_held\n", $output);
+        self::assertStringContainsString("  Trace:\n" . self::UNCAPPED . "    [allow] permission: not_held\n", $output);
     }
 
     /**
@@ -225,7 +228,9 @@ final class WhyCanCommandTest extends TestCase
         $output = Artisan::output();
 
         self::assertSame(0, $exitCode);
-        self::assertStringContainsString("  Trace:\n    [deny] trace-policy[{$policy->id}]#0: not_applicable\n    [allow] trace-policy[{$policy->id}]#1: matched\n", $output);
+        $trace = "  Trace:\n    [deny] trace-policy[{$policy->id}]#0: not_applicable\n" . self::UNCAPPED . "    [allow] trace-policy[{$policy->id}]#1: matched\n";
+
+        self::assertStringContainsString($trace, $output);
     }
 
     /**

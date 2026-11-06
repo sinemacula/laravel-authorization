@@ -9,6 +9,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 use Tests\Feature\Stubs\StubSecondIdentity;
@@ -72,6 +73,33 @@ final class SubjectGrantsTest extends TestCase
         self::assertSame(['person'], $names(SubjectGrants::identityPolicies(new Subject($principal, $identity))));
         self::assertSame([], SubjectGrants::identityPolicies(new Subject($principal, $principal)));
         self::assertSame([], SubjectGrants::identityPolicies(new Subject($principal)));
+    }
+
+    /**
+     * The boundaries of the principal and of its identity both apply, the
+     * identity's once, and only when it is another model.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheBoundariesOfThePrincipalAndItsIdentityApply(): void
+    {
+        $principal = SuspendableIdentity::create(['id' => 'account-1']);
+        $identity  = StubSecondIdentity::create(['id' => 'person-1']);
+        $service   = BoundaryService::instance();
+
+        self::assertNotNull($service);
+
+        $service->set($principal, Policy::create(['name' => 'account-cap', 'document' => ['version' => 1, 'statements' => []]]));
+        $service->set($identity, Policy::create(['name' => 'person-cap', 'document' => ['version' => 1, 'statements' => []]]));
+
+        $names = static fn (array $policies): array => \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $policies);
+
+        self::assertSame(['account-cap', 'person-cap'], $names(SubjectGrants::boundaries(new Subject($principal, $identity))));
+        self::assertSame(['account-cap'], $names(SubjectGrants::boundaries(new Subject($principal, $principal))));
+        self::assertSame(['account-cap'], $names(SubjectGrants::boundaries(new Subject($principal))));
+        self::assertSame([], SubjectGrants::boundaries(new Subject(new \stdClass)));
     }
 
     /**

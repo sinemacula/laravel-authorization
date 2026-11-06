@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Exceptions\ResourcePolicyException;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Support\PolicyPrincipals;
 use Tests\Feature\Stubs\StubIdentity;
@@ -115,6 +116,31 @@ final class PolicyPrincipalsTest extends TestCase
 
         self::assertSame([self::UNNAMED, self::DENY], self::stored($own));
         self::assertSame([self::UNNAMED], self::stored($loose));
+    }
+
+    /**
+     * A policy set as a grantee's boundary names no principals: a rewrite that
+     * names some is refused, and one that names none is kept.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testABoundaryNamesNoPrincipals(): void
+    {
+        $boundaries = BoundaryService::instance();
+        $cap        = self::policy('cap', [self::UNNAMED]);
+
+        self::assertNotNull($boundaries);
+
+        $boundaries->set(StubIdentity::create(['id' => 'user-1']), $cap);
+
+        self::assertRefused(static fn () => $cap->update(['document' => ['statements' => [self::DENY, self::NAMED]]]), 'cap', [1], 'statement #1 name some');
+        self::assertSame([self::UNNAMED], self::stored($cap));
+
+        $cap->update(['document' => ['statements' => [self::UNNAMED, self::DENY]]]);
+
+        self::assertSame([self::UNNAMED, self::DENY], self::stored($cap));
     }
 
     /**

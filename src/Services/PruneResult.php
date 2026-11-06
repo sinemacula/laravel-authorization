@@ -21,19 +21,20 @@ final readonly class PruneResult
      * @param  list<string>  $unresolvedTypes
      * @param  int  $resourcePolicies
      * @param  list<string>  $unresolvedResourceTypes
+     * @param  int  $boundaries
      */
     public function __construct(
 
         /** The grants removed because they had expired. */
         public int $expired,
 
-        /** The grants removed because their grantee no longer exists. */
+        /** The grants removed because their grantee no longer exists, its permission boundaries apart. */
         public int $orphaned,
 
         /** The inline policies removed because the grantee they belong to no longer exists. */
         public int $inlinePolicies,
 
-        /** The grantee types that name no model class, whose grants and inline policies were left. */
+        /** The grantee types that name no model class, whose grants, boundaries and inline policies were left. */
         public array $unresolvedTypes,
 
         /** The resource policy attachments removed because the record they are attached to no longer exists. */
@@ -41,5 +42,8 @@ final readonly class PruneResult
 
         /** The resource types that name no model class, whose records' attachments were left. */
         public array $unresolvedResourceTypes = [],
+
+        /** The permission boundaries removed because their grantee no longer exists. */
+        public int $boundaries = 0,
     ) {}
 }

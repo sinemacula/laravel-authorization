@@ -7,50 +7,70 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
-use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 
 /**
- * Decides a check from policy statements: the deny stage, then the allow stage,
- * then the implicit deny (AUTHZ-7.1).
+ * Decides a check from its statements, stage by stage (AUTHZ-7.1): the denies,
+ * the caps (guardrails, permission boundaries and session caps), then the
+ * allows, then the implicit deny. No allow is reached before every deny and
+ * every cap has run, so a deny, or a cap that does not allow the check, beats
+ * every allow source: a policy's allow, a resource policy's, a permission held
+ * and an insufficient authentication alike.
  *
- * Every deny statement of every policy is assessed, then, when none decided,
- * every allow statement, each in a fixed order (the policies by name, each
- * statement by its position) and recorded in the trace, so the decision, its
- * trace and the statements that decided it are the same whatever order the
- * policies were read in (AUTHZ-7.9). An explicit deny wins over any allow, and
- * the allows are not assessed once a deny decided (N4). The evaluator fails
- * closed: a deny statement applies when its test cannot be decided (a missing
- * context key, an unresolved `${…}` reference), and a statement that cannot be
- * evaluated denies the check as an invalid policy, so no fault in a statement
- * ever skips a deny.
+ * 1. *Deny*: every deny statement of every policy and every boundary is
+ *    assessed, each in a fixed order (the policies by name, each statement by
+ *    its position; see `StatementEntries`) and recorded in the trace, so the
+ *    decision, its trace and the statements that decided it are the same
+ *    whatever order the policies were read in (AUTHZ-7.9). An explicit deny
+ *    wins over any allow, and nothing after it is assessed (N4).
+ * 2. *Guardrail*: no guardrail applies yet (BL-49); the stage records that it
+ *    capped nothing.
+ * 3. *Boundary*: each boundary of the subject's principal and identity must
+ *    allow the check, as its allow statements would as an ordinary policy's,
+ *    conditions included. The boundaries are intersected: one that does not
+ *    allow the check, one with no allow statement included, denies it as
+ *    `boundary`, with a step that names it, and with none the stage caps
+ *    nothing. A boundary grants nothing: passing it only lets the allows be
+ *    weighed.
+ * 4. *Session*: no session cap applies yet (BL-50); the stage records that it
+ *    capped nothing.
+ * 5. *Allow*: every allow statement is assessed; failing an allow, a permission
+ *    the subject holds allows, asked through the callback the caller gives,
+ *    once, and only when no statement allowed and none was invalid.
+ * 6. *Implicit*: nothing allowed. The denial is `insufficient_authentication`
+ *    when an allow statement names the action and the resource and only its
+ *    authentication requirement is unmet (N35), with each such requirement and
+ *    its unmet parts as alternatives; `condition_failed` when an allow
+ *    statement names them but its conditions do not hold; and `no_match`
+ *    otherwise.
  *
- * Nothing allowed by a statement is denied as `insufficient_authentication`
- * when an allow statement names the action and the resource and only its
- * authentication requirement is unmet (N35), with each such requirement and its
- * unmet parts as alternatives; as `condition_failed` when an allow statement
- * names them but its conditions do not hold; and as `no_match` otherwise. On a
- * deny statement an unmet requirement is a test that does not hold, so the deny
- * does not apply, and one that cannot be checked applies it, as any undecidable
- * test does. A permission the subject holds is a further allow source, which
- * the manager consults when the statements allow nothing, so it allows over an
- * insufficient authentication too.
+ * Every stage the decision reaches is recorded in its trace: each statement it
+ * assessed, the permission step, a step naming each boundary that refused the
+ * check, and a step for a cap stage that capped nothing.
+ *
+ * The evaluator fails closed: a deny statement applies when its test cannot be
+ * decided (a missing context key, an unresolved `${…}` reference), and a
+ * statement that cannot be evaluated denies the check as an invalid policy at
+ * the stage that found it, so no fault in a statement ever skips a deny or a
+ * cap. On a deny statement an unmet requirement is a test that does not hold,
+ * so the deny does not apply, and one that cannot be checked applies it, as any
+ * undecidable test does. On a boundary's allow an unmet requirement keeps the
+ * boundary from allowing, so a boundary that refuses is never answered with a
+ * step-up.
  *
  * A policy attached to a resource (AUTHZ-7.3) is decided with the others: its
  * denies apply to everyone at the deny stage, and its allows only to a subject
  * their `principals` name, at the allow stage, with no permission held. An
- * allow that does not apply to the subject is recorded as a principal mismatch
- * and bears on nothing, an unmet authentication requirement included.
+ * allow that does not apply to the subject, a boundary's included, is recorded
+ * as a principal mismatch and bears on nothing, an unmet authentication
+ * requirement included.
  *
  * A decision that read a requirement carries how long it may be reused: in the
  * session it was made in, until the earliest instant a met requirement it read
  * stops being met (N37).
  *
- * @phpstan-type StatementEntry array{
- *     \SineMacula\Laravel\Authorization\Evaluation\StatementReference,
- *     \SineMacula\Laravel\Authorization\Evaluation\Statement,
- *     \SineMacula\Laravel\Authorization\Evaluation\TraceEntry
- * }
+ * @phpstan-import-type StatementEntry from \SineMacula\Laravel\Authorization\Evaluation\StatementEntries
+ * @phpstan-import-type Gathered from \SineMacula\Laravel\Authorization\Evaluation\StatementEntries
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -78,16 +98,14 @@ final class PolicyEvaluator
     /** @var \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null Lazily created interpolator. */
     private ?ContextInterpolator $interpolator = null;
 
-    /**
-     * Each policy's statements with their references, kept while the policy
-     * lives.
-     *
-     * @var \WeakMap<\SineMacula\Laravel\Authorization\Evaluation\Policy, array{deny: list<StatementEntry>, allow: list<StatementEntry>}>|null
-     */
-    private ?\WeakMap $entries = null;
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\StatementEntries|null Each policy's statements, worked out once per policy. */
+    private ?StatementEntries $entries = null;
+
+    /** @var array<string, \SineMacula\Laravel\Authorization\Evaluation\TraceEntry> The step each cap stage adds when it caps nothing, made once. */
+    private array $uncapped = [];
 
     /**
-     * Decide the check from the policies' statements.
+     * Decide the check from the statements of the policies and the boundaries.
      *
      * The context is the check's own: every statement of the check reads the
      * same one, which builds each namespace the first time a statement reads
@@ -96,29 +114,45 @@ final class PolicyEvaluator
      * factory holds it, and the subject and resource under `subject` and
      * `resource`; the resource identifier is what resource patterns match.
      *
+     * The boundaries are the permission boundaries that apply to the check,
+     * each of which must allow it. The permission callback answers whether the
+     * subject holds a permission the action names; with none, no permission is
+     * consulted.
+     *
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
      * @param  string  $action
      * @param  string|null  $resource
      * @param  array<array-key, mixed>|\SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
+     * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $boundaries
+     * @param  (\Closure(): bool)|null  $permission
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    public function evaluate(array $policies, string $action, ?string $resource = null, array|CheckContext $context = []): Decision
-    {
-        $context = CheckContext::from($context);
+    public function evaluate(
+        array $policies,
+        string $action,
+        ?string $resource = null,
+        array|CheckContext $context = [],
+        array $boundaries = [],
+        ?\Closure $permission = null,
+    ): Decision {
+        $context    = CheckContext::from($context);
+        $statements = ($this->entries ??= new StatementEntries)->of($policies, $boundaries);
 
-        return $this->decide($this->statementsOf($policies), $action, $resource, $context)->withFreshness($context->requirementFreshness());
+        return $this->decide($statements, $action, $resource, $context, $permission)->withFreshness($context->requirementFreshness());
     }
 
     /**
-     * Decide the check from the statements, the deny stage first.
+     * Decide the check from the statements, stage by stage: the denies, then
+     * the caps, then the allows.
      *
-     * @param  array{deny: list<StatementEntry>, allow: list<StatementEntry>}  $statements
+     * @param  Gathered  $statements
      * @param  string  $action
      * @param  string|null  $resource
      * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
+     * @param  (\Closure(): bool)|null  $permission
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    private function decide(array $statements, string $action, ?string $resource, CheckContext $context): Decision
+    private function decide(array $statements, string $action, ?string $resource, CheckContext $context, ?\Closure $permission): Decision
     {
         $trace    = [];
         [$denies] = $this->assess($statements[self::DENY], DecisionStage::DENY, $action, $resource, $context, $trace);
@@ -127,7 +161,119 @@ final class PolicyEvaluator
             return self::conclude(DecisionStage::DENY, $denies, [], $trace);
         }
 
-        [$allows, $requirements] = $this->assess($statements[self::ALLOW], DecisionStage::ALLOW, $action, $resource, $context, $trace);
+        $capped = $this->cap($statements['boundaries'], $action, $resource, $context, $trace);
+
+        return $capped ?? $this->allow($statements[self::ALLOW], $action, $resource, $context, $permission, $trace);
+    }
+
+    /**
+     * Run the cap stages in order, guardrails, boundaries, then session caps,
+     * and return the denial of the first that does not allow the check, or null
+     * when none caps it, adding each stage's steps to the trace.
+     *
+     * Guardrails (BL-49) and session caps (BL-50) take their places here as
+     * they arrive; until then each records that it capped nothing.
+     *
+     * @param  list<array{list<StatementEntry>, \SineMacula\Laravel\Authorization\Evaluation\TraceEntry}>  $boundaries
+     * @param  string  $action
+     * @param  string|null  $resource
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
+     * @param  list<\SineMacula\Laravel\Authorization\Evaluation\TraceEntry>  $trace
+     *
+     * @param-out list<\SineMacula\Laravel\Authorization\Evaluation\TraceEntry>  $trace
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision|null
+     */
+    private function cap(array $boundaries, string $action, ?string $resource, CheckContext $context, array &$trace): ?Decision
+    {
+        $trace[] = $this->uncapped(DecisionStage::GUARDRAIL);
+
+        $bounded = $this->bound($boundaries, $action, $resource, $context, $trace);
+
+        if ($bounded === null) {
+            $trace[] = $this->uncapped(DecisionStage::SESSION);
+        }
+
+        return $bounded;
+    }
+
+    /**
+     * Run the boundary stage: every allow statement of every boundary is
+     * assessed, each boundary in turn, and the check passes only when each
+     * boundary has one that allows it. Each boundary that does not adds a step
+     * naming it. Return the denial when one does not, as `boundary`, or as
+     * `invalid_policy` when a boundary's statement cannot be evaluated, or null
+     * when every boundary allows it or there is none.
+     *
+     * @param  list<array{list<StatementEntry>, \SineMacula\Laravel\Authorization\Evaluation\TraceEntry}>  $boundaries
+     * @param  string  $action
+     * @param  string|null  $resource
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
+     * @param  list<\SineMacula\Laravel\Authorization\Evaluation\TraceEntry>  $trace
+     *
+     * @param-out list<\SineMacula\Laravel\Authorization\Evaluation\TraceEntry>  $trace
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision|null
+     */
+    private function bound(array $boundaries, string $action, ?string $resource, CheckContext $context, array &$trace): ?Decision
+    {
+        if ($boundaries === []) {
+            $trace[] = $this->uncapped(DecisionStage::BOUNDARY);
+
+            return null;
+        }
+
+        $invalid = [];
+        $refused = false;
+
+        foreach ($boundaries as [$statements, $refusal]) {
+            [$found] = $this->assess($statements, DecisionStage::BOUNDARY, $action, $resource, $context, $trace);
+            $invalid = [...$invalid, ...$found[self::INVALID]];
+
+            if ($found[self::ALLOW] !== []) {
+                continue;
+            }
+
+            // A boundary that does not allow the check, one with no allow
+            // statement included, is named in the trace, so the decision says
+            // which cap refused it.
+            $refused = true;
+            $trace[] = $refusal;
+        }
+
+        return match (true) {
+            $invalid !== [] => Decision::deny(DecisionReason::INVALID_POLICY, DecisionStage::BOUNDARY, $invalid, $trace),
+            $refused        => Decision::deny(DecisionReason::BOUNDARY, DecisionStage::BOUNDARY, [], $trace),
+            default         => null,
+        };
+    }
+
+    /**
+     * Run the allow stage, and conclude the decision: an allow statement that
+     * matches allows, failing that a permission the subject holds, and failing
+     * that the implicit deny decides. The permission is asked only when no
+     * allow statement matched and none was invalid, and its step recorded.
+     *
+     * @param  list<StatementEntry>  $statements
+     * @param  string  $action
+     * @param  string|null  $resource
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
+     * @param  (\Closure(): bool)|null  $permission
+     * @param  list<\SineMacula\Laravel\Authorization\Evaluation\TraceEntry>  $trace
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
+     */
+    private function allow(array $statements, string $action, ?string $resource, CheckContext $context, ?\Closure $permission, array $trace): Decision
+    {
+        [$allows, $requirements] = $this->assess($statements, DecisionStage::ALLOW, $action, $resource, $context, $trace);
+
+        if ($permission !== null && $allows[self::ALLOW] === [] && $allows[self::INVALID] === []) {
+            $held    = $permission();
+            $trace[] = new TraceEntry(DecisionStage::ALLOW, $held ? TraceOutcome::HELD : TraceOutcome::NOT_HELD);
+
+            if ($held) {
+                return Decision::allow(DecisionStage::ALLOW, [], $trace);
+            }
+        }
 
         return self::conclude(DecisionStage::ALLOW, $allows, $requirements, $trace);
     }
@@ -153,6 +299,7 @@ final class PolicyEvaluator
     {
         $found        = [self::DENY => [], self::INVALID => [], self::ALLOW => [], self::INSUFFICIENT => [], self::FAILED => [], self::NONE => []];
         $requirements = [];
+        $isDeny       = $stage === DecisionStage::DENY;
 
         foreach ($statements as [$reference, $statement, $notApplicable]) {
             // Most statements do not name the action, and decide nothing.
@@ -162,10 +309,9 @@ final class PolicyEvaluator
                 continue;
             }
 
-            // An allow applies only to the subjects its source admits.
-            // Boundaries, guardrails and session caps (BL-48 to BL-50) will
-            // rank above a resource policy's allow when they arrive.
-            if ($stage === DecisionStage::ALLOW && !self::isForSubject($reference, $statement, $context)) {
+            // An allow, a boundary's included, applies only to the subjects its
+            // source admits.
+            if (!$isDeny && !self::isForSubject($reference, $statement, $context)) {
                 $trace[] = new TraceEntry($stage, TraceOutcome::PRINCIPAL_MISMATCH, $reference);
 
                 continue;
@@ -178,7 +324,7 @@ final class PolicyEvaluator
             $trace[] = new TraceEntry($stage, $outcome, $reference, $assessment->conditions ?? []);
 
             if ($unmet === null) {
-                $found[self::categoryOf($stage === DecisionStage::DENY, $outcome)][] = $reference;
+                $found[self::categoryOf($isDeny, $outcome)][] = $reference;
 
                 continue;
             }
@@ -191,65 +337,10 @@ final class PolicyEvaluator
     }
 
     /**
-     * Return every statement of the policies with its reference, the deny
-     * statements and the allow statements apart, the policies in order of name
-     * and each statement in order of position.
-     *
-     * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
-     * @return array{deny: list<StatementEntry>, allow: list<StatementEntry>}
-     */
-    private function statementsOf(array $policies): array
-    {
-        \usort($policies, static fn (Policy $left, Policy $right): int => \strcmp(self::orderOf($left), self::orderOf($right)));
-
-        $statements = [self::DENY => [], self::ALLOW => []];
-
-        foreach ($policies as $policy) {
-            foreach ($this->entriesOf($policy) as $effect => $entries) {
-                foreach ($entries as $entry) {
-                    $statements[$effect][] = $entry;
-                }
-            }
-        }
-
-        return $statements;
-    }
-
-    /**
-     * Return a policy's statements, each with its reference and the trace entry
-     * it adds when it does not name the action, the deny statements and the
-     * allow statements apart, built once per policy.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $policy
-     * @return array{deny: list<StatementEntry>, allow: list<StatementEntry>}
-     */
-    private function entriesOf(Policy $policy): array
-    {
-        $this->entries ??= new \WeakMap;
-
-        if (!isset($this->entries[$policy])) {
-            $entries = [self::DENY => [], self::ALLOW => []];
-
-            foreach ($policy->statements as $index => $statement) {
-                $isDeny    = $statement->effect === PolicyEffect::DENY;
-                $reference = new StatementReference($policy->name, $index, $policy->id, $statement->sid, $policy->resource);
-
-                $stage = $isDeny ? DecisionStage::DENY : DecisionStage::ALLOW;
-
-                $entries[$isDeny ? self::DENY : self::ALLOW][] = [$reference, $statement, new TraceEntry($stage, TraceOutcome::NOT_APPLICABLE, $reference)];
-            }
-
-            $this->entries[$policy] = $entries;
-        }
-
-        return $this->entries[$policy];
-    }
-
-    /**
      * Determine whether an allow statement applies to the check's subject, as
      * its source admits: in a resource policy, only when one of its
-     * `principals` names the subject; in a policy attached any other way, only
-     * when it names no principals.
+     * `principals` names the subject; in a policy attached any other way, a
+     * boundary included, only when it names no principals.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\StatementReference  $reference
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
@@ -263,20 +354,6 @@ final class PolicyEvaluator
         }
 
         return $statement->principals !== null && $context->isSubjectNamedBy($statement->principals);
-    }
-
-    /**
-     * Return what a policy is ordered by: its name, then its stored key, then
-     * the resource it is attached to, then its document, so policies of one
-     * name take a fixed order too and two that tie on all four are the same
-     * policy, attached the same way.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $policy
-     * @return string
-     */
-    private static function orderOf(Policy $policy): string
-    {
-        return $policy->name . "\0" . ($policy->id ?? '') . "\0" . ($policy->resource ?? '') . "\0" . \json_encode($policy->toArray(), \JSON_THROW_ON_ERROR);
     }
 
     /**
@@ -325,13 +402,14 @@ final class PolicyEvaluator
     }
 
     /**
-     * Conclude the decision from what a stage's statements found: an explicit
-     * deny, then an invalid statement, then an allow, then an implicit deny:
-     * insufficient authentication, then a failed condition, then no match. An
-     * invalid statement denies at the stage that found it.
+     * Conclude the decision from what the deny or the allow stage's statements
+     * found: an explicit deny, then an invalid statement, then an allow, then
+     * an implicit deny: insufficient authentication, then a failed condition,
+     * then no match. An invalid statement denies at the stage that found it.
      *
-     * Insufficient authentication is concluded at the implicit stage, so a
-     * permission the subject holds still allows over it.
+     * By the time the allow stage concludes, every deny and every cap has let
+     * the check through, so insufficient authentication is only ever concluded
+     * once nothing refuses it but the requirement.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage  $stage
      * @param  array<string, list<\SineMacula\Laravel\Authorization\Evaluation\StatementReference>>  $found
@@ -341,8 +419,6 @@ final class PolicyEvaluator
      */
     private static function conclude(DecisionStage $stage, array $found, array $requirements, array $trace): Decision
     {
-        // Boundaries, guardrails and session caps (BL-48 to BL-50) will rank
-        // above insufficient authentication when they arrive.
         return match (true) {
             $found[self::DENY]         !== [] => Decision::deny(DecisionReason::EXPLICIT_DENY, DecisionStage::DENY, $found[self::DENY], $trace),
             $found[self::INVALID]      !== [] => Decision::deny(DecisionReason::INVALID_POLICY, $stage, $found[self::INVALID], $trace),
@@ -351,6 +427,17 @@ final class PolicyEvaluator
             $found[self::FAILED]       !== [] => Decision::deny(DecisionReason::CONDITION_FAILED, DecisionStage::IMPLICIT, [], $trace),
             default                           => Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT, [], $trace),
         };
+    }
+
+    /**
+     * Return the step a cap stage adds when it caps nothing, made once.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage  $stage
+     * @return \SineMacula\Laravel\Authorization\Evaluation\TraceEntry
+     */
+    private function uncapped(DecisionStage $stage): TraceEntry
+    {
+        return $this->uncapped[$stage->value] ??= new TraceEntry($stage, TraceOutcome::UNCAPPED);
     }
 
     /**

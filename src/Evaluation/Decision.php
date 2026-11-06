@@ -7,15 +7,15 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
-use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 
 /**
  * The decision of one check (AUTHZ-7.1, AUTHZ-7.9, AUTHZ-7.10, D11).
  *
  * It says whether the check is allowed, and, when it is denied, why, as a
  * machine-readable reason. It names the stage that decided it and the
- * statements that did (none for a permission held, or a denial no statement
- * made), and carries the trace of every step the decision took, in a fixed
+ * statements that did (none for a permission held, a boundary that does not
+ * allow it, or another denial no statement made), and carries the trace of
+ * every step the decision took, every stage it reached included, in a fixed
  * order whatever order the policies were read in. The trace holds key names and
  * results, never a context or attribute value (AUTHZ-8.8), so it is safe to log
  * or store.
@@ -120,23 +120,6 @@ final readonly class Decision
     public function isAllowed(): bool
     {
         return $this->effect === DecisionEffect::ALLOW;
-    }
-
-    /**
-     * Return the decision once the subject's permissions are consulted, when no
-     * statement decided it: an allow when the subject holds the permission the
-     * action names, else the same denial, the step recorded either way.
-     *
-     * @param  bool  $held
-     * @return self
-     */
-    public function withPermission(bool $held): self
-    {
-        $step = new TraceEntry(DecisionStage::ALLOW, $held ? TraceOutcome::HELD : TraceOutcome::NOT_HELD);
-
-        return $held
-            ? new self(DecisionEffect::ALLOW, null, DecisionStage::ALLOW, [], [...$this->trace, $step], [], $this->freshness)
-            : $this->withStep($step);
     }
 
     /**

@@ -161,6 +161,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame(DecisionStage::ALLOW, $decision->stage);
         self::assertSame([], $decision->statements);
         self::assertEquals([
+            ...self::uncapped(),
             new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_APPLICABLE, new StatementReference('noise', 0)),
             new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD),
         ], $decision->trace);
@@ -188,6 +189,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame(DecisionStage::IMPLICIT, $decision->stage);
         self::assertSame([], $decision->statements);
         self::assertEquals([
+            ...self::uncapped(),
             new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_APPLICABLE, new StatementReference('noise', 0)),
             new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_HELD),
         ], $decision->trace);
@@ -215,12 +217,12 @@ final class AuthorizationManagerTest extends TestCase
 
         self::assertSame(DecisionReason::CONDITION_FAILED, $denied->reason);
         self::assertSame(DecisionStage::IMPLICIT, $denied->stage);
-        self::assertEquals([$failed, new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_HELD)], $denied->trace);
+        self::assertEquals([...self::uncapped(), $failed, new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_HELD)], $denied->trace);
 
         self::assertTrue($allowed->isAllowed());
         self::assertSame(DecisionStage::ALLOW, $allowed->stage);
         self::assertSame([], $allowed->statements);
-        self::assertEquals([$failed, new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD)], $allowed->trace);
+        self::assertEquals([...self::uncapped(), $failed, new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD)], $allowed->trace);
     }
 
     /**
@@ -247,7 +249,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertFalse($manager->can('posts:create', null, ['input.request.ip' => '10.0.0.1']));
         self::assertFalse($manager->can('posts:update', null, ['request' => ['ip' => '10.0.0.1']]));
         self::assertFalse($manager->can('posts:update', null, ['request.ip' => '10.0.0.1']));
-        self::assertSame(TraceOutcome::UNDECIDABLE, $manager->check('posts:update', null, ['request' => ['ip' => '10.0.0.1']])->trace[1]->outcome);
+        self::assertSame(TraceOutcome::UNDECIDABLE, $manager->check('posts:update', null, ['request' => ['ip' => '10.0.0.1']])->trace[4]->outcome);
     }
 
     /**
@@ -361,6 +363,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame(DecisionStage::ALLOW, $decision->stage);
         self::assertEquals([new StatementReference('allow-create', 0)], $decision->statements);
         self::assertEquals([
+            ...self::uncapped(),
             new TraceEntry(DecisionStage::ALLOW, TraceOutcome::MATCHED, new StatementReference('allow-create', 0)),
         ], $decision->trace);
     }
@@ -734,7 +737,7 @@ final class AuthorizationManagerTest extends TestCase
 
         self::assertTrue($decision->isAllowed());
         self::assertEquals([new StatementReference('override', 0)], $decision->statements);
-        self::assertCount(1, $decision->trace);
+        self::assertCount(4, $decision->trace);
     }
 
     /**
@@ -1475,5 +1478,20 @@ final class AuthorizationManagerTest extends TestCase
             ->andReturn($active);
 
         return $principal;
+    }
+
+    /**
+     * Return the steps the guardrail, boundary and session stages add, in that
+     * order, when none of them caps the check.
+     *
+     * @return list<\SineMacula\Laravel\Authorization\Evaluation\TraceEntry>
+     */
+    private static function uncapped(): array
+    {
+        return [
+            new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::UNCAPPED),
+            new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::UNCAPPED),
+            new TraceEntry(DecisionStage::SESSION, TraceOutcome::UNCAPPED),
+        ];
     }
 }

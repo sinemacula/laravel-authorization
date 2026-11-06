@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
+use SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked;
@@ -33,6 +34,7 @@ use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\SyncResult;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -269,8 +271,8 @@ final class GrantServiceTest extends TestCase
 
     /**
      * Revoking everything removes every role, permission and policy the grantee
-     * holds, in one operation that reports each revocation with the actor, and
-     * leaves other grantees' grants alone.
+     * holds, and its boundaries, in one operation that reports each revocation
+     * and removal with the actor, and leaves other grantees' grants alone.
      *
      * @return void
      *
@@ -288,10 +290,11 @@ final class GrantServiceTest extends TestCase
         self::service()->grantRole($other, $role);
         self::service()->grantPermission($user, Permission::create(['name' => 'posts:edit']));
         self::service()->attachPolicy($user, $policy);
+        BoundaryService::instance()?->set($user, Policy::create(['name' => 'cap', 'document' => ['version' => 1, 'statements' => []]]));
 
         Event::fake();
 
-        self::assertSame(3, self::service()->revokeAll($user, $actor));
+        self::assertSame(4, self::service()->revokeAll($user, $actor));
 
         self::assertSame(0, DB::table('authorizable_roles')->where('authorizable_id', $user->getKey())->count());
         self::assertSame(0, DB::table('authorizable_permissions')->where('authorizable_id', $user->getKey())->count());
@@ -304,9 +307,13 @@ final class GrantServiceTest extends TestCase
         );
         Event::assertDispatched(PermissionRevoked::class, static fn (PermissionRevoked $event): bool => self::refersTo($event->grantee, $user));
         Event::assertDispatched(PolicyDetached::class, static fn (PolicyDetached $event): bool => self::refersTo($event->grantee, $user));
+        Event::assertDispatched(BoundaryRemoved::class, static fn (BoundaryRemoved $event): bool => self::refersTo($event->grantee, $user) && $event->name === 'cap');
+
+        self::assertSame(0, DB::table('authorizable_boundaries')->count());
 
         $events     = [...self::dispatchedEvents(RoleRevoked::class), ...self::dispatchedEvents(PermissionRevoked::class), ...self::dispatchedEvents(PolicyDetached::class)];
-        $operations = \array_unique(\array_map(static fn (PermissionRevoked|PolicyDetached|RoleRevoked $event): string => $event->operation->id, $events));
+        $events     = [...$events, ...self::dispatchedEvents(BoundaryRemoved::class)];
+        $operations = \array_unique(\array_map(static fn (BoundaryRemoved|PermissionRevoked|PolicyDetached|RoleRevoked $event): string => $event->operation->id, $events));
 
         self::assertCount(1, $operations);
         self::assertSame([], $user->getRoles());

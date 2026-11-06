@@ -31,9 +31,13 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * between the read and the delete is kept. The grants of a grantee that no
  * longer exists, such as one deleted by a raw query rather than through the
  * model, are revoked through `GrantService::revokeAll()`, so each is reported
- * as revoked. A soft-deleted grantee still exists and keeps its grants. A
- * grantee type that names no model class is skipped and reported, so a missing
- * morph map entry never removes grants.
+ * as revoked. Its permission boundaries (AUTHZ-7.4) are removed first, through
+ * `BoundaryService::removeAll()`, each reported as removed and counted apart
+ * from the grants: a grantee whose only rows are boundaries is found too, so a
+ * boundary it leaves behind never keeps its policy undeletable. A soft-deleted
+ * grantee still exists and keeps its grants and its boundaries. A grantee type
+ * that names no model class is skipped and reported, so a missing morph map
+ * entry never removes grants or boundaries.
  *
  * The inline policies of a grantee that no longer exists are deleted too, each
  * through the model so it is reported as deleted and its attachments go with it
@@ -52,10 +56,10 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * removed.
  *
  * Pretending counts exactly what a real run would remove, in the same order: an
- * expired grant once, among the expired, and the grants of a grantee that is
- * gone that are still live, with the attachments of its own inline policies
- * among them, since a real run revokes those before it deletes the policies,
- * then the attachments of each record that is gone.
+ * expired grant once, among the expired, the boundaries of a grantee that is
+ * gone, and its grants that are still live, with the attachments of its own
+ * inline policies among them, since a real run revokes those before it deletes
+ * the policies, then the attachments of each record that is gone.
  *
  * @phpstan-type ExpiredRow array{
  *     target_id: string,
@@ -79,6 +83,7 @@ final readonly class GrantPruner
      *
      * @param  \SineMacula\Laravel\Authorization\Services\GrantService  $grants
      * @param  \SineMacula\Laravel\Authorization\Services\ResourcePolicyService  $resourcePolicies
+     * @param  \SineMacula\Laravel\Authorization\Services\BoundaryService  $boundaries
      */
     public function __construct(
 
@@ -87,12 +92,15 @@ final readonly class GrantPruner
 
         /** The resource policy service the attachments of a record that is gone are detached through. */
         private ResourcePolicyService $resourcePolicies,
+
+        /** The boundary service the boundaries of a grantee that is gone are removed through. */
+        private BoundaryService $boundaries,
     ) {}
 
     /**
-     * Remove the expired grants, the grants and inline policies of grantees
-     * that no longer exist, and the resource policy attachments of records that
-     * no longer exist, or, pretending, only count them.
+     * Remove the expired grants, the boundaries, grants and inline policies of
+     * grantees that no longer exist, and the resource policy attachments of
+     * records that no longer exist, or, pretending, only count them.
      *
      * @param  int  $chunk
      * @param  bool  $pretend
@@ -120,9 +128,11 @@ final readonly class GrantPruner
 
         [$orphans, $unresolved] = self::orphans($chunk);
         $orphaned               = 0;
+        $boundaries             = 0;
 
         foreach ($orphans as $grantee) {
-            $orphaned += $pretend ? self::countLiveGrants($grantee) : $this->grants->revokeAll($grantee);
+            $boundaries += $pretend ? self::countBoundaries($grantee) : $this->boundaries->removeAll($grantee);
+            $orphaned   += $pretend ? self::countLiveGrants($grantee) : $this->grants->revokeAll($grantee);
         }
 
         [$owners, $unowned] = self::missingOwners(self::policiesTable(), 'owner', $chunk);
@@ -139,7 +149,7 @@ final readonly class GrantPruner
             $attachments += $pretend ? self::countAttachments($record) : $this->resourcePolicies->detachAll(ResourceReference::record($record->type, $record->id));
         }
 
-        return new PruneResult($expired, $orphaned, $inline, \array_values($unresolved + $unowned), $attachments, \array_values($unplaced));
+        return new PruneResult($expired, $orphaned, $inline, \array_values($unresolved + $unowned), $attachments, \array_values($unplaced), $boundaries);
     }
 
     /**
@@ -334,9 +344,9 @@ final readonly class GrantPruner
     }
 
     /**
-     * Return the grantees, across every grant table, that no longer exist,
-     * keyed so each is listed once, and the grantee types that name no model
-     * class.
+     * Return the grantees, across every grant table and the boundaries table,
+     * that no longer exist, keyed so each is listed once, and the grantee types
+     * that name no model class.
      *
      * @param  int  $chunk
      * @return array{0: array<string, \SineMacula\Laravel\Authorization\Support\Reference>, 1: array<string, string>}
@@ -346,8 +356,8 @@ final readonly class GrantPruner
         $orphans    = [];
         $unresolved = [];
 
-        foreach (GrantTarget::cases() as $kind) {
-            [$missing, $types] = self::missingOwners($kind->table(), 'authorizable', $chunk);
+        foreach ([...\array_map(static fn (GrantTarget $kind): string => $kind->table(), GrantTarget::cases()), self::boundariesTable()] as $table) {
+            [$missing, $types] = self::missingOwners($table, 'authorizable', $chunk);
 
             $orphans    += $missing;
             $unresolved += $types;
@@ -458,6 +468,17 @@ final readonly class GrantPruner
     }
 
     /**
+     * Return the boundaries table, as `authorization.tables` names it.
+     *
+     * @return string
+     */
+    private static function boundariesTable(): string
+    {
+        /** @var string */
+        return config('authorization.tables.authorizable_boundaries', 'authorizable_boundaries');
+    }
+
+    /**
      * Count the resource policy attachments of the record, in every scope.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $record
@@ -468,6 +489,20 @@ final readonly class GrantPruner
         return AuthorizationConnection::connection()->table(self::resourcePoliciesTable())
             ->where('resource_type', $record->type)
             ->where('resource_id', $record->id)
+            ->count();
+    }
+
+    /**
+     * Count the grantee's permission boundaries, in every scope.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @return int
+     */
+    private static function countBoundaries(Reference $grantee): int
+    {
+        return AuthorizationConnection::connection()->table(self::boundariesTable())
+            ->where('authorizable_type', $grantee->type)
+            ->where('authorizable_id', $grantee->id)
             ->count();
     }
 
