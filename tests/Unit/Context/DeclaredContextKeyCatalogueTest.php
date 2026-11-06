@@ -46,8 +46,16 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
             'request.ip'               => new ContextKey('request.ip', ContextKeyType::IP),
             'request.method'           => new ContextKey('request.method', ContextKeyType::STRING),
             'request.route'            => new ContextKey('request.route', ContextKeyType::STRING),
+            'resource.id'              => new ContextKey('resource.id', ContextKeyType::STRING),
+            'resource.tenant.id'       => new ContextKey('resource.tenant.id', ContextKeyType::STRING),
+            'resource.tenant.type'     => new ContextKey('resource.tenant.type', ContextKeyType::STRING),
+            'resource.type'            => new ContextKey('resource.type', ContextKeyType::STRING),
+            'subject.id'               => new ContextKey('subject.id', ContextKeyType::STRING),
+            'subject.tenant.id'        => new ContextKey('subject.tenant.id', ContextKeyType::STRING),
+            'subject.tenant.type'      => new ContextKey('subject.tenant.type', ContextKeyType::STRING),
+            'subject.type'             => new ContextKey('subject.type', ContextKeyType::STRING),
         ], $catalogue->keys());
-        self::assertSame(['authentication', 'environment', 'request'], $catalogue->namespaces());
+        self::assertSame(['authentication', 'environment', 'request', 'resource', 'subject'], $catalogue->namespaces());
     }
 
     /**
@@ -97,7 +105,7 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
         self::assertEquals(new ContextKey('tenant.plan', ContextKeyType::STRING), $catalogue->find('tenant.plan'));
         self::assertEquals(new ContextKey('tenant.limits.seats', ContextKeyType::NUMBER), $catalogue->find('tenant.limits.seats'));
         self::assertEquals(new ContextKey('input.post.status', ContextKeyType::STRING), $catalogue->find('input.post.status'));
-        self::assertSame(['authentication', 'environment', 'input', 'request', 'tenant'], $catalogue->namespaces());
+        self::assertSame(['authentication', 'environment', 'input', 'request', 'resource', 'subject', 'tenant'], $catalogue->namespaces());
     }
 
     /**
@@ -132,7 +140,7 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
 
         self::assertEquals(new ContextKey('authentication.level', ContextKeyType::NUMBER, false), $catalogue->find('authentication.level'));
         self::assertEquals(new ContextKey('device.trusted', ContextKeyType::BOOL), $catalogue->find('device.trusted'));
-        self::assertSame(['alpha', 'authentication', 'device', 'environment', 'request'], $catalogue->namespaces());
+        self::assertSame(['alpha', 'authentication', 'device', 'environment', 'request', 'resource', 'subject'], $catalogue->namespaces());
         self::assertSame([
             'alpha.tags',
             'authentication.guard',
@@ -145,6 +153,14 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
             'request.ip',
             'request.method',
             'request.route',
+            'resource.id',
+            'resource.tenant.id',
+            'resource.tenant.type',
+            'resource.type',
+            'subject.id',
+            'subject.tenant.id',
+            'subject.tenant.type',
+            'subject.type',
         ], \array_keys($catalogue->keys()));
     }
 
@@ -252,50 +268,152 @@ final class DeclaredContextKeyCatalogueTest extends TestCase
     }
 
     /**
-     * Provide the namespaces that are not part of a check's context.
+     * Provide the namespaces whose keys only the package and the attribute
+     * providers declare.
      *
      * @return iterable<string, array{string}>
      */
-    public static function nonContextNamespaceProvider(): iterable
+    public static function attributeNamespaceProvider(): iterable
     {
-        yield 'principal' => ['principal'];
         yield 'resource' => ['resource'];
         yield 'subject' => ['subject'];
     }
 
     /**
-     * A key under a namespace that is not part of a check's context is refused,
-     * whether declared or registered, and is not declared.
+     * A key under `subject` or `resource` is refused, whether declared or
+     * registered, and is not declared, while the built-ins stay as they were.
      *
      * @param  string  $namespace
      * @return void
      */
-    #[DataProvider('nonContextNamespaceProvider')]
-    public function testRefusesAKeyOutsideTheChecksContext(string $namespace): void
+    #[DataProvider('attributeNamespaceProvider')]
+    public function testRefusesAKeyUnderAnAttributeNamespace(string $namespace): void
     {
-        $reason = "is under the namespace '{$namespace}', which is not part of a check's context; "
-            . '`${principal.…}` and `${resource.…}` read the principal and the resource without declaring them.';
+        $reason = "is under the namespace '{$namespace}', whose keys are the package's built-ins and those an attribute provider declares; "
+            . 'register a provider in authorization.attributes.subjects or authorization.attributes.resources.';
         $catalogue = new DeclaredContextKeyCatalogue;
 
         try {
             $catalogue->declare("{$namespace}.email", ContextKeyType::STRING);
 
-            self::fail('A key outside the check\'s context is refused on declare.');
+            self::fail('A key under an attribute namespace is refused on declare.');
         } catch (\InvalidArgumentException $exception) {
             self::assertSame("Context key '{$namespace}.email' {$reason}", $exception->getMessage());
         }
 
         try {
-            $catalogue->register($namespace, ['id' => 'string']);
+            $catalogue->register($namespace, ['status' => 'string']);
 
-            self::fail('A key outside the check\'s context is refused on register.');
+            self::fail('A key under an attribute namespace is refused on register.');
         } catch (\InvalidArgumentException $exception) {
-            self::assertSame("Context key '{$namespace}.id' {$reason}", $exception->getMessage());
+            self::assertSame("Context key '{$namespace}.status' {$reason}", $exception->getMessage());
         }
 
         self::assertNull($catalogue->find("{$namespace}.email"));
-        self::assertNull($catalogue->find("{$namespace}.id"));
-        self::assertNotContains($namespace, $catalogue->namespaces());
+        self::assertNull($catalogue->find("{$namespace}.status"));
+        self::assertEquals(new ContextKey("{$namespace}.id", ContextKeyType::STRING), $catalogue->find("{$namespace}.id"));
+    }
+
+    /**
+     * `principal` is no reserved namespace any more: its keys are declared like
+     * any other's.
+     *
+     * @return void
+     */
+    public function testAcceptsAKeyUnderPrincipalLikeAnyOther(): void
+    {
+        $catalogue = new DeclaredContextKeyCatalogue;
+
+        self::assertFalse($catalogue->permits('principal.id'));
+
+        $catalogue->declare('principal.id', ContextKeyType::STRING);
+
+        self::assertTrue($catalogue->permits('principal.id'));
+    }
+
+    /**
+     * The attributes the providers declare enter the catalogue under their
+     * namespace, typed by name or as a type, two providers may declare one key
+     * alike, and one provider may declare a key under another provider's.
+     *
+     * @return void
+     */
+    public function testDeclaresTheProvidersAttributes(): void
+    {
+        $catalogue = new DeclaredContextKeyCatalogue(['tenant' => ['plan' => 'string']], [
+            'resource' => [
+                'App\PostAttributes'    => ['status' => 'string', 'owner.id' => ContextKeyType::STRING],
+                'App\CommentAttributes' => ['status' => 'string', 'owner' => 'string', 'owner-id' => 'string'],
+            ],
+            'subject' => ['App\UserAttributes' => ['clearance' => 'number']],
+        ]);
+
+        self::assertEquals(new ContextKey('resource.status', ContextKeyType::STRING), $catalogue->find('resource.status'));
+        self::assertEquals(new ContextKey('resource.owner.id', ContextKeyType::STRING), $catalogue->find('resource.owner.id'));
+        self::assertEquals(new ContextKey('resource.owner', ContextKeyType::STRING), $catalogue->find('resource.owner'));
+        self::assertEquals(new ContextKey('subject.clearance', ContextKeyType::NUMBER), $catalogue->find('subject.clearance'));
+        self::assertTrue($catalogue->permits('subject.clearance', 'gte'));
+        self::assertTrue($catalogue->permits('tenant.plan'));
+    }
+
+    /**
+     * Provide attribute declarations the catalogue refuses, with the reason.
+     *
+     * @return iterable<string, array{array<string, array<string, array<string, string>>>, string}>
+     */
+    public static function invalidAttributesProvider(): iterable
+    {
+        yield 'another namespace' => [
+            ['tenant' => ['App\Plan' => ['plan' => 'string']]],
+            'Attribute provider App\Plan supplies the namespace \'tenant\'; attributes belong under \'subject\' or \'resource\'.',
+        ];
+
+        foreach (['id', 'type', 'tenant', 'tenant.id', 'tenant.name', 'id.value'] as $path) {
+            yield "the built-in {$path}" => [
+                ['resource' => ['App\Post' => [$path => 'string']]],
+                "Attribute provider App\\Post declares 'resource.{$path}', which is a built-in or under one; no provider may declare 'id', 'type' or 'tenant'.",
+            ];
+        }
+
+        yield 'a conflicting type' => [
+            ['subject' => ['App\User' => ['level' => 'number'], 'App\Admin' => ['level' => 'string']]],
+            'Attribute provider App\Admin declares \'subject.level\' as string, but another provider declares it as number.',
+        ];
+        yield 'an unknown type' => [
+            ['subject' => ['App\User' => ['level' => 'integer']]],
+            'Context key \'subject.level\' has an unknown type \'integer\'; use one of string, number, bool, time, ip, list.',
+        ];
+        yield 'a key under another' => [
+            ['resource' => ['App\Post' => ['owner' => 'string', 'owner.id' => 'string']]],
+            'Attribute provider App\Post declares \'resource.owner.id\' under \'resource.owner\', which it also declares; declare the keys under \'resource.owner\' alone.',
+        ];
+        yield 'a key deep under another declared after it' => [
+            ['subject' => ['App\User' => ['team.lead.id' => 'string', 'status' => 'string', 'team' => 'list']]],
+            'Attribute provider App\User declares \'subject.team.lead.id\' under \'subject.team\', which it also declares; declare the keys under \'subject.team\' alone.',
+        ];
+        yield 'a malformed path' => [
+            ['subject' => ['App\User' => ['level..x' => 'string']]],
+            'Context key \'subject.level..x\' must be',
+        ];
+    }
+
+    /**
+     * An attribute declaration outside `subject` and `resource`, of a built-in
+     * or a key under one, of a key another provider declares with another type,
+     * of a key under another the provider declares, of an unknown type or with
+     * a malformed path is refused.
+     *
+     * @param  array<string, array<string, array<string, string>>>  $attributes
+     * @param  string  $message
+     * @return void
+     */
+    #[DataProvider('invalidAttributesProvider')]
+    public function testRefusesAnInvalidAttributeDeclaration(array $attributes, string $message): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage($message);
+
+        new DeclaredContextKeyCatalogue([], $attributes);
     }
 
     /**

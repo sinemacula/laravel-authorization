@@ -80,11 +80,11 @@ final class ContextConfigValidatorTest extends TestCase
             'authorization.context.keys',
             'Context key \'request.ip\' is already declared as ip.',
         ];
-        yield 'a key under principal' => [
-            ['keys' => ['principal' => ['email' => 'string']]],
+        yield 'a key under resource' => [
+            ['keys' => ['resource' => ['status' => 'string']]],
             'authorization.context.keys',
-            'Context key \'principal.email\' is under the namespace \'principal\', which is not part of a check\'s context; '
-                . '`${principal.…}` and `${resource.…}` read the principal and the resource without declaring them.',
+            'Context key \'resource.status\' is under the namespace \'resource\', whose keys are the package\'s built-ins and those an attribute provider declares; '
+                . 'register a provider in authorization.attributes.subjects or authorization.attributes.resources.',
         ];
         yield 'sources that are not an array' => [['sources' => PlanContextSource::class], 'authorization.context.sources', 'expected an array of class names, got string.'];
         yield 'a source that is not a class-string' => [['sources' => [42]], 'authorization.context.sources.0', 'entry must be a non-empty class-string, got int.'];
@@ -99,7 +99,7 @@ final class ContextConfigValidatorTest extends TestCase
             ['sources' => [PlanContextSource::class, ReservedContextSource::class]],
             'authorization.context.sources.1',
             'source \'' . ReservedContextSource::class . '\' supplies the namespace \'request\', which is not a name or is reserved'
-                . ' (authentication, request, environment, input, principal, resource, subject).',
+                . ' (authentication, request, environment, input, subject, resource).',
         ];
         yield 'two sources claiming one namespace' => [
             ['sources' => [PlanContextSource::class, PlanContextSource::class]],

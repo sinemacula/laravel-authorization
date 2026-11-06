@@ -47,19 +47,19 @@ final class StatementInterpolationBranchesTest extends TestCase
         $statement = Statement::fromArray([
             'effect'     => 'allow',
             'actions'    => ['posts:update'],
-            'conditions' => ['eq' => ['input.tenant' => '${principal.id}']],
+            'conditions' => ['eq' => ['input.tenant' => '${subject.id}']],
         ]);
 
-        $principal = self::principal('org-7');
+        $subject = self::subject('org-7');
 
-        self::assertTrue($statement->conditionsSatisfiedBy(['input' => ['tenant' => 'org-7']], new ContextInterpolator, $principal));
-        self::assertFalse($statement->conditionsSatisfiedBy(['input' => ['tenant' => 'org-9']], new ContextInterpolator, $principal));
+        self::assertTrue($statement->conditionsSatisfiedBy(['input' => ['tenant' => 'org-7'], 'subject' => $subject], new ContextInterpolator));
+        self::assertFalse($statement->conditionsSatisfiedBy(['input' => ['tenant' => 'org-9'], 'subject' => $subject], new ContextInterpolator));
 
-        $matched = $statement->assess('posts:update', null, ['input' => ['tenant' => 'org-7']], new ContextInterpolator, $principal);
+        $matched = $statement->assess('posts:update', null, ['input' => ['tenant' => 'org-7'], 'subject' => $subject], new ContextInterpolator);
         self::assertSame(MatchOutcome::MATCHES, $matched->outcome);
         self::assertSame('', $matched->detail);
 
-        $mismatched = $statement->assess('posts:update', null, ['input' => ['tenant' => 'org-9']], new ContextInterpolator, $principal);
+        $mismatched = $statement->assess('posts:update', null, ['input' => ['tenant' => 'org-9'], 'subject' => $subject], new ContextInterpolator);
         self::assertSame(MatchOutcome::DOES_NOT_MATCH, $mismatched->outcome);
         self::assertSame('', $mismatched->detail);
     }
@@ -74,10 +74,10 @@ final class StatementInterpolationBranchesTest extends TestCase
         $statement = Statement::fromArray([
             'effect'     => 'allow',
             'actions'    => ['posts:update'],
-            'conditions' => ['eq' => ['input.tenant' => '${principal.id}']],
+            'conditions' => ['eq' => ['input.tenant' => '${subject.id}']],
         ]);
 
-        self::assertTrue($statement->conditionsSatisfiedBy(['input' => ['tenant' => '${principal.id}']]));
+        self::assertTrue($statement->conditionsSatisfiedBy(['input' => ['tenant' => '${subject.id}']]));
         self::assertFalse($statement->conditionsSatisfiedBy(['input' => ['tenant' => 'org-7']]));
     }
 
@@ -93,14 +93,14 @@ final class StatementInterpolationBranchesTest extends TestCase
         $statement = Statement::fromArray([
             'effect'     => 'allow',
             'actions'    => ['posts:update'],
-            'conditions' => ['eq' => ['input.tenant' => 'org-${principal.id}']],
+            'conditions' => ['eq' => ['input.tenant' => 'org-${subject.id}']],
         ]);
 
-        $result = $statement->assess('posts:update', null, ['input' => ['tenant' => 'org-']], new ContextInterpolator, new \stdClass);
+        $result = $statement->assess('posts:update', null, ['input' => ['tenant' => 'org-']], new ContextInterpolator);
 
         self::assertSame(MatchOutcome::UNDECIDABLE, $result->outcome);
         self::assertSame(self::UNRESOLVED_TENANT, $result->detail);
-        self::assertFalse($statement->conditionsSatisfiedBy(['input' => ['tenant' => 'org-']], new ContextInterpolator, null));
+        self::assertFalse($statement->conditionsSatisfiedBy(['input' => ['tenant' => 'org-']], new ContextInterpolator));
     }
 
     /**
@@ -114,16 +114,16 @@ final class StatementInterpolationBranchesTest extends TestCase
         $statement = Statement::fromArray([
             'effect'     => 'deny',
             'actions'    => ['posts:update'],
-            'conditions' => ['eq' => ['input.tenant' => '${principal.id}']],
+            'conditions' => ['eq' => ['input.tenant' => '${subject.id}']],
         ]);
 
-        $matched = $statement->assess('posts:update', null, ['input' => ['tenant' => 'org-7']], new ContextInterpolator, self::principal('org-7'));
+        $matched = $statement->assess('posts:update', null, ['input' => ['tenant' => 'org-7'], 'subject' => self::subject('org-7')], new ContextInterpolator);
         self::assertSame(MatchOutcome::MATCHES, $matched->outcome);
 
-        $mismatched = $statement->assess('posts:update', null, ['input' => ['tenant' => 'org-9']], new ContextInterpolator, self::principal('org-7'));
+        $mismatched = $statement->assess('posts:update', null, ['input' => ['tenant' => 'org-9'], 'subject' => self::subject('org-7')], new ContextInterpolator);
         self::assertSame(MatchOutcome::DOES_NOT_MATCH, $mismatched->outcome);
 
-        $undecidable = $statement->assess('posts:update', null, ['input' => ['tenant' => '']], new ContextInterpolator, null);
+        $undecidable = $statement->assess('posts:update', null, ['input' => ['tenant' => '']], new ContextInterpolator);
         self::assertSame(MatchOutcome::UNDECIDABLE, $undecidable->outcome);
         self::assertSame(self::UNRESOLVED_TENANT, $undecidable->detail);
     }
@@ -159,13 +159,13 @@ final class StatementInterpolationBranchesTest extends TestCase
         $statement = Statement::fromArray([
             'effect'     => 'allow',
             'actions'    => ['posts:update'],
-            'conditions' => ['in' => ['input.owner' => ['${principal.id}', 'admin']]],
+            'conditions' => ['in' => ['input.owner' => ['${subject.id}', 'admin']]],
         ]);
 
-        $principal = self::principal('42');
+        $subject = self::subject('42');
 
-        self::assertFalse($statement->conditionsSatisfiedBy(['input' => ['owner' => '42']], new ContextInterpolator, $principal));
-        self::assertTrue($statement->conditionsSatisfiedBy(['input' => ['owner' => '${principal.id}']], new ContextInterpolator, $principal));
+        self::assertFalse($statement->conditionsSatisfiedBy(['input' => ['owner' => '42'], 'subject' => $subject], new ContextInterpolator));
+        self::assertTrue($statement->conditionsSatisfiedBy(['input' => ['owner' => '${subject.id}'], 'subject' => $subject], new ContextInterpolator));
     }
 
     /**
@@ -182,9 +182,9 @@ final class StatementInterpolationBranchesTest extends TestCase
             'conditions' => ['eq' => ['input.flag' => true]],
         ]);
 
-        self::assertTrue($statement->conditionsSatisfiedBy(['input' => ['flag' => true]], new ContextInterpolator, null));
-        self::assertFalse($statement->conditionsSatisfiedBy(['input' => ['flag' => 'true']], new ContextInterpolator, null));
-        self::assertFalse($statement->conditionsSatisfiedBy(['input' => ['flag' => false]], new ContextInterpolator, null));
+        self::assertTrue($statement->conditionsSatisfiedBy(['input' => ['flag' => true]], new ContextInterpolator));
+        self::assertFalse($statement->conditionsSatisfiedBy(['input' => ['flag' => 'true']], new ContextInterpolator));
+        self::assertFalse($statement->conditionsSatisfiedBy(['input' => ['flag' => false]], new ContextInterpolator));
     }
 
     /**
@@ -198,15 +198,15 @@ final class StatementInterpolationBranchesTest extends TestCase
         $statement = Statement::fromArray([
             'effect'     => 'allow',
             'actions'    => ['posts:update'],
-            'conditions' => ['like' => ['input.path' => '${principal.id}/*']],
+            'conditions' => ['like' => ['input.path' => '${subject.id}/*']],
         ]);
 
-        $principal = self::principal('*');
+        $subject = self::subject('*');
 
-        self::assertTrue($statement->conditionsSatisfiedBy(['input' => ['path' => '*/report']], new ContextInterpolator, $principal));
-        self::assertFalse($statement->conditionsSatisfiedBy(['input' => ['path' => 'team/report']], new ContextInterpolator, $principal));
+        self::assertTrue($statement->conditionsSatisfiedBy(['input' => ['path' => '*/report'], 'subject' => $subject], new ContextInterpolator));
+        self::assertFalse($statement->conditionsSatisfiedBy(['input' => ['path' => 'team/report'], 'subject' => $subject], new ContextInterpolator));
 
-        $undecidable = $statement->assess('posts:update', null, ['input' => ['path' => '*/report']], new ContextInterpolator, null);
+        $undecidable = $statement->assess('posts:update', null, ['input' => ['path' => '*/report']], new ContextInterpolator);
         self::assertSame(MatchOutcome::UNDECIDABLE, $undecidable->outcome);
         self::assertSame('condition \'input.path\' references a value that cannot be resolved', $undecidable->detail);
     }
@@ -227,8 +227,8 @@ final class StatementInterpolationBranchesTest extends TestCase
 
         self::assertTrue($statement->conditionsSatisfiedBy(['input' => ['type' => 'App\Models\Post']]));
         self::assertFalse($statement->conditionsSatisfiedBy(['input' => ['type' => 'AppModelsPost']]));
-        self::assertTrue($statement->conditionsSatisfiedBy(['input' => ['type' => 'App\Models\Post']], new ContextInterpolator, null));
-        self::assertFalse($statement->conditionsSatisfiedBy(['input' => ['type' => 'AppModelsPost']], new ContextInterpolator, null));
+        self::assertTrue($statement->conditionsSatisfiedBy(['input' => ['type' => 'App\Models\Post']], new ContextInterpolator));
+        self::assertFalse($statement->conditionsSatisfiedBy(['input' => ['type' => 'AppModelsPost']], new ContextInterpolator));
     }
 
     /**
@@ -243,20 +243,20 @@ final class StatementInterpolationBranchesTest extends TestCase
         $statement = Statement::fromArray([
             'effect'    => 'allow',
             'actions'   => ['posts:update'],
-            'resources' => ['posts:${principal.id}'],
+            'resources' => ['posts:${subject.id}'],
         ]);
 
-        $principal = self::principal('4*');
+        $subject = self::subject('4*');
 
-        $matched = $statement->assess('posts:update', 'posts:4*', [], new ContextInterpolator, $principal);
+        $matched = $statement->assess('posts:update', 'posts:4*', ['subject' => $subject], new ContextInterpolator);
         self::assertSame(MatchOutcome::MATCHES, $matched->outcome);
 
-        $mismatched = $statement->assess('posts:update', 'posts:42', [], new ContextInterpolator, $principal);
+        $mismatched = $statement->assess('posts:update', 'posts:42', ['subject' => $subject], new ContextInterpolator);
         self::assertSame(MatchOutcome::DOES_NOT_MATCH, $mismatched->outcome);
         self::assertSame('action/resource did not match', $mismatched->detail);
 
-        self::assertTrue($statement->matches('posts:update', 'posts:4*', new ContextInterpolator, $principal));
-        self::assertFalse($statement->matches('posts:update', 'posts:42', new ContextInterpolator, $principal));
+        self::assertTrue($statement->matches('posts:update', 'posts:4*', new ContextInterpolator, ['subject' => $subject]));
+        self::assertFalse($statement->matches('posts:update', 'posts:42', new ContextInterpolator, ['subject' => $subject]));
     }
 
     /**
@@ -289,12 +289,13 @@ final class StatementInterpolationBranchesTest extends TestCase
     }
 
     /**
-     * `${resource.id}` in a condition is unresolved for a resource without a
-     * colon, so the condition is undecidable.
+     * `${resource.id}` in a condition reads the `resource` namespace, never the
+     * identifier the statement matches, so a check whose resource has no id
+     * leaves the condition undecidable.
      *
      * @return void
      */
-    public function testResourceIdWithoutColonIsUndecidable(): void
+    public function testResourceIdIsReadFromTheResourceNamespace(): void
     {
         $statement = Statement::fromArray([
             'effect'     => 'allow',
@@ -302,10 +303,10 @@ final class StatementInterpolationBranchesTest extends TestCase
             'conditions' => ['eq' => ['input.tenant' => '${resource.id}']],
         ]);
 
-        $resolved = $statement->assess('posts:update', 'posts:42', ['input' => ['tenant' => '42']], new ContextInterpolator);
+        $resolved = $statement->assess('posts:update', 'posts:42', ['input' => ['tenant' => '42'], 'resource' => ['id' => '42']], new ContextInterpolator);
         self::assertSame(MatchOutcome::MATCHES, $resolved->outcome);
 
-        $undecidable = $statement->assess('posts:update', 'global', ['input' => ['tenant' => 'global']], new ContextInterpolator);
+        $undecidable = $statement->assess('posts:update', 'posts:42', ['input' => ['tenant' => '42']], new ContextInterpolator);
         self::assertSame(MatchOutcome::UNDECIDABLE, $undecidable->outcome);
         self::assertSame(self::UNRESOLVED_TENANT, $undecidable->detail);
     }
@@ -331,10 +332,9 @@ final class StatementInterpolationBranchesTest extends TestCase
     }
 
     /**
-     * A reference to any namespace but `principal` and `resource`, in an
-     * operand or a resource pattern, reads the check's context as a dot path,
-     * building the namespace on the first read; a literal dotted key never
-     * stands in for it.
+     * A reference to any namespace, in an operand or a resource pattern, reads
+     * the check's context as a dot path, building the namespace on the first
+     * read; a literal dotted key never stands in for it.
      *
      * @return void
      */
@@ -369,16 +369,13 @@ final class StatementInterpolationBranchesTest extends TestCase
     }
 
     /**
-     * Build a plain principal exposing the given id as a public property.
+     * Build the `subject` namespace of a check whose subject has the given id.
      *
      * @param  string  $id
-     * @return object
+     * @return array{id: string}
      */
-    private static function principal(string $id): object
+    private static function subject(string $id): array
     {
-        $principal     = new \stdClass;
-        $principal->id = $id;
-
-        return $principal;
+        return ['id' => $id];
     }
 }

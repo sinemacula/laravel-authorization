@@ -9,10 +9,8 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator;
 
 /**
- * Coverage for the missing-key fallback in `ContextInterpolator` when the
- * principal is a plain object without a matching public property. Consumers who
- * pass an arbitrary DTO as the principal rely on this path to avoid `Undefined
- * property` warnings during interpolation: the token is unresolved, so
+ * Coverage for the missing-key fallback in `ContextInterpolator`: a token whose
+ * key is missing, or present with a null value, is unresolved, so
  * `interpolate()` returns null and the statement treats the test as undecidable
  * rather than comparing against an empty string.
  *
@@ -27,40 +25,20 @@ use SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator;
 final class ContextInterpolatorMissingKeysTest extends TestCase
 {
     /**
-     * A plain object principal whose property does not exist leaves the token
-     * unresolved instead of raising or substituting an empty string.
+     * A subject or resource attribute the namespace does not hold, or holds as
+     * null, leaves the token unresolved, in a pattern as in a literal string.
      *
      * @return void
      */
-    public function testUnknownPropertyOnPlainObjectIsUnresolved(): void
+    public function testMissingAndNullAttributesAreUnresolved(): void
     {
         $interpolator = new ContextInterpolator;
-        $principal    = new \stdClass;
-        // No `id` property set.
-        $interpolated = $interpolator->interpolate(
-            'id:${principal.id}',
-            $principal,
-            null,
-            [],
-        );
+        $context      = ['subject' => ['id' => '7', 'team' => null], 'resource' => ['type' => 'post']];
 
-        self::assertNull($interpolated);
-    }
-
-    /**
-     * A plain object principal whose property exists but holds null leaves the
-     * token unresolved, in a pattern as in a literal string.
-     *
-     * @return void
-     */
-    public function testNullPropertyOnPlainObjectIsUnresolved(): void
-    {
-        $interpolator  = new ContextInterpolator;
-        $principal     = new \stdClass;
-        $principal->id = null;
-
-        self::assertNull($interpolator->interpolate('id:${principal.id}', $principal, null, []));
-        self::assertNull($interpolator->interpolatePattern('id:${principal.id}', $principal, null, []));
+        self::assertNull($interpolator->interpolate('team:${subject.team}', $context));
+        self::assertNull($interpolator->interpolate('dept:${subject.department}', $context));
+        self::assertNull($interpolator->interpolatePattern('post:${resource.id}', $context));
+        self::assertSame('user:7', $interpolator->interpolate('user:${subject.id}', $context));
     }
 
     /**
@@ -74,10 +52,10 @@ final class ContextInterpolatorMissingKeysTest extends TestCase
     {
         $interpolator = new ContextInterpolator;
 
-        self::assertNull($interpolator->interpolate('ip:${request.ip}', null, null, []));
-        self::assertNull($interpolator->interpolate('ip:${request.ip}', null, null, ['request' => []]));
-        self::assertNull($interpolator->interpolate('ip:${request.ip}', null, null, ['request' => ['ip' => null]]));
-        self::assertNull($interpolator->interpolatePattern('ip:${request.ip}', null, null, ['request.ip' => '10.0.0.1']));
-        self::assertSame('ip:10.0.0.1', $interpolator->interpolate('ip:${request.ip}', null, null, ['request' => ['ip' => '10.0.0.1']]));
+        self::assertNull($interpolator->interpolate('ip:${request.ip}', []));
+        self::assertNull($interpolator->interpolate('ip:${request.ip}', ['request' => []]));
+        self::assertNull($interpolator->interpolate('ip:${request.ip}', ['request' => ['ip' => null]]));
+        self::assertNull($interpolator->interpolatePattern('ip:${request.ip}', ['request.ip' => '10.0.0.1']));
+        self::assertSame('ip:10.0.0.1', $interpolator->interpolate('ip:${request.ip}', ['request' => ['ip' => '10.0.0.1']]));
     }
 }

@@ -226,10 +226,11 @@ return [
     | The context a policy's conditions and `${…}` references read is nested
     | namespaces, each key a dot path: `authentication` (`guard`, `user_id`,
     | `user_type`), `request` (`ip`, `method`, `route`, present only in a
-    | routed request), `environment` (`time`, UTC), `input` (what the caller
-    | passes to `check()`, `can()`, a Gate and the like, held there alone, so
-    | `['post' => ['status' => 'draft']]` is `input.post.status`) and any
-    | namespace a source below adds. Replace a trusted namespace by binding its
+    | routed request), `environment` (`time`, UTC), `subject` and `resource`
+    | (see attributes below), `input` (what the caller passes to `check()`,
+    | `can()`, a Gate and the like, held there alone, so `['post' =>
+    | ['status' => 'draft']]` is `input.post.status`) and any namespace a
+    | source below adds. Replace a trusted namespace by binding its
     | contract (`AuthenticationContext`, `RequestContext`,
     | `EnvironmentContext`).
     |
@@ -240,19 +241,54 @@ return [
     | 'string']]`. A policy reading an undeclared key, or testing a key with an
     | operator that does not suit its type, is refused when it is written. A
     | service provider may also register keys on the `ContextKeyCatalogue`.
+    | Keys under `subject` and `resource` are refused here; declare them on an
+    | attribute provider (see attributes below).
     |
     | `sources` lists classes implementing `ContextSource`, resolved from the
     | container, each supplying one namespace of its own, built only when a
     | statement reads it. A class that does not implement the contract, a
     | reserved namespace (`authentication`, `request`, `environment`, `input`,
-    | `principal`, `resource`, `subject`) and a namespace two sources supply
-    | are refused at boot.
+    | `subject`, `resource`) and a namespace two sources supply are refused at
+    | boot.
     |
     */
 
     'context' => [
         'keys'    => [],
         'sources' => [],
+    ],
+
+    /*
+    |---------------------------------------------------------------------------
+    | Subject and resource attributes
+    |---------------------------------------------------------------------------
+    |
+    | The `subject` and `resource` namespaces hold the check's subject and
+    | resource. Their built-in keys are `id`, `type`, `tenant.type` and
+    | `tenant.id`: the subject's key, morph type and tenant, and the
+    | resource's id (a record only), type (a record or a type alone) and
+    | tenant. An opaque resource identifier has neither id nor type.
+    |
+    | Further attributes come from providers registered by morph type:
+    | `resources` maps a type to a class implementing
+    | `ResourceAttributeProvider`, given the record and the model the check
+    | was given, if any (a model implementing `AuthorizableResource` too,
+    | when its reference carries no model), and `subjects` maps a type to a
+    | class implementing `SubjectAttributeProvider`, given the subject. Each
+    | is resolved from the container, and the attributes it declares
+    | (`['status' => 'string']` becomes `resource.status`) are the only ones
+    | it exposes; nothing under a declared key is, and a map, or a list under
+    | a type other than `list`, stays present but undecidable. A class that
+    | does not implement its contract, an unknown type, a built-in, a key
+    | under another the provider declares and a key two providers declare
+    | with different types are refused at boot. A provider that throws aborts
+    | the check with `AttributeProviderFailed`.
+    |
+    */
+
+    'attributes' => [
+        'resources' => [],
+        'subjects'  => [],
     ],
 
     /*

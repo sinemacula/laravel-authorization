@@ -165,6 +165,77 @@ final class CheckContextTest extends TestCase
     }
 
     /**
+     * A builder runs only for the namespaces it was given for, however alike
+     * another builder is: two closures over one method compare equal, yet each
+     * builds its own namespace, so each runs once.
+     *
+     * @return void
+     */
+    public function testABuilderRunsOnlyForItsOwnNamespaces(): void
+    {
+        $source = new class {
+            /** @var int How many times the namespaces were built. */
+            public int $calls = 0;
+
+            /**
+             * Build both namespaces.
+             *
+             * @return array<string, array<string, int>>
+             */
+            public function build(): array
+            {
+                $this->calls++;
+
+                return ['a' => ['v' => 1], 'b' => ['v' => 2]];
+            }
+        };
+
+        $first   = $source->build(...);
+        $second  = $source->build(...);
+        $context = new CheckContext([], ['a' => $first, 'b' => $second]);
+
+        self::assertEquals($first, $second);
+        self::assertSame([true, 1], $context->lookup('a.v'));
+        self::assertSame([true, 2], $context->lookup('b.v'));
+        self::assertSame(2, $source->calls);
+    }
+
+    /**
+     * A builder that throws is never run again for the check: the failure
+     * reaches the reader, a later read finds every namespace it was to build
+     * missing, and the namespaces of other builders are still built.
+     *
+     * @return void
+     */
+    public function testABuilderThatThrowsIsNeverRetried(): void
+    {
+        $calls   = 0;
+        $builder = static function () use (&$calls): array {
+            $calls++;
+
+            throw new \RuntimeException('provider failed');
+        };
+        $context = new CheckContext([], [
+            'resource' => $builder,
+            'subject'  => $builder,
+            'request'  => static fn (): array => ['request' => ['ip' => '10.0.0.1']],
+        ]);
+
+        try {
+            $context->lookup('resource.status');
+
+            self::fail('The builder\'s failure reaches the reader.');
+        } catch (\RuntimeException $exception) {
+            self::assertSame('provider failed', $exception->getMessage());
+        }
+
+        self::assertSame([false, null], $context->lookup('resource.status'));
+        self::assertSame([false, null], $context->lookup('subject.id'));
+        self::assertSame([true, '10.0.0.1'], $context->lookup('request.ip'));
+        self::assertSame(1, $calls);
+    }
+
+    /**
      * A namespace a builder leaves out is absent, and its builder is not run
      * again.
      *

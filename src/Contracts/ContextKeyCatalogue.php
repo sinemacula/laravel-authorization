@@ -18,11 +18,13 @@ use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
  *
  * The shipped default declares the package's own keys (`authentication.guard`,
  * `authentication.user_id`, `authentication.user_type`, `request.ip`,
- * `request.method`, `request.route` and `environment.time`) and those of
- * `authorization.context.keys`; an application or sibling package registers its
- * own namespace and keys from a service provider. Keys of the `input`
- * namespace, which holds the values the caller passes, are declared like any
- * other.
+ * `request.method`, `request.route`, `environment.time`, and the built-in
+ * `subject` and `resource` keys `id`, `type`, `tenant.type` and `tenant.id`),
+ * those of `authorization.context.keys` and those the attribute providers of
+ * `authorization.attributes` declare; an application or sibling package
+ * registers its own namespace and keys from a service provider. Keys of the
+ * `input` namespace, which holds the values the caller passes, are declared
+ * like any other.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -34,9 +36,9 @@ interface ContextKeyCatalogue
      *
      * Declaring a key again as it was declared changes nothing; declaring it
      * with another type or testability is refused, so one declaration never
-     * silently changes what another relies on. A key under `principal`,
-     * `resource` or `subject`, which are not part of a check's context, is
-     * refused.
+     * silently changes what another relies on. A key under `subject` or
+     * `resource`, whose keys only the package and the attribute providers
+     * declare, is refused.
      *
      * @param  string  $path
      * @param  \SineMacula\Laravel\Authorization\Enums\ContextKeyType  $type

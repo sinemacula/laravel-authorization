@@ -1158,16 +1158,16 @@ final class PolicyEvaluatorTest extends TestCase
         $calls     = [];
         $evaluator = new PolicyEvaluator;
 
-        $first = $evaluator->evaluate([$policy], 'posts:read', 'tenants/org-1/posts', self::countingContext($calls), null);
+        $first = $evaluator->evaluate([$policy], 'posts:read', 'tenants/org-1/posts', self::countingContext($calls));
 
         self::assertTrue($first->isAllowed());
         self::assertSame(['request' => 1, 'tenant' => 1], $calls);
 
-        $evaluator->evaluate([$policy], 'posts:read', 'tenants/org-1/posts', self::countingContext($calls), null);
+        $evaluator->evaluate([$policy], 'posts:read', 'tenants/org-1/posts', self::countingContext($calls));
 
         self::assertSame(['request' => 2, 'tenant' => 2], $calls);
 
-        $evaluator->evaluate([$policy], 'posts:list', null, self::countingContext($calls), null);
+        $evaluator->evaluate([$policy], 'posts:list', null, self::countingContext($calls));
 
         self::assertSame(['request' => 2, 'tenant' => 2], $calls);
     }

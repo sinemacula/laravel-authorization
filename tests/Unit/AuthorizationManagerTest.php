@@ -250,6 +250,33 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * Without a check context factory, the subject and the resource still
+     * supply their built-in keys, so a statement on the resource's type and id
+     * and on the subject's type decides by them.
+     *
+     * @return void
+     */
+    public function testTheBuiltInKeysAreSuppliedWithoutAFactory(): void
+    {
+        $principal = $this->stubAuthorizable([], [Policy::fromArray([
+            'name'       => 'built-ins',
+            'statements' => [[
+                'effect'     => 'allow',
+                'actions'    => ['posts:update'],
+                'resources'  => ['*'],
+                'conditions' => ['eq' => ['resource.type' => 'post', 'resource.id' => '42'], 'null' => ['subject.type' => false]],
+            ]],
+        ])]);
+
+        $manager = $this->manager()->for($principal);
+
+        self::assertTrue($manager->can('posts:update', ResourceReference::record('post', '42')));
+        self::assertFalse($manager->can('posts:update', ResourceReference::record('post', '43')));
+        self::assertFalse($manager->can('posts:update', ResourceReference::record('page', '42')));
+        self::assertFalse($manager->can('posts:update', ResourceReference::type('post')));
+    }
+
+    /**
      * With a check context factory, each check's context holds the sources'
      * namespaces beside the caller's `input`, so a caller can never stand in
      * for the request, and a source is read once per check that reads it.

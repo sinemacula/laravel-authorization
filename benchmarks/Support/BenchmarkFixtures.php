@@ -110,15 +110,17 @@ final class BenchmarkFixtures
      * A realistic check context: the caller's `input`, the request's metadata
      * and the environment, as namespaces. Paired with the
      * `interpolationPattern()` fixture so the 10-token parse path reads context
-     * paths alongside the principal and resource namespaces.
+     * paths alongside the subject and resource namespaces.
      *
      * @return array<string, mixed>
      */
     public static function interpolationContext(): array
     {
         return [
-            'input'   => ['tenant' => 'tenant-99'],
-            'request' => [
+            'subject'  => ['id' => 'user-42', 'type' => 'user'],
+            'resource' => ['id' => '42', 'type' => 'posts'],
+            'input'    => ['tenant' => 'tenant-99'],
+            'request'  => [
                 'ip'         => '10.0.0.42',
                 'method'     => 'POST',
                 'path'       => '/admin/posts/99',
@@ -131,7 +133,7 @@ final class BenchmarkFixtures
     }
 
     /**
-     * A 10-token interpolation pattern blending principal, resource, and
+     * A 10-token interpolation pattern blending subject, resource, and
      * dot-notation context lookups. Used by the `ContextInterpolator`
      * benchmark.
      *
@@ -139,7 +141,7 @@ final class BenchmarkFixtures
      */
     public static function interpolationPattern(): string
     {
-        return '${principal.id}:${principal.type}:${resource.type}:${resource.id}'
+        return '${subject.id}:${subject.type}:${resource.type}:${resource.id}'
             . ':${input.tenant}:${request.ip}:${request.method}'
             . ':${request.path}:${request.country}:${environment.tier}';
     }

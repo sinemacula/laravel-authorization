@@ -4,10 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
-use SineMacula\Laravel\Authorization\Context\ContextKey;
 use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\ContextKeyCatalogue;
-use SineMacula\Laravel\Authorization\Contracts\ContextSource;
 
 /**
  * Decides whether a policy document may be written (AUTHZ-6.2, AUTHZ-6.10).
@@ -22,9 +20,9 @@ use SineMacula\Laravel\Authorization\Contracts\ContextSource;
  *
  * Every condition key must be declared, may be tested, and be of a type its
  * operator suits (`ContextKeyType`), and every `${…}` reference in an operand
- * or a resource pattern must name a declared key, but for one to `principal` or
- * `resource`, which are not the check's context. A value of the wrong type is
- * still undecidable at evaluation, whatever the key declares.
+ * or a resource pattern must name a declared key, `${subject.…}` and
+ * `${resource.…}` included. A value of the wrong type is still undecidable at
+ * evaluation, whatever the key declares.
  *
  * The policy model's `document` attribute writes through here, and so does
  * every write of the policy service, and `authorization:policy:validate` checks
@@ -42,7 +40,8 @@ final readonly class PolicyValidator
     public const int KEY_LENGTH = 128;
 
     /** @var string How to declare a context key a policy reads. */
-    public const string DECLARE_KEYS = 'declare it in authorization.context.keys or register it with the context key catalogue.';
+    public const string DECLARE_KEYS = 'declare it in authorization.context.keys or register it with the context key catalogue, '
+        . 'or, under subject or resource, on an attribute provider.';
 
     /** @var string Why no document may be written when the catalogue declares no actions. */
     public const string NOTHING_DECLARED = 'No permissions are declared to check the policy\'s actions against; declare them in permission_enums or permission_providers.';
@@ -128,9 +127,7 @@ final readonly class PolicyValidator
      * Return a reason for each condition test and `${…}` reference of each
      * statement the key catalogue does not permit: a condition key not
      * declared, a condition on a key that may not be tested, an operator that
-     * does not suit the key's type, and a reference to a key not declared. A
-     * reference to `principal` or `resource` is not to the check's context, so
-     * it needs no declaring.
+     * does not suit the key's type, and a reference to a key not declared.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $policy
      * @return list<string>
@@ -234,8 +231,7 @@ final readonly class PolicyValidator
 
     /**
      * Return the path of every `${…}` reference in the string operands and
-     * resource patterns that reads the check's context, once each: every one
-     * but a reference to `principal` or `resource`.
+     * resource patterns, once each.
      *
      * @param  list<mixed>  $subjects
      * @return list<string>
@@ -246,10 +242,10 @@ final readonly class PolicyValidator
 
         foreach (\array_filter($subjects, \is_string(...)) as $subject) {
             foreach (ContextInterpolator::references($subject) as $path) {
-                $paths[$path] = !\in_array(ContextKey::namespaceOf($path), ContextSource::INTERPOLATED_NAMESPACES, true);
+                $paths[$path] = $path;
             }
         }
 
-        return \array_keys(\array_filter($paths));
+        return \array_values($paths);
     }
 }

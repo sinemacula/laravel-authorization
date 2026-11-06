@@ -57,10 +57,11 @@ denied.
   operator that does not suit its type, or names an action no declared permission matches, and
   `authorization:policy:validate` checks files or stored policies against the same rules.
 - **A namespaced context**: conditions read dot paths such as `request.ip`, `authentication.user_id`,
-  `environment.time` and `input.post.status`. The trusted namespaces come from their own sources, never from the caller,
-  whose values land under `input` alone; an application adds a namespace of its own with a `ContextSource`, and declares
-  every key a policy may read, with its type, in a key catalogue. A namespace is built only when a statement reads it,
-  and at most once a check.
+  `environment.time`, `subject.id`, `resource.owner.id` and `input.post.status`. The trusted namespaces come from their
+  own sources, never from the caller, whose values land under `input` alone; the subject's and the resource's attributes
+  come from providers registered by morph type; an application adds a namespace of its own with a `ContextSource`, and
+  declares every key a policy may read, with its type, in a key catalogue. A namespace is built only when a statement
+  reads it, and at most once a check.
 - **Gate auto-wiring**: every case of a configured permission enum is registered as a Gate ability, with a choice of
   what happens when an ability of the same name already exists.
 - **A permission catalogue in code**: enums and providers declare each permission with a description, a category and
@@ -156,8 +157,8 @@ AUTHORIZATION_LOG_CHANNEL=stderr
 ```
 
 `config/authorization.php` documents every other option: models, tables, the default guard, permission providers, the
-Gate conflict mode, the policy store, the policy limits, the context keys and sources, the subject resolver, the cache,
-and the role hierarchy and rank.
+Gate conflict mode, the policy store, the policy limits, the context keys and sources, the attribute providers, the
+subject resolver, the cache, and the role hierarchy and rank.
 
 ## Usage
 
@@ -483,7 +484,7 @@ Conditions name the operator first, then each context key it tests, as a dot pat
 ```php
 'conditions' => [
     'ip_in'        => ['request.ip' => ['10.0.0.0/8', '2001:db8::/32']],
-    'eq'           => ['input.post.tenant' => '${principal.tenant_id}'],
+    'eq'           => ['resource.owner.id' => '${subject.id}'],
     'any_value_in' => ['input.groups' => ['editors', 'admins']],
     'null'         => ['input.post.archived_at' => true],
     'before'       => ['environment.time' => '2026-12-31T23:59:59Z'],
@@ -519,21 +520,20 @@ Conditions name the operator first, then each context key it tests, as a dot pat
 - `any_value_in` and `all_values_in` need the context value to be a list, such as a token's scopes. An empty list never
   passes `all_values_in`.
 - `eq` and `neq` never take a list: use `in` or `not_in`. String operands may use `${…}` interpolation; list operands
-  are literal. A reference reads the same dot paths a condition key does (`${request.ip}`, `${input.post.id}`,
-  `${environment.time}`), plus `${principal.…}` and `${resource.…}`; a missing, null or non-scalar value leaves it
+  are literal. A reference reads the same dot paths a condition key does, through the same resolver (`${request.ip}`,
+  `${input.post.id}`, `${subject.id}`, `${resource.owner.id}`); a missing, null or non-scalar value leaves it
   unresolved, which makes the test undecidable.
 
 A policy is checked whenever it is saved, through the model or `PolicyService`, and refused with every limit,
 context-key and catalogue reason at once, or, for a malformed document, the first structural fault found and any limit
-it breaks. The reasons are a malformed document; a condition key, or a `${…}` reference other than to `principal` or
-`resource`, that the context key catalogue does not declare; a condition on a key that may not be tested; an operator
-that does not suit the key's type; an `actions` or `not_actions` pattern that matches no declared permission; or a
-document over the limits in `policies.limits`
-(`AUTHORIZATION_POLICY_DOCUMENT_BYTES`, `_STATEMENTS`, `_CONDITIONS` and `_PATTERN_LENGTH`: 64 KiB of JSON, 100
-statements, 50 key tests a statement and 512 characters a pattern or string operand). The limits are checked again when
-a stored policy is read, and the resolution cache keys cached policies by the limits they were checked under, so
-lowering one makes the stored policies over it deny as `invalid_policy` until they are fixed. To find them, or to check
-policy files before you deploy them:
+it breaks. The reasons are a malformed document; a condition key or `${…}` reference that the context key catalogue
+does not declare; a condition on a key that may not be tested; an operator that does not suit the key's type; an
+`actions` or `not_actions` pattern that matches no declared permission; or a document over the limits in
+`policies.limits` (`AUTHORIZATION_POLICY_DOCUMENT_BYTES`, `_STATEMENTS`, `_CONDITIONS` and `_PATTERN_LENGTH`: 64 KiB of
+JSON, 100 statements, 50 key tests a statement and 512 characters a pattern or string operand). The limits are checked
+again when a stored policy is read, and the resolution cache keys cached policies by the limits they were checked
+under, so lowering one makes the stored policies over it deny as `invalid_policy` until they are fixed. To find them, or
+to check policy files before you deploy them:
 
 ```bash
 php artisan authorization:policy:validate --database
@@ -553,6 +553,8 @@ at most once a check, so a check whose policies read nothing of the request neve
 | `authentication` | `guard`, `user_id`, `user_type` | The bound `AuthenticationContext`                           |
 | `request`        | `ip`, `method`, `route`         | The bound `RequestContext`, only in a routed request        |
 | `environment`    | `time`                          | The bound `EnvironmentContext`                              |
+| `subject`        | `id`, `type`, `tenant.*`, more  | The check's subject and its attribute provider              |
+| `resource`       | `id`, `type`, `tenant.*`, more  | The check's resource and its attribute provider             |
 | `input`          | The keys you declare            | What the caller passes                                      |
 | Any other        | The keys its owner declares     | A `ContextSource` listed in `authorization.context.sources` |
 
@@ -562,6 +564,8 @@ only `guard` is present. `request` holds Laravel's `ip()`, resolved through your
 route's name, and only once the request has been routed: in a queued job or a console command the namespace is absent,
 so every `request` key is missing. `environment.time` is `now()` in UTC as `Y-m-d\TH:i:s\Z`, fixed the first time the
 check reads `environment`, then kept for the rest of the check, so `Carbon::setTestNow()` freezes it in tests.
+`subject` and `resource` describe who the check is about and what it is on; see [Subject and resource
+attributes](#subject-and-resource-attributes).
 
 What the caller passes lands under `input`, and only there: the `$context` of `check()`, `can()`, `authorize()`,
 `explain()` and `effectivePermissions()`, the string-keyed and associative arguments of a Gate check, and the context
@@ -574,8 +578,8 @@ Authorization::can('posts:delete', $post, ['request' => ['ip' => '10.0.0.1']]); 
 ```
 
 Every key a policy reads must be declared in the context key catalogue, with a type, or the policy is refused when it
-is saved. The package declares its own seven keys; declare the rest, `input`'s included, in `config/authorization.php`,
-each path within its namespace:
+is saved. The package declares its own keys, those in the table above, and your attribute providers declare theirs;
+declare the rest, `input`'s included, in `config/authorization.php`, each path within its namespace:
 
 ```php
 'context' => [
@@ -610,9 +614,8 @@ public function boot(): void
 A key's type decides the operators a condition may test it with; `null` suits every type, and an `_if_exists` form
 follows its operator. A key may also be declared untestable (`declare($path, $type, isTestable: false)`), so that a
 reference may read it but no condition may test it. Declaring a key again with another type is refused, and so is a key
-under `principal`, `resource` or `subject`, which are not part of a check's context: `${principal.…}` and
-`${resource.…}` read the principal and the resource without declaring them. The type is checked when the policy is
-written; a value of the wrong type at evaluation is still undecidable.
+under `subject` or `resource`, whose keys come only from the package and the attribute providers. The type is checked
+when the policy is written; a value of the wrong type at evaluation is still undecidable.
 
 | Type     | Operators                                                       |
 |----------|-----------------------------------------------------------------|
@@ -649,8 +652,8 @@ final class TenantContext implements ContextSource
 ```
 
 A source that does not implement the contract, one that claims a reserved namespace (`authentication`, `request`,
-`environment`, `input`, `principal`, `resource` or `subject`), two sources claiming one namespace, and a source claiming
-a namespace your `AuthenticationContext` adds are refused at boot. The trusted namespaces are replaced only by rebinding
+`environment`, `input`, `subject` or `resource`), two sources claiming one namespace, and a source claiming a namespace
+your `AuthenticationContext` adds are refused at boot. The trusted namespaces are replaced only by rebinding
 their own contracts. To supply `authentication` from your authentication layer, along with any namespace it adds
 beside it such as `mfa` or `sso`, bind your own `AuthenticationContext`. Its `namespaces()` lists every namespace it
 supplies and `values()` returns their values keyed by namespace; declare the keys of any namespace it adds in the
@@ -665,6 +668,116 @@ $this->app->scoped(AuthenticationContext::class, App\Authorization\SessionAuthen
 
 `RequestContext` and `EnvironmentContext` are rebound the same way. The defaults are built per request or job, so queue
 workers and Octane read the request and the user they are serving; a binding of your own is kept as you bound it.
+
+### Subject and resource attributes
+
+The `subject` namespace describes who the check is about and `resource` what it is on. The package declares and
+supplies their built-in keys, every one a string:
+
+| Key                                          | Holds                                                                         |
+|----------------------------------------------|-------------------------------------------------------------------------------|
+| `subject.id`                                 | The subject's key (`getKey()` for a model)                                    |
+| `subject.type`                               | The subject's morph type (the morph alias, or the class name)                 |
+| `subject.tenant.type`, `subject.tenant.id`   | The morph type and key of the tenant the subject resolver gave the subject    |
+| `resource.id`                                | The record's key, for a check on one record                                   |
+| `resource.type`                              | The resource's type, for a record or a type alone                             |
+| `resource.tenant.type`, `resource.tenant.id` | The resource's tenant, from the resource tenant resolver or its reference     |
+
+A check with no subject has no `subject` namespace, and one without a resource has no `resource` namespace; the tenant
+keys are missing when there is no tenant. A model, or a `(type, id)` pair, names a record and has both `resource.id`
+and `resource.type`. A model class (`Post::class`) names a type alone, so only `resource.type` is present. Any other
+string is an opaque identifier with neither: `'reports:42'` is never split at its `:`.
+
+Every other attribute comes from a provider, registered for one morph type. A resource attribute provider implements
+`SineMacula\Laravel\Authorization\Contracts\ResourceAttributeProvider`: `attributes()` declares each attribute, a dot
+path within `resource`, with its type, and `values()` returns a record's values, nested by key. It is given the
+record's reference and the model the check was given, so it can read the model rather than query for it. A model that
+implements `AuthorizableResource` is handed on too, when the reference it returns names one record and carries no
+model. The model is null when the check named the record some other way, such as a `(type, id)` pair or an
+`AuthorizableResource` that is not a model:
+
+```php
+use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Contracts\ResourceAttributeProvider;
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
+
+final class PostAttributes implements ResourceAttributeProvider
+{
+    public function attributes(): array
+    {
+        return ['status' => 'string', 'owner.id' => 'string'];
+    }
+
+    public function values(ResourceReference $resource, ?Model $model): array
+    {
+        $post = $model ?? Post::query()->find($resource->id);
+
+        return $post === null ? [] : ['status' => $post->status, 'owner' => ['id' => (string) $post->user_id]];
+    }
+}
+```
+
+A subject attribute provider implements `SineMacula\Laravel\Authorization\Contracts\SubjectAttributeProvider` the same
+way, its `values()` given the subject:
+
+```php
+use SineMacula\Laravel\Authorization\Contracts\SubjectAttributeProvider;
+
+final class UserAttributes implements SubjectAttributeProvider
+{
+    public function attributes(): array
+    {
+        return ['department' => 'string', 'clearance' => 'number'];
+    }
+
+    public function values(object $subject): array
+    {
+        return ['department' => $subject->department, 'clearance' => $subject->clearance_level];
+    }
+}
+```
+
+Register each under the morph type it serves (the morph alias, or the class name) in `config/authorization.php`. They
+are resolved from the container:
+
+```php
+'attributes' => [
+    'resources' => ['post' => App\Authorization\PostAttributes::class],
+    'subjects'  => ['user' => App\Authorization\UserAttributes::class],
+],
+```
+
+A policy then reads them like any other key, through a condition or a `${…}` reference:
+
+```php
+'conditions' => [
+    'eq' => ['resource.owner.id' => '${subject.id}'],
+    'in' => ['resource.status' => ['draft', 'review']],
+],
+```
+
+What a provider declares enters the key catalogue at boot. A class that does not implement its contract or cannot be
+resolved, a provider declaring a built-in (`id`, `type` or anything under `tenant`), a provider declaring a key under
+another key it declares (`owner` and `owner.id`), and two providers declaring one key with different types are refused
+at boot; two providers may declare one key alike. Only the keys a provider declares are exposed: a value it returns
+for any other key is dropped, and so is everything under a declared key. A declared key holds a scalar or `null`, or,
+for a `list`, a list of them; a map, or a list under any other type, stays present but cannot be read into, so a test
+of the key is undecidable, `${…}` does not resolve it and none of the keys under it can be read. A value of the wrong
+type is undecidable when the policy is evaluated, as for any context value.
+
+A namespace is built the first time a statement under evaluation reads any of its keys, built-in or not, and at most
+once a check, so a provider is asked at most once a check, and not at all by a check whose policies read nothing of
+its namespace. Nothing is kept for the next check. The resource provider is asked only about a record: a type alone,
+an opaque identifier, no resource and a type with no provider leave only the built-ins that apply, so an attribute key
+is missing. A missing key makes its test undecidable, so an allow on it does not apply and a deny does, unless it is
+tested with `null` or an `_if_exists` operator.
+
+A provider that throws aborts the check rather than letting it be decided with the attribute missing: `check()`,
+`can()`, `authorize()`, the Gate and every other entry point throw
+`SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed`, with the provider's exception as its previous
+one. No decision is made, so no decision event is dispatched and the check records no last decision. The message names
+the provider's class and the namespace, never an attribute value, and nothing the provider returned or threw reaches a
+decision, an event or the trace.
 
 ### Listening to events
 

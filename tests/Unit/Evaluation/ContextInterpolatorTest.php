@@ -5,8 +5,6 @@ declare(strict_types = 1);
 namespace Tests\Unit\Evaluation;
 
 use Illuminate\Container\Container;
-use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\AbstractLogger;
@@ -70,8 +68,6 @@ final class ContextInterpolatorTest extends TestCase
     {
         $interpolated = $this->interpolator->interpolate(
             'tenant:${input.tenant_id}',
-            null,
-            null,
             ['input' => ['tenant_id' => 'org-42']],
         );
 
@@ -88,8 +84,6 @@ final class ContextInterpolatorTest extends TestCase
     {
         $interpolated = $this->interpolator->interpolate(
             'ip:${input.request.ip}',
-            null,
-            null,
             ['input' => ['request' => ['ip' => '10.0.0.1']]],
         );
 
@@ -97,9 +91,8 @@ final class ContextInterpolatorTest extends TestCase
     }
 
     /**
-     * A token of any namespace but `principal` and `resource` reads the check's
-     * context: `${request.ip}`, `${environment.time}` and an application's own
-     * namespace alike.
+     * A token reads the check's context: `${request.ip}`, `${environment.time}`
+     * and an application's own namespace alike.
      *
      * @return void
      */
@@ -111,10 +104,10 @@ final class ContextInterpolatorTest extends TestCase
             'tenant'      => ['plan' => ['tier' => 'pro']],
         ];
 
-        self::assertSame('10.0.0.1', $this->interpolator->interpolate('${request.ip}', null, null, $context));
-        self::assertSame('2026-01-31T09:30:00Z', $this->interpolator->interpolate('${environment.time}', null, null, $context));
-        self::assertSame('pro', $this->interpolator->interpolate('${tenant.plan.tier}', null, null, $context));
-        self::assertSame('10.0.0.1', $this->interpolator->interpolatePattern('${request.ip}', null, null, new CheckContext($context)));
+        self::assertSame('10.0.0.1', $this->interpolator->interpolate('${request.ip}', $context));
+        self::assertSame('2026-01-31T09:30:00Z', $this->interpolator->interpolate('${environment.time}', $context));
+        self::assertSame('pro', $this->interpolator->interpolate('${tenant.plan.tier}', $context));
+        self::assertSame('10.0.0.1', $this->interpolator->interpolatePattern('${request.ip}', new CheckContext($context)));
     }
 
     /**
@@ -128,8 +121,8 @@ final class ContextInterpolatorTest extends TestCase
     {
         $context = ['request.ip' => '10.0.0.1', 'input' => ['request' => ['ip' => '10.0.0.2']]];
 
-        self::assertNull($this->interpolator->interpolate('${request.ip}', null, null, $context));
-        self::assertSame('10.0.0.2', $this->interpolator->interpolate('${input.request.ip}', null, null, $context));
+        self::assertNull($this->interpolator->interpolate('${request.ip}', $context));
+        self::assertSame('10.0.0.2', $this->interpolator->interpolate('${input.request.ip}', $context));
     }
 
     /**
@@ -140,7 +133,7 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testTheContextNamespaceIsUnresolved(): void
     {
-        self::assertNull($this->interpolator->interpolate('${context.tenant_id}', null, null, ['input' => ['tenant_id' => 'org-1'], 'tenant_id' => 'org-1']));
+        self::assertNull($this->interpolator->interpolate('${context.tenant_id}', ['input' => ['tenant_id' => 'org-1'], 'tenant_id' => 'org-1']));
     }
 
     /**
@@ -165,8 +158,8 @@ final class ContextInterpolatorTest extends TestCase
             },
         ]);
 
-        self::assertSame('10.0.0.1/GET', $this->interpolator->interpolate('${request.ip}/${request.method}', null, null, $context));
-        self::assertSame('10.0.0.1', $this->interpolator->interpolatePattern('${request.ip}', null, null, $context));
+        self::assertSame('10.0.0.1/GET', $this->interpolator->interpolate('${request.ip}/${request.method}', $context));
+        self::assertSame('10.0.0.1', $this->interpolator->interpolatePattern('${request.ip}', $context));
         self::assertSame(['request' => 1, 'environment' => 0], $calls);
     }
 
@@ -180,10 +173,10 @@ final class ContextInterpolatorTest extends TestCase
     {
         $context = ['input' => ['count' => 42, 'ratio' => 2.5, 'yes' => true, 'no' => false]];
 
-        self::assertSame('42', $this->interpolator->interpolate('${input.count}', null, null, $context));
-        self::assertSame('2.5', $this->interpolator->interpolate('${input.ratio}', null, null, $context));
-        self::assertSame('true', $this->interpolator->interpolate('${input.yes}', null, null, $context));
-        self::assertSame('[false]', $this->interpolator->interpolate('[${input.no}]', null, null, $context));
+        self::assertSame('42', $this->interpolator->interpolate('${input.count}', $context));
+        self::assertSame('2.5', $this->interpolator->interpolate('${input.ratio}', $context));
+        self::assertSame('true', $this->interpolator->interpolate('${input.yes}', $context));
+        self::assertSame('[false]', $this->interpolator->interpolate('[${input.no}]', $context));
     }
 
     /**
@@ -196,10 +189,10 @@ final class ContextInterpolatorTest extends TestCase
     {
         $context = ['input' => ['nested' => ['a' => 'b'], 'object' => new \stdClass, 'nothing' => null]];
 
-        self::assertNull($this->interpolator->interpolate('v:${input.absent}', null, null, $context));
-        self::assertNull($this->interpolator->interpolate('v:${input.nested}', null, null, $context));
-        self::assertNull($this->interpolator->interpolate('v:${input.object}', null, null, $context));
-        self::assertNull($this->interpolator->interpolate('v:${input.nothing}', null, null, $context));
+        self::assertNull($this->interpolator->interpolate('v:${input.absent}', $context));
+        self::assertNull($this->interpolator->interpolate('v:${input.nested}', $context));
+        self::assertNull($this->interpolator->interpolate('v:${input.object}', $context));
+        self::assertNull($this->interpolator->interpolate('v:${input.nothing}', $context));
     }
 
     /**
@@ -212,372 +205,61 @@ final class ContextInterpolatorTest extends TestCase
     {
         $context = ['input' => ['' => 'leak', 'key' => 'value']];
 
-        self::assertNull($this->interpolator->interpolate('${input}', null, null, $context));
-        self::assertNull($this->interpolator->interpolate('${input.}', null, null, $context));
+        self::assertNull($this->interpolator->interpolate('${input}', $context));
+        self::assertNull($this->interpolator->interpolate('${input.}', $context));
     }
 
     // ------------------------------------------------------------------
-    // Resource namespace
+    // Subject and resource namespaces
     // ------------------------------------------------------------------
 
     /**
-     * `${resource.id}` and `${resource.type}` split the resource string at its
-     * first colon.
+     * `${subject.…}` and `${resource.…}` read the check's `subject` and
+     * `resource` namespaces through the same resolver as any other.
      *
      * @return void
      */
-    public function testResourceIdAndTypeSplitAtFirstColon(): void
+    public function testSubjectAndResourceReadTheirNamespaces(): void
     {
-        self::assertSame('post:99', $this->interpolator->interpolate('post:${resource.id}', null, 'posts:99', []));
-        self::assertSame('type:posts', $this->interpolator->interpolate('type:${resource.type}', null, 'posts:99', []));
+        $context = [
+            'subject'  => ['id' => '7', 'type' => 'user', 'department' => 'sales'],
+            'resource' => ['id' => '42', 'type' => 'post', 'owner' => ['id' => '7']],
+        ];
 
-        // Only the first colon splits; later colons belong to the id.
-        self::assertSame('7:8', $this->interpolator->interpolate('${resource.id}', null, 'posts:7:8', []));
-        self::assertSame('posts', $this->interpolator->interpolate('${resource.type}', null, 'posts:7:8', []));
+        self::assertSame('user:7', $this->interpolator->interpolate('${subject.type}:${subject.id}', $context));
+        self::assertSame('post:42', $this->interpolator->interpolate('${resource.type}:${resource.id}', $context));
+        self::assertSame('7/sales', $this->interpolator->interpolate('${resource.owner.id}/${subject.department}', $context));
+        self::assertSame('post:42', $this->interpolator->interpolatePattern('${resource.type}:${resource.id}', new CheckContext($context)));
     }
 
     /**
-     * The colon-position arithmetic is exact at the boundaries of the resource
-     * string: an empty segment resolves to the empty string.
+     * A resource with no id leaves `${resource.id}` unresolved: it is never
+     * read by splitting the identifier, and a check with no resource or subject
+     * leaves every token of the namespace unresolved.
      *
      * @return void
      */
-    public function testResourceColonSplitBoundaryPrecision(): void
+    public function testAMissingIdIsNeverInferred(): void
     {
-        self::assertSame('B', $this->interpolator->interpolate('${resource.id}', null, 'A:B', []));
-        self::assertSame('A', $this->interpolator->interpolate('${resource.type}', null, 'A:B', []));
-
-        self::assertSame('trailing', $this->interpolator->interpolate('${resource.id}', null, ':trailing', []));
-        self::assertSame('[]', $this->interpolator->interpolate('[${resource.type}]', null, ':trailing', []));
-
-        self::assertSame('[]', $this->interpolator->interpolate('[${resource.id}]', null, 'leading:', []));
-        self::assertSame('leading', $this->interpolator->interpolate('${resource.type}', null, 'leading:', []));
+        self::assertNull($this->interpolator->interpolate('${resource.id}', ['resource' => ['type' => 'post']]));
+        self::assertNull($this->interpolator->interpolate('${resource.id}', ['input' => ['resource' => 'post:42']]));
+        self::assertNull($this->interpolator->interpolate('${resource.type}', []));
+        self::assertNull($this->interpolator->interpolate('${subject.id}', []));
+        self::assertNull($this->interpolator->interpolate('${resource}', ['resource' => ['id' => '42']]));
     }
 
     /**
-     * A resource without a colon is its own type and has no id, so
-     * `${resource.id}` is unresolved.
+     * `${principal.…}` is no namespace of the check's context, so it is
+     * unresolved whatever the check is about.
      *
      * @return void
      */
-    public function testResourceWithoutColonHasTypeButNoId(): void
+    public function testPrincipalIsUnresolved(): void
     {
-        self::assertSame('global', $this->interpolator->interpolate('${resource.type}', null, 'global', []));
-        self::assertNull($this->interpolator->interpolate('${resource.id}', null, 'global', []));
-        self::assertNull($this->interpolator->interpolate('${resource.id}-${resource.type}', null, 'global', []));
-    }
+        $context = ['subject' => ['id' => '7', 'type' => 'user']];
 
-    /**
-     * Resource tokens are unresolved without a resource, without a key and for
-     * any key other than `id` and `type`.
-     *
-     * @return void
-     */
-    public function testResourceTokensUnresolvedWithoutResourceOrKnownKey(): void
-    {
-        self::assertNull($this->interpolator->interpolate('res:${resource.id}', null, null, []));
-        self::assertNull($this->interpolator->interpolate('res:${resource.type}', null, null, []));
-        self::assertNull($this->interpolator->interpolate('${resource}', null, 'posts:42', []));
-        self::assertNull($this->interpolator->interpolate('${resource.unknown}', null, 'posts:42', []));
-    }
-
-    // ------------------------------------------------------------------
-    // Principal namespace: plain objects
-    // ------------------------------------------------------------------
-
-    /**
-     * A plain object principal exposes its public properties.
-     *
-     * @return void
-     */
-    public function testPlainObjectPublicPropertyResolves(): void
-    {
-        $principal       = new \stdClass;
-        $principal->id   = 'abc';
-        $principal->name = 'Bob';
-        $principal->rank = 3;
-
-        self::assertSame('id:abc', $this->interpolator->interpolate('id:${principal.id}', $principal, null, []));
-        self::assertSame('Bob', $this->interpolator->interpolate('${principal.name}', $principal, null, []));
-        self::assertSame('3', $this->interpolator->interpolate('${principal.rank}', $principal, null, []));
-    }
-
-    /**
-     * A plain object principal never exposes a protected property, a missing
-     * property or a `getAttribute()` method it happens to declare: only
-     * Eloquent models are read through `getAttribute()`.
-     *
-     * @return void
-     */
-    public function testPlainObjectNonPublicStateIsUnresolved(): void
-    {
-        $principal = new class {
-            /** @var string A public property the interpolator may read. */
-            public string $name = 'Alice';
-
-            /** @var string A protected property the interpolator must not read. */
-            protected string $secret = 'leak';
-
-            /**
-             * Answer every key, to prove the interpolator never calls it.
-             *
-             * @param  string  $key
-             * @return string
-             */
-            public function getAttribute(string $key): string
-            {
-                return "attribute-{$key}";
-            }
-        };
-
-        self::assertSame('Alice', $this->interpolator->interpolate('${principal.name}', $principal, null, []));
-        self::assertNull($this->interpolator->interpolate('${principal.secret}', $principal, null, []));
-        self::assertNull($this->interpolator->interpolate('${principal.id}', $principal, null, []));
-    }
-
-    /**
-     * A non-scalar or null public property is unresolved.
-     *
-     * @return void
-     */
-    public function testNonScalarPropertyIsUnresolved(): void
-    {
-        $principal          = new \stdClass;
-        $principal->items   = ['a', 'b'];
-        $principal->owner   = new \stdClass;
-        $principal->nothing = null;
-
-        self::assertNull($this->interpolator->interpolate('${principal.items}', $principal, null, []));
-        self::assertNull($this->interpolator->interpolate('${principal.owner}', $principal, null, []));
-        self::assertNull($this->interpolator->interpolate('${principal.nothing}', $principal, null, []));
-    }
-
-    /**
-     * `${principal.type}` returns the morph class when the principal offers
-     * one, ahead of any property of the same name.
-     *
-     * @return void
-     */
-    public function testPrincipalTypeReturnsMorphClass(): void
-    {
-        $principal = new class {
-            /** @var string A property that must not shadow the morph class. */
-            public string $type = 'wrong-path';
-
-            /**
-             * @return string
-             */
-            public function getMorphClass(): string
-            {
-                return 'user';
-            }
-        };
-
-        self::assertSame('type:user', $this->interpolator->interpolate('type:${principal.type}', $principal, null, []));
-    }
-
-    /**
-     * `${principal.type}` falls back to the class name, ahead of any property
-     * of the same name, when there is no morph class.
-     *
-     * @return void
-     */
-    public function testPrincipalTypeFallsBackToClassName(): void
-    {
-        $principal       = new \stdClass;
-        $principal->type = 'wrong-path';
-
-        self::assertSame(\stdClass::class, $this->interpolator->interpolate('${principal.type}', $principal, null, []));
-    }
-
-    /**
-     * Principal tokens are unresolved without a principal and without a key.
-     *
-     * @return void
-     */
-    public function testPrincipalTokensUnresolvedWithoutPrincipalOrKey(): void
-    {
-        $principal     = new \stdClass;
-        $principal->id = 'abc';
-
-        self::assertNull($this->interpolator->interpolate('user:${principal.id}', null, null, []));
-        self::assertNull($this->interpolator->interpolate('user:${principal.type}', null, null, []));
-        self::assertNull($this->interpolator->interpolate('${principal}', $principal, null, []));
-        self::assertNull($this->interpolator->interpolate('${principal.}', $principal, null, []));
-    }
-
-    // ------------------------------------------------------------------
-    // Principal namespace: Eloquent models
-    // ------------------------------------------------------------------
-
-    /**
-     * `${principal.id}` is the model's key and other keys read its attributes.
-     *
-     * @return void
-     */
-    public function testModelPrincipalResolvesKeyAndAttributes(): void
-    {
-        $principal = new class extends Model {};
-        $principal->setRawAttributes(['id' => 42, 'name' => 'Alice', 'active' => true]);
-
-        self::assertSame('user:42', $this->interpolator->interpolate('user:${principal.id}', $principal, null, []));
-        self::assertSame('Alice', $this->interpolator->interpolate('${principal.name}', $principal, null, []));
-        self::assertSame('true', $this->interpolator->interpolate('${principal.active}', $principal, null, []));
-        self::assertNull($this->interpolator->interpolate('${principal.missing}', $principal, null, []));
-    }
-
-    /**
-     * `${principal.id}` resolves through `getKey()`, so a model with a custom
-     * primary key resolves its real key rather than an `id` column.
-     *
-     * @return void
-     */
-    public function testModelWithCustomPrimaryKeyResolvesPrincipalId(): void
-    {
-        $principal = new class extends Model {
-            /** @var string The primary key column. */
-            protected $primaryKey = 'uuid';
-
-            /** @var string The primary key type. */
-            protected $keyType = 'string';
-        };
-        $principal->setRawAttributes(['uuid' => 'u-1', 'id' => 99]);
-
-        self::assertSame('u-1', $this->interpolator->interpolate('${principal.id}', $principal, null, []));
-        self::assertSame('u-1', $this->interpolator->interpolate('${principal.uuid}', $principal, null, []));
-    }
-
-    /**
-     * A model without a key leaves `${principal.id}` unresolved.
-     *
-     * @return void
-     */
-    public function testModelWithoutKeyLeavesPrincipalIdUnresolved(): void
-    {
-        $principal = new class extends Model {};
-
-        self::assertNull($this->interpolator->interpolate('${principal.id}', $principal, null, []));
-    }
-
-    /**
-     * A hidden attribute is never resolved, even though the model holds it.
-     *
-     * @return void
-     */
-    public function testModelHiddenAttributeIsUnresolved(): void
-    {
-        $principal = new class extends Model {
-            /** @var list<string> The attributes hidden from serialisation. */
-            protected $hidden = ['secret'];
-        };
-        $principal->setRawAttributes(['secret' => 'leak', 'name' => 'Alice']);
-
-        self::assertNull($this->interpolator->interpolate('${principal.secret}', $principal, null, []));
-        self::assertSame('Alice', $this->interpolator->interpolate('${principal.name}', $principal, null, []));
-    }
-
-    /**
-     * A model with a non-empty `$visible` resolves only the attributes it
-     * lists, while `${principal.id}` still resolves through the key.
-     *
-     * @return void
-     */
-    public function testModelVisibleListRestrictsAttributes(): void
-    {
-        $principal = new class extends Model {
-            /** @var list<string> The attributes visible in serialisation. */
-            protected $visible = ['name'];
-        };
-        $principal->setRawAttributes(['id' => 5, 'name' => 'Alice', 'email' => 'alice@example.com']);
-
-        self::assertSame('Alice', $this->interpolator->interpolate('${principal.name}', $principal, null, []));
-        self::assertNull($this->interpolator->interpolate('${principal.email}', $principal, null, []));
-        self::assertSame('5', $this->interpolator->interpolate('${principal.id}', $principal, null, []));
-    }
-
-    /**
-     * An empty `$visible` allows every attribute that is not hidden, and an
-     * attribute both visible and hidden stays unresolved.
-     *
-     * @return void
-     */
-    public function testModelEmptyVisibleListAllowsEverythingNotHidden(): void
-    {
-        $open = new class extends Model {
-            /** @var list<string> The attributes visible in serialisation. */
-            protected $visible = [];
-
-            /** @var list<string> The attributes hidden from serialisation. */
-            protected $hidden = ['secret'];
-        };
-        $open->setRawAttributes(['name' => 'Alice', 'email' => 'alice@example.com', 'secret' => 'leak']);
-
-        self::assertSame('Alice', $this->interpolator->interpolate('${principal.name}', $open, null, []));
-        self::assertSame('alice@example.com', $this->interpolator->interpolate('${principal.email}', $open, null, []));
-        self::assertNull($this->interpolator->interpolate('${principal.secret}', $open, null, []));
-
-        $both = new class extends Model {
-            /** @var list<string> The attributes visible in serialisation. */
-            protected $visible = ['name', 'secret'];
-
-            /** @var list<string> The attributes hidden from serialisation. */
-            protected $hidden = ['secret'];
-        };
-        $both->setRawAttributes(['name' => 'Alice', 'secret' => 'leak']);
-
-        self::assertSame('Alice', $this->interpolator->interpolate('${principal.name}', $both, null, []));
-        self::assertNull($this->interpolator->interpolate('${principal.secret}', $both, null, []));
-    }
-
-    /**
-     * A relation name is never resolved, even when an attribute of the same
-     * name is present.
-     *
-     * @return void
-     */
-    public function testModelRelationNameIsUnresolved(): void
-    {
-        $principal = new class extends Model {
-            /**
-             * A relation the interpolator must not read.
-             *
-             * @return \Illuminate\Database\Eloquent\Relations\BelongsTo<\Illuminate\Database\Eloquent\Model, $this>
-             */
-            public function team(): BelongsTo
-            {
-                return $this->belongsTo(Model::class);
-            }
-        };
-        $principal->setRawAttributes(['team' => 'leak', 'name' => 'Alice']);
-
-        self::assertNull($this->interpolator->interpolate('${principal.team}', $principal, null, []));
-        self::assertSame('Alice', $this->interpolator->interpolate('${principal.name}', $principal, null, []));
-    }
-
-    /**
-     * A non-scalar model attribute is unresolved.
-     *
-     * @return void
-     */
-    public function testModelNonScalarAttributeIsUnresolved(): void
-    {
-        $principal = new class extends Model {};
-        $principal->setRawAttributes(['meta' => ['a' => 'b']]);
-
-        self::assertNull($this->interpolator->interpolate('${principal.meta}', $principal, null, []));
-    }
-
-    /**
-     * `${principal.type}` on a model is its morph class.
-     *
-     * @return void
-     */
-    public function testModelPrincipalTypeIsMorphClass(): void
-    {
-        $principal = new class extends Model {};
-        $principal->setRawAttributes(['type' => 'wrong-path']);
-
-        self::assertSame($principal->getMorphClass(), $this->interpolator->interpolate('${principal.type}', $principal, null, []));
+        self::assertNull($this->interpolator->interpolate('${principal.id}', $context));
+        self::assertNull($this->interpolator->interpolate('${principal.type}', $context));
     }
 
     // ------------------------------------------------------------------ Tokens
@@ -591,14 +273,9 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testMultipleTokensAllResolve(): void
     {
-        $principal     = new \stdClass;
-        $principal->id = 7;
-
         $interpolated = $this->interpolator->interpolate(
-            '${principal.id}:${input.env}:${resource.type}:${resource.id}',
-            $principal,
-            'posts:1',
-            ['input' => ['env' => 'prod']],
+            '${subject.id}:${input.env}:${resource.type}:${resource.id}',
+            ['subject' => ['id' => '7'], 'resource' => ['type' => 'posts', 'id' => '1'], 'input' => ['env' => 'prod']],
         );
 
         self::assertSame('7:prod:posts:1', $interpolated);
@@ -614,9 +291,9 @@ final class ContextInterpolatorTest extends TestCase
     {
         $context = ['input' => ['env' => 'prod']];
 
-        self::assertNull($this->interpolator->interpolate('${input.env}:${input.missing}:${resource.type}', null, 'posts:1', $context));
-        self::assertNull($this->interpolator->interpolate('${input.missing}:${input.env}', null, null, $context));
-        self::assertNull($this->interpolator->interpolatePattern('${input.env}/${input.missing}/*', null, null, $context));
+        self::assertNull($this->interpolator->interpolate('${input.env}:${input.missing}:${resource.type}', $context));
+        self::assertNull($this->interpolator->interpolate('${input.missing}:${input.env}', $context));
+        self::assertNull($this->interpolator->interpolatePattern('${input.env}/${input.missing}/*', $context));
     }
 
     /**
@@ -626,8 +303,8 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testUnknownNamespaceIsUnresolved(): void
     {
-        self::assertNull($this->interpolator->interpolate('prefix:${unknown.key}:suffix', null, null, ['input' => ['key' => 'value']]));
-        self::assertNull($this->interpolator->interpolate('${_private.key}', null, null, []));
+        self::assertNull($this->interpolator->interpolate('prefix:${unknown.key}:suffix', ['input' => ['key' => 'value']]));
+        self::assertNull($this->interpolator->interpolate('${_private.key}', []));
     }
 
     /**
@@ -640,10 +317,10 @@ final class ContextInterpolatorTest extends TestCase
     {
         $context = ['input' => ['Key_9' => 'ok', 'a' => ['b2' => 'deep']]];
 
-        self::assertSame('ok', $this->interpolator->interpolate('${input.Key_9}', null, null, $context));
-        self::assertSame('deep', $this->interpolator->interpolate('${input.a.b2}', null, null, $context));
-        self::assertSame('$input.a', $this->interpolator->interpolate('$input.a', null, null, $context));
-        self::assertSame('$ {input.a}', $this->interpolator->interpolate('$ {input.a}', null, null, $context));
+        self::assertSame('ok', $this->interpolator->interpolate('${input.Key_9}', $context));
+        self::assertSame('deep', $this->interpolator->interpolate('${input.a.b2}', $context));
+        self::assertSame('$input.a', $this->interpolator->interpolate('$input.a', $context));
+        self::assertSame('$ {input.a}', $this->interpolator->interpolate('$ {input.a}', $context));
     }
 
     /**
@@ -657,16 +334,16 @@ final class ContextInterpolatorTest extends TestCase
     {
         $context = ['input' => ['Key_9' => 'ok', 'a' => 'value']];
 
-        self::assertNull($this->interpolator->interpolate('x:${1input.a}', null, null, $context));
-        self::assertNull($this->interpolator->interpolate('x:${input-a}', null, null, $context));
-        self::assertNull($this->interpolator->interpolate('x:${}', null, null, $context));
-        self::assertNull($this->interpolator->interpolate('${input.tenant-id}', null, null, $context));
-        self::assertNull($this->interpolator->interpolate('${input-a}', null, null, $context));
-        self::assertNull($this->interpolator->interpolate('${}', null, null, $context));
-        self::assertNull($this->interpolator->interpolate('${1x}', null, null, $context));
-        self::assertNull($this->interpolator->interpolate('${foo', null, null, $context));
-        self::assertNull($this->interpolator->interpolate('${input.Key_9}${-}', null, null, $context));
-        self::assertNull($this->interpolator->interpolate('${-}${input.Key_9}', null, null, $context));
+        self::assertNull($this->interpolator->interpolate('x:${1input.a}', $context));
+        self::assertNull($this->interpolator->interpolate('x:${input-a}', $context));
+        self::assertNull($this->interpolator->interpolate('x:${}', $context));
+        self::assertNull($this->interpolator->interpolate('${input.tenant-id}', $context));
+        self::assertNull($this->interpolator->interpolate('${input-a}', $context));
+        self::assertNull($this->interpolator->interpolate('${}', $context));
+        self::assertNull($this->interpolator->interpolate('${1x}', $context));
+        self::assertNull($this->interpolator->interpolate('${foo', $context));
+        self::assertNull($this->interpolator->interpolate('${input.Key_9}${-}', $context));
+        self::assertNull($this->interpolator->interpolate('${-}${input.Key_9}', $context));
     }
 
     /**
@@ -736,8 +413,8 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testStringWithNoTokensPassesThrough(): void
     {
-        self::assertSame('static:pattern', $this->interpolator->interpolate('static:pattern', null, null, []));
-        self::assertSame('', $this->interpolator->interpolate('', null, null, []));
+        self::assertSame('static:pattern', $this->interpolator->interpolate('static:pattern', []));
+        self::assertSame('', $this->interpolator->interpolate('', []));
     }
 
     /**
@@ -749,8 +426,6 @@ final class ContextInterpolatorTest extends TestCase
     {
         $interpolated = $this->interpolator->interpolate(
             'literal:\${input.a}',
-            null,
-            null,
             ['input' => ['a' => 'resolved']],
         );
 
@@ -767,8 +442,6 @@ final class ContextInterpolatorTest extends TestCase
     {
         $interpolated = $this->interpolator->interpolate(
             '${input.a}:\${literal}:${input.a}',
-            null,
-            null,
             ['input' => ['a' => 'resolved']],
         );
 
@@ -785,8 +458,8 @@ final class ContextInterpolatorTest extends TestCase
     {
         $context = ['input' => ['escaped' => 'a\${b}', 'token' => '${input.other}', 'other' => 'leak']];
 
-        self::assertSame('a\${b}', $this->interpolator->interpolate('${input.escaped}', null, null, $context));
-        self::assertSame('x:${input.other}', $this->interpolator->interpolate('x:${input.token}', null, null, $context));
+        self::assertSame('a\${b}', $this->interpolator->interpolate('${input.escaped}', $context));
+        self::assertSame('x:${input.other}', $this->interpolator->interpolate('x:${input.token}', $context));
     }
 
     /**
@@ -798,8 +471,6 @@ final class ContextInterpolatorTest extends TestCase
     {
         $interpolated = $this->interpolator->interpolate(
             'App\Models\Post:${input.id}',
-            null,
-            null,
             ['input' => ['id' => '1']],
         );
 
@@ -820,7 +491,7 @@ final class ContextInterpolatorTest extends TestCase
     {
         $context = ['input' => ['name' => 'a*b?c[d]e\f']];
 
-        $pattern = $this->interpolator->interpolatePattern('files/${input.name}', null, null, $context);
+        $pattern = $this->interpolator->interpolatePattern('files/${input.name}', $context);
 
         self::assertSame('files/a\*b\?c\[d\]e\\\f', $pattern);
         self::assertTrue(\fnmatch($pattern, 'files/a*b?c[d]e\f'));
@@ -835,7 +506,7 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testInterpolatePatternWildcardValueMatchesOnlyItself(): void
     {
-        $pattern = $this->interpolator->interpolatePattern('docs:${input.id}', null, null, ['input' => ['id' => '*']]);
+        $pattern = $this->interpolator->interpolatePattern('docs:${input.id}', ['input' => ['id' => '*']]);
 
         self::assertSame('docs:\*', $pattern);
         self::assertTrue(\fnmatch($pattern, 'docs:*'));
@@ -850,7 +521,7 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testInterpolatePatternDoublesLiteralBackslashes(): void
     {
-        $pattern = $this->interpolator->interpolatePattern('App\Models\*:${input.id}', null, null, ['input' => ['id' => '1']]);
+        $pattern = $this->interpolator->interpolatePattern('App\Models\*:${input.id}', ['input' => ['id' => '1']]);
 
         self::assertSame('App\\\Models\\\*:1', $pattern);
         self::assertTrue(\fnmatch($pattern, 'App\Models\Post:1'));
@@ -867,9 +538,9 @@ final class ContextInterpolatorTest extends TestCase
     {
         $context = ['input' => ['escaped' => 'a\${b}']];
 
-        self::assertSame('${input.x}*', $this->interpolator->interpolatePattern('\${input.x}*', null, null, $context));
+        self::assertSame('${input.x}*', $this->interpolator->interpolatePattern('\${input.x}*', $context));
 
-        $pattern = $this->interpolator->interpolatePattern('${input.escaped}', null, null, $context);
+        $pattern = $this->interpolator->interpolatePattern('${input.escaped}', $context);
 
         self::assertSame('a\\\${b}', $pattern);
         self::assertTrue(\fnmatch($pattern, 'a\${b}'));
@@ -883,8 +554,8 @@ final class ContextInterpolatorTest extends TestCase
      */
     public function testInterpolatePatternUnresolvedAndTokenless(): void
     {
-        self::assertNull($this->interpolator->interpolatePattern('docs:${resource.id}', null, 'global', []));
-        self::assertSame('docs:*', $this->interpolator->interpolatePattern('docs:*', null, null, []));
+        self::assertNull($this->interpolator->interpolatePattern('docs:${resource.id}', []));
+        self::assertSame('docs:*', $this->interpolator->interpolatePattern('docs:*', []));
     }
 
     /**
@@ -897,9 +568,9 @@ final class ContextInterpolatorTest extends TestCase
     {
         $context = ['input' => ['a' => 'value']];
 
-        self::assertNull($this->interpolator->interpolatePattern('${input-a}', null, null, $context));
-        self::assertNull($this->interpolator->interpolatePattern('docs:${input.tenant-id}*', null, null, $context));
-        self::assertNull($this->interpolator->interpolatePattern('${input.a}/${}', null, null, $context));
+        self::assertNull($this->interpolator->interpolatePattern('${input-a}', $context));
+        self::assertNull($this->interpolator->interpolatePattern('docs:${input.tenant-id}*', $context));
+        self::assertNull($this->interpolator->interpolatePattern('${input.a}/${}', $context));
     }
 
     /**
@@ -950,10 +621,10 @@ final class ContextInterpolatorTest extends TestCase
         $container->instance('log', $logger);
         Container::setInstance($container);
 
-        self::assertNull($this->interpolator->interpolate('${input.a}:${input.first}:${input.second}', null, null, ['input' => ['a' => 'x']]));
+        self::assertNull($this->interpolator->interpolate('${input.a}:${input.first}:${input.second}', ['input' => ['a' => 'x']]));
         self::assertSame(['debug: Unresolved interpolation token \'${input.first}\': the test is undecidable.'], $logger->messages);
 
-        self::assertSame('x', $this->interpolator->interpolate('${input.a}', null, null, ['input' => ['a' => 'x']]));
+        self::assertSame('x', $this->interpolator->interpolate('${input.a}', ['input' => ['a' => 'x']]));
         self::assertCount(1, $logger->messages);
     }
 
@@ -987,8 +658,8 @@ final class ContextInterpolatorTest extends TestCase
         $container->instance('log', $logger);
         Container::setInstance($container);
 
-        self::assertNull($this->interpolator->interpolate('${input.missing}', null, null, []));
-        self::assertNull($this->interpolator->interpolatePattern('${input.missing}', null, null, []));
+        self::assertNull($this->interpolator->interpolate('${input.missing}', []));
+        self::assertNull($this->interpolator->interpolatePattern('${input.missing}', []));
     }
 
     /**
@@ -1001,6 +672,6 @@ final class ContextInterpolatorTest extends TestCase
     {
         Container::setInstance(new Container);
 
-        self::assertNull($this->interpolator->interpolate('${input.missing}', null, null, []));
+        self::assertNull($this->interpolator->interpolate('${input.missing}', []));
     }
 }

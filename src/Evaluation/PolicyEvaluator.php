@@ -74,27 +74,27 @@ final class PolicyEvaluator
      * same one, which builds each namespace the first time a statement reads
      * it. A context given as an array is the check's namespaces, already built,
      * so what a caller passes belongs under `input`, where the check context
-     * factory holds it.
+     * factory holds it, and the subject and resource under `subject` and
+     * `resource`; the resource identifier is what resource patterns match.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
      * @param  string  $action
      * @param  string|null  $resource
      * @param  array<array-key, mixed>|\SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
-     * @param  object|null  $principal
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    public function evaluate(array $policies, string $action, ?string $resource = null, array|CheckContext $context = [], ?object $principal = null): Decision
+    public function evaluate(array $policies, string $action, ?string $resource = null, array|CheckContext $context = []): Decision
     {
         $context    = CheckContext::from($context);
         $statements = $this->statementsOf($policies);
         $trace      = [];
-        $denies     = $this->assess($statements[self::DENY], DecisionStage::DENY, $action, $resource, $context, $principal, $trace);
+        $denies     = $this->assess($statements[self::DENY], DecisionStage::DENY, $action, $resource, $context, $trace);
 
         if ($denies[self::DENY] !== [] || $denies[self::INVALID] !== []) {
             return self::conclude(DecisionStage::DENY, $denies, $trace);
         }
 
-        $allows = $this->assess($statements[self::ALLOW], DecisionStage::ALLOW, $action, $resource, $context, $principal, $trace);
+        $allows = $this->assess($statements[self::ALLOW], DecisionStage::ALLOW, $action, $resource, $context, $trace);
 
         return self::conclude(DecisionStage::ALLOW, $allows, $trace);
     }
@@ -108,14 +108,13 @@ final class PolicyEvaluator
      * @param  string  $action
      * @param  string|null  $resource
      * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
-     * @param  object|null  $principal
      * @param  list<\SineMacula\Laravel\Authorization\Evaluation\TraceEntry>  $trace
      *
      * @param-out list<\SineMacula\Laravel\Authorization\Evaluation\TraceEntry>  $trace
      *
      * @return array<string, list<\SineMacula\Laravel\Authorization\Evaluation\StatementReference>>
      */
-    private function assess(array $statements, DecisionStage $stage, string $action, ?string $resource, CheckContext $context, ?object $principal, array &$trace): array
+    private function assess(array $statements, DecisionStage $stage, string $action, ?string $resource, CheckContext $context, array &$trace): array
     {
         $found = [self::DENY => [], self::INVALID => [], self::ALLOW => [], self::FAILED => [], self::NONE => []];
 
@@ -127,7 +126,7 @@ final class PolicyEvaluator
                 continue;
             }
 
-            $assessment = $statement->assess($action, $resource, $context, $this->interpolator(), $principal);
+            $assessment = $statement->assess($action, $resource, $context, $this->interpolator());
             $outcome    = self::outcomeOf($assessment);
 
             $trace[]                                                             = new TraceEntry($stage, $outcome, $reference, $assessment->conditions ?? []);

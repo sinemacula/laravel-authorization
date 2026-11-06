@@ -14,7 +14,11 @@ use SineMacula\Laravel\Authorization\Context\RoutedRequestContext;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
 use SineMacula\Laravel\Authorization\Contracts\RequestContext;
+use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\PlanContextSource;
+use Tests\Feature\Stubs\RecordingResourceAttributes;
+use Tests\Feature\Stubs\RecordingSubjectAttributes;
 use Tests\Feature\Stubs\ReservedContextSource;
 use Tests\TestCase;
 
@@ -58,9 +62,57 @@ final class ContextBindingsTest extends TestCase
 
         $catalogue = ContextBindings::catalogue($this->application());
 
-        self::assertSame(['authentication', 'environment', 'input', 'plan', 'request'], $catalogue->namespaces());
+        self::assertSame(['authentication', 'environment', 'input', 'plan', 'request', 'resource', 'subject'], $catalogue->namespaces());
         self::assertTrue($catalogue->permits('input.post.status', 'eq'));
         self::assertTrue($catalogue->permits('plan.tier', 'like'));
+    }
+
+    /**
+     * The catalogue declares the attributes the providers of
+     * `authorization.attributes` declare, under `resource` and `subject`,
+     * beside the built-ins.
+     *
+     * @return void
+     */
+    public function testTheCatalogueDeclaresTheProvidersAttributes(): void
+    {
+        $this->config()->set('authorization.attributes', [
+            'resources' => ['post' => RecordingResourceAttributes::class],
+            'subjects'  => ['user' => RecordingSubjectAttributes::class],
+        ]);
+
+        $catalogue = ContextBindings::catalogue($this->application());
+
+        self::assertTrue($catalogue->permits('resource.status', 'eq'));
+        self::assertTrue($catalogue->permits('resource.owner.id', 'eq'));
+        self::assertTrue($catalogue->permits('subject.department', 'eq'));
+        self::assertTrue($catalogue->permits('subject.id', 'eq'));
+        self::assertFalse($catalogue->permits('resource.secret'));
+        self::assertFalse($catalogue->permits('subject.salary'));
+    }
+
+    /**
+     * The factory hands the check's subject and resource to the providers of
+     * `authorization.attributes`, each resolved from the container.
+     *
+     * @return void
+     */
+    public function testTheFactoryHoldsTheConfiguredAttributeProviders(): void
+    {
+        $posts = new RecordingResourceAttributes('archived');
+
+        $this->application()->instance(RecordingResourceAttributes::class, $posts);
+        $this->config()->set('authorization.attributes', [
+            'resources' => ['post' => RecordingResourceAttributes::class],
+            'subjects'  => [\stdClass::class => RecordingSubjectAttributes::class],
+        ]);
+
+        $context = ContextBindings::factory($this->application())->make([], new Subject(new \stdClass), ResourceReference::record('post', '9'));
+
+        self::assertSame([true, 'archived'], $context->lookup('resource.status'));
+        self::assertSame([true, '9'], $context->lookup('resource.id'));
+        self::assertSame([true, 'sales'], $context->lookup('subject.department'));
+        self::assertCount(1, $posts->calls);
     }
 
     /**

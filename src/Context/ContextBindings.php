@@ -35,12 +35,13 @@ final class ContextBindings
     ];
 
     /**
-     * Build the context key catalogue from the package's keys and those of
-     * `authorization.context.keys`.
+     * Build the context key catalogue from the package's keys, those of
+     * `authorization.context.keys` and those the attribute providers declare.
      *
      * @param  \Illuminate\Contracts\Foundation\Application  $app
      * @return \SineMacula\Laravel\Authorization\Context\DeclaredContextKeyCatalogue
      *
+     * @throws \Illuminate\Contracts\Container\BindingResolutionException
      * @throws \InvalidArgumentException
      */
     public static function catalogue(Application $app): DeclaredContextKeyCatalogue
@@ -48,13 +49,13 @@ final class ContextBindings
         /** @var array<string, array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType|string>> $keys */
         $keys = (array) $app['config']->get('authorization.context.keys', []);
 
-        return new DeclaredContextKeyCatalogue($keys);
+        return new DeclaredContextKeyCatalogue($keys, AttributeProviders::fromConfig($app)->declarations());
     }
 
     /**
-     * Build the check context factory from the bound trusted sources and the
-     * sources of `authorization.context.sources`, each resolved from the
-     * container.
+     * Build the check context factory from the bound trusted sources, the
+     * sources of `authorization.context.sources` and the attribute providers of
+     * `authorization.attributes`, each resolved from the container.
      *
      * @param  \Illuminate\Contracts\Foundation\Application  $app
      * @return \SineMacula\Laravel\Authorization\Context\CheckContextFactory
@@ -72,6 +73,7 @@ final class ContextBindings
             request: $app->make(RequestContext::class),
             environment: $app->make(EnvironmentContext::class),
             sources: \array_map(static fn (string $class): ContextSource => $app->make($class), $classes),
+            attributes: AttributeProviders::fromConfig($app),
         );
     }
 }

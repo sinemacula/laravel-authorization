@@ -6,17 +6,18 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
 
 /**
  * The context of one check: nested namespaces (`authentication`, `request`,
- * `environment`, `input` and any an application source adds), each read as a
- * dot path, segment by segment (N24).
+ * `environment`, `subject`, `resource`, `input` and any an application source
+ * adds), each read as a dot path, segment by segment (N24).
  *
  * A namespace is given already built (the caller's `input`) or built by a
  * builder the first time a statement of the check reads it, and at most once
- * for the check: the namespaces no statement reads are never built. A builder
- * returns its namespaces' values keyed by namespace, and may build several
- * namespaces at once (the authentication context builds `authentication` and
- * any `mfa` or `sso` namespace it contributes); a namespace it leaves out is
- * absent, so its keys are missing. Build a new context for every check, so no
- * value outlives the check that read it.
+ * for the check, even when its builder throws: the namespaces no statement
+ * reads are never built. A builder returns its namespaces' values keyed by
+ * namespace, and may build several namespaces at once (the authentication
+ * context builds `authentication` and any `mfa` or `sso` namespace it
+ * contributes); a namespace it leaves out is absent, so its keys are missing.
+ * Build a new context for every check, so no value outlives the check that read
+ * it.
  *
  * A path is never a literal flat key: `request.ip` reads the `ip` key of the
  * `request` namespace, and a top-level key named `request.ip` is never read.
@@ -122,16 +123,24 @@ final class CheckContext
      * Run a builder once and keep every namespace it builds, leaving absent
      * those it was to build but left out.
      *
+     * The builder is dropped before it runs, so one that throws is never run
+     * again for the check: the failure aborts the check, and its namespaces
+     * stay absent rather than being built on a later read.
+     *
      * @param  \Closure(): array<array-key, mixed>  $builder
      * @return void
      */
     private function build(\Closure $builder): void
     {
+        $namespaces = \array_keys($this->builders, $builder, true);
+
+        foreach ($namespaces as $namespace) {
+            unset($this->builders[$namespace]);
+        }
+
         $built = $builder();
 
-        foreach (\array_keys($this->builders, $builder, true) as $namespace) {
-            unset($this->builders[$namespace]);
-
+        foreach ($namespaces as $namespace) {
             if (!\array_key_exists($namespace, $built)) {
                 continue;
             }

@@ -83,16 +83,19 @@ final class ResourceReferencesTest extends TestCase
 
     /**
      * A saved model is a record of its morph class and key, with no tenant when
-     * the resolver knows none.
+     * the resolver knows none, and keeps the model itself.
      *
      * @return void
      */
     public function testASavedModelIsARecordOfItsMorphClassAndKey(): void
     {
-        $model = self::model(42);
+        $model     = self::model(42);
+        $zero      = self::model(0);
+        $reference = ResourceReferences::of($model);
 
-        self::assertEquals(ResourceReference::record($model->getMorphClass(), '42'), ResourceReferences::of($model));
-        self::assertEquals(ResourceReference::record($model->getMorphClass(), '0'), ResourceReferences::of(self::model(0)));
+        self::assertEquals(ResourceReference::record($model->getMorphClass(), '42', null, $model), $reference);
+        self::assertSame($model, $reference instanceof ResourceReference ? $reference->model : null);
+        self::assertEquals(ResourceReference::record($zero->getMorphClass(), '0', null, $zero), ResourceReferences::of($zero));
         self::assertCount(2, $this->resolver->asked);
     }
 
@@ -136,7 +139,7 @@ final class ResourceReferencesTest extends TestCase
 
     /**
      * The resource contract wins over a model's own record and its resolved
-     * tenant, saved or not.
+     * tenant, saved or not, and the model is handed on with its record.
      *
      * @return void
      */
@@ -155,12 +158,42 @@ final class ResourceReferencesTest extends TestCase
             }
         };
 
-        self::assertEquals(ResourceReference::record('document', '7'), ResourceReferences::of($resource));
+        self::assertEquals(ResourceReference::record('document', '7', null, $resource), ResourceReferences::of($resource));
 
         $resource->setRawAttributes(['id' => 42]);
 
-        self::assertEquals(ResourceReference::record('document', '7'), ResourceReferences::of($resource));
+        self::assertEquals(ResourceReference::record('document', '7', null, $resource), ResourceReferences::of($resource));
         self::assertCount(0, $this->resolver->asked);
+    }
+
+    /**
+     * A model implementing the resource contract is handed on with the record
+     * its contract names when that reference carries no model, keeping the
+     * contract's identifier, type, id and tenant; a model the reference already
+     * carries, and a reference that names no one record, are kept as given.
+     *
+     * @return void
+     */
+    public function testAModelResourceIsHandedOnWithTheRecordItsContractNames(): void
+    {
+        $tenant = new Reference('stub_tenant', '3');
+        $other  = self::model(9);
+
+        $record = new ResourceReference('docs/7', 'document', '7', $tenant);
+        $model  = self::resourceModel($record);
+
+        $reference = ResourceReferences::of($model);
+
+        self::assertInstanceOf(ResourceReference::class, $reference);
+        self::assertSame(['docs/7', 'document', '7', $tenant, $model], [$reference->identifier, $reference->type, $reference->id, $reference->tenant, $reference->model]);
+
+        $carried = ResourceReference::record('document', '7', null, $other);
+
+        self::assertSame($carried, ResourceReferences::of(self::resourceModel($carried)));
+
+        foreach ([ResourceReference::type('document'), new ResourceReference('document:7')] as $unnamed) {
+            self::assertSame($unnamed, ResourceReferences::of(self::resourceModel($unnamed)));
+        }
     }
 
     /**
@@ -424,7 +457,7 @@ final class ResourceReferencesTest extends TestCase
 
         Relation::morphMap(['anonymous' => $model::class]);
 
-        self::assertEquals(ResourceReference::record('anonymous', '42'), ResourceReferences::of($model));
+        self::assertEquals(ResourceReference::record('anonymous', '42', null, $model), ResourceReferences::of($model));
     }
 
     /**
@@ -468,6 +501,39 @@ final class ResourceReferencesTest extends TestCase
         $model = new StubTenant;
 
         $model->setRawAttributes(['id' => $key]);
+
+        return $model;
+    }
+
+    /**
+     * Return a saved model whose resource contract names the given reference.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $reference
+     * @return \Illuminate\Database\Eloquent\Model&\SineMacula\Laravel\Authorization\Contracts\AuthorizableResource
+     */
+    private static function resourceModel(ResourceReference $reference): AuthorizableResource&Model
+    {
+        $model = new class extends Model implements AuthorizableResource {
+            /** @var \SineMacula\Laravel\Authorization\Support\ResourceReference|null The reference the contract names. */
+            public ?ResourceReference $reference = null;
+
+            /**
+             * Return the reference the contract names.
+             *
+             * @return \SineMacula\Laravel\Authorization\Support\ResourceReference
+             *
+             * @throws \LogicException
+             */
+            #[\Override]
+            public function toResourceReference(): ResourceReference
+            {
+                return $this->reference ?? throw new \LogicException('The model names no reference.');
+            }
+        };
+
+        $model->reference = $reference;
+
+        $model->setRawAttributes(['id' => 42]);
 
         return $model;
     }

@@ -854,14 +854,14 @@ final class ConditionEvaluatorTest extends TestCase
             $error = "invalid operand for operator '{$operator}'";
 
             yield "{$operator} string" => [$operator, 'a', null];
-            yield "{$operator} interpolated" => [$operator, '${principal.id}', null];
+            yield "{$operator} interpolated" => [$operator, '${subject.id}', null];
             yield "{$operator} empty" => [$operator, '', $error];
             yield "{$operator} int" => [$operator, 5, $error];
             yield "{$operator} list" => [$operator, ['a'], $error];
-            yield "{$operator} escaped reference" => [$operator, '\${principal.id}', null];
-            yield "{$operator} malformed reference" => [$operator, '${principal.tenant-id}', null];
+            yield "{$operator} escaped reference" => [$operator, '\${subject.id}', null];
+            yield "{$operator} malformed reference" => [$operator, '${subject.tenant-id}', null];
             yield "{$operator} nul byte" => [$operator, "a\0b", $error];
-            yield "{$operator} interpolated with a nul byte" => [$operator, "\${principal.id}\0", $error];
+            yield "{$operator} interpolated with a nul byte" => [$operator, "\${subject.id}\0", $error];
         }
     }
 

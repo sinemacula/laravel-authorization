@@ -4,14 +4,20 @@ declare(strict_types = 1);
 
 namespace Tests\Unit\Context;
 
+use Illuminate\Container\Container;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Context\AttributeProviders;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\ContextSource;
 use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
 use SineMacula\Laravel\Authorization\Contracts\RequestContext;
+use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use Tests\Feature\Stubs\RecordingResourceAttributes;
+use Tests\Feature\Stubs\RecordingSubjectAttributes;
 
 /**
  * Unit tests for `CheckContextFactory`, which makes the context of each check
@@ -131,6 +137,61 @@ final class CheckContextFactoryTest extends TestCase
         foreach (['authentication', 'mfa', 'request', 'environment', 'tenant'] as $namespace) {
             self::assertSame([false, null], $context->lookup($namespace), $namespace);
         }
+    }
+
+    /**
+     * The check's subject and resource supply `subject` and `resource`, from
+     * their built-in keys alone when no providers are given, and neither
+     * namespace is present for a check with no subject or resource.
+     *
+     * @return void
+     */
+    public function testTheSubjectAndResourceSupplyTheirNamespaces(): void
+    {
+        $subject = new Subject(new \stdClass);
+        $context = $this->factory()->make(['subject' => ['id' => 'forged']], $subject, ResourceReference::record('post', '42'));
+
+        self::assertSame([true, \stdClass::class], $context->lookup('subject.type'));
+        self::assertSame([false, null], $context->lookup('subject.id'));
+        self::assertSame([true, ['id' => '42', 'type' => 'post']], $context->lookup('resource'));
+        self::assertSame([true, 'forged'], $context->lookup('input.subject.id'));
+
+        $empty = $this->factory()->make();
+
+        self::assertSame([false, null], $empty->lookup('subject'));
+        self::assertSame([false, null], $empty->lookup('resource'));
+    }
+
+    /**
+     * The providers given supply the declared attributes of the check's subject
+     * and resource, each read only when the check reads its namespace.
+     *
+     * @return void
+     */
+    public function testTheProvidersSupplyTheSubjectAndResourceAttributes(): void
+    {
+        $container = new Container;
+        $posts     = new RecordingResourceAttributes('published');
+        $users     = new RecordingSubjectAttributes;
+
+        $container->instance(RecordingResourceAttributes::class, $posts);
+        $container->instance(RecordingSubjectAttributes::class, $users);
+
+        $factory = new CheckContextFactory(
+            $this->authentication([], ['authentication']),
+            $this->request([]),
+            $this->environment([]),
+            [],
+            new AttributeProviders($container, ['post' => RecordingResourceAttributes::class], [\stdClass::class => RecordingSubjectAttributes::class]),
+        );
+
+        $context = $factory->make([], new Subject(new \stdClass), ResourceReference::record('post', '42'));
+
+        self::assertSame([true, 'published'], $context->lookup('resource.status'));
+        self::assertSame([true, 'sales'], $context->lookup('subject.department'));
+        self::assertSame([false, null], $context->lookup('subject.salary'));
+        self::assertCount(1, $posts->calls);
+        self::assertCount(1, $users->calls);
     }
 
     /**
