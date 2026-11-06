@@ -30,15 +30,18 @@ A statement names its actions with `actions`, or with `not_actions` (every actio
 resources with `resources`, with `not_resources` (every resource none of its patterns matches), or with neither (every
 resource, and a check that names none). Its `conditions` map each operator to the context keys it tests, each a dot
 path into the check's context, and every test must hold:
-`{"ip_not_in": {"request.ip": ["10.0.0.0/8"]}, "eq": {"input.tenant": "${principal.tenant}"}}`. A key the context lacks
+`{"ip_not_in": {"request.ip": ["10.0.0.0/8"]}, "eq": {"resource.owner.id": "${subject.id}"}}`. A key the context lacks
 makes a test undecidable, except under the `_if_exists` suffix, which passes it, and for `null`, which decides it.
 
 The check's context is built once a check, in `AuthorizationManager`, after the subject and resource stages: the
-caller's values under `input`, and the `authentication`, `request` and `environment` namespaces and those of the
-application's sources from their own sources, each built only when a statement assessed reads it and then kept for the
-rest of the check, so a deny stage and an allow stage reading `request.ip` see one value. A decision that ends before
-the statements are assessed builds none of them. The shape, the operators, the operands and the namespaces are in
-[Wildcard and Condition Semantics](wildcard-and-condition-semantics.md).
+caller's values under `input`, the `authentication`, `request` and `environment` namespaces and those of the
+application's sources from their own sources, and the `subject` and `resource` namespaces from the subject, the
+resource reference and their attribute providers, each built only when a statement assessed reads it and then kept for
+the rest of the check, so a deny stage and an allow stage reading `request.ip` see one value. A decision that ends
+before the statements are assessed builds none of them. An attribute provider that throws aborts the check with
+`AttributeProviderFailed` rather than letting it be decided: no decision is made, recorded or dispatched. The shape,
+the operators, the operands and the namespaces are in [Wildcard and Condition
+Semantics](wildcard-and-condition-semantics.md).
 
 `not_resources` counts as resource scoping: a statement with it never covers a check that names no resource, so
 `{"effect": "deny", "actions": ["posts:delete"], "not_resources": ["post:1"]}` denies deleting every post but `post:1`

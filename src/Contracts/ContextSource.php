@@ -16,22 +16,20 @@ namespace SineMacula\Laravel\Authorization\Contracts;
  *
  * A source may not claim a reserved namespace: the trusted ones
  * (`authentication`, `request`, `environment`) are replaced only by rebinding
- * their own contracts, `input` holds what the caller passes, and `principal`,
- * `resource` and `subject` are not part of a check's context.
+ * their own contracts, `input` holds what the caller passes, and `subject` and
+ * `resource` hold the check's subject and resource, from their built-in keys
+ * and attribute providers.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
 interface ContextSource
 {
-    /** @var list<string> The namespaces a `${…}` reference reads from the check's principal and resource rather than its context. */
-    public const array INTERPOLATED_NAMESPACES = ['principal', 'resource'];
-
-    /** @var list<string> The reserved namespaces that are not part of a check's context: no source supplies them, and no key is declared under them. */
-    public const array NON_CONTEXT_NAMESPACES = [...self::INTERPOLATED_NAMESPACES, 'subject'];
+    /** @var list<string> The namespaces of the check's subject and resource: their keys are the package's built-ins and those attribute providers declare, never a source's. */
+    public const array ATTRIBUTE_NAMESPACES = ['subject', 'resource'];
 
     /** @var list<string> The namespaces no source may claim. */
-    public const array RESERVED_NAMESPACES = ['authentication', 'request', 'environment', 'input', ...self::NON_CONTEXT_NAMESPACES];
+    public const array RESERVED_NAMESPACES = ['authentication', 'request', 'environment', 'input', ...self::ATTRIBUTE_NAMESPACES];
 
     /**
      * Return the namespace the source supplies.

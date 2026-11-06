@@ -4,25 +4,17 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
-use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
 
 /**
  * Resolve `${namespace.path}` tokens in policy statement strings.
  *
- * - `${principal.*}`: attributes of the resolved principal. `principal.id` is
- *   the model's key and `principal.type` its morph class (or class name). Other
- *   keys read the model's attribute through `getAttribute()`, or a public
- *   property on a plain object. Hidden attributes (listed in `$hidden`, or left
- *   out of a non-empty `$visible`) and relations are never read.
- * - `${resource.*}`: derived from the resource string. `resource.type` is the
- *   segment before the first `:` (the whole string when there is none) and
- *   `resource.id` the segment after it (unresolved when there is none).
- * - Any other token is a dot path of the check's context, read by the same
- *   resolver as condition keys: `${request.ip}`, `${input.post}`,
- *   `${environment.time}`. The namespace is built the first time the check
- *   reads it. A namespace the context does not hold, such as `context`, is
- *   unresolved.
+ * Every token is a dot path of the check's context, read by the same resolver
+ * as condition keys: `${subject.id}`, `${resource.owner.id}`, `${request.ip}`,
+ * `${input.post}`, `${environment.time}`. The namespace is built the first time
+ * the check reads it. A namespace the context does not hold, such as `context`,
+ * is unresolved, and `${resource.id}` is unresolved for a check whose resource
+ * has no id: it is never read by splitting the resource's identifier.
  *
  * A token that cannot be resolved to a scalar (a missing key, a null, a list or
  * map) makes the whole string unresolved: `interpolate()` and
@@ -54,14 +46,12 @@ final class ContextInterpolator
      * Returns null when any token cannot be resolved.
      *
      * @param  string  $subject
-     * @param  object|null  $principal
-     * @param  string|null  $resource
      * @param  array<array-key, mixed>|\SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
      * @return string|null
      */
-    public function interpolate(string $subject, ?object $principal, ?string $resource, array|CheckContext $context = []): ?string
+    public function interpolate(string $subject, array|CheckContext $context = []): ?string
     {
-        return $this->render($subject, $principal, $resource, CheckContext::from($context), false);
+        return self::render($subject, CheckContext::from($context), false);
     }
 
     /**
@@ -74,14 +64,12 @@ final class ContextInterpolator
      * any token cannot be resolved.
      *
      * @param  string  $pattern
-     * @param  object|null  $principal
-     * @param  string|null  $resource
      * @param  array<array-key, mixed>|\SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
      * @return string|null
      */
-    public function interpolatePattern(string $pattern, ?object $principal, ?string $resource, array|CheckContext $context = []): ?string
+    public function interpolatePattern(string $pattern, array|CheckContext $context = []): ?string
     {
-        return $this->render($pattern, $principal, $resource, CheckContext::from($context), true);
+        return self::render($pattern, CheckContext::from($context), true);
     }
 
     /**
@@ -155,18 +143,16 @@ final class ContextInterpolator
      * Render the string, resolving every token.
      *
      * @param  string  $subject
-     * @param  object|null  $principal
-     * @param  string|null  $resource
      * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
      * @param  bool  $asPattern
      * @return string|null
      */
-    private function render(string $subject, ?object $principal, ?string $resource, CheckContext $context, bool $asPattern): ?string
+    private static function render(string $subject, CheckContext $context, bool $asPattern): ?string
     {
         $rendered = '';
 
         foreach (self::split($subject) as $part) {
-            $piece = $this->renderPart($part, $principal, $resource, $context, $asPattern);
+            $piece = self::renderPart($part, $context, $asPattern);
 
             if ($piece === null) {
                 return null;
@@ -210,13 +196,11 @@ final class ContextInterpolator
      * malformed reference.
      *
      * @param  string  $part
-     * @param  object|null  $principal
-     * @param  string|null  $resource
      * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
      * @param  bool  $asPattern
      * @return string|null
      */
-    private function renderPart(string $part, ?object $principal, ?string $resource, CheckContext $context, bool $asPattern): ?string
+    private static function renderPart(string $part, CheckContext $context, bool $asPattern): ?string
     {
         if ($part === '\${' || self::isMalformed($part)) {
             return $part === '\${' ? '${' : null;
@@ -226,162 +210,30 @@ final class ContextInterpolator
             return $asPattern ? self::literalPattern($part) : $part;
         }
 
-        $value = $this->resolveToken(\substr($part, 2, -1), $principal, $resource, $context);
+        $value = self::resolveToken(\substr($part, 2, -1), $context);
 
         return $asPattern && $value !== null ? \addcslashes($value, self::GLOB_SPECIAL) : $value;
     }
 
     /**
-     * Resolve a single dotted token to its string value, or null when it cannot
-     * be resolved.
+     * Resolve a single dotted token to its string value, or null when its key
+     * is missing or its value is not a scalar.
      *
      * @param  string  $token
-     * @param  object|null  $principal
-     * @param  string|null  $resource
      * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
      * @return string|null
      */
-    private function resolveToken(string $token, ?object $principal, ?string $resource, CheckContext $context): ?string
+    private static function resolveToken(string $token, CheckContext $context): ?string
     {
-        $dotPos    = \strpos($token, '.');
-        $namespace = $dotPos === false ? $token : \substr($token, 0, $dotPos);
-        $key       = $dotPos === false ? '' : \substr($token, $dotPos + 1);
+        $value = $context->lookup($token)[1];
 
-        $value = match ($namespace) {
-            'principal' => $this->resolvePrincipal($principal, $key),
-            'resource'  => $this->resolveResource($resource, $key),
-            default     => self::resolveContext($context, $token),
-        };
-
-        if ($value === null) {
+        if (!\is_scalar($value)) {
             self::logUnresolved($token);
 
             return null;
         }
 
         return \is_bool($value) ? \var_export($value, true) : (string) $value;
-    }
-
-    /**
-     * Resolve a key from the principal object.
-     *
-     * @param  object|null  $principal
-     * @param  string  $key
-     * @return scalar|null
-     */
-    private function resolvePrincipal(?object $principal, string $key): bool|float|int|string|null
-    {
-        if ($principal === null || $key === '') {
-            return null;
-        }
-
-        if ($key === 'type') {
-            return $this->resolvePrincipalType($principal);
-        }
-
-        /** @var mixed $value */
-        $value = $principal instanceof Model
-            ? $this->resolveModelAttribute($principal, $key)
-            : $this->resolvePublicProperty($principal, $key);
-
-        return \is_scalar($value) ? $value : null;
-    }
-
-    /**
-     * Read an attribute of an Eloquent principal, refusing hidden attributes
-     * and relations.
-     *
-     * @param  \Illuminate\Database\Eloquent\Model  $principal
-     * @param  string  $key
-     * @return mixed
-     */
-    private function resolveModelAttribute(Model $principal, string $key): mixed
-    {
-        if ($key === 'id') {
-            return $principal->getKey();
-        }
-
-        $visible = $principal->getVisible();
-
-        if (\in_array($key, $principal->getHidden(), true) || ($visible !== [] && !\in_array($key, $visible, true)) || $principal->isRelation($key)) {
-            return null;
-        }
-
-        return $principal->getAttribute($key);
-    }
-
-    /**
-     * Read a public property of a plain principal object.
-     *
-     * @param  object  $principal
-     * @param  string  $key
-     * @return mixed
-     */
-    private function resolvePublicProperty(object $principal, string $key): mixed
-    {
-        /** @var array<string, mixed> $vars */
-        $vars = \get_object_vars($principal);
-
-        return $vars[$key] ?? null;
-    }
-
-    /**
-     * Resolve the principal type string.
-     *
-     * Eloquent models with a `getMorphClass` method return their morph alias;
-     * all other objects fall back to their fully-qualified class name.
-     *
-     * @param  object  $principal
-     * @return string
-     */
-    private function resolvePrincipalType(object $principal): string
-    {
-        if (\method_exists($principal, 'getMorphClass')) {
-            return $principal->getMorphClass();
-        }
-
-        return $principal::class;
-    }
-
-    /**
-     * Resolve a dot path of the check's context, or null when its key is
-     * missing or its value is not a scalar.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
-     * @param  string  $path
-     * @return scalar|null
-     */
-    private static function resolveContext(CheckContext $context, string $path): bool|float|int|string|null
-    {
-        $value = $context->lookup($path)[1];
-
-        return \is_scalar($value) ? $value : null;
-    }
-
-    /**
-     * Resolve a key from the resource string representation.
-     *
-     * `resource.type` returns the segment before the first `:`, or the whole
-     * string when there is none. `resource.id` returns the segment after it,
-     * and is unresolved when there is none.
-     *
-     * @param  string|null  $resource
-     * @param  string  $key
-     * @return string|null
-     */
-    private function resolveResource(?string $resource, string $key): ?string
-    {
-        if ($resource === null || $key === '') {
-            return null;
-        }
-
-        $colonPos = \strpos($resource, ':');
-
-        return match ($key) {
-            'id'    => $colonPos === false ? null : \substr($resource, $colonPos + 1),
-            'type'  => $colonPos === false ? $resource : \substr($resource, 0, $colonPos),
-            default => null,
-        };
     }
 
     /**

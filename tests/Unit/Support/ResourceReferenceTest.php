@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Unit\Support;
 
+use Illuminate\Database\Eloquent\Model;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -37,6 +38,7 @@ final class ResourceReferenceTest extends TestCase
         self::assertNull($reference->type);
         self::assertNull($reference->id);
         self::assertNull($reference->tenant);
+        self::assertNull($reference->model);
     }
 
     /**
@@ -47,29 +49,35 @@ final class ResourceReferenceTest extends TestCase
     public function testKeepsEveryPartGiven(): void
     {
         $tenant    = new Reference('stub_tenant', '7');
-        $reference = new ResourceReference('custom', 'post', '42', $tenant);
+        $model     = new class extends Model {};
+        $reference = new ResourceReference('custom', 'post', '42', $tenant, $model);
 
         self::assertSame('custom', $reference->identifier);
         self::assertSame('post', $reference->type);
         self::assertSame('42', $reference->id);
         self::assertSame($tenant, $reference->tenant);
+        self::assertSame($model, $reference->model);
     }
 
     /**
-     * A record is identified as `type:id`, with no tenant unless one is given.
+     * A record is identified as `type:id`, with no tenant or model unless one
+     * is given.
      *
      * @return void
      */
     public function testARecordIsIdentifiedByItsTypeAndId(): void
     {
         $tenant = new Reference('stub_tenant', '7');
+        $model  = new class extends Model {};
         $record = ResourceReference::record('post', '42');
 
         self::assertSame('post:42', $record->identifier);
         self::assertSame('post', $record->type);
         self::assertSame('42', $record->id);
         self::assertNull($record->tenant);
+        self::assertNull($record->model);
         self::assertSame($tenant, ResourceReference::record('post', '42', $tenant)->tenant);
+        self::assertSame($model, ResourceReference::record('post', '42', null, $model)->model);
     }
 
     /**
@@ -87,6 +95,7 @@ final class ResourceReferenceTest extends TestCase
         self::assertSame('post', $type->type);
         self::assertNull($type->id);
         self::assertNull($type->tenant);
+        self::assertNull($type->model);
         self::assertSame($tenant, ResourceReference::type('post', $tenant)->tenant);
     }
 

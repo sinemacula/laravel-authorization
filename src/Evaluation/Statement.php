@@ -170,14 +170,13 @@ final readonly class Statement
      * @param  string  $action
      * @param  string|null  $resource
      * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null  $interpolator
-     * @param  object|null  $principal
      * @param  array<array-key, mixed>|\SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
      * @return bool
      */
-    public function matches(string $action, ?string $resource = null, ?ContextInterpolator $interpolator = null, ?object $principal = null, array|CheckContext $context = []): bool
+    public function matches(string $action, ?string $resource = null, ?ContextInterpolator $interpolator = null, array|CheckContext $context = []): bool
     {
         return $this->coversAction($action)
-            && $this->matchesTarget(new InterpolationScope($interpolator, $principal, $resource, $context))->holds();
+            && $this->matchesTarget(new InterpolationScope($interpolator, $resource, $context))->holds();
     }
 
     /**
@@ -189,13 +188,11 @@ final readonly class Statement
      *
      * @param  array<array-key, mixed>|\SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
      * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null  $interpolator
-     * @param  object|null  $principal
-     * @param  string|null  $resource
      * @return bool
      */
-    public function conditionsSatisfiedBy(array|CheckContext $context, ?ContextInterpolator $interpolator = null, ?object $principal = null, ?string $resource = null): bool
+    public function conditionsSatisfiedBy(array|CheckContext $context, ?ContextInterpolator $interpolator = null): bool
     {
-        return $this->assessConditions(new InterpolationScope($interpolator, $principal, $resource, $context))->holds();
+        return $this->assessConditions(new InterpolationScope($interpolator, null, $context))->holds();
     }
 
     /**
@@ -208,23 +205,17 @@ final readonly class Statement
      * @param  string|null  $resource
      * @param  array<array-key, mixed>|\SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
      * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null  $interpolator
-     * @param  object|null  $principal
      * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
      */
-    public function assess(
-        string $action,
-        ?string $resource = null,
-        array|CheckContext $context = [],
-        ?ContextInterpolator $interpolator = null,
-        ?object $principal = null,
-    ): MatchResult {
+    public function assess(string $action, ?string $resource = null, array|CheckContext $context = [], ?ContextInterpolator $interpolator = null): MatchResult
+    {
         // Most statements of a policy do not name the action, so that case
         // returns before the scope is built.
         if (!$this->coversAction($action)) {
             return MatchResult::doesNotMatch(self::TARGET_MISMATCH);
         }
 
-        $scope  = new InterpolationScope($interpolator, $principal, $resource, $context);
+        $scope  = new InterpolationScope($interpolator, $resource, $context);
         $target = $this->matchesTarget($scope);
 
         if ($target->outcome === MatchOutcome::DOES_NOT_MATCH) {

@@ -83,16 +83,19 @@ final class ResourceReferencesTest extends TestCase
 
     /**
      * A saved model is a record of its morph class and key, with no tenant when
-     * the resolver knows none.
+     * the resolver knows none, and keeps the model itself.
      *
      * @return void
      */
     public function testASavedModelIsARecordOfItsMorphClassAndKey(): void
     {
-        $model = self::model(42);
+        $model     = self::model(42);
+        $zero      = self::model(0);
+        $reference = ResourceReferences::of($model);
 
-        self::assertEquals(ResourceReference::record($model->getMorphClass(), '42'), ResourceReferences::of($model));
-        self::assertEquals(ResourceReference::record($model->getMorphClass(), '0'), ResourceReferences::of(self::model(0)));
+        self::assertEquals(ResourceReference::record($model->getMorphClass(), '42', null, $model), $reference);
+        self::assertSame($model, $reference instanceof ResourceReference ? $reference->model : null);
+        self::assertEquals(ResourceReference::record($zero->getMorphClass(), '0', null, $zero), ResourceReferences::of($zero));
         self::assertCount(2, $this->resolver->asked);
     }
 
@@ -424,7 +427,7 @@ final class ResourceReferencesTest extends TestCase
 
         Relation::morphMap(['anonymous' => $model::class]);
 
-        self::assertEquals(ResourceReference::record('anonymous', '42'), ResourceReferences::of($model));
+        self::assertEquals(ResourceReference::record('anonymous', '42', null, $model), ResourceReferences::of($model));
     }
 
     /**

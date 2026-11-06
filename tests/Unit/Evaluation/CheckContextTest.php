@@ -165,6 +165,41 @@ final class CheckContextTest extends TestCase
     }
 
     /**
+     * A builder that throws is never run again for the check: the failure
+     * reaches the reader, a later read finds every namespace it was to build
+     * missing, and the namespaces of other builders are still built.
+     *
+     * @return void
+     */
+    public function testABuilderThatThrowsIsNeverRetried(): void
+    {
+        $calls   = 0;
+        $builder = static function () use (&$calls): array {
+            $calls++;
+
+            throw new \RuntimeException('provider failed');
+        };
+        $context = new CheckContext([], [
+            'resource' => $builder,
+            'subject'  => $builder,
+            'request'  => static fn (): array => ['request' => ['ip' => '10.0.0.1']],
+        ]);
+
+        try {
+            $context->lookup('resource.status');
+
+            self::fail('The builder\'s failure reaches the reader.');
+        } catch (\RuntimeException $exception) {
+            self::assertSame('provider failed', $exception->getMessage());
+        }
+
+        self::assertSame([false, null], $context->lookup('resource.status'));
+        self::assertSame([false, null], $context->lookup('subject.id'));
+        self::assertSame([true, '10.0.0.1'], $context->lookup('request.ip'));
+        self::assertSame(1, $calls);
+    }
+
+    /**
      * A namespace a builder leaves out is absent, and its builder is not run
      * again.
      *

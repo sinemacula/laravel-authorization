@@ -59,7 +59,7 @@ final class PolicyValidatorTest extends TestCase
                 'sid'        => 'Read',
                 'effect'     => 'allow',
                 'actions'    => ['posts:read'],
-                'conditions' => ['eq' => ['input.tenant' => '${principal.tenant}'], 'ip_in' => ['request.ip' => '10.0.0.0/8']],
+                'conditions' => ['eq' => ['input.tenant' => '${subject.tenant.id}'], 'ip_in' => ['request.ip' => '10.0.0.0/8']],
             ],
             ['sid' => 'Write', 'effect' => 'deny', 'not_actions' => ['posts:read'], 'not_resources' => ['post:1']],
         ]);
@@ -122,7 +122,8 @@ final class PolicyValidatorTest extends TestCase
     /**
      * A condition on a declared key with an operator its type suits, an
      * `_if_exists` form of one, or `null`, is accepted, and so is a `${…}`
-     * reference to a declared key, to the principal or to the resource.
+     * reference to a declared key, the subject's and resource's built-ins
+     * included.
      *
      * @return void
      */
@@ -133,17 +134,17 @@ final class PolicyValidatorTest extends TestCase
         self::assertSame([], $validator->errors(self::document([[
             'effect'     => 'allow',
             'actions'    => ['a'],
-            'resources'  => ['post:${input.owner}', 'user:${principal.id}', '${resource.type}:*'],
+            'resources'  => ['post:${input.owner}', 'user:${subject.id}', '${resource.type}:*'],
             'conditions' => [
                 'eq'              => ['input.post.status' => '${input.owner}', 'authentication.guard' => 'web', 'input.draft' => true],
                 'gte'             => ['input.post.words' => 100],
                 'ip_in_if_exists' => ['request.ip' => '10.0.0.0/8'],
-                'starts_with'     => ['request.route' => 'posts.', 'authentication.user_type' => '${principal.type}'],
+                'starts_with'     => ['request.route' => 'posts.', 'authentication.user_type' => '${subject.type}'],
                 'before'          => ['environment.time' => '2030-01-01T00:00:00Z'],
                 'null'            => ['environment.time' => false, 'input.groups' => false, 'request.ip' => false],
                 'any_value_in'    => ['input.groups' => ['editors']],
                 'bool'            => ['input.draft' => true],
-                'in'              => ['request.method' => ['GET', 'HEAD'], 'authentication.user_id' => ['${principal.id}']],
+                'in'              => ['request.method' => ['GET', 'HEAD'], 'authentication.user_id' => ['${subject.id}']],
             ],
         ]])));
     }
@@ -276,15 +277,15 @@ final class PolicyValidatorTest extends TestCase
     /**
      * A `${…}` reference to a key the catalogue does not declare is refused,
      * once for its statement, in an operand or a resource pattern, and so is
-     * the removed `${context.…}` namespace; references to the principal and the
-     * resource need no declaring.
+     * the removed `${context.…}` namespace; the subject's and resource's
+     * built-ins are declared.
      *
      * @return void
      */
     public function testRefusesAReferenceToAKeyNotDeclared(): void
     {
         $document = self::document([
-            ['effect' => 'allow', 'actions' => ['a'], 'resources' => ['post:${input.post}', '${resource.type}:${principal.id}']],
+            ['effect' => 'allow', 'actions' => ['a'], 'resources' => ['post:${input.post}', '${resource.type}:${subject.id}']],
             ['effect' => 'allow', 'actions' => ['a'], 'conditions' => ['eq' => ['request.route' => '${context.route}', 'request.method' => '${input.post}-${context.route}']]],
         ]);
 
@@ -299,7 +300,7 @@ final class PolicyValidatorTest extends TestCase
     /**
      * A `${…}` reference in a `not_resources` pattern is checked like one in
      * `resources`: refused when it names no declared key, accepted when it
-     * names a declared key, the principal or the resource.
+     * names a declared key, a built-in of the subject or resource included.
      *
      * @return void
      */
@@ -312,23 +313,42 @@ final class PolicyValidatorTest extends TestCase
             ['Policy statement #0 reference \'${input.undeclared}\' names no declared context key; ' . PolicyValidator::DECLARE_KEYS],
             $validator->errors($statement('post:${input.undeclared}')),
         );
-        self::assertSame([], $validator->errors($statement('post:${principal.id}')));
+        self::assertSame([], $validator->errors($statement('post:${subject.id}')));
         self::assertSame([], $validator->errors($statement('post:${input.post}')));
     }
 
     /**
-     * A `${subject.…}` reference is refused, as no key may be declared under
-     * `subject`, while `${principal.…}` and `${resource.…}` need no declaring.
+     * A `${principal.…}` reference is refused as undeclared, as the namespace
+     * is gone, and so is a subject or resource attribute no provider declares,
+     * in a reference or a condition; one a provider declares is accepted.
      *
      * @return void
      */
-    public function testRefusesAReferenceToTheSubjectNamespace(): void
+    public function testRefusesThePrincipalAndUndeclaredAttributes(): void
     {
-        $document = self::document([['effect' => 'allow', 'actions' => ['a'], 'resources' => ['post:${subject.id}', '${resource.type}:${principal.id}']]]);
+        $document = self::document([[
+            'effect'     => 'allow',
+            'actions'    => ['a'],
+            'resources'  => ['post:${principal.id}', 'post:${resource.owner.id}'],
+            'conditions' => ['eq' => ['resource.status' => 'draft', 'subject.department' => '${subject.team}']],
+        ]]);
+
+        self::assertSame([
+            'Policy statement #0 condition key \'resource.status\' is not a declared context key; ' . PolicyValidator::DECLARE_KEYS,
+            'Policy statement #0 condition key \'subject.department\' is not a declared context key; ' . PolicyValidator::DECLARE_KEYS,
+            'Policy statement #0 reference \'${principal.id}\' names no declared context key; ' . PolicyValidator::DECLARE_KEYS,
+            'Policy statement #0 reference \'${resource.owner.id}\' names no declared context key; ' . PolicyValidator::DECLARE_KEYS,
+            'Policy statement #0 reference \'${subject.team}\' names no declared context key; ' . PolicyValidator::DECLARE_KEYS,
+        ], $this->declaringKeys([])->errors($document));
+
+        $this->app?->instance(ContextKeyCatalogue::class, new DeclaredContextKeyCatalogue([], [
+            'resource' => ['App\PostAttributes' => ['status' => 'string', 'owner.id' => 'string']],
+            'subject'  => ['App\UserAttributes' => ['department' => 'string', 'team' => 'string']],
+        ]));
 
         self::assertSame(
-            ['Policy statement #0 reference \'${subject.id}\' names no declared context key; ' . PolicyValidator::DECLARE_KEYS],
-            $this->declaringKeys([])->errors($document),
+            ['Policy statement #0 reference \'${principal.id}\' names no declared context key; ' . PolicyValidator::DECLARE_KEYS],
+            self::validator()->errors($document),
         );
     }
 

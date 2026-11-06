@@ -41,17 +41,6 @@ final class ContextInterpolatorBudgetTest extends TestCase
         $interpolator = new ContextInterpolator;
         $pattern      = self::buildTwentyTokenPattern();
         $context      = self::buildContext();
-        /**
-         * Minimal principal stub exposing the fields referenced by the
-         * benchmark pattern.
-         */
-        $principal = new class {
-            /** @var string */
-            public string $id = 'user-42';
-
-            /** @var string */
-            public string $name = 'alice';
-        };
 
         // Run 1,000 iterations — amortises microsecond-level jitter across a
         // measurable window and gives the budget comfortable headroom vs.
@@ -59,7 +48,7 @@ final class ContextInterpolatorBudgetTest extends TestCase
         $start = \microtime(true);
 
         for ($i = 0; $i < 1000; $i++) {
-            $interpolator->interpolate($pattern, $principal, 'posts:42', $context);
+            $interpolator->interpolate($pattern, $context);
         }
 
         $elapsed = \microtime(true) - $start;
@@ -72,7 +61,7 @@ final class ContextInterpolatorBudgetTest extends TestCase
     }
 
     /**
-     * Build a 20-token pattern mixing principal, resource, and dot-notation
+     * Build a 20-token pattern mixing subject, resource, and dot-notation
      * context lookups — kept here rather than in a shared helper so the
      * performance suite has no runtime dependency on the benchmark-support
      * tree.
@@ -81,7 +70,7 @@ final class ContextInterpolatorBudgetTest extends TestCase
      */
     private static function buildTwentyTokenPattern(): string
     {
-        $ten = '${principal.id}:${principal.type}:${resource.type}:${resource.id}'
+        $ten = '${subject.id}:${subject.type}:${resource.type}:${resource.id}'
             . ':${input.tenant}:${request.ip}:${request.method}'
             . ':${request.path}:${request.country}:${environment.tier}';
 
@@ -96,8 +85,10 @@ final class ContextInterpolatorBudgetTest extends TestCase
     private static function buildContext(): array
     {
         return [
-            'input'   => ['tenant' => 'tenant-99'],
-            'request' => [
+            'subject'  => ['id' => 'user-42', 'type' => 'user'],
+            'resource' => ['id' => '99', 'type' => 'post'],
+            'input'    => ['tenant' => 'tenant-99'],
+            'request'  => [
                 'ip'         => '10.0.0.42',
                 'method'     => 'POST',
                 'path'       => '/admin/posts/99',

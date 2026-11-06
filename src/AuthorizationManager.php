@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Model;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
+use SineMacula\Laravel\Authorization\Context\AttributeNamespaces;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
@@ -137,12 +138,21 @@ final class AuthorizationManager
      * (`['post' => ['status' => 'draft']]` is `input.post.status`) and never
      * anywhere else: the `authentication`, `request` and `environment`
      * namespaces, and those the application's sources add, come from their
-     * sources alone, built only when a statement of the check reads them.
+     * sources alone, and `subject` and `resource` from the check's subject and
+     * resource and their attribute providers, each built only when a statement
+     * of the check reads it. A model given as the resource is handed to its
+     * type's resource attribute provider. A provider that fails aborts the
+     * check with `AttributeProviderFailed`: no decision is recorded or
+     * reported.
      *
      * @param  string  $action
      * @param  mixed  $resource
      * @param  array<string, mixed>  $context
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed
+     *
+     * @phpstan-ignore throws.unusedType
      */
     public function check(string $action, mixed $resource = null, array $context = []): Decision
     {
@@ -357,7 +367,7 @@ final class AuthorizationManager
             return Decision::deny(DecisionReason::RESOURCE_UNRESOLVED, DecisionStage::RESOURCE);
         }
 
-        $decide = fn (): Decision => $this->decideGrants($subject, $action, $resource?->identifier, $context);
+        $decide = fn (): Decision => $this->decideGrants($subject, $action, $resource, $context);
 
         return $resource === null ? $decide() : ResourceScope::decide($subject, $action, $resource, $decide);
     }
@@ -372,11 +382,11 @@ final class AuthorizationManager
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
-     * @param  string|null  $resource
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
      * @param  array<string, mixed>  $context
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    private function decideGrants(Subject $subject, string $action, ?string $resource, array $context): Decision
+    private function decideGrants(Subject $subject, string $action, ?ResourceReference $resource, array $context): Decision
     {
         try {
             $policies = $this->gatherPolicies($subject);
@@ -386,9 +396,12 @@ final class AuthorizationManager
 
         // What the caller passes is held under `input` alone, never promoted
         // into another namespace, so it cannot stand in for the request, the
-        // authentication or any source's values (N27).
-        $checkContext = $this->contexts?->make($context) ?? new CheckContext([CheckContextFactory::INPUT => $context]);
-        $decision     = $this->evaluator->evaluate($policies, $action, $resource, $checkContext, $subject->subject);
+        // authentication, the subject, the resource or any source's values
+        // (N27). Without a factory, the subject and resource still supply their
+        // built-in keys.
+        $checkContext = $this->contexts?->make($context, $subject, $resource)
+            ?? new CheckContext([CheckContextFactory::INPUT => $context], (new AttributeNamespaces)->builders($subject, $resource));
+        $decision = $this->evaluator->evaluate($policies, $action, $resource?->identifier, $checkContext);
 
         return $decision->stage === DecisionStage::IMPLICIT ? $decision->withPermission(SubjectGrants::holdsPermission($subject, $action)) : $decision;
     }

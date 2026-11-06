@@ -11,15 +11,21 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyValidator;
 
 /**
  * The context keys declared to the package: its own, those given at
- * construction (the `authorization.context.keys` configuration) and those an
- * application or sibling package registers from a service provider.
+ * construction (the `authorization.context.keys` configuration and the
+ * attribute providers' declarations) and those an application or sibling
+ * package registers from a service provider.
  *
  * The catalogue lives in the container, one per application, and holds no
  * static state: what one registers is seen by every policy written after it. A
  * key is a full dot path of at least two segments, the namespace first, each in
  * the condition key syntax, of at most `PolicyValidator::KEY_LENGTH`
- * characters, and never under `principal`, `resource` or `subject`, which are
- * not part of a check's context.
+ * characters.
+ *
+ * The keys of `subject` and `resource` (N29) are the package's built-ins (`id`,
+ * `type`, `tenant.type` and `tenant.id`) and those the attribute providers
+ * declare, given at construction; neither namespace takes a key declared or
+ * registered any other way, and no provider may declare a built-in or a key
+ * under one.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -35,27 +41,49 @@ final class DeclaredContextKeyCatalogue implements ContextKeyCatalogue
         'request.ip'               => 'ip',
         'request.method'           => 'string',
         'request.route'            => 'string',
+        'resource.id'              => 'string',
+        'resource.tenant.id'       => 'string',
+        'resource.tenant.type'     => 'string',
+        'resource.type'            => 'string',
+        'subject.id'               => 'string',
+        'subject.tenant.id'        => 'string',
+        'subject.tenant.type'      => 'string',
+        'subject.type'             => 'string',
     ];
+
+    /** @var list<string> The first segments of the built-in `subject` and `resource` keys, under which no attribute provider may declare a key. */
+    public const array BUILT_IN_ATTRIBUTES = ['id', 'type', 'tenant'];
 
     /** @var array<string, \SineMacula\Laravel\Authorization\Context\ContextKey> Every declared key, by dot path. */
     private array $keys = [];
 
     /**
-     * Create a new declared context key catalogue with the package's keys and
-     * the given ones.
+     * Create a new declared context key catalogue with the package's keys, the
+     * given ones and the attributes the providers declare.
+     *
+     * The attributes are keyed by namespace (`subject` or `resource`), then by
+     * the provider's class, each a map of dot paths within the namespace to
+     * their types, as the provider's `attributes()` returns them.
      *
      * @param  array<string, array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType|string>>  $keys
+     * @param  array<string, array<string, array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType|string>>>  $attributes
      *
      * @throws \InvalidArgumentException
      */
-    public function __construct(array $keys = [])
+    public function __construct(array $keys = [], array $attributes = [])
     {
         foreach (self::PACKAGE_KEYS as $path => $type) {
-            $this->declare($path, ContextKeyType::from($type));
+            $this->put($path, ContextKeyType::from($type), true);
         }
 
         foreach ($keys as $namespace => $namespaceKeys) {
             $this->register($namespace, $namespaceKeys);
+        }
+
+        foreach ($attributes as $namespace => $providers) {
+            foreach ($providers as $provider => $providerKeys) {
+                $this->declareAttributes($namespace, $provider, $providerKeys);
+            }
         }
     }
 
@@ -72,21 +100,10 @@ final class DeclaredContextKeyCatalogue implements ContextKeyCatalogue
     #[\Override]
     public function declare(string $path, ContextKeyType $type, bool $isTestable = true): void
     {
-        if (!self::isValidPath($path)) {
-            $syntax = 'a namespace and one or more \'.\'-separated segments of letters, digits, \'_\' and \'-\'';
+        self::assertValidPath($path);
+        self::assertOutsideAttributes($path);
 
-            throw new \InvalidArgumentException("Context key '{$path}' must be {$syntax}, and at most " . PolicyValidator::KEY_LENGTH . ' characters.');
-        }
-
-        self::assertInContext($path);
-
-        $declared = $this->keys[$path] ?? null;
-
-        if ($declared !== null && ($declared->type !== $type || $declared->isTestable !== $isTestable)) {
-            throw new \InvalidArgumentException("Context key '{$path}' is already declared as {$declared->type->value}" . ($declared->isTestable ? '' : ', untestable') . '.');
-        }
-
-        $this->keys[$path] = $declared ?? new ContextKey($path, $type, $isTestable);
+        $this->put($path, $type, $isTestable);
     }
 
     /**
@@ -166,6 +183,70 @@ final class DeclaredContextKeyCatalogue implements ContextKeyCatalogue
     }
 
     /**
+     * Declare a key, refusing one already declared with another type or
+     * testability.
+     *
+     * @param  string  $path
+     * @param  \SineMacula\Laravel\Authorization\Enums\ContextKeyType  $type
+     * @param  bool  $isTestable
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function put(string $path, ContextKeyType $type, bool $isTestable): void
+    {
+        $declared = $this->keys[$path] ?? null;
+
+        if ($declared !== null && ($declared->type !== $type || $declared->isTestable !== $isTestable)) {
+            throw new \InvalidArgumentException("Context key '{$path}' is already declared as {$declared->type->value}" . ($declared->isTestable ? '' : ', untestable') . '.');
+        }
+
+        $this->keys[$path] = $declared ?? new ContextKey($path, $type, $isTestable);
+    }
+
+    /**
+     * Declare the attributes a provider supplies under `subject` or `resource`,
+     * refusing another namespace, a built-in or a key under one, and a key
+     * another provider declares with another type.
+     *
+     * @param  string  $namespace
+     * @param  string  $provider
+     * @param  array<string, \SineMacula\Laravel\Authorization\Enums\ContextKeyType|string>  $keys
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     */
+    private function declareAttributes(string $namespace, string $provider, array $keys): void
+    {
+        if (!\in_array($namespace, ContextSource::ATTRIBUTE_NAMESPACES, true)) {
+            throw new \InvalidArgumentException("Attribute provider {$provider} supplies the namespace '{$namespace}'; attributes belong under 'subject' or 'resource'.");
+        }
+
+        foreach ($keys as $path => $type) {
+            $key = "{$namespace}.{$path}";
+
+            self::assertValidPath($key);
+
+            if (\in_array(\explode('.', $path)[0], self::BUILT_IN_ATTRIBUTES, true)) {
+                $reason = 'is a built-in or under one; no provider may declare \'id\', \'type\' or \'tenant\'.';
+
+                throw new \InvalidArgumentException("Attribute provider {$provider} declares '{$key}', which {$reason}");
+            }
+
+            $type     = self::typeOf($key, $type);
+            $declared = $this->keys[$key] ?? null;
+
+            if ($declared !== null && $declared->type !== $type) {
+                $reason = "but another provider declares it as {$declared->type->value}.";
+
+                throw new \InvalidArgumentException("Attribute provider {$provider} declares '{$key}' as {$type->value}, {$reason}");
+            }
+
+            $this->put($key, $type, true);
+        }
+    }
+
+    /**
      * Return the type a key is registered with, refusing a name that is not a
      * type.
      *
@@ -187,38 +268,46 @@ final class DeclaredContextKeyCatalogue implements ContextKeyCatalogue
     }
 
     /**
-     * Refuse a path under a namespace that is not part of a check's context
-     * (`principal`, `resource` or `subject`), which no source supplies, so a
-     * condition on it could only ever find it missing.
+     * Refuse a path under `subject` or `resource`, whose keys are the package's
+     * built-ins and those the attribute providers declare, so a key declared
+     * any other way could only ever be found missing.
      *
      * @param  string  $path
      * @return void
      *
      * @throws \InvalidArgumentException
      */
-    private static function assertInContext(string $path): void
+    private static function assertOutsideAttributes(string $path): void
     {
         $namespace = ContextKey::namespaceOf($path);
 
-        if (\in_array($namespace, ContextSource::NON_CONTEXT_NAMESPACES, true)) {
-            $reason = "is under the namespace '{$namespace}', which is not part of a check's context; "
-                . '`${principal.…}` and `${resource.…}` read the principal and the resource without declaring them.';
+        if (\in_array($namespace, ContextSource::ATTRIBUTE_NAMESPACES, true)) {
+            $reason = "is under the namespace '{$namespace}', whose keys are the package's built-ins and those an attribute provider declares; "
+                . 'register a provider in authorization.attributes.subjects or authorization.attributes.resources.';
 
             throw new \InvalidArgumentException("Context key '{$path}' {$reason}");
         }
     }
 
     /**
-     * Determine whether the path is a namespace and at least one more segment,
-     * in the condition key syntax and not too long.
+     * Refuse a path that is not a namespace and at least one more segment, in
+     * the condition key syntax and not too long.
      *
      * @param  string  $path
-     * @return bool
+     * @return void
+     *
+     * @throws \InvalidArgumentException
      */
-    private static function isValidPath(string $path): bool
+    private static function assertValidPath(string $path): void
     {
-        return \str_contains($path, '.')
+        $isValid = \str_contains($path, '.')
             && \strlen($path) <= PolicyValidator::KEY_LENGTH
             && \preg_match(PolicyValidator::KEY_PATTERN, $path) === 1;
+
+        if (!$isValid) {
+            $syntax = 'a namespace and one or more \'.\'-separated segments of letters, digits, \'_\' and \'-\'';
+
+            throw new \InvalidArgumentException("Context key '{$path}' must be {$syntax}, and at most " . PolicyValidator::KEY_LENGTH . ' characters.');
+        }
     }
 }

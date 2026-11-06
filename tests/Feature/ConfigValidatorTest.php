@@ -19,6 +19,7 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
+use Tests\Feature\Stubs\ConflictingResourceAttributes;
 use Tests\Feature\Stubs\Contracts\PermissionEnumInterface;
 use Tests\Feature\Stubs\CustomPermission;
 use Tests\Feature\Stubs\CustomPolicy;
@@ -656,6 +657,28 @@ final class ConfigValidatorTest extends TestCase
     }
 
     /**
+     * The shipped `attributes` config passes, and the attribute providers are
+     * checked at boot: one declaring a built-in fails it.
+     *
+     * @return void
+     */
+    public function testTheAttributesConfigIsValidatedAtBoot(): void
+    {
+        ConfigValidator::validate($this->authorizationConfig(), $this->app);
+
+        $this->app?->instance(ConflictingResourceAttributes::class, new ConflictingResourceAttributes(['id' => 'string']));
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app->make(ConfigRepository::class); // @phpstan-ignore method.nonObject
+        $config->set('authorization.attributes.resources', ['post' => ConflictingResourceAttributes::class]);
+
+        $this->expectException(InvalidAuthorizationConfigException::class);
+        $this->expectExceptionMessage('Invalid authorization config at \'authorization.attributes\'');
+
+        (new AuthorizationServiceProvider($this->app))->boot(); // @phpstan-ignore argument.type
+    }
+
+    /**
      * The shipped `context` config passes, and the context config is checked at
      * boot: a source claiming a reserved namespace fails it.
      *
@@ -673,7 +696,7 @@ final class ConfigValidatorTest extends TestCase
             fn () => (new AuthorizationServiceProvider($this->app))->boot(),
             'authorization.context.sources.0',
             'source \'' . ReservedContextSource::class . '\' supplies the namespace \'request\', which is not a name or is reserved'
-                . ' (authentication, request, environment, input, principal, resource, subject).',
+                . ' (authentication, request, environment, input, subject, resource).',
         );
     }
 

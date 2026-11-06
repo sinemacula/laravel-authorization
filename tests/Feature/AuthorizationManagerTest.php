@@ -36,6 +36,7 @@ use SineMacula\Laravel\Authorization\Events\Identity\PolicyAttached as IdentityP
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyDetached as IdentityPolicyDetached;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned as IdentityRoleAssigned;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked as IdentityRoleRevoked;
+use SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
@@ -50,9 +51,12 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
+use Tests\Feature\Stubs\FailingResourceAttributes;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\PlanContextSource;
+use Tests\Feature\Stubs\RecordingResourceAttributes;
+use Tests\Feature\Stubs\RecordingSubjectAttributes;
 use Tests\Feature\Stubs\ReservedContextSource;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSecondIdentity;
@@ -1177,6 +1181,154 @@ final class AuthorizationManagerTest extends TestCase
         $this->expectExceptionMessage('cannot supply the namespace \'request\'');
 
         Authorization::can('posts:create');
+    }
+
+    /**
+     * The `subject` and `resource` namespaces hold the built-in keys of the
+     * check's subject and resource, so `${subject.id}` and `${resource.id}`
+     * read the subject's key and the record's id, a type alone has no id, and
+     * neither is ever read by splitting an opaque identifier.
+     *
+     * @return void
+     */
+    public function testTheSubjectAndResourceBuiltInsDecideTheCheck(): void
+    {
+        $user = StubIdentity::create(['id' => 'self-1']);
+        $post = StubIdentity::create(['id' => 'post-1']);
+        $type = $user->getMorphClass();
+
+        $policy = EvaluationPolicy::fromArray(['name' => 'built-ins', 'statements' => [
+            ['effect' => 'allow', 'actions' => ['users:self'], 'resources' => [$type . ':${subject.id}']],
+            ['effect' => 'allow', 'actions' => ['posts:mirror'], 'conditions' => ['eq' => ['input.post_id' => '${resource.id}']]],
+            ['effect' => 'allow', 'actions' => ['posts:typed'], 'conditions' => ['eq' => ['resource.type' => 'post', 'subject.type' => $type]]],
+        ]]);
+
+        $scope = Authorization::for($user)->withPolicies([$policy]);
+
+        self::assertTrue($scope->can('users:self', $user));
+        self::assertFalse($scope->can('users:self', $post));
+        self::assertTrue($scope->can('posts:mirror', $post, ['post_id' => 'post-1']));
+        self::assertTrue($scope->can('posts:mirror', ['post', 'post-1'], ['post_id' => 'post-1']));
+        self::assertFalse($scope->can('posts:mirror', $post, ['post_id' => 'post-2']));
+        self::assertFalse($scope->can('posts:mirror', 'post:post-1', ['post_id' => 'post-1']));
+        self::assertTrue($scope->can('posts:typed', ['post', '7']));
+        self::assertFalse($scope->can('posts:typed', 'post:7'));
+        self::assertFalse($scope->can('posts:typed'));
+    }
+
+    /**
+     * The providers of `authorization.attributes` supply the attributes they
+     * declare for the check's subject and record: each is asked at most once
+     * for a check, never for one that reads no attribute, and the resource's
+     * provider is handed the model the check was given, or none for a pair. A
+     * record of a type with no provider has no attributes, a value a provider
+     * returns for a key it does not declare is dropped, and the trace holds the
+     * keys tested, never their values.
+     *
+     * @return void
+     */
+    public function testAttributeProvidersSupplyTheDeclaredAttributes(): void
+    {
+        $user  = StubIdentity::create(['id' => 'seller-1']);
+        $post  = StubIdentity::create(['id' => 'post-2']);
+        $type  = $user->getMorphClass();
+        $posts = new RecordingResourceAttributes;
+        $users = new RecordingSubjectAttributes;
+
+        $this->app?->instance(RecordingResourceAttributes::class, $posts);
+        $this->app?->instance(RecordingSubjectAttributes::class, $users);
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make(ConfigRepository::class);
+        $config->set('authorization.attributes', [
+            'resources' => [$type => RecordingResourceAttributes::class],
+            'subjects'  => [$type => RecordingSubjectAttributes::class],
+        ]);
+
+        $policy = EvaluationPolicy::fromArray(['name' => 'attributes', 'statements' => [
+            ['effect' => 'allow', 'actions' => ['posts:edit'], 'conditions' => ['eq' => [
+                'resource.status'    => 'draft',
+                'resource.owner.id'  => '7',
+                'subject.department' => 'sales',
+            ]]],
+            ['effect' => 'allow', 'actions' => ['posts:edit'], 'resources' => ['${resource.type}:${resource.status}']],
+            ['effect' => 'allow', 'actions' => ['posts:leak'], 'conditions' => ['eq' => ['resource.secret' => 'classified']]],
+            ['effect' => 'allow', 'actions' => ['posts:read']],
+        ]]);
+
+        $scope = Authorization::for($user)->withPolicies([$policy]);
+
+        $decision = $scope->check('posts:edit', $post);
+
+        self::assertTrue($decision->isAllowed());
+        self::assertSame(['resource.status' => true, 'resource.owner.id' => true, 'subject.department' => true], $decision->trace[0]->conditions);
+        self::assertStringNotContainsString('draft', $decision->explain());
+        self::assertStringNotContainsString('sales', $decision->explain());
+        self::assertTrue($scope->can('posts:edit', [$type, 'post-3']));
+        self::assertTrue($scope->can('posts:read', $post));
+        self::assertFalse($scope->can('posts:leak', $post));
+        self::assertFalse($scope->can('posts:edit', StubTenant::query()->create(['id' => 'tenant-1', 'name' => 'tenant-1'])));
+        self::assertFalse($scope->can('posts:edit', $type));
+
+        // One call for each check that read the resource: the model, then none
+        // for the pair, then the model again; none for the check reading no
+        // attribute, the record of another type or the type alone.
+        self::assertSame([$post, null, $post], \array_column($posts->calls, 1));
+        self::assertSame(['post-2', 'post-3', 'post-2'], \array_map(static fn (array $call): ?string => $call[0]->id, $posts->calls));
+        self::assertSame($user, $users->calls[0]);
+    }
+
+    /**
+     * A resource attribute provider that throws aborts the check with
+     * `AttributeProviderFailed`, wrapping its failure: no decision is made,
+     * recorded or reported, so nothing of the provider's message or values
+     * reaches a decision, an event or the trace, and the provider is asked once
+     * for the check.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testAFailingAttributeProviderAbortsTheCheck(): void
+    {
+        $user     = StubIdentity::create(['id' => 'reader-1']);
+        $post     = StubIdentity::create(['id' => 'post-4']);
+        $provider = new FailingResourceAttributes;
+
+        $this->app?->instance(FailingResourceAttributes::class, $provider);
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make(ConfigRepository::class);
+        $config->set('authorization.attributes.resources', [$post->getMorphClass() => FailingResourceAttributes::class]);
+
+        $policy = EvaluationPolicy::fromArray(['name' => 'failing', 'statements' => [
+            ['effect' => 'deny', 'actions' => ['posts:read'], 'conditions' => ['eq_if_exists' => ['resource.status' => 'archived']]],
+            ['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => ['null' => ['resource.status' => true]]],
+        ]]);
+
+        Event::fake();
+
+        $scope = Authorization::for($user)->withPolicies([$policy]);
+
+        try {
+            $scope->check('posts:read', $post);
+
+            self::fail('The check is aborted.');
+        } catch (AttributeProviderFailed $exception) {
+            self::assertSame(FailingResourceAttributes::class, $exception->getProvider());
+            self::assertSame('resource', $exception->getNamespace());
+            self::assertStringNotContainsString(FailingResourceAttributes::MESSAGE, $exception->getMessage());
+            self::assertSame(FailingResourceAttributes::MESSAGE, $exception->getPrevious()?->getMessage());
+        }
+
+        self::assertSame(1, $provider->calls);
+        self::assertNull($scope->lastDecision());
+        Event::assertNotDispatched(DecisionEvaluated::class);
+        Event::assertNotDispatched(AuthorizationFailed::class);
+
+        $this->expectException(AttributeProviderFailed::class);
+
+        $scope->authorize('posts:read', $post);
     }
 
     /**

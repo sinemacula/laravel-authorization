@@ -33,9 +33,9 @@ final class ResourceReferences
      * pair, so the check denies instead of matching every resource-less
      * statement. The resource contract wins over a model's own `type:id`; a
      * model's or a `(type, id)` pair's tenant comes from the bound resource
-     * tenant resolver; a model class names its type alone; a pair names one
-     * record; any other string, or object that can be cast to one, is an opaque
-     * identifier.
+     * tenant resolver, and a model's reference keeps the model; a model class
+     * names its type alone; a pair names one record; any other string, or
+     * object that can be cast to one, is an opaque identifier.
      *
      * An identifier holding a NUL byte names nothing, so it cannot be
      * identified either, however it was given: a string, a pair, a model's key,
@@ -63,8 +63,8 @@ final class ResourceReferences
     }
 
     /**
-     * Return the reference to a saved model, with its tenant, or false when it
-     * has no key.
+     * Return the reference to a saved model, with its tenant and the model
+     * itself, or false when it has no key.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $model
      * @return false|\SineMacula\Laravel\Authorization\Support\ResourceReference
@@ -77,7 +77,7 @@ final class ResourceReferences
             return false;
         }
 
-        return ResourceReference::record($model->getMorphClass(), (string) $key, self::resolver()->tenantOf($model));
+        return ResourceReference::record($model->getMorphClass(), (string) $key, self::resolver()->tenantOf($model), $model);
     }
 
     /**

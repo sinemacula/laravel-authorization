@@ -16,7 +16,7 @@ use SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator;
  * statement count. The bench tracks three shapes:
  *
  * - a no-token string (common path — most action patterns are plain);
- * - a 10-token realistic pattern mixing principal / resource / context;
+ * - a 10-token realistic pattern mixing subject / resource / context;
  * - a 20-token wide pattern (budget reference shape).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -29,9 +29,6 @@ use SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator;
 #[Bench\OutputTimeUnit('microseconds')]
 final class ContextInterpolatorBench
 {
-    /** @var string Resource string used by every subject. */
-    private const string RESOURCE = 'posts:42';
-
     /** @var \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator Reusable interpolator across revolutions. */
     private ContextInterpolator $interpolator; // @phpstan-ignore property.uninitialized
 
@@ -44,9 +41,6 @@ final class ContextInterpolatorBench
     /** @var array<string, mixed> Context array populated by `setUp()`. */
     private array $context = [];
 
-    /** @var object Plain principal stand-in with scalar attributes. */
-    private object $principal; // @phpstan-ignore property.uninitialized
-
     /**
      * Bench setUp — prime fixtures reused across every revolution.
      *
@@ -58,23 +52,6 @@ final class ContextInterpolatorBench
         $this->pattern10    = BenchmarkFixtures::interpolationPattern();
         $this->pattern20    = BenchmarkFixtures::interpolationPatternWide();
         $this->context      = BenchmarkFixtures::interpolationContext();
-
-        $this->principal = new class {
-            /**
-             * Create the stub principal with its interpolatable fields.
-             *
-             * @param  string  $id
-             * @param  string  $name
-             */
-            public function __construct(
-
-                /** @var string */
-                public readonly string $id = 'user-42',
-
-                /** @var string */
-                public readonly string $name = 'alice',
-            ) {}
-        };
     }
 
     /**
@@ -87,7 +64,7 @@ final class ContextInterpolatorBench
     #[Bench\Revs(5000)]
     public function benchNoTokens(): void
     {
-        $this->interpolator->interpolate('plain:resource:string', $this->principal, self::RESOURCE, $this->context);
+        $this->interpolator->interpolate('plain:resource:string', $this->context);
     }
 
     /**
@@ -100,7 +77,7 @@ final class ContextInterpolatorBench
     #[Bench\Revs(2000)]
     public function benchTenTokens(): void
     {
-        $this->interpolator->interpolate($this->pattern10, $this->principal, self::RESOURCE, $this->context);
+        $this->interpolator->interpolate($this->pattern10, $this->context);
     }
 
     /**
@@ -113,6 +90,6 @@ final class ContextInterpolatorBench
     #[Bench\Revs(1000)]
     public function benchTwentyTokens(): void
     {
-        $this->interpolator->interpolate($this->pattern20, $this->principal, self::RESOURCE, $this->context);
+        $this->interpolator->interpolate($this->pattern20, $this->context);
     }
 }

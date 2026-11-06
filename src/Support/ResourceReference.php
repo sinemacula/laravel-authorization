@@ -4,6 +4,8 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Support;
 
+use Illuminate\Database\Eloquent\Model;
+
 /**
  * The resource a check is about (AUTHZ-4.2): its type, its id and, where it has
  * one, its tenant, with the identifier statements match their resource patterns
@@ -13,6 +15,9 @@ namespace SineMacula\Laravel\Authorization\Support;
  * type alone ("create a post") as `type:*`, so a pattern naming the type covers
  * it and one naming a single record does not (N6). A plain string is taken as
  * an opaque identifier, used as given, with no type, id or tenant (N7).
+ *
+ * A reference made from a model keeps the model, so the resource attribute
+ * provider of its type can read it rather than query for it (N30).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -26,6 +31,7 @@ final readonly class ResourceReference
      * @param  string|null  $type
      * @param  string|null  $id
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  \Illuminate\Database\Eloquent\Model|null  $model
      */
     public function __construct(
 
@@ -40,6 +46,9 @@ final readonly class ResourceReference
 
         /** The tenant that owns the resource; null for none or unknown. */
         public ?Reference $tenant = null,
+
+        /** The model the check was given; null when it named the resource some other way. */
+        public ?Model $model = null,
     ) {}
 
     /**
@@ -48,11 +57,12 @@ final readonly class ResourceReference
      * @param  string  $type
      * @param  string  $id
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  \Illuminate\Database\Eloquent\Model|null  $model
      * @return self
      */
-    public static function record(string $type, string $id, ?Reference $tenant = null): self
+    public static function record(string $type, string $id, ?Reference $tenant = null, ?Model $model = null): self
     {
-        return new self("{$type}:{$id}", $type, $id, $tenant);
+        return new self("{$type}:{$id}", $type, $id, $tenant, $model);
     }
 
     /**

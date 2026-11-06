@@ -484,15 +484,15 @@ final class StatementTest extends TestCase
      */
     public function testNotResourcesWithAnUnresolvedPattern(): void
     {
-        $statement = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read'], 'not_resources' => ['post:${principal.id}']]);
-        $excluding = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read'], 'not_resources' => ['post:${principal.id}', 'post:9']]);
+        $statement = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read'], 'not_resources' => ['post:${subject.id}']]);
+        $excluding = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read'], 'not_resources' => ['post:${subject.id}', 'post:9']]);
 
         $interpolator = new ContextInterpolator;
 
         self::assertResult(MatchOutcome::UNDECIDABLE, self::UNRESOLVED_RESOURCE, $statement->assess('posts:read', 'post:2', [], $interpolator));
         self::assertResult(MatchOutcome::DOES_NOT_MATCH, self::TARGET_MISMATCH, $excluding->assess('posts:read', 'post:9', [], $interpolator));
-        self::assertResult(MatchOutcome::MATCHES, '', $statement->assess('posts:read', 'post:2', [], $interpolator, (object) ['id' => 1]));
-        self::assertResult(MatchOutcome::DOES_NOT_MATCH, self::TARGET_MISMATCH, $statement->assess('posts:read', 'post:1', [], $interpolator, (object) ['id' => 1]));
+        self::assertResult(MatchOutcome::MATCHES, '', $statement->assess('posts:read', 'post:2', ['subject' => ['id' => '1']], $interpolator));
+        self::assertResult(MatchOutcome::DOES_NOT_MATCH, self::TARGET_MISMATCH, $statement->assess('posts:read', 'post:1', ['subject' => ['id' => '1']], $interpolator));
     }
 
     /**
@@ -513,28 +513,29 @@ final class StatementTest extends TestCase
     }
 
     /**
-     * Resource patterns interpolate the principal, the context and the
-     * resource, escaping every substituted value.
+     * Resource patterns interpolate the subject, the resource and the rest of
+     * the context, escaping every substituted value.
      *
      * @return void
      */
     public function testInterpolatedResourcePatterns(): void
     {
         $interpolator = new ContextInterpolator;
-        $byPrincipal  = self::allowOn('posts:${principal.id}:*');
+        $bySubject    = self::allowOn('posts:${subject.id}:*');
         $byContext    = self::allowOn('tenant:${input.tenant_id}:*');
         $byType       = self::allowOn('${resource.type}:*');
-        $byName       = self::allowOn('folder:${principal.username}/*');
+        $byName       = self::allowOn('folder:${subject.username}/*');
 
-        self::assertTrue($byPrincipal->matches('posts:read', 'posts:42:draft', $interpolator, (object) ['id' => 42]));
-        self::assertFalse($byPrincipal->matches('posts:read', 'posts:99:draft', $interpolator, (object) ['id' => 42]));
-        self::assertTrue($byContext->matches('posts:read', 'tenant:org-5:posts', $interpolator, null, ['input' => ['tenant_id' => 'org-5']]));
-        self::assertFalse($byContext->matches('posts:read', 'tenant:org-9:posts', $interpolator, null, ['input' => ['tenant_id' => 'org-5']]));
-        self::assertTrue($byType->matches('posts:read', 'posts:42', $interpolator));
-        self::assertFalse($byName->matches('posts:read', 'folder:alice/report', $interpolator, (object) ['username' => '*']));
-        self::assertTrue($byName->matches('posts:read', 'folder:*/report', $interpolator, (object) ['username' => '*']));
-        self::assertFalse($byPrincipal->matches('posts:read', 'posts:42:draft'));
-        self::assertTrue($byPrincipal->matches('posts:read', 'posts:${principal.id}:draft'));
+        self::assertTrue($bySubject->matches('posts:read', 'posts:42:draft', $interpolator, ['subject' => ['id' => '42']]));
+        self::assertFalse($bySubject->matches('posts:read', 'posts:99:draft', $interpolator, ['subject' => ['id' => '42']]));
+        self::assertTrue($byContext->matches('posts:read', 'tenant:org-5:posts', $interpolator, ['input' => ['tenant_id' => 'org-5']]));
+        self::assertFalse($byContext->matches('posts:read', 'tenant:org-9:posts', $interpolator, ['input' => ['tenant_id' => 'org-5']]));
+        self::assertTrue($byType->matches('posts:read', 'posts:42', $interpolator, ['resource' => ['type' => 'posts', 'id' => '42']]));
+        self::assertFalse($byType->matches('posts:read', 'posts:42', $interpolator));
+        self::assertFalse($byName->matches('posts:read', 'folder:alice/report', $interpolator, ['subject' => ['username' => '*']]));
+        self::assertTrue($byName->matches('posts:read', 'folder:*/report', $interpolator, ['subject' => ['username' => '*']]));
+        self::assertFalse($bySubject->matches('posts:read', 'posts:42:draft'));
+        self::assertTrue($bySubject->matches('posts:read', 'posts:${subject.id}:draft'));
     }
 
     /**
@@ -547,8 +548,8 @@ final class StatementTest extends TestCase
     public function testUnresolvedResourcePatterns(): void
     {
         $interpolator = new ContextInterpolator;
-        $unresolved   = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read'], 'resources' => ['posts:${principal.id}:*', 'arn:users:*']]);
-        $fallback     = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read'], 'resources' => ['posts:${principal.id}:*', 'posts:*']]);
+        $unresolved   = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read'], 'resources' => ['posts:${subject.id}:*', 'arn:users:*']]);
+        $fallback     = Statement::fromArray(['effect' => 'deny', 'actions' => ['posts:read'], 'resources' => ['posts:${subject.id}:*', 'posts:*']]);
         $malformed    = new Statement(PolicyEffect::DENY, ['posts:read'], ['posts:${input.tenant-id}']);
 
         self::assertResult(MatchOutcome::UNDECIDABLE, self::UNRESOLVED_RESOURCE, $unresolved->assess('posts:read', 'posts:42:draft', [], $interpolator));
@@ -844,7 +845,7 @@ final class StatementTest extends TestCase
     public function testIfExistsDecidesFaultsAsWithoutTheSuffix(): void
     {
         $malformed  = new Statement(PolicyEffect::DENY, ['x'], conditions: ['ip_in_if_exists' => ['input.ip' => '10.0.0.0/33']]);
-        $referenced = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['eq_if_exists' => ['input.owner' => '${principal.id}']]]);
+        $referenced = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['eq_if_exists' => ['input.owner' => '${subject.id}']]]);
 
         $interpolator = new ContextInterpolator;
 
@@ -1019,8 +1020,8 @@ final class StatementTest extends TestCase
      */
     public function testTargetCombinesWithConditions(): void
     {
-        $statement    = new Statement(PolicyEffect::DENY, ['posts:read'], ['posts:${principal.id}'], ['eq' => ['input.tenant' => 'org-1']]);
-        $invalid      = new Statement(PolicyEffect::DENY, ['posts:read'], ['posts:${principal.id}'], ['bogus' => ['tenant' => 'org-1']]);
+        $statement    = new Statement(PolicyEffect::DENY, ['posts:read'], ['posts:${subject.id}'], ['eq' => ['input.tenant' => 'org-1']]);
+        $invalid      = new Statement(PolicyEffect::DENY, ['posts:read'], ['posts:${subject.id}'], ['bogus' => ['tenant' => 'org-1']]);
         $scoped       = new Statement(PolicyEffect::DENY, ['posts:read'], ['posts:1'], ['bogus' => ['tenant' => 'org-1']]);
         $interpolator = new ContextInterpolator;
 
@@ -1055,7 +1056,7 @@ final class StatementTest extends TestCase
             'lte'    => ['input.size' => '${input.maximum}'],
             'bool'   => ['input.flag' => '${input.expected_flag}'],
             'like'   => ['input.name' => '${input.prefix}*'],
-            'eq'     => ['input.owner' => '${principal.id}', 'input.post' => '${resource.id}'],
+            'eq'     => ['input.owner' => '${subject.id}', 'input.post' => '${resource.id}'],
         ];
 
         $statement = Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => $conditions]);
@@ -1076,19 +1077,20 @@ final class StatementTest extends TestCase
                 'expected_flag' => false,
                 'prefix'        => 'admin',
             ],
+            'subject'  => ['id' => '42'],
+            'resource' => ['id' => '7', 'type' => 'post'],
         ];
 
         $interpolator = new ContextInterpolator;
-        $principal    = (object) ['id' => 42];
 
         self::assertSame($conditions, $statement->conditions);
-        self::assertResult(MatchOutcome::MATCHES, '', $statement->assess('x', 'post:7', $context, $interpolator, $principal));
-        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $statement->assess('x', 'post:7', ['input' => ['size' => 6] + $context['input']], $interpolator, $principal));
+        self::assertResult(MatchOutcome::MATCHES, '', $statement->assess('x', 'post:7', $context, $interpolator));
+        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $statement->assess('x', 'post:7', ['input' => ['size' => 6] + $context['input']] + $context, $interpolator));
         $wildcard = ['input' => ['prefix' => '*'] + $context['input']] + $context;
 
-        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $statement->assess('x', 'post:7', $wildcard, $interpolator, $principal));
-        self::assertTrue($statement->conditionsSatisfiedBy($context, $interpolator, $principal, 'post:7'));
-        self::assertFalse($statement->conditionsSatisfiedBy($context, $interpolator, $principal, 'post:8'));
+        self::assertResult(MatchOutcome::DOES_NOT_MATCH, '', $statement->assess('x', 'post:7', $wildcard, $interpolator));
+        self::assertTrue($statement->conditionsSatisfiedBy($context, $interpolator));
+        self::assertFalse($statement->conditionsSatisfiedBy(['resource' => ['id' => '8']] + $context, $interpolator));
     }
 
     /**
@@ -1137,7 +1139,7 @@ final class StatementTest extends TestCase
      */
     public function testUnresolvedAndLiteralOperands(): void
     {
-        $owner   = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['eq' => ['input.owner_id' => '${principal.id}']]]);
+        $owner   = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['eq' => ['input.owner_id' => '${subject.id}']]]);
         $pattern = Statement::fromArray(['effect' => 'deny', 'actions' => ['x'], 'conditions' => ['like' => ['input.name' => '${input.pattern}']]]);
         $classes = Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => ['like' => ['input.class' => 'App\Models\*']]]);
         $path    = Statement::fromArray(['effect' => 'allow', 'actions' => ['x'], 'conditions' => ['eq' => ['input.path' => 'App\Models:${input.suffix}']]]);
@@ -1149,7 +1151,7 @@ final class StatementTest extends TestCase
             'condition \'input.owner_id\' references a value that cannot be resolved',
             $owner->assess('x', null, ['input' => ['owner_id' => '']], $interpolator),
         );
-        self::assertResult(MatchOutcome::MATCHES, '', $owner->assess('x', null, ['input' => ['owner_id' => '${principal.id}']]));
+        self::assertResult(MatchOutcome::MATCHES, '', $owner->assess('x', null, ['input' => ['owner_id' => '${subject.id}']]));
         self::assertResult(
             MatchOutcome::UNDECIDABLE,
             'condition \'input.name\': operator \'like\' has an empty operand',

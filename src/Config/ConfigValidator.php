@@ -72,6 +72,7 @@ final class ConfigValidator
         self::validateCacheTtl($config['cache']['ttl'] ?? 300);
         self::validatePolicyLimits($config['policies']['limits'] ?? []);
         ContextConfigValidator::validate($config['context'] ?? [], $container);
+        AttributeConfigValidator::validate($config['attributes'] ?? [], $container);
     }
 
     /**

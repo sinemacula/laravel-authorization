@@ -134,7 +134,7 @@ final class StatementValidatorTest extends TestCase
      */
     public function testAssertValidResource(): void
     {
-        foreach (['*', 'posts:*', 'posts:${principal.id}', 'posts:\${literal}', 'App\Models\Post:*'] as $pattern) {
+        foreach (['*', 'posts:*', 'posts:${subject.id}', 'posts:\${literal}', 'App\Models\Post:*'] as $pattern) {
             StatementValidator::assertValidResource($pattern);
         }
 

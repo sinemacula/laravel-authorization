@@ -7,7 +7,7 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
 /**
  * The inputs a statement interpolates its patterns and operands against, and
  * tests its conditions against: the interpolator (null to leave `${…}` tokens
- * literal), the principal, the resource and the context of one check.
+ * literal), the resource and the context of one check.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -24,7 +24,6 @@ final readonly class InterpolationScope
      * check's namespaces, already built.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null  $interpolator
-     * @param  object|null  $principal
      * @param  string|null  $resource
      * @param  array<array-key, mixed>|\SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
      */
@@ -33,10 +32,7 @@ final readonly class InterpolationScope
         /** Interpolator resolving `${…}` tokens; null leaves them literal. */
         public ?ContextInterpolator $interpolator = null,
 
-        /** Principal the check is about. */
-        public ?object $principal = null,
-
-        /** Resource the check names, if any. */
+        /** Identifier of the resource the check names, if any, which resource patterns are matched against. */
         public ?string $resource = null,
 
         // Context of the check; an array is its namespaces, already built.
@@ -58,7 +54,7 @@ final readonly class InterpolationScope
             return $subject;
         }
 
-        return $this->interpolator->interpolate($subject, $this->principal, $this->resource, $this->context);
+        return $this->interpolator->interpolate($subject, $this->context);
     }
 
     /**
@@ -74,6 +70,6 @@ final readonly class InterpolationScope
             return ContextInterpolator::literalPattern($pattern);
         }
 
-        return $this->interpolator->interpolatePattern($pattern, $this->principal, $this->resource, $this->context);
+        return $this->interpolator->interpolatePattern($pattern, $this->context);
     }
 }

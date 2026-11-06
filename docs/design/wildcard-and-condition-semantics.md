@@ -3,8 +3,8 @@
 Permission checks and policy statement matching both use `fnmatch` for pattern evaluation, and policy statements support
 a condition operator catalogue for context-sensitive decisions. This note documents the wildcard matching direction, how
 backslashes and substituted values are kept literal, the four outcomes a statement test can have, the check's context
-and the keys a policy may read from it, the condition operator set, `${…}` interpolation, and the interaction between
-wildcards and the RBAC fallback.
+(the subject and resource attributes among it) and the keys a policy may read from it, the condition operator set,
+`${…}` interpolation, and the interaction between wildcards and the RBAC fallback.
 
 ## Invariants
 
@@ -62,7 +62,8 @@ wildcards and the RBAC fallback.
 8. **A condition key is a dot path, and the caller supplies only `input`.** The context of a check is nested
    namespaces, and a condition key or a `${…}` reference is read one segment at a time through them by one strict
    resolver, never as a literal key. Whatever the caller passes is held under `input` and never promoted into another
-   namespace, so `authentication`, `request` and `environment` hold only what their trusted sources supply (see [The
+   namespace, so `authentication`, `request` and `environment` hold only what their trusted sources supply, and
+   `subject` and `resource` only the package's built-ins and the declared attributes of their providers (see [The
    check's context](#the-checks-context)).
 
 ## Wildcard Matching
@@ -192,6 +193,8 @@ The context a check's statements read is nested namespaces (N24), each made by o
 | `authentication` | `guard`, `user_id`, `user_type` (strings) | `AuthenticationContext`; `GuardAuthenticationContext` |
 | `request`        | `ip` (ip), `method`, `route` (strings)    | `RequestContext`; `RoutedRequestContext`              |
 | `environment`    | `time` (time)                             | `EnvironmentContext`; `ClockEnvironmentContext`       |
+| `subject`        | `id`, `type`, `tenant.type`, `tenant.id`  | The check's subject; a `SubjectAttributeProvider`     |
+| `resource`       | `id`, `type`, `tenant.type`, `tenant.id`  | The check's resource; a `ResourceAttributeProvider`   |
 | `input`          | none                                      | What the caller passes                                |
 | Any other        | none                                      | A `ContextSource` in `authorization.context.sources`  |
 
@@ -202,41 +205,65 @@ The context a check's statements read is nested namespaces (N24), each made by o
   console command the namespace is absent. `environment.time` is `now()` in UTC as `Y-m-d\TH:i:s\Z`, fixed the first
   time the check reads `environment`, then kept for the rest of the check. Each is replaced only by rebinding its
   contract.
+- **Subject and resource** (N29). `subject` and `resource` describe who the check is about and what it is on, and
+  their built-in keys are strings. `subject.id` is the subject's key (`getKey()` for a model), `subject.type` its morph
+  class or, without one, its class name, and `subject.tenant.type` and `subject.tenant.id` its tenant, as `TenantScope`
+  extracts it. `resource.id`, `resource.type`, `resource.tenant.type` and `resource.tenant.id` come from the check's
+  `ResourceReference`: a record has an id and a type, a type alone has only a type, and an opaque identifier has
+  neither, since it is never split at its `:`. A tenant key is absent without a tenant, and the whole namespace without
+  a subject or a resource.
+- **Attribute providers** (N30, AUTHZ-8.4, AUTHZ-8.5). Every other key of `subject` and `resource` comes from the
+  provider registered for the subject's or the record's morph type in `authorization.attributes.subjects` or
+  `authorization.attributes.resources`, resolved from the container. Its `attributes()` declares dot paths within the
+  namespace with their types, and its `values()` returns them nested by key: a `SubjectAttributeProvider` is given the
+  subject, and a `ResourceAttributeProvider` the record's reference and the model the check was given, if any, so it
+  need not query for it. Only the keys the matching provider declares are exposed; any other value it returns is
+  dropped. The model's columns are never read directly, and there is no `principal` namespace.
+- **Attribute fallbacks and failures** (N31). A type alone, an opaque identifier, no resource and a type with no
+  provider leave only the built-ins that apply, so an attribute key is missing (undecidable, or decided by `null` and
+  `_if_exists`). A provider that throws, or cannot be resolved, aborts the check with `AttributeProviderFailed`, its
+  failure kept as the previous exception: the check is never decided with the attribute missing, so a failing provider
+  never allows anything. The message names the provider's class and the namespace, never a value, and nothing the
+  provider returned or threw reaches the decision, an event or the trace (AUTHZ-8.8).
 - **Caller values** (N27). The `$context` of `check()` and every helper over it (`can()`, `authorize()`, `explain()`,
   `effectivePermissions()`, the Gate's string-keyed and associative arguments and the testing assertions) is wrapped
   under `input` once, where the manager builds the check's context. A caller passing
   `['request' => ['ip' => '10.0.0.1']]` supplies `input.request.ip`, never `request.ip`.
 - **Application namespaces** (N26). A `ContextSource` names one namespace and returns its values, nested by key. A
   source that does not implement the contract, one claiming a reserved namespace (`authentication`, `request`,
-  `environment`, `input`, `principal`, `resource`, `subject`), two sources claiming one namespace, and a source claiming
-  a namespace the `AuthenticationContext` contributes are refused at boot, as is an `AuthenticationContext` contributing
+  `environment`, `input`, `subject`, `resource`), two sources claiming one namespace, and a source claiming a namespace
+  the `AuthenticationContext` contributes are refused at boot, as is an `AuthenticationContext` contributing
   a namespace that is not a name, is reserved or is listed twice. A source returning nothing leaves its namespace
   absent.
-- **Lazy and once a check.** A namespace is built the first time a check reads a path in it, through a condition key
-  or a `${…}` reference in an operand or a resource pattern (`principal` and `resource` aside), by
-  `CheckContext::find()` and `lookup()`, and kept for the rest of the check. So every statement of one check sees the
-  same values, a namespace is built at most once for the check, and a check that reads nothing of the request never
-  builds it. Each check has a context of its own.
+- **Lazy and once a check** (N32). A namespace is built the first time a check reads a path in it, through a
+  condition key or a `${…}` reference in an operand or a resource pattern, by `CheckContext::find()` and `lookup()`,
+  and kept for the rest of the check. So every statement of one check sees the same values, a namespace is built at
+  most once for the check, and a check that reads nothing of the request never builds it. Reading any key of `subject`
+  or `resource`, a built-in included, builds the whole namespace and so asks its provider, once. A build that throws is
+  not retried: the check is aborted. Each check has a context of its own, and nothing is kept for the next.
 
 A condition key is a dot path read one segment at a time over these namespaces: `request.ip` reads the `ip` key of the
 `request` namespace. It is never a literal key: a context whose top level holds a key named `request.ip` does not supply
 `request.ip`, and an `input` of `['post.status' => 'draft']` does not supply `input.post.status`. A key is **missing**
 when its namespace is absent, when a segment is absent, or when a segment is read through a value that is not an array;
 a key present with a `null` value is not missing. A missing key makes a test undecidable, passes under `_if_exists`, and
-is decided by `null`. `${…}` references to any namespace but `principal` and `resource` go through the same resolver,
-so a condition and a reference naming one path always see the same value.
+is decided by `null`. Every `${…}` reference goes through the same resolver, so a condition and a reference naming one
+path always see the same value.
 
 ### The key catalogue
 
 Every key a policy reads must be declared in the bound `ContextKeyCatalogue` (N25), as a full dot path with a type and
 whether a condition may test it (by default it may). The default, `DeclaredContextKeyCatalogue`, is held by the
-container and has no static state. It declares the package's seven keys and those of `authorization.context.keys`
-(`namespace => [path => type]`, checked by the configuration validator at boot), and a service provider registers more
-with `register($namespace, [$path => $type])` or `declare($path, $type, $isTestable)`. Keys of `input` are declared like
-any other. Declaring a key again as it was changes nothing; with another type or testability it is refused. A key under
-`principal`, `resource` or `subject` is refused too: none is part of a check's context, so no source supplies it and a
-condition on it would always find it missing, while `${principal.…}` and `${resource.…}` read the principal and the
-resource without declaring them (`ContextSource::NON_CONTEXT_NAMESPACES`).
+container and has no static state. It declares the package's fifteen keys (`PACKAGE_KEYS`: seven of the trusted
+namespaces and the eight built-ins of `subject` and `resource`), those of `authorization.context.keys`
+(`namespace => [path => type]`, checked by the configuration validator at boot) and those the attribute providers
+declare, each under its namespace, and a service provider registers more with `register($namespace, [$path => $type])`
+or `declare($path, $type, $isTestable)`. Keys of `input` are declared like any other. Declaring a key again as it was
+changes nothing; with another type or testability it is refused. A key under `subject` or `resource` is refused when
+declared or registered (`ContextSource::ATTRIBUTE_NAMESPACES`): their keys come only from the package and the
+providers. At boot, `AttributeConfigValidator` refuses a provider that does not implement its contract or cannot be
+resolved, one declaring a built-in (`id`, `type` or anything under `tenant`), and two declaring one key with different
+types; two providers may declare one key alike.
 
 A key's type decides the operators a condition may test it with. The `_if_exists` form of an operator follows it, and
 `null` suits every type:
@@ -261,7 +288,7 @@ Conditions are a map of operator to key tests, and each key test maps a context 
 ```json
 {
   "ip_not_in": { "request.ip": ["10.0.0.0/8", "192.168.0.0/16"] },
-  "eq": { "input.post.tenant": "${principal.tenant}" },
+  "eq": { "resource.owner.id": "${subject.id}" },
   "gte": { "input.post.revision": 2 }
 }
 ```
@@ -347,17 +374,16 @@ Resource patterns and string operands may reference the check through `${namespa
 
 | Token                   | Resolves to                                                                    |
 |-------------------------|--------------------------------------------------------------------------------|
-| `${principal.id}`       | `getKey()` for an Eloquent model, the public `id` property for other objects   |
-| `${principal.type}`     | `getMorphClass()` when the object has it, otherwise its class name             |
-| `${principal.<key>}`    | A model attribute or a public property; never a hidden attribute or a relation |
-| `${resource.type}`      | The resource before its first `:`, or the whole resource when it has none      |
-| `${resource.id}`        | The resource after its first `:`; unresolved when it has none                  |
+| `${subject.id}`         | The subject's key; unresolved when it has none                                 |
+| `${subject.type}`       | The subject's morph class, or its class name                                   |
+| `${resource.id}`        | The record's id; unresolved for a type alone or an opaque identifier           |
+| `${resource.type}`      | The record's or the type's type; unresolved for an opaque identifier           |
 | `${<namespace>.<path>}` | The context key at that dot path, as a condition reads it (`${request.ip}`)    |
 
 A token is `${`, a body matching `[a-zA-Z_][a-zA-Z0-9_.]*`, and `}`. The namespace is the body up to its first `.` and
-the path everything after it. `principal` and `resource` are read as the table says; every other namespace is read from
-the check's context by the resolver condition keys use, so `${request.ip}` reads `ip` within `request` and never a
-top-level key named `request.ip`, and reading it builds the namespace like a condition would. There is no `context`
+the path everything after it. Every namespace, `subject` and `resource` included, is read from the check's context by
+the resolver condition keys use, so `${request.ip}` reads `ip` within `request` and never a top-level key named
+`request.ip`, and reading it builds the namespace like a condition would. There is no `context` or `principal`
 namespace. A well-formed token naming a key the catalogue does not declare, `${context.…}` and a token without a path
 (`${input}`, `${input.}`) among them, is refused by `PolicyValidator` when a policy is written, and is unresolved when a
 statement built without the validator is evaluated. Any other `${` that is not the `\${` escape -- `${input.tenant-id}`,
@@ -365,15 +391,14 @@ statement built without the validator is evaluated. Any other `${` that is not t
 pattern or a string operand, and on a directly constructed statement it makes a resource pattern unresolved
 (undecidable) and a condition invalid.
 
-A model's **hidden attributes** are never read: an attribute listed in `$hidden`, or left out of a non-empty
-`$visible`, is unresolved, as is any relation. `${principal.id}` is the model's key whatever `$hidden` says. A
-principal that is not an Eloquent model is read only through its public properties.
+A reference never reads a model's columns or an object's properties: `${subject.department}` resolves only when the
+subject's provider declares `department` and returns a value for it, as `${resource.owner.id}` does for the record's.
 
 A token that does not resolve to a scalar (an unknown namespace or key, a missing path, an array value, a check without
-a principal or resource) makes the **whole string** unresolved: the test is undecidable, never compared against an empty
+a subject or resource) makes the **whole string** unresolved: the test is undecidable, never compared against an empty
 substitution. Every substituted value is a string: numbers are cast (`42` becomes `'42'`) and booleans become `'true'`
 or `'false'`. An interpolated `eq` or `neq` operand is therefore compared strictly against a string, so
-`{"eq": {"input.owner": "${principal.id}"}}` matches an `input.owner` of `'42'` but not the integer `42`: pass such
+`{"eq": {"input.owner": "${subject.id}"}}` matches an `input.owner` of `'42'` but not the integer `42`: pass such
 context values as strings. The numeric, time and `bool` operators read a substituted string as they read any other
 (`'true'` and `'false'` are boolean forms). Write `\${` for a literal `${`; the escape is undone only in the string's
 own text, never inside a substituted value. An operand holding only the escape contains no reference, so it is checked
@@ -423,8 +448,8 @@ reasons into one `InvalidPolicyDocumentException` message, separated by semicolo
   cache keys cached policies by the limits they were checked under, so a changed limit makes them be read and checked
   again. Lowering a limit therefore makes every stored document over it deny until it is fixed.
 - **Context keys** (N25): every condition key must be declared in the context key catalogue, may not be one declared
-  untestable, and must be of a type its operator suits; every `${…}` reference in an operand or a resource pattern,
-  except to `principal` and `resource`, must name a declared key (see [The key catalogue](#the-key-catalogue)). A
+  untestable, and must be of a type its operator suits; every `${…}` reference in an operand or a resource pattern
+  must name a declared key, so a `${principal.…}` reference is refused (see [The key catalogue](#the-key-catalogue)). A
   declared key is always a valid path: a letter or `_`, then letters, digits and `_`, then any number of `.`-separated
   segments of letters, digits, `_` and `-`, at most 128 characters, so a malformed key is refused as undeclared. Each
   reason is given once for its statement; a reason naming an undeclared key says how to declare it.
@@ -480,6 +505,10 @@ document, then a summary, and exits 1 when any is invalid.
   per-check memo of built namespaces; `CheckContextFactory::make()` -- a check's context, the caller's values under
   `input` and every other namespace from its source; `AuthorizationManager::decideGrants()` -- where the caller's values
   are wrapped.
+- `AttributeNamespaces::builders()` -- the `subject` and `resource` namespaces of a check, their built-ins and their
+  providers' values; `AttributeProviders` -- the providers by morph type, the declared keys only, and
+  `AttributeProviderFailed`; the `SubjectAttributeProvider` and `ResourceAttributeProvider` contracts;
+  `AttributeConfigValidator` -- `authorization.attributes` at boot.
 - `ContextInterpolator::references()` -- the paths a string references.
 - The `ContextKeyCatalogue` contract, `DeclaredContextKeyCatalogue`, `ContextKey` and `ContextKeyType::suits()` -- the
   declared keys and the type and operator rules; `ContextConfigValidator` -- `authorization.context` at boot.
@@ -521,6 +550,11 @@ document, then a summary, and exits 1 when any is invalid.
 - `DeclaredContextKeyCatalogueTest`, `ContextKeyTypeTest` and `ContextConfigValidatorTest` -- the catalogue, the type
   rules and the configuration; `GuardAuthenticationContextTest`, `RoutedRequestContextTest` and
   `ClockEnvironmentContextTest` -- the trusted sources.
+- `AttributeNamespacesTest`, `AttributeProvidersTest`, `AttributeConfigValidatorTest` and
+  `CheckContextTest::testABuilderThatThrowsIsNeverRetried` -- the built-ins, the providers, the declared keys only, the
+  boot checks and a failed build; `AuthorizationManagerTest::testTheSubjectAndResourceBuiltInsDecideTheCheck`,
+  `testAttributeProvidersSupplyTheDeclaredAttributes` and `testAFailingAttributeProviderAbortsTheCheck` -- the
+  attributes through a check.
 
 ## Change Triggers
 
@@ -529,8 +563,9 @@ document, then a summary, and exits 1 when any is invalid.
   operand is a glob or in `LITERAL_OPERAND_OPERATORS` when its operand is never interpolated, the key types it suits in
   `ContextKeyType`, and a new row in the operator catalogue above, including which operands are invalid and which
   context values are undecidable.
-- Letting a caller's value reach a namespace other than `input`, or reading a condition key as a literal flat key,
-  would violate invariant 8 and requires a design decision before implementation.
+- Letting a caller's value reach a namespace other than `input`, reading a condition key as a literal flat key, or
+  reading a model's columns or an undeclared attribute into `subject` or `resource`, would violate invariant 8 and
+  requires a design decision before implementation.
 - Changing the matching direction (e.g. allowing the caller to supply wildcards) would violate invariant 1 and requires
   a design decision before implementation.
 - Letting an undecidable test skip a deny, or letting a resource-less check match a resource-scoped statement, would

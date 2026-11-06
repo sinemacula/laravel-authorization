@@ -9,12 +9,16 @@ use SineMacula\Laravel\Authorization\Contracts\ContextSource;
 use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
 use SineMacula\Laravel\Authorization\Contracts\RequestContext;
 use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
+use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
 
 /**
  * Makes the context of each check from its sources (N26, N27).
  *
  * The trusted sources supply `authentication` (and any namespace the
- * authentication context contributes), `request` and `environment`; the
+ * authentication context contributes), `request` and `environment`; the check's
+ * subject and resource supply `subject` and `resource`, from their built-in
+ * keys and the attribute providers (see `AttributeNamespaces`); the
  * application's sources supply their own namespaces; and what the caller passes
  * is held under `input`, never promoted into another namespace, so a caller
  * passing `['request' => ['ip' => …]]` supplies `input.request.ip`, never
@@ -39,6 +43,9 @@ final readonly class CheckContextFactory
     /** @var array<string, \Closure(): array<array-key, mixed>> The builder of each namespace a source supplies. */
     private array $builders;
 
+    /** @var \SineMacula\Laravel\Authorization\Context\AttributeNamespaces Builds each check's `subject` and `resource` namespaces. */
+    private AttributeNamespaces $attributes;
+
     /**
      * Create a new check context factory.
      *
@@ -46,11 +53,17 @@ final readonly class CheckContextFactory
      * @param  \SineMacula\Laravel\Authorization\Contracts\RequestContext  $request
      * @param  \SineMacula\Laravel\Authorization\Contracts\EnvironmentContext  $environment
      * @param  iterable<\SineMacula\Laravel\Authorization\Contracts\ContextSource>  $sources
+     * @param  \SineMacula\Laravel\Authorization\Context\AttributeProviders|null  $attributes
      *
      * @throws \InvalidArgumentException
      */
-    public function __construct(AuthenticationContext $authentication, RequestContext $request, EnvironmentContext $environment, iterable $sources = [])
-    {
+    public function __construct(
+        AuthenticationContext $authentication,
+        RequestContext $request,
+        EnvironmentContext $environment,
+        iterable $sources = [],
+        ?AttributeProviders $attributes = null,
+    ) {
         $builders = self::authenticationBuilders($authentication);
 
         foreach ($sources as $source) {
@@ -64,19 +77,23 @@ final readonly class CheckContextFactory
         $builders['request']     = static fn (): array => self::namespaced('request', $request->values());
         $builders['environment'] = static fn (): array => self::namespaced('environment', $environment->values());
 
-        $this->builders = $builders;
+        $this->builders   = $builders;
+        $this->attributes = new AttributeNamespaces($attributes);
     }
 
     /**
      * Make the context of one check, holding what the caller passes under
-     * `input`.
+     * `input`, and the check's subject and resource under `subject` and
+     * `resource`.
      *
      * @param  array<array-key, mixed>  $input
+     * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
      * @return \SineMacula\Laravel\Authorization\Evaluation\CheckContext
      */
-    public function make(array $input = []): CheckContext
+    public function make(array $input = [], ?Subject $subject = null, ?ResourceReference $resource = null): CheckContext
     {
-        return new CheckContext([self::INPUT => $input], $this->builders);
+        return new CheckContext([self::INPUT => $input], [...$this->builders, ...$this->attributes->builders($subject, $resource)]);
     }
 
     /**
