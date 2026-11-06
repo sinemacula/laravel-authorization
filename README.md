@@ -493,8 +493,8 @@ Conditions name the operator first, then each context key it tests, as a dot pat
 
 | Operator                        | Operand                               | Holds when the context value                                   |
 |---------------------------------|---------------------------------------|----------------------------------------------------------------|
-| `eq`, `neq`                     | one scalar                            | is, or is not, strictly equal to it                            |
-| `in`, `not_in`                  | a non-empty list of scalars           | is, or is not, in the list (strictly)                          |
+| `eq`, `neq`                     | one scalar                            | is a scalar or null that is, or is not, strictly equal to it   |
+| `in`, `not_in`                  | a non-empty list of scalars           | is a scalar or null that is, or is not, in the list (strictly) |
 | `starts_with`, `ends_with`      | a non-empty string                    | is a string that starts, or ends, with it                      |
 | `like`                          | a non-empty glob                      | is a string that matches it                                    |
 | `gt`, `gte`, `lt`, `lte`        | a number or numeric string            | is a number above, at least, below or at most it               |
