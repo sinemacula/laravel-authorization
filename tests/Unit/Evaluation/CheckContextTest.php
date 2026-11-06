@@ -10,10 +10,12 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
 use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
+use SineMacula\Laravel\Authorization\Evaluation\PrincipalSelectors;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementCheck;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementFreshness;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\StubRequirementChecker;
 
 /**
@@ -349,6 +351,22 @@ final class CheckContextTest extends TestCase
         self::assertSame(MatchOutcome::MATCHES, $context->assessRequirement(new AuthenticationRequirement(['multifactor' => null]))->outcome);
         self::assertEquals(new RequirementFreshness('session-1'), $context->requirementFreshness());
         self::assertSame([], $this->builds);
+    }
+
+    /**
+     * A context given the subject's selectors asks them whether a resource
+     * policy's principals name the subject; one without names nobody.
+     *
+     * @return void
+     */
+    public function testIsSubjectNamedByAsksTheSubjectsSelectors(): void
+    {
+        $user    = new Reference('user', '1');
+        $context = new CheckContext([], [], null, new PrincipalSelectors(new Subject($user)));
+
+        self::assertTrue($context->isSubjectNamedBy(['user:2', 'user:1']));
+        self::assertFalse($context->isSubjectNamedBy(['user:2']));
+        self::assertFalse((new CheckContext)->isSubjectNamedBy(['user:1']));
     }
 
     /**

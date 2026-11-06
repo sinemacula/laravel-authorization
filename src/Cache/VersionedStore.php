@@ -15,11 +15,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *
  * Every grantee, role, policy and tenant has a version token, a random string
  * that a write bumps by replacing it, and the policies attached to roles share
- * one more. An entry records the tokens of everything it was built from, and
- * holds only while every one of them is unchanged, so a write invalidates
- * exactly the entries it affects on any store, with or without tags. A token is
- * random rather than a counter, so a token the store evicted and created again
- * can never match an entry recorded before.
+ * one more, as do the policies attached to the resources of each type and every
+ * resource policy entry. An entry records the tokens of everything it was built
+ * from, and holds only while every one of them is unchanged, so a write
+ * invalidates exactly the entries it affects on any store, with or without
+ * tags. A token is random rather than a counter, so a token the store evicted
+ * and created again can never match an entry recorded before.
  *
  * A store that fails is never fatal to a check: the read or write is skipped,
  * the failure is written to the package's log channel once, and the store is
@@ -95,6 +96,21 @@ final class VersionedStore
     public function rolePoliciesKey(): string
     {
         return "{$this->prefix}:version:role-policies";
+    }
+
+    /**
+     * Return the key of the version token the policies attached to resources of
+     * the type share, which an attachment to the type or to any of its records
+     * bumps; or, with no type, of the one token every resource policy entry
+     * shares, which a change to any policy or its deletion bumps. Every entry
+     * of a resource's policies records both before it reads the attachments.
+     *
+     * @param  string|null  $type
+     * @return string
+     */
+    public function resourcePoliciesKey(?string $type = null): string
+    {
+        return "{$this->prefix}:version:resource-policies" . ($type === null ? '' : ':' . $type);
     }
 
     /**

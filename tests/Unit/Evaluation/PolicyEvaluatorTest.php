@@ -16,6 +16,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
+use SineMacula\Laravel\Authorization\Evaluation\PrincipalSelectors;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementCheck;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementFreshness;
 use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
@@ -24,6 +25,7 @@ use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
 use SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\StubRequirementChecker;
 
 /**
@@ -1386,6 +1388,123 @@ final class PolicyEvaluatorTest extends TestCase
     }
 
     /**
+     * A resource policy's allow applies to a subject its principals name, at
+     * the allow stage, decided by the statement, which names the resource its
+     * policy is attached to; it does not apply to a subject they do not name,
+     * nor to any subject without the context naming one, and the trace says so.
+     *
+     * @return void
+     */
+    public function testAResourcePolicysAllowAppliesOnlyToTheSubjectsItNames(): void
+    {
+        $policy = self::policy('sharing', [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:2', 'user:1']]])->withId('key')->withResource('posts:7');
+        $named  = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', 'posts:7', self::namedContext('1'));
+
+        self::assertTrue($named->isAllowed());
+        self::assertSame(DecisionStage::ALLOW, $named->stage);
+        self::assertEquals([new StatementReference('sharing', 0, 'key', null, 'posts:7')], $named->statements);
+        self::assertSame(TraceOutcome::MATCHED, $named->trace[0]->outcome);
+
+        foreach ([self::namedContext('3'), new CheckContext] as $context) {
+            $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', 'posts:7', $context);
+
+            self::assertSame(DecisionReason::NO_MATCH, $decision->reason);
+            self::assertSame(DecisionStage::IMPLICIT, $decision->stage);
+            $reference = new StatementReference('sharing', 0, 'key', null, 'posts:7');
+
+            self::assertEquals([new TraceEntry(DecisionStage::ALLOW, TraceOutcome::PRINCIPAL_MISMATCH, $reference)], $decision->trace);
+        }
+
+        $other = (new PolicyEvaluator)->evaluate([$policy], 'posts:edit', 'posts:7', self::namedContext('1'));
+
+        self::assertSame(TraceOutcome::NOT_APPLICABLE, $other->trace[0]->outcome);
+    }
+
+    /**
+     * An allow that does not fit its source applies to nobody: a resource
+     * policy's allow naming no principals, and an allow naming principals in a
+     * policy attached any other way, the subject named or not.
+     *
+     * @return void
+     */
+    public function testAnAllowThatDoesNotFitItsSourceAppliesToNobody(): void
+    {
+        $unnamed    = self::policy('unnamed', [['effect' => 'allow', 'actions' => ['posts:read']]])->withResource('posts:*');
+        $misplaced  = self::policy('misplaced', [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']]]);
+        $identities = self::policy('identity', [['effect' => 'allow', 'actions' => ['posts:read']]]);
+
+        foreach ([$unnamed, $misplaced] as $policy) {
+            $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', 'posts:7', self::namedContext('1'));
+
+            self::assertSame(DecisionReason::NO_MATCH, $decision->reason);
+            self::assertSame(TraceOutcome::PRINCIPAL_MISMATCH, $decision->trace[0]->outcome);
+        }
+
+        self::assertTrue((new PolicyEvaluator)->evaluate([$identities], 'posts:read', 'posts:7', self::namedContext('1'))->isAllowed());
+    }
+
+    /**
+     * A resource policy's deny applies to everyone at the deny stage, over an
+     * allow from any source, the subject named or not.
+     *
+     * @return void
+     */
+    public function testAResourcePolicysDenyAppliesToEveryone(): void
+    {
+        $locked = self::policy('locked', [['sid' => 'lock', 'effect' => 'deny', 'actions' => ['posts:delete']]])->withResource('posts:7');
+        $mine   = self::policy('mine', [['effect' => 'allow', 'actions' => ['posts:delete']]]);
+
+        foreach ([self::namedContext('1'), new CheckContext] as $context) {
+            $decision = (new PolicyEvaluator)->evaluate([$mine, $locked], 'posts:delete', 'posts:7', $context);
+
+            self::assertSame(DecisionReason::EXPLICIT_DENY, $decision->reason);
+            self::assertEquals([new StatementReference('locked', 0, null, 'lock', 'posts:7')], $decision->statements);
+            self::assertCount(1, $decision->trace);
+        }
+    }
+
+    /**
+     * An allow whose principals do not name the subject never makes the
+     * decision `insufficient_authentication` or `condition_failed`: it bears on
+     * nothing.
+     *
+     * @return void
+     */
+    public function testAMismatchedAllowBearsOnNothing(): void
+    {
+        $policy = self::policy('sharing', [
+            ['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:2'], 'conditions' => ['eq' => ['input.flag' => 'on']]],
+            [...self::requiringAllow(['phishing_resistant' => []]), 'principals' => ['user:2']],
+        ])->withResource('posts:7');
+
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', 'posts:7', self::namedContext('1'));
+
+        self::assertSame(DecisionReason::NO_MATCH, $decision->reason);
+        $outcomes = \array_map(static fn (TraceEntry $entry): TraceOutcome => $entry->outcome, $decision->trace);
+
+        self::assertSame([TraceOutcome::PRINCIPAL_MISMATCH, TraceOutcome::PRINCIPAL_MISMATCH], $outcomes);
+    }
+
+    /**
+     * One policy attached as a resource policy and to the subject is ordered by
+     * the resource after its name and key, so the decision is the same whatever
+     * order the policies come in.
+     *
+     * @return void
+     */
+    public function testAPolicyAttachedTwoWaysIsOrderedByTheResource(): void
+    {
+        $identity = self::policy('denies', [['effect' => 'deny', 'actions' => ['posts:delete']]])->withId('key');
+        $resource = $identity->withResource('posts:7');
+
+        foreach (self::permutations([$identity, $resource]) as $policies) {
+            $decision = (new PolicyEvaluator)->evaluate($policies, 'posts:delete', 'posts:7');
+
+            self::assertEquals([new StatementReference('denies', 0, 'key'), new StatementReference('denies', 0, 'key', null, 'posts:7')], $decision->statements);
+        }
+    }
+
+    /**
      * Build a check context with `request`, `tenant` and `environment`
      * namespaces, each built on demand, counting each build.
      *
@@ -1413,6 +1532,17 @@ final class PolicyEvaluatorTest extends TestCase
         }
 
         return new CheckContext(['input' => []], $builders);
+    }
+
+    /**
+     * Return a context whose subject is `user:<id>`.
+     *
+     * @param  string  $id
+     * @return \SineMacula\Laravel\Authorization\Evaluation\CheckContext
+     */
+    private static function namedContext(string $id): CheckContext
+    {
+        return new CheckContext(['input' => []], [], null, new PrincipalSelectors(new Subject(new Reference('user', $id))));
     }
 
     /**

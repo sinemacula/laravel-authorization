@@ -92,8 +92,8 @@ final class InlinePolicies
 
     /**
      * Refuse to attach an inline policy to any grantee but the one it belongs
-     * to, and a policy whose row is gone. A managed policy, or a target that is
-     * not a policy, passes.
+     * to, a policy naming `principals`, and a policy whose row is gone. A
+     * managed policy naming none, or a target that is not a policy, passes.
      *
      * The grantee is read from the stored row, not from the model in hand: a
      * model loaded without its owner columns, or with them changed and not
@@ -118,7 +118,9 @@ final class InlinePolicies
 
     /**
      * Refuse to attach a policy, as `stored()` read it, to any grantee but the
-     * one it belongs to. A managed policy passes.
+     * one it belongs to, and a policy naming `principals`, which only a
+     * resource policy does (see `PolicyPrincipals`). A managed policy naming
+     * none passes.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $stored
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $grantee
@@ -130,18 +132,18 @@ final class InlinePolicies
     {
         $owner = self::ownerOf($stored);
 
-        if ($owner === null || ($owner->type === $grantee->type && $owner->id === $grantee->id)) {
-            return;
+        if ($owner !== null && ($owner->type !== $grantee->type || $owner->id !== $grantee->id)) {
+            throw new InlinePolicyAttachmentException(PolicyDocument::nameOf($stored->getAttribute('name')), $owner, $grantee);
         }
 
-        throw new InlinePolicyAttachmentException(PolicyDocument::nameOf($stored->getAttribute('name')), $owner, $grantee);
+        PolicyPrincipals::assertAttachableToGrantee($stored);
     }
 
     /**
-     * Read the name and owner columns of the policy with the given key as
-     * stored, through the configured policy class, outside any global scope and
-     * on the write connection, so a replica that has not caught up never hides
-     * a policy just created; null when no policy has the key.
+     * Read the name, owner columns and document of the policy with the given
+     * key as stored, through the configured policy class, outside any global
+     * scope and on the write connection, so a replica that has not caught up
+     * never hides a policy just created; null when no policy has the key.
      *
      * @param  mixed  $key
      * @return \SineMacula\Laravel\Authorization\Models\Policy|null
@@ -149,7 +151,7 @@ final class InlinePolicies
     public static function stored(mixed $key): ?Policy
     {
         $class  = self::policyClass();
-        $policy = $class::query()->withoutGlobalScopes()->useWritePdo()->find($key, [(new $class)->getKeyName(), 'name', 'owner_type', 'owner_id']);
+        $policy = $class::query()->withoutGlobalScopes()->useWritePdo()->find($key, [(new $class)->getKeyName(), 'name', 'owner_type', 'owner_id', 'document']);
 
         return $policy instanceof Policy ? $policy : null;
     }

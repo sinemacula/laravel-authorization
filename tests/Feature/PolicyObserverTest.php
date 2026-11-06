@@ -12,10 +12,12 @@ use SineMacula\Laravel\Authorization\Events\Policy\Updated as PolicyUpdated;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyOwnerException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\OwnerChangedException;
+use SineMacula\Laravel\Authorization\Exceptions\ResourcePolicyException;
 use SineMacula\Laravel\Authorization\Exceptions\SystemInlinePolicyException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Support\DocumentDigest;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\CatchesRefusals;
@@ -173,6 +175,31 @@ final class PolicyObserverTest extends TestCase
 
         self::assertSame(['mine'], Policy::query()->pluck('name')->all());
         self::assertFalse(Policy::query()->findOrFail($inline->id)->is_system);
+    }
+
+    /**
+     * A rewrite that breaks the `principals` rule for where the policy is
+     * attached is refused before it is written: principals on a policy attached
+     * to a grantee, an allow naming none on a resource policy.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARewriteBreakingThePrincipalsRuleIsRefused(): void
+    {
+        $named   = ['statements' => [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']]]];
+        $unnamed = ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]];
+        $own     = Policy::query()->create(['name' => 'own', 'document' => $unnamed]);
+        $sharing = Policy::query()->create(['name' => 'sharing', 'document' => $named]);
+
+        $this->app?->make(GrantService::class)->attachPolicy(new Reference('user', '1'), $own);
+        $this->app?->make(ResourcePolicyService::class)->attach($sharing, 'posts');
+
+        self::assertInstanceOf(ResourcePolicyException::class, self::refusalOf(static fn () => $own->update(['document' => $named])));
+        self::assertInstanceOf(ResourcePolicyException::class, self::refusalOf(static fn () => $sharing->update(['document' => $unnamed])));
+        self::assertNull(Policy::query()->findOrFail($own->id)->document['statements'][0]['principals'] ?? null);
+        self::assertSame(['user:1'], Policy::query()->findOrFail($sharing->id)->document['statements'][0]['principals'] ?? null);
     }
 
     /**

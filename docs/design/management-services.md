@@ -15,6 +15,8 @@ model in its own transaction on the package's connection; it moves onto `Permiss
   (`createInline()`).
 - `GrantService`: grant, revoke and sync roles, permissions and policies to a grantee, an identity or a role, with an
   optional expiry.
+- `ResourcePolicyService`: attach a policy to a resource, a record or a whole resource type, and detach it
+  (AUTHZ-7.3).
 
 Each is a final class bound as a singleton (it holds no state), resolved from the container or injected. Every public
 method takes the actor making the call as an optional `$actor`, a model or a `Support\Reference`: null for console and
@@ -102,6 +104,19 @@ events themselves are described in [Events](events.md).
    tenant's and the platform's alike. A revocation by name revokes each of them the grantee or role holds, and a sync
    that names one keeps each held row of the name, granting the row the lookup ranks first only when none is held.
 
+12. **A resource's policies are attached like grants (AUTHZ-7.3).** `ResourcePolicyService::attach()` writes a row of
+    `resource_policies`: the policy, the resource's morph type and its key (null for the whole type), and the scope,
+    worked out as a grant's is (`GrantScopes::of()`), so a tenant's policy is attached in that tenant or below it and
+    anywhere else is refused with `GrantScopeMismatchException`. The write is insert-or-ignore on a null-folding unique
+    key over the policy, the resource and the scope, so it is idempotent under concurrency and returns `GRANTED`,
+    `REACH_CHANGED` or `UNCHANGED`; `detach()` removes the attachment in the scope it names and returns how many it
+    removed. The stored policy must suit a resource (`PolicyPrincipals`): an inline policy, or one with an allow naming
+    no principals, is refused with `ResourcePolicyException` before anything is written, and a resource that names no
+    type, or an unsaved model, with `InvalidResourceException`. A policy naming principals is refused the other way, by
+    every grant path to an identity or a role. Each call is one transaction and one operation, dispatches
+    `Resource\PolicyAttached` or `Resource\PolicyDetached` after commit only when it changed something, and refreshes
+    the resolution cache for the resource's type. The rows carry no actor column; the events carry the actor.
+
 ## Success Path
 
 ```php
@@ -140,6 +155,8 @@ working: each forwards to the matching service method with no actor.
 - **`authorization:sync` writes directly.** The permission catalogue sync saves and deletes through the permission
   model, in one transaction on the package's connection and as one operation, rather than through
   `PermissionService`.
+- **A resource's attachments outlive the resource.** They name it by type and key, with no foreign key, so deleting the
+  record leaves them in place until they are detached. Deleting the policy removes them with its row.
 - **The commands name no actor by default.** `authorization:grant`, `authorization:revoke` and `authorization:sync`
   take `--actor={morphType}:{key}`, which must name a row that exists; without it they record no actor.
 
@@ -151,6 +168,8 @@ working: each forwards to the matching service method with no actor.
 - `Enums\GrantTarget`: each kind's configured model, grant table and events.
 - `Support\InlinePolicies` and `Observers\AuthorizablePolicyPivotObserver`: the grantee an inline policy belongs to, the
   refusals and its deletion with that grantee.
+- `Services\ResourcePolicyService`, `Services\Support\ResourcePolicyTable` and `Support\PolicyPrincipals`: a
+  resource's attachments, their scoped writes and the principals rule.
 - `Enums\GrantOutcome` and `Services\SyncResult`: what a call changed.
 - `Observers\RoleObserver::assertNoHierarchyCycle()`: the locked, unscoped ancestor walk.
 
@@ -162,6 +181,8 @@ working: each forwards to the matching service method with no actor.
 - `PermissionServiceTest`, `PolicyServiceTest`, `RecordWriterTest`: the record writes, inline policies among them.
 - `InlinePoliciesTest`, `AuthorizablePolicyPivotObserverTest`, `OwnerUniquenessTest`, `GrantPrunerTest`: the grantee an
   inline policy belongs to, its refusals on every write path, its name per grantee and its deletion with the grantee.
+- `ResourcePolicyServiceTest`, `ResourcePolicyTableTest`, `PolicyPrincipalsTest`: a resource's attachments, their
+  scope, idempotency, events and refusals.
 - `HasRolesTest`, `HasPermissionsTest`, `HasPoliciesTest`, `ManagesPermissionsTest`: the traits delegate.
 
 ## Change Triggers

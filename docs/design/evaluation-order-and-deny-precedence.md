@@ -16,8 +16,9 @@ throws when it does not. It returns a `Decision`:
 - `reason` -- why it denies, a `DecisionReason` (AUTHZ-7.10); null when it allows.
 - `stage` -- the `DecisionStage` that decided it.
 - `statements` -- the statements that decided it, each a `StatementReference` (the policy's name, its stored key, the
-  statement's position and its `sid` when it has one, shown as `name[key]#position sid="…"`); none for a permission held
-  or a denial no statement made. The `sid` only names the statement: it never changes the decision or the order.
+  statement's position, its `sid` when it has one and, for a resource policy, the resource the policy is attached to,
+  shown as `name[key]#position sid="…" on "post:7"`); none for a permission held or a denial no statement made. The
+  `sid` only names the statement: it never changes the decision or the order.
 - `trace` -- every step taken, in order, each a `TraceEntry`: its stage, its `TraceOutcome`, the statement it
   assessed (none for the permission step), and the condition keys (their dot paths) it tested with whether each held.
 - `requirements` -- for an `insufficient_authentication` denial, one `UnmetRequirement` for each statement in
@@ -50,6 +51,9 @@ before the statements are assessed builds none of them. An attribute provider th
 the operators, the operands and the namespaces are in [Wildcard and Condition
 Semantics](wildcard-and-condition-semantics.md).
 
+An allow statement of a resource policy also names its `principals`, the subjects it applies to (see [Resource
+Policies](#resource-policies)); a deny takes none.
+
 `not_resources` counts as resource scoping: a statement with it never covers a check that names no resource, so
 `{"effect": "deny", "actions": ["posts:delete"], "not_resources": ["post:1"]}` denies deleting every post but `post:1`
 and leaves a resource-less `posts:delete` check alone. Only a statement without either resource list, or whose
@@ -74,18 +78,52 @@ separate model. The default resolver, `DefaultPolicyResolver`, unions three sour
 An attachment of an inline policy to any grantee but the one it belongs to is left out of the resolution, should one
 reach the table past the write paths that refuse it.
 
-A fourth source follows the resolver's. When the subject's identity is a separate model,
-`AuthorizationManager::gatherPolicies()` appends that identity's own and role-attached policies through
-`SubjectGrants::identityPolicies()`. This happens after the bound `PolicyResolver`, not through it, so a custom
-resolver does not control it.
+Two more sources follow the resolver's, in `AuthorizationManager::gatherPolicies()`, after the bound `PolicyResolver`
+rather than through it, so a custom resolver controls neither:
+
+- **A separate identity's policies.** When the subject's identity is a separate model, that identity's own and
+  role-attached policies, through `SubjectGrants::identityPolicies()`.
+- **The resource's policies (AUTHZ-7.3).** The managed policies attached through `resource_policies` to the check's
+  record and to its type, through `ResourcePolicyResolver::policiesFor()`. A check on a type alone reads those attached
+  to the type; a check on an opaque identifier, or on no resource, reads none and runs no query. Only the attachments
+  that hold in the tenant and application the check is decided in count, as a grant's do, and a policy attached to the
+  record and to its type is listed once, as the record's. Each is hydrated with the resource it is attached to
+  (`Policy::withResource()`, `type:id` or `type:*`), which makes it a resource policy (see [Resource
+  Policies](#resource-policies)).
+
+`withPolicies()` replaces every source, the resource's included; a supplied policy given a resource is evaluated as a
+resource policy.
 
 Within one grantee's resolution, its own attachments and its roles', a policy held more than one way (attached to the
 grantee and to a role, or to two of its roles) is listed once. A policy held by both the subject and its separate
 identity may be listed twice, which never changes the decision. The stored policies are read through the resolution
 cache; a change to any role's policy attachments refreshes every identity's cached policies, and a change to the
 hierarchy refreshes those of the identities whose roles it reaches. The order the sources are read in is never relied
-on: invariant 2 orders the policies within each stage, so a deny in a role's policy is decided exactly as one attached
-to the identity, and wins over every allow and every permission.
+on: invariant 2 orders the policies within each stage, so a deny in a role's policy, or in the resource's, is decided
+exactly as one attached to the identity, and wins over every allow and every permission.
+
+The resource's policies are read in one query, on the write connection, through the resolution cache, keyed by the
+resource and the policy limits. Attaching or detaching a policy refreshes the cached entries of the resource's type, and
+updating or deleting any policy refreshes every cached resource-policy entry, since one query reads the attachments and
+the documents together.
+
+## Resource Policies
+
+A resource policy is a managed policy attached to a record or a whole resource type, through
+`ResourcePolicyService::attach()` and `detach()`. It answers who may act on the resource rather than what a grantee may
+do, so its statements are read the other way round:
+
+- **Each allow names its principals.** `principals` is a non-empty list of selectors: `<morph type>:<id>`, the
+  subject's principal or identity by morph class and key, or `role:<role id>`, whoever holds that role (by its key,
+  never its name) in the tenant and application the check is decided in, and, with the hierarchy enabled, whoever holds
+  a role below it, read through `RoleGraph` as the role's permissions and policies are. A selector is an exact name,
+  never a pattern.
+- **Each deny applies to everyone.** A deny takes no `principals`; it applies to every subject checking the resource.
+- **The rule follows the attachment.** `PolicyValidator` refuses a malformed selector and `principals` on a deny when a
+  policy is saved. A policy attached to a resource must name principals on every allow, and may not be inline; a policy
+  attached to an identity or a role may name none. Each attachment is refused with `ResourcePolicyException` when the
+  stored policy breaks the rule for it, and a rewrite of an attached policy that would break it is refused as well
+  (`PolicyPrincipals`).
 
 ## Invariants
 
@@ -99,25 +137,28 @@ to the identity, and wins over every allow and every permission.
       tenant-owned resource when no tenant is active) denies as `tenant_scope` before any policy is read, unless the
       subject holds the action's permission through a platform-wide grant, when the rest runs at platform scope
       (AUTHZ-4.4, AUTHZ-5.5, N9).
-   4. *Deny*: every deny statement of every applicable policy is assessed. One that matches, or whose test cannot be
-      decided, denies as `explicit_deny`. Failing that, a deny statement that cannot be evaluated denies as
-      `invalid_policy`. A stored policy that cannot be read, or whose document is over a configured limit, denies as
-      `invalid_policy` before any statement is assessed.
-   5. *Allow*: only when no deny decided, every allow statement is assessed. One that cannot be evaluated denies as
-      `invalid_policy`; failing that, one that matches allows. Failing that, a permission the subject holds that the
-      action names (directly or through a role) allows.
+   4. *Deny*: every deny statement of every applicable policy is assessed, a resource policy's for every subject. One
+      that matches, or whose test cannot be decided, denies as `explicit_deny`. Failing that, a deny statement that
+      cannot be evaluated denies as `invalid_policy`. A stored policy that cannot be read, or whose document is over a
+      configured limit, denies as `invalid_policy` before any statement is assessed.
+   5. *Allow*: only when no deny decided, every allow statement is assessed. An allow applies only to the subjects its
+      source admits (invariant 9); one that does not is recorded as `principal_mismatch` and decides nothing. One that
+      cannot be evaluated denies as `invalid_policy`; failing that, one that matches allows, a resource policy's with no
+      permission held. Failing that, a permission the subject holds that the action names (directly or through a role)
+      allows.
    6. *Implicit*: nothing allowed. The denial is `insufficient_authentication` when an allow statement names the action
       and the resource and only its authentication requirement is unmet (invariant 7); `condition_failed` when an allow
       statement names them but its conditions do not hold or cannot be decided; and `no_match` otherwise.
 
    Guardrails, permission boundaries and session policies take their places between the deny and allow stages as they
-   arrive (BL-48 to BL-50), and each of them ranks above `insufficient_authentication`: a step-up never gets past a
-   boundary, a guardrail or a session cap.
+   arrive (BL-48 to BL-50), and each of them ranks above `insufficient_authentication` and above a resource policy's
+   allow: a step-up, or a resource policy naming the subject, never gets past a boundary, a guardrail or a session cap.
 
 2. **The decision is deterministic (AUTHZ-7.9).** Within each stage, policies are assessed in order of name, then stored
-   key, then document, and each statement in order of position, and every statement of the stage is assessed whatever is
-   found first, so the decision, the statements that decided it and the trace are the same whatever order the policies
-   were read in. A stage that decides ends the decision: once a deny decided, no allow statement is assessed (N4).
+   key, then the resource a resource policy is attached to, then document, and each statement in order of position, and
+   every statement of the stage is assessed whatever is found first, so the decision, the statements that decided it
+   and the trace are the same whatever order the policies were read in. A stage that decides ends the decision: once a
+   deny decided, no allow statement is assessed (N4).
 
 3. **RBAC is additive / allow-only.** Direct permission grants and role-inherited permissions are unioned on read.
    There is no RBAC-layer deny: every permission a subject holds contributes an allow and nothing else, and only when no
@@ -163,20 +204,31 @@ to the identity, and wins over every allow and every permission.
    reused. Every other entry point (`can()`, the Gate, the Blade directives and `effectivePermissions()`) decides
    afresh, and the resolution cache holds grants and policies, never decisions.
 
+9. **An allow applies only to the subjects its source admits (AUTHZ-7.3, N39).** A resource policy's allow applies only
+   when one of its `principals` names the subject, and then allows without the subject holding any permission; an allow
+   in a policy attached any other way applies only when it names no principals, so a statement with `principals` from
+   the policy store, a `withPolicies()` override or a row written past the refusals never allows. A mismatched allow is
+   recorded as `principal_mismatch` before its resource and conditions are read, and counts for nothing: it is no
+   `condition_failed` and no `insufficient_authentication` candidate. A resource policy's allow is reached only after
+   the tenant stage and every deny, so it never admits a resource of another tenant (`tenant_scope` still decides that
+   first) and never beats a deny. The principals are judged lazily: a reference costs no query, and the subject's roles
+   are read once a check, only when a role selector is reached and no reference matched.
+
 ## Trace
 
 Each statement adds one entry, in the deny stage for a deny statement and the allow stage for an allow statement, and
 the permission step adds one more when the statements allowed nothing:
 
-| What the step found                                                 | Outcome            |
-|---------------------------------------------------------------------|--------------------|
-| The statement does not name the action or the resource              | `not_applicable`   |
-| It names them and its conditions hold                               | `matched`          |
-| It names them but its conditions do not hold                        | `condition_failed` |
-| It names the action but a value it needs is missing or unresolvable | `undecidable`      |
-| It cannot be evaluated                                              | `invalid`          |
-| The subject holds the permission the action names                   | `held`             |
-| The subject does not hold it                                        | `not_held`         |
+| What the step found                                                 | Outcome              |
+|---------------------------------------------------------------------|----------------------|
+| The statement does not name the action or the resource              | `not_applicable`     |
+| An allow that names the action but does not apply to the subject    | `principal_mismatch` |
+| It names them and its conditions hold                               | `matched`            |
+| It names them but its conditions do not hold                        | `condition_failed`   |
+| It names the action but a value it needs is missing or unresolvable | `undecidable`        |
+| It cannot be evaluated                                              | `invalid`            |
+| The subject holds the permission the action names                   | `held`               |
+| The subject does not hold it                                        | `not_held`           |
 
 An authentication requirement is recorded as the condition key `authentication`, with whether it held, and never a
 proof or anything the checker answered: a statement whose requirement alone is unmet is `condition_failed` with
@@ -243,6 +295,10 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   `decideGrants()` -- the check's context (`CheckContextFactory::make()`), `invalid_policy` when policies cannot be
   gathered, the statements, and the permission step.
 - `ResourceReferences::of()` -- every resource argument's reference; `ResourceScope::decide()` -- the tenant stage.
+- `ResourcePolicyResolver::policiesFor()` -- the resource's and its type's policies, in one query;
+  `PrincipalSelectors` and `CheckContext::isSubjectNamedBy()` -- whether a selector names the subject;
+  `PolicyEvaluator::isForSubject()` -- whether an allow applies to the subject; `PolicyPrincipals` -- the attachment
+  and rewrite refusals; `ResourcePolicyService` -- attaching and detaching.
 - `DefaultPolicyResolver::policiesFor()` -- the policy store and the identity's policies;
   `HasPolicies::getPolicies()` and `GrantResolver::policies()` -- the identity's own attachments and its roles';
   `RolePolicies` -- where a role's policy applies; `RoleGraph::keysHeldBy()` and `RoleGraph::keysWithin()` -- the roles
@@ -277,6 +333,11 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   source in one order, the queries taken and a hierarchy that moves while the policies are read;
   `InlinePoliciesTest`, `HasPoliciesTest` and `AuthorizablePolicyPivotObserverTest` -- inline policies attached to
   their grantee alone, left out when attached to another, and deleted with their grantee.
+- `ResourcePolicyResolverTest`, `PrincipalSelectorsTest` and the Feature `AuthorizationManagerTest` -- a record's and
+  its type's policies, a type alone and an opaque identifier, selectors by reference and by role in and out of scope
+  and down the hierarchy, a deny for everyone, an allow with no permission held, `tenant_scope` before any resource
+  policy, and the queries taken; `PolicyPrincipalsTest`, `ResourcePolicyServiceTest` and `InlinePoliciesTest` -- the
+  attachment and rewrite refusals; `PolicyEvaluatorTest` -- `principal_mismatch` and the order with resources.
 - `FailClosedPolicyHydrationTest` -- an unreadable row, or one over a limit, is never skipped.
 - `PolicyValidatorTest` and `PolicyDocumentTest` -- the write-time checks and the limits on read.
 - `GateRegistrarTest` and `AuthorizeActionTest` -- an argument that cannot be identified denies as
@@ -291,8 +352,11 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 - Letting `insufficient_authentication` win over a deny, an invalid policy or another allow, or reusing a decision that
   read a requirement in another session or past its met-until instant, would violate invariants 7 and 8 and requires a
   design decision before implementation.
-- Adding a source of policies (resource-based policies, AUTHZ-7.3) requires updating the section on where policies come
-  from, and the new source's policies must be ordered with the rest under invariant 2.
+- Adding a source of policies requires updating the section on where policies come from, and the new source's policies
+  must be ordered with the rest under invariant 2.
+- Letting a resource policy's allow apply to a subject its principals do not name, a deny take `principals`, or an
+  allow with `principals` apply outside a resource policy would violate invariant 9 and requires a design decision
+  before implementation. Each cap that arrives (BL-48 to BL-50) must rank above a resource policy's allow.
 - Changing deny semantics (e.g. deny-unless, deny-with-exception) requires a new invariant entry above.
 - Introducing RBAC-layer deny (negative permissions) would violate invariant 3 and requires a design decision before
   implementation.

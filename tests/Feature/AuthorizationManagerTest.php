@@ -51,6 +51,7 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
@@ -1585,6 +1586,255 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * A policy attached to a record allows the subject its principals name, by
+     * reference, without the subject holding any permission, and nobody else;
+     * the trace records each statement with the resource its policy is attached
+     * to, and the explanation shows it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAResourcePolicyAllowsTheSubjectItNames(): void
+    {
+        $named = StubIdentity::create(['id' => 'user-1']);
+        $other = StubIdentity::create(['id' => 'user-2']);
+        $post  = ResourceReference::record('posts', '7');
+
+        $share = ['sid' => 'share', 'effect' => 'allow', 'actions' => ['posts:read'], 'principals' => [$named->getMorphClass() . ':user-1']];
+
+        self::attachToResource(self::resourcePolicy('sharing', [$share]), ['posts', 7]);
+
+        $allowed = Authorization::for($named)->check('posts:read', $post);
+        $denied  = Authorization::for($other)->check('posts:read', $post);
+
+        self::assertTrue($allowed->isAllowed());
+        self::assertSame(DecisionStage::ALLOW, $allowed->stage);
+        self::assertSame('posts:7', $allowed->statements[0]->resource);
+        self::assertStringContainsString('sharing[', $allowed->explain());
+        self::assertStringContainsString('#0 sid="share" on "posts:7"', $allowed->explain());
+        self::assertSame(DecisionReason::NO_MATCH, $denied->reason);
+        self::assertSame(TraceOutcome::PRINCIPAL_MISMATCH, $denied->trace[0]->outcome);
+        self::assertSame('posts:7', $denied->trace[0]->statement?->resource);
+        self::assertSame(TraceOutcome::NOT_HELD, $denied->trace[1]->outcome);
+        self::assertFalse(Authorization::for($named)->can('posts:read', ResourceReference::record('posts', '8')));
+    }
+
+    /**
+     * A policy attached to a type applies to a check on any record of the type
+     * and on the type alone; a check on an opaque identifier, or on no
+     * resource, reads no resource policy.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATypesResourcePolicyAppliesToItsRecordsAndToTheTypeAlone(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        self::attachToResource(self::resourcePolicy('creators', [['effect' => 'allow', 'actions' => ['posts:*'], 'principals' => [$user->getMorphClass() . ':user-1']]]), 'posts');
+
+        self::assertTrue(Authorization::for($user)->can('posts:create', ResourceReference::type('posts')));
+        self::assertTrue(Authorization::for($user)->can('posts:read', ['posts', 9]));
+        self::assertFalse(Authorization::for($user)->can('posts:read', 'posts:9'));
+        self::assertFalse(Authorization::for($user)->can('posts:read'));
+        self::assertFalse(Authorization::for($user)->can('posts:read', ResourceReference::type('docs')));
+    }
+
+    /**
+     * A resource policy's deny applies to everyone checking the resource,
+     * whatever they hold: a subject holding the permission and an identity
+     * policy allowing the action is denied by it, and the decision names it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAResourcePolicysDenyAppliesToEveryone(): void
+    {
+        Permission::create(['name' => 'posts:delete']);
+
+        $holder = StubIdentity::create(['id' => 'user-1']);
+        $other  = StubIdentity::create(['id' => 'user-2']);
+
+        $holder->givePermission('posts:delete');
+        $holder->attachPolicy(Policy::create(['name' => 'mine', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:delete']]]]]));
+
+        self::assertTrue(Authorization::for($holder)->can('posts:delete', ['posts', 7]));
+
+        self::attachToResource(self::resourcePolicy('locked', [['sid' => 'lock', 'effect' => 'deny', 'actions' => ['posts:delete']]]), ['posts', 7]);
+
+        foreach ([$holder, $other] as $subject) {
+            $decision = Authorization::for($subject)->check('posts:delete', ['posts', 7]);
+
+            self::assertSame(DecisionReason::EXPLICIT_DENY, $decision->reason);
+            self::assertSame(['lock'], \array_map(static fn (StatementReference $statement): ?string => $statement->sid, $decision->statements));
+            self::assertSame('posts:7', $decision->statements[0]->resource);
+        }
+
+        self::assertTrue(Authorization::for($holder)->can('posts:delete', ['posts', 8]));
+    }
+
+    /**
+     * A role selector names whoever holds the role, by its key, in the scope
+     * the check is decided in: not a holder of the role in another tenant, or
+     * for another application, nor a holder of another role of the same name.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARoleSelectorNamesTheHoldersOfTheRoleInTheScope(): void
+    {
+        [$tenantA, $tenantB] = \array_map(static fn (string $id): StubTenant => StubTenant::query()->create(['id' => $id, 'name' => $id]), ['tenant-a', 'tenant-b']);
+
+        $editor    = Role::create(['name' => 'editor']);
+        $lookalike = Role::create(['name' => 'editor', 'tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => 'tenant-a']);
+        $inA       = StubIdentity::create(['id' => 'in-a']);
+        $inB       = StubIdentity::create(['id' => 'in-b']);
+        $onMobile  = StubIdentity::create(['id' => 'on-mobile']);
+        $similar   = StubIdentity::create(['id' => 'similar']);
+
+        $inA->assignRole($editor, null, $tenantA);
+        $inB->assignRole($editor, null, $tenantB);
+        $onMobile->assignRole($editor, application: 'mobile');
+        $similar->assignRole($lookalike, null, $tenantA);
+
+        self::attachToResource(self::resourcePolicy('editors', [['effect' => 'allow', 'actions' => ['posts:edit'], 'principals' => ['role:' . $editor->id]]]), 'posts');
+
+        $can = function (StubIdentity $user, ?StubTenant $tenant, ?string $application = null): bool {
+            $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($user, $tenant, $application));
+            $this->app?->forgetInstance(ResolvedTenant::class);
+
+            return Authorization::for($user)->can('posts:edit', ['posts', 7]);
+        };
+
+        self::assertTrue($can($inA, $tenantA));
+        self::assertFalse($can($inB, $tenantA));
+        self::assertTrue($can($inB, $tenantB));
+        self::assertFalse($can($onMobile, null, 'admin'));
+        self::assertTrue($can($onMobile, null, 'mobile'));
+        self::assertFalse($can($similar, $tenantA));
+    }
+
+    /**
+     * A role selector names the holders of the roles below the role too, as a
+     * policy attached to the role reaches them, so the holder of a child role
+     * is allowed by a resource policy naming its parent, and the holder of the
+     * parent is not allowed by one naming the child.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARoleSelectorNamesTheHoldersOfTheRolesBelowIt(): void
+    {
+        $author  = Role::create(['name' => 'author']);
+        $editor  = Role::create(['name' => 'editor', 'parent_id' => $author->id]);
+        $writer  = StubIdentity::create(['id' => 'writer']);
+        $checker = StubIdentity::create(['id' => 'checker']);
+
+        $writer->assignRole($author);
+        $checker->assignRole($editor);
+
+        self::attachToResource(self::resourcePolicy('authors', [['effect' => 'allow', 'actions' => ['posts:edit'], 'principals' => ['role:' . $author->id]]]), 'posts');
+        self::attachToResource(self::resourcePolicy('editors', [['effect' => 'allow', 'actions' => ['posts:delete'], 'principals' => ['role:' . $editor->id]]]), 'posts');
+
+        self::assertTrue(Authorization::for($checker)->can('posts:edit', ['posts', 7]));
+        self::assertTrue(Authorization::for($checker)->can('posts:delete', ['posts', 7]));
+        self::assertTrue(Authorization::for($writer)->can('posts:edit', ['posts', 7]));
+        self::assertFalse(Authorization::for($writer)->can('posts:delete', ['posts', 7]));
+    }
+
+    /**
+     * A resource policy's allow never reaches across tenants: a resource of a
+     * tenant outside the subject's scope is still denied as `tenant_scope`
+     * before any policy is read, while one in scope is allowed.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAResourcePolicyNeverAllowsAnOutOfScopeResource(): void
+    {
+        [$tenantA, $tenantB] = \array_map(static fn (string $id): StubTenant => StubTenant::query()->create(['id' => $id, 'name' => $id]), ['tenant-a', 'tenant-b']);
+
+        $user  = StubIdentity::create(['id' => 'user-1']);
+        $share = ['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => [$user->getMorphClass() . ':user-1']];
+
+        self::attachToResource(self::resourcePolicy('sharing', [$share]), 'posts');
+
+        $this->resolvePrincipalAs($user);
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($user, $tenantA));
+        $this->app?->forgetInstance(ResolvedTenant::class);
+
+        $outside = Authorization::check('posts:read', ResourceReference::record('posts', '7', Reference::of($tenantB)));
+
+        self::assertSame(DecisionReason::TENANT_SCOPE, $outside->reason);
+        self::assertSame([], $outside->trace);
+        self::assertTrue(Authorization::can('posts:read', ResourceReference::record('posts', '7', Reference::of($tenantA))));
+    }
+
+    /**
+     * An attachment or detachment takes effect on the next check in the
+     * request, and a per-call override evaluates only the policies it names.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAResourceAttachmentTakesEffectOnTheNextCheck(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $policy = self::resourcePolicy('sharing', [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => [$user->getMorphClass() . ':user-1']]]);
+
+        self::assertFalse(Authorization::for($user)->can('posts:read', ['posts', 7]));
+
+        self::attachToResource($policy, ['posts', 7]);
+
+        self::assertTrue(Authorization::for($user)->can('posts:read', ['posts', 7]));
+        self::assertFalse(Authorization::for($user)->withPolicies([])->can('posts:read', ['posts', 7]));
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        self::assertTrue(Authorization::for($user)->can('posts:read', ['posts', 7]));
+        $read = \array_filter(DB::getQueryLog(), static fn (array $query): bool => \str_contains($query['query'], 'resource_policies'));
+
+        self::assertSame([], $read);
+
+        DB::disableQueryLog();
+
+        $service = ResourcePolicyService::instance();
+        $service?->detach($policy, ['posts', 7]);
+
+        self::assertFalse(Authorization::for($user)->can('posts:read', ['posts', 7]));
+    }
+
+    /**
+     * A resource policy whose document cannot be read denies every check on the
+     * resource as an invalid policy.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnUnreadableResourcePolicyDeniesEveryCheckOnTheResource(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $policy = self::resourcePolicy('broken', [['effect' => 'deny', 'actions' => ['posts:delete']]]);
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']));
+        self::attachToResource($policy, ['posts', 7]);
+
+        DB::table('policies')->where('id', $policy->id)->update(['document' => '{"statements":[{"effect":"deny"}]}']);
+
+        self::assertSame(DecisionReason::INVALID_POLICY, Authorization::for($user)->check('posts:read', ['posts', 7])->reason);
+        self::assertTrue(Authorization::for($user)->can('posts:read', ['posts', 8]));
+    }
+
+    /**
      * Assert that exactly one decision event was dispatched, for the check of
      * `posts:create` without a resource, carrying the supplied principal,
      * context and decision, and that no failure event was dispatched.
@@ -1660,6 +1910,36 @@ final class AuthorizationManagerTest extends TestCase
 
         /** @var \SineMacula\Laravel\Authorization\AuthorizationManager */
         return $this->app?->make(AuthorizationManager::class);
+    }
+
+    /**
+     * Create a policy of the statements.
+     *
+     * @param  string  $name
+     * @param  list<array<string, mixed>>  $statements
+     * @return \SineMacula\Laravel\Authorization\Models\Policy
+     */
+    private static function resourcePolicy(string $name, array $statements): Policy
+    {
+        return Policy::create(['name' => $name, 'document' => ['statements' => $statements]]);
+    }
+
+    /**
+     * Attach the policy to the resource through the resource policy service.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @param  mixed  $resource
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    private static function attachToResource(Policy $policy, mixed $resource): void
+    {
+        $service = ResourcePolicyService::instance();
+
+        self::assertInstanceOf(ResourcePolicyService::class, $service);
+
+        $service->attach($policy, $resource);
     }
 
     /**

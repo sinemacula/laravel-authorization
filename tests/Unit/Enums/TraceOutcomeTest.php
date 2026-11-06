@@ -22,16 +22,17 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 final class TraceOutcomeTest extends TestCase
 {
     /**
-     * The enum defines exactly the five statement outcomes and the two
+     * The enum defines exactly the six statement outcomes and the two
      * permission outcomes, in declaration order.
      *
      * @return void
      */
-    public function testExactlySevenCases(): void
+    public function testExactlyEightCases(): void
     {
         self::assertSame(
             [
                 TraceOutcome::NOT_APPLICABLE,
+                TraceOutcome::PRINCIPAL_MISMATCH,
                 TraceOutcome::MATCHED,
                 TraceOutcome::CONDITION_FAILED,
                 TraceOutcome::UNDECIDABLE,
@@ -51,6 +52,7 @@ final class TraceOutcomeTest extends TestCase
     public function testBackingValues(): void
     {
         self::assertSame('not_applicable', TraceOutcome::NOT_APPLICABLE->value);
+        self::assertSame('principal_mismatch', TraceOutcome::PRINCIPAL_MISMATCH->value);
         self::assertSame('matched', TraceOutcome::MATCHED->value);
         self::assertSame('condition_failed', TraceOutcome::CONDITION_FAILED->value);
         self::assertSame('undecidable', TraceOutcome::UNDECIDABLE->value);
@@ -68,6 +70,7 @@ final class TraceOutcomeTest extends TestCase
     public function testTryFromResolvesKnownValues(): void
     {
         self::assertSame(TraceOutcome::NOT_APPLICABLE, TraceOutcome::tryFrom('not_applicable'));
+        self::assertSame(TraceOutcome::PRINCIPAL_MISMATCH, TraceOutcome::tryFrom('principal_mismatch'));
         self::assertSame(TraceOutcome::MATCHED, TraceOutcome::tryFrom('matched'));
         self::assertSame(TraceOutcome::CONDITION_FAILED, TraceOutcome::tryFrom('condition_failed'));
         self::assertSame(TraceOutcome::UNDECIDABLE, TraceOutcome::tryFrom('undecidable'));

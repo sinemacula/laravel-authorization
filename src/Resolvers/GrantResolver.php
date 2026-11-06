@@ -149,6 +149,34 @@ final class GrantResolver
     }
 
     /**
+     * Hydrate one policy for evaluation, writing a document that cannot be read
+     * to the log channel before its exception is thrown. The resource policy
+     * resolver hydrates through here too.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Policy
+     *
+     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
+     */
+    public static function hydrate(Policy $policy): \SineMacula\Laravel\Authorization\Evaluation\Policy
+    {
+        try {
+            return PolicyDocument::hydrate($policy);
+        } catch (InvalidPolicyDocumentException $exception) {
+            AuthorizationLog::warning(
+                "Authorization: malformed policy '{$policy->id}' denies every check for its holder: " . $exception->getMessage(),
+                [
+                    'policy_id'   => $policy->id,
+                    'policy_name' => $policy->name,
+                    'reason'      => $exception->getMessage(),
+                ],
+            );
+
+            throw $exception;
+        }
+    }
+
+    /**
      * Return the permissions the held roles hold, reading the roles and their
      * hierarchy afresh, for a resolution whose hierarchy moved while it ran.
      *
@@ -232,33 +260,6 @@ final class GrantResolver
         }
 
         return $ordered;
-    }
-
-    /**
-     * Hydrate one policy for evaluation, writing a document that cannot be read
-     * to the log channel before its exception is thrown.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
-     * @return \SineMacula\Laravel\Authorization\Evaluation\Policy
-     *
-     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
-     */
-    private static function hydrate(Policy $policy): \SineMacula\Laravel\Authorization\Evaluation\Policy
-    {
-        try {
-            return PolicyDocument::hydrate($policy);
-        } catch (InvalidPolicyDocumentException $exception) {
-            AuthorizationLog::warning(
-                "Authorization: malformed policy '{$policy->id}' denies every check for its holder: " . $exception->getMessage(),
-                [
-                    'policy_id'   => $policy->id,
-                    'policy_name' => $policy->name,
-                    'reason'      => $exception->getMessage(),
-                ],
-            );
-
-            throw $exception;
-        }
     }
 
     /**

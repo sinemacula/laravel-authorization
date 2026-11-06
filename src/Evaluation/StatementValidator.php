@@ -18,6 +18,10 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
  * operator, an operand of the wrong type or a malformed `${…}` reference. It is
  * not part of the public API.
  *
+ * An allow statement may name its `principals` (AUTHZ-7.3): the subjects a
+ * resource policy's allow applies to, each by reference or a role by its key. A
+ * deny statement takes none.
+ *
  * The `authentication_requirement` operator (N33) tests the reserved key
  * `authentication` alone, has no `_if_exists` form, and takes a requirement as
  * its operand (see `AuthenticationRequirement`), which its key test carries
@@ -33,7 +37,13 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 final class StatementValidator
 {
     /** @var list<string> The keys a statement may carry. */
-    public const array KEYS = ['sid', 'effect', 'actions', 'not_actions', 'resources', 'not_resources', 'conditions'];
+    public const array KEYS = ['sid', 'effect', 'actions', 'not_actions', 'resources', 'not_resources', 'principals', 'conditions'];
+
+    /** @var string What a `principals` selector may be: a type, a colon and an id, each of 1 to 191 bytes, with no space, `*` or `${`. */
+    public const string SELECTOR_PATTERN = '/\A(?!.*\$\{)[^\s:*\x00]{1,191}:[^\s*\x00]{1,191}\z/';
+
+    /** @var string The type of a selector that names a role by its key. */
+    public const string ROLE_SELECTOR = 'role';
 
     /** @var string What a statement id may be: 1 to 64 letters, digits, `_`, `-`, `:` and `.`. */
     public const string SID_PATTERN = '/\A[A-Za-z0-9_:.\-]{1,64}\z/';
@@ -94,6 +104,67 @@ final class StatementValidator
                 throw new \InvalidArgumentException("Policy statement {$field} must be a non-empty list of non-empty strings.");
             }
         }
+    }
+
+    /**
+     * Refuse `principals` that are not a non-empty list of selectors, or that a
+     * deny statement carries.
+     *
+     * A selector names a subject by reference, `<morph type>:<id>`, or a role
+     * by its key, `role:<role id>`: an exact name, never a pattern. Only an
+     * allow statement names its principals; a deny in a resource policy applies
+     * to everyone checking the resource, so `principals` on one is refused
+     * rather than read as narrowing it.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect  $effect
+     * @param  array<int, string>|null  $principals
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     */
+    public static function assertPrincipals(PolicyEffect $effect, ?array $principals): void
+    {
+        if ($principals === null) {
+            return;
+        }
+
+        if ($effect === PolicyEffect::DENY) {
+            throw new \InvalidArgumentException('Policy statement principals name whom an allow applies to; a deny takes none, and applies to everyone.');
+        }
+
+        if (!self::isPatternList($principals)) {
+            throw new \InvalidArgumentException('Policy statement principals must be a non-empty list of selectors.');
+        }
+
+        foreach ($principals as $selector) {
+            if (\preg_match(self::SELECTOR_PATTERN, $selector) !== 1) {
+                throw new \InvalidArgumentException("Policy statement principal '{$selector}' must be a subject reference <type>:<id> or a role role:<role id>.");
+            }
+        }
+    }
+
+    /**
+     * Extract the `principals` selectors from a statement document, or null
+     * when it names none.
+     *
+     * @param  array<array-key, mixed>  $data
+     * @return list<string>|null
+     *
+     * @throws \InvalidArgumentException
+     */
+    public static function principalsOf(array $data): ?array
+    {
+        if (!\array_key_exists('principals', $data)) {
+            return null;
+        }
+
+        $principals = $data['principals'];
+
+        if (!self::isPatternList($principals)) {
+            throw new \InvalidArgumentException('Policy statement principals must be a non-empty list of selectors.');
+        }
+
+        return $principals;
     }
 
     /**

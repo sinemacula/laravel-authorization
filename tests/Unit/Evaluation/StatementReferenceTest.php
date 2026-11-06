@@ -117,4 +117,18 @@ final class StatementReferenceTest extends TestCase
         self::assertSame('p#0 sid="a/b"', (new StatementReference('p', 0, null, 'a/b'))->toString());
         self::assertSame('p#0 sid="a\ufffd"', (new StatementReference('p', 0, null, "a\xff"))->toString());
     }
+
+    /**
+     * A statement of a resource policy names the resource its policy is
+     * attached to, JSON-encoded after the sid; any other names none.
+     *
+     * @return void
+     */
+    public function testToStringNamesTheResourceOfAResourcePolicy(): void
+    {
+        self::assertSame('sharing[key]#0 sid="share" on "posts:7"', (new StatementReference('sharing', 0, 'key', 'share', 'posts:7'))->toString());
+        self::assertSame('sharing#2 on "App/Post:*"', (new StatementReference('sharing', 2, resource: 'App/Post:*'))->toString());
+        self::assertSame('sharing#2', (new StatementReference('sharing', 2))->toString());
+        self::assertNull((new StatementReference('sharing', 2))->resource);
+    }
 }

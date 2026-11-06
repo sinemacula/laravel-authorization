@@ -41,6 +41,7 @@ final class ResolutionPinsTest extends TestCase
         $pins->roles(['role-1', 'role-2']);
         $pins->policies(['policy-1']);
         $pins->rolePolicies();
+        $pins->resourcePolicies('posts');
         $pins->tenants(new TenantChain([new Reference('stub_tenant', 'account'), new Reference('stub_tenant', 'org')]));
         $pins->roles([]);
 
@@ -50,6 +51,8 @@ final class ResolutionPinsTest extends TestCase
             'authz:version:role:role-2',
             'authz:version:policy:policy-1',
             'authz:version:role-policies',
+            'authz:version:resource-policies',
+            'authz:version:resource-policies:posts',
             'authz:version:tenant:stub_tenant:account',
             'authz:version:tenant:stub_tenant:org',
         ], \array_keys($pins->tokens()));
@@ -70,6 +73,7 @@ final class ResolutionPinsTest extends TestCase
         $pins->roles(['role-1']);
         $pins->policies(['policy-1']);
         $pins->rolePolicies();
+        $pins->resourcePolicies('posts');
         $pins->tenants(new TenantChain([new Reference('stub_tenant', 'account')]));
 
         self::assertSame([], $pins->tokens());

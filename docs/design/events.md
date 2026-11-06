@@ -14,6 +14,10 @@ named and the operation they belong to, and are dispatched only once the write c
 - **Grant events.** Under `Identity\`: `RoleAssigned`, `RoleRevoked`, `RoleExpiryChanged`, `PermissionGranted`,
   `PermissionRevoked`, `PermissionExpiryChanged`, `PolicyAttached`, `PolicyDetached` and `PolicyExpiryChanged`. Each
   also implements `Contracts\IdentityEvent` and names its `grantee`, which for a policy attached to a role is the role.
+- **Resource policy events.** Under `Resource\`: `PolicyAttached` and `PolicyDetached`, when a policy is attached to
+  or detached from a resource or a whole resource type (AUTHZ-7.3), each with the resource's type, its key (null for
+  the whole type), the policy, its name and the scope. A re-attachment with another reach dispatches `PolicyAttached`
+  again, carrying the new reach. They name no grantee, so they implement `AuthorizationEvent` alone.
 - **Expiry events.** Under `Identity\`: `RoleExpired`, `PermissionExpired` and `PolicyExpired`, dispatched when
   `authorization:prune` removes an expired grant, with its expiry and an operation that names no actor (the sweep is
   system work).
@@ -57,7 +61,8 @@ named and the operation they belong to, and are dispatched only once the write c
    transaction, in every scope and whether or not the grant had expired; the grantees are ordered by type and key. A
    deleted role's own policy attachments are each reported as `Identity\PolicyDetached`, as a deleted identity's
    grants are, and a deleted grantee's inline policies each as `Policy\Deleted`, in an operation of their own with no
-   actor.
+   actor. A deleted policy's attachments to resources go with its row, through the foreign key, and are not reported
+   one by one: `Policy\Deleted` stands for them.
 
 9. **Digests, not documents.** A policy event carries its document's version and the SHA-256 of its canonical JSON
    (keys sorted at every depth, lists in order, slashes and Unicode unescaped) as a `DocumentDigest`.
@@ -131,6 +136,8 @@ app(GrantService::class)->grantRole($user, 'editor', actor: $admin);
 
 - `EventSnapshotsTest`: every event implements the marker; every change event takes only plain values.
 - `OperationScopeTest`: after-commit dispatch, nesting, rollback and the current operation.
+- `ResourcePolicyServiceTest`, `PolicyAttachedTest`, `PolicyDetachedTest`: the resource policy events, after commit
+  and only for a change.
 - `GrantServiceTest`, `RoleServiceTest`, `PermissionServiceTest`, `PolicyServiceTest`, `RecordWriterTest`: the actor,
   the grantor columns, one operation id per call, rollback and the morph map.
 - `RoleObserverTest`, `PermissionObserverTest`, `PolicyObserverTest`, `RecordChangesTest`: the payloads, the deleted

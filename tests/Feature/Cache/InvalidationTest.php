@@ -12,6 +12,8 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\VersionedStore;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
+use SineMacula\Laravel\Authorization\Events\Resource\PolicyAttached as ResourcePolicyAttached;
+use SineMacula\Laravel\Authorization\Events\Resource\PolicyDetached as ResourcePolicyDetached;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -138,7 +140,8 @@ final class InvalidationTest extends TestCase
     }
 
     /**
-     * A change to a policy and its deletion each bump the policy.
+     * A change to a policy and its deletion each bump the policy, and the
+     * version every resource policy entry shares.
      *
      * @return void
      */
@@ -148,7 +151,7 @@ final class InvalidationTest extends TestCase
         $role     = Role::create(['name' => 'editor']);
         $policies = $this->app?->make(PolicyService::class);
         $policy   = Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]);
-        $key      = [$this->versions()->policyKey($policy->id)];
+        $key      = [$this->versions()->policyKey($policy->id), $this->versions()->resourcePoliciesKey()];
 
         self::assertNotNull($policies);
         $deny = ['version' => 1, 'statements' => [['effect' => 'deny', 'actions' => ['*']]]];
@@ -318,6 +321,26 @@ final class InvalidationTest extends TestCase
     }
 
     /**
+     * A policy attached to or detached from a resource bumps the version the
+     * resources of its type share, for a record and for the whole type alike,
+     * and nothing of another type.
+     *
+     * @return void
+     */
+    public function testResourceAttachmentsBumpTheirType(): void
+    {
+        $operation = Operation::begin();
+        $policy    = new Reference('policy', 'policy-1');
+        $keys      = Invalidation::keys($this->versions(), [
+            new ResourcePolicyAttached($operation, 'posts', '7', $policy, 'sharing', GrantScope::platform()),
+            new ResourcePolicyDetached($operation, 'posts', null, $policy, 'sharing', GrantScope::platform()),
+            new ResourcePolicyAttached($operation, 'docs', null, $policy, 'sharing', GrantScope::platform()),
+        ]);
+
+        self::assertSame([$this->versions()->resourcePoliciesKey('posts'), $this->versions()->resourcePoliciesKey('docs')], $keys);
+    }
+
+    /**
      * Return the version keys among the user's, the role's and the policy's,
      * and, with the role as a grantee, the role's as a grantee and the one the
      * role policies share, whose tokens the write changed.
@@ -335,6 +358,7 @@ final class InvalidationTest extends TestCase
 
         if ($policy !== null) {
             $keys[] = $this->versions()->policyKey($policy->id);
+            $keys[] = $this->versions()->resourcePoliciesKey();
         }
 
         if ($asGrantee) {

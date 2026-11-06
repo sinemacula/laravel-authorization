@@ -385,6 +385,22 @@ final class GrantResolverTest extends TestCase
     }
 
     /**
+     * One policy is hydrated for evaluation under its stored name and key, as
+     * the resource policy resolver hydrates each it reads.
+     *
+     * @return void
+     */
+    public function testHydratesOnePolicy(): void
+    {
+        $policy = Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'name' => 'other', 'statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
+
+        $hydrated = GrantResolver::hydrate($policy);
+
+        self::assertSame(['readers', $policy->id, null], [$hydrated->name, $hydrated->id, $hydrated->resource]);
+        self::assertSame(['posts:read'], $hydrated->statements[0]->actions);
+    }
+
+    /**
      * Return an array store that runs the write the first time versions are
      * read, as a write committing while a resolution runs would.
      *

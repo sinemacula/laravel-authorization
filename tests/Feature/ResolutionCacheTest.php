@@ -456,8 +456,8 @@ final class ResolutionCacheTest extends TestCase
         $entry = $this->store->get(self::policiesKey());
         self::assertIsArray($entry);
         self::assertSame([
-            ['id' => 'policy-key', 'document' => $keyed->toArray()],
-            ['id' => null, 'document' => $unkeyed->toArray()],
+            ['id' => 'policy-key', 'document' => $keyed->toArray(), 'resource' => null],
+            ['id' => null, 'document' => $unkeyed->toArray(), 'resource' => null],
         ], $entry['value']);
 
         $read = $this->request()->rememberPolicies(self::grantee(), fn (): Resolution => $this->resolve([]));
@@ -741,6 +741,70 @@ final class ResolutionCacheTest extends TestCase
         $this->permissions($cache);
 
         self::assertSame(3, $this->resolutions);
+    }
+
+    /**
+     * A resource's policies are kept under the resource, the tenant, the
+     * application and the policy limits, each with the resource it is attached
+     * to, read back from the store in the next request without resolving, and
+     * record no grantee's version.
+     *
+     * @return void
+     */
+    public function testAResourcesPoliciesAreKeptUnderTheResource(): void
+    {
+        $document = ['name' => 'sharing', 'statements' => [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']]]];
+        $policy   = EvaluationPolicy::fromArray($document)->withId('policy-key')->withResource('posts:7');
+        $resource = new Reference('posts', '7');
+        $key      = 'authorization-test:resource-policies:posts:7:platform:every:limits:65536.100.50.512';
+
+        $this->request()->rememberResourcePolicies($resource, function (ResolutionPins $pins) use ($policy): Resolution {
+            $pins->resourcePolicies('posts');
+
+            return $this->resolve([$policy]);
+        });
+
+        $entry = $this->store->get($key);
+
+        self::assertIsArray($entry);
+        self::assertSame([['id' => 'policy-key', 'document' => $policy->toArray(), 'resource' => 'posts:7']], $entry['value']);
+        self::assertSame([$this->versions()->resourcePoliciesKey(), $this->versions()->resourcePoliciesKey('posts')], \array_keys($entry['versions']));
+
+        $read = $this->request()->rememberResourcePolicies($resource, fn (): Resolution => $this->resolve([]));
+
+        self::assertSame(1, $this->resolutions);
+        self::assertEquals([$policy], $read);
+        self::assertSame('posts:7', $read[0]->resource);
+        self::assertSame([], $this->request()->rememberPolicies($resource, fn (): Resolution => $this->resolve([])));
+    }
+
+    /**
+     * A resource policy entry whose resource is not a string is discarded as
+     * corrupt and resolved again.
+     *
+     * @return void
+     */
+    public function testAResourcePolicyEntryWithAMalformedResourceIsDiscarded(): void
+    {
+        $logger   = $this->recordLogs();
+        $policy   = EvaluationPolicy::fromArray(['name' => 'sharing', 'statements' => []])->withResource('posts:*');
+        $resource = new Reference('posts', '*');
+        $key      = 'authorization-test:resource-policies:posts:*:platform:every:limits:65536.100.50.512';
+
+        $this->request()->rememberResourcePolicies($resource, function (ResolutionPins $pins) use ($policy): Resolution {
+            $pins->resourcePolicies('posts');
+
+            return $this->resolve([$policy]);
+        });
+
+        $entry = $this->store->get($key);
+        self::assertIsArray($entry);
+
+        $this->store->put($key, [...$entry, 'value' => [['id' => null, 'document' => $policy->toArray(), 'resource' => 7]]], 60);
+
+        self::assertEquals([$policy], $this->request()->rememberResourcePolicies($resource, fn (): Resolution => $this->resolve([$policy])));
+        self::assertSame(2, $this->resolutions);
+        self::assertCount(1, $logger->messages());
     }
 
     /**
