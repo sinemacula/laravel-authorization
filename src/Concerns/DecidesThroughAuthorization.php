@@ -19,12 +19,12 @@ use SineMacula\Laravel\Authorization\Support\PolicyResponses;
  * returns `$this->decide($user, 'posts:update', $post)`.
  *
  * The decision becomes `Response::allow()`, or `Response::deny()` with the
- * decision's reason code as its code and the translated line for that code as
- * its message (see `PolicyResponses`); never a not-found response. An
- * `insufficient_authentication` denial keeps its own code, but the trait does
- * not raise the step-up exception or carry the requirements: a caller that
- * needs them uses `authorize()` or `check()`. A guest (a null user) is no
- * subject, so it is denied as `subject_unresolved`.
+ * decision's reason code as its code and the generic translated `denied` line
+ * as its message, whatever the reason (see `PolicyResponses`); never a
+ * not-found response. An `insufficient_authentication` denial keeps its own
+ * code, but the trait does not raise the step-up exception or carry the
+ * requirements: a caller that needs them uses `authorize()` or `check()`. A
+ * guest (a null user) is no subject, so it is denied as `subject_unresolved`.
  *
  * For an ability the package's Gate hook answers, the hook decides before any
  * policy class runs, so the trait serves abilities outside the catalogue's

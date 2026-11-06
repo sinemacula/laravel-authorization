@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\UnmetRequirement;
 use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
+use SineMacula\Laravel\Authorization\Support\Messages;
 
 /**
  * Unit tests for `InsufficientAuthenticationException`, the denial
@@ -105,8 +106,8 @@ final class InsufficientAuthenticationExceptionTest extends TestCase
     }
 
     /**
-     * The message is the one it is given, Laravel's English default without
-     * one, and the translation key names the package's line.
+     * The message is the one it is given, and Laravel's English default without
+     * one.
      *
      * @return void
      */
@@ -114,23 +115,22 @@ final class InsufficientAuthenticationExceptionTest extends TestCase
     {
         self::assertSame('Authentification requise.', (new InsufficientAuthenticationException([], 'Authentification requise.'))->getMessage());
         self::assertSame('This action is unauthorized.', (new InsufficientAuthenticationException([]))->getMessage());
-        self::assertSame('authorization::authorization.insufficient_authentication', InsufficientAuthenticationException::MESSAGE_KEY);
     }
 
     /**
-     * `translated()` words the message with the translator's line, keeping the
-     * candidates.
+     * `translated()` words the message with the translator's generic `denied`
+     * line, as every denial's, keeping the candidates.
      *
      * @return void
      */
     public function testTranslatedUsesTheTranslatorsLine(): void
     {
         $translator = self::createStub(Translator::class);
-        $translator->method('get')->willReturnMap([[InsufficientAuthenticationException::MESSAGE_KEY, [], null, 'Authentification requise.']]);
+        $translator->method('get')->willReturnMap([[Messages::DENIED, [], null, 'Action non autorisée.']]);
 
         $exception = InsufficientAuthenticationException::translated(self::candidates(), $translator);
 
-        self::assertSame('Authentification requise.', $exception->getMessage());
+        self::assertSame('Action non autorisée.', $exception->getMessage());
         self::assertSame(self::candidates()[0]->toArray(), $exception->requirements()[0]->toArray());
     }
 
@@ -144,10 +144,10 @@ final class InsufficientAuthenticationExceptionTest extends TestCase
     public function testTranslatedFallsBackToLaravelsMessage(): void
     {
         $missing = self::createStub(Translator::class);
-        $missing->method('get')->willReturn(InsufficientAuthenticationException::MESSAGE_KEY);
+        $missing->method('get')->willReturn(Messages::DENIED);
 
         $group = self::createStub(Translator::class);
-        $group->method('get')->willReturn(['insufficient_authentication' => 'More.']);
+        $group->method('get')->willReturn(['denied' => 'Denied.']);
 
         foreach ([null, $missing, $group] as $translator) {
             self::assertSame('This action is unauthorized.', InsufficientAuthenticationException::translated([], $translator)->getMessage());

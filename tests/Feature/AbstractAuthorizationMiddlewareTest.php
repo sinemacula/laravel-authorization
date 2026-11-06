@@ -94,8 +94,8 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
     }
 
     /**
-     * The user Laravel signed in is refused a role it does not hold, with the
-     * role message, and an action it is not allowed, with the denial message.
+     * The user Laravel signed in is refused a role it does not hold and an
+     * action it is not allowed, each with the generic denial message.
      *
      * @return void
      */
@@ -106,7 +106,7 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
         $role   = self::denialOf(fn (): Response => $this->runMiddleware(RequireRole::class, self::request(), 'auditor'));
         $action = self::denialOf(fn (): Response => $this->runMiddleware(RequirePermission::class, self::request(), 'posts:delete'));
 
-        self::assertSame('This action requires a role you do not have.', $role->getMessage());
+        self::assertSame('This action is unauthorized.', $role->getMessage());
         self::assertSame(DecisionReason::NO_MATCH, $role->getReason());
         self::assertSame('This action is unauthorized.', $action->getMessage());
         self::assertSame(DecisionReason::NO_MATCH, $action->getReason());
@@ -184,22 +184,18 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
     }
 
     /**
-     * A middleware the container resolves words its denials in the translator's
-     * current locale.
+     * A middleware the container resolves words every denial with the generic
+     * line, in the translator's current locale.
      *
      * @return void
      */
     public function testDenialsAreTranslatedInTheCurrentLocale(): void
     {
-        $translator = $this->app?->make(Translator::class);
-        self::assertInstanceOf(TranslatorImplementation::class, $translator);
-
-        $translator->addLines(['authorization.role_required' => 'Rôle requis.', 'authorization.denied' => 'Action non autorisée.'], 'fr', 'authorization');
-        $translator->setLocale('fr');
+        $this->inFrench();
 
         $this->actingAs($this->seedGrantedUser());
 
-        self::assertSame('Rôle requis.', self::denialOf(fn (): Response => $this->runMiddleware(RequireRole::class, self::request(), 'auditor'))->getMessage());
+        self::assertSame('Action non autorisée.', self::denialOf(fn (): Response => $this->runMiddleware(RequireRole::class, self::request(), 'auditor'))->getMessage());
         self::assertSame('Action non autorisée.', self::denialOf(fn (): Response => $this->runMiddleware(RequirePermission::class, self::request(), 'posts:delete'))->getMessage());
         self::assertSame('Action non autorisée.', self::denialOf(fn (): Response => $this->runMiddleware(AuthorizeAction::class, self::request(), 'posts:delete'))->getMessage());
     }
@@ -216,6 +212,56 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
         $denial = self::denialOf(static fn (): mixed => (new RequireRole)->handle(self::request(), self::passThrough(), 'auditor'));
 
         self::assertSame('This action is unauthorized.', $denial->getMessage());
+    }
+
+    /**
+     * A middleware the container resolves words the unauthenticated response
+     * with the translator's line, in its current locale.
+     *
+     * @param  class-string<\SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware>  $middleware
+     * @param  string  $names
+     * @return void
+     *
+     * @throws \Illuminate\Auth\AuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
+     */
+    #[TestWith([RequireRole::class, 'admin'])]
+    #[TestWith([RequirePermission::class, 'posts:create'])]
+    #[TestWith([AuthorizeAction::class, 'posts:create'])]
+    public function testTheUnauthenticatedMessageIsTranslatedInTheCurrentLocale(string $middleware, string $names): void
+    {
+        $this->inFrench();
+
+        $this->expectException(AuthenticationException::class);
+        $this->expectExceptionMessage('Non authentifié.');
+
+        $this->runMiddleware($middleware, self::request(), $names);
+    }
+
+    /**
+     * Without a translator, or when the translator has no line for the key, the
+     * unauthenticated response keeps Laravel's English message.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
+     */
+    public function testWithoutALineTheUnauthenticatedMessageIsLaravelsEnglish(): void
+    {
+        $missing = self::createStub(Translator::class);
+        $missing->method('get')->willReturnArgument(0);
+
+        foreach ([new RequireRole, new RequirePermission($missing)] as $middleware) {
+            try {
+                $middleware->handle(self::request(), self::passThrough(), 'admin');
+                self::fail($middleware::class . ' admitted the request.');
+            } catch (AuthenticationException $exception) {
+                self::assertSame('Unauthenticated.', $exception->getMessage());
+            }
+        }
     }
 
     /**
@@ -272,6 +318,20 @@ final class AbstractAuthorizationMiddlewareTest extends TestCase
                 self::assertSame(['multifactor'], $exception->requirements()[0]->unmet);
             }
         }
+    }
+
+    /**
+     * Give the translator French lines for the package and switch to French.
+     *
+     * @return void
+     */
+    private function inFrench(): void
+    {
+        $translator = $this->app?->make(Translator::class);
+        self::assertInstanceOf(TranslatorImplementation::class, $translator);
+
+        $translator->addLines(['authorization.denied' => 'Action non autorisée.', 'authorization.unauthenticated' => 'Non authentifié.'], 'fr', 'authorization');
+        $translator->setLocale('fr');
     }
 
     /**

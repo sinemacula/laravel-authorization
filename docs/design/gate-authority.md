@@ -64,11 +64,11 @@ allow or deny is the Gate's answer; any define or policy for `posts:update` is n
 - **Policy classes.** A Laravel policy class can decide through the package with
   `Concerns\DecidesThroughAuthorization`: each method names its action and calls `decide()`, which makes one
   `forUser($user)->check()` and returns `Response::allow()`, or `Response::deny()` with the reason code as its code and
-  the `authorization::authorization.<code>` line as its message, never a not-found response. No method name is mapped
-  to an action. For a declared ability the hook answers before any policy class runs (invariant 3), so the trait
-  serves the abilities the hook leaves to Laravel (invariant 4), and every ability when the hook is off. An
-  `insufficient_authentication` denial keeps its code but raises no step-up exception and carries no requirements;
-  `authorize()` and `check()` do.
+  the generic `authorization::authorization.denied` line as its message, whatever the reason (N61), never a not-found
+  response. No method name is mapped to an action. For a declared ability the hook answers before any policy class
+  runs (invariant 3), so the trait serves the abilities the hook leaves to Laravel (invariant 4), and every ability
+  when the hook is off. An `insufficient_authentication` denial keeps its code but raises no step-up exception and
+  carries no requirements; `authorize()` and `check()` do.
 
 ## Implementation Anchors
 
@@ -87,7 +87,7 @@ allow or deny is the Gate's answer; any define or policy for `posts:update` is n
   and `authorize()` through the hook, and the switch off.
 - `DecidesThroughAuthorizationTest` -- a policy method allowed and denied through the Gate with one check, the code
   and the translated message, a reworded line, `insufficient_authentication`, a guest, every resource form and the
-  context under `input`; `PolicyResponsesTest` -- every reason's response and a line for every reason.
+  context under `input`; `PolicyResponsesTest` -- every reason's response, each with its code and the generic line.
 - `DeclaredAbilitiesTest` -- exact membership, one read per instance, one instance per job.
 - `ConfigValidatorTest` -- the strict switch.
 - `CheckConfigurationCommandTest` -- the report.

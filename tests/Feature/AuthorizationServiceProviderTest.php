@@ -45,7 +45,6 @@ use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
-use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
@@ -639,16 +638,6 @@ final class AuthorizationServiceProviderTest extends TestCase
     }
 
     /**
-     * The shipped language file has a line for an insufficient authentication.
-     *
-     * @return void
-     */
-    public function testLoadsTheInsufficientAuthenticationLine(): void
-    {
-        self::assertSame('This action requires further authentication.', $this->translator()->get(InsufficientAuthenticationException::MESSAGE_KEY));
-    }
-
-    /**
      * The shipped subject resolver has no tenant, so only platform-wide rows
      * are visible, whether or not a user is signed in.
      *
@@ -893,13 +882,13 @@ final class AuthorizationServiceProviderTest extends TestCase
     }
 
     /**
-     * The shipped language file has a line for the missing-role denial.
+     * The shipped language file has a line for an unauthenticated request.
      *
      * @return void
      */
-    public function testLoadsTheRoleRequiredLine(): void
+    public function testLoadsTheUnauthenticatedLine(): void
     {
-        self::assertSame('This action requires a role you do not have.', $this->translator()->get(AuthorizationException::ROLE_REQUIRED_KEY));
+        self::assertSame('Unauthenticated.', $this->translator()->get('authorization::authorization.unauthenticated'));
     }
 
     /**

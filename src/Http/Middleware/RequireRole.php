@@ -6,7 +6,6 @@ namespace SineMacula\Laravel\Authorization\Http\Middleware;
 
 use Illuminate\Http\Request;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
-use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Support\CheckArguments;
 use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 
@@ -25,8 +24,8 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
  *
  * A subject that cannot hold roles holds none, and is denied. A subject that is
  * inactive, or whose identity is, is denied with the `subject_inactive` reason
- * code. Any other denial carries the `no_match` reason code and the
- * `role_required` message; since no action was decided, it records no decision
+ * code. Any other denial carries the `no_match` reason code; both carry the
+ * generic `denied` message. Since no action was decided, it records no decision
  * and fires no `AuthorizationFailed` event. A guard that is also the name of a
  * role is refused, since `role:editor,admin` may mean either role; write it as
  * `guard=admin`.
@@ -64,6 +63,6 @@ final class RequireRole extends AbstractAuthorizationMiddleware
             }
         }
 
-        throw $this->denial(DecisionReason::NO_MATCH, AuthorizationException::ROLE_REQUIRED_KEY);
+        throw $this->denial(DecisionReason::NO_MATCH);
     }
 }

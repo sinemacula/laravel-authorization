@@ -82,7 +82,7 @@ final class RequireRoleTest extends TestCase
     }
 
     /**
-     * A missing role denies the request with the translated role message.
+     * A missing role denies the request with the generic translated message.
      *
      * @return void
      */
@@ -94,7 +94,7 @@ final class RequireRoleTest extends TestCase
 
         self::assertSame(DecisionReason::NO_MATCH, $denial->getReason());
         self::assertSame(403, $denial->getCode());
-        self::assertSame('This action requires a role you do not have.', $denial->getMessage());
+        self::assertSame('This action is unauthorized.', $denial->getMessage());
     }
 
     /**
