@@ -22,36 +22,54 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 final class DecisionReasonTest extends TestCase
 {
     /**
-     * Every case carries a non-empty backing value.
+     * The enum defines exactly the seven denial reasons, in declaration order:
+     * an allowed check carries no reason, so there is no allow case.
      *
      * @return void
      */
-    public function testEveryBackingValueIsNonEmpty(): void
+    public function testExactlySevenCases(): void
+    {
+        self::assertSame(
+            [
+                DecisionReason::EXPLICIT_DENY,
+                DecisionReason::NO_MATCH,
+                DecisionReason::CONDITION_FAILED,
+                DecisionReason::INVALID_POLICY,
+                DecisionReason::SUBJECT_INACTIVE,
+                DecisionReason::SUBJECT_UNRESOLVED,
+                DecisionReason::RESOURCE_UNRESOLVED,
+            ],
+            DecisionReason::cases(),
+        );
+    }
+
+    /**
+     * Every case is backed by its stable audit-log code.
+     *
+     * @return void
+     */
+    public function testBackingValues(): void
+    {
+        self::assertSame('explicit_deny', DecisionReason::EXPLICIT_DENY->value);
+        self::assertSame('no_match', DecisionReason::NO_MATCH->value);
+        self::assertSame('condition_failed', DecisionReason::CONDITION_FAILED->value);
+        self::assertSame('invalid_policy', DecisionReason::INVALID_POLICY->value);
+        self::assertSame('subject_inactive', DecisionReason::SUBJECT_INACTIVE->value);
+        self::assertSame('subject_unresolved', DecisionReason::SUBJECT_UNRESOLVED->value);
+        self::assertSame('resource_unresolved', DecisionReason::RESOURCE_UNRESOLVED->value);
+    }
+
+    /**
+     * Every code keeps to the reason grammar: 1 to 64 characters of lower-case
+     * letters, digits, `_`, `.`, `:` and `-`, starting with a letter or digit.
+     *
+     * @return void
+     */
+    public function testEveryCodeKeepsToTheGrammar(): void
     {
         foreach (DecisionReason::cases() as $case) {
-            self::assertNotSame('', $case->value, "Case {$case->name} has an empty backing value.");
+            self::assertMatchesRegularExpression('/^[a-z0-9][a-z0-9_.:-]{0,63}$/', $case->value, "Case {$case->name} breaks the reason grammar.");
         }
-    }
-
-    /**
-     * The case count matches the four-step evaluation model plus the
-     * invalid-policy and inactive-subject denials.
-     *
-     * @return void
-     */
-    public function testExactlySixCases(): void
-    {
-        self::assertCount(6, DecisionReason::cases());
-    }
-
-    /**
-     * The invalid-policy case is backed by its stable audit-log value.
-     *
-     * @return void
-     */
-    public function testInvalidPolicyBackingValue(): void
-    {
-        self::assertSame('invalid_policy', DecisionReason::INVALID_POLICY->value);
     }
 
     /**
@@ -61,12 +79,13 @@ final class DecisionReasonTest extends TestCase
      */
     public function testLabelReturnsExactTextForEachCase(): void
     {
-        self::assertSame('explicit allow from a policy statement', DecisionReason::EXPLICIT_ALLOW->label());
-        self::assertSame('explicit deny from a policy statement', DecisionReason::EXPLICIT_DENY->label());
-        self::assertSame('implicit deny (no statement matched)', DecisionReason::IMPLICIT_DENY->label());
-        self::assertSame('RBAC grant (direct permission or role-inherited)', DecisionReason::RBAC_ALLOW->label());
-        self::assertSame('invalid policy (a policy could not be evaluated)', DecisionReason::INVALID_POLICY->label());
-        self::assertSame('subject inactive (the subject or its identity is inactive)', DecisionReason::SUBJECT_INACTIVE->label());
+        self::assertSame('an applicable statement denies it', DecisionReason::EXPLICIT_DENY->label());
+        self::assertSame('no statement or permission names it', DecisionReason::NO_MATCH->label());
+        self::assertSame('a statement names it, but its conditions do not hold', DecisionReason::CONDITION_FAILED->label());
+        self::assertSame('an applicable policy cannot be evaluated', DecisionReason::INVALID_POLICY->label());
+        self::assertSame('the subject or its identity is inactive', DecisionReason::SUBJECT_INACTIVE->label());
+        self::assertSame('there is no subject', DecisionReason::SUBJECT_UNRESOLVED->label());
+        self::assertSame('the resource cannot be identified', DecisionReason::RESOURCE_UNRESOLVED->label());
     }
 
     /**
@@ -88,21 +107,26 @@ final class DecisionReasonTest extends TestCase
      */
     public function testTryFromResolvesKnownValues(): void
     {
-        self::assertSame(DecisionReason::EXPLICIT_ALLOW, DecisionReason::tryFrom('explicit_allow'));
         self::assertSame(DecisionReason::EXPLICIT_DENY, DecisionReason::tryFrom('explicit_deny'));
-        self::assertSame(DecisionReason::IMPLICIT_DENY, DecisionReason::tryFrom('implicit_deny'));
-        self::assertSame(DecisionReason::RBAC_ALLOW, DecisionReason::tryFrom('rbac_allow'));
+        self::assertSame(DecisionReason::NO_MATCH, DecisionReason::tryFrom('no_match'));
+        self::assertSame(DecisionReason::CONDITION_FAILED, DecisionReason::tryFrom('condition_failed'));
         self::assertSame(DecisionReason::INVALID_POLICY, DecisionReason::tryFrom('invalid_policy'));
         self::assertSame(DecisionReason::SUBJECT_INACTIVE, DecisionReason::tryFrom('subject_inactive'));
+        self::assertSame(DecisionReason::SUBJECT_UNRESOLVED, DecisionReason::tryFrom('subject_unresolved'));
+        self::assertSame(DecisionReason::RESOURCE_UNRESOLVED, DecisionReason::tryFrom('resource_unresolved'));
     }
 
     /**
-     * tryFrom() returns null for unknown values.
+     * tryFrom() returns null for an unknown value, and for each code the
+     * reasons used to carry, which no longer exist.
      *
      * @return void
      */
     public function testTryFromReturnsNullForUnknownValue(): void
     {
         self::assertNull(DecisionReason::tryFrom('unknown'));
+        self::assertNull(DecisionReason::tryFrom('explicit_allow'));
+        self::assertNull(DecisionReason::tryFrom('implicit_deny'));
+        self::assertNull(DecisionReason::tryFrom('rbac_allow'));
     }
 }

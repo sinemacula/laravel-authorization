@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Feature;
 
 use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Console\WhyCanCommand;
 use SineMacula\Laravel\Authorization\Models\Permission;
@@ -27,7 +28,8 @@ use Tests\TestCase;
 final class WhyCanCommandTest extends TestCase
 {
     /**
-     * Reports ALLOWED when identity has RBAC permission.
+     * Reports ALLOWED when the identity holds the permission through a role: no
+     * reason, the allow stage, and a trace ending in the permission held.
      *
      * @return void
      */
@@ -48,11 +50,15 @@ final class WhyCanCommandTest extends TestCase
 
         self::assertSame(0, $exitCode);
         self::assertStringContainsString('ALLOWED', $output);
-        self::assertStringContainsString('rbac_allow', $output);
+        self::assertStringContainsString('  Reason:   (none)', $output);
+        self::assertStringContainsString('  Stage:    allow', $output);
+        self::assertStringContainsString("  Trace:\n    [allow] permission: held\n", $output);
     }
 
     /**
-     * Reports DENIED when identity has no permission.
+     * Reports DENIED when the identity has no permission: nothing names the
+     * action, at the implicit stage, and the trace records the permission not
+     * held.
      *
      * @return void
      */
@@ -68,11 +74,14 @@ final class WhyCanCommandTest extends TestCase
 
         self::assertSame(0, $exitCode);
         self::assertStringContainsString('DENIED', $output);
-        self::assertStringContainsString('implicit_deny', $output);
+        self::assertStringContainsString('  Reason:   no_match', $output);
+        self::assertStringContainsString('  Stage:    implicit', $output);
+        self::assertStringContainsString("  Trace:\n    [allow] permission: not_held\n", $output);
     }
 
     /**
-     * Reports DENIED when explicit deny policy overrides RBAC.
+     * Reports DENIED when an explicit deny policy overrides RBAC, decided at
+     * the deny stage by the deny statement.
      *
      * @return void
      */
@@ -103,7 +112,10 @@ final class WhyCanCommandTest extends TestCase
 
         self::assertSame(0, $exitCode);
         self::assertStringContainsString('DENIED', $output);
-        self::assertStringContainsString('explicit_deny', $output);
+        self::assertStringContainsString('  Reason:   explicit_deny', $output);
+        self::assertStringContainsString('  Stage:    deny', $output);
+        self::assertStringContainsString('    [deny] deny-delete#0: matched', $output);
+        self::assertStringNotContainsString('permission:', $output);
     }
 
     /**
@@ -142,8 +154,9 @@ final class WhyCanCommandTest extends TestCase
     }
 
     /**
-     * Output includes the Action and Resource labels. Pins MethodCallRemoval
-     * mutants on lines 75-77 and the Concat mutants on line 76.
+     * Output includes the Result, Reason, Stage, Action and Resource labels, in
+     * that order. Pins the MethodCallRemoval and Concat mutants on the lines
+     * that print them.
      *
      * @return void
      */
@@ -162,11 +175,12 @@ final class WhyCanCommandTest extends TestCase
         self::assertStringContainsString('Resource: (none)', $output);
         self::assertStringContainsString('Reason:', $output);
         self::assertStringContainsString('Result:', $output);
+        self::assertMatchesRegularExpression('/  Result:   DENIED\n  Reason:   no_match\n  Stage:    implicit\n  Action:   custom:action\n  Resource: \(none\)\n/', $output);
     }
 
     /**
      * The `verdictColor` private method returns 'green' for allowed and 'red'
-     * for denied. Pins the Ternary mutant on line 106.
+     * for denied. Pins the Ternary mutant in it.
      *
      * @return void
      */
@@ -180,9 +194,10 @@ final class WhyCanCommandTest extends TestCase
     }
 
     /**
-     * The trace output includes each entry's decision, policy, index and
-     * reason. Pins the Foreach_ mutant on line 82 and the MethodCallRemoval on
-     * line 83.
+     * The trace output prints each entry indented on its own line, with its
+     * stage, policy, statement index and outcome, the deny stage before the
+     * allow stage. No deny decides, so both stages are traced. Pins the
+     * Foreach_ and MethodCallRemoval mutants on the trace loop.
      *
      * @return void
      */
@@ -193,7 +208,10 @@ final class WhyCanCommandTest extends TestCase
             'name'     => 'trace-policy',
             'document' => [
                 'name'       => 'trace-policy',
-                'statements' => [['effect' => 'deny', 'actions' => ['trace:action']]],
+                'statements' => [
+                    ['effect' => 'deny', 'actions' => ['other:action']],
+                    ['effect' => 'allow', 'actions' => ['trace:action']],
+                ],
             ],
         ]);
 
@@ -207,19 +225,32 @@ final class WhyCanCommandTest extends TestCase
         $output = Artisan::output();
 
         self::assertSame(0, $exitCode);
-        self::assertStringContainsString('Trace:', $output);
-        self::assertStringContainsString('trace-policy', $output);
+        self::assertStringContainsString("  Trace:\n    [deny] trace-policy#0: not_applicable\n    [allow] trace-policy#1: matched\n", $output);
     }
 
     /**
-     * The `NotIdentical` mutant on line 79 checks `$exitStatus->trace !== []`.
-     * An empty-trace output must NOT contain "Trace:".
+     * A decision with an empty trace, here the denial for an identity holding a
+     * policy document that cannot be read, prints no "Trace:" section. Pins the
+     * NotIdentical mutant on `$decision->trace !== []`.
      *
      * @return void
      */
     public function testEmptyTraceOmitsTraceSection(): void
     {
-        StubIdentity::create(['id' => 'f3f3f3f3-0000-0000-0000-000000000001']);
+        $user = StubIdentity::create(['id' => 'f3f3f3f3-0000-0000-0000-000000000001']);
+
+        DB::table('policies')->insert([
+            'id'         => 'f4f4f4f4-0000-0000-0000-000000000001',
+            'name'       => 'unreadable',
+            'document'   => \json_encode(['malformed' => true]),
+            'created_at' => now(),
+            'updated_at' => now(),
+        ]);
+        DB::table('authorizable_policies')->insert([
+            'policy_id'         => 'f4f4f4f4-0000-0000-0000-000000000001',
+            'authorizable_type' => $user->getMorphClass(),
+            'authorizable_id'   => 'f3f3f3f3-0000-0000-0000-000000000001',
+        ]);
 
         $exitCode = Artisan::call('authorization:why-can', [
             'identity' => StubIdentity::class . ':f3f3f3f3-0000-0000-0000-000000000001',
@@ -228,6 +259,8 @@ final class WhyCanCommandTest extends TestCase
         $output = Artisan::output();
 
         self::assertSame(0, $exitCode);
+        self::assertStringContainsString('  Reason:   invalid_policy', $output);
+        self::assertStringContainsString('  Stage:    deny', $output);
         self::assertStringNotContainsString('Trace:', $output);
     }
 }

@@ -84,7 +84,7 @@ final class RequireRoleTest extends TestCase
 
         $denial = self::denialOf(fn (): Response => $this->handle('admin'));
 
-        self::assertSame(DecisionReason::IMPLICIT_DENY, $denial->getReason());
+        self::assertSame(DecisionReason::NO_MATCH, $denial->getReason());
         self::assertSame(403, $denial->getCode());
         self::assertSame('This action requires a role you do not have.', $denial->getMessage());
     }
@@ -155,7 +155,7 @@ final class RequireRoleTest extends TestCase
     {
         $this->actAs(new \stdClass);
 
-        self::assertSame(DecisionReason::IMPLICIT_DENY, self::denialOf(fn (): Response => $this->handle('admin'))->getReason());
+        self::assertSame(DecisionReason::NO_MATCH, self::denialOf(fn (): Response => $this->handle('admin'))->getReason());
     }
 
     /**

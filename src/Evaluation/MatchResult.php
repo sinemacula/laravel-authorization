@@ -25,15 +25,30 @@ final readonly class MatchResult
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome  $outcome
      * @param  string  $detail
+     * @param  array<string, bool>|null  $conditions
      */
     public function __construct(
 
         /** The outcome of the test. */
         public MatchOutcome $outcome,
 
-        /** What decided the outcome, for the trace; empty when it matched. */
+        /** What decided the outcome, for diagnostics; empty when it matched. */
         public string $detail = '',
+
+        /** Each condition key a statement tested, with whether it held; null when the statement does not name the action and the resource. */
+        public ?array $conditions = null,
     ) {}
+
+    /**
+     * Return the result with the condition keys tested and whether each held.
+     *
+     * @param  array<string, bool>  $conditions
+     * @return self
+     */
+    public function withConditions(array $conditions): self
+    {
+        return new self($this->outcome, $this->detail, $conditions);
+    }
 
     /**
      * Build a result for a test that holds.

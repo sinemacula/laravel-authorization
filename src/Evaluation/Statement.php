@@ -169,7 +169,13 @@ final readonly class Statement
         $scope  = new InterpolationScope($interpolator, $principal, $resource, $context);
         $target = $this->matchesTarget($scope);
 
-        return $target->outcome === MatchOutcome::DOES_NOT_MATCH ? $target : $target->and($this->assessConditions($scope));
+        if ($target->outcome === MatchOutcome::DOES_NOT_MATCH) {
+            return $target;
+        }
+
+        $conditions = $this->assessConditions($scope);
+
+        return $target->and($conditions)->withConditions($conditions->conditions ?? []);
     }
 
     /**
@@ -213,7 +219,8 @@ final readonly class Statement
     }
 
     /**
-     * Assess every condition against the context.
+     * Assess every condition against the context, recording each key with
+     * whether it held.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\InterpolationScope  $scope
      * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
@@ -221,13 +228,16 @@ final readonly class Statement
     private function assessConditions(InterpolationScope $scope): MatchResult
     {
         $result = MatchResult::matches();
+        $held   = [];
 
         foreach ($this->conditions as $key => $expected) {
             $part   = $this->assessCondition($key, $expected, $scope);
             $result = $part->outcome === MatchOutcome::MATCHES ? $result : $result->and($part);
+
+            $held[$key] = $part->outcome === MatchOutcome::MATCHES;
         }
 
-        return $result;
+        return $result->withConditions($held);
     }
 
     /**

@@ -500,7 +500,7 @@ final class AuthorizationServiceProviderTest extends TestCase
         self::assertSame(['a-editor', 'global', 'on-call'], $this->visibleRoleNames());
         self::assertSame(['a-editor', 'on-call'], $this->rolesOf($userId));
 
-        Authorization::for($this->identity($userId))->evaluate('posts:read');
+        Authorization::for($this->identity($userId))->check('posts:read');
 
         self::assertNotNull(Authorization::lastDecision());
 
@@ -558,7 +558,7 @@ final class AuthorizationServiceProviderTest extends TestCase
         $first = $this->inSandbox($base, function () use ($tenantA, $userId): array {
             SwitchableSubjectResolver::$tenant = $tenantA;
 
-            Authorization::for($this->identity($userId))->evaluate('posts:read');
+            Authorization::for($this->identity($userId))->check('posts:read');
 
             return [$this->visibleRoleNames(), $this->rolesOf($userId), Authorization::lastDecision()];
         });

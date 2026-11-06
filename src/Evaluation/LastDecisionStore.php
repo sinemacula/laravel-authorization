@@ -5,40 +5,39 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
 /**
- * Single-slot holder for the most recent evaluation result. Shared by reference
- * across cloned manager scopes so `Authorization::lastDecision()` observes
- * decisions made through `for($user)->can(...)` chains. Each `put()` replaces
- * the prior value; no history is retained. The service provider binds it with
- * `scoped()`, so the slot belongs to the current request or job.
+ * Single-slot holder for the most recent decision. Shared by reference across
+ * cloned manager scopes so `Authorization::lastDecision()` observes decisions
+ * made through `for($user)->can(...)` chains. Each `put()` replaces the prior
+ * value; no history is retained. The service provider binds it with `scoped()`,
+ * so the slot belongs to the current request or job.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
 final class LastDecisionStore
 {
-    /** @var \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult|null Most recent result across any scope. */
-    private ?EvaluationResult $last = null;
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\Decision|null Most recent decision across any scope. */
+    private ?Decision $last = null;
 
     /**
-     * Store the supplied evaluation result as the most recent decision,
-     * overwriting any prior value.
+     * Store the supplied decision as the most recent one, overwriting any prior
+     * value.
      *
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult  $result
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
      * @return void
      */
-    public function put(EvaluationResult $result): void
+    public function put(Decision $decision): void
     {
-        $this->last = $result;
+        $this->last = $decision;
     }
 
     /**
-     * Return the most recent evaluation result, or null when the current
-     * request or job has not yet evaluated a decision (or the store was
-     * explicitly cleared).
+     * Return the most recent decision, or null when the current request or job
+     * has not yet evaluated a decision (or the store was explicitly cleared).
      *
-     * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult|null
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision|null
      */
-    public function get(): ?EvaluationResult
+    public function get(): ?Decision
     {
         return $this->last;
     }

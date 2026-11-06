@@ -10,10 +10,12 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
-use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
+use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Policy as PolicyModel;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
@@ -169,15 +171,16 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
 
-        $decision = Authorization::for($user)->evaluate('fixed:act');
+        $decision = Authorization::for($user)->check('fixed:act');
 
-        self::assertTrue($decision->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $decision->reason);
+        self::assertTrue($decision->isAllowed());
+        self::assertSame(DecisionStage::ALLOW, $decision->stage);
+        self::assertEquals([new StatementReference('fixed', 0)], $decision->statements);
     }
 
     /**
-     * `Authorization::lastDecision()` returns the most recent evaluation result
-     * even when the decision was produced by a scoped clone via `for()`.
+     * `Authorization::lastDecision()` returns the most recent decision even
+     * when it was produced by a scoped clone via `for()`.
      *
      * @return void
      */
@@ -200,8 +203,9 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
         $last = Authorization::lastDecision();
 
         self::assertNotNull($last); // @phpstan-ignore staticMethod.impossibleType
-        self::assertFalse($last->allowed);
+        self::assertFalse($last->isAllowed());
         self::assertSame(DecisionReason::EXPLICIT_DENY, $last->reason);
+        self::assertSame(DecisionStage::DENY, $last->stage);
     }
 
     /**
@@ -224,8 +228,9 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
         $last = Authorization::lastDecision();
 
         self::assertNotNull($last);
-        self::assertTrue($last->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $last->reason);
+        self::assertTrue($last->isAllowed());
+        self::assertNull($last->reason);
+        self::assertEquals([new StatementReference('override', 0)], $last->statements);
     }
 
     /**
@@ -255,7 +260,7 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
     public function testResetClearsTheStore(): void
     {
         $store = new LastDecisionStore;
-        $store->put(EvaluationResult::rbacAllowed());
+        $store->put(Decision::allow(DecisionStage::ALLOW));
 
         self::assertNotNull($store->get());
 
@@ -266,8 +271,10 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
 
     /**
      * `Authorization::explain()` returns the same human-readable summary that
-     * the trace-aware `EvaluationResult::explain()` produces — the shortcut
-     * exists so error-handler output and the CLI path can stay terse.
+     * `Decision::explain()` produces for the check, the verdict with its
+     * reason, stage and deciding statement followed by each step of the trace —
+     * the shortcut exists so error-handler output and the CLI path can stay
+     * terse.
      *
      * @return void
      */
@@ -285,8 +292,12 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
 
         $explanation = Authorization::for($user)->explain('posts:destroy');
 
-        self::assertStringContainsString('DENY', $explanation);
-        self::assertStringContainsString('explicit deny', $explanation);
+        self::assertSame(
+            "DENY (explicit_deny: an applicable statement denies it) at the deny stage by deny-destruct#0.\n"
+            . '  [deny] deny-destruct#0: matched',
+            $explanation,
+        );
+        self::assertSame(Authorization::for($user)->check('posts:destroy')->explain(), $explanation);
     }
 
     /**

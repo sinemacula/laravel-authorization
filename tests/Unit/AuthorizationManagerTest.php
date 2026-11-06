@@ -10,12 +10,19 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
+use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
+use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
+use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
+use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
@@ -52,7 +59,7 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * Anonymous resolver yields implicit deny on can().
+     * Anonymous resolver yields a denial on can().
      *
      * @return void
      */
@@ -112,7 +119,9 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * RBAC permission grants allow when no policies match.
+     * A permission the subject holds allows when no statement decides the
+     * check: the decision is an allow at the allow stage, decided by no
+     * statement, with the held permission appended to the evaluator's trace.
      *
      * @return void
      */
@@ -132,19 +141,82 @@ final class AuthorizationManagerTest extends TestCase
             ]),
         ]);
 
-        $decision = $manager->for($principal)->evaluate('posts:create');
+        $decision = $manager->for($principal)->check('posts:create');
 
-        self::assertTrue($decision->allowed);
-        self::assertSame(DecisionReason::RBAC_ALLOW, $decision->reason);
+        self::assertTrue($decision->isAllowed());
+        self::assertNull($decision->reason);
+        self::assertSame(DecisionStage::ALLOW, $decision->stage);
+        self::assertSame([], $decision->statements);
+        self::assertEquals([
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_APPLICABLE, new StatementReference('noise', 0)),
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD),
+        ], $decision->trace);
     }
 
     /**
-     * Policy explicit allow takes precedence (and the RBAC fallback is
-     * skipped).
+     * A permission the subject does not hold keeps the evaluator's denial, its
+     * reason and its stage, and appends the step that found it not held.
      *
      * @return void
      */
-    public function testPolicyExplicitAllowReason(): void
+    public function testPermissionNotHeldAppendsTheStepAndKeepsTheDenial(): void
+    {
+        $principal = $this->stubAuthorizable(['users:read'], [
+            Policy::fromArray([
+                'name'       => 'noise',
+                'statements' => [['effect' => 'allow', 'actions' => ['users:read']]],
+            ]),
+        ]);
+
+        $decision = $this->manager()->for($principal)->check('posts:create');
+
+        self::assertFalse($decision->isAllowed());
+        self::assertSame(DecisionReason::NO_MATCH, $decision->reason);
+        self::assertSame(DecisionStage::IMPLICIT, $decision->stage);
+        self::assertSame([], $decision->statements);
+        self::assertEquals([
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_APPLICABLE, new StatementReference('noise', 0)),
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_HELD),
+        ], $decision->trace);
+    }
+
+    /**
+     * An allow statement whose conditions do not hold leaves the check to the
+     * permission step: a permission not held keeps the `condition_failed`
+     * denial, and a permission held turns it into an allow, the statement's
+     * failed condition kept in the trace either way.
+     *
+     * @return void
+     */
+    public function testPermissionStepFollowsAnAllowWhoseConditionsFail(): void
+    {
+        $policy = Policy::fromArray([
+            'name'       => 'tenant-only',
+            'statements' => [['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['tenant' => ['eq' => 'org-1']]]],
+        ]);
+
+        $failed = new TraceEntry(DecisionStage::ALLOW, TraceOutcome::CONDITION_FAILED, new StatementReference('tenant-only', 0), ['tenant' => false]);
+
+        $denied  = $this->manager()->for($this->stubAuthorizable([], [$policy]))->check('posts:create', null, ['tenant' => 'org-2']);
+        $allowed = $this->manager()->for($this->stubAuthorizable(['posts:create'], [$policy]))->check('posts:create', null, ['tenant' => 'org-2']);
+
+        self::assertSame(DecisionReason::CONDITION_FAILED, $denied->reason);
+        self::assertSame(DecisionStage::IMPLICIT, $denied->stage);
+        self::assertEquals([$failed, new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_HELD)], $denied->trace);
+
+        self::assertTrue($allowed->isAllowed());
+        self::assertSame(DecisionStage::ALLOW, $allowed->stage);
+        self::assertSame([], $allowed->statements);
+        self::assertEquals([$failed, new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD)], $allowed->trace);
+    }
+
+    /**
+     * A policy allow decides the check at the allow stage, by its statement,
+     * and the permission step is skipped: the trace holds the statement alone.
+     *
+     * @return void
+     */
+    public function testPolicyAllowDecidesAtTheAllowStage(): void
     {
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
@@ -160,14 +232,21 @@ final class AuthorizationManagerTest extends TestCase
             ]),
         ]);
 
-        $decision = $manager->for($principal)->evaluate('posts:create');
+        $decision = $manager->for($principal)->check('posts:create');
 
-        self::assertTrue($decision->allowed);
-        self::assertSame(DecisionReason::EXPLICIT_ALLOW, $decision->reason);
+        self::assertTrue($decision->isAllowed());
+        self::assertNull($decision->reason);
+        self::assertSame(DecisionStage::ALLOW, $decision->stage);
+        self::assertEquals([new StatementReference('allow-create', 0)], $decision->statements);
+        self::assertEquals([
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::MATCHED, new StatementReference('allow-create', 0)),
+        ], $decision->trace);
     }
 
     /**
-     * Policy explicit deny overrides RBAC allow.
+     * A policy explicit deny overrides a permission the subject holds: the
+     * check is denied at the deny stage by the deny statement, and the
+     * permission is never consulted.
      *
      * @return void
      */
@@ -187,17 +266,139 @@ final class AuthorizationManagerTest extends TestCase
             ]),
         ]);
 
-        $decision = $manager->for($principal)->evaluate('posts:delete');
+        $decision = $manager->for($principal)->check('posts:delete');
 
-        self::assertFalse($decision->allowed);
+        self::assertFalse($decision->isAllowed());
         self::assertSame(DecisionReason::EXPLICIT_DENY, $decision->reason);
+        self::assertSame(DecisionStage::DENY, $decision->stage);
+        self::assertEquals([new StatementReference('deny', 0)], $decision->statements);
+        self::assertEquals([
+            new TraceEntry(DecisionStage::DENY, TraceOutcome::MATCHED, new StatementReference('deny', 0)),
+        ], $decision->trace);
     }
 
     /**
-     * withPolicies overrides the principal's policies and the policy store.
+     * With no subject, the check is denied as `subject_unresolved` at the
+     * subject stage, without reading any policy.
      *
      * @return void
      */
+    public function testCheckDeniesWithoutASubjectAtTheSubjectStage(): void
+    {
+        $policies = \Mockery::mock(PolicyResolver::class);
+        $policies->shouldNotReceive('policiesFor');
+
+        $decision = $this->managerWithPolicies($policies, new StubSubjectResolver)->check('posts:create');
+
+        self::assertFalse($decision->isAllowed());
+        self::assertSame(DecisionReason::SUBJECT_UNRESOLVED, $decision->reason);
+        self::assertSame(DecisionStage::SUBJECT, $decision->stage);
+        self::assertSame([], $decision->statements);
+        self::assertSame([], $decision->trace);
+    }
+
+    /**
+     * An inactive subject is denied as `subject_inactive` at the subject stage,
+     * whatever its permissions or policies would allow, and no policy is read.
+     *
+     * @return void
+     */
+    public function testCheckDeniesAnInactiveSubjectAtTheSubjectStage(): void
+    {
+        $principal = $this->stubAuthorizable(['posts:create'], [
+            Policy::fromArray([
+                'name'       => 'allow-create',
+                'statements' => [['effect' => 'allow', 'actions' => ['posts:create']]],
+            ]),
+        ], active: false);
+
+        $policies = \Mockery::mock(PolicyResolver::class);
+        $policies->shouldNotReceive('policiesFor');
+
+        $manager  = $this->managerWithPolicies($policies, new StubSubjectResolver($principal));
+        $decision = $manager->check('posts:create');
+
+        self::assertFalse($decision->isAllowed());
+        self::assertSame(DecisionReason::SUBJECT_INACTIVE, $decision->reason);
+        self::assertSame(DecisionStage::SUBJECT, $decision->stage);
+        self::assertSame([], $decision->statements);
+        self::assertSame([], $decision->trace);
+        self::assertFalse($manager->can('posts:create'));
+    }
+
+    /**
+     * A policy document that cannot be read denies the check as
+     * `invalid_policy` at the deny stage, with an empty trace, even when the
+     * subject holds the permission.
+     *
+     * @return void
+     */
+    public function testUnreadablePolicyDeniesAsInvalidPolicy(): void
+    {
+        $principal = $this->stubAuthorizable(['posts:create']);
+
+        $policies = \Mockery::mock(PolicyResolver::class);
+        $policies->shouldReceive('policiesFor')
+            ->once()
+            ->with($principal)
+            ->andThrow(new InvalidPolicyDocumentException('broken', 'unreadable'));
+
+        $decision = $this->managerWithPolicies($policies, new StubSubjectResolver($principal))->check('posts:create');
+
+        self::assertFalse($decision->isAllowed());
+        self::assertSame(DecisionReason::INVALID_POLICY, $decision->reason);
+        self::assertSame(DecisionStage::DENY, $decision->stage);
+        self::assertSame([], $decision->statements);
+        self::assertSame([], $decision->trace);
+    }
+
+    /**
+     * `refuseUnidentifiedResource()` denies as `resource_unresolved` at the
+     * resource stage without consulting any policy or permission, records the
+     * denial as the last decision and reports it with `DecisionEvaluated`.
+     *
+     * @return void
+     */
+    public function testRefuseUnidentifiedResourceDeniesAtTheResourceStage(): void
+    {
+        $principal = $this->stubAuthorizable(['posts:update']);
+        $reported  = [];
+
+        $events = \Mockery::mock(Dispatcher::class);
+        $events->shouldReceive('dispatch')
+            ->once()
+            ->andReturnUsing(static function (object $event) use (&$reported): void {
+                $reported[] = $event;
+            });
+
+        $policies = \Mockery::mock(PolicyResolver::class);
+        $policies->shouldNotReceive('policiesFor');
+
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator,
+            subjectResolver: new StubSubjectResolver($principal),
+            policyResolver: $policies,
+            lastDecisionStore: new LastDecisionStore,
+            events: $events,
+        );
+
+        $decision = $manager->refuseUnidentifiedResource('posts:update', ['tenant' => 'org-1']);
+
+        self::assertFalse($decision->isAllowed());
+        self::assertSame(DecisionReason::RESOURCE_UNRESOLVED, $decision->reason);
+        self::assertSame(DecisionStage::RESOURCE, $decision->stage);
+        self::assertSame([], $decision->statements);
+        self::assertSame([], $decision->trace);
+        self::assertSame($decision, $manager->lastDecision());
+        self::assertCount(1, $reported);
+        self::assertInstanceOf(DecisionEvaluated::class, $reported[0]);
+        self::assertSame($principal, $reported[0]->principal);
+        self::assertSame('posts:update', $reported[0]->action);
+        self::assertNull($reported[0]->resource);
+        self::assertSame(['tenant' => 'org-1'], $reported[0]->context);
+        self::assertSame($decision, $reported[0]->decision);
+    }
+
     /**
      * withPolicies returns a fresh scope and does not mutate the originating
      * manager (kills the "remove clone" mutant).
@@ -259,6 +460,9 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * withPolicies overrides the principal's policies and the policy store: the
+     * override's allow decides the check, by its statement alone.
+     *
      * @return void
      */
     public function testWithPoliciesOverridesEverything(): void
@@ -285,9 +489,11 @@ final class AuthorizationManagerTest extends TestCase
             'statements' => [['effect' => 'allow', 'actions' => ['x']]],
         ]);
 
-        $decision = $manager->for($principal)->withPolicies([$override])->evaluate('x');
+        $decision = $manager->for($principal)->withPolicies([$override])->check('x');
 
-        self::assertTrue($decision->allowed);
+        self::assertTrue($decision->isAllowed());
+        self::assertEquals([new StatementReference('override', 0)], $decision->statements);
+        self::assertCount(1, $decision->trace);
     }
 
     /**
@@ -321,16 +527,22 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * DecisionEvaluated fires on every evaluation.
+     * DecisionEvaluated fires once on every check, carrying the decision the
+     * check returns.
      *
      * @return void
      */
     public function testDecisionEventDispatched(): void
     {
+        $reported = [];
+
         $events = \Mockery::mock(Dispatcher::class);
         $events->shouldReceive('dispatch')
             ->once()
-            ->with(\Mockery::type(DecisionEvaluated::class));
+            ->with(\Mockery::type(DecisionEvaluated::class))
+            ->andReturnUsing(static function (DecisionEvaluated $event) use (&$reported): void {
+                $reported[] = $event;
+            });
 
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
@@ -340,10 +552,11 @@ final class AuthorizationManagerTest extends TestCase
             events: $events,
         );
 
-        $manager->evaluate('x');
+        $decision = $manager->check('x');
 
-        // Mockery throws on unmet expectations during tearDown.
-        self::assertTrue(true);
+        self::assertCount(1, $reported);
+        self::assertSame($decision, $reported[0]->decision);
+        self::assertSame('x', $reported[0]->action);
     }
 
     /**
@@ -378,6 +591,54 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * authorize() reports the denial with AuthorizationFailed, carrying the
+     * same decision the check recorded, and throws with the decision's reason.
+     *
+     * @return void
+     */
+    public function testAuthorizeReportsTheDecisionAndThrowsWithItsReason(): void
+    {
+        $principal = $this->stubAuthorizable(['posts:delete'], [
+            Policy::fromArray([
+                'name'       => 'deny',
+                'statements' => [['effect' => 'deny', 'actions' => ['posts:delete']]],
+            ]),
+        ]);
+
+        $reported = [];
+
+        $events = \Mockery::mock(Dispatcher::class);
+        $events->shouldReceive('dispatch')
+            ->twice()
+            ->andReturnUsing(static function (object $event) use (&$reported): void {
+                $reported[] = $event;
+            });
+
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator,
+            subjectResolver: new StubSubjectResolver($principal),
+            policyResolver: new DefaultPolicyResolver,
+            lastDecisionStore: new LastDecisionStore,
+            events: $events,
+        );
+
+        $exception = $this->denialOf($manager, 'posts:delete', 'arn:posts:1');
+        $decision  = $manager->lastDecision();
+
+        self::assertInstanceOf(Decision::class, $decision);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $decision->reason);
+        self::assertSame($decision->reason, $exception->getReason());
+        self::assertCount(2, $reported);
+        self::assertInstanceOf(DecisionEvaluated::class, $reported[0]);
+        self::assertSame($decision, $reported[0]->decision);
+        self::assertInstanceOf(AuthorizationFailed::class, $reported[1]);
+        self::assertSame($decision, $reported[1]->decision);
+        self::assertSame($principal, $reported[1]->principal);
+        self::assertSame('posts:delete', $reported[1]->action);
+        self::assertSame('arn:posts:1', $reported[1]->resource);
+    }
+
+    /**
      * authorize() succeeds silently when allowed.
      *
      * @return void
@@ -404,6 +665,7 @@ final class AuthorizationManagerTest extends TestCase
         }
 
         self::assertFalse($threw, 'authorize() must not throw when the decision allows.');
+        self::assertTrue($manager->lastDecision()?->isAllowed());
     }
 
     /**
@@ -448,12 +710,12 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * `evaluate()` writes the result to the last-decision store. Pins the
-     * MethodCallRemoval mutant on line 145.
+     * `check()` records the decision it returns as the last decision, and
+     * `can()` adapts the same recorded decision to whether it is allowed.
      *
      * @return void
      */
-    public function testEvaluateWritesToLastDecisionStore(): void
+    public function testCheckRecordsTheDecisionAsTheLastDecision(): void
     {
         $store   = new LastDecisionStore;
         $manager = new AuthorizationManager(
@@ -463,12 +725,37 @@ final class AuthorizationManagerTest extends TestCase
             lastDecisionStore: $store,
         );
 
-        self::assertNull($manager->lastDecision());
+        $before   = $manager->lastDecision();
+        $decision = $manager->check('some:action');
+        $recorded = $manager->lastDecision();
 
-        $manager->evaluate('some:action');
+        self::assertNull($before);
+        self::assertSame($decision, $recorded);
+        self::assertSame($decision, $store->get());
+        self::assertSame(DecisionReason::SUBJECT_UNRESOLVED, $decision->reason);
 
-        self::assertNotNull($manager->lastDecision());
-        self::assertSame(DecisionReason::IMPLICIT_DENY, $manager->lastDecision()->reason);
+        $scoped = $manager->for($this->stubAuthorizable(['some:action']));
+
+        self::assertTrue($scoped->can('some:action'));
+
+        $last = $manager->lastDecision();
+
+        self::assertNotNull($last);
+        self::assertTrue($last->isAllowed());
+        self::assertSame(DecisionStage::ALLOW, $last->stage);
+    }
+
+    /**
+     * `explain()` returns the explanation of the decision `check()` makes.
+     *
+     * @return void
+     */
+    public function testExplainExplainsTheCheck(): void
+    {
+        $manager = $this->manager();
+
+        self::assertSame('DENY (subject_unresolved: there is no subject) at the subject stage.', $manager->explain('posts:create'));
+        self::assertSame($manager->check('posts:create')->explain(), $manager->explain('posts:create'));
     }
 
     /**
@@ -495,9 +782,9 @@ final class AuthorizationManagerTest extends TestCase
         $scoped = $manager->withPolicies([5 => $policy]);
 
         $principal = $this->stubAuthorizable();
-        $decision  = $scoped->for($principal)->evaluate('x');
+        $decision  = $scoped->for($principal)->check('x');
 
-        self::assertTrue($decision->allowed);
+        self::assertTrue($decision->isAllowed());
     }
 
     /**
@@ -517,7 +804,7 @@ final class AuthorizationManagerTest extends TestCase
         );
 
         // Should not throw.
-        $manager->evaluate('x');
+        $manager->check('x');
 
         self::assertTrue(true, 'dispatch() must not throw when events is null.');
     }
@@ -584,15 +871,15 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * An anonymous denial carries the implicit-deny reason code.
+     * An anonymous denial carries the `subject_unresolved` reason code.
      *
      * @return void
      */
-    public function testAnonymousDenialCarriesImplicitDenyReason(): void
+    public function testAnonymousDenialCarriesSubjectUnresolvedReason(): void
     {
         $exception = $this->denialOf($this->manager(), 'posts:create');
 
-        self::assertSame(DecisionReason::IMPLICIT_DENY, $exception->getReason());
+        self::assertSame(DecisionReason::SUBJECT_UNRESOLVED, $exception->getReason());
     }
 
     /**
@@ -778,10 +1065,10 @@ final class AuthorizationManagerTest extends TestCase
             events: $events,
         );
 
-        $manager->evaluate('posts:create');
+        $manager->check('posts:create');
         $exception = $this->denialOf($manager, 'posts:create');
 
-        self::assertSame(DecisionReason::IMPLICIT_DENY, $exception->getReason());
+        self::assertSame(DecisionReason::NO_MATCH, $exception->getReason());
     }
 
     /**
@@ -796,6 +1083,24 @@ final class AuthorizationManagerTest extends TestCase
             evaluator: new PolicyEvaluator,
             subjectResolver: $resolver,
             policyResolver: new DefaultPolicyResolver,
+            lastDecisionStore: new LastDecisionStore,
+        );
+    }
+
+    /**
+     * Build a manager gathering policies through the supplied policy resolver
+     * and resolving its subject through the supplied subject resolver.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Contracts\PolicyResolver  $policies
+     * @param  \SineMacula\Laravel\Authorization\Contracts\SubjectResolver  $subjects
+     * @return \SineMacula\Laravel\Authorization\AuthorizationManager
+     */
+    private function managerWithPolicies(PolicyResolver $policies, SubjectResolver $subjects): AuthorizationManager
+    {
+        return new AuthorizationManager(
+            evaluator: new PolicyEvaluator,
+            subjectResolver: $subjects,
+            policyResolver: $policies,
             lastDecisionStore: new LastDecisionStore,
         );
     }
@@ -838,13 +1143,14 @@ final class AuthorizationManagerTest extends TestCase
 
     /**
      * Build a stubbed authorizable principal returning the supplied permissions
-     * and policies.
+     * and policies, active unless told otherwise.
      *
      * @param  array<int, string>  $permissions
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
+     * @param  bool  $active
      * @return \SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity
      */
-    private function stubAuthorizable(array $permissions = [], array $policies = []): AuthorizableIdentity
+    private function stubAuthorizable(array $permissions = [], array $policies = [], bool $active = true): AuthorizableIdentity
     {
         $principal = \Mockery::mock(AuthorizableIdentity::class);
 
@@ -855,7 +1161,7 @@ final class AuthorizationManagerTest extends TestCase
             ->andReturn($policies);
 
         $principal->shouldReceive('isAuthorizationActive')
-            ->andReturnTrue();
+            ->andReturn($active);
 
         return $principal;
     }

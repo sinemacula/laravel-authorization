@@ -64,6 +64,6 @@ final class RequireRole extends AbstractAuthorizationMiddleware
             }
         }
 
-        throw $this->denial(DecisionReason::IMPLICIT_DENY, AuthorizationException::ROLE_REQUIRED_KEY);
+        throw $this->denial(DecisionReason::NO_MATCH, AuthorizationException::ROLE_REQUIRED_KEY);
     }
 }

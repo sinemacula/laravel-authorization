@@ -45,15 +45,15 @@ trait AuthorizationAssertions
      */
     public function assertCan(object $principal, string $action, ?string $resource = null, array $context = []): void
     {
-        $result = Authorization::for($principal)->evaluate($action, $resource, $context);
+        $decision = Authorization::for($principal)->check($action, $resource, $context);
 
         self::assertTrue(
-            $result->allowed,
+            $decision->isAllowed(),
             \sprintf(
-                "Failed asserting that the principal can perform '%s'%s.\nEvaluation trace:\n%s",
+                "Failed asserting that the principal can perform '%s'%s.\nDecision:\n%s",
                 $action,
                 $resource !== null ? " on resource '{$resource}'" : '',
-                $result->explain(),
+                $decision->explain(),
             ),
         );
     }
@@ -72,15 +72,15 @@ trait AuthorizationAssertions
      */
     public function assertCannot(object $principal, string $action, ?string $resource = null, array $context = []): void
     {
-        $result = Authorization::for($principal)->evaluate($action, $resource, $context);
+        $decision = Authorization::for($principal)->check($action, $resource, $context);
 
         self::assertFalse(
-            $result->allowed,
+            $decision->isAllowed(),
             \sprintf(
-                "Failed asserting that the principal cannot perform '%s'%s.\nEvaluation trace:\n%s",
+                "Failed asserting that the principal cannot perform '%s'%s.\nDecision:\n%s",
                 $action,
                 $resource !== null ? " on resource '{$resource}'" : '',
-                $result->explain(),
+                $decision->explain(),
             ),
         );
     }

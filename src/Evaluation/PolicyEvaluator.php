@@ -4,219 +4,204 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
-use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 
 /**
- * AWS IAM-style policy evaluator.
+ * Decides a check from policy statements: the deny stage, then the allow stage,
+ * then the implicit deny (AUTHZ-7.1).
  *
- * The evaluator walks every statement from every supplied policy in order,
- * building up a trace as it goes. Behaviour mirrors AWS IAM's four-step
- * decision order — implicit deny → explicit deny → allow → implicit deny — so
- * an explicit deny always wins, regardless of how many allows preceded it.
+ * Every deny statement of every policy is assessed, then, when none decided,
+ * every allow statement, each in a fixed order (the policies by name, each
+ * statement by its position) and recorded in the trace, so the decision, its
+ * trace and the statements that decided it are the same whatever order the
+ * policies were read in (AUTHZ-7.9). An explicit deny wins over any allow, and
+ * the allows are not assessed once a deny decided (N4). The evaluator fails
+ * closed: a deny statement applies when its test cannot be decided (a missing
+ * context key, an unresolved `${…}` reference), and a statement that cannot be
+ * evaluated denies the check as an invalid policy, so no fault in a statement
+ * ever skips a deny.
  *
- * The evaluator fails closed: a deny statement applies when its test cannot be
- * decided (a missing context key, an unresolved `${…}` reference), and a
- * malformed statement denies the check as an invalid policy, so no fault in a
- * statement ever skips a deny.
+ * Nothing allowed by a statement is denied as `condition_failed` when an allow
+ * statement names the action and the resource but its conditions do not hold,
+ * and as `no_match` otherwise. A permission the subject holds is a further
+ * allow source, which the manager consults when the statements allow nothing.
+ *
+ * @phpstan-type StatementEntry array{\SineMacula\Laravel\Authorization\Evaluation\StatementReference, \SineMacula\Laravel\Authorization\Evaluation\Statement}
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
 final class PolicyEvaluator
 {
-    /** @var string A statement that allows the check. */
-    private const string ALLOW = 'allow';
-
     /** @var string A statement that denies the check. */
     private const string DENY = 'deny';
 
-    /** @var string A malformed statement; the check denies as an invalid policy. */
+    /** @var string A statement that cannot be evaluated. */
     private const string INVALID = 'invalid';
 
-    /** @var string A statement that does not apply to the check. */
-    private const string SKIP = 'skip';
+    /** @var string A statement that allows the check. */
+    private const string ALLOW = 'allow';
 
-    /** @var \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null */
+    /** @var string An allow statement that names the check but whose conditions do not hold. */
+    private const string FAILED = 'failed';
+
+    /** @var string A statement that does not bear on the check. */
+    private const string NONE = 'none';
+
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator|null Lazily created interpolator. */
     private ?ContextInterpolator $interpolator = null;
 
     /**
-     * Evaluate the supplied policies against the action, resource and context.
-     *
-     * A deny statement whose test cannot be decided applies, an allow statement
-     * whose test cannot be decided does not, and a malformed statement denies
-     * the whole check as an invalid policy.
+     * Decide the check from the policies' statements.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
      * @param  string  $action
      * @param  string|null  $resource
      * @param  array<string, mixed>  $context
      * @param  object|null  $principal
-     * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    public function evaluate(array $policies, string $action, ?string $resource = null, array $context = [], ?object $principal = null): EvaluationResult
+    public function evaluate(array $policies, string $action, ?string $resource = null, array $context = [], ?object $principal = null): Decision
     {
-        $interpolator = $this->interpolator();
+        $statements = self::statementsOf($policies);
+        $trace      = [];
+        $denies     = $this->assess($statements[self::DENY], DecisionStage::DENY, $action, $resource, $context, $principal, $trace);
 
-        /** @var list<array{policy: string, statement_index: int, decision: \SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision, reason: string}> $trace */
-        $trace          = [];
-        $allowStatement = null;
-
-        foreach (self::statementsOf($policies) as [$policyName, $index, $statement]) {
-            if (!$statement->coversAction($action)) {
-                $trace[] = ['policy' => $policyName, 'statement_index' => $index, 'decision' => TraceDecision::SKIPPED, 'reason' => Statement::TARGET_MISMATCH];
-
-                continue;
-            }
-
-            $assessment = $statement->assess($action, $resource, $context, $interpolator, $principal);
-            $decision   = $this->record($trace, $policyName, $index, $statement, $assessment);
-            $final      = $decision === self::SKIP ? null : self::conclude($decision, $statement, $trace);
-
-            if ($final !== null) {
-                return $final;
-            }
-
-            $allowStatement ??= $decision === self::ALLOW ? $statement : null;
+        if ($denies[self::DENY] !== [] || $denies[self::INVALID] !== []) {
+            return self::conclude(DecisionStage::DENY, $denies, $trace);
         }
 
-        return $allowStatement !== null
-            ? EvaluationResult::allowed($allowStatement, $trace)
-            : EvaluationResult::implicitlyDenied($trace);
+        $allows = $this->assess($statements[self::ALLOW], DecisionStage::ALLOW, $action, $resource, $context, $principal, $trace);
+
+        return self::conclude(DecisionStage::ALLOW, $allows, $trace);
     }
 
     /**
-     * Yield every statement of every policy, in order, with its policy's name
-     * and its index within the policy.
+     * Assess the statements of one stage, adding each to the trace, and return
+     * what they found, by how each bears on the check.
+     *
+     * @param  list<StatementEntry>  $statements
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage  $stage
+     * @param  string  $action
+     * @param  string|null  $resource
+     * @param  array<string, mixed>  $context
+     * @param  object|null  $principal
+     * @param  list<\SineMacula\Laravel\Authorization\Evaluation\TraceEntry>  $trace
+     *
+     * @param-out list<\SineMacula\Laravel\Authorization\Evaluation\TraceEntry>  $trace
+     *
+     * @return array<string, list<\SineMacula\Laravel\Authorization\Evaluation\StatementReference>>
+     */
+    private function assess(array $statements, DecisionStage $stage, string $action, ?string $resource, array $context, ?object $principal, array &$trace): array
+    {
+        $found = [self::DENY => [], self::INVALID => [], self::ALLOW => [], self::FAILED => [], self::NONE => []];
+
+        foreach ($statements as [$reference, $statement]) {
+            $assessment = $statement->assess($action, $resource, $context, $this->interpolator(), $principal);
+            $outcome    = self::outcomeOf($assessment);
+
+            $trace[]                                                             = new TraceEntry($stage, $outcome, $reference, $assessment->conditions ?? []);
+            $found[self::categoryOf($stage === DecisionStage::DENY, $outcome)][] = $reference;
+        }
+
+        return $found;
+    }
+
+    /**
+     * Return every statement of the policies with its reference, the deny
+     * statements and the allow statements apart, the policies in order of name
+     * and each statement in order of position.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
-     * @return \Generator<int, array{0: string, 1: int, 2: \SineMacula\Laravel\Authorization\Evaluation\Statement}>
+     * @return array{deny: list<StatementEntry>, allow: list<StatementEntry>}
      */
-    private static function statementsOf(array $policies): \Generator
+    private static function statementsOf(array $policies): array
     {
+        \usort($policies, static fn (Policy $left, Policy $right): int => \strcmp($left->name, $right->name));
+
+        $statements = [self::DENY => [], self::ALLOW => []];
+
         foreach ($policies as $policy) {
             foreach ($policy->statements as $index => $statement) {
-                yield [$policy->name, $index, $statement];
+                $statements[$statement->effect === PolicyEffect::DENY ? self::DENY : self::ALLOW][] = [new StatementReference($policy->name, $index), $statement];
             }
         }
+
+        return $statements;
     }
 
     /**
-     * Decide what an assessed statement contributes and append its trace entry.
-     * The common case, a statement that does not apply, skips the decision
-     * helpers.
+     * Return what a statement's assessment found.
      *
-     * @param  list<array{policy: string, statement_index: int, decision: \SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision, reason: string}>  $trace
-     * @param  string  $policyName
-     * @param  int  $index
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
      * @param  \SineMacula\Laravel\Authorization\Evaluation\MatchResult  $assessment
-     * @return string
-     *
-     * @param-out list<array{policy: string, statement_index: int, decision: \SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision, reason: string}>  $trace
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome
      */
-    private function record(array &$trace, string $policyName, int $index, Statement $statement, MatchResult $assessment): string
+    private static function outcomeOf(MatchResult $assessment): TraceOutcome
     {
-        if ($assessment->outcome === MatchOutcome::DOES_NOT_MATCH) {
-            $trace[] = ['policy' => $policyName, 'statement_index' => $index, 'decision' => TraceDecision::SKIPPED, 'reason' => self::mismatchReason($assessment)];
+        return match ($assessment->outcome) {
+            MatchOutcome::MATCHES        => TraceOutcome::MATCHED,
+            MatchOutcome::UNDECIDABLE    => TraceOutcome::UNDECIDABLE,
+            MatchOutcome::INVALID        => TraceOutcome::INVALID,
+            MatchOutcome::DOES_NOT_MATCH => $assessment->conditions === null ? TraceOutcome::NOT_APPLICABLE : TraceOutcome::CONDITION_FAILED,
+        };
+    }
 
-            return self::SKIP;
+    /**
+     * Return how a statement bears on the check: a deny when a deny statement
+     * applies or cannot be decided, an allow when an allow statement matches, a
+     * failed allow when one names the check but its conditions do not hold or
+     * cannot be decided, and invalid when it cannot be evaluated.
+     *
+     * @param  bool  $isDeny
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome  $outcome
+     * @return string
+     */
+    private static function categoryOf(bool $isDeny, TraceOutcome $outcome): string
+    {
+        $bearing = match ($outcome) {
+            TraceOutcome::INVALID        => self::INVALID,
+            TraceOutcome::NOT_APPLICABLE => self::NONE,
+            default                      => null,
+        };
+
+        if ($bearing !== null) {
+            return $bearing;
         }
 
-        $decision = self::decide($statement, $assessment);
-        $trace[]  = $this->traceEntry($policyName, $index, $decision, self::reason($decision, $assessment));
+        if ($isDeny) {
+            return $outcome === TraceOutcome::CONDITION_FAILED ? self::NONE : self::DENY;
+        }
 
-        return $decision;
+        return $outcome === TraceOutcome::MATCHED ? self::ALLOW : self::FAILED;
     }
 
     /**
-     * Describe a statement that does not apply, for the trace.
+     * Conclude the decision from what a stage's statements found: an explicit
+     * deny, then an invalid statement, then an allow, then an implicit deny. An
+     * invalid statement denies at the stage that found it.
      *
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\MatchResult  $assessment
-     * @return string
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage  $stage
+     * @param  array<string, list<\SineMacula\Laravel\Authorization\Evaluation\StatementReference>>  $found
+     * @param  list<\SineMacula\Laravel\Authorization\Evaluation\TraceEntry>  $trace
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    private static function mismatchReason(MatchResult $assessment): string
-    {
-        return $assessment->detail !== '' ? $assessment->detail : 'conditions not satisfied';
-    }
-
-    /**
-     * Return the result that ends the walk: a deny or an invalid statement.
-     * Returns null when the walk continues.
-     *
-     * @param  string  $decision
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
-     * @param  list<array{policy: string, statement_index: int, decision: \SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision, reason: string}>  $trace
-     * @return \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult|null
-     */
-    private static function conclude(string $decision, Statement $statement, array $trace): ?EvaluationResult
-    {
-        return match ($decision) {
-            self::INVALID => EvaluationResult::invalidPolicy($trace),
-            self::DENY    => EvaluationResult::explicitlyDenied($statement, $trace),
-            default       => null,
-        };
-    }
-
-    /**
-     * Decide what an assessed statement contributes to the check. Statements
-     * that definitely do not apply are skipped before this is called.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\MatchResult  $assessment
-     * @return string
-     */
-    private static function decide(Statement $statement, MatchResult $assessment): string
+    private static function conclude(DecisionStage $stage, array $found, array $trace): Decision
     {
         return match (true) {
-            $assessment->outcome === MatchOutcome::INVALID => self::INVALID,
-            $statement->effect   === PolicyEffect::DENY    => self::DENY,
-            $assessment->outcome === MatchOutcome::MATCHES => self::ALLOW,
-            default                                        => self::SKIP,
+            $found[self::DENY]    !== [] => Decision::deny(DecisionReason::EXPLICIT_DENY, DecisionStage::DENY, $found[self::DENY], $trace),
+            $found[self::INVALID] !== [] => Decision::deny(DecisionReason::INVALID_POLICY, $stage, $found[self::INVALID], $trace),
+            $found[self::ALLOW]   !== [] => Decision::allow(DecisionStage::ALLOW, $found[self::ALLOW], $trace),
+            $found[self::FAILED]  !== [] => Decision::deny(DecisionReason::CONDITION_FAILED, DecisionStage::IMPLICIT, [], $trace),
+            default                      => Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT, [], $trace),
         };
     }
 
     /**
-     * Describe the decision for the trace.
-     *
-     * @param  string  $decision
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\MatchResult  $assessment
-     * @return string
-     */
-    private static function reason(string $decision, MatchResult $assessment): string
-    {
-        $label = match ($decision) {
-            self::INVALID => 'invalid statement',
-            self::DENY    => 'explicit deny',
-            self::ALLOW   => 'explicit allow',
-            default       => 'could not be decided',
-        };
-
-        return $assessment->detail !== '' ? "{$label}: {$assessment->detail}" : $label;
-    }
-
-    /**
-     * Build the trace entry recorded for an assessed statement.
-     *
-     * @param  string  $policy
-     * @param  int  $index
-     * @param  string  $decision
-     * @param  string  $reason
-     * @return array{policy: string, statement_index: int, decision: \SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision, reason: string}
-     */
-    private function traceEntry(string $policy, int $index, string $decision, string $reason): array
-    {
-        return [
-            'policy'          => $policy,
-            'statement_index' => $index,
-            'decision'        => $decision === self::SKIP ? TraceDecision::SKIPPED : TraceDecision::MATCHED,
-            'reason'          => $reason,
-        ];
-    }
-
-    /**
-     * Return the shared context interpolator instance.
+     * Return the interpolator, created on first use.
      *
      * @return \SineMacula\Laravel\Authorization\Evaluation\ContextInterpolator
      */

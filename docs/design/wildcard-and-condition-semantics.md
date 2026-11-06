@@ -14,11 +14,11 @@ set, `${…}` interpolation, and the interaction between wildcards and the RBAC 
    escalation granted to the holder, not a query broadening requested by the caller.
 
 2. **The same direction applies inside policy statements.** A statement's `actions` and `resources` arrays are patterns
-   matched against the literal action and resource supplied to `evaluate()`. A statement with `actions: ['posts:*']`
+   matched against the literal action and resource supplied to `check()`. A statement with `actions: ['posts:*']`
    matches an evaluation for `posts:create`. A statement with `actions: ['posts:create']` does not match an evaluation
    for `posts:*`.
 
-3. **A check without a resource is covered only by `*`.** When `evaluate()` or `can()` is called without a resource, a
+3. **A check without a resource is covered only by `*`.** When `check()` or `can()` is called without a resource, a
    statement matches only when its `resources` include the literal `*` (which is also the default when the key is
    omitted). A statement scoped to particular resources, even one as broad as `posts:*`, never matches a resource-less
    check, so leaving the resource out can never widen a statement written for specific resources.

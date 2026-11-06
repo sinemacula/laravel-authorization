@@ -51,6 +51,112 @@ final class MatchResultTest extends TestCase
     }
 
     /**
+     * The constructor defaults the condition keys to null, meaning the
+     * statement does not name the action and the resource.
+     *
+     * @return void
+     */
+    public function testConstructorDefaultsConditionsToNull(): void
+    {
+        self::assertNull((new MatchResult(MatchOutcome::MATCHES))->conditions);
+        self::assertNull((new MatchResult(MatchOutcome::DOES_NOT_MATCH, 'detail'))->conditions);
+    }
+
+    /**
+     * The constructor stores the supplied condition keys, each with whether it
+     * held, in order.
+     *
+     * @return void
+     */
+    public function testConstructorStoresConditions(): void
+    {
+        $result = new MatchResult(MatchOutcome::DOES_NOT_MATCH, 'detail', ['tenant' => true, 'role' => false]);
+
+        self::assertSame(['tenant' => true, 'role' => false], $result->conditions);
+    }
+
+    /**
+     * The factories build results without condition keys.
+     *
+     * @return void
+     */
+    public function testFactoriesCarryNoConditions(): void
+    {
+        self::assertNull(MatchResult::matches()->conditions);
+        self::assertNull(MatchResult::doesNotMatch()->conditions);
+        self::assertNull(MatchResult::doesNotMatch('detail')->conditions);
+        self::assertNull(MatchResult::undecidable('detail')->conditions);
+        self::assertNull(MatchResult::invalid('detail')->conditions);
+        self::assertNull(MatchResult::fromBool(true)->conditions);
+        self::assertNull(MatchResult::fromBool(false)->conditions);
+    }
+
+    /**
+     * withConditions() returns a new result with the condition keys, keeping
+     * the outcome and the detail, and leaves the original untouched.
+     *
+     * @return void
+     */
+    public function testWithConditionsReturnsCopyWithConditions(): void
+    {
+        $original = MatchResult::undecidable('key \'ip\' is missing from the context');
+        $result   = $original->withConditions(['tenant' => true, 'ip' => false]);
+
+        self::assertNotSame($original, $result);
+        self::assertSame(MatchOutcome::UNDECIDABLE, $result->outcome);
+        self::assertSame('key \'ip\' is missing from the context', $result->detail);
+        self::assertSame(['tenant' => true, 'ip' => false], $result->conditions);
+        self::assertNull($original->conditions);
+    }
+
+    /**
+     * withConditions() records an empty map as no keys tested, distinct from
+     * null, and replaces any keys the result already carried.
+     *
+     * @return void
+     */
+    public function testWithConditionsStoresEmptyAndReplacesExisting(): void
+    {
+        $empty = MatchResult::matches()->withConditions([]);
+
+        self::assertSame([], $empty->conditions);
+        self::assertTrue($empty->holds());
+
+        $replaced = (new MatchResult(MatchOutcome::DOES_NOT_MATCH, '', ['a' => true]))->withConditions(['b' => false]);
+
+        self::assertSame(['b' => false], $replaced->conditions);
+    }
+
+    /**
+     * withConditions() never changes the shared plain results.
+     *
+     * @return void
+     */
+    public function testWithConditionsLeavesSharedResultsUntouched(): void
+    {
+        MatchResult::matches()->withConditions(['tenant' => true]);
+        MatchResult::doesNotMatch()->withConditions(['tenant' => false]);
+
+        self::assertNull(MatchResult::matches()->conditions);
+        self::assertNull(MatchResult::doesNotMatch()->conditions);
+    }
+
+    /**
+     * and() carries the condition keys of the result it keeps, and none when it
+     * keeps one that has none.
+     *
+     * @return void
+     */
+    public function testAndKeepsConditionsOfKeptResult(): void
+    {
+        $failed   = MatchResult::doesNotMatch()->withConditions(['tenant' => false]);
+        $combined = MatchResult::matches()->and($failed);
+
+        self::assertSame(['tenant' => false], $combined->conditions);
+        self::assertNull($failed->and(MatchResult::invalid('broken'))->conditions);
+    }
+
+    /**
      * matches() builds a matching result with no detail.
      *
      * @return void

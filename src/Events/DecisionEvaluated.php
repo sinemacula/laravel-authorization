@@ -5,24 +5,24 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Events;
 
 use SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent;
-use SineMacula\Laravel\Authorization\Evaluation\EvaluationResult;
+use SineMacula\Laravel\Authorization\Evaluation\Decision;
 
 /**
  * Dispatched every time the authorization manager completes an evaluation —
  * `can()`, `authorize()`, `evaluate()`, every path.
  *
  * Carries the principal, action, resource, context, and the full evaluation
- * result — including the reproducible trace — so audit listeners can persist
- * the decision verbatim. Listeners that want
- * a denial-only view filter on `$event->result->allowed === false`;
- * the separate `AuthorizationFailed` event covers the narrower hard-denial
- * signal that fires only when `authorize()` is about to throw.
+ * decision — including its reproducible trace — so audit listeners can persist
+ * the decision verbatim. Listeners that want a denial-only view filter on
+ * `!$event->decision->isAllowed()`; the separate `AuthorizationFailed` event
+ * covers the narrower hard-denial signal that fires only when `authorize()` is
+ * about to throw.
  *
  * It implements `AuthorizationEvent`, as every event the package dispatches
  * does. Unlike the change events, it is dispatched when the decision is made,
  * not after a commit, since a denial is a fact even if the surrounding
  * transaction rolls back, and it still carries the principal object, the
- * context and the result as they were evaluated.
+ * context and the decision as they were evaluated.
  *
  * Part of the SemVer-stable event API; breaking changes require a major version
  * bump.
@@ -41,7 +41,7 @@ final readonly class DecisionEvaluated implements AuthorizationEvent
      * @param  string  $action
      * @param  string|null  $resource
      * @param  array<string, mixed>  $context
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult  $result
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
      */
     public function __construct(
 
@@ -57,7 +57,7 @@ final readonly class DecisionEvaluated implements AuthorizationEvent
         /** Evaluation context passed through to policy statements. */
         public array $context,
 
-        /** Final evaluation result, including the reproducible trace. */
-        public EvaluationResult $result,
+        /** The decision, with its reason, deciding statements and trace. */
+        public Decision $decision,
     ) {}
 }
