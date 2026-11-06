@@ -9,8 +9,11 @@ why the decision behaves the way it does -- the code and tests encode the *what*
 
 ## The Decision
 
-`AuthorizationManager::check()` is the one core decision (D22); `can()` reads whether it allows and `authorize()`
-throws when it does not. It returns a `Decision`:
+`AuthorizationManager::check()` is the one core decision (D22); `can()` and `cannot()` read whether it allows, `any()`
+and `all()` read it for each action they decide, `authorize()` throws when it does not, and a Laravel policy class
+deciding through `Concerns\DecidesThroughAuthorization` turns it into a policy response. It makes no decision of its
+own: `Evaluation\DecisionPipeline` admits the check and gathers its sources, the policy evaluator decides it, and
+`check()` alone records and reports the result. It returns a `Decision`:
 
 - `effect` -- `DecisionEffect::ALLOW` or `DecisionEffect::DENY`; `isAllowed()` reads it.
 - `reason` -- why it denies, a `DecisionReason` (AUTHZ-7.10); null when it allows.
@@ -85,8 +88,8 @@ resolver, `DefaultPolicyResolver`, unions three sources (AUTHZ-6.9, AUTHZ-7.2):
 An attachment of an inline policy to any grantee but the one it belongs to is left out of the resolution, should one
 reach the table past the write paths that refuse it.
 
-Two more sources follow the resolver's, in `AuthorizationManager::gatherPolicies()`, after the bound `PolicyResolver`
-rather than through it, so a custom resolver controls neither:
+Two more sources follow the resolver's, in `DecisionPipeline::gatherPolicies()`, after the bound `PolicyResolver` rather
+than through it, so a custom resolver controls neither:
 
 - **A separate identity's policies.** When the subject's identity is a separate model, that identity's own and
   role-attached policies, through `SubjectGrants::identityPolicies()`: whole when it is of the same kind, both machines
@@ -415,8 +418,9 @@ refuses never reads the permissions, since the session stage runs before the all
    returned only in the session of the request that recorded it, as the subject resolver gives it, whichever subject the
    decision was about, and until the earliest instant a met requirement it read stops being met. The checker is asked
    for every requirement of every check and nothing it answers is remembered, so an unmet or undecidable result is never
-   reused. Every other entry point (`can()`, the Gate, the Blade directives and `effectivePermissions()`) decides
-   afresh, and the resolution cache holds grants and policies, never decisions.
+   reused. Every other entry point (`can()`, `cannot()`, `any()`, `all()`, the Gate, a policy class's `decide()`, the
+   Blade directives and `effectivePermissions()`) decides afresh, and the resolution cache holds grants and policies,
+   never decisions.
 
 9. **An allow applies only to the subjects its source admits (AUTHZ-7.3, N39).** A resource policy's allow applies only
    when one of its `principals` names the subject, and then allows without the subject holding any permission; an allow
@@ -476,10 +480,11 @@ refuses never reads the permissions, since the session stage runs before the all
     on a resource therefore costs no query beyond the first resolution of its scope, and none once that is warm. A
     resource admitted at platform scope is still capped by its own tenant's guardrails (invariant 11).
 
-    `effectivePermissions()`, the Gate, the `permission:` and `authorize:` middleware and the permission directives
-    decide through `check()` (D22), so they apply this invariant and every other. `hasPermission()`,
-    `hasPermissionTo()`, `getPermissions()` and `assertHasPermission()` keep their documented meaning: they report what
-    is granted in the current scope and decide nothing.
+    `can()`, `cannot()`, `any()`, `all()`, `effectivePermissions()`, the Gate, a policy class's `decide()`, the
+    `permission:` and `authorize:` middleware and the permission directives decide through `check()` (D22), so they
+    apply this invariant and every other. `hasPermission()`, `hasPermissionTo()`, `getPermissions()` and
+    `assertHasPermission()` keep their documented meaning: they report what is granted in the current scope and decide
+    nothing.
 
 ## Trace
 
@@ -640,11 +645,13 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 
 ## Implementation Anchors
 
-- `AuthorizationManager::check()` -- the core decision; `decide()` -- the subject and resource stages;
-  `decideGrants()` -- the check's context (`CheckContextFactory::make()`), `invalid_policy` when the policies, the
-  guardrails or the boundaries cannot be gathered, and the evaluator given the policies, the boundaries, the permission
-  callback and the guardrails, or none at all (`null`) for the exempt `authorization:guardrails:manage`, under the
-  check's session caps; `capped()` -- the scoped manager carrying the explicit caps.
+- `AuthorizationManager::check()` -- the core decision and its recording; `DecisionPipeline::decide()` -- the subject
+  and resource stages; `DecisionPipeline::decideGrants()` -- the check's context (`CheckContextFactory::make()`),
+  `invalid_policy` when the policies, the guardrails or the boundaries cannot be gathered, and the evaluator given the
+  policies, the boundaries, the permission callback and the guardrails, or none at all (`null`) for the exempt
+  `authorization:guardrails:manage`, under the check's session caps; `AuthorizationManager::capped()` and
+  `DecisionPipeline::capped()` -- the scoped manager carrying the explicit caps; `AuthorizationManager::any()` and
+  `all()`, over `Support\ActionList` -- several actions decided in order, stopping at the first that settles the answer.
 - `ResourceReferences::of()` -- every resource argument's reference; `ResourceScope::decide()` -- the tenant stage.
 - `SubjectGrants::permissionFor()` -- the held permission that allows the check, the subject's before its granting
   identity's, read in the scope the check is decided in; `HeldPermissions::match()` -- the wildcard rules and the
@@ -752,6 +759,12 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 - `GateRegistrarTest` and `AuthorizeActionTest` -- an argument that cannot be identified denies as
   `resource_unresolved`.
 - `ResourceReferencesTest` and `ResourceScopeTest` -- resource references and the tenant stage.
+- `DecisionPipelineTest` -- each admission stage, the policy sources, the override and the explicit caps, the session
+  caps, an unreadable policy, the exempt guardrail permission, and the caller's values with and without a context
+  factory; `ActionListTest` and the Unit and Feature `AuthorizationManagerTest` -- `cannot()`, `any()` and `all()` on
+  the current subject and on every scoped manager, stopping at the first decision that settles the answer, each
+  decision recorded and reported, `insufficient_authentication` as a refusal, every resource form, and an empty list
+  refused before anything is decided.
 
 ## Change Triggers
 

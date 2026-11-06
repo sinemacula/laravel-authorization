@@ -10,7 +10,8 @@ use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
 
 /**
  * Unit tests for `InvalidCheckArgumentException`, which refuses an argument a
- * route middleware or a Blade directive cannot honour.
+ * route middleware, a Blade directive or a check over several actions cannot
+ * honour.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -107,5 +108,15 @@ final class InvalidCheckArgumentExceptionTest extends TestCase
             'App\Middleware names nothing to check. List one or more names, separated by \'|\'.',
             InvalidCheckArgumentException::noNames('App\Middleware')->getMessage(),
         );
+    }
+
+    /**
+     * A check over several actions given none names the method.
+     *
+     * @return void
+     */
+    public function testNoActionsNamesTheMethod(): void
+    {
+        self::assertSame('all() takes at least one action to decide, none given.', InvalidCheckArgumentException::noActions('all')->getMessage());
     }
 }

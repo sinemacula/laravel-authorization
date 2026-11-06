@@ -99,6 +99,9 @@ must each allow the check, then an explicit allow or a permission held allows it
 - **The Gate's authority**: one `Gate::before` hook answers every ability the enums, the providers or the package
   declare, and its allow and its deny both stand over any `Gate::define` callback or Laravel policy class; every other
   ability falls through to Laravel unchanged. Configuration can turn it off, and `authorization:check` reports it.
+- **A programmatic API**: `can`, `cannot`, `authorize`, `check`, `any`, `all` and `explain`, through the
+  `Authorization` facade or an injected `AuthorizationManager`, about the current subject or one named with `for()` or
+  `forUser()`, and a trait through which a Laravel policy class decides the abilities the Gate hook leaves to it.
 - **A permission catalogue in code**: enums and providers declare each permission with a description, a category and
   its guards, and `authorization:sync` writes them to the database on deploy, reporting stale rows rather than
   deleting them. Booting never touches the database.
@@ -461,8 +464,9 @@ Authorization::for($user)->explain('posts:delete', 'posts/42');
 supplies it (see [The check's context](#the-checks-context)).
 
 `Authorization::check()` returns the full `Decision`: `isAllowed()`, the denial's reason code (`reason`), the stage that
-decided it (`stage`), the statements that did (`statements`) and a trace of every step. `can()` and `authorize()` are
-shortcuts over it. A check runs in stages, stopping at the first that decides: the subject (`subject_unresolved`,
+decided it (`stage`), the statements that did (`statements`) and a trace of every step. `can()`, `cannot()`, `any()`,
+`all()` and `authorize()` are shortcuts over it (see [The programmatic API](#the-programmatic-api)).
+A check runs in stages, stopping at the first that decides: the subject (`subject_unresolved`,
 `subject_inactive`), the resource (`resource_unresolved`), its tenant (`tenant_scope`), then the denies in every
 applicable policy, a guardrail's and a permission boundary's included (`explicit_deny`, or `invalid_policy` for a
 statement that cannot be evaluated), then the caps: the [guardrails](#guardrails) and the [permission
@@ -1080,9 +1084,10 @@ permissions.
 
 ### How a check is decided
 
-`Authorization::check()` is the one decision behind `can()`, `authorize()`, `explain()`, the Gate, the `permission:` and
-`authorize:` middleware and the permission directives (`role:` and `@role` check membership only, so no stage applies to
-them, guardrails and boundaries included). It runs these stages in order, and the first that decides ends it; no allow
+`Authorization::check()` is the one decision behind `can()`, `cannot()`, `any()`, `all()`, `authorize()`, `explain()`,
+the Gate, a Laravel policy class deciding through the package's trait, the `permission:` and `authorize:` middleware and
+the permission directives (`role:` and `@role` check membership only, so no stage applies to them, guardrails and
+boundaries included). It runs these stages in order, and the first that decides ends it; no allow
 is weighed before every deny and every cap has run:
 
 | Stage       | What it weighs                                                                                                    | Denies as                                                     |
@@ -1273,9 +1278,10 @@ check reads `environment`, then kept for the rest of the check, so `Carbon::setT
 `subject` and `resource` describe who the check is about and what it is on; see [Subject and resource
 attributes](#subject-and-resource-attributes).
 
-What the caller passes lands under `input`, and only there: the `$context` of `check()`, `can()`, `authorize()`,
-`explain()` and `effectivePermissions()`, the string-keyed and associative arguments of a Gate check, and the context
-of `assertCan()` and `assertCannot()`. A caller can never supply a trusted value:
+What the caller passes lands under `input`, and only there: the `$context` of `check()`, `can()`, `cannot()`, `any()`,
+`all()`, `authorize()`, `explain()`, `effectivePermissions()` and a policy class's `decide()`, the string-keyed and
+associative arguments of a Gate check, and the context of `assertCan()` and `assertCannot()`. A caller can never supply
+a trusted value:
 
 ```php
 Authorization::can('posts:publish', $post, ['post' => ['status' => 'draft']]); // input.post.status
@@ -1635,7 +1641,8 @@ in the session of the request that recorded it, whichever subject it was about (
 until the earliest instant a met requirement it read stops being met. The decision's own `$decision->freshness` keeps a
 fingerprint of the session it was made in (its SHA-256 hash, never the session id, so the decision stays safe to log)
 and that instant, and `isFreshFor($session)` says whether it may be reused in a session. Nothing else keeps a decision:
-`can()`, the Gate, the Blade directives and `effectivePermissions()` decide afresh every time, and the resolution cache
+`can()`, `cannot()`, `any()`, `all()`, the Gate, a policy class's `decide()`, the Blade directives and
+`effectivePermissions()` decide afresh every time, and the resolution cache
 holds grants and policies, never decisions.
 
 #### Under the suite
@@ -1700,6 +1707,85 @@ the actor.
 `DecisionEvaluated` and `AuthorizationFailed` implement the marker too, but are dispatched when the decision is made,
 not after a commit, and still carry the principal, the context and the decision as they were evaluated.
 
+### The programmatic API
+
+Every check goes through `SineMacula\Laravel\Authorization\AuthorizationManager`, which the `Authorization` facade
+proxies and the container injects. Each method decides about the current subject, as the subject resolver gives it,
+or about the subject of the scoped manager it is called on:
+
+| Method                                    | What it does                                                                                     |
+|-------------------------------------------|--------------------------------------------------------------------------------------------------|
+| `can($action, $resource, $context)`       | Decides the action and returns whether it is allowed                                             |
+| `cannot($action, $resource, $context)`    | Returns the opposite of `can()`                                                                  |
+| `authorize($action, $resource, $context)` | Decides the action and throws when it is not allowed                                             |
+| `check($action, $resource, $context)`     | Decides the action and returns the full `Decision`                                               |
+| `any($actions, $resource, $context)`      | Returns whether at least one of the actions is allowed                                           |
+| `all($actions, $resource, $context)`      | Returns whether every one of the actions is allowed                                              |
+| `explain($action, $resource, $context)`   | Decides the action and returns its explanation as text                                           |
+| `lastDecision()`                          | Returns the latest decision of the request or job, whichever manager made it                     |
+| `effectivePermissions($context)`          | Decides every permission the enums declare and returns whether each is allowed                   |
+| `for($subject)`                           | Returns a scoped manager deciding about the model named, in the request's tenant and application |
+| `forUser($user)`                          | Returns a scoped manager deciding about the subject the resolver translates the user into        |
+| `capped($actions)`                        | Returns a scoped manager whose checks are capped by the actions given                            |
+| `withPolicies($policies)`                 | Returns a scoped manager that evaluates only the policies given                                  |
+
+`check()` is the one decision: every other method adapts it, and each decision it makes is recorded as the last
+decision and reported with `DecisionEvaluated`. The resource and the context take the same forms everywhere: a model,
+a `[type, id]` pair, a `ResourceReference`, an `AuthorizableResource`, a model class or a string names the resource
+(see [Managing roles, permissions and grants](#managing-roles-permissions-and-grants)), and the context is the caller's
+values, read under `input` (see [The check's context](#the-checks-context)).
+
+```php
+use SineMacula\Laravel\Authorization\Facades\Authorization;
+
+Authorization::can('posts:update', $post);                       // true or false
+Authorization::cannot('posts:delete', ['post', 42]);             // the opposite of can()
+Authorization::any(['posts:update', 'posts:publish'], $post);    // true at the first action allowed
+Authorization::all(['posts:update', 'posts:publish'], $post);    // false at the first action refused
+Authorization::for($user)->authorize('posts:publish', $post);  // throws when the check is denied
+```
+
+`any()` and `all()` decide their actions one at a time, in the order given, and stop as soon as the answer is known:
+`any()` at the first action allowed, `all()` at the first refused, so no action after it is decided. Each action
+decided is recorded and reported as `check()` records it, so the last decision is that of the last action decided. An
+`insufficient_authentication` decision is a refusal there, as it is for `can()`; to ask for a step-up, decide the
+action with `authorize()` or read the decision's requirements from `check()`. A list that names no action is refused
+with an `InvalidCheckArgumentException` (an `InvalidArgumentException`) before anything is decided. There is no
+throwing form over several actions: call `authorize()` for each action that must be allowed.
+
+The facade resolves the manager scoped to the current request or job, so every call in that lifecycle reaches the same
+manager, and the next request or job gets a new one. `for()`, `forUser()`, `capped()` and `withPolicies()` never change
+it: each returns a new scoped manager, which every method above works on, and which shares the lifecycle's last
+decision, so `Authorization::lastDecision()` returns the latest decision whichever of them made it. They chain: a
+scoped manager made from another keeps its subject, its caps and its policies, and a further cap narrows its caps:
+
+```php
+$preview = Authorization::for($user)->capped(['posts:*'])->withPolicies([$hypothetical]);
+
+$preview->all(['posts:read', 'posts:update'], $post);
+Authorization::lastDecision();  // the decision of the last action $preview decided
+```
+
+Injected, the manager is the same one the facade resolves. Inject it into a class built for the request or job, such
+as a controller, an action or a queued job's `handle()`; a singleton would keep the manager of the request it was
+first built in:
+
+```php
+use SineMacula\Laravel\Authorization\AuthorizationManager;
+
+final class PublishPost
+{
+    public function __construct(private readonly AuthorizationManager $authorization) {}
+
+    public function __invoke(Post $post): void
+    {
+        $this->authorization->authorize('posts:publish', $post);
+
+        $post->publish();
+    }
+}
+```
+
 ### Laravel's Gate
 
 The package is the authority of Laravel's Gate for the abilities it declares. Booting registers one `Gate::before`
@@ -1747,6 +1833,62 @@ Then nothing is registered and the Gate knows none of the package's permissions;
 directives still decide them. Only true or false is accepted: any other value of `authorization.gate.enabled` is
 refused at boot. `authorization:check` reports whether the hook is enabled. The contract behind the hook is in
 [Gate authority](docs/design/gate-authority.md).
+
+### Laravel policy classes
+
+A Laravel policy class can decide through the package with the
+`SineMacula\Laravel\Authorization\Concerns\DecidesThroughAuthorization` trait. Each policy method names its action and
+hands `decide()` the user Laravel gives it, the model or any other resource, and any context:
+
+```php
+namespace App\Policies;
+
+use App\Models\Post;
+use App\Models\User;
+use Illuminate\Auth\Access\Response;
+use SineMacula\Laravel\Authorization\Concerns\DecidesThroughAuthorization;
+
+final class PostPolicy
+{
+    use DecidesThroughAuthorization;
+
+    public function archive(User $user, Post $post): Response
+    {
+        return $this->decide($user, 'posts:archive', $post);
+    }
+
+    public function preview(?User $user, Post $post): Response
+    {
+        return $this->decide($user, 'posts:read', $post, ['preview' => true]); // input.preview
+    }
+}
+```
+
+`decide()` makes one check, through `Authorization::forUser($user)->check()`, about the subject the subject resolver
+translates the user into, so it is recorded as the last decision and reported with `DecisionEvaluated` as any check
+is, and it takes the resource and the context in the same forms as the [programmatic API](#the-programmatic-api). No
+method name is mapped to an action: each method names its own. A guest (a null user, which Laravel hands only to a
+method whose user is nullable) is no subject, so it is denied as `subject_unresolved`.
+
+An allow is `Response::allow()`. A denial is `Response::deny()` with the decision's reason code as its code, such as
+`explicit_deny`, and as its message the line the package's language file holds for that code, such as
+`authorization::authorization.explicit_deny`, in the current locale; publish the language files to reword one. A
+denial is never a not-found response, so Laravel answers it with a `403`:
+
+```php
+Gate::inspect('archive', $post)->code();     // 'explicit_deny'
+Gate::inspect('archive', $post)->message();  // 'This action is not allowed.'
+```
+
+An `insufficient_authentication` denial keeps its own code, but the trait raises no
+`InsufficientAuthenticationException` and the response carries no requirements, so it is answered as any other `403`.
+A caller that needs to ask for a step-up decides the action with `authorize()`, which raises that exception, or with
+`check()`, whose decision names the requirements (see [Authentication requirements](#authentication-requirements)).
+
+For an ability whose exact name the package declares, the [Gate hook](#laravels-gate) answers before any policy class
+runs, so a policy method is never called for it. The trait is for the abilities outside the catalogue's exact names,
+such as `archive` above, which the hook leaves to Laravel and its policy classes, and for applications that turn the
+hook off, where Laravel's policy classes answer the Gate for every ability.
 
 ### Middleware and Blade
 
@@ -1903,7 +2045,7 @@ The contracts behind the evaluator, for maintainers and reviewers, are in [docs/
 | [Permission catalogue sync](docs/design/permission-catalogue-sync.md)                       | Declaring permissions in code and `authorization:sync`         |
 | [Management services](docs/design/management-services.md)                                   | The services every role, permission and grant write uses       |
 | [Events](docs/design/events.md)                                                             | The marker, the snapshots, the actor and after-commit          |
-| [Gate authority](docs/design/gate-authority.md)                                             | The `Gate::before` hook, what falls through and the switch     |
+| [Gate authority](docs/design/gate-authority.md)                                             | The `Gate::before` hook, the switch and policy classes         |
 
 ## Requirements
 

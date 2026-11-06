@@ -9,13 +9,19 @@ use Illuminate\Support\Facades\Facade;
 /**
  * Authorization facade.
  *
- * Static proxy to the container-bound authorization manager. Every call is
- * forwarded to a fresh manager scope so `for()` / `withPolicies()` / `capped()`
- * chains do not leak between requests.
+ * Static proxy to the container-bound authorization manager. The facade
+ * resolves the manager scoped to the current request or job, so every call in
+ * that lifecycle reaches the same manager and a new one is made for the next.
+ * `for()`, `forUser()`, `withPolicies()` and `capped()` never change it: each
+ * returns a new scoped clone, which shares the lifecycle's last-decision store,
+ * so `lastDecision()` reads the latest decision of any of them.
  *
  * @phpcs:disable Generic.Files.LineLength.TooLong
  *
  * @method static bool can(string $action, mixed $resource = null, array<string, mixed> $context = [])
+ * @method static bool cannot(string $action, mixed $resource = null, array<string, mixed> $context = [])
+ * @method static bool any(array<int, string> $actions, mixed $resource = null, array<string, mixed> $context = [])
+ * @method static bool all(array<int, string> $actions, mixed $resource = null, array<string, mixed> $context = [])
  * @method static void authorize(string $action, mixed $resource = null, array<string, mixed> $context = [])
  * @method static \SineMacula\Laravel\Authorization\Evaluation\Decision check(string $action, mixed $resource = null, array<string, mixed> $context = [])
  * @method static \SineMacula\Laravel\Authorization\AuthorizationManager for(object $subject)

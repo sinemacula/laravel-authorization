@@ -104,8 +104,9 @@ its identity. A subject named this way never has a session, whichever model it i
 met for it. With no subject resolved, the clone has no tenant or application.
 
 `Authorization::forUser($user)` returns a cloned manager deciding about the subject the resolver translates the user
-into. The Gate hook uses it for the user Laravel hands over. `forUser(null)` decides about a guest: no subject, so
-every check of the clone denies as `subject_unresolved`, whoever the request is about.
+into. The Gate hook uses it for the user Laravel hands over, and so does a Laravel policy class deciding through
+`Concerns\DecidesThroughAuthorization`, for the user its method is given. `forUser(null)` decides about a guest: no
+subject, so every check of the clone denies as `subject_unresolved`, whoever the request is about.
 
 ## Static Resolution Path
 
@@ -139,7 +140,8 @@ rather than asking the resolver again without end.
 - `Subject` -- the resolved subject, identity, tenant, application, guard and session.
 - `Resolvers\AuthGuardSubjectResolver` -- the shipped default.
 - `AuthorizationManager::currentSubject()`, `for()` and `forUser()` -- resolution and the scoped clones.
-- `Registrars\GateRegistrar` -- the Gate hook translating its user.
+- `Registrars\GateRegistrar` -- the Gate hook translating its user; `Concerns\DecidesThroughAuthorization` -- a policy
+  class translating its user the same way.
 - `Support\ResolvedTenant` and `Scopes\TenantScope` -- the tenant held per request or job.
 - `AbstractAuthorizationMiddleware` and `BladeHelpers::currentSubject()` -- the static resolution paths.
 
@@ -150,7 +152,8 @@ rather than asking the resolver again without end.
 - `SubjectTest` -- the value and `withSubject()`.
 - `AuthorizationManagerTest` (Unit) -- `for()` keeps the tenant and application; `forUser()` uses the translation,
   and `forUser(null)` decides about no subject.
-- `GateRegistrarTest` -- the Gate's user translated, `Gate::forUser($other)`, and a guest denied.
+- `GateRegistrarTest` -- the Gate's user translated, `Gate::forUser($other)`, and a guest denied;
+  `DecidesThroughAuthorizationTest` -- a policy class's user translated, and a guest denied.
 - `TenantScopeTest` and `ResolvedTenantTest` -- the subject's tenant scopes the rows; no subject or tenant means
   platform rows only.
 - `AuthorizationServiceProviderTest` -- the resolver and tenant rebuilt per job; an application's own binding kept.
