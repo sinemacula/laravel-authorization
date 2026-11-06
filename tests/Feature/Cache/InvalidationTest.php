@@ -17,6 +17,8 @@ use SineMacula\Laravel\Authorization\Events\Resource\PolicyDetached as ResourceP
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Resolvers\BoundaryResolver;
+use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantPruner;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
@@ -141,7 +143,7 @@ final class InvalidationTest extends TestCase
 
     /**
      * A change to a policy and its deletion each bump the policy, and the
-     * version every resource policy entry shares.
+     * versions every resource policy entry and every boundary entry share.
      *
      * @return void
      */
@@ -151,7 +153,7 @@ final class InvalidationTest extends TestCase
         $role     = Role::create(['name' => 'editor']);
         $policies = $this->app?->make(PolicyService::class);
         $policy   = Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]);
-        $key      = [$this->versions()->policyKey($policy->id), $this->versions()->resourcePoliciesKey()];
+        $key      = [$this->versions()->policyKey($policy->id), $this->versions()->resourcePoliciesKey(), $this->versions()->boundariesKey()];
 
         self::assertNotNull($policies);
         $deny = ['version' => 1, 'statements' => [['effect' => 'deny', 'actions' => ['*']]]];
@@ -341,6 +343,65 @@ final class InvalidationTest extends TestCase
     }
 
     /**
+     * Setting, replacing and removing a boundary each bump the grantee, and
+     * nothing else.
+     *
+     * @return void
+     */
+    public function testBoundaryChangesBumpTheGrantee(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $role    = Role::create(['name' => 'editor']);
+        $first   = Policy::create(['name' => 'first-cap', 'document' => ['version' => 1, 'statements' => []]]);
+        $second  = Policy::create(['name' => 'second-cap', 'document' => ['version' => 1, 'statements' => []]]);
+        $service = $this->app?->make(BoundaryService::class);
+        $grantee = [$this->versions()->granteeKey($user)];
+
+        self::assertNotNull($service);
+        self::assertSame($grantee, $this->bumpedBy(static fn () => $service->set($user, $first), $user, $role, $first));
+        self::assertSame($grantee, $this->bumpedBy(static fn () => $service->set($user, $second), $user, $role, $first));
+        self::assertSame($grantee, $this->bumpedBy(static fn () => $service->remove($user), $user, $role, $first));
+        self::assertSame([], $this->bumpedBy(static fn () => $service->remove($user), $user, $role, $first));
+    }
+
+    /**
+     * A boundary set, replaced or removed, and its policy rewritten, takes
+     * effect on the next request, whatever the entries were built from.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testABoundaryChangeTakesEffectOnTheNextRequest(): void
+    {
+        $user     = StubIdentity::create(['id' => 'user-1']);
+        $policy   = Policy::create(['name' => 'cap', 'document' => ['version' => 1, 'statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
+        $service  = $this->app?->make(BoundaryService::class);
+        $policies = $this->app?->make(PolicyService::class);
+        $actions  = function () use ($user): array {
+            $this->nextRequest();
+
+            return \array_map(static fn (EvaluationPolicy $boundary): array => $boundary->statements[0]->actions ?? [], BoundaryResolver::boundariesFor($this->fresh($user)));
+        };
+
+        self::assertNotNull($service);
+        self::assertNotNull($policies);
+        self::assertSame([], $actions());
+
+        $service->set($user, $policy);
+
+        self::assertSame([['posts:read']], $actions());
+
+        $policies->rewrite($policy, ['version' => 1, 'statements' => [['effect' => 'allow', 'actions' => ['posts:edit']]]]);
+
+        self::assertSame([['posts:edit']], $actions());
+
+        $service->remove($user);
+
+        self::assertSame([], $actions());
+    }
+
+    /**
      * Return the version keys among the user's, the role's and the policy's,
      * and, with the role as a grantee, the role's as a grantee and the one the
      * role policies share, whose tokens the write changed.
@@ -359,6 +420,7 @@ final class InvalidationTest extends TestCase
         if ($policy !== null) {
             $keys[] = $this->versions()->policyKey($policy->id);
             $keys[] = $this->versions()->resourcePoliciesKey();
+            $keys[] = $this->versions()->boundariesKey();
         }
 
         if ($asGrantee) {

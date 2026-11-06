@@ -51,6 +51,7 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -269,7 +270,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertNull($decision->reason);
         self::assertSame(DecisionStage::ALLOW, $decision->stage);
         self::assertSame([], $decision->statements);
-        self::assertEquals([new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD)], $decision->trace);
+        self::assertEquals([...self::uncapped(), new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD)], $decision->trace);
     }
 
     /**
@@ -604,6 +605,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame(DecisionStage::ALLOW, $decision->stage);
         self::assertEquals([new StatementReference('broken-override', 0)], $decision->statements);
         self::assertEquals([
+            ...self::uncapped(),
             new TraceEntry(DecisionStage::ALLOW, TraceOutcome::INVALID, new StatementReference('broken-override', 0), ['input.tenant' => false]),
         ], $decision->trace);
         self::assertFalse(Authorization::for($user)->withPolicies([$invalid])->can('posts:create', null, ['tenant' => 'org-1']));
@@ -671,6 +673,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame(DecisionStage::ALLOW, $decision->stage);
         self::assertSame([], $decision->statements);
         self::assertEquals([
+            ...self::uncapped(),
             new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_APPLICABLE, new StatementReference('unrelated', 0)),
             new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD),
         ], $decision->trace);
@@ -706,6 +709,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertSame(DecisionStage::ALLOW, $skipped->stage);
         self::assertSame([], $skipped->statements);
         self::assertEquals([
+            ...self::uncapped(),
             new TraceEntry(DecisionStage::ALLOW, TraceOutcome::UNDECIDABLE, new StatementReference('conditional-allow', 0), ['input.tenant' => false]),
             new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD),
         ], $skipped->trace);
@@ -1277,7 +1281,7 @@ final class AuthorizationManagerTest extends TestCase
         $decision = $scope->check('posts:edit', $post);
 
         self::assertTrue($decision->isAllowed());
-        self::assertSame(['resource.status' => true, 'resource.owner.id' => true, 'subject.department' => true], $decision->trace[0]->conditions);
+        self::assertSame(['resource.status' => true, 'resource.owner.id' => true, 'subject.department' => true], $decision->trace[3]->conditions);
         self::assertStringNotContainsString('draft', $decision->explain());
         self::assertStringNotContainsString('sales', $decision->explain());
         self::assertTrue($scope->can('posts:edit', [$type, 'post-3']));
@@ -1412,7 +1416,7 @@ final class AuthorizationManagerTest extends TestCase
 
         self::assertTrue($decision->isAllowed());
         self::assertSame([], $decision->requirements);
-        self::assertSame(TraceOutcome::HELD, $decision->trace[1]->outcome);
+        self::assertSame(TraceOutcome::HELD, $decision->trace[4]->outcome);
     }
 
     /**
@@ -1614,9 +1618,9 @@ final class AuthorizationManagerTest extends TestCase
         self::assertStringContainsString('sharing[', $allowed->explain());
         self::assertStringContainsString('#0 sid="share" on "posts:7"', $allowed->explain());
         self::assertSame(DecisionReason::NO_MATCH, $denied->reason);
-        self::assertSame(TraceOutcome::PRINCIPAL_MISMATCH, $denied->trace[0]->outcome);
-        self::assertSame('posts:7', $denied->trace[0]->statement?->resource);
-        self::assertSame(TraceOutcome::NOT_HELD, $denied->trace[1]->outcome);
+        self::assertSame(TraceOutcome::PRINCIPAL_MISMATCH, $denied->trace[3]->outcome);
+        self::assertSame('posts:7', $denied->trace[3]->statement?->resource);
+        self::assertSame(TraceOutcome::NOT_HELD, $denied->trace[4]->outcome);
         self::assertFalse(Authorization::for($named)->can('posts:read', ResourceReference::record('posts', '8')));
     }
 
@@ -1918,6 +1922,348 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * A boundary caps every allow source: a permission held directly or through
+     * a role, an identity policy's allow, a role policy's allow and a resource
+     * policy's allow naming the subject are each denied as `boundary` at the
+     * boundary stage when the boundary does not allow the action, and allowed
+     * again once the boundary is removed.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testABoundaryCapsEveryAllowSource(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+        $role = Role::create(['name' => 'editor']);
+        $post = ResourceReference::record('posts', '7');
+
+        $user->givePermission(Permission::create(['name' => 'posts:edit']));
+        $role->givePermission(Permission::create(['name' => 'posts:review']));
+        $role->attachPolicy(self::resourcePolicy('role-allow', [['effect' => 'allow', 'actions' => ['posts:archive']]]));
+        $user->assignRole($role);
+        $user->attachPolicy(self::resourcePolicy('own-allow', [['effect' => 'allow', 'actions' => ['posts:publish']]]));
+        $sharing = ['effect' => 'allow', 'actions' => ['posts:delete'], 'principals' => [$user->getMorphClass() . ':user-1']];
+
+        self::attachToResource(self::resourcePolicy('sharing', [$sharing]), ['posts', 7]);
+
+        self::boundaries()->set($user, self::resourcePolicy('read-only', [['effect' => 'allow', 'actions' => ['posts:read']]]));
+
+        foreach (['posts:edit', 'posts:review', 'posts:archive', 'posts:publish', 'posts:delete'] as $action) {
+            $decision = Authorization::for($user)->check($action, $post);
+
+            self::assertSame(DecisionReason::BOUNDARY, $decision->reason, $action);
+            self::assertSame(DecisionStage::BOUNDARY, $decision->stage, $action);
+            self::assertSame([], $decision->statements, $action);
+            self::assertNotContains(DecisionStage::ALLOW, \array_map(static fn (TraceEntry $entry): DecisionStage => $entry->stage, $decision->trace), $action);
+        }
+
+        self::assertFalse(Authorization::for($user)->can('posts:read', $post));
+
+        self::boundaries()->remove($user);
+
+        foreach (['posts:edit', 'posts:review', 'posts:archive', 'posts:publish', 'posts:delete'] as $action) {
+            self::assertTrue(Authorization::for($user)->can($action, $post), $action);
+        }
+    }
+
+    /**
+     * What a boundary allows is still decided by the allows: a boundary grants
+     * nothing, so an action it allows that nothing else allows is denied at the
+     * implicit stage, and one a permission allows is allowed, the trace running
+     * through every stage in order.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testABoundaryGrantsNothing(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:edit']));
+        self::boundaries()->set($user, self::resourcePolicy('editing', [['effect' => 'allow', 'actions' => ['posts:edit', 'posts:read']]]));
+
+        $denied  = Authorization::for($user)->check('posts:read');
+        $allowed = Authorization::for($user)->check('posts:edit');
+
+        self::assertSame(DecisionReason::NO_MATCH, $denied->reason);
+        self::assertSame(DecisionStage::IMPLICIT, $denied->stage);
+        self::assertTrue($allowed->isAllowed());
+        self::assertSame(
+            [
+                [DecisionStage::GUARDRAIL, TraceOutcome::UNCAPPED],
+                [DecisionStage::BOUNDARY, TraceOutcome::MATCHED],
+                [DecisionStage::SESSION, TraceOutcome::UNCAPPED],
+                [DecisionStage::ALLOW, TraceOutcome::HELD],
+            ],
+            \array_map(static fn (TraceEntry $entry): array => [$entry->stage, $entry->outcome], $allowed->trace),
+        );
+        self::assertSame('editing', $allowed->trace[1]->statement?->policy);
+    }
+
+    /**
+     * A deny wins over every allow source, a boundary that allows the action
+     * included, and a boundary's own deny statement denies at the deny stage
+     * whatever allows the action.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADenyBeatsEveryAllowSource(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+        $role = Role::create(['name' => 'editor']);
+        $post = ResourceReference::record('posts', '7');
+
+        $user->givePermission(Permission::create(['name' => 'posts:edit']));
+        $role->attachPolicy(self::resourcePolicy('role-allow', [['effect' => 'allow', 'actions' => ['posts:edit', 'posts:read']]]));
+        $user->assignRole($role);
+        $sharing = ['effect' => 'allow', 'actions' => ['posts:edit', 'posts:read'], 'principals' => [$user->getMorphClass() . ':user-1']];
+
+        self::attachToResource(self::resourcePolicy('sharing', [$sharing]), ['posts', 7]);
+        self::boundaries()->set($user, self::resourcePolicy('bounded', [
+            ['effect' => 'allow', 'actions' => ['posts:edit', 'posts:read']],
+            ['effect' => 'deny', 'actions' => ['posts:read']],
+        ]));
+
+        self::assertTrue(Authorization::for($user)->can('posts:edit', $post));
+
+        $boundaryDeny = Authorization::for($user)->check('posts:read', $post);
+
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $boundaryDeny->reason);
+        self::assertSame(DecisionStage::DENY, $boundaryDeny->stage);
+        self::assertSame('bounded', $boundaryDeny->statements[0]->policy);
+
+        $user->attachPolicy(self::resourcePolicy('no-editing', [['effect' => 'deny', 'actions' => ['posts:edit']]]));
+
+        $denied = Authorization::for($user)->check('posts:edit', $post);
+
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $denied->reason);
+        self::assertSame(DecisionStage::DENY, $denied->stage);
+        self::assertSame(['no-editing'], \array_map(static fn (StatementReference $statement): string => $statement->policy, $denied->statements));
+        self::assertSame(['deny'], \array_values(\array_unique(\array_map(static fn (TraceEntry $entry): string => $entry->stage->value, $denied->trace))));
+    }
+
+    /**
+     * Every boundary that applies is intersected: a tenant's boundary never
+     * replaces the platform's, so in the tenant only what both allow passes,
+     * and outside it the platform's alone applies.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testThePlatformAndTenantBoundariesIntersect(): void
+    {
+        $tenant = StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'tenant-a']);
+        $user   = StubIdentity::create(['id' => 'user-1']);
+
+        foreach (['posts:read', 'posts:edit', 'posts:publish'] as $action) {
+            $user->givePermission(Permission::create(['name' => $action]));
+        }
+
+        self::boundaries()->set($user, self::resourcePolicy('platform-cap', [['effect' => 'allow', 'actions' => ['posts:read', 'posts:edit']]]));
+        self::boundaries()->set($user, self::resourcePolicy('tenant-cap', [['effect' => 'allow', 'actions' => ['posts:read', 'posts:publish']]]), $tenant);
+
+        $this->resolvePrincipalAs($user);
+
+        self::assertTrue(Authorization::can('posts:read'));
+        self::assertTrue(Authorization::can('posts:edit'));
+        self::assertFalse(Authorization::can('posts:publish'));
+
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($user, $tenant));
+        $this->app?->forgetInstance(ResolvedTenant::class);
+
+        self::assertTrue(Authorization::can('posts:read'));
+        self::assertSame(DecisionReason::BOUNDARY, Authorization::check('posts:edit')->reason);
+        self::assertSame(DecisionReason::BOUNDARY, Authorization::check('posts:publish')->reason);
+    }
+
+    /**
+     * The boundaries of the subject's principal and of its identity are
+     * intersected: only what both allow passes.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testThePrincipalAndIdentityBoundariesIntersect(): void
+    {
+        $principal = SuspendableIdentity::create(['id' => 'account-1']);
+        $identity  = StubSecondIdentity::create(['id' => 'person-1']);
+
+        foreach (['posts:read', 'posts:edit', 'posts:publish'] as $action) {
+            $principal->givePermission(Permission::create(['name' => $action]));
+        }
+
+        self::boundaries()->set($principal, self::resourcePolicy('account-cap', [['effect' => 'allow', 'actions' => ['posts:read', 'posts:edit']]]));
+        self::boundaries()->set($identity, self::resourcePolicy('person-cap', [['effect' => 'allow', 'actions' => ['posts:read', 'posts:publish']]]));
+
+        $this->app?->instance(SubjectResolver::class, new FixedSubjectResolver(new Subject($principal, $identity)));
+
+        $manager = $this->app?->make(AuthorizationManager::class);
+        self::assertNotNull($manager);
+
+        self::assertTrue($manager->can('posts:read'));
+        self::assertSame(DecisionReason::BOUNDARY, $manager->check('posts:edit')->reason);
+        self::assertSame(DecisionReason::BOUNDARY, $manager->check('posts:publish')->reason);
+    }
+
+    /**
+     * An allow whose authentication requirement alone is unmet is reported as
+     * `insufficient_authentication` only once every boundary lets the action
+     * through; a boundary that does not allow it denies as `boundary`, and an
+     * override of the policies never lifts a boundary.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testInsufficientAuthenticationComesOnlyAfterTheBoundaries(): void
+    {
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $checker = new StubRequirementChecker(RequirementResult::unmet(['multifactor']));
+        $policy  = self::resourcePolicy('cap', [['effect' => 'allow', 'actions' => ['posts:read']]]);
+
+        self::boundaries()->set($user, $policy);
+
+        $capped = $this->inSession($user, 'session-1', $checker)->withPolicies([self::requiringPolicy()])->check('reports:export');
+
+        self::assertSame(DecisionReason::BOUNDARY, $capped->reason);
+        self::assertSame([], $capped->requirements);
+
+        $policy->update(['document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read', 'reports:export']]]]]);
+
+        $stepUp = $this->inSession($user, 'session-1', $checker)->withPolicies([self::requiringPolicy()])->check('reports:export');
+
+        self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $stepUp->reason);
+        self::assertCount(1, $stepUp->requirements);
+    }
+
+    /**
+     * With no boundary nothing is capped, and the boundary stage says so.
+     *
+     * @return void
+     */
+    public function testNoBoundaryMeansNoCap(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:edit']));
+
+        $decision = Authorization::for($user)->check('posts:edit');
+
+        self::assertTrue($decision->isAllowed());
+        self::assertEquals(new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::UNCAPPED), $decision->trace[1]);
+        self::assertStringContainsString('[boundary] boundaries: uncapped', $decision->explain());
+    }
+
+    /**
+     * A boundary whose document cannot be read denies every check for its
+     * grantee as an invalid policy, rather than lifting the cap.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnUnreadableBoundaryDeniesAsAnInvalidPolicy(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $policy = self::resourcePolicy('cap', [['effect' => 'allow', 'actions' => ['posts:edit']]]);
+
+        $user->givePermission(Permission::create(['name' => 'posts:edit']));
+        self::boundaries()->set($user, $policy);
+
+        DB::table('policies')->where('id', $policy->getKey())->update(['document' => '{"statements": "broken"}']);
+
+        $decision = Authorization::for($user)->check('posts:edit');
+
+        self::assertSame(DecisionReason::INVALID_POLICY, $decision->reason);
+        self::assertSame(DecisionStage::DENY, $decision->stage);
+    }
+
+    /**
+     * Setting, replacing and removing a boundary, and rewriting its policy,
+     * each take effect on the next check through a warm persistent cache.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testBoundaryChangesInvalidateTheCachedResolution(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make(ConfigRepository::class);
+        $config->set('authorization.cache.store', 'array');
+
+        (new AuthorizationServiceProvider($this->app))->register(); // @phpstan-ignore argument.type
+
+        $user  = StubIdentity::create(['id' => 'user-1']);
+        $read  = self::resourcePolicy('read-cap', [['effect' => 'allow', 'actions' => ['posts:read']]]);
+        $edit  = self::resourcePolicy('edit-cap', [['effect' => 'allow', 'actions' => ['posts:edit']]]);
+        $check = static fn (): bool => Authorization::for($user)->can('posts:edit');
+
+        $user->givePermission(Permission::create(['name' => 'posts:edit']));
+
+        self::assertTrue($check());
+
+        self::boundaries()->set($user, $read);
+
+        self::assertFalse($check());
+
+        self::boundaries()->set($user, $edit);
+
+        self::assertTrue($check());
+
+        $edit->update(['document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
+
+        self::assertFalse($check());
+
+        self::boundaries()->remove($user);
+
+        self::assertTrue($check());
+    }
+
+    /**
+     * Once warm, a check about a subject with boundaries reads nothing; cold,
+     * the boundaries and their documents are read in one query for the grantee.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testBoundariesAreReadInOneQueryAndNoneOnceWarm(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:edit']));
+        self::boundaries()->set($user, self::resourcePolicy('cap', [['effect' => 'allow', 'actions' => ['posts:edit']]]));
+
+        $this->resolvePrincipalAs($user);
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        self::assertTrue(Authorization::can('posts:edit'));
+
+        $cold = \array_filter(DB::getQueryLog(), static fn (array $query): bool => \str_contains($query['query'], 'authorizable_boundaries'));
+
+        DB::flushQueryLog();
+
+        self::assertTrue(Authorization::can('posts:edit'));
+        self::assertFalse(Authorization::can('posts:read'));
+
+        $warm = DB::getQueryLog();
+
+        DB::disableQueryLog();
+
+        self::assertCount(1, $cold);
+        self::assertSame([], $warm);
+    }
+
+    /**
      * Assert that exactly one decision event was dispatched, for the check of
      * `posts:create` without a resource, carrying the supplied principal,
      * context and decision, and that no failure event was dispatched.
@@ -2052,5 +2398,34 @@ final class AuthorizationManagerTest extends TestCase
         \sort($values);
 
         return \array_values($values); // @phpstan-ignore arrayValues.list
+    }
+
+    /**
+     * Return the steps the guardrail, boundary and session stages add, in that
+     * order, when none of them caps the check.
+     *
+     * @return list<\SineMacula\Laravel\Authorization\Evaluation\TraceEntry>
+     */
+    private static function uncapped(): array
+    {
+        return [
+            new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::UNCAPPED),
+            new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::UNCAPPED),
+            new TraceEntry(DecisionStage::SESSION, TraceOutcome::UNCAPPED),
+        ];
+    }
+
+    /**
+     * Return the boundary service, as the container binds it.
+     *
+     * @return \SineMacula\Laravel\Authorization\Services\BoundaryService
+     */
+    private static function boundaries(): BoundaryService
+    {
+        $service = BoundaryService::instance();
+
+        self::assertInstanceOf(BoundaryService::class, $service);
+
+        return $service;
     }
 }

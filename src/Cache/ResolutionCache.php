@@ -8,7 +8,6 @@ use Illuminate\Container\Container;
 use Illuminate\Contracts\Cache\Repository as CacheRepository;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
-use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyLimits;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
@@ -17,8 +16,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 /**
  * Two-tier cache (in-memory memo plus optional persistent store) for what a
  * grantee resolves to: its roles, the keys of the roles it reaches, its
- * permissions and its policies, and for what a resource resolves to: the
- * policies attached to it and to its type.
+ * permissions, its policies and its permission boundaries, and for what a
+ * resource resolves to: the policies attached to it and to its type.
  *
  * Persistent entries are keyed by kind, grantee and the tenant the tenant scope
  * applies, since the roles and permissions a grantee resolves to depend on it.
@@ -45,7 +44,7 @@ final readonly class ResolutionCache
     use HasContainerInstance;
 
     /** @var list<string> The kinds of entry that hold policy documents, hydrated under the policy limits. */
-    private const array POLICY_KINDS = ['policies', 'resource-policies', 'resource-type-policies'];
+    private const array POLICY_KINDS = ['policies', 'boundaries', 'resource-policies', 'resource-type-policies'];
 
     /** @var \SineMacula\Laravel\Authorization\Cache\ResolutionMemo In-memory tier, keyed by full cache key. */
     private ResolutionMemo $memo;
@@ -85,7 +84,7 @@ final readonly class ResolutionCache
     public function rememberRoles(object $grantee, \Closure $resolve): array
     {
         /** @var list<string> */
-        return $this->remember('roles', $grantee, $resolve, static fn (array $stored): array => self::names($stored));
+        return $this->remember('roles', $grantee, $resolve, ResolutionCodec::names(...));
     }
 
     /**
@@ -98,7 +97,7 @@ final readonly class ResolutionCache
     public function rememberPermissions(object $grantee, \Closure $resolve): array
     {
         /** @var list<string> */
-        return $this->remember('permissions', $grantee, $resolve, static fn (array $stored): array => self::names($stored));
+        return $this->remember('permissions', $grantee, $resolve, ResolutionCodec::names(...));
     }
 
     /**
@@ -112,7 +111,28 @@ final readonly class ResolutionCache
     public function rememberPolicies(object $grantee, \Closure $resolve): array
     {
         /** @var list<\SineMacula\Laravel\Authorization\Evaluation\Policy> */
-        return $this->remember('policies', $grantee, $resolve, self::policies(...), static fn (Policy $policy): array => self::encodePolicy($policy));
+        return $this->remember('policies', $grantee, $resolve, ResolutionCodec::policies(...), ResolutionCodec::encodePolicy(...));
+    }
+
+    /**
+     * Return the grantee's permission boundaries that hold in the current
+     * scope, resolving them on a miss. The persistent tier holds their
+     * documents.
+     *
+     * The entry is keyed and pinned as the grantee's policies are: by the
+     * grantee, the tenant and the application, holding while the grantee, the
+     * version every boundary entry shares and the tenant chain are unchanged,
+     * so setting or removing a boundary, or changing any policy, is seen on the
+     * next check.
+     *
+     * @param  object  $grantee
+     * @param  \Closure(\SineMacula\Laravel\Authorization\Cache\ResolutionPins): \SineMacula\Laravel\Authorization\Cache\Resolution<mixed>  $resolve
+     * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>
+     */
+    public function rememberBoundaries(object $grantee, \Closure $resolve): array
+    {
+        /** @var list<\SineMacula\Laravel\Authorization\Evaluation\Policy> */
+        return $this->remember('boundaries', $grantee, $resolve, ResolutionCodec::policies(...), ResolutionCodec::encodePolicy(...));
     }
 
     /**
@@ -132,7 +152,7 @@ final readonly class ResolutionCache
     public function rememberRoleKeys(object $grantee, \Closure $resolve): array
     {
         /** @var list<string> */
-        return $this->remember('role-keys', $grantee, $resolve, static fn (array $stored): array => self::names($stored));
+        return $this->remember('role-keys', $grantee, $resolve, ResolutionCodec::names(...));
     }
 
     /**
@@ -157,7 +177,7 @@ final readonly class ResolutionCache
         $kind = $id === null ? 'resource-type-policies' : 'resource-policies';
 
         /** @var list<\SineMacula\Laravel\Authorization\Evaluation\Policy> */
-        return $this->remember($kind, new Reference($type, $id ?? '*'), $resolve, self::policies(...), static fn (Policy $policy): array => self::encodePolicy($policy), false);
+        return $this->remember($kind, new Reference($type, $id ?? '*'), $resolve, ResolutionCodec::policies(...), ResolutionCodec::encodePolicy(...), false);
     }
 
     /**
@@ -342,7 +362,7 @@ final readonly class ResolutionCache
 
         $entry = $this->store->get($key);
 
-        if (!self::isEntry($entry) || $this->store->tokens(\array_keys($entry['versions'])) !== $entry['versions']) {
+        if (!ResolutionCodec::isEntry($entry) || $this->store->tokens(\array_keys($entry['versions'])) !== $entry['versions']) {
             return null;
         }
 
@@ -401,84 +421,5 @@ final readonly class ResolutionCache
     private function lifetime(?int $expiresIn): int
     {
         return $expiresIn === null ? $this->ttl : \min($this->ttl, $expiresIn - 1);
-    }
-
-    /**
-     * Determine whether a stored value has the shape of an entry.
-     *
-     * @param  mixed  $entry
-     * @return bool
-     *
-     * @phpstan-assert-if-true array{versions: non-empty-array<string, string>, value: array<mixed>, until: int} $entry
-     */
-    private static function isEntry(mixed $entry): bool
-    {
-        if (!\is_array($entry) || !\is_int($entry['until'] ?? null)) {
-            return false;
-        }
-
-        return \is_array($entry['value'] ?? null) && \is_array($entry['versions'] ?? null) && $entry['versions'] !== [];
-    }
-
-    /**
-     * Read stored names back, refusing anything that is not a list of names.
-     *
-     * @param  array<mixed>  $stored
-     * @return list<string>
-     *
-     * @throws \UnexpectedValueException
-     */
-    private static function names(array $stored): array
-    {
-        foreach ($stored as $name) {
-            if (!\is_string($name)) {
-                throw new \UnexpectedValueException('Cached name is not a string.');
-            }
-        }
-
-        /** @var list<string> */
-        return $stored;
-    }
-
-    /**
-     * Return what the persistent tier holds of a policy: its stored key, its
-     * document and, for a resource policy, the resource it is attached to.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $policy
-     * @return array{id: string|null, document: array<string, mixed>, resource: string|null}
-     */
-    private static function encodePolicy(Policy $policy): array
-    {
-        return ['id' => $policy->id, 'document' => $policy->toArray(), 'resource' => $policy->resource];
-    }
-
-    /**
-     * Hydrate stored policy documents back into evaluation policies, each with
-     * its stored key and, for a resource policy, the resource it is attached
-     * to.
-     *
-     * @param  array<mixed>  $stored
-     * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>
-     *
-     * @throws \UnexpectedValueException
-     */
-    private static function policies(array $stored): array
-    {
-        $policies = [];
-
-        foreach ($stored as $entry) {
-            $id       = \is_array($entry) ? $entry['id']       ?? null : null;
-            $resource = \is_array($entry) ? $entry['resource'] ?? null : null;
-
-            if (!\is_array($entry) || !\is_array($entry['document'] ?? null) || ($id !== null && !\is_string($id)) || ($resource !== null && !\is_string($resource))) {
-                throw new \UnexpectedValueException('Cached policy entry is not a policy document with its key.');
-            }
-
-            /** @var array<string, mixed> $document */
-            $document   = $entry['document'];
-            $policies[] = Policy::fromArray($document)->withId($id)->withResource($resource);
-        }
-
-        return $policies;
     }
 }

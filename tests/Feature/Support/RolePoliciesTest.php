@@ -432,7 +432,9 @@ final class RolePoliciesTest extends TestCase
         $forward  = (new PolicyEvaluator)->evaluate($policies, 'posts:read');
         $backward = (new PolicyEvaluator)->evaluate(\array_reverse($policies), 'posts:read');
 
-        self::assertSame(['a-inline', 'b-stored', 'c-role', 'd-own'], \array_map(static fn (TraceEntry $entry): ?string => $entry->statement?->policy, $forward->trace));
+        $statements = \array_values(\array_filter($forward->trace, static fn (TraceEntry $entry): bool => $entry->statement !== null));
+
+        self::assertSame(['a-inline', 'b-stored', 'c-role', 'd-own'], \array_map(static fn (TraceEntry $entry): ?string => $entry->statement?->policy, $statements));
         self::assertEquals($forward->trace, $backward->trace);
     }
 

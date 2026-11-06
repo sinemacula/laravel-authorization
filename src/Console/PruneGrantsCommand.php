@@ -16,11 +16,11 @@ use SineMacula\Laravel\Authorization\Services\GrantPruner;
  * what would be removed without removing it, and `--chunk` sets how many rows
  * each pass reads. Grants that have expired already stop counting at their
  * expiry, so pruning keeps the grant tables small rather than making checks
- * correct. The inline policies of a grantee that no longer exists are removed
- * too. A grantee type that names no model class is reported and its grants and
- * inline policies are left; a resource type that names no model class is
- * reported and its records' attachments are left. A whole type's attachments
- * are never removed.
+ * correct. The permission boundaries and inline policies of a grantee that no
+ * longer exists are removed too. A grantee type that names no model class is
+ * reported and its grants, boundaries and inline policies are left; a resource
+ * type that names no model class is reported and its records' attachments are
+ * left. A whole type's attachments are never removed.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -35,7 +35,7 @@ final class PruneGrantsCommand extends Command
         EOD;
 
     /** @var string The console command description. */
-    protected $description = 'Remove expired grants, the grants and inline policies of grantees that no longer exist, and the resource policies of records that no longer exist';
+    protected $description = 'Remove expired grants, the grants, boundaries and inline policies of grantees that are gone, and the resource policies of records that are gone';
 
     /**
      * Execute the console command.

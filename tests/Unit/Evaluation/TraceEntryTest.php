@@ -68,6 +68,18 @@ final class TraceEntryTest extends TestCase
     }
 
     /**
+     * toString() names the caps a cap stage weighs when it capped nothing.
+     *
+     * @return void
+     */
+    public function testToStringWithoutStatementNamesTheCapsOfACapStage(): void
+    {
+        self::assertSame('[guardrail] guardrails: uncapped', (new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::UNCAPPED))->toString());
+        self::assertSame('[boundary] boundaries: uncapped', (new TraceEntry(DecisionStage::BOUNDARY, TraceOutcome::UNCAPPED))->toString());
+        self::assertSame('[session] session caps: uncapped', (new TraceEntry(DecisionStage::SESSION, TraceOutcome::UNCAPPED))->toString());
+    }
+
+    /**
      * toString() names the statement assessed, and adds nothing more when it
      * tested no condition.
      *

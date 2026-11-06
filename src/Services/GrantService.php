@@ -330,11 +330,12 @@ final class GrantService
     }
 
     /**
-     * Revoke every role, permission and policy the grantee holds, in one
-     * transaction and as one operation, dispatching a revoked or detached event
-     * for each. The `HasAuthorization` trait calls this once a grantee is
-     * deleted, `RoleObserver` once a role is deleted, and the grant pruner for
-     * a grantee that no longer exists.
+     * Revoke every role, permission and policy the grantee holds, and remove
+     * its permission boundaries, in one transaction and as one operation,
+     * dispatching a revoked, detached or removed event for each, and return how
+     * many there were. The `HasAuthorization` trait calls this once a grantee
+     * is deleted, `RoleObserver` once a role is deleted, and the grant pruner
+     * for a grantee that no longer exists.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
@@ -353,6 +354,8 @@ final class GrantService
             foreach (GrantTarget::cases() as $kind) {
                 $events = [...$events, ...self::revokeEverywhere($kind, $reference, $operation)];
             }
+
+            $events = [...$events, ...BoundaryService::removeEverywhere($reference, $operation)];
 
             OperationScope::dispatch(...$events);
 

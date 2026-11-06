@@ -30,11 +30,13 @@ Blade directives, console commands and test assertions.
 | **Role**       | A named set of permissions, granted as one. Roles can inherit from a parent role.                             |
 | **Permission** | A named action, such as `posts:update` or `posts.update`, or a wildcard pattern of them, such as `posts:*`.   |
 | **Policy**     | A JSON document of statements, each allowing or denying actions on resources, optionally under conditions.    |
+| **Boundary**   | A policy set on a principal or an identity that caps what it may do, whatever its grants allow.               |
 | **Decision**   | The answer to one check: allowed or not, with the reason and a trace of the statements that decided it.       |
 
-Every check runs the same stages: the subject, the resource and its tenant are checked first, then an explicit deny in
-any policy that applies (the principal's, its roles' and the resource's) wins, then an explicit allow, then the
-principal's role and permission grants, and anything left is denied.
+Every check runs the same stages (see [How a check is decided](#how-a-check-is-decided)): the subject, the resource and
+its tenant are checked first, then an explicit deny in any policy that applies (the principal's, its roles', the
+resource's and its boundaries') wins, then the caps (its permission boundaries) must each allow the check, then an
+explicit allow or a permission held allows it, and anything left is denied.
 
 ## Features
 
@@ -65,6 +67,9 @@ principal's role and permission grants, and anything left is denied.
   names the subjects it applies to in `principals`, by reference or by a role's key, and allows them without any
   permission held; its denies apply to everyone checking the resource. The tenant stage still comes first, so a
   resource policy never reaches across tenants.
+- **Permission boundaries**: a managed policy set on a principal or an identity, platform-wide or in a tenant, caps
+  everything the check could otherwise allow: a policy's allow, a resource policy's and a permission held alike. Every
+  boundary that applies must allow the check, a boundary grants nothing, and its denies count with every other deny.
 - **Authentication requirements**: an allow can require additional verification, multifactor authentication,
   phishing resistance or a minimum assurance level, each with an optional maximum age, judged for the subject's session
   by a requirement checker you bind. When only that requirement keeps an allow from applying, the check is denied as
@@ -88,16 +93,17 @@ principal's role and permission grants, and anything left is denied.
   cleared unless `forceSystem()` unlocks the next change.
 - **Explanations**: `Authorization::explain()`, the last decision of the request, and `authorization:why-can` on the
   command line.
-- **Management services** that own every write of a role, permission, policy, grant or resource attachment: each call
-  runs in one transaction on the package's connection, through the configured models, and grants are idempotent under
-  concurrency. The traits, the grant and revoke commands and the Spatie import write through them; only
+- **Management services** that own every write of a role, permission, policy, grant, resource attachment or permission
+  boundary: each call runs in one transaction on the package's connection, through the configured models, and grants are
+  idempotent under concurrency. The traits, the grant and revoke commands and the Spatie import write through them; only
   `authorization:sync` still writes the permission catalogue through the permission model, in its own transaction.
-- **Events** for every grant, revocation, expiry change, resource attachment and model change that changes something,
-  for each use of the system override, for each decision, and when `authorize()` refuses. All implement one marker
-  interface; the change events are snapshots of plain values that carry the actor the caller named, and are dispatched
-  only once the write commits.
-- **Resolution cache** for roles, permissions and policies, in memory and optionally in any cache store, versioned so
-  every write takes effect on the next check in every worker, and falling back to the database when the store fails.
+- **Events** for every grant, revocation, expiry change, resource attachment, boundary change and model change that
+  changes something, for each use of the system override, for each decision, and when `authorize()` refuses. All
+  implement one marker interface; the change events are snapshots of plain values that carry the actor the caller named,
+  and are dispatched only once the write commits.
+- **Resolution cache** for roles, permissions, policies and boundaries, in memory and optionally in any cache store,
+  versioned so every write takes effect on the next check in every worker, and falling back to the database when the
+  store fails.
 - **Swappable everything**: models, table names, the database connection, the subject resolver and the policy store.
 - **Spatie import**: `authorization:migrate-spatie` copies roles, permissions and grants from
   `spatie/laravel-permission` through the management services (its `guard_name` becomes `guard`), reporting and
@@ -191,9 +197,9 @@ class User extends Authenticatable implements AuthorizableIdentity
 }
 ```
 
-Keys may be integers, UUIDs or ULIDs. Deleting the model removes its grants; a model that soft-deletes keeps them until
-it is force-deleted, so restoring it restores its access. To deny a suspended user everything, override
-`isAuthorizationActive()`:
+Keys may be integers, UUIDs or ULIDs. Deleting the model removes its grants and its permission boundaries; a model that
+soft-deletes keeps them until it is force-deleted, so restoring it restores its access. To deny a suspended user
+everything, override `isAuthorizationActive()`:
 
 ```php
 public function isAuthorizationActive(): bool
@@ -288,10 +294,11 @@ Gate::forUser($user)->allows('posts:update');
 
 ### Managing roles, permissions and grants
 
-Every write goes through five services, which you inject or resolve from the container: `RoleService`,
-`PermissionService` and `PolicyService` for the records, `GrantService` for what a grantee holds, and
+Every write goes through six services, which you inject or resolve from the container: `RoleService`,
+`PermissionService` and `PolicyService` for the records, `GrantService` for what a grantee holds,
 `ResourcePolicyService` for the policies attached to resources (see [Resource-based
-policies](#resource-based-policies)). Each call runs in one transaction on the package's connection
+policies](#resource-based-policies)), and `BoundaryService` for the permission boundaries of principals and identities
+(see [Permission boundaries](#permission-boundaries)). Each call runs in one transaction on the package's connection
 (`authorization.connection`), through the models `authorization.models` configures, and takes the actor making the call
 as an optional `actor`, a model or a reference (null for console and system work). Every event the call dispatches
 carries it, and every grant row it writes records it in `granted_by_type` and `granted_by_id`; it is never read from the
@@ -550,6 +557,8 @@ the check's resource and to its type (see [Resource-based policies](#resource-ba
 identity, own and role-attached alike (see `docs/design/evaluation-order-and-deny-precedence.md`). A policy attached
 both to the identity and to one of its roles counts once. The order they are gathered in never changes the decision:
 each stage assesses them by name, then stored key, then the resource a resource policy is attached to, then document.
+The grantee's permission boundaries are read apart from them, so a custom resolver never drops them (see [Permission
+boundaries](#permission-boundaries)).
 
 ### Resource-based policies
 
@@ -646,16 +655,137 @@ permission; one whose principals do not name the subject is recorded as `princip
 unmet authentication requirement on it included. A statement that names principals in a policy attached any other way
 (one from the policy store, or supplied through `withPolicies()`) is recorded the same way and never allows. The tenant
 stage runs first, so a resource of a tenant outside the subject's scope is still denied as `tenant_scope` before any
-policy is read: a resource policy never allows across tenants. When a subject is admitted to such a resource through a
-platform-wide permission, and the check runs at platform scope, a deny attached to the resource in its own tenant still
-applies: the resource's owner can lock it against everyone, a support user with a platform-wide grant included. That
-tenant's resource-policy allows do not reach the subject there. `withPolicies()` bypasses the resource's policies with
-the rest; give a supplied policy a resource with `Policy::withResource('post:42')` to have it evaluated as one.
+policy is read: a resource policy never allows across tenants, and the subject's permission boundaries are weighed
+before any allow, so they cap a resource policy's allow as they cap every other. When a subject is admitted to such a
+resource through a platform-wide permission, and the check runs at platform scope, a deny attached to the resource in
+its own tenant still applies: the resource's owner can lock it against everyone, a support user with a platform-wide
+grant included. That tenant's resource-policy allows do not reach the subject there. `withPolicies()` bypasses the
+resource's policies with the rest; give a supplied policy a resource with `Policy::withResource('post:42')` to have it
+evaluated as one.
 
 The decision, the trace and `explain()` name a resource policy's statements as they name any other, with the resource
 the policy is attached to: `post-42-sharing[<its key>]#0 sid="reviewers-read" on "post:42"`. `authorization:why-can`
 names its resource as an opaque identifier, so it reads no resource policies; explain a check on the model or the pair
 to see them.
+
+### Permission boundaries
+
+A permission boundary caps what a principal or an identity may do, whatever its grants allow. It is a managed policy
+set on the grantee through `BoundaryService`: a check about the grantee passes only what the boundary's allow
+statements allow, conditions included, and the boundary's deny statements deny as any other deny does. A boundary
+grants nothing: a check it lets through still needs an allow statement or a permission held.
+
+```php
+use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Services\BoundaryService;
+
+$supportCap = Policy::create([
+    'name'     => 'support-read-only',
+    'document' => [
+        'statements' => [
+            ['sid' => 'read', 'effect' => 'allow', 'actions' => ['posts:read', 'comments:read']],
+            ['sid' => 'no-exports', 'effect' => 'deny', 'actions' => ['posts:export']],
+        ],
+    ],
+]);
+
+$boundaries = app(BoundaryService::class);
+
+$boundaries->set($user, $supportCap, actor: $admin);                // GrantOutcome::GRANTED, platform-wide
+$boundaries->set($user, $tenantCap, tenant: $organisation);         // GRANTED, in the organisation and below it
+$boundaries->set($user, $stricterCap, tenant: $organisation);       // REPLACED: one boundary per scope
+$boundaries->set($user, $stricterCap, $organisation, false);        // REACH_CHANGED: the organisation alone
+$boundaries->remove($user, tenant: $organisation, actor: $admin);   // true: it had one there
+
+$user->givePermission('posts:update');
+
+Authorization::for($user)->can('posts:update', $post); // false: the boundary does not allow it
+Authorization::for($user)->can('posts:read', $post);   // false: the boundary allows it, but nothing grants it
+```
+
+**Setting one.** `set($grantee, $policy, $tenant, $includeSubtree, $actor)` takes a saved model or a reference with a
+type and a key as the grantee, and a stored managed policy. A grantee has at most one boundary per scope, so setting
+another where it has one replaces it (`GrantOutcome::REPLACED`), setting the same one again changes nothing and returns
+`UNCHANGED`, and setting it with the other reach returns `REACH_CHANGED`. The scope works as a grant's does: a policy a
+tenant owns is set in that tenant, or a tenant below it that the call names, and naming any other is refused with
+`GrantScopeMismatchException`; a platform policy is set in the tenant named, else platform-wide. A boundary in a tenant
+reaches the tenants below it unless `includeSubtree` is false. Boundaries have no application: one holds in every
+application. `remove($grantee, $tenant, $actor)` removes the grantee's boundary in the tenant named, else its
+platform-wide one, and returns whether it had one there. A role is refused with `BoundaryException`, since a boundary
+caps a principal or an identity and a role's holders never read it, and so is an inline policy; a policy whose allows
+name `principals` is refused with `ResourcePolicyException`, a policy whose row is gone with
+`InvalidGrantTargetException`, and a grantee that is unsaved or has no key with `InvalidGranteeException`, each before
+anything is written.
+
+**Which apply.** A check reads the boundaries of the subject's principal and, when it is a separate model, of its
+identity, that hold in the tenant the check is decided in: the platform-wide one, the tenant's own, and the one of each
+tenant above it that reaches down, exactly as grants reach. A tenant-owned resource the tenant stage admits is decided
+in its own tenant, so that tenant's boundaries apply; a check that falls back to platform scope reads the platform-wide
+ones. With no tenant, only the platform-wide boundaries apply, and with none at all nothing is capped.
+
+**Intersection.** Every boundary that applies must allow the check: a tenant's boundary never replaces the
+platform-wide one, and the principal's never replaces its identity's. A check passes only what each of them allows, so
+setting a boundary in a tenant can only narrow what the grantee may do there. A boundary with no allow statement that
+covers the check denies it as `boundary`.
+
+**What they cap.** Boundaries are weighed after every deny and before any allow, so they cap every allow source alike:
+a permission held directly or through a role, an allow in the grantee's own or its roles' policies, a resource policy's
+allow naming the subject, and a platform-wide permission that admitted a resource of another tenant. A boundary that
+does not allow the check denies it as `boundary` at the `boundary` stage; a boundary statement that cannot be evaluated
+denies it as `invalid_policy` there, and one whose document cannot be read denies every check about the grantee as
+`invalid_policy`, so a broken boundary never lifts the cap. An allow in a boundary whose authentication requirement is
+unmet does not allow the check, and the denial is `boundary`, never `insufficient_authentication`: a step-up never gets
+past a boundary. `withPolicies()` replaces the check's policies alone, so the subject's boundaries and permissions
+still apply. `hasPermission()` and `hasRole()` report what is granted, not what a boundary lets through; decide with
+`can()`, `check()` or the Gate.
+
+**Lifecycle.** Setting or removing a boundary dispatches `Identity\BoundarySet` (carrying the policy it replaced as
+`previous`, when it replaced one) or `Identity\BoundaryRemoved` once the call commits, only when it changed something,
+with the grantee, the policy, its name, the scope and the actor. Both implement `IdentityEvent`, and the change takes
+effect on the next check in every worker, as a grant's does. Deleting the grantee removes its boundaries, each reported
+as removed, and `authorization:prune` removes those of a grantee deleted without its model events. A policy in use as a
+boundary cannot be deleted: the delete is refused with `BoundaryException`, whose `getGrantees()` lists every grantee it
+bounds, until each boundary is removed, and the table's foreign key refuses a delete made past the model. Rewriting a
+boundary's document so that an allow names `principals` is refused with `ResourcePolicyException`. A boundary's
+statements are named in the decision, the trace and `explain()` as any policy's are, at the `deny` stage for its denies
+and the `boundary` stage for its allows.
+
+The boundaries are read in one query, apart from the policies, so a custom `PolicyResolver` never drops them, and are
+cached with the rest of the resolution: once warm, a check reads none.
+
+### How a check is decided
+
+`Authorization::check()` is the one decision behind `can()`, `authorize()`, `explain()`, the Gate, the middleware and
+the Blade directives. It runs these stages in order, and the first that decides ends it; no allow is weighed before
+every deny and every cap has run:
+
+| Stage       | What it weighs                                                                                                    | Denies as                                                     |
+|-------------|-------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------|
+| `subject`   | Whether there is a subject, and whether it and its identity are active                                            | `subject_unresolved`, `subject_inactive`                      |
+| `resource`  | Whether the resource argument can be identified                                                                   | `resource_unresolved`                                         |
+| `tenant`    | Whether the resource's tenant is within the check's, or a platform-wide grant of the permission admits it         | `tenant_scope`                                                |
+| `deny`      | Every deny of every source: the subject's, its identity's, their roles', the resource's and the boundaries'       | `explicit_deny`, `invalid_policy`                             |
+| `guardrail` | Guardrails on the tenant and the platform (none yet: the stage caps nothing)                                      |                                                               |
+| `boundary`  | Every permission boundary of the principal and of its identity that applies must allow the check                  | `boundary`, `invalid_policy`                                  |
+| `session`   | The session's caps, such as a credential's scopes (none yet: the stage caps nothing)                              |                                                               |
+| `allow`     | Every allow statement that applies to the subject, a resource policy's naming it included, then a permission held | `invalid_policy`                                              |
+| `implicit`  | Nothing allowed                                                                                                   | `insufficient_authentication`, `condition_failed`, `no_match` |
+
+Within each stage, the policies are assessed in a fixed order (name, stored key, resource, then document) and each
+statement by its position, so the decision and its trace never depend on the order the policies were read in. The
+decision records the stage that decided it and every step it took: each statement assessed, a cap stage that capped
+nothing as `uncapped`, and the permission step, which is asked only when no allow statement matched and none was
+invalid:
+
+```text
+DENY (boundary: a permission boundary does not allow it) at the boundary stage.
+  [deny] support-read-only[<key>]#1 sid="no-exports": not_applicable
+  [guardrail] guardrails: uncapped
+  [boundary] support-read-only[<key>]#0 sid="read": not_applicable
+```
+
+The full contract, and why a deny and a cap always win, is in [Evaluation order and deny
+precedence](docs/design/evaluation-order-and-deny-precedence.md).
 
 ### Writing policies
 
@@ -1087,15 +1217,15 @@ authenticated. Your checker should still confirm the proofs it finds belong to `
 
 #### The decision and the exception
 
-A check is denied as `insufficient_authentication` when no deny applies, no invalid policy blocks it, nothing else
-allows it (no other allow statement and no permission held), and at least one allow statement names the action and the
-resource with every other condition holding and only its requirement unmet. It ranks above `condition_failed`, and
-deny precedence always wins. A requirement that cannot be checked is undecidable, not unmet, so its statement is no
-candidate and, alone, leaves the check `condition_failed`. The decision's
-`requirements` lists each such statement's requirement with its unmet parts, as an `UnmetRequirement`: they are
-alternatives, any one of which met would allow the check. On a deny statement an unmet requirement is a test that does
-not hold, so the deny does not apply, while one that cannot be checked applies it, as any undecidable test does. The
-trace records the requirement as the key `authentication`, with whether it held, and never a proof.
+A check is denied as `insufficient_authentication` when no deny applies, no invalid policy blocks it, every permission
+boundary allows it, nothing else allows it (no other allow statement and no permission held), and at least one allow
+statement names the action and the resource with every other condition holding and only its requirement unmet. It ranks
+above `condition_failed`, and deny precedence always wins. A requirement that cannot be checked is undecidable, not
+unmet, so its statement is no candidate and, alone, leaves the check `condition_failed`. The decision's `requirements`
+lists each such statement's requirement with its unmet parts, as an `UnmetRequirement`: they are alternatives, any one
+of which met would allow the check. On a deny statement an unmet requirement is a test that does not hold, so the deny
+does not apply, while one that cannot be checked applies it, as any undecidable test does. The trace records the
+requirement as the key `authentication`, with whether it held, and never a proof.
 
 `authorize()`, and the `permission:` and `authorize:` middleware, throw
 `SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException` for it. It extends Laravel's
@@ -1158,8 +1288,8 @@ saved, with a reason that points at `authentication_requirement`.
 ### Listening to events
 
 Every event the package dispatches implements `SineMacula\Laravel\Authorization\Contracts\AuthorizationEvent`, so one
-listener, or one audit mapper registration, covers them all. The grant events also implement `IdentityEvent` and name
-their `grantee`:
+listener, or one audit mapper registration, covers them all. The grant and boundary events also implement
+`IdentityEvent` and name their `grantee`:
 
 ```php
 use Illuminate\Support\Facades\Event;
@@ -1178,13 +1308,14 @@ Event::listen(static function (RoleDeleted $event): void {
 });
 ```
 
-The change events (roles, permissions and policies created, updated and deleted; permissions granted to and revoked
-from a role; roles, permissions and policies granted to, revoked from and re-dated on a grantee; policies attached to
-and detached from a resource, `Resource\PolicyAttached` and `Resource\PolicyDetached`; and `SystemOverrideUsed`) are
-`final readonly` snapshots of plain values: a record is a `Reference`, its morph class under your morph map and its key
-as a string, never a model, alongside names, the scope, expiries and times. An update carries the fields it changed,
-before and after. A policy event carries its document's version and SHA-256 digest, never the document. A delete lists
-every grantee that held the role, permission or policy, so the evidence says who lost access.
+The change events (roles, permissions and policies created, updated and deleted; permissions granted to and revoked from
+a role; roles, permissions and policies granted to, revoked from and re-dated on a grantee; policies attached to and
+detached from a resource, `Resource\PolicyAttached` and `Resource\PolicyDetached`; permission boundaries set and
+removed, `Identity\BoundarySet` and `Identity\BoundaryRemoved`; and `SystemOverrideUsed`) are `final readonly` snapshots
+of plain values: a record is a `Reference`, its morph class under your morph map and its key as a string, never a model,
+alongside names, the scope, expiries and times. An update carries the fields it changed, before and after. A policy
+event carries its document's version and SHA-256 digest, never the document. A delete lists every grantee that held the
+role, permission or policy, so the evidence says who lost access.
 
 Each is dispatched only once its write commits on the package's connection: inside your own transaction it waits for
 the outermost commit, and a transaction that rolls back dispatches nothing. Every event of one service call carries
@@ -1292,13 +1423,14 @@ grant rows record; it must name a row that exists, and without it they record no
 `authorization:prune` removes the grants that no longer count: expired grants, reported as `RoleExpired`,
 `PermissionExpired` or `PolicyExpired` with no actor, a role's expired grants of permissions, reported as
 `Role\PermissionExpired`, the grants of a grantee deleted without its model events, such as by a raw query, reported as
-revoked, then the inline policies of such a grantee, reported as deleted, and last the resource policy attachments of a
-record that no longer exists, reported as `Resource\PolicyDetached`. The record's morph type is resolved to its model
-class as a grantee's is; a type that names no model class is reported and its records' attachments are left, and a whole
-type's attachments are never removed. A soft-deleted grantee keeps its grants and its inline policies, and a
-soft-deleted record its attachments. Expired grants stop counting at their expiry with or without it, so pruning keeps
-the tables small rather than making checks correct. Like `model:prune`, it takes `--pretend`, which counts exactly what
-a run would remove, and `--chunk`, and is scheduled like any command:
+revoked, with its permission boundaries, reported as `Identity\BoundaryRemoved`, then the inline policies of such a
+grantee, reported as deleted, and last the resource policy attachments of a record that no longer exists, reported as
+`Resource\PolicyDetached`. The record's morph type is resolved to its model class as a grantee's is; a type that names
+no model class is reported and its records' attachments are left, and a whole type's attachments are never removed. A
+soft-deleted grantee keeps its grants, its boundaries and its inline policies, and a soft-deleted record its
+attachments. Expired grants stop counting at their expiry with or without it, so pruning keeps the tables small rather
+than making checks correct. Like `model:prune`, it takes `--pretend`, which counts exactly what a run would remove, and
+`--chunk`, and is scheduled like any command:
 
 ```php
 Schedule::command('authorization:prune')->daily();
@@ -1324,7 +1456,7 @@ The contracts behind the evaluator, for maintainers and reviewers, are in [docs/
 
 | Note                                                                                        | Covers                                                         |
 |---------------------------------------------------------------------------------------------|----------------------------------------------------------------|
-| [Evaluation order and deny precedence](docs/design/evaluation-order-and-deny-precedence.md) | The staged decision order, policy sources, and why a deny wins |
+| [Evaluation order and deny precedence](docs/design/evaluation-order-and-deny-precedence.md) | The stages, policy sources and boundaries, and why a deny wins |
 | [Wildcard and condition semantics](docs/design/wildcard-and-condition-semantics.md)         | Pattern matching, undecidable tests and condition operators    |
 | [Polymorphic identity pivots](docs/design/polymorphic-identity-pivots.md)                   | Why grants work for integer, UUID and ULID keys                |
 | [Subject resolver contract](docs/design/subject-resolver-contract.md)                       | The default resolver and how an application binds its own      |

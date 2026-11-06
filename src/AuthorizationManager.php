@@ -38,10 +38,12 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 /**
  * Authorization manager — the facade-facing entry point.
  *
- * Coordinates subject resolution, policy gathering, evaluation, and RBAC
- * fallback into a single API. The manager is deliberately small and delegates
- * the actual statement walking to the policy evaluator; every stage returns a
- * decision, with the reason code and trace recorded for audit consumers.
+ * Coordinates subject resolution, the gathering of policies, boundaries and
+ * permissions, and evaluation into a single API. The manager admits the check
+ * (the subject, resource and tenant stages) and gathers every source; the
+ * policy evaluator runs the rest of the stages in AUTHZ-7.1's order, the
+ * denies, the caps, the allows and the implicit deny, each recorded in the
+ * decision's trace for audit consumers.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -304,6 +306,8 @@ final class AuthorizationManager
      * bypassing the principal's own attached policies, any configured policy
      * store and the policies attached to the resource. A supplied policy given
      * a resource (`Policy::withResource()`) is evaluated as a resource policy.
+     * The subject's permission boundaries and permissions still count, so an
+     * override never lifts a cap.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
      * @return self
@@ -369,11 +373,12 @@ final class AuthorizationManager
     }
 
     /**
-     * Decide the action for the supplied subject, stage by stage (AUTHZ-7.1): a
-     * subject that is missing, or inactive (it or its identity), is denied
-     * before anything else is read; a resource that cannot be identified is
-     * denied next; a tenant-owned resource is decided in its tenant's scope, or
-     * denied as out of scope (see `ResourceScope`); then the grants decide.
+     * Decide the action for the supplied subject, stage by stage (AUTHZ-7.1),
+     * admitting the check first: a subject that is missing, or inactive (it or
+     * its identity), is denied before anything else is read; a resource that
+     * cannot be identified is denied next; a tenant-owned resource is decided
+     * in its tenant's scope, or denied as out of scope (see `ResourceScope`);
+     * then the grants decide.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @param  string  $action
@@ -397,17 +402,26 @@ final class AuthorizationManager
     }
 
     /**
-     * Decide the action from the subject's grants: its policies' statements,
-     * and its identity's, and those of the policies attached to the resource
-     * and its type, by their deny and allow stages, then, when they allow
-     * nothing, a permission the subject holds. A resource policy's denies apply
-     * to everyone, and its allows to the subjects their `principals` name, with
-     * no permission held; by now the tenant stage has admitted the resource, so
-     * a resource policy never allows across tenants, and a deny attached to the
-     * resource in its own tenant applies even once the check falls back to
-     * platform scope. A policy document that cannot be read denies the check as
-     * an invalid policy. The subject's identity, when it is another model,
-     * contributes its policies and its grants (see `SubjectGrants`).
+     * Decide the admitted action from every source the subject's grants and the
+     * resource give, in the evaluator's stages: every explicit deny, from the
+     * subject's policies, its identity's, those attached to the resource and
+     * its type, and its boundaries; then the caps, the boundaries of the
+     * subject and its identity among them; then every allow, a policy's, a
+     * resource policy's naming the subject, and a permission the subject holds;
+     * then the implicit deny. No allow is weighed before every deny and cap, so
+     * a boundary caps a resource policy's allow and a permission held as it
+     * caps a policy's.
+     *
+     * A resource policy's denies apply to everyone, and its allows to the
+     * subjects their `principals` name, with no permission held; by now the
+     * tenant stage has admitted the resource, so a resource policy never allows
+     * across tenants, and a deny attached to the resource in its own tenant
+     * applies even once the check falls back to platform scope. A policy or
+     * boundary document that cannot be read denies the check as an invalid
+     * policy. The subject's identity, when it is another model, contributes its
+     * policies, its grants and its boundaries (see `SubjectGrants`). A
+     * `withPolicies()` override replaces the policies alone: the subject's
+     * boundaries and permissions still count.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
@@ -418,7 +432,8 @@ final class AuthorizationManager
     private function decideGrants(Subject $subject, string $action, ?ResourceReference $resource, array $context): Decision
     {
         try {
-            $policies = $this->gatherPolicies($subject, $resource);
+            $policies   = $this->gatherPolicies($subject, $resource);
+            $boundaries = SubjectGrants::boundaries($subject);
         } catch (InvalidPolicyDocumentException) {
             return Decision::deny(DecisionReason::INVALID_POLICY, DecisionStage::DENY);
         }
@@ -430,9 +445,10 @@ final class AuthorizationManager
         // built-in keys.
         $checkContext = $this->contexts?->make($context, $subject, $resource)
             ?? new CheckContext([CheckContextFactory::INPUT => $context], (new AttributeNamespaces)->builders($subject, $resource), null, new PrincipalSelectors($subject));
-        $decision = $this->evaluator->evaluate($policies, $action, $resource?->identifier, $checkContext);
 
-        return $decision->stage === DecisionStage::IMPLICIT ? $decision->withPermission(SubjectGrants::holdsPermission($subject, $action)) : $decision;
+        $permission = static fn (): bool => SubjectGrants::holdsPermission($subject, $action);
+
+        return $this->evaluator->evaluate($policies, $action, $resource?->identifier, $checkContext, $boundaries, $permission);
     }
 
     /**

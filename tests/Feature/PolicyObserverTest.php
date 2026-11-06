@@ -9,6 +9,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Events\Policy\Created as PolicyCreated;
 use SineMacula\Laravel\Authorization\Events\Policy\Deleted as PolicyDeleted;
 use SineMacula\Laravel\Authorization\Events\Policy\Updated as PolicyUpdated;
+use SineMacula\Laravel\Authorization\Exceptions\BoundaryException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPolicyOwnerException;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantColumnsException;
 use SineMacula\Laravel\Authorization\Exceptions\OwnerChangedException;
@@ -16,6 +17,7 @@ use SineMacula\Laravel\Authorization\Exceptions\ResourcePolicyException;
 use SineMacula\Laravel\Authorization\Exceptions\SystemInlinePolicyException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
+use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Support\DocumentDigest;
@@ -200,6 +202,56 @@ final class PolicyObserverTest extends TestCase
         self::assertInstanceOf(ResourcePolicyException::class, self::refusalOf(static fn () => $sharing->update(['document' => $unnamed])));
         self::assertNull(Policy::query()->findOrFail($own->id)->document['statements'][0]['principals'] ?? null);
         self::assertSame(['user:1'], Policy::query()->findOrFail($sharing->id)->document['statements'][0]['principals'] ?? null);
+    }
+
+    /**
+     * Deleting a policy in use as a permission boundary is refused before
+     * anything is read or reported; once the boundary is removed, it is
+     * deleted.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testDeletingAPolicyInUseAsABoundaryIsRefused(): void
+    {
+        $policy     = Policy::query()->create(['name' => 'cap', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
+        $boundaries = $this->app?->make(BoundaryService::class);
+
+        self::assertNotNull($boundaries);
+
+        $boundaries->set(new Reference('user', '1'), $policy);
+
+        Event::fake([PolicyDeleted::class]);
+
+        self::assertInstanceOf(BoundaryException::class, self::refusalOf(static fn () => $policy->delete()));
+        self::assertNotNull(Policy::query()->find($policy->id));
+        Event::assertNotDispatched(PolicyDeleted::class);
+
+        $boundaries->remove(new Reference('user', '1'));
+
+        self::assertTrue($policy->delete());
+        Event::assertDispatched(PolicyDeleted::class);
+    }
+
+    /**
+     * A rewrite that names principals is refused while the policy is a
+     * grantee's boundary.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARewriteNamingPrincipalsIsRefusedForABoundary(): void
+    {
+        $policy = Policy::query()->create(['name' => 'cap', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
+
+        $this->app?->make(BoundaryService::class)->set(new Reference('user', '1'), $policy);
+
+        $named = ['statements' => [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']]]];
+
+        self::assertInstanceOf(ResourcePolicyException::class, self::refusalOf(static fn () => $policy->update(['document' => $named])));
+        self::assertNull(Policy::query()->findOrFail($policy->id)->document['statements'][0]['principals'] ?? null);
     }
 
     /**

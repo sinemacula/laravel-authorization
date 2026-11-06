@@ -9,8 +9,8 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 
 /**
  * One step of a decision: the stage it belongs to, what it found, the statement
- * it assessed (none for a permission), and the condition keys it tested with
- * whether each held.
+ * it assessed (none for a permission, or for a cap stage that found nothing to
+ * cap by), and the condition keys it tested with whether each held.
  *
  * Never a value: only key names and results reach the trace (AUTHZ-8.8).
  *
@@ -35,7 +35,7 @@ final readonly class TraceEntry
         /** What the step found. */
         public TraceOutcome $outcome,
 
-        /** The statement assessed; null for a permission. */
+        /** The statement assessed; null for a permission, or a cap stage that capped nothing. */
         public ?StatementReference $statement = null,
 
         /** Each condition key tested, with whether it held. */
@@ -43,13 +43,21 @@ final readonly class TraceEntry
     ) {}
 
     /**
-     * Return the entry as one line of an explanation.
+     * Return the entry as one line of an explanation: the statement it
+     * assessed, else what its stage weighs, the permission at the allow stage
+     * and the caps at a cap stage.
      *
      * @return string
      */
     public function toString(): string
     {
-        $subject    = $this->statement?->toString() ?? 'permission';
+        $subject = $this->statement?->toString() ?? match ($this->stage) {
+            DecisionStage::GUARDRAIL => 'guardrails',
+            DecisionStage::BOUNDARY  => 'boundaries',
+            DecisionStage::SESSION   => 'session caps',
+            default                  => 'permission',
+        };
+
         $conditions = [];
 
         foreach ($this->conditions as $key => $holds) {

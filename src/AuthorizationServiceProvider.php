@@ -47,6 +47,7 @@ use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\ApplicationAccess;
+use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
@@ -473,14 +474,24 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
     /**
      * Bind the management services that own every write of a role, permission,
-     * policy, grant or resource policy attachment. They hold no state, so each
-     * is a singleton.
+     * policy, grant, resource policy attachment or permission boundary. They
+     * hold no state, so each is a singleton.
      *
      * @return void
      */
     private function registerManagementServices(): void
     {
-        foreach ([RoleService::class, PermissionService::class, PolicyService::class, GrantService::class, ResourcePolicyService::class, ApplicationAccess::class] as $service) {
+        $services = [
+            RoleService::class,
+            PermissionService::class,
+            PolicyService::class,
+            GrantService::class,
+            ResourcePolicyService::class,
+            BoundaryService::class,
+            ApplicationAccess::class,
+        ];
+
+        foreach ($services as $service) {
             $this->app->singleton($service);
         }
     }

@@ -69,7 +69,8 @@ final class AuthorizationAssertionsTest extends TestCase
         $this->expectException(AssertionFailedError::class);
         $this->expectExceptionMessage(
             "Failed asserting that the principal can perform 'docs:view'.\nDecision:\n"
-            . "DENY (no_match: no statement or permission names it) at the implicit stage.\n  [allow] permission: not_held",
+            . "DENY (no_match: no statement or permission names it) at the implicit stage.\n"
+            . "  [guardrail] guardrails: uncapped\n  [boundary] boundaries: uncapped\n  [session] session caps: uncapped\n  [allow] permission: not_held",
         );
 
         $this->assertCan($user, 'docs:view');
@@ -101,7 +102,10 @@ final class AuthorizationAssertionsTest extends TestCase
         $user->givePermission('docs:delete');
 
         $this->expectException(AssertionFailedError::class);
-        $this->expectExceptionMessage("Failed asserting that the principal cannot perform 'docs:delete'.\nDecision:\nALLOW at the allow stage.\n  [allow] permission: held");
+        $this->expectExceptionMessage(
+            "Failed asserting that the principal cannot perform 'docs:delete'.\nDecision:\nALLOW at the allow stage.\n"
+            . "  [guardrail] guardrails: uncapped\n  [boundary] boundaries: uncapped\n  [session] session caps: uncapped\n  [allow] permission: held",
+        );
 
         $this->assertCannot($user, 'docs:delete');
     }

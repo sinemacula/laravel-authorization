@@ -5,8 +5,9 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Evaluation\Enums;
 
 /**
- * What one step of a decision found: a statement's assessment, or whether the
- * subject holds the permission named by the action.
+ * What one step of a decision found: a statement's assessment, whether the
+ * subject holds the permission named by the action, or that a cap stage found
+ * nothing to cap the check by.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,4 +37,7 @@ enum TraceOutcome: string
 
     /** The subject does not hold the permission the action names. */
     case NOT_HELD = 'not_held';
+
+    /** No guardrail, boundary or session cap applies at the stage, so it caps nothing. */
+    case UNCAPPED = 'uncapped';
 }

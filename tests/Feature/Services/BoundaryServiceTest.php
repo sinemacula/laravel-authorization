@@ -1,0 +1,430 @@
+<?php
+
+declare(strict_types = 1);
+
+namespace Tests\Feature\Services;
+
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Event;
+use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
+use SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved;
+use SineMacula\Laravel\Authorization\Events\Identity\BoundarySet;
+use SineMacula\Laravel\Authorization\Exceptions\BoundaryException;
+use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidGranteeException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
+use SineMacula\Laravel\Authorization\Exceptions\ResourcePolicyException;
+use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\BoundaryService;
+use SineMacula\Laravel\Authorization\Support\Operation;
+use SineMacula\Laravel\Authorization\Support\OperationScope;
+use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\ComparesReferences;
+use Tests\Concerns\ReadsDispatchedEvents;
+use Tests\Feature\Stubs\StubIdentity;
+use Tests\TestCase;
+
+/**
+ * Feature tests for `BoundaryService`, which sets, replaces and removes the
+ * permission boundaries of principals and identities.
+ *
+ * @author      Ben Carey <bdmc@sinemacula.co.uk>
+ * @copyright   2026 Sine Macula Limited
+ *
+ * @internal
+ *
+ * @SuppressWarnings("php:S1192")
+ */
+#[CoversClass(BoundaryService::class)]
+final class BoundaryServiceTest extends TestCase
+{
+    use ActsAsTenant, ComparesReferences, ReadsDispatchedEvents;
+
+    /**
+     * The service is bound once in the container.
+     *
+     * @return void
+     */
+    public function testIsBoundAsASingleton(): void
+    {
+        self::assertInstanceOf(BoundaryService::class, self::service());
+        self::assertSame(self::service(), self::service());
+    }
+
+    /**
+     * A boundary is set platform-wide by default, its row recording the actor,
+     * and reported once with the operation, the grantee, the policy and the
+     * scope, naming no policy replaced.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testSetsABoundary(): void
+    {
+        Event::fake([BoundarySet::class]);
+
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $policy = self::cap('read-only');
+        $actor  = new Reference('admin', '1');
+
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($user, $policy, actor: $actor));
+
+        $row = (array) DB::table('authorizable_boundaries')->sole();
+
+        self::assertSame([$user->getMorphClass(), 'user-1', null, null, 'admin', '1'], [
+            $row['authorizable_type'], $row['authorizable_id'], $row['tenant_type'], $row['tenant_id'], $row['granted_by_type'], $row['granted_by_id'],
+        ]);
+        self::assertSame($policy->id, $row['policy_id']);
+        self::assertTrue((bool) $row['include_subtree']);
+
+        $events = self::dispatchedEvents(BoundarySet::class);
+
+        self::assertCount(1, $events);
+        self::assertTrue(self::refersTo($events[0]->grantee, $user));
+        self::assertTrue(self::refersTo($events[0]->policy, $policy));
+        self::assertTrue(self::refersTo($events[0]->operation->actor, $actor));
+        self::assertSame('read-only', $events[0]->name);
+        self::assertNull($events[0]->scope->tenant);
+        self::assertNull($events[0]->scope->application);
+        self::assertTrue($events[0]->scope->includeSubtree);
+        self::assertNull($events[0]->previous);
+    }
+
+    /**
+     * Setting the boundary the grantee has in the scope changes nothing and
+     * reports nothing; another reach changes the reach alone, and another
+     * policy replaces it, each reported, the replacement naming the policy it
+     * replaced; the grantee keeps one boundary in the scope throughout.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testSettingAgainChangesTheReachOrReplacesTheBoundary(): void
+    {
+        $tenant = self::createTenant('tenant-a');
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $first  = self::cap('first');
+        $second = self::cap('second');
+
+        self::service()->set($user, $first, $tenant);
+
+        Event::fake([BoundarySet::class]);
+
+        self::assertSame(GrantOutcome::UNCHANGED, self::service()->set($user, $first, $tenant));
+        self::assertSame([], self::dispatchedEvents(BoundarySet::class));
+        self::assertSame(GrantOutcome::REACH_CHANGED, self::service()->set($user, $first, $tenant, false));
+        self::assertFalse((bool) DB::table('authorizable_boundaries')->value('include_subtree'));
+        self::assertSame(GrantOutcome::REPLACED, self::service()->set($user, $second, $tenant, false, new Reference('admin', '2')));
+
+        $row = (array) DB::table('authorizable_boundaries')->sole();
+
+        self::assertSame($second->id, $row['policy_id']);
+        self::assertSame('2', $row['granted_by_id']);
+
+        $events = self::dispatchedEvents(BoundarySet::class);
+
+        self::assertCount(2, $events);
+        self::assertNull($events[0]->previous);
+        self::assertFalse($events[0]->scope->includeSubtree);
+        self::assertTrue(self::refersTo($events[0]->scope->tenant, $tenant));
+        self::assertTrue(self::refersTo($events[1]->policy, $second));
+        self::assertTrue(self::refersTo($events[1]->previous, $first));
+        self::assertSame('second', $events[1]->name);
+    }
+
+    /**
+     * A grantee has one boundary per scope: one platform-wide and one in a
+     * tenant are two, and a platform-wide one always reaches below.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testSetsOneBoundaryPerScope(): void
+    {
+        $tenant = self::createTenant('tenant-a');
+        $user   = StubIdentity::create(['id' => 'user-1']);
+
+        self::service()->set($user, self::cap('platform'), includeSubtree: false);
+        self::service()->set($user, self::cap('tenant'), $tenant);
+        self::service()->set(StubIdentity::create(['id' => 'user-2']), self::cap('other'));
+
+        self::assertSame(3, DB::table('authorizable_boundaries')->count());
+        self::assertTrue((bool) DB::table('authorizable_boundaries')->whereNull('tenant_id')->where('authorizable_id', 'user-1')->value('include_subtree'));
+    }
+
+    /**
+     * A boundary is removed in the scope named, reported with the policy it was
+     * and the reach it had; removing it elsewhere, or again, removes nothing
+     * and reports nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRemovesInTheScope(): void
+    {
+        $tenant = self::createTenant('tenant-a');
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $policy = self::cap('tenant-cap');
+
+        self::service()->set($user, $policy, $tenant, false);
+
+        Event::fake([BoundaryRemoved::class]);
+
+        self::assertFalse(self::service()->remove($user));
+        self::assertTrue(self::service()->remove($user, $tenant, new Reference('admin', '1')));
+        self::assertFalse(self::service()->remove($user, $tenant));
+        self::assertSame(0, DB::table('authorizable_boundaries')->count());
+
+        $events = self::dispatchedEvents(BoundaryRemoved::class);
+
+        self::assertCount(1, $events);
+        self::assertTrue(self::refersTo($events[0]->grantee, $user));
+        self::assertTrue(self::refersTo($events[0]->policy, $policy));
+        self::assertTrue(self::refersTo($events[0]->operation->actor, new Reference('admin', '1')));
+        self::assertSame('tenant-cap', $events[0]->name);
+        self::assertTrue(self::refersTo($events[0]->scope->tenant, $tenant));
+        self::assertFalse($events[0]->scope->includeSubtree);
+    }
+
+    /**
+     * A grantee given by reference has its boundary set and removed as a
+     * model's.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTakesAGranteeByReference(): void
+    {
+        $reference = new Reference('member', 'm-1');
+
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($reference, self::cap('cap')));
+        self::assertSame('member', DB::table('authorizable_boundaries')->value('authorizable_type'));
+        self::assertTrue(self::service()->remove($reference));
+    }
+
+    /**
+     * Removing every boundary of a grantee inside an operation removes each, in
+     * every scope, and returns an event for each, dispatching none itself.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRemovesEveryBoundaryOfAGrantee(): void
+    {
+        $tenant = self::createTenant('tenant-a');
+        $user   = StubIdentity::create(['id' => 'user-1']);
+
+        self::service()->set($user, self::cap('platform'));
+        self::service()->set($user, self::cap('tenant'), $tenant, false);
+        self::service()->set(StubIdentity::create(['id' => 'user-2']), self::cap('other'));
+
+        Event::fake([BoundaryRemoved::class]);
+
+        $events = OperationScope::run(Operation::begin(), static fn (Operation $operation): array => BoundaryService::removeEverywhere(Reference::of($user), $operation));
+        $scopes = \array_map(static fn (BoundaryRemoved $event): array => [$event->name, $event->scope->tenant?->id, $event->scope->includeSubtree], $events);
+
+        \sort($scopes);
+
+        self::assertSame([['platform', null, true], ['tenant', 'tenant-a', false]], $scopes);
+        self::assertSame([], self::dispatchedEvents(BoundaryRemoved::class));
+        self::assertSame(['user-2'], DB::table('authorizable_boundaries')->pluck('authorizable_id')->all());
+    }
+
+    /**
+     * A policy one tenant owns is set as a boundary in that tenant by default,
+     * and refused in any other.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATenantsPolicyIsSetOnlyInItsTenant(): void
+    {
+        [$tenantA, $tenantB] = \array_map(self::createTenant(...), ['tenant-a', 'tenant-b']);
+
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $policy = self::cap('owned', ['tenant_type' => $tenantA->getMorphClass(), 'tenant_id' => 'tenant-a']);
+
+        self::service()->set($user, $policy);
+
+        self::assertSame('tenant-a', DB::table('authorizable_boundaries')->value('tenant_id'));
+
+        $this->expectException(GrantScopeMismatchException::class);
+
+        self::service()->set($user, $policy, $tenantB);
+    }
+
+    /**
+     * An inline policy, a policy naming principals, a policy whose row is gone
+     * and a role are each refused before anything is written.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRefusesWhatCannotBeABoundary(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $inline = $user->createInlinePolicy('mine', ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]);
+        $named  = self::policy('named', [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']]]);
+        $role   = Role::create(['name' => 'editor']);
+
+        $refusals = [
+            [static fn () => self::service()->set($user, $inline), BoundaryException::class, 'Inline policy \'mine\''],
+            [static fn () => self::service()->set($user, $named), ResourcePolicyException::class, 'Policy \'named\''],
+            [static fn () => self::service()->set($user, new Policy(['name' => 'unsaved'])), InvalidGrantTargetException::class, ''],
+            [static fn () => self::service()->set($role, self::cap('cap')), BoundaryException::class, "boundary of role '{$role->id}'"],
+        ];
+
+        foreach ($refusals as [$call, $class, $message]) {
+            try {
+                $call();
+                self::fail("{$class} was not thrown.");
+            } catch (\Throwable $exception) {
+                self::assertInstanceOf($class, $exception);
+                self::assertStringContainsString($message, $exception->getMessage());
+            }
+        }
+
+        self::assertSame(0, DB::table('authorizable_boundaries')->count());
+    }
+
+    /**
+     * A grantee that is not a saved model with a key, or a reference with a
+     * type and a key, is refused before anything is read.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRefusesAGranteeWithoutAKey(): void
+    {
+        foreach ([new StubIdentity(['id' => 'unsaved']), new Reference('member', '')] as $grantee) {
+            try {
+                self::service()->set($grantee, self::cap('cap-' . \spl_object_id($grantee)));
+                self::fail('The grantee was not refused.');
+            } catch (InvalidGranteeException) {
+                // Expected.
+            }
+        }
+
+        $this->expectException(InvalidGranteeException::class);
+
+        self::service()->remove(new Reference('', 'm-1'));
+    }
+
+    /**
+     * The boundary's events are dispatched once the enclosing transaction
+     * commits, and never when it rolls back.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testDispatchesOnlyOnceTheWriteCommits(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $policy = self::cap('cap');
+
+        Event::fake([BoundarySet::class, BoundaryRemoved::class]);
+
+        try {
+            DB::transaction(static function () use ($user, $policy): void {
+                self::service()->set($user, $policy);
+
+                self::assertSame([], self::dispatchedEvents(BoundarySet::class));
+
+                throw new \RuntimeException('roll back');
+            });
+        } catch (\RuntimeException) {
+            // Expected.
+        }
+
+        self::assertSame([], self::dispatchedEvents(BoundarySet::class));
+        self::assertSame(0, DB::table('authorizable_boundaries')->count());
+
+        DB::transaction(static function () use ($user, $policy): void {
+            self::service()->set($user, $policy);
+            self::service()->remove($user);
+
+            self::assertSame([], self::dispatchedEvents(BoundarySet::class));
+            self::assertSame([], self::dispatchedEvents(BoundaryRemoved::class));
+        });
+
+        self::assertCount(1, self::dispatchedEvents(BoundarySet::class));
+        self::assertCount(1, self::dispatchedEvents(BoundaryRemoved::class));
+        self::assertNotSame(self::dispatchedEvents(BoundarySet::class)[0]->operation->id, self::dispatchedEvents(BoundaryRemoved::class)[0]->operation->id);
+    }
+
+    /**
+     * A grantee deleted takes its boundaries with it, each reported, so their
+     * policies can be deleted.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGranteeDeletedTakesItsBoundaries(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $policy = self::cap('cap');
+
+        self::service()->set($user, $policy);
+
+        Event::fake([BoundaryRemoved::class]);
+
+        $user->delete();
+
+        self::assertSame(0, DB::table('authorizable_boundaries')->count());
+        self::assertCount(1, self::dispatchedEvents(BoundaryRemoved::class));
+        self::assertTrue($policy->delete());
+    }
+
+    /**
+     * Return the boundary service, as the container binds it.
+     *
+     * @return \SineMacula\Laravel\Authorization\Services\BoundaryService
+     */
+    private static function service(): BoundaryService
+    {
+        $service = BoundaryService::instance();
+
+        self::assertInstanceOf(BoundaryService::class, $service);
+
+        return $service;
+    }
+
+    /**
+     * Create a boundary policy allowing `posts:read`, with the attributes.
+     *
+     * @param  string  $name
+     * @param  array<string, mixed>  $attributes
+     * @return \SineMacula\Laravel\Authorization\Models\Policy
+     */
+    private static function cap(string $name, array $attributes = []): Policy
+    {
+        return self::policy($name, [['effect' => 'allow', 'actions' => ['posts:read']]], $attributes);
+    }
+
+    /**
+     * Create a policy of the statements, with the attributes.
+     *
+     * @param  string  $name
+     * @param  list<array<string, mixed>>  $statements
+     * @param  array<string, mixed>  $attributes
+     * @return \SineMacula\Laravel\Authorization\Models\Policy
+     */
+    private static function policy(string $name, array $statements, array $attributes = []): Policy
+    {
+        return Policy::create(['name' => $name, ...$attributes, 'document' => ['statements' => $statements]]);
+    }
+}

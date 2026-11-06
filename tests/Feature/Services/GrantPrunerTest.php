@@ -10,6 +10,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleExpired;
@@ -21,6 +22,7 @@ use SineMacula\Laravel\Authorization\Exceptions\SystemPolicyProtectedException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantPruner;
 use SineMacula\Laravel\Authorization\Services\PruneResult;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
@@ -32,9 +34,9 @@ use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
 /**
- * Feature tests for removing expired grants, the grants and inline policies of
- * grantees that no longer exist, and the resource policies of records that no
- * longer exist.
+ * Feature tests for removing expired grants, the grants, boundaries and inline
+ * policies of grantees that no longer exist, and the resource policies of
+ * records that no longer exist.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -475,6 +477,54 @@ final class GrantPrunerTest extends TestCase
             ResourcePolicyDetached::class,
             static fn (ResourcePolicyDetached $event): bool => [$event->resourceType, $event->resourceId, $event->operation->actor] === ['stub_identity', 'record-gone', null],
         );
+    }
+
+    /**
+     * The boundaries of a grantee that no longer exists, one whose only rows
+     * are boundaries included, are removed and reported in every scope, and
+     * pretending only counts them; a grantee that exists keeps its boundary,
+     * and the policy can be deleted once no boundary uses it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRemovesTheBoundariesOfGranteesThatAreGone(): void
+    {
+        $tenant     = StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'tenant-a']);
+        $policy     = Policy::create(['name' => 'read-only', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
+        $kept       = Policy::create(['name' => 'kept-cap', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]]]);
+        $gone       = StubIdentity::create(['id' => 'user-gone']);
+        $alive      = StubIdentity::create(['id' => 'user-kept']);
+        $boundaries = BoundaryService::instance();
+
+        self::assertInstanceOf(BoundaryService::class, $boundaries);
+
+        $boundaries->set($gone, $policy);
+        $boundaries->set($gone, $policy, $tenant);
+        $boundaries->set($alive, $kept);
+
+        DB::table('stub_identities')->where('id', 'user-gone')->delete();
+
+        Event::fake([BoundaryRemoved::class]);
+
+        $pretended = self::pruner()->prune(1000, true);
+
+        self::assertSame(2, $pretended->orphaned);
+        self::assertSame(3, DB::table('authorizable_boundaries')->count());
+        Event::assertNotDispatched(BoundaryRemoved::class);
+
+        $result = self::pruner()->prune(1000);
+
+        self::assertSame(2, $result->orphaned);
+        self::assertSame(['user-kept'], DB::table('authorizable_boundaries')->pluck('authorizable_id')->all());
+        Event::assertDispatchedTimes(BoundaryRemoved::class, 2);
+        Event::assertDispatched(
+            BoundaryRemoved::class,
+            static fn (BoundaryRemoved $event): bool => [$event->grantee->id, $event->name, $event->operation->actor] === ['user-gone', 'read-only', null],
+        );
+
+        self::assertTrue((bool) $policy->delete());
     }
 
     /**

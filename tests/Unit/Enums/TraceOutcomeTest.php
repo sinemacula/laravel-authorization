@@ -22,12 +22,13 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 final class TraceOutcomeTest extends TestCase
 {
     /**
-     * The enum defines exactly the six statement outcomes and the two
-     * permission outcomes, in declaration order.
+     * The enum defines exactly the six statement outcomes, the two permission
+     * outcomes and the outcome of a cap stage that caps nothing, in declaration
+     * order.
      *
      * @return void
      */
-    public function testExactlyEightCases(): void
+    public function testExactlyNineCases(): void
     {
         self::assertSame(
             [
@@ -39,6 +40,7 @@ final class TraceOutcomeTest extends TestCase
                 TraceOutcome::INVALID,
                 TraceOutcome::HELD,
                 TraceOutcome::NOT_HELD,
+                TraceOutcome::UNCAPPED,
             ],
             TraceOutcome::cases(),
         );
@@ -59,6 +61,7 @@ final class TraceOutcomeTest extends TestCase
         self::assertSame('invalid', TraceOutcome::INVALID->value);
         self::assertSame('held', TraceOutcome::HELD->value);
         self::assertSame('not_held', TraceOutcome::NOT_HELD->value);
+        self::assertSame('uncapped', TraceOutcome::UNCAPPED->value);
     }
 
     /**
@@ -77,6 +80,7 @@ final class TraceOutcomeTest extends TestCase
         self::assertSame(TraceOutcome::INVALID, TraceOutcome::tryFrom('invalid'));
         self::assertSame(TraceOutcome::HELD, TraceOutcome::tryFrom('held'));
         self::assertSame(TraceOutcome::NOT_HELD, TraceOutcome::tryFrom('not_held'));
+        self::assertSame(TraceOutcome::UNCAPPED, TraceOutcome::tryFrom('uncapped'));
         self::assertNull(TraceOutcome::tryFrom('skipped'));
         self::assertNull(TraceOutcome::tryFrom('unknown'));
     }

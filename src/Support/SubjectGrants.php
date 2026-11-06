@@ -8,6 +8,7 @@ use SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPermissions;
 use SineMacula\Laravel\Authorization\Contracts\SupportsPolicies;
 use SineMacula\Laravel\Authorization\Contracts\SupportsRoles;
+use SineMacula\Laravel\Authorization\Resolvers\BoundaryResolver;
 use SineMacula\Laravel\Authorization\Subject;
 
 /**
@@ -16,8 +17,9 @@ use SineMacula\Laravel\Authorization\Subject;
  *
  * An identity's grants hold in every principal of that identity, a principal's
  * only in that principal, and nothing reaches a principal through another
- * principal of the same identity. A subject or identity that reports itself
- * inactive is denied everything, whatever either holds.
+ * principal of the same identity. The permission boundaries of both cap every
+ * check about the subject. A subject or identity that reports itself inactive
+ * is denied everything, whatever either holds.
  *
  * The manager, the Blade role helpers and the `role:` middleware all ask here,
  * so they read the same grants.
@@ -104,6 +106,21 @@ final class SubjectGrants
         $identity = self::separateIdentity($subject);
 
         return $identity instanceof SupportsPolicies ? $identity->getPolicies() : [];
+    }
+
+    /**
+     * Return the permission boundaries that apply to a check about the subject
+     * in the current tenant: its own, and its identity's when that is another
+     * model, all of which cap the check together (see `BoundaryResolver`).
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
+     */
+    public static function boundaries(Subject $subject): array
+    {
+        return [...BoundaryResolver::boundariesFor($subject->subject), ...BoundaryResolver::boundariesFor(self::separateIdentity($subject))];
     }
 
     /**

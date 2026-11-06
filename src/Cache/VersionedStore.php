@@ -15,12 +15,13 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *
  * Every grantee, role, policy and tenant has a version token, a random string
  * that a write bumps by replacing it, and the policies attached to roles share
- * one more, as do the policies attached to the resources of each type and every
- * resource policy entry. An entry records the tokens of everything it was built
- * from, and holds only while every one of them is unchanged, so a write
- * invalidates exactly the entries it affects on any store, with or without
- * tags. A token is random rather than a counter, so a token the store evicted
- * and created again can never match an entry recorded before.
+ * one more, as do the policies attached to the resources of each type, every
+ * resource policy entry and every entry of a grantee's permission boundaries.
+ * An entry records the tokens of everything it was built from, and holds only
+ * while every one of them is unchanged, so a write invalidates exactly the
+ * entries it affects on any store, with or without tags. A token is random
+ * rather than a counter, so a token the store evicted and created again can
+ * never match an entry recorded before.
  *
  * A store that fails is never fatal to a check: the read or write is skipped,
  * the failure is written to the package's log channel once, and the store is
@@ -111,6 +112,20 @@ final class VersionedStore
     public function resourcePoliciesKey(?string $type = null): string
     {
         return "{$this->prefix}:version:resource-policies" . ($type === null ? '' : ':' . $type);
+    }
+
+    /**
+     * Return the key of the one version token every entry of a grantee's
+     * permission boundaries shares, which a change to any policy or its
+     * deletion bumps. Every such entry records it before it reads the
+     * boundaries and their documents in one query; setting or removing a
+     * boundary bumps the grantee.
+     *
+     * @return string
+     */
+    public function boundariesKey(): string
+    {
+        return "{$this->prefix}:version:boundaries";
     }
 
     /**

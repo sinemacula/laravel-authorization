@@ -43,6 +43,9 @@ enum DecisionReason: string
     /** An allow statement names the check, and only its authentication requirement is unmet. */
     case INSUFFICIENT_AUTHENTICATION = 'insufficient_authentication';
 
+    /** A permission boundary of the subject's principal or identity does not allow the check. */
+    case BOUNDARY = 'boundary';
+
     /**
      * Return a short description of the reason, for explanations.
      *
@@ -60,6 +63,7 @@ enum DecisionReason: string
             self::RESOURCE_UNRESOLVED         => 'the resource cannot be identified',
             self::TENANT_SCOPE                => 'the resource belongs to a tenant outside the scope',
             self::INSUFFICIENT_AUTHENTICATION => 'a statement allows it once further authentication is met',
+            self::BOUNDARY                    => 'a permission boundary does not allow it',
         };
     }
 }

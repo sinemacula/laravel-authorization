@@ -21,6 +21,13 @@ named and the operation they belong to, and are dispatched only once the write c
   that no longer exists, with an operation that names no actor. Both extend `Resource\ResourcePolicyEvent`, the
   abstract, readonly shape they share, which is never dispatched itself. They name no grantee, so they implement
   `AuthorizationEvent` alone.
+- **Boundary events.** Under `Identity\`: `BoundarySet` and `BoundaryRemoved`, when a policy is set as a principal's or
+  an identity's permission boundary in a scope, or the boundary there is removed (AUTHZ-7.4), each with the grantee, the
+  policy, its name and the scope. `BoundarySet` also carries `previous`, the policy the boundary replaced, or null for a
+  new boundary or one whose reach alone changed; there is no separate replaced event. A grantee's boundaries removed
+  with its other grants, once it is deleted or pruned, are each reported as `BoundaryRemoved` in that operation. Both
+  extend `Identity\BoundaryEvent`, the abstract, readonly shape they share, which is never dispatched itself, and
+  implement `IdentityEvent`, so the grantee's cached resolutions are refreshed as a grant's are.
 - **Expiry events.** Under `Identity\`: `RoleExpired`, `PermissionExpired` and `PolicyExpired`, dispatched when
   `authorization:prune` removes an expired grant, with its expiry and an operation that names no actor (the sweep is
   system work).
@@ -28,7 +35,8 @@ named and the operation they belong to, and are dispatched only once the write c
 
 ## Invariants
 
-1. **One marker.** Every event class implements `AuthorizationEvent`; `IdentityEvent` extends it for the grant events.
+1. **One marker.** Every event class implements `AuthorizationEvent`; `IdentityEvent` extends it for the grant and
+   boundary events.
 
 2. **Snapshots of plain values.** Every change event is a `final readonly` class whose constructor takes only scalars,
    arrays of scalars or of references, the package's value objects (`Support\Operation`, `Support\Reference`,
@@ -62,10 +70,12 @@ named and the operation they belong to, and are dispatched only once the write c
    carried; `Permission\Deleted` every grantee that held the permission directly and every role that carried it;
    `Policy\Deleted` every grantee it was attached to. Each list is read before the row goes, inside the delete's
    transaction, in every scope and whether or not the grant had expired; the grantees are ordered by type and key. A
-   deleted role's own policy attachments are each reported as `Identity\PolicyDetached`, as a deleted identity's
-   grants are, and a deleted grantee's inline policies each as `Policy\Deleted`, in an operation of their own with no
-   actor. A deleted policy's attachments to resources go with its row, through the foreign key, and are not reported
-   one by one: `Policy\Deleted` stands for them.
+   deleted role's own policy attachments are each reported as `Identity\PolicyDetached`, as a deleted identity's grants
+   are, and a deleted grantee's inline policies each as `Policy\Deleted`, in an operation of their own with no actor. A
+   deleted policy's attachments to resources go with its row, through the foreign key, and are not reported one by one:
+   `Policy\Deleted` stands for them. A policy in use as a permission boundary is never deleted: the delete is refused
+   with `BoundaryException` before anything is read or written, so no `Policy\Deleted` and no `BoundaryRemoved` is
+   dispatched for it.
 
 9. **Digests, not documents.** A policy event carries its document's version and the SHA-256 of its canonical JSON
    (keys sorted at every depth, lists in order, slashes and Unicode unescaped) as a `DocumentDigest`.
@@ -122,7 +132,8 @@ app(GrantService::class)->grantRole($user, 'editor', actor: $admin);
 - **Grants carry their scope.** Every grant event reports the tenant the grant holds in, or none for platform-wide,
   whether it also holds in the tenants below (`includeSubtree`, always true platform-wide), and its application, or
   none for every application. A grant re-made with another reach dispatches the granted event again, carrying the new
-  reach.
+  reach. A boundary holds in every application, so its events' scope names none; one set again with another reach
+  dispatches `BoundarySet` again, with no `previous`.
 
 ## Implementation Anchors
 
@@ -132,6 +143,8 @@ app(GrantService::class)->grantRole($user, 'editor', actor: $admin);
 - `Observers\RoleObserver`, `Observers\PermissionObserver`, `Observers\PolicyObserver` and
   `Observers\Support\RecordChanges`: the record events, the before and after, and the grantees a delete reads.
 - `Enums\GrantTarget`: the grant events and the holders of a row.
+- `Services\BoundaryService`: the boundary events; `Support\PolicyBoundaries`: the refused delete of a boundary's
+  policy.
 - `Concerns\HasSystemProtection`: the override event.
 - `Console\Support\ActorOption`: the commands' `--actor`.
 
@@ -141,6 +154,10 @@ app(GrantService::class)->grantRole($user, 'editor', actor: $admin);
 - `OperationScopeTest`: after-commit dispatch, nesting, rollback and the current operation.
 - `ResourcePolicyServiceTest`, `PolicyAttachedTest`, `PolicyDetachedTest`, `ResourcePolicyEventTest`: the resource
   policy events and the shape they share, after commit and only for a change.
+- `BoundaryServiceTest`, `BoundarySetTest`, `BoundaryRemovedTest`, `BoundaryEventTest`: the boundary events, the policy
+  replaced and the shape they share, after commit and only for a change; `GrantServiceTest` and `GrantPrunerTest`: a
+  deleted or pruned grantee's boundaries reported as removed; `PolicyObserverTest`: a boundary's policy refused
+  deletion.
 - `GrantServiceTest`, `RoleServiceTest`, `PermissionServiceTest`, `PolicyServiceTest`, `RecordWriterTest`: the actor,
   the grantor columns, one operation id per call, rollback and the morph map.
 - `RoleObserverTest`, `PermissionObserverTest`, `PolicyObserverTest`, `RecordChangesTest`: the payloads, the deleted
@@ -155,4 +172,4 @@ app(GrantService::class)->grantRole($user, 'editor', actor: $admin);
 - The decision payload: the subject as a reference, the deciding policy and statement, and the keys a decision
   depended on.
 - Applications: the grant events report the application written.
-- Grant expiry, boundaries, guardrails and break-glass: their events join the set.
+- Grant expiry, guardrails and break-glass: their events join the set.
