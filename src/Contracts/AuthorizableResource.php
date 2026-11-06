@@ -4,16 +4,15 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Contracts;
 
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
+
 /**
- * Contract for objects that can identify themselves as an authorization
- * resource string.
+ * Contract for objects that identify themselves as the resource of a check
+ * (AUTHZ-4.2).
  *
- * When an object implementing this contract is passed through the Gate
- * translation layer, the evaluator receives the string returned by
- * `toResourceIdentifier()` instead of falling back to Eloquent's
- * `{morphClass}:{key}` convention or `__toString()`. This gives non-Eloquent
- * resource objects a first-class hook into the policy evaluator's
- * resource-matching surface.
+ * The reference it returns wins over a model's own `type:id` and its tenant
+ * resolver, so a non-Eloquent object, or a model that knows its own tenant,
+ * names exactly the resource, and the tenant, a check is about (N8).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -21,10 +20,10 @@ namespace SineMacula\Laravel\Authorization\Contracts;
 interface AuthorizableResource
 {
     /**
-     * Return the canonical resource identifier string used by the policy
-     * evaluator for resource matching.
+     * Return the reference to the resource: its identifier, type, id and
+     * tenant.
      *
-     * @return string
+     * @return \SineMacula\Laravel\Authorization\Support\ResourceReference
      */
-    public function toResourceIdentifier(): string;
+    public function toResourceReference(): ResourceReference;
 }

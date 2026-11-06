@@ -16,6 +16,7 @@ use Psr\Log\LoggerInterface;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableResource;
+use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
@@ -26,9 +27,12 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
+use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\TestCase;
@@ -39,12 +43,13 @@ use Tests\TestCase;
  * resource the evaluator sees.
  *
  * An argument that cannot be identified as a resource (an unsaved model, a
- * model without a usable key, a number, a boolean, a list or a plain object) is
- * refused at the resource stage as an unresolved resource, without consulting
- * any policy or RBAC grant, so it can never be mistaken for a check about no
- * resource at all. A null argument means no resource; strings, saved models,
+ * model without a usable key, a number, a boolean, a list that is not a `(type,
+ * id)` pair or a plain object) is denied by the decision at the resource stage
+ * as an unresolved resource, without consulting any policy or RBAC grant, so it
+ * can never be mistaken for a check about no resource at all. A null argument
+ * means no resource; strings, saved models, model classes, `(type, id)` pairs,
  * resource-contract objects and stringable objects are forwarded as their
- * identifiers.
+ * references, a model's with the tenant its resolver names.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -182,18 +187,70 @@ final class GateRegistrarTest extends TestCase
     }
 
     /**
-     * A list array at index zero is neither a context map nor a resource
-     * identifier, so the Gate refuses it as an unresolved resource.
+     * A list array at index zero that is not a `(type, id)` pair (empty, of
+     * another length, or with an empty or non-string type, or an id that is
+     * empty, boolean or not a scalar) is neither a context map nor a resource,
+     * so the Gate refuses it as an unresolved resource.
      *
      * @return void
      */
-    public function testListArrayArgumentIsRefusedAsUnresolved(): void
+    public function testListArrayArgumentThatIsNotAPairIsRefusedAsUnresolved(): void
     {
         $user = $this->actAsFullyPermittedPrincipal();
 
-        $this->assertGateRefusesUnidentifiedArgument(['arn:post:42', 'arn:post:43'], $user);
         $this->assertGateRefusesUnidentifiedArgument([], $user);
+        $this->assertGateRefusesUnidentifiedArgument(['post'], $user);
+        $this->assertGateRefusesUnidentifiedArgument(['arn:post:42', 'arn:post:43', 'arn:post:44'], $user);
+        $this->assertGateRefusesUnidentifiedArgument(['', 42], $user);
+        $this->assertGateRefusesUnidentifiedArgument([42, 42], $user);
+        $this->assertGateRefusesUnidentifiedArgument(['post', ''], $user);
+        $this->assertGateRefusesUnidentifiedArgument(['post', true], $user);
+        $this->assertGateRefusesUnidentifiedArgument(['post', null], $user);
+        $this->assertGateRefusesUnidentifiedArgument(['post', ['42']], $user);
         $this->assertResourcelessCheckStillAllowed();
+    }
+
+    /**
+     * A `(type, id)` pair at index zero names one record of the type, as
+     * `type:id`, whether the id is a string or a number.
+     *
+     * @return void
+     */
+    public function testTypeAndIdPairIsIdentifiedAsTheRecord(): void
+    {
+        $this->actAsPrincipalAllowedOn('post:42');
+
+        self::assertTrue(Gate::allows('posts:create', [['post', 42]]));
+        self::assertTrue(Gate::allows('posts:create', [['post', '42']]));
+        self::assertFalse(Gate::allows('posts:create', [['post', 43]]));
+        self::assertSame(['post:42', 'post:42', 'post:43'], $this->evaluatedResources());
+    }
+
+    /**
+     * A model class names its type alone, as `morphClass:*`, so a statement on
+     * the type covers it and one on a single record does not.
+     *
+     * @return void
+     */
+    public function testModelClassIsIdentifiedAsItsType(): void
+    {
+        $this->actAsPrincipalAllowedOn('stub:*');
+
+        $recordOnly = StubIdentity::create(['id' => (string) Str::uuid()]);
+
+        $recordOnly->attachPolicy(Policy::create([
+            'id'       => (string) Str::uuid(),
+            'name'     => 'record-allow',
+            'document' => [
+                'statements' => [
+                    ['effect' => 'allow', 'actions' => ['posts:create'], 'resources' => ['stub:target-1']],
+                ],
+            ],
+        ]));
+
+        self::assertTrue(Gate::allows('posts:create', [StubIdentity::class]));
+        self::assertFalse(Gate::forUser($recordOnly)->allows('posts:create', [StubIdentity::class]));
+        self::assertSame(['stub:*', 'stub:*'], $this->evaluatedResources());
     }
 
     /**
@@ -329,14 +386,70 @@ final class GateRegistrarTest extends TestCase
     }
 
     /**
-     * An Eloquent model implementing the resource contract is identified by
-     * `toResourceIdentifier()`, both when it has a key of its own and when it
-     * has none.
+     * A saved model's tenant is the one the bound resource tenant resolver
+     * names, and it reaches the decision: with no tenant active, a tenant-owned
+     * model is out of scope and denied as `tenant_scope` before any policy is
+     * read, unless the subject holds the permission platform-wide.
      *
      * @return void
      */
-    public function testEloquentModelImplementingResourceContractUsesItsIdentifier(): void
+    public function testSavedModelCarriesTheTenantItsResolverNames(): void
     {
+        $resolver = new FixedResourceTenantResolver(new Reference('org', 'org-1'));
+        $target   = StubIdentity::create(['id' => 'target-1']);
+
+        $this->app?->instance(ResourceTenantResolver::class, $resolver);
+
+        // Act as the platform-wide holder first, so the scoped principal below
+        // is the request's subject and the holder is the Gate user's.
+        $holder = $this->actAsFullyPermittedPrincipal();
+
+        $this->actAsPrincipalAllowedOn('stub:target-1');
+
+        self::assertFalse(Gate::allows('posts:create', [$target]));
+        self::assertSame([$target], $resolver->asked);
+
+        $denial = $this->decisions()[0];
+
+        self::assertSame('stub:target-1', $denial->resource);
+        self::assertSame(DecisionReason::TENANT_SCOPE, $denial->decision->reason);
+        self::assertSame(DecisionStage::TENANT, $denial->decision->stage);
+        self::assertSame([], $denial->decision->trace);
+
+        self::assertTrue(Gate::forUser($holder)->allows('posts:create', [$target]));
+        self::assertSame(['stub:target-1', 'stub:target-1'], $this->evaluatedResources());
+        self::assertSame($holder, $this->decisions()[1]->principal);
+    }
+
+    /**
+     * A resource reference passed to the Gate is used as given, its tenant
+     * included.
+     *
+     * @return void
+     */
+    public function testResourceReferenceIsUsedAsGiven(): void
+    {
+        $this->actAsPrincipalAllowedOn('invoice:7');
+
+        self::assertTrue(Gate::allows('posts:create', [ResourceReference::record('invoice', '7')]));
+        self::assertFalse(Gate::allows('posts:create', [ResourceReference::record('invoice', '7', new Reference('org', 'org-1'))]));
+        self::assertSame(['invoice:7', 'invoice:7'], $this->evaluatedResources());
+        self::assertSame(DecisionReason::TENANT_SCOPE, Authorization::lastDecision()?->reason);
+    }
+
+    /**
+     * An Eloquent model implementing the resource contract is identified by
+     * `toResourceReference()`, both when it has a key of its own and when it
+     * has none, and the resource tenant resolver is not asked about it.
+     *
+     * @return void
+     */
+    public function testEloquentModelImplementingResourceContractUsesItsReference(): void
+    {
+        $resolver = new FixedResourceTenantResolver(new Reference('org', 'org-1'));
+
+        $this->app?->instance(ResourceTenantResolver::class, $resolver);
+
         $this->actAsPrincipalAllowedOn('document:contract-7');
 
         $resource = new class extends Model implements AuthorizableResource {
@@ -344,14 +457,14 @@ final class GateRegistrarTest extends TestCase
             protected $table = 'stub_identities';
 
             /**
-             * Return the canonical resource identifier.
+             * Return the reference to the resource.
              *
-             * @return string
+             * @return \SineMacula\Laravel\Authorization\Support\ResourceReference
              */
             #[\Override]
-            public function toResourceIdentifier(): string
+            public function toResourceReference(): ResourceReference
             {
-                return 'document:contract-7';
+                return ResourceReference::record('document', 'contract-7');
             }
         };
 
@@ -361,6 +474,7 @@ final class GateRegistrarTest extends TestCase
 
         self::assertTrue(Gate::allows('posts:create', [$resource]));
         self::assertSame(['document:contract-7', 'document:contract-7'], $this->evaluatedResources());
+        self::assertSame([], $resolver->asked);
     }
 
     /**

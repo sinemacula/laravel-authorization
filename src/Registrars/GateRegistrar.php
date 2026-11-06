@@ -12,7 +12,8 @@ use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
 use SineMacula\Laravel\Authorization\Exceptions\GateConflictException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
-use SineMacula\Laravel\Authorization\Support\ResourceIdentifier;
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 
 /**
  * Walk every configured permission enum and register a matching Laravel Gate.
@@ -125,12 +126,10 @@ final readonly class GateRegistrar
                 /** @var \SineMacula\Laravel\Authorization\AuthorizationManager $manager */
                 $manager = $user === null ? Authorization::getFacadeRoot() : Authorization::forUser($user);
 
-                // An argument the evaluator cannot identify as a resource
-                // denies, rather than turning the check into one about no
-                // resource at all.
-                return $resource === false
-                    ? $manager->refuseUnidentifiedResource($permission, $context)->isAllowed()
-                    : $manager->can($permission, $resource, $context);
+                // An argument that cannot be identified as a resource denies as
+                // `resource_unresolved`, rather than turning the check into one
+                // about no resource at all.
+                return $manager->can($permission, $resource, $context);
             },
         );
     }
@@ -138,12 +137,12 @@ final readonly class GateRegistrar
     /**
      * Translate the arguments Laravel hands to a Gate callback into the
      * `(resource, context)` pair the authorization manager accepts. Positional
-     * entries map to the resource identifier; string keys and string-keyed
+     * entries map to the resource reference; string keys and string-keyed
      * arrays merge into the context map. The resource is false when the first
      * positional argument cannot be identified as a resource.
      *
      * @param  array<int|string, mixed>  $arguments
-     * @return array{0: false|string|null, 1: array<string, mixed>}
+     * @return array{0: false|\SineMacula\Laravel\Authorization\Support\ResourceReference|null, 1: array<string, mixed>}
      */
     private static function translateGateArguments(array $arguments): array
     {
@@ -174,16 +173,16 @@ final readonly class GateRegistrar
      *
      * @param  int  $key
      * @param  mixed  $value
-     * @param  false|string|null  $resource
+     * @param  false|\SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
      * @param  array<string, mixed>  $context
-     * @return array{0: false|string|null, 1: array<string, mixed>}
+     * @return array{0: false|\SineMacula\Laravel\Authorization\Support\ResourceReference|null, 1: array<string, mixed>}
      */
-    private static function applyPositionalGateArgument(int $key, mixed $value, false|string|null $resource, array $context): array
+    private static function applyPositionalGateArgument(int $key, mixed $value, false|ResourceReference|null $resource, array $context): array
     {
         $isContextMap = \is_array($value) && !\array_is_list($value);
 
         if ($key === 0 && !$isContextMap) {
-            return [ResourceIdentifier::of($value), $context];
+            return [ResourceReferences::of($value), $context];
         }
 
         if (!$isContextMap) {

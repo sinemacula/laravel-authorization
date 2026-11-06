@@ -351,6 +351,39 @@ final class TenantScopeTest extends TestCase
     }
 
     /**
+     * A nested within restores the enclosing one's tenant and application when
+     * it returns, also when its callback throws, and the outermost restores the
+     * request's.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testANestedWithinRestoresTheEnclosingTenantAndApplication(): void
+    {
+        [$tenantA, $tenantB] = $this->seedRows();
+
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver(new \stdClass, null, 'web'));
+
+        $seen = TenantScope::within($tenantA, 'admin', function () use ($tenantB): array {
+            $inner = TenantScope::within($tenantB, 'api', fn (): array => [TenantScope::currentApplication(), $this->roleNames()]);
+            $after = [TenantScope::currentApplication(), $this->roleNames()];
+
+            try {
+                TenantScope::within($tenantB, 'api', static fn (): never => self::refuse());
+            } catch (\RuntimeException) {
+                $after[] = TenantScope::currentApplication();
+            }
+
+            return [$inner, $after];
+        });
+
+        self::assertSame([['api', ['b-role', 'platform-role']], ['admin', ['a-role', 'platform-role'], 'admin']], $seen);
+        self::assertSame('web', TenantScope::currentApplication());
+        self::assertSame(['platform-role'], $this->roleNames());
+    }
+
+    /**
      * What is resolved within another application is not served to the request
      * afterwards, and without a resolution cache bound, within runs all the
      * same.

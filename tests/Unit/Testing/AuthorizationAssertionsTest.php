@@ -312,4 +312,70 @@ final class AuthorizationAssertionsTest extends TestCase
         $this->assertCan($user, 'posts:edit', 'post:42', ['tenant' => 'org-1']);
         $this->assertCannot($user, 'posts:edit', 'post:42', ['tenant' => 'org-2']);
     }
+
+    /**
+     * `assertCan` and `assertCannot` take any resource a check takes: a `(type,
+     * id)` pair names the record as `type:id`, as a string does.
+     *
+     * @return void
+     */
+    public function testAssertionsTakeATypeAndIdPair(): void
+    {
+        $user = StubIdentity::create(['id' => '0d6f2b8a-41c7-4e3b-9a5d-6c8e1f2a3b4d']);
+
+        $user->attachPolicy(Policy::create([
+            'id'       => '5a1c9e7b-3d2f-4b6a-8e0c-9f1d2a3b4c5e',
+            'name'     => 'pair-allow',
+            'document' => [
+                'statements' => [
+                    ['effect' => 'allow', 'actions' => ['posts:edit'], 'resources' => ['post:42']],
+                ],
+            ],
+        ]));
+
+        $this->assertCan($user, 'posts:edit', ['post', 42]);
+        $this->assertCannot($user, 'posts:edit', ['post', 43]);
+    }
+
+    /**
+     * `assertCan` names a saved model in its failure message by the reference
+     * the check made of it, `morphClass:key`.
+     *
+     * @return void
+     */
+    public function testAssertCanDescribesAModelByItsReference(): void
+    {
+        $user   = StubIdentity::create(['id' => '8b3e1d5f-7a2c-4f9e-b6d4-2c1a0e9f8d7b']);
+        $target = StubTenant::create(['id' => 'tenant-described', 'name' => 'Described']);
+
+        $this->expectException(AssertionFailedError::class);
+        $this->expectExceptionMessage('Failed asserting that the principal can perform \'posts:edit\' on resource \'' . $target->getMorphClass() . ':tenant-described\'.');
+
+        $this->assertCan($user, 'posts:edit', $target);
+    }
+
+    /**
+     * A resource that cannot be identified is described by nothing in the
+     * failure message, and the check it names is denied as unresolved, so
+     * `assertCannot` passes on it.
+     *
+     * @return void
+     */
+    public function testAnUnidentifiableResourceIsDescribedByNothing(): void
+    {
+        Permission::create(['id' => '2e4c6a8b-0d1f-4a3c-9e5b-7d9f1b3d5f7a', 'name' => 'docs:view', 'guard' => 'web']);
+
+        $user = StubIdentity::create(['id' => '4f6a8c0e-2b4d-4f6a-8c0e-2b4d6f8a0c2e']);
+        $user->givePermission('docs:view');
+
+        $this->assertCannot($user, 'docs:view', 42);
+
+        $this->expectException(AssertionFailedError::class);
+        $this->expectExceptionMessage(
+            "Failed asserting that the principal can perform 'docs:view'.\nDecision:\n"
+            . 'DENY (resource_unresolved: the resource cannot be identified) at the resource stage.',
+        );
+
+        $this->assertCan($user, 'docs:view', new StubIdentity);
+    }
 }

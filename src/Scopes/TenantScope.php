@@ -43,6 +43,9 @@ final class TenantScope implements Scope
     /** @var string The container key bound while the subject's tenant is being resolved, so a query on any scoped model the resolver runs meanwhile sees platform rows only. */
     private const string RESOLVING = 'authorization.tenant_scope.resolving';
 
+    /** @var string The container key holding the tenant and application `within()` put in place, so a nested call restores them. */
+    private const string WITHIN = 'authorization.tenant_scope.within';
+
     /**
      * Apply the tenant scope to the given Eloquent builder.
      *
@@ -174,10 +177,11 @@ final class TenantScope implements Scope
      *
      * Queries the callback runs see that tenant and application, also when it
      * runs while the subject is being resolved (a guard admitting a principal
-     * as it signs in, say). Afterwards the request's are resolved again on the
-     * next query, from the resolver and the default guard, and the resolution
-     * cache's memo, whose entries hold under one tenant and application, is
-     * emptied.
+     * as it signs in, say). Afterwards a nested call restores the enclosing
+     * call's, and an outermost one leaves the request's to be resolved again on
+     * the next query, from the resolver and the default guard, and the
+     * resolution cache's memo, whose entries hold under one tenant and
+     * application, is emptied.
      *
      * @template TResult
      *
@@ -190,17 +194,20 @@ final class TenantScope implements Scope
     {
         $container = Container::getInstance();
         $resolving = $container->bound(self::RESOLVING);
+        $outer     = $container->bound(self::WITHIN) ? $container->make(self::WITHIN) : null;
 
         /** @var \SineMacula\Laravel\Authorization\Contracts\SubjectResolver $resolver */
         $resolver = $container->make(SubjectResolver::class);
+        $holder   = new ResolvedTenant($resolver, $tenant, $application, self::defaultGuard($container));
 
-        $container->instance(ResolvedTenant::class, new ResolvedTenant($resolver, $tenant, $application, self::defaultGuard($container)));
+        $container->instance(ResolvedTenant::class, $holder);
+        $container->instance(self::WITHIN, $holder);
         $container->forgetInstance(self::RESOLVING);
 
         try {
             return $callback();
         } finally {
-            $container->forgetInstance(ResolvedTenant::class);
+            self::restore($container, $outer);
 
             if ($resolving) {
                 $container->instance(self::RESOLVING, true);
@@ -222,6 +229,28 @@ final class TenantScope implements Scope
         $guard = $container->make('config')->get('auth.defaults.guard');
 
         return \is_string($guard) ? $guard : null;
+    }
+
+    /**
+     * Restore what `within()` replaced: the enclosing `within()`'s tenant and
+     * application when it was nested, else nothing, so the request's are
+     * resolved again on the next query.
+     *
+     * @param  \Illuminate\Container\Container  $container
+     * @param  mixed  $outer
+     * @return void
+     */
+    private static function restore(Container $container, mixed $outer): void
+    {
+        if ($outer instanceof ResolvedTenant) {
+            $container->instance(ResolvedTenant::class, $outer);
+            $container->instance(self::WITHIN, $outer);
+
+            return;
+        }
+
+        $container->forgetInstance(ResolvedTenant::class);
+        $container->forgetInstance(self::WITHIN);
     }
 
     /**

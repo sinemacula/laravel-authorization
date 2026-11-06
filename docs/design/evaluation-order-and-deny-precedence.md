@@ -28,14 +28,21 @@ log, store and put on an event.
 1. **The stages run in order, and the first that decides ends the decision (AUTHZ-7.1).**
    1. *Subject*: no subject denies as `subject_unresolved`; an inactive subject, or one whose identity is inactive,
       denies as `subject_inactive`. Nothing else is read.
-   2. *Deny*: every deny statement of every applicable policy is assessed. One that matches, or whose test cannot be
+   2. *Resource*: a resource argument that cannot be identified (an unsaved model, a number, an empty pair, a route
+      parameter the route lacks) denies as `resource_unresolved` (N1).
+   3. *Tenant*: a resource whose tenant is the decision's tenant, or below it in the tenant tree, is decided in its own
+      tenant, so grants there and those above it that reach down count. A resource of any other tenant (every
+      tenant-owned resource when no tenant is active) denies as `tenant_scope` before any policy is read, unless the
+      subject holds the action's permission through a platform-wide grant, when the rest runs at platform scope
+      (AUTHZ-4.4, AUTHZ-5.5, N9).
+   4. *Deny*: every deny statement of every applicable policy is assessed. One that matches, or whose test cannot be
       decided, denies as `explicit_deny`. Failing that, a deny statement that cannot be evaluated denies as
       `invalid_policy`. A stored policy that cannot be read denies as `invalid_policy` before any statement is
       assessed.
-   3. *Allow*: only when no deny decided, every allow statement is assessed. One that cannot be evaluated denies as
+   5. *Allow*: only when no deny decided, every allow statement is assessed. One that cannot be evaluated denies as
       `invalid_policy`; failing that, one that matches allows. Failing that, a permission the subject holds that the
       action names (directly or through a role) allows.
-   4. *Implicit*: nothing allowed. The denial is `condition_failed` when an allow statement names the action and the
+   6. *Implicit*: nothing allowed. The denial is `condition_failed` when an allow statement names the action and the
       resource but its conditions do not hold or cannot be decided, and `no_match` otherwise.
 
    Guardrails, permission boundaries and session policies take their places between the deny and allow stages as they
@@ -98,18 +105,22 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   context holds. An interpolated operand that resolves to a value of the wrong type is `undecidable`, not invalid. A
   statement whose action or resource does not cover the check is `not_applicable` before its conditions are looked
   at, so it never makes the check invalid.
-- **Resource-less check**: a check without a resource matches only statements whose resources include `*`. Through the
-  Gate and the `authorize:` middleware, an argument that cannot be identified as a resource denies as
-  `resource_unresolved` at the resource stage, without reading any policy or permission, rather than becoming a
-  resource-less check; the denial is recorded and reported like any other decision.
+- **Resource references**: every check names its resource the same way (`ResourceReferences::of()`): a model as
+  `type:id` with the tenant the bound `ResourceTenantResolver` gives it (none by default, N10), a `(type, id)` pair the
+  same way, a model class as `type:*` (N6), an `AuthorizableResource` as the reference it returns (N8), and any other
+  string as an opaque identifier with no tenant (N7).
+- **Resource-less check**: a check without a resource matches only statements whose resources include `*`. An argument
+  that cannot be identified as a resource denies as `resource_unresolved` at the resource stage, without reading any
+  policy or permission, rather than becoming a resource-less check; the denial is recorded and reported like any
+  other decision.
 - **Empty statements list**: a policy with zero statements contributes nothing to the trace and does not affect the
   decision.
 
 ## Implementation Anchors
 
-- `AuthorizationManager::check()` -- the core decision; `decide()` -- the subject stage and the permission step;
-  `decidePolicies()` -- `invalid_policy` when policies cannot be gathered; `refuseUnidentifiedResource()` --
-  `resource_unresolved` for an argument that cannot be identified.
+- `AuthorizationManager::check()` -- the core decision; `decide()` -- the subject and resource stages;
+  `decideGrants()` -- `invalid_policy` when policies cannot be gathered, the statements, and the permission step.
+- `ResourceReferences::of()` -- every resource argument's reference; `ResourceScope::decide()` -- the tenant stage.
 - `PolicyEvaluator::evaluate()` -- the deny, allow and implicit stages, each assessing its statements in a fixed
   order.
 - `Statement::assess()` -- the assessment, with each condition key's result.
@@ -126,6 +137,7 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 - `FailClosedPolicyHydrationTest` -- an unreadable row is never skipped.
 - `GateRegistrarTest` and `AuthorizeActionTest` -- an argument that cannot be identified denies as
   `resource_unresolved`.
+- `ResourceReferencesTest` and `ResourceScopeTest` -- resource references and the tenant stage.
 
 ## Change Triggers
 

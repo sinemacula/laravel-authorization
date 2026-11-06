@@ -101,12 +101,12 @@ abstract class AbstractAuthorizationMiddleware
      * `Authorization::authorize()` does.
      *
      * @param  non-empty-list<string>  $actions
-     * @param  string|null  $resource
+     * @param  mixed  $resource
      * @return void
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
      */
-    protected function authorizeAny(array $actions, ?string $resource): void
+    protected function authorizeAny(array $actions, mixed $resource): void
     {
         $manager = self::manager();
         $last    = \array_pop($actions);

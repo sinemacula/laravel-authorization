@@ -24,6 +24,7 @@ use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
+use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
@@ -39,6 +40,7 @@ use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
+use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\ApplicationAccess;
 use SineMacula\Laravel\Authorization\Services\GrantService;
@@ -49,6 +51,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\CustomRoleMiddlewareDouble;
+use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubPolicyStore;
 use Tests\Feature\Stubs\StubSubjectResolver;
@@ -132,6 +135,7 @@ final class AuthorizationServiceProviderTest extends TestCase
         $abstracts = [
             SubjectResolver::class,
             TenantTree::class,
+            ResourceTenantResolver::class,
             ResolvedTenant::class,
             ResolutionCache::class,
             PolicyResolver::class,
@@ -202,9 +206,10 @@ final class AuthorizationServiceProviderTest extends TestCase
         (new AuthorizationServiceProvider($app))->register();
 
         $bound = [
-            SubjectResolver::class => new StubSubjectResolver,
-            PolicyStore::class     => new StubPolicyStore,
-            PolicyResolver::class  => new DefaultPolicyResolver,
+            SubjectResolver::class        => new StubSubjectResolver,
+            PolicyStore::class            => new StubPolicyStore,
+            PolicyResolver::class         => new DefaultPolicyResolver,
+            ResourceTenantResolver::class => new FixedResourceTenantResolver,
         ];
 
         foreach ($bound as $contract => $instance) {
@@ -382,6 +387,31 @@ final class AuthorizationServiceProviderTest extends TestCase
         $configured = $app->make(TenantTree::class);
 
         self::assertInstanceOf(StubTenantTree::class, $configured);
+    }
+
+    /**
+     * The resolver that knows no resource's tenant is bound by default, and the
+     * configured class in its place.
+     *
+     * @return void
+     */
+    public function testConfiguredResourceTenantResolverIsBound(): void
+    {
+        $app = $this->application();
+
+        $default = $app->make(ResourceTenantResolver::class);
+
+        self::assertInstanceOf(NoResourceTenant::class, $default);
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $app->make(ConfigRepository::class);
+        $config->set('authorization.resource_tenant_resolver', FixedResourceTenantResolver::class);
+
+        (new AuthorizationServiceProvider($app))->register();
+
+        $configured = $app->make(ResourceTenantResolver::class);
+
+        self::assertInstanceOf(FixedResourceTenantResolver::class, $configured);
     }
 
     /**

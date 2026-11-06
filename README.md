@@ -392,14 +392,15 @@ Authorization::for($user)->can('posts:delete', 'posts/42', ['ip' => request()->i
 Authorization::for($user)->explain('posts:delete', 'posts/42', ['ip' => request()->ip()]);
 ```
 
-`Authorization::check()` returns the full `Decision`: `isAllowed()`, the denial's reason code (`reason`), the stage
-that decided it (`stage`), the statements that did (`statements`) and a trace of every step. `can()` and `authorize()`
-are shortcuts over it. A check runs in stages, stopping at the first that decides: the subject (`subject_unresolved`,
-`subject_inactive`), then the denies in every applicable policy (`explicit_deny`, or `invalid_policy` for a statement
-that cannot be evaluated), then the allows (an allow statement, then a permission held), then the implicit deny
-(`condition_failed` when an allow statement names the check but its conditions do not hold, else `no_match`). Each
-stage assesses its statements in a fixed order, so the decision is the same whatever order the policies are read in,
-and the trace records condition key names and whether each held, never their values:
+`Authorization::check()` returns the full `Decision`: `isAllowed()`, the denial's reason code (`reason`), the stage that
+decided it (`stage`), the statements that did (`statements`) and a trace of every step. `can()` and `authorize()` are
+shortcuts over it. A check runs in stages, stopping at the first that decides: the subject (`subject_unresolved`,
+`subject_inactive`), the resource (`resource_unresolved`), its tenant (`tenant_scope`), then the denies in every
+applicable policy (`explicit_deny`, or `invalid_policy` for a statement that cannot be evaluated), then the allows (an
+allow statement, then a permission held), then the implicit deny (`condition_failed` when an allow statement names the
+check but its conditions do not hold, else `no_match`). Each stage assesses its statements in a fixed order, so the
+decision is the same whatever order the policies are read in, and the trace records condition key names and whether each
+held, never their values:
 
 ```php
 $decision = Authorization::for($user)->check('posts:delete', 'posts/42', ['ip' => request()->ip()]);
@@ -408,6 +409,15 @@ $decision->isAllowed();        // false
 $decision->reason;             // DecisionReason::EXPLICIT_DENY
 $decision->statements;         // [StatementReference('no-deletes-off-network', 0, <its key>)]
 ```
+
+A check's resource can be a model (`type:id`), a `[type, id]` pair, a model class for a check on the type alone
+(`type:*`, so `post:*` covers "create a post" and `post:42` does not), an object implementing
+`SineMacula\Laravel\Authorization\Contracts\AuthorizableResource` (which returns its own `ResourceReference`), or any
+other string, used as given. A value that cannot be identified, such as an unsaved model, denies as
+`resource_unresolved`. To have tenant-owned resources decided in their own tenant, bind a `ResourceTenantResolver` as
+`resource_tenant_resolver` in `config/authorization.php`: a resource of the active tenant, or of a tenant below it, is
+then decided there, and one of any other tenant is denied as `tenant_scope` before any policy is read, unless a
+platform-wide grant of the permission covers it. The default knows no model's tenant.
 
 Policies fail closed. A deny whose condition cannot be decided, such as a check made without `ip` in its context,
 still applies, while an allow in the same position does not. A check without a resource matches only statements whose
@@ -480,11 +490,11 @@ Route::get('/api/admin', ApiAdmin::class)->middleware('role:admin,api');
   policies, explicit denies, the permissions held and the subject's tenant. An explicit deny wins over a held
   permission, and a policy allow admits without one. The check has no resource, so only statements whose resources
   include `*` apply to it.
-- `authorize:{action},{route parameter}` decides the action on the parameter's bound model, converted as the Gate
-  converts its argument (`morphClass:key`, or the identifier of an `AuthorizableResource`), or on the parameter's value
-  when nothing binds it. A value that cannot be identified, such as an unsaved model, or a parameter the route does not
-  carry, denies. Without a parameter, the check has no resource. Like Laravel's `can:`, it is placed right after
-  `SubstituteBindings` in the middleware priority, so it decides on the bound model wherever the route lists it.
+- `authorize:{action},{route parameter}` decides the action on the parameter's bound model, referenced as every
+  check references it, or on the parameter's value when nothing binds it. A value that cannot be identified, such as
+  an unsaved model, or a parameter the route does not carry, denies as `resource_unresolved`. Without a parameter, the
+  check has no resource. Like Laravel's `can:`, it is placed right after `SubstituteBindings` in the middleware
+  priority, so it decides on the bound model wherever the route lists it.
 - `role:` checks role membership. A role is not an action, so policies never apply to it: it sees the roles the
   subject's `hasRole()` sees, the platform's and its tenant's. A second argument limits it to the roles of that
   authentication guard and the guard-agnostic ones. A name that is not in `auth.guards` is refused, and so is a bare

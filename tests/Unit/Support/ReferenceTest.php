@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Cache\PrincipalCacheKey;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
@@ -50,6 +51,21 @@ final class ReferenceTest extends TestCase
         self::assertSame('user', $reference->getMorphClass());
         self::assertSame('42', $reference->getKey());
         self::assertSame('user:42', PrincipalCacheKey::for($reference));
+    }
+
+    /**
+     * The reference is a tenant, answering the record's type and key as the
+     * tenant's, so a tenant named by a reference can be a decision's tenant.
+     *
+     * @return void
+     */
+    public function testIsATenantNamedByItsTypeAndKey(): void
+    {
+        $tenant = new Reference('stub_tenant', '7');
+
+        self::assertInstanceOf(AuthorizableTenant::class, $tenant);
+        self::assertSame('stub_tenant', $tenant->getMorphClass());
+        self::assertSame('7', $tenant->getKey());
     }
 
     /**

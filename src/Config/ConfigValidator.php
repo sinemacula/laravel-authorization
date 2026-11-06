@@ -8,6 +8,7 @@ use Illuminate\Contracts\Container\Container;
 use SineMacula\Laravel\Authorization\Contracts\PermissionEnum;
 use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
+use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
@@ -17,6 +18,7 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
+use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
 
 /**
  * Boot-time validator for the shipped authorization config.
@@ -63,6 +65,7 @@ final class ConfigValidator
         self::validateSubjectResolver($config['subject_resolver'] ?? null);
         self::validateTenantTree($config['tenant_tree'] ?? null);
         self::validateApplicationAccess($config['application_access'] ?? []);
+        self::validateResourceTenantResolver($config['resource_tenant_resolver'] ?? null);
         self::validatePolicyStore($config['policy_store'] ?? null);
         self::validateCacheStore($config['cache']['store'] ?? null, $container);
         self::validateCacheTtl($config['cache']['ttl'] ?? 300);
@@ -358,6 +361,27 @@ final class ConfigValidator
                 throw new InvalidAuthorizationConfigException('authorization.application_access', 'each application name must map to a permission name, both non-empty strings.');
             }
         }
+    }
+
+    /**
+     * Validate that `resource_tenant_resolver` resolves to a class implementing
+     * `ResourceTenantResolver`. Null is refused rather than read as no tenant,
+     * so a missing resolver fails at boot.
+     *
+     * @param  mixed  $value
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    private static function validateResourceTenantResolver(mixed $value): void
+    {
+        if ($value === null) {
+            $reason = 'a resource tenant resolver class is required; set it to \\' . NoResourceTenant::class . ' to read no resource\'s tenant.';
+
+            throw new InvalidAuthorizationConfigException('authorization.resource_tenant_resolver', $reason);
+        }
+
+        self::assertImplementsContract($value, ResourceTenantResolver::class, 'authorization.resource_tenant_resolver');
     }
 
     /**

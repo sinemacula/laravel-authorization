@@ -12,13 +12,17 @@ use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Route;
 use Illuminate\Translation\Translator as TranslatorImplementation;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware;
 use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ChecksAccess;
+use Tests\Feature\Stubs\FixedResourceTenantResolver;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
@@ -28,7 +32,9 @@ use Tests\TestCase;
  * action on the model a route parameter binds.
  *
  * The routes bind `{post}` to a `StubTenant` row, named `post` in the morph
- * map, so a bound model is the resource `post:{key}`.
+ * map, so a bound model is the resource `post:{key}`. A value that cannot be
+ * identified, or a parameter the route does not carry, is denied by the
+ * decision itself as `resource_unresolved`, as the Gate denies it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -39,6 +45,7 @@ use Tests\TestCase;
  */
 #[CoversClass(AuthorizeAction::class)]
 #[CoversClass(AbstractAuthorizationMiddleware::class)]
+#[CoversClass(AuthorizationManager::class)]
 final class AuthorizeActionTest extends TestCase
 {
     use ChecksAccess;
@@ -167,9 +174,9 @@ final class AuthorizeActionTest extends TestCase
 
     /**
      * A value that cannot be identified (an unsaved model) denies, even when a
-     * policy allows the action on every resource. The refusal is recorded once,
-     * for the list's last action, as an implicit deny about no resource, and
-     * fires `AuthorizationFailed` once, as a denied list does.
+     * policy allows the action on every resource. Each listed action is denied
+     * at the resource stage about no resource, and only the last fires
+     * `AuthorizationFailed`, as a denied list does.
      *
      * @return void
      */
@@ -323,9 +330,39 @@ final class AuthorizeActionTest extends TestCase
     }
 
     /**
+     * A bound model the resource tenant resolver places in a tenant is decided
+     * in that tenant's scope: with no tenant active it is out of scope, and a
+     * policy allowing the action on every resource is not read, so the request
+     * is denied as `tenant_scope`. The resolver is asked about the bound model.
+     *
+     * @return void
+     */
+    public function testABoundModelOfATenantOutsideTheScopeIsDenied(): void
+    {
+        $post     = StubTenant::create(['id' => 'post-1']);
+        $resolver = new FixedResourceTenantResolver(new Reference('org', 'org-1'));
+
+        $this->app?->instance(ResourceTenantResolver::class, $resolver);
+
+        $this->allowEverySubject([self::ACTION]);
+        $this->actAs(StubIdentity::create(['id' => 'outsider']));
+
+        $this->getJson('/posts/post-1')->assertForbidden();
+
+        $this->withoutExceptionHandling();
+
+        self::assertSame(DecisionReason::TENANT_SCOPE, self::denialOf(fn () => $this->get('/posts/post-1'))->getReason());
+        self::assertNotSame([], $resolver->asked);
+
+        foreach ($resolver->asked as $model) {
+            self::assertTrue($model->is($post));
+        }
+    }
+
+    /**
      * Assert the request is refused for an unidentifiable resource: a denial at
-     * the resource stage recorded once, for the last action about no resource,
-     * and one `AuthorizationFailed` event.
+     * the resource stage about no resource recorded for each listed action, and
+     * one `AuthorizationFailed` event, for the last.
      *
      * @param  string  $uri
      * @return void
@@ -340,10 +377,15 @@ final class AuthorizeActionTest extends TestCase
 
         self::assertSame(DecisionReason::RESOURCE_UNRESOLVED, $denial->getReason());
         self::assertSame('This action is unauthorized.', $denial->getMessage());
-        Event::assertDispatchedTimes(DecisionEvaluated::class, 1);
-        Event::assertDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => $event->action === self::ACTION
-            && $event->resource                                                                                        === null
-            && $event->decision->stage                                                                                 === DecisionStage::RESOURCE);
+        Event::assertDispatchedTimes(DecisionEvaluated::class, 2);
+
+        foreach (['posts:update', self::ACTION] as $action) {
+            Event::assertDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => $event->action === $action
+                && $event->resource                                                                                        === null
+                && $event->decision->reason                                                                                === DecisionReason::RESOURCE_UNRESOLVED
+                && $event->decision->stage                                                                                 === DecisionStage::RESOURCE);
+        }
+
         Event::assertDispatchedTimes(AuthorizationFailed::class, 1);
         Event::assertDispatched(AuthorizationFailed::class, static fn (AuthorizationFailed $event): bool => $event->action === self::ACTION
             && $event->resource                                                                                            === null
