@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleExpired;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
+use SineMacula\Laravel\Authorization\Events\Role\PermissionExpired as RolePermissionExpired;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -68,8 +69,9 @@ final class GrantPrunerTest extends TestCase
     }
 
     /**
-     * Expired grants of every kind are removed and reported, with no actor, the
-     * scope and the expiry; live and permanent grants stay.
+     * Expired grants of every kind, a role's grants of permissions included,
+     * are removed and reported, with no actor, the scope and the expiry; live
+     * and permanent grants stay.
      *
      * @return void
      *
@@ -86,12 +88,14 @@ final class GrantPrunerTest extends TestCase
         $user->givePermission(Permission::create(['name' => 'posts:edit']), Carbon::parse('2026-07-01 11:30:00'));
         $user->givePermission(Permission::create(['name' => 'posts:read']), Carbon::parse('2026-07-01 13:00:00'));
         $user->attachPolicy(Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]), Carbon::parse('2026-07-01 12:00:00'));
+        $role->givePermission(Permission::create(['name' => 'posts:delete']), Carbon::parse('2026-07-01 10:00:00'));
+        $role->givePermission('posts:read', Carbon::parse('2026-07-01 13:00:00'));
 
         Event::fake();
 
         $result = self::pruner()->prune(1000);
 
-        self::assertSame(3, $result->expired);
+        self::assertSame(4, $result->expired);
         self::assertSame(0, $result->orphaned);
         self::assertSame(['viewer'], Role::query()->whereKey(DB::table('authorizable_roles')->pluck('role_id'))->pluck('name')->all());
         self::assertSame(1, DB::table('authorizable_permissions')->count());
@@ -107,6 +111,15 @@ final class GrantPrunerTest extends TestCase
         self::assertSame('UTC', $expired[0]->expiredAt->getTimezone()->getName());
         Event::assertDispatchedTimes(PermissionExpired::class, 1);
         Event::assertDispatchedTimes(PolicyExpired::class, 1);
+        self::assertSame(['posts:read'], $role->getPermissions());
+
+        $lapsed = self::dispatchedEvents(RolePermissionExpired::class);
+
+        self::assertCount(1, $lapsed);
+        self::assertNull($lapsed[0]->operation->actor);
+        self::assertSame(['editor', 'posts:delete', null], [$lapsed[0]->roleName, $lapsed[0]->permissionName, $lapsed[0]->tenant]);
+        self::assertSame($role->id, $lapsed[0]->role->id);
+        self::assertSame('2026-07-01 10:00:00 UTC', $lapsed[0]->expiredAt->format('Y-m-d H:i:s e'));
     }
 
     /**
@@ -177,7 +190,7 @@ final class GrantPrunerTest extends TestCase
 
     /**
      * A grant re-armed between the read of the expired grants and its removal
-     * is kept, and nothing is reported.
+     * is kept, and nothing is reported, a role's grant of a permission as well.
      *
      * @return void
      *
@@ -185,25 +198,32 @@ final class GrantPrunerTest extends TestCase
      */
     public function testKeepsAGrantReArmedWhileThePruneRuns(): void
     {
-        StubIdentity::create(['id' => 'user-1'])->assignRole(Role::create(['name' => 'editor']), Carbon::parse('2026-07-01 11:00:00'));
+        $role = Role::create(['name' => 'editor']);
 
-        $rearmed = false;
+        StubIdentity::create(['id' => 'user-1'])->assignRole($role, Carbon::parse('2026-07-01 11:00:00'));
+        $role->givePermission(Permission::create(['name' => 'posts:edit']), Carbon::parse('2026-07-01 11:00:00'));
+
+        $rearmed = [];
 
         DB::listen(static function (QueryExecuted $query) use (&$rearmed): void {
-            if ($rearmed || !\str_starts_with($query->sql, 'select') || !\str_contains($query->sql, 'authorizable_roles')) {
-                return;
+            foreach (['authorizable_roles', 'role_permissions'] as $table) {
+                if (isset($rearmed[$table]) || !\str_starts_with($query->sql, 'select') || !\str_contains($query->sql, $table)) {
+                    continue;
+                }
+
+                $rearmed[$table] = true;
+
+                DB::table($table)->update(['expires_at' => '2026-07-02 12:00:00']);
             }
-
-            $rearmed = true;
-
-            DB::table('authorizable_roles')->update(['expires_at' => '2026-07-02 12:00:00']);
         });
 
         Event::fake();
 
         self::assertSame(0, self::pruner()->prune(1000)->expired);
         self::assertSame(1, DB::table('authorizable_roles')->count());
+        self::assertSame(1, DB::table('role_permissions')->count());
         Event::assertNotDispatched(RoleExpired::class);
+        Event::assertNotDispatched(RolePermissionExpired::class);
     }
 
     /**
@@ -220,6 +240,7 @@ final class GrantPrunerTest extends TestCase
 
         $user->assignRole(Role::create(['name' => 'editor']), Carbon::parse('2026-07-01 11:00:00'));
         $gone->assignRole(Role::create(['name' => 'viewer']));
+        Role::create(['name' => 'author'])->givePermission(Permission::create(['name' => 'posts:edit']), Carbon::parse('2026-07-01 11:00:00'));
         $gone->givePermission(Permission::create(['name' => 'posts:read']));
 
         DB::table('stub_identities')->where('id', 'user-2')->delete();
@@ -228,7 +249,8 @@ final class GrantPrunerTest extends TestCase
 
         $result = self::pruner()->prune(1000, true);
 
-        self::assertSame(1, $result->expired);
+        self::assertSame(2, $result->expired);
+        self::assertSame(1, DB::table('role_permissions')->count());
         self::assertSame(2, $result->orphaned);
         self::assertSame(2, DB::table('authorizable_roles')->count());
         self::assertSame(1, DB::table('authorizable_permissions')->count());

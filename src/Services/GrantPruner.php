@@ -10,6 +10,7 @@ use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
+use SineMacula\Laravel\Authorization\Events\Role\PermissionExpired as RolePermissionExpired;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
@@ -39,6 +40,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  *     application: string|null,
  *     expires_at: string,
  * }
+ * @phpstan-type RolePermissionRow array{role_id: string, permission_id: string, expires_at: string}
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -68,10 +70,20 @@ final readonly class GrantPruner
      */
     public function prune(int $chunk, bool $pretend = false): PruneResult
     {
-        $expired = 0;
+        $expired = $pretend ? self::expiredRolePermissions()->count() : self::sweep(
+            self::expiredRolePermissions(),
+            ['role_id', 'permission_id', 'expires_at'],
+            $chunk,
+            static fn (array $rows, Operation $operation): int => self::pruneRolePermissionChunk($rows, $operation),
+        );
 
         foreach (GrantTarget::cases() as $kind) {
-            $expired += $pretend ? self::expired($kind)->count() : self::pruneExpired($kind, $chunk);
+            $expired += $pretend ? self::expired($kind)->count() : self::sweep(
+                self::expired($kind),
+                [$kind->column() . ' as target_id', 'authorizable_type', 'authorizable_id', 'tenant_type', 'tenant_id', 'application', 'expires_at'],
+                $chunk,
+                static fn (array $rows, Operation $operation): int => self::pruneChunk($kind, $rows, $operation),
+            );
         }
 
         [$orphans, $unresolved] = self::orphans($chunk);
@@ -85,34 +97,73 @@ final readonly class GrantPruner
     }
 
     /**
-     * Remove the expired grants of one kind, a chunk at a time, each chunk one
-     * operation, and return how many were removed.
+     * Remove the expired rows the query reads, a chunk at a time, each chunk
+     * one operation, and return how many were removed.
      *
      * Every row read is removed, or has been re-armed or removed since, so a
      * later read never returns it and the sweep ends.
      *
-     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
+     * @param  \Illuminate\Database\Query\Builder  $expired
+     * @param  list<string>  $columns
      * @param  int  $chunk
+     * @param  \Closure(list<array<string, string|null>>, \SineMacula\Laravel\Authorization\Support\Operation): int  $remove
      * @return int
      *
      * @throws \Throwable
      */
-    private static function pruneExpired(GrantTarget $kind, int $chunk): int
+    private static function sweep(Builder $expired, array $columns, int $chunk, \Closure $remove): int
     {
         $removed = 0;
 
         do {
-            /** @var list<ExpiredRow> $rows */
-            $rows = self::expired($kind)
-                ->limit($chunk)
-                ->get([$kind->column() . ' as target_id', 'authorizable_type', 'authorizable_id', 'tenant_type', 'tenant_id', 'application', 'expires_at'])
-                ->map(static fn (object $row): array => (array) $row)
-                ->all();
+            /** @var list<array<string, string|null>> $rows */
+            $rows = (clone $expired)->limit($chunk)->get($columns)->map(static fn (object $row): array => (array) $row)->all();
 
-            $removed += OperationScope::run(Operation::begin(), static fn (Operation $operation): int => self::pruneChunk($kind, $rows, $operation));
+            $removed += OperationScope::run(Operation::begin(), static fn (Operation $operation): int => $remove($rows, $operation));
         } while (\count($rows) === $chunk);
 
         return $removed;
+    }
+
+    /**
+     * Remove one chunk of a role's expired grants of permissions, reporting
+     * each removed, and return how many were removed.
+     *
+     * @param  list<RolePermissionRow>  $rows
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @return int
+     */
+    private static function pruneRolePermissionChunk(array $rows, Operation $operation): int
+    {
+        /** @var array<string, \SineMacula\Laravel\Authorization\Models\Role> $roles */
+        $roles = self::keyed(GrantTarget::ROLE, \array_column($rows, 'role_id'));
+
+        /** @var array<string, \SineMacula\Laravel\Authorization\Models\Permission> $permissions */
+        $permissions = self::keyed(GrantTarget::PERMISSION, \array_column($rows, 'permission_id'));
+        $events      = [];
+
+        foreach ($rows as $row) {
+            $role       = $roles[$row['role_id']]             ?? null;
+            $permission = $permissions[$row['permission_id']] ?? null;
+
+            if ($role === null || $permission === null || self::rolePermission($row)->delete() === 0) {
+                continue;
+            }
+
+            $events[] = new RolePermissionExpired(
+                $operation,
+                Reference::of($role),
+                $role->name,
+                Reference::of($permission),
+                $permission->name,
+                Reference::tenantOf($role),
+                Carbon::parse($row['expires_at'], 'UTC')->toImmutable(),
+            );
+        }
+
+        OperationScope::dispatch(...$events);
+
+        return \count($events);
     }
 
     /**
@@ -126,12 +177,8 @@ final readonly class GrantPruner
      */
     private static function pruneChunk(GrantTarget $kind, array $rows, Operation $operation): int
     {
-        $targets = [];
+        $targets = self::keyed($kind, \array_column($rows, 'target_id'));
         $events  = [];
-
-        foreach ($kind->find(\array_column($rows, 'target_id')) as $model) {
-            $targets[$model->getKey()] = $model; // @phpstan-ignore offsetAccess.invalidOffset
-        }
 
         foreach ($rows as $row) {
             $target = $targets[$row['target_id']] ?? null;
@@ -147,6 +194,50 @@ final readonly class GrantPruner
         OperationScope::dispatch(...$events);
 
         return \count($events);
+    }
+
+    /**
+     * Load the roles, permissions or policies with the given keys, keyed by
+     * key.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
+     * @param  list<string>  $ids
+     * @return array<string, \Illuminate\Database\Eloquent\Model>
+     */
+    private static function keyed(GrantTarget $kind, array $ids): array
+    {
+        $models = [];
+
+        foreach ($kind->find($ids) as $model) {
+            $models[$model->getKey()] = $model; // @phpstan-ignore offsetAccess.invalidOffset
+        }
+
+        return $models;
+    }
+
+    /**
+     * Query the expired grants of permissions to roles.
+     *
+     * @return \Illuminate\Database\Query\Builder
+     */
+    private static function expiredRolePermissions(): Builder
+    {
+        /** @var string $table */
+        $table = config('authorization.tables.role_permissions', 'role_permissions');
+
+        return AuthorizationConnection::connection()->table($table)->where('expires_at', '<=', Carbon::now('UTC'));
+    }
+
+    /**
+     * Query exactly one expired grant of a permission to a role, so a grant
+     * re-armed since it was read is left.
+     *
+     * @param  RolePermissionRow  $row
+     * @return \Illuminate\Database\Query\Builder
+     */
+    private static function rolePermission(array $row): Builder
+    {
+        return self::expiredRolePermissions()->where('role_id', $row['role_id'])->where('permission_id', $row['permission_id']);
     }
 
     /**

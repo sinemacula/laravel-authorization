@@ -42,7 +42,9 @@ events themselves are described in [Events](events.md).
 4. **Expiry.** Re-granting a grant that has expired re-arms it with the new expiry (`REARMED`). A different expiry on
    a live grant is a change of its own (`EXPIRY_CHANGED`). A sync grants what is missing with the sync's expiry,
    re-arms a listed grant that has expired with the same expiry, leaves a live grant as it is, and revokes what is not
-   listed. A sync given no expiry, as every trait sync is, re-arms a lapsed temporary grant as a permanent one.
+   listed. A sync given no expiry, as every identity trait sync is, re-arms a lapsed temporary grant as a permanent
+   one. A role's grants of permissions behave the same way through `RoleService::grantPermission()` and
+   `syncPermissions()`, which take the expiry before the actor.
 
 5. **One scope per grant.** A grant holds in one tenant or platform-wide (AUTHZ-5.1). The tenant that owns the
    target fixes it, and naming another tenant is refused with `GrantScopeMismatchException`; a platform target is

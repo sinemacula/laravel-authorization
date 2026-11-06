@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Cache;
 
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Cache\Invalidation;
@@ -13,6 +14,7 @@ use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\GrantPruner;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
@@ -104,7 +106,10 @@ final class InvalidationTest extends TestCase
         self::assertNotNull($roles);
         self::assertSame([], $this->bumpedBy(static fn () => Role::create(['name' => 'other']), $user, $role));
         self::assertSame($key, $this->bumpedBy(static fn () => $roles->grantPermission($role, Permission::create(['name' => 'posts:edit'])), $user, $role));
-        self::assertSame($key, $this->bumpedBy(static fn () => $roles->revokePermission($role, 'posts:edit'), $user, $role));
+        self::assertSame($key, $this->bumpedBy(static fn () => $roles->grantPermission($role, 'posts:edit', Carbon::parse('2000-01-01 00:00:00')), $user, $role));
+        self::assertSame($key, $this->bumpedBy(static fn () => app(GrantPruner::class)->prune(1000), $user, $role));
+        self::assertSame($key, $this->bumpedBy(static fn () => $roles->grantPermission($role, Permission::create(['name' => 'posts:read'])), $user, $role));
+        self::assertSame($key, $this->bumpedBy(static fn () => $roles->revokePermission($role, 'posts:read'), $user, $role));
         self::assertSame($key, $this->bumpedBy(static fn () => $roles->setParent($role, $parent), $user, $role));
         self::assertSame($key, $this->bumpedBy(static fn () => $roles->rename($role, 'author'), $user, $role));
         self::assertSame($key, $this->bumpedBy(static fn () => $roles->delete($role), $user, $role));

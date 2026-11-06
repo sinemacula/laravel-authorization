@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Models;
 
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Attributes\ScopedBy;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
@@ -13,6 +14,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
 use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Concerns\ValidatesAuthorizationName;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPermissionProtectedException;
 use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
 use SineMacula\Laravel\Authorization\Observers\PermissionObserver;
@@ -125,7 +127,8 @@ class Permission extends Model
      * The inverse of `Role::permissions()`: the same pivot table, the same
      * columns and the same `RolePermission` pivot model, so an `attach(...)` or
      * `sync(...)` from the permission side runs through the pivot's `saving`
-     * hook and the guard-parity invariant it enforces.
+     * hook and the guard-parity invariant it enforces. A role whose grant of
+     * the permission has expired is left out.
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
@@ -151,7 +154,11 @@ class Permission extends Model
             table: $pivot,
             foreignPivotKey: 'permission_id',
             relatedPivotKey: 'role_id',
-        )->using(RolePermission::class);
+        )->using(RolePermission::class)
+            ->withPivot('expires_at')
+            ->where(static function (Builder $query) use ($pivot): void {
+                LiveGrants::only($query, $pivot);
+            });
     }
 
     /**

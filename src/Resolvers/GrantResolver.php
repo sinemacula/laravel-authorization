@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
+use SineMacula\Laravel\Authorization\Support\InheritedPermissions;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
 
@@ -55,7 +56,7 @@ final class GrantResolver
         /** @var array<string, string> $names */
         $names = $keys === [] ? [] : $grants->getRelated()->newQuery()->useWritePdo()->whereKey($keys)->pluck('name', 'id')->all();
 
-        return new Resolution(self::inOrder($keys, $names), self::expiresIn($held));
+        return new Resolution(self::inOrder($keys, $names), self::expiresIn(null, $held));
     }
 
     /**
@@ -78,15 +79,16 @@ final class GrantResolver
 
         $pins->roles(\array_keys($reach));
 
-        $inherited = RoleGraph::permissionNamesWithin($reach, $keys);
+        $within    = RoleGraph::permissionsWithin($reach, $keys);
+        $inherited = $within ?? self::inheritedAfresh($roles, $keys);
 
         /** @var list<string> $names */
         $names = $granted->pluck('name')->all();
 
         return new Resolution(
-            \array_values(\array_unique([...$names, ...($inherited ?? self::inheritedAfresh($roles, $keys))])),
-            self::expiresIn($granted, $held),
-            $inherited !== null,
+            \array_values(\array_unique([...$names, ...$inherited->names])),
+            self::expiresIn($inherited->expiresIn, $granted, $held),
+            $within !== null,
         );
     }
 
@@ -119,26 +121,25 @@ final class GrantResolver
             $policies[] = self::hydrate($policy);
         }
 
-        return new Resolution($policies, self::expiresIn($held));
+        return new Resolution($policies, self::expiresIn(null, $held));
     }
 
     /**
-     * Return the names of the permissions the held roles hold, reading the
-     * roles and their hierarchy afresh, for a resolution whose hierarchy moved
-     * while it ran.
+     * Return the permissions the held roles hold, reading the roles and their
+     * hierarchy afresh, for a resolution whose hierarchy moved while it ran.
      *
      * @param  \Illuminate\Database\Eloquent\Relations\MorphToMany<\SineMacula\Laravel\Authorization\Models\Role, \Illuminate\Database\Eloquent\Model>  $roles
      * @param  list<string>  $keys
-     * @return list<string>
+     * @return \SineMacula\Laravel\Authorization\Support\InheritedPermissions
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\RoleHierarchyCycleException
      */
-    private static function inheritedAfresh(MorphToMany $roles, array $keys): array
+    private static function inheritedAfresh(MorphToMany $roles, array $keys): InheritedPermissions
     {
         /** @var list<\SineMacula\Laravel\Authorization\Models\Role> $fresh */
         $fresh = $roles->getRelated()->newQuery()->useWritePdo()->whereKey($keys)->get()->all();
 
-        return RoleGraph::permissionNamesHeldBy($fresh);
+        return RoleGraph::permissionsHeldBy($fresh);
     }
 
     /**
@@ -208,16 +209,16 @@ final class GrantResolver
     }
 
     /**
-     * Return the seconds until the nearest of the grants expires, or null when
-     * none of them expires.
+     * Return the seconds until the nearest of the grants expires, starting from
+     * an expiry already known, or null when none of them expires.
      *
+     * @param  int|null  $nearest
      * @param  \Illuminate\Database\Eloquent\Collection<int, \Illuminate\Database\Eloquent\Model>  ...$grants
      * @return int|null
      */
-    private static function expiresIn(EloquentCollection ...$grants): ?int
+    private static function expiresIn(?int $nearest, EloquentCollection ...$grants): ?int
     {
-        $now     = Carbon::now()->getTimestamp();
-        $nearest = null;
+        $now = Carbon::now()->getTimestamp();
 
         foreach ($grants as $models) {
             foreach ($models as $model) {

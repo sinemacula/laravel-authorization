@@ -7,18 +7,20 @@ namespace SineMacula\Laravel\Authorization\Services;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\UniqueConstraintViolationException;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
-use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
+use SineMacula\Laravel\Authorization\Events\Role\PermissionExpiryChanged as RolePermissionExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionGranted as RolePermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked as RolePermissionRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Services\Support\GrantChange;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
+use SineMacula\Laravel\Authorization\Services\Support\RolePermissionTable;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
@@ -40,10 +42,12 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * concurrent re-parentings cannot close a cycle between them, and a cycle
  * through another tenant's role is refused as well.
  *
- * Granting a permission the role carries changes nothing, and a concurrent
- * duplicate never surfaces a unique-constraint violation. The role and role
- * permission events are dispatched once the write commits, on the package's
- * connection, and only for a write that changed something.
+ * A role's grant of a permission may carry an expiry, after which it no longer
+ * counts. Granting a permission the role carries with the same expiry changes
+ * nothing, and a concurrent duplicate never surfaces a unique-constraint
+ * violation. The role and role permission events are dispatched once the write
+ * commits, on the package's connection, and only for a write that changed
+ * something.
  *
  * Each method takes the actor making the call as `$actor`, a model or a
  * reference, the reads as well as the writes: null for console and system work.
@@ -203,29 +207,33 @@ final class RoleService
     }
 
     /**
-     * Grant a permission to a role. A permission the role carries already is
-     * reported as unchanged.
+     * Grant a permission to a role, until the given expiry or forever.
+     *
+     * Granting a permission the role carries with the same expiry changes
+     * nothing; a permission whose grant has expired is re-armed with the new
+     * expiry, and a live grant given a different expiry has it changed.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
+     * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Enums\GrantOutcome
      *
      * @throws \Throwable
      */
-    public function grantPermission(Role|string $role, Permission|string $permission, Model|Reference|null $actor = null): GrantOutcome
+    public function grantPermission(Role|string $role, Permission|string $permission, ?\DateTimeInterface $expiresAt = null, Model|Reference|null $actor = null): GrantOutcome
     {
-        return OperationScope::run(Operation::begin($actor), static function (Operation $operation) use ($role, $permission): GrantOutcome {
+        return OperationScope::run(Operation::begin($actor), static function (Operation $operation) use ($role, $permission, $expiresAt): GrantOutcome {
             $model  = self::resolve($role);
             $target = self::permissionFor($model, $permission);
 
-            if (!self::writeAttachment($model, $target)) {
-                return GrantOutcome::UNCHANGED;
-            }
+            $model->unsetRelation('permissions');
 
-            OperationScope::dispatch(self::event(RolePermissionGranted::class, $operation, $model, $target));
+            $change = (new RolePermissionTable($model))->grant($target->id, $expiresAt);
 
-            return GrantOutcome::GRANTED;
+            OperationScope::dispatch(...self::changeEvents($operation, $model, $target, $change, $expiresAt));
+
+            return $change->outcome;
         });
     }
 
@@ -256,12 +264,7 @@ final class RoleService
             $model->unsetRelation('permissions');
             $model->permissions()->detach(\array_map(static fn (Permission $target): string => $target->id, $revoked));
 
-            OperationScope::dispatch(...\array_map(static fn (Permission $target): RolePermissionRevoked => self::event(
-                RolePermissionRevoked::class,
-                $operation,
-                $model,
-                $target,
-            ), $revoked));
+            OperationScope::dispatch(...\array_map(static fn (Permission $target): RolePermissionRevoked => self::revokedEvent($operation, $model, $target), $revoked));
 
             return \count($revoked);
         });
@@ -270,43 +273,50 @@ final class RoleService
     /**
      * Replace a role's permissions with the given ones.
      *
+     * A permission the role carries is kept as it is; one whose grant has
+     * expired is re-armed with the given expiry, and one the role did not carry
+     * is granted until it, or forever.
+     *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Permission|string>  $permissions
+     * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @return \SineMacula\Laravel\Authorization\Services\SyncResult
      *
      * @throws \Throwable
      */
-    public function syncPermissions(Role|string $role, array $permissions, Model|Reference|null $actor = null): SyncResult
+    public function syncPermissions(Role|string $role, array $permissions, ?\DateTimeInterface $expiresAt = null, Model|Reference|null $actor = null): SyncResult
     {
         /** @var \SineMacula\Laravel\Authorization\Services\SyncResult */
-        return OperationScope::run(Operation::begin($actor), static function (Operation $operation) use ($role, $permissions): SyncResult {
-            $model    = self::resolve($role);
-            $relation = $model->permissions();
-            $held     = self::heldPermissionIds($model);
-            $desired  = self::desired($model, $permissions, $held);
-            $revoked  = \array_values(\array_diff($held, \array_map(static fn (Permission $target): string => $target->id, $desired)));
-            $granted  = [];
-            $events   = [];
+        return OperationScope::run(Operation::begin($actor), static function (Operation $operation) use ($role, $permissions, $expiresAt): SyncResult {
+            $model   = self::resolve($role);
+            $held    = self::heldPermissionIds($model);
+            $desired = self::desired($model, $permissions, $held);
+            $revoked = \array_values(\array_diff($held, \array_map(static fn (Permission $target): string => $target->id, $desired)));
+            $table   = new RolePermissionTable($model);
+            $changed = [];
+            $events  = [];
 
-            $relation->detach($revoked);
+            $model->unsetRelation('permissions');
+            $model->permissions()->detach($revoked);
 
             foreach ($desired as $target) {
-                if (!self::writeAttachment($model, $target)) {
-                    continue;
-                }
+                $change = $table->rearm($target->id, $expiresAt);
+                $events = [...$events, ...self::changeEvents($operation, $model, $target, $change, $expiresAt)];
 
-                $granted[] = $target->id;
-                $events[]  = self::event(RolePermissionGranted::class, $operation, $model, $target);
+                $changed[$change->outcome->value][] = $target->id;
             }
 
-            foreach ($relation->getRelated()->newQuery()->withoutGlobalScope(TenantScope::class)->whereKey($revoked)->get() as $target) {
-                $events[] = self::event(RolePermissionRevoked::class, $operation, $model, $target);
+            /** @var list<\SineMacula\Laravel\Authorization\Models\Permission> $removed */
+            $removed = GrantTarget::PERMISSION->find($revoked);
+
+            foreach ($removed as $target) {
+                $events[] = self::revokedEvent($operation, $model, $target);
             }
 
             OperationScope::dispatch(...$events);
 
-            return new SyncResult($granted, [], $revoked);
+            return new SyncResult($changed[GrantOutcome::GRANTED->value] ?? [], $changed[GrantOutcome::REARMED->value] ?? [], $revoked);
         });
     }
 
@@ -351,37 +361,6 @@ final class RoleService
         $keys = $role->permissions()->newPivotQuery()->pluck('permission_id')->all();
 
         return \array_values(\array_map(static fn (mixed $key): string => \is_scalar($key) ? (string) $key : '', $keys));
-    }
-
-    /**
-     * Attach the permission to the role unless it carries it, and report
-     * whether it was attached. The attachment goes through the role permission
-     * pivot, so guard parity is enforced, inside a savepoint, so a concurrent
-     * duplicate rolls back only the attachment.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
-     * @param  \SineMacula\Laravel\Authorization\Models\Permission  $permission
-     * @return bool
-     *
-     * @throws \Throwable
-     */
-    private static function writeAttachment(Role $role, Permission $permission): bool
-    {
-        $role->unsetRelation('permissions');
-
-        $relation = $role->permissions();
-
-        if ($relation->newPivotQuery()->where('permission_id', $permission->id)->exists()) {
-            return false;
-        }
-
-        try {
-            AuthorizationConnection::connection()->transaction(static fn () => $relation->attach($permission->id));
-        } catch (UniqueConstraintViolationException) {
-            return false;
-        }
-
-        return true;
     }
 
     /**
@@ -440,20 +419,41 @@ final class RoleService
     }
 
     /**
-     * Build a role permission event for the permission granted to or revoked
-     * from the role.
+     * Build the events a grant of a permission to the role dispatches: none
+     * when it changed nothing, the granted event for a new grant, and also the
+     * expiry-changed event for a re-armed grant or a changed expiry.
      *
-     * @template TEvent of \SineMacula\Laravel\Authorization\Events\Role\PermissionGranted|\SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked
-     *
-     * @param  class-string<TEvent>  $event
      * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @param  \SineMacula\Laravel\Authorization\Models\Permission  $permission
-     * @return TEvent
+     * @param  \SineMacula\Laravel\Authorization\Services\Support\GrantChange  $change
+     * @param  \DateTimeInterface|null  $expiresAt
+     * @return list<\SineMacula\Laravel\Authorization\Events\Role\PermissionExpiryChanged|\SineMacula\Laravel\Authorization\Events\Role\PermissionGranted>
      */
-    private static function event(string $event, Operation $operation, Role $role, Permission $permission): RolePermissionGranted|RolePermissionRevoked
+    private static function changeEvents(Operation $operation, Role $role, Permission $permission, GrantChange $change, ?\DateTimeInterface $expiresAt): array
     {
-        return new $event($operation, Reference::of($role), $role->name, Reference::of($permission), $permission->name, Reference::tenantOf($role));
+        $grant     = [$operation, Reference::of($role), $role->name, Reference::of($permission), $permission->name, Reference::tenantOf($role)];
+        $expiresAt = UtcDateTime::toUtc($expiresAt)?->toImmutable();
+        $granted   = new RolePermissionGranted(...[...$grant, $expiresAt]);
+
+        return match ($change->outcome) {
+            GrantOutcome::UNCHANGED => [],
+            GrantOutcome::GRANTED   => [$granted],
+            default                 => [$granted, new RolePermissionExpiryChanged(...[...$grant, $change->previousExpiresAt?->toImmutable(), $expiresAt])],
+        };
+    }
+
+    /**
+     * Build the event the revocation of a permission from the role dispatches.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+     * @param  \SineMacula\Laravel\Authorization\Models\Permission  $permission
+     * @return \SineMacula\Laravel\Authorization\Events\Role\PermissionRevoked
+     */
+    private static function revokedEvent(Operation $operation, Role $role, Permission $permission): RolePermissionRevoked
+    {
+        return new RolePermissionRevoked($operation, Reference::of($role), $role->name, Reference::of($permission), $permission->name, Reference::tenantOf($role));
     }
 
     /**

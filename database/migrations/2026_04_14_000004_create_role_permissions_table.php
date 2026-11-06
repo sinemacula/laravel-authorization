@@ -34,11 +34,18 @@ return new class extends Migration {
 
         (new MigrationCollisionGuard($schema))->ensureNotExists($table);
 
-        $schema->create($table, static function (Blueprint $blueprint) use ($rolesTable, $permissionsTable): void {
+        $schema->create($table, static function (Blueprint $blueprint) use ($table, $rolesTable, $permissionsTable): void {
             $blueprint->uuid('role_id');
             $blueprint->uuid('permission_id');
 
+            // When the role stops carrying the permission, in UTC; null for
+            // forever. Rows whose expiry has passed no longer count, and are
+            // left for `authorization:prune` to remove. A `dateTime` rather
+            // than a `timestamp`, which stops at 2038 on MySQL.
+            $blueprint->dateTime('expires_at')->nullable();
+
             $blueprint->primary(['role_id', 'permission_id']);
+            $blueprint->index('expires_at', $table . '_expires_at_index');
 
             $blueprint->foreign('role_id')->references('id')->on($rolesTable)->cascadeOnDelete();
             $blueprint->foreign('permission_id')->references('id')->on($permissionsTable)->cascadeOnDelete();

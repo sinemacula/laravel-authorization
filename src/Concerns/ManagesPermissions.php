@@ -4,7 +4,9 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Concerns;
 
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\BelongsToMany;
+use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\RolePermission;
 use SineMacula\Laravel\Authorization\Services\RoleService;
@@ -41,7 +43,8 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
      * path — the role service, a direct `$role->permissions()->attach(...)`, or
      * a raw `sync(...)` — runs through the pivot's `saving` hook and the
      * guard-parity invariant it enforces. Only the role service reports the
-     * change.
+     * change. A permission whose grant to the role has expired is left out, and
+     * each carries its expiry as `$permission->pivot->expires_at`.
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
@@ -67,21 +70,31 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
             table          : $pivot,
             foreignPivotKey: 'role_id',
             relatedPivotKey: 'permission_id',
-        )->using(RolePermission::class);
+        )->using(RolePermission::class)
+            ->withPivot('expires_at')
+            ->where(static function (Builder $query) use ($pivot): void {
+                LiveGrants::only($query, $pivot);
+            });
     }
 
     /**
-     * Attach the given permission to this role, through the role service. A
-     * permission the role carries already is left as it is, and no event fires.
+     * Attach the given permission to this role, through the role service.
+     *
+     * An optional `$expiresAt` makes the grant temporal: the role stops
+     * carrying the permission the moment the clock passes it, without a sweeper
+     * run. A permission the role carries with the same expiry is left as it is,
+     * and no event fires; one whose grant has expired is re-armed with the new
+     * expiry.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
+     * @param  \DateTimeInterface|null  $expiresAt
      * @return static
      *
      * @throws \Throwable
      */
-    public function givePermission(Permission|string $permission): static
+    public function givePermission(Permission|string $permission, ?\DateTimeInterface $expiresAt = null): static
     {
-        self::authorizationRoles()->grantPermission($this, $permission);
+        self::authorizationRoles()->grantPermission($this, $permission, $expiresAt);
 
         return $this;
     }
@@ -90,13 +103,14 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
      * Spatie alias for the canonical `givePermission()` helper.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
+     * @param  \DateTimeInterface|null  $expiresAt
      * @return static
      *
      * @throws \Throwable
      */
-    public function givePermissionTo(Permission|string $permission): static
+    public function givePermissionTo(Permission|string $permission, ?\DateTimeInterface $expiresAt = null): static
     {
-        return $this->givePermission($permission);
+        return $this->givePermission($permission, $expiresAt);
     }
 
     /**
@@ -138,16 +152,19 @@ trait ManagesPermissions // @phpstan-ignore trait.unused
      * fires `RolePermissionRevoked`, so audit consumers receive the same
      * per-row signal they would for `givePermission()` / `revokePermission()`
      * calls and the cache invalidation listener wired to those events keeps the
-     * resolution cache coherent.
+     * resolution cache coherent. A permission the role carries is kept as it
+     * is; one whose grant has expired is re-armed with `$expiresAt`, and a new
+     * one is granted until it, or forever.
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Permission|string>  $permissions
+     * @param  \DateTimeInterface|null  $expiresAt
      * @return static
      *
      * @throws \Throwable
      */
-    public function syncPermissions(array $permissions): static
+    public function syncPermissions(array $permissions, ?\DateTimeInterface $expiresAt = null): static
     {
-        self::authorizationRoles()->syncPermissions($this, $permissions);
+        self::authorizationRoles()->syncPermissions($this, $permissions, $expiresAt);
 
         return $this;
     }

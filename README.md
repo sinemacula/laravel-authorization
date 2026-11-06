@@ -38,7 +38,8 @@ principal's role and permission grants, and anything left is denied.
 ## Features
 
 - **Roles and permissions** as Eloquent models with UUID keys, granted to any model through polymorphic pivots (integer,
-  UUID and ULID keys all work), each grant with an optional expiry, stored in UTC whatever zone it is given in.
+  UUID and ULID keys all work), each grant with an optional expiry, stored in UTC whatever zone it is given in. A
+  role's grant of a permission can expire too.
 - **Owned records**: a role, permission or policy belongs to the platform or to one tenant, and its name is unique
   within its owner (and, for roles and permissions, its guard), so two tenants can each have their own `manager`. A
   tenant cannot take the name of a platform system role, revoking a name removes every held grant of it (the
@@ -285,12 +286,13 @@ Grants are idempotent: granting what the grantee holds, with the same expiry, ch
 returns `GrantOutcome::UNCHANGED`, and a concurrent duplicate never raises a unique-constraint violation. Re-granting a
 grant that has expired re-arms it with the new expiry (`REARMED`), and a new expiry on a live grant is reported as
 `EXPIRY_CHANGED`. A sync re-arms a listed grant that has expired with the sync's expiry, or with none when it is given
-none, and leaves a live one as it is. The trait sync methods take no expiry, so a lapsed temporary grant they list comes
-back permanent; to re-arm it for a limited time, call `GrantService::syncRoles()` (or `syncPermissions()`,
-`syncPolicies()`) with an expiry. Setting a role's parent locks the roles involved and refuses a cycle. A role with
-children cannot be deleted (`RoleHasChildrenException`), so no one holding a child loses what it inherited by
-surprise: move the children to another parent or delete them first. A target of the wrong kind, such as a role in a
-policy sync, is refused with
+none, and leaves a live one as it is. A role's permissions work the same way: `RoleService::grantPermission()` and
+`syncPermissions()`, and the role's `givePermission()` and `syncPermissions()`, each take an optional expiry. The
+identity traits' sync methods take no expiry, so a lapsed temporary grant they list comes back permanent; to re-arm it
+for a limited time, call `GrantService::syncRoles()` (or `syncPermissions()`, `syncPolicies()`) with an expiry. Setting
+a role's parent locks the roles involved and refuses a cycle. A role with children cannot be deleted
+(`RoleHasChildrenException`), so no one holding a child loses what it inherited by surprise: move the children to
+another parent or delete them first. A target of the wrong kind, such as a role in a policy sync, is refused with
 `InvalidGrantTargetException`; a grantee that is not a saved model with a key with `InvalidGranteeException`; and an
 unsaved role, permission or policy handed to its service, which would otherwise be created or clear a parent, with
 `UnsavedRecordException`.
@@ -499,7 +501,8 @@ identity holds on a temporary or expired grant is made permanent and reported as
 grant rows record; it must name a row that exists, and without it they record no actor.
 
 `authorization:prune` removes the grants that no longer count: expired grants, reported as `RoleExpired`,
-`PermissionExpired` or `PolicyExpired` with no actor, and the grants of a grantee deleted without its model events, such
+`PermissionExpired` or `PolicyExpired` with no actor, a role's expired grants of permissions, reported as
+`Role\PermissionExpired`, and the grants of a grantee deleted without its model events, such
 as by a raw query, reported as revoked. A soft-deleted grantee keeps its grants. Expired grants stop counting at their
 expiry with or without it, so pruning keeps the tables small rather than making checks correct. Like `model:prune`, it
 takes `--pretend` and `--chunk`, and is scheduled like any command:

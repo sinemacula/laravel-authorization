@@ -178,7 +178,8 @@ final class GrantResolverTest extends TestCase
     /**
      * A role moved under a parent the resolution had not read, between reading
      * the hierarchy and its permissions, still resolves to the moved role's
-     * permissions afresh, but is marked unstable so it is not stored.
+     * permissions afresh, expiring with them, but is marked unstable so it is
+     * not stored.
      *
      * @return void
      */
@@ -188,7 +189,7 @@ final class GrantResolverTest extends TestCase
         $parent = Role::create(['name' => 'publisher']);
         $role   = Role::create(['name' => 'editor']);
 
-        $parent->givePermission(Permission::create(['name' => 'posts:publish']));
+        $parent->givePermission(Permission::create(['name' => 'posts:publish']), Carbon::parse('2026-07-01 12:01:00'));
         $user->assignRole($role);
 
         $store = new VersionedStore(new Repository(self::onFirstPin(static fn () => DB::table('roles')->where('id', $role->id)->update(['parent_id' => $parent->id]))), 'authz');
@@ -196,7 +197,30 @@ final class GrantResolverTest extends TestCase
         $resolution = GrantResolver::permissions($user->permissions(), $user->roles(), new ResolutionPins($store));
 
         self::assertSame(['posts:publish'], $resolution->value);
+        self::assertSame(60, $resolution->expiresIn);
         self::assertFalse($resolution->stable);
+    }
+
+    /**
+     * A role's grant of a permission that expires sooner than any grant of the
+     * identity's bounds the resolution, and one that has expired is left out.
+     *
+     * @return void
+     */
+    public function testARolesPermissionThatExpiresSoonerBoundsTheResolution(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+        $role = Role::create(['name' => 'writer']);
+
+        $role->givePermission(Permission::create(['name' => 'posts:write']), Carbon::parse('2026-07-01 12:02:00'));
+        $role->givePermission(Permission::create(['name' => 'posts:lapsed']), Carbon::parse('2026-07-01 11:00:00'));
+        $user->givePermission(Permission::create(['name' => 'posts:read']), Carbon::parse('2026-07-01 12:05:00'));
+        $user->assignRole($role);
+
+        $resolution = GrantResolver::permissions($user->permissions(), $user->roles(), new ResolutionPins);
+
+        self::assertEqualsCanonicalizing(['posts:read', 'posts:write'], $resolution->value);
+        self::assertSame(120, $resolution->expiresIn);
     }
 
     /**

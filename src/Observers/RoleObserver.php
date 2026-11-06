@@ -208,7 +208,15 @@ final class RoleObserver
             RoleParity::assertUnder($child, $role);
         }
 
-        foreach ($role->permissions()->withoutGlobalScope(TenantScope::class)->get() as $permission) {
+        // Every permission the role carries, an expired grant included, since a
+        // re-armed grant keeps its row.
+        /** @var list<string> $permissions */
+        $permissions = $role->permissions()->newPivotQuery()->pluck('permission_id')->all();
+
+        /** @var list<\SineMacula\Laravel\Authorization\Models\Permission> $carried */
+        $carried = GrantTarget::PERMISSION->find($permissions);
+
+        foreach ($carried as $permission) {
             RoleParity::assertCarries($role, $permission);
         }
     }
