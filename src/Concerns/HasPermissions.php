@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePermissionPivot;
 use SineMacula\Laravel\Authorization\Resolvers\GrantResolver;
+use SineMacula\Laravel\Authorization\Support\HeldPermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
@@ -168,7 +169,15 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * `hasPermission('posts:create')`, and an identity holding `*` satisfies
      * every check (the super-admin path). The reverse direction does not match:
      * holding `posts:create` does not satisfy an asked `posts:*`. Backslashes
-     * are compared literally via `FNM_NOESCAPE`.
+     * are compared literally via `FNM_NOESCAPE` (see `HeldPermissions`).
+     *
+     * This reports what is granted in the current scope (the tenant chain and
+     * application the tenant scope applies), and decides nothing: it weighs no
+     * policy, deny, guardrail, boundary or session cap, and no resource's
+     * tenant. To ask whether the subject may perform an action, decide it with
+     * `Authorization::check()` or `can()`, through which the Gate, the Blade
+     * permission directives, the `permission:` middleware and
+     * `effectivePermissions()` all decide.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return bool
@@ -177,13 +186,7 @@ trait HasPermissions // @phpstan-ignore trait.unused
     {
         $asked = $permission instanceof Permission ? $permission->name : $permission;
 
-        foreach ($this->getPermissions() as $held) {
-            if (\fnmatch($held, $asked, \FNM_NOESCAPE)) {
-                return true;
-            }
-        }
-
-        return false;
+        return HeldPermissions::match($this->getPermissions(), $asked) !== null;
     }
 
     /**
@@ -196,6 +199,15 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * revocation or change to a held role, its ancestors or a held permission
      * takes effect on the next check. A miss takes five queries however many
      * roles the identity holds and however deep they sit.
+     *
+     * Only the grants that reach the current scope count: platform-wide ones,
+     * those made in the current tenant, and its ancestors' that reach the
+     * tenants below them, in the current application or every one, and not
+     * expired (see `TenantChain::grants()`). Each scope's names are resolved
+     * and kept apart, under the scope's tenant and application, so the
+     * resolutions form a map from scope to the permissions that reach it: a
+     * check on a resource of a tenant reads the map's entry for that tenant
+     * (see `ResourceScope`), and a grant never counts where it does not reach.
      *
      * @return array<int, string>
      *

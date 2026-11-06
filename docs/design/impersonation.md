@@ -85,8 +85,9 @@ it hands over.
   user Y" signal should emit their own event at the call site.
 - **The permission step uses the target principal's permissions.** When `for($user)` is active, the held-permission
   check is made at the allow stage, after the caps and only when no allow statement decides, through
-  `SubjectGrants::holdsPermission()` over the target subject's grantees, its principal and its identity -- the target
-  user's permissions, not the caller's, capped by the target user's boundaries.
+  `SubjectGrants::permissionFor()` over the target subject's grantees, its principal and its identity -- the target
+  user's permissions, not the caller's, capped by the target user's boundaries, and counted only where the grant they
+  came from reaches the resource.
 
 ## Implementation Anchors
 

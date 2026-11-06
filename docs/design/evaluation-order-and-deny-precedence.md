@@ -23,8 +23,9 @@ throws when it does not. It returns a `Decision`:
 - `trace` -- every step taken, in order, each a `TraceEntry`: its stage, its `TraceOutcome`, the statement it assessed
   (none for the permission step, a guardrail or boundary that refused the check, a session cap, or a cap stage that
   capped nothing), the cap it names when it is a guardrail's or a boundary's refusal (`cap`, as `name[key]`) or a
-  session cap's step (`cap`, by the session cap's name), and the condition keys (their dot paths) it tested with
-  whether each held.
+  session cap's step (`cap`, by the session cap's name), the held permission that allowed when it is the permission
+  step and found one (`permission`, as it was granted, a pattern such as `posts:*` included), and the condition keys
+  (their dot paths) it tested with whether each held.
 - `requirements` -- for an `insufficient_authentication` denial, one `UnmetRequirement` for each statement in
   `statements`, in the same order: the authentication requirement that alone kept it from applying and its unmet parts.
   They are alternatives: any one of them met would allow the check. Empty for every other decision.
@@ -345,8 +346,11 @@ refuses never reads the permissions, since the session stage runs before the all
    6. *Allow*: every allow statement is assessed. An allow applies only to the subjects its source admits (invariant
       9); one that does not is recorded as `principal_mismatch` and decides nothing. One that cannot be evaluated
       denies as `invalid_policy`; failing that, one that matches allows, a resource policy's with no permission held.
-      Failing that, a permission the subject holds that the action names (directly or through a role, which BL-51
-      refines) allows. The permission is asked once, and only when no allow statement matched and none was invalid.
+      Failing that, a permission the subject holds that the action names, directly or through a role, allows, when the
+      grant it came from reaches the check (invariant 13). The permission is asked once, and only when no allow
+      statement matched and none was invalid, and its step names the held permission that allowed. This is the only
+      place a permission held is weighed: no stage, and no entry point, answers a check from the permissions before
+      every deny and cap has run, and the tenant stage's platform-wide grant only admits a resource, never allows it.
    7. *Implicit*: nothing allowed. The denial is `insufficient_authentication` when an allow statement names the action
       and the resource and only its authentication requirement is unmet (invariant 7); `condition_failed` when an allow
       statement names them but its conditions do not hold or cannot be decided; and `no_match` otherwise.
@@ -365,10 +369,13 @@ refuses never reads the permissions, since the session stage runs before the all
    allow is. What each policy gives (its statements split by effect, their references and its sort key) is worked out
    once per policy object (`StatementEntries`), not once a check.
 
-3. **RBAC is additive / allow-only.** Direct permission grants and role-inherited permissions are unioned on read.
-   There is no RBAC-layer deny: every permission a subject holds contributes an allow and nothing else, and only when no
-   statement has decided the check and every cap has let it through: a guardrail, a boundary or a session cap caps a
-   permission held as it caps a policy's allow.
+3. **RBAC is additive / allow-only, and an allow source at the allow stage alone (AUTHZ-7.7, N43).** Direct
+   permission grants and role-inherited permissions are unioned on read. There is no RBAC-layer deny: every permission
+   a subject holds contributes an allow and nothing else, and only when no statement has decided the check and every
+   cap has let it through: a guardrail, a boundary or a session cap caps a permission held as it caps a policy's allow.
+   A held name is matched against the action by the wildcard rules (`HeldPermissions`), and the trace names the one
+   that allowed: the action itself when it is held, else the first covering pattern in byte order, so the trace does
+   not depend on the order the grants were read in.
 
 4. **All deny semantics live exclusively in policies.** "Everyone in role X except these three users" is a deny
    policy, not an RBAC construct, so an administrator reviewing effective permissions never reasons about negative
@@ -454,6 +461,25 @@ refuses never reads the permissions, since the session stage runs before the all
     reach its subject only when both are machines or neither is, while the identity's deny statements, its boundaries
     and its inactivity still apply.
 
+13. **A permission allows only what the grant it came from reaches (AUTHZ-7.7, AUTHZ-5, N43).** For a resource of a
+    tenant, a grant counts when it was made in that tenant, in an ancestor and reaches the tenants below it
+    (`include_subtree`), or platform-wide; the tenant stage has already denied a resource outside the active tenant's
+    subtree as `tenant_scope` unless a platform-wide grant of the permission admits it, and then only platform-wide
+    grants count. For a resource with no tenant, a type alone, an opaque identifier or no resource, only the grants that
+    hold in the active tenant count (its own, its ancestors' that reach below, and platform-wide ones), and with no
+    active tenant only platform-wide grants. A grant's application and expiry hold for every kind of resource. The
+    reach is carried by the scope the permissions are resolved in: the check is decided in the resource's tenant (or
+    at platform scope after an admission), the grant query keeps the grants that reach that scope
+    (`TenantChain::grants()`), and the resolution cache keys each scope's permissions by its tenant, whether it stands
+    below it, and its application, so the resolutions form a map from scope to the permissions that reach it. A check
+    on a resource therefore costs no query beyond the first resolution of its scope, and none once that is warm. A
+    resource admitted at platform scope is still capped by its own tenant's guardrails (invariant 11).
+
+    `effectivePermissions()`, the Gate, the `permission:` and `authorize:` middleware and the permission directives
+    decide through `check()` (D22), so they apply this invariant and every other. `hasPermission()`,
+    `hasPermissionTo()`, `getPermissions()` and `assertHasPermission()` keep their documented meaning: they report what
+    is granted in the current scope and decide nothing.
+
 ## Trace
 
 Each statement adds one entry: in the deny stage for a deny statement, a guardrail's and a boundary's included; in the
@@ -465,7 +491,8 @@ session caps: uncapped`), and so does the guardrail stage for a check exempt fro
 exempt`). Each session cap adds one entry naming it, whether it covers the action or not: `credential` for the
 credential's scopes, `credential:missing` for the empty cap standing in for a machine's missing scopes, and `capped[n]`
 for the n-th explicit cap, outermost first (`[session] credential: covered`, `[session] capped[1]: refused`). The
-permission step adds one more when it is asked:
+permission step adds one more when it is asked, naming the held permission when one allowed (`[allow] permission
+"posts:*": held`) and the permission alone when none did (`[allow] permission: not_held`):
 
 | What the step found                                                 | Outcome              |
 |---------------------------------------------------------------------|----------------------|
@@ -475,7 +502,7 @@ permission step adds one more when it is asked:
 | It names them but its conditions do not hold                        | `condition_failed`   |
 | It names the action but a value it needs is missing or unresolvable | `undecidable`        |
 | It cannot be evaluated                                              | `invalid`            |
-| The subject holds the permission the action names                   | `held`               |
+| The subject holds a permission the action names (the step names it) | `held`               |
 | The subject does not hold it                                        | `not_held`           |
 | A cap no allow statement of its own lets the check through          | `refused`            |
 | A session cap none of whose patterns covers the action              | `refused`            |
@@ -618,6 +645,11 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   callback and the guardrails, or none at all (`null`) for the exempt `authorization:guardrails:manage`, under the
   check's session caps; `capped()` -- the scoped manager carrying the explicit caps.
 - `ResourceReferences::of()` -- every resource argument's reference; `ResourceScope::decide()` -- the tenant stage.
+- `SubjectGrants::permissionFor()` -- the held permission that allows the check, the subject's before its granting
+  identity's, read in the scope the check is decided in; `HeldPermissions::match()` -- the wildcard rules and the
+  deterministic choice, shared with `HasPermissions::hasPermission()`; `HasPermissions::getPermissions()`,
+  `GrantResolver::permissions()` and `TenantChain::grants()` -- the permissions whose grants reach the scope, kept per
+  scope by `ResolutionCache::rememberPermissions()`.
 - `ResourcePolicyResolver::policiesFor()` -- the resource's and its type's policies, in one query;
   `PrincipalSelectors` and `CheckContext::isSubjectNamedBy()` -- whether a selector names the subject;
   `PolicyEvaluator::isForSubject()` -- whether an allow applies to the subject; `PolicyPrincipals` -- the attachment
@@ -631,9 +663,10 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 - `PolicyEvaluator::evaluate()` -- the deny, cap, allow and implicit stages, each assessing its statements in a fixed
   order; `cap()` -- the guardrail, boundary and session stages in order; `capBy()` -- a cap stage's intersection, the
   guardrails' and the boundaries'; `capped()` and `capBySession()` -- the session caps a check is decided under and
-  their intersection; `allow()` -- the allow statements, then the permission asked lazily; `conclude()` --
-  the order of the outcomes, `insufficient_authentication` among them. `StatementEntries` -- the statements of the
-  policies, the guardrails and the boundaries, split by stage and ordered, worked out once per policy.
+  their intersection; `allow()` -- the allow statements, then the permission asked lazily, its step naming the held
+  permission; `conclude()` -- the order of the outcomes, `insufficient_authentication` among them. `StatementEntries`
+  -- the statements of the policies, the guardrails and the boundaries, split by stage and ordered, worked out once per
+  policy.
 - `GuardrailResolver::guardrailsFor()` -- the guardrails of the platform, the check's tenant and its ancestors, in the
   resource's tenant when it has one, in one query through `ResolutionCache::rememberGuardrails()`; `GuardrailService`,
   `Services\Support\GuardrailTable` and `Services\Support\GuardrailAuthority` -- setting and removing them and who may;
@@ -696,7 +729,13 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   throws, the met-until instant and the last decision's freshness; `InsufficientAuthenticationExceptionTest` -- the
   exception.
 - `AuthorizationManagerTest` (Unit and Feature) -- the subject stage, the RBAC allow, deny over RBAC and over a role,
-  `invalid_policy` over a held permission, and the caller's values under `input` and nowhere else.
+  `invalid_policy` over a held permission, and the caller's values under `input` and nowhere else; the Feature
+  `AuthorizationManagerTest` -- a permission held allowing only after every deny and cap, with its step naming it, a
+  grant's reach over a tenant's resources, its subtree, a sibling and another tree, platform-wide grants, tenantless
+  checks with and without an active tenant, applications and expiry, and `effectivePermissions()` agreeing with
+  `check()`; `RequirePermissionTest` -- the middleware agreeing with `check()` in a tenant; `RbacQueryBudgetTest` -- no
+  query once each scope a check reads is warm; `HeldPermissionsTest`, `SubjectGrantsTest` and `HasPermissionsTest` --
+  the match, the permission named, and `hasPermission()` reporting what is granted without deciding.
 - `RolePoliciesTest` and `GrantResolverTest` -- a role's policy in and out of scope (tenant, application, expiry and
   subtree), inheritance down the hierarchy, a deny in a role's policy, a policy held several ways listed once, every
   source in one order, the queries taken and a hierarchy that moves while the policies are read;
@@ -736,5 +775,8 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 - Changing deny semantics (e.g. deny-unless, deny-with-exception) requires a new invariant entry above.
 - Introducing RBAC-layer deny (negative permissions) would violate invariant 3 and requires a design decision before
   implementation.
+- Answering a check from the permissions held before the allow stage (a fast path ahead of the denies or the caps),
+  letting a permission count on a resource its grant does not reach, or letting `hasPermission()` stand in for a
+  decision would violate invariants 3 and 13 and requires a design decision before implementation.
 - Letting an undecidable deny, an invalid statement or an unreadable policy be skipped would violate invariants 5 and 6
   and requires a design decision before implementation.

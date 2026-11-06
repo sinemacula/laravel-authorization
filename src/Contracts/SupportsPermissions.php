@@ -56,6 +56,11 @@ interface SupportsPermissions
      * Return the names of every permission the identity holds, either directly
      * or through its assigned roles.
      *
+     * The decision reads these names, those of the grants that reach the scope
+     * it is decided in, and matches the action against them by the wildcard
+     * rules (see `HeldPermissions`), so its trace can name the permission that
+     * allowed; `hasPermission()` reports what is granted without deciding.
+     *
      * @return array<int, string>
      */
     public function getPermissions(): array;

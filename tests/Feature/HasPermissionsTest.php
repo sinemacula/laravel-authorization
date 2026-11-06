@@ -15,12 +15,16 @@ use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionRevoked;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ChecksGrantExpiry;
 use Tests\Concerns\ChecksGrantsByName;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
 /**
@@ -103,6 +107,33 @@ final class HasPermissionsTest extends TestCase
         $reaches = DB::table('authorizable_permissions')->pluck('include_subtree')->map(static fn (mixed $reach): bool => (bool) $reach)->all();
 
         self::assertEqualsCanonicalizing([false, true], $reaches);
+    }
+
+    /**
+     * `hasPermission()` reports what is granted in the current scope by the
+     * wildcard rules, and decides nothing: a permission held is reported though
+     * a deny refuses the decision, and one held only in a tenant is reported
+     * there alone.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testHasPermissionReportsWhatIsGrantedWithoutDeciding(): void
+    {
+        $user   = StubIdentity::create(['id' => 'user-1']);
+        $tenant = StubTenant::query()->create(['id' => 'tenant-a', 'name' => 'tenant-a']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:*']));
+        $user->givePermission(Permission::create(['name' => 'users:read']), null, $tenant);
+        $user->attachPolicy(Policy::create(['name' => 'no-editing', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:edit']]]]]));
+
+        self::assertTrue($user->hasPermission('posts:edit'));
+        self::assertTrue($user->hasPermissionTo('posts:edit'));
+        self::assertFalse($user->hasPermission('posts'));
+        self::assertFalse(Authorization::for($user)->can('posts:edit'));
+        self::assertFalse($user->hasPermission('users:read'));
+        self::assertContains('users:read', TenantScope::within($tenant, null, static fn (): array => $user->getPermissions()));
     }
 
     /**

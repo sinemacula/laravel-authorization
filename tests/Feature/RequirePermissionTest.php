@@ -18,10 +18,15 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Http\Middleware\AbstractAuthorizationMiddleware;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Models\Permission;
+use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\GuardrailService;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
+use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\ChecksAccess;
 use Tests\Feature\Stubs\RolesOnlyPrincipal;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
 /**
@@ -255,6 +260,54 @@ final class RequirePermissionTest extends TestCase
             self::assertSame($expected, Gate::forUser($identity)->allows($action), "The Gate answered wrongly on {$action}.");
             self::assertSame($expected, $this->admits(RequirePermission::class, self::request(), $action), "The middleware disagrees with the Gate on {$action}.");
         }
+    }
+
+    /**
+     * The middleware decides through `check()`, so it admits exactly what the
+     * decision allows in the request's tenant: a permission held there, and one
+     * held platform-wide, but not one held only in another tenant, nor one the
+     * tenant's guardrail caps, whatever the identity holds.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheMiddlewareAgreesWithTheDecisionInTheTenant(): void
+    {
+        [$account, $sibling] = \array_map(static fn (string $id): StubTenant => StubTenant::query()->create(['id' => $id, 'name' => $id]), ['account', 'sibling']);
+
+        $identity = StubIdentity::create(['id' => 'editor-1']);
+        $actor    = StubIdentity::create(['id' => 'guardrail-admin']);
+
+        foreach (['posts:create', 'posts:delete', 'posts:publish', 'posts:archive', PackagePermissions::GUARDRAILS_MANAGE] as $name) {
+            Permission::create(['name' => $name]);
+        }
+
+        $identity->givePermission('posts:create', null, $account);
+        $identity->givePermission('posts:delete', null, $sibling);
+        $identity->givePermission('posts:publish');
+        $identity->givePermission('posts:archive');
+        $actor->givePermission(PackagePermissions::GUARDRAILS_MANAGE);
+
+        $guardrails = GuardrailService::instance();
+
+        self::assertInstanceOf(GuardrailService::class, $guardrails);
+
+        $statement = ['effect' => 'allow', 'actions' => ['posts:create', 'posts:delete', 'posts:publish']];
+
+        $guardrails->set(Policy::create(['name' => 'no-archive', 'document' => ['statements' => [$statement]]]), $account, $actor);
+
+        $this->actingAsIdentity($identity, $account);
+        $this->app?->forgetInstance(ResolvedTenant::class);
+
+        $expected = ['posts:create' => true, 'posts:delete' => false, 'posts:publish' => true, 'posts:archive' => false];
+
+        foreach ($expected as $action => $allowed) {
+            self::assertSame($allowed, Authorization::check($action)->isAllowed(), $action);
+            self::assertSame($allowed, $this->admits(RequirePermission::class, self::request(), $action), "The middleware disagrees with the decision on {$action}.");
+        }
+
+        self::assertTrue($identity->hasPermission('posts:archive'));
     }
 
     /**

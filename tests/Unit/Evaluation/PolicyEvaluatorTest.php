@@ -1537,7 +1537,7 @@ final class PolicyEvaluatorTest extends TestCase
     public function testEveryStageIsTracedInOrder(): void
     {
         $policy   = self::policy('p', [['effect' => 'deny', 'actions' => ['posts:delete']], ['effect' => 'allow', 'actions' => ['posts:edit']]]);
-        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, [], [], static fn (): bool => false);
+        $decision = (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, [], [], static fn (): ?string => null);
 
         self::assertEquals([
             self::entry(DecisionStage::DENY, TraceOutcome::NOT_APPLICABLE, 'p', 0),
@@ -1610,7 +1610,7 @@ final class PolicyEvaluatorTest extends TestCase
     public function testABoundaryWithNoAllowStatementDeniesNamingIt(): void
     {
         $allowAll = self::policy('all', [['effect' => 'allow', 'actions' => ['*']]]);
-        $empty    = (new PolicyEvaluator)->evaluate([$allowAll], 'posts:write', null, [], [(new Policy('empty', []))->withId('9')], static fn (): bool => true);
+        $empty    = (new PolicyEvaluator)->evaluate([$allowAll], 'posts:write', null, [], [(new Policy('empty', []))->withId('9')], static fn (): string => '*');
         $denyOnly = (new PolicyEvaluator)->evaluate([$allowAll], 'posts:read', null, [], [self::policy('donly', [['effect' => 'deny', 'actions' => ['posts:delete']]])]);
 
         self::assertSame(DecisionReason::BOUNDARY, $empty->reason);
@@ -1658,7 +1658,7 @@ final class PolicyEvaluatorTest extends TestCase
             self::entry(DecisionStage::ALLOW, TraceOutcome::MATCHED, 'both', 0),
         ], $allowed->trace);
 
-        $capped = (new PolicyEvaluator)->evaluate([$narrow], 'posts:edit', null, [], [$narrow], static fn (): bool => true);
+        $capped = (new PolicyEvaluator)->evaluate([$narrow], 'posts:edit', null, [], [$narrow], static fn (): string => '*');
 
         self::assertSame(DecisionReason::BOUNDARY, $capped->reason);
     }
@@ -1676,7 +1676,7 @@ final class PolicyEvaluatorTest extends TestCase
         $policy   = self::policy('p', [['effect' => 'allow', 'actions' => ['posts:edit']]]);
         $alone    = (new PolicyEvaluator)->evaluate([], 'posts:read', null, [], [$boundary]);
         $allowed  = (new PolicyEvaluator)->evaluate([$policy], 'posts:edit', null, [], [$boundary]);
-        $held     = (new PolicyEvaluator)->evaluate([], 'posts:read', null, [], [$boundary], static fn (): bool => true);
+        $held     = (new PolicyEvaluator)->evaluate([], 'posts:read', null, [], [$boundary], static fn (): string => '*');
 
         self::assertSame(DecisionReason::NO_MATCH, $alone->reason);
         self::assertTrue($allowed->isAllowed());
@@ -1703,8 +1703,8 @@ final class PolicyEvaluatorTest extends TestCase
         $narrow = self::policy('b-narrow', [['effect' => 'allow', 'actions' => ['posts:read']]]);
 
         foreach ([[$wide, $narrow], [$narrow, $wide]] as $boundaries) {
-            $edit = (new PolicyEvaluator)->evaluate([], 'posts:edit', null, [], $boundaries, static fn (): bool => true);
-            $read = (new PolicyEvaluator)->evaluate([], 'posts:read', null, [], $boundaries, static fn (): bool => true);
+            $edit = (new PolicyEvaluator)->evaluate([], 'posts:edit', null, [], $boundaries, static fn (): string => '*');
+            $read = (new PolicyEvaluator)->evaluate([], 'posts:read', null, [], $boundaries, static fn (): string => '*');
 
             self::assertSame(DecisionReason::BOUNDARY, $edit->reason);
             self::assertEquals([
@@ -1729,14 +1729,14 @@ final class PolicyEvaluatorTest extends TestCase
         $boundary = self::policy('cap', [['effect' => 'allow', 'actions' => ['posts:read'], 'conditions' => ['eq' => ['input.region' => 'eu']]]]);
         $named    = self::policy('named', [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']]]);
         $evaluate = static fn (array $boundaries, array $input): Decision => (new PolicyEvaluator)
-            ->evaluate([], 'posts:read', null, ['input' => $input], $boundaries, static fn (): bool => true);
+            ->evaluate([], 'posts:read', null, ['input' => $input], $boundaries, static fn (): string => '*');
 
         self::assertTrue($evaluate([$boundary], ['region' => 'eu'])->isAllowed());
         self::assertSame(DecisionReason::BOUNDARY, $evaluate([$boundary], ['region' => 'us'])->reason);
         self::assertSame(DecisionReason::BOUNDARY, $evaluate([$boundary], [])->reason);
         self::assertSame(TraceOutcome::UNDECIDABLE, $evaluate([$boundary], [])->trace[1]->outcome);
 
-        $mismatched = (new PolicyEvaluator)->evaluate([], 'posts:read', null, self::namedContext('1'), [$named], static fn (): bool => true);
+        $mismatched = (new PolicyEvaluator)->evaluate([], 'posts:read', null, self::namedContext('1'), [$named], static fn (): string => '*');
 
         self::assertSame(DecisionReason::BOUNDARY, $mismatched->reason);
         self::assertSame(TraceOutcome::PRINCIPAL_MISMATCH, $mismatched->trace[1]->outcome);
@@ -1775,7 +1775,7 @@ final class PolicyEvaluatorTest extends TestCase
     {
         $broken   = new Policy('a-broken', [new Statement(PolicyEffect::ALLOW, ['posts:read'], null, ['bogus' => ['input.k' => 1]])]);
         $allowing = self::policy('b-allowing', [['effect' => 'allow', 'actions' => ['posts:read']]]);
-        $decision = (new PolicyEvaluator)->evaluate([], 'posts:read', null, [], [$allowing, $broken], static fn (): bool => true);
+        $decision = (new PolicyEvaluator)->evaluate([], 'posts:read', null, [], [$allowing, $broken], static fn (): string => '*');
 
         self::assertSame(DecisionReason::INVALID_POLICY, $decision->reason);
         self::assertSame(DecisionStage::BOUNDARY, $decision->stage);
@@ -1807,7 +1807,7 @@ final class PolicyEvaluatorTest extends TestCase
         self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, $unmet(), [$open])->reason);
         self::assertSame(DecisionReason::BOUNDARY, (new PolicyEvaluator)->evaluate([$policy], 'posts:read', null, $unmet(), [$closed])->reason);
 
-        $capped = (new PolicyEvaluator)->evaluate([], 'posts:read', null, $unmet(), [$stepped], static fn (): bool => true);
+        $capped = (new PolicyEvaluator)->evaluate([], 'posts:read', null, $unmet(), [$stepped], static fn (): string => '*');
 
         self::assertSame(DecisionReason::BOUNDARY, $capped->reason);
         self::assertSame([], $capped->requirements);
@@ -1858,8 +1858,8 @@ final class PolicyEvaluatorTest extends TestCase
         $narrow = self::policy('b-narrow', [['effect' => 'allow', 'actions' => ['posts:read']]]);
 
         foreach ([[$wide, $narrow], [$narrow, $wide]] as $guardrails) {
-            $edit = (new PolicyEvaluator)->evaluate([], 'posts:edit', null, [], [], static fn (): bool => true, $guardrails);
-            $read = (new PolicyEvaluator)->evaluate([], 'posts:read', null, [], [], static fn (): bool => true, $guardrails);
+            $edit = (new PolicyEvaluator)->evaluate([], 'posts:edit', null, [], [], static fn (): string => '*', $guardrails);
+            $read = (new PolicyEvaluator)->evaluate([], 'posts:read', null, [], [], static fn (): string => '*', $guardrails);
 
             self::assertSame(DecisionReason::GUARDRAIL, $edit->reason);
             self::assertEquals([
@@ -1872,11 +1872,11 @@ final class PolicyEvaluatorTest extends TestCase
                 new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::MATCHED, self::reference('a-wide', 0)),
                 new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::MATCHED, self::reference('b-narrow', 0)),
                 ...self::uncapped(DecisionStage::BOUNDARY, DecisionStage::SESSION),
-                new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD),
+                new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD, null, [], null, '*'),
             ], $read->trace);
         }
 
-        $empty = (new PolicyEvaluator)->evaluate([], 'posts:read', null, [], [], static fn (): bool => true, [new Policy('empty', [])]);
+        $empty = (new PolicyEvaluator)->evaluate([], 'posts:read', null, [], [], static fn (): string => '*', [new Policy('empty', [])]);
 
         self::assertSame(DecisionReason::GUARDRAIL, $empty->reason);
         self::assertEquals([new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::REFUSED, null, [], 'empty')], $empty->trace);
@@ -1894,8 +1894,8 @@ final class PolicyEvaluatorTest extends TestCase
     {
         $guardrail = self::policy('rail', [['effect' => 'allow', 'actions' => ['posts:*']]]);
         $boundary  = self::policy('cap', [['effect' => 'allow', 'actions' => ['posts:read']]]);
-        $alone     = (new PolicyEvaluator)->evaluate([], 'posts:edit', null, [], [], static fn (): bool => false, [$guardrail]);
-        $bounded   = (new PolicyEvaluator)->evaluate([], 'posts:edit', null, [], [$boundary], static fn (): bool => true, [$guardrail]);
+        $alone     = (new PolicyEvaluator)->evaluate([], 'posts:edit', null, [], [], static fn (): ?string => null, [$guardrail]);
+        $bounded   = (new PolicyEvaluator)->evaluate([], 'posts:edit', null, [], [$boundary], static fn (): string => '*', [$guardrail]);
 
         self::assertSame(DecisionReason::NO_MATCH, $alone->reason);
         self::assertSame(DecisionStage::IMPLICIT, $alone->stage);
@@ -1921,7 +1921,7 @@ final class PolicyEvaluatorTest extends TestCase
         $named     = self::policy('named', [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']]]);
         $stepped   = self::policy('stepped', [self::requiringAllow(self::MULTIFACTOR)]);
         $evaluate  = static fn (array $guardrails, array|CheckContext $context): Decision => (new PolicyEvaluator)
-            ->evaluate([], 'posts:read', null, $context, [], static fn (): bool => true, $guardrails);
+            ->evaluate([], 'posts:read', null, $context, [], static fn (): string => '*', $guardrails);
 
         self::assertTrue($evaluate([$guardrail], ['input' => ['region' => 'eu']])->isAllowed());
         self::assertSame(DecisionReason::GUARDRAIL, $evaluate([$guardrail], ['input' => ['region' => 'us']])->reason);
@@ -1972,17 +1972,17 @@ final class PolicyEvaluatorTest extends TestCase
     public function testACheckExemptFromTheGuardrailsSkipsTheirStage(): void
     {
         $evaluator = new PolicyEvaluator;
-        $allowed   = $evaluator->evaluate([], 'posts:read', null, [], [], static fn (): bool => true, null);
-        $again     = $evaluator->evaluate([], 'posts:read', null, [], [], static fn (): bool => true, null);
-        $uncapped  = $evaluator->evaluate([], 'posts:read', null, [], [], static fn (): bool => true, []);
+        $allowed   = $evaluator->evaluate([], 'posts:read', null, [], [], static fn (): string => '*', null);
+        $again     = $evaluator->evaluate([], 'posts:read', null, [], [], static fn (): string => '*', null);
+        $uncapped  = $evaluator->evaluate([], 'posts:read', null, [], [], static fn (): string => '*', []);
         $boundary  = self::policy('cap', [['effect' => 'allow', 'actions' => ['posts:read']]]);
-        $bounded   = $evaluator->evaluate([], 'posts:edit', null, [], [$boundary], static fn (): bool => true, null);
+        $bounded   = $evaluator->evaluate([], 'posts:edit', null, [], [$boundary], static fn (): string => '*', null);
 
         self::assertTrue($allowed->isAllowed());
         self::assertEquals([
             new TraceEntry(DecisionStage::GUARDRAIL, TraceOutcome::EXEMPT),
             ...self::uncapped(DecisionStage::BOUNDARY, DecisionStage::SESSION),
-            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD),
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD, null, [], null, '*'),
         ], $allowed->trace);
         self::assertStringContainsString('[guardrail] guardrails: exempt', $allowed->explain());
         self::assertSame($allowed->trace[0], $again->trace[0]);
@@ -2002,7 +2002,7 @@ final class PolicyEvaluatorTest extends TestCase
     {
         $broken   = new Policy('a-broken', [new Statement(PolicyEffect::ALLOW, ['posts:read'], null, ['bogus' => ['input.k' => 1]])]);
         $allowing = self::policy('b-allowing', [['effect' => 'allow', 'actions' => ['posts:read']]]);
-        $decision = (new PolicyEvaluator)->evaluate([], 'posts:read', null, [], [], static fn (): bool => true, [$allowing, $broken]);
+        $decision = (new PolicyEvaluator)->evaluate([], 'posts:read', null, [], [], static fn (): string => '*', [$allowing, $broken]);
 
         self::assertSame(DecisionReason::INVALID_POLICY, $decision->reason);
         self::assertSame(DecisionStage::GUARDRAIL, $decision->stage);
@@ -2024,10 +2024,10 @@ final class PolicyEvaluatorTest extends TestCase
     public function testThePermissionIsAskedOnlyWhenNoStatementAllows(): void
     {
         $asked      = new \ArrayObject;
-        $permission = static function () use ($asked): bool {
+        $permission = static function () use ($asked): string {
             $asked->append(true);
 
-            return true;
+            return 'posts:*';
         };
 
         $allowing = self::policy('p', [['effect' => 'allow', 'actions' => ['posts:read']]]);
@@ -2043,7 +2043,8 @@ final class PolicyEvaluatorTest extends TestCase
         self::assertTrue($held->isAllowed());
         self::assertSame(DecisionStage::ALLOW, $held->stage);
         self::assertSame([], $held->statements);
-        self::assertEquals(new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD), $held->trace[\count($held->trace) - 1]);
+        self::assertEquals(new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD, null, [], null, 'posts:*'), $held->trace[\count($held->trace) - 1]);
+        self::assertSame('[allow] permission "posts:*": held', $held->trace[\count($held->trace) - 1]->toString());
 
         $stepUp = self::policy('s', [self::requiringAllow(self::MULTIFACTOR)]);
         $unmet  = self::requirementContext(RequirementResult::unmet(['multifactor']));
@@ -2067,7 +2068,7 @@ final class PolicyEvaluatorTest extends TestCase
         ];
 
         foreach (['posts:read', 'posts:edit', 'posts:delete'] as $action) {
-            $evaluate  = static fn (array $order): Decision => (new PolicyEvaluator)->evaluate([], $action, null, [], $order, static fn (): bool => true);
+            $evaluate  = static fn (array $order): Decision => (new PolicyEvaluator)->evaluate([], $action, null, [], $order, static fn (): string => '*');
             $decisions = \array_map($evaluate, self::permutations($boundaries));
 
             foreach ($decisions as $decision) {
@@ -2116,16 +2117,16 @@ final class PolicyEvaluatorTest extends TestCase
     public function testEverySessionCapMustCoverTheAction(): void
     {
         $session = SessionCaps::of(['posts:*'], [['posts:read', 'comments:read']]);
-        $read    = (new PolicyEvaluator)->capped($session)->evaluate([], 'posts:read', null, [], [], static fn (): bool => true);
-        $edit    = (new PolicyEvaluator)->capped($session)->evaluate([], 'posts:edit', null, [], [], static fn (): bool => true);
-        $comment = (new PolicyEvaluator)->capped($session)->evaluate([], 'comments:read', null, [], [], static fn (): bool => true);
+        $read    = (new PolicyEvaluator)->capped($session)->evaluate([], 'posts:read', null, [], [], static fn (): string => '*');
+        $edit    = (new PolicyEvaluator)->capped($session)->evaluate([], 'posts:edit', null, [], [], static fn (): string => '*');
+        $comment = (new PolicyEvaluator)->capped($session)->evaluate([], 'comments:read', null, [], [], static fn (): string => '*');
 
         self::assertTrue($read->isAllowed());
         self::assertEquals([
             ...self::uncapped(DecisionStage::GUARDRAIL, DecisionStage::BOUNDARY),
             self::sessionStep(TraceOutcome::COVERED, 'credential'),
             self::sessionStep(TraceOutcome::COVERED, 'capped[1]'),
-            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD),
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD, null, [], null, '*'),
         ], $read->trace);
 
         self::assertSame(DecisionReason::SESSION_POLICY, $edit->reason);
@@ -2144,9 +2145,9 @@ final class PolicyEvaluatorTest extends TestCase
      */
     public function testAnEmptySessionCapAllowsNothingWhereNoCapCapsNothing(): void
     {
-        $evaluate = static fn (SessionCaps $session): Decision => (new PolicyEvaluator)->capped($session)->evaluate([], 'posts:read', null, [], [], static fn (): bool => true);
+        $evaluate = static fn (SessionCaps $session): Decision => (new PolicyEvaluator)->capped($session)->evaluate([], 'posts:read', null, [], [], static fn (): string => '*');
 
-        self::assertTrue((new PolicyEvaluator)->evaluate([], 'posts:read', null, [], [], static fn (): bool => true)->isAllowed());
+        self::assertTrue((new PolicyEvaluator)->evaluate([], 'posts:read', null, [], [], static fn (): string => '*')->isAllowed());
         self::assertTrue($evaluate(new SessionCaps)->isAllowed());
         self::assertEquals(self::uncapped(DecisionStage::SESSION), \array_slice($evaluate(new SessionCaps)->trace, 2, 1));
 
@@ -2186,7 +2187,7 @@ final class PolicyEvaluatorTest extends TestCase
      */
     public function testASessionCapGrantsNothing(): void
     {
-        $decision = (new PolicyEvaluator)->capped(SessionCaps::of(['posts:read']))->evaluate([], 'posts:read', null, [], [], static fn (): bool => false);
+        $decision = (new PolicyEvaluator)->capped(SessionCaps::of(['posts:read']))->evaluate([], 'posts:read', null, [], [], static fn (): ?string => null);
 
         self::assertSame(DecisionReason::NO_MATCH, $decision->reason);
         self::assertSame(DecisionStage::IMPLICIT, $decision->stage);

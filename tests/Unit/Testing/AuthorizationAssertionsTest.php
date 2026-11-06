@@ -104,7 +104,7 @@ final class AuthorizationAssertionsTest extends TestCase
         $this->expectException(AssertionFailedError::class);
         $this->expectExceptionMessage(
             "Failed asserting that the principal cannot perform 'docs:delete'.\nDecision:\nALLOW at the allow stage.\n"
-            . "  [guardrail] guardrails: uncapped\n  [boundary] boundaries: uncapped\n  [session] session caps: uncapped\n  [allow] permission: held",
+            . "  [guardrail] guardrails: uncapped\n  [boundary] boundaries: uncapped\n  [session] session caps: uncapped\n  [allow] permission \"docs:delete\": held",
         );
 
         $this->assertCannot($user, 'docs:delete');

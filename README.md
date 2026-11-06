@@ -369,11 +369,13 @@ $user->assignRole('admin', tenant: $organisationA);
 $user->assignRole('viewer', tenant: $organisationB);
 ```
 
-A check counts the grants made platform-wide and those made in the current tenant; without a tenant, only platform-wide
-grants. Granting a tenant's own role outside that tenant and the tenants below it, or platform-wide, is refused with
-`GrantScopeMismatchException`. A revocation removes the grant in the same scope, and a sync replaces the grants of one
-scope: the tenant named, else the tenant that owns every target, else the platform. A grant is for every
-application unless the call names one.
+A check counts the grants made platform-wide, those made in the current tenant and those made in its ancestors that
+reach the tenants below them; without a tenant, only platform-wide grants. A check on a resource of a tenant counts the
+grants that reach that tenant instead (see [Permissions held and the resources they
+reach](#permissions-held-and-the-resources-they-reach)). Granting a tenant's own role outside that tenant and the
+tenants below it, or platform-wide, is refused with `GrantScopeMismatchException`. A revocation removes the grant in
+the same scope, and a sync replaces the grants of one scope: the tenant named, else the tenant that owns every target,
+else the platform. A grant is for every application unless the call names one.
 
 A grant can also be limited to one application (a guard's name, as `laravel-authentication` names it): it counts only
 when the subject resolver reports that application, and a grant for every application counts on all of them. Each
@@ -1109,6 +1111,49 @@ DENY (boundary: a permission boundary does not allow it) at the boundary stage.
 
 The full contract, and why a deny and a cap always win, is in [Evaluation order and deny
 precedence](docs/design/evaluation-order-and-deny-precedence.md).
+
+#### Permissions held and the resources they reach
+
+A permission held, directly or through a role, is one allow source among the others, weighed at the `allow` stage
+alone: never before every deny, guardrail, boundary and session cap has let the check through, and only once no allow
+statement matched. Nothing answers a check from the permissions before then, so a deny or a cap always beats a
+permission held, a `*` included. The permission step names the held permission that allowed, as it was granted, so a
+wildcard says which pattern let the action through:
+
+```text
+ALLOW at the allow stage.
+  [guardrail] guardrails: uncapped
+  [boundary] boundaries: uncapped
+  [session] session caps: uncapped
+  [allow] permission "posts:*": held
+```
+
+When the action itself is held it is the one named, and otherwise the first covering pattern in byte order, so the
+trace is the same whatever order the grants were read in.
+
+A permission allows a check on a resource only when the grant it came from reaches the resource:
+
+- A resource of a tenant: a grant made in that tenant, a grant made in one of its ancestors that reaches the tenants
+  below it (`includeSubtree`, the default), or a platform-wide grant. The resource must still be within the active
+  tenant, or below it, to be decided at all; one of any other tenant is denied as `tenant_scope` unless a platform-wide
+  grant of the permission admits it, and then only platform-wide grants count, while that tenant's guardrails and the
+  denies attached to the resource there still apply.
+- A resource with no tenant, a type alone, an opaque identifier or no resource: the grants that hold in the active
+  tenant, its own, its ancestors' that reach below and platform-wide ones; with no active tenant, platform-wide grants
+  alone.
+
+A grant limited to an application counts only in checks on that application, and an expired grant counts nowhere, for
+every kind of resource. A permission held in tenant A therefore allows actions on resources in A and, when the grant
+reaches its subtree, in the tenants below A, and never in a sibling of A or in another tree.
+
+The grants are resolved for each scope a check is decided in and kept per scope (tenant and application) in the
+resolution cache, so the reach costs no query of its own: once each scope is warm, checks on its resources read none.
+
+`effectivePermissions()`, the Gate, the `permission:` and `authorize:` middleware and the permission directives all
+decide through `check()`, so they answer what the decision allows, with every stage above. `hasPermission()` (and its
+alias `hasPermissionTo()`), `getPermissions()` and `assertHasPermission()` keep their meaning: they report what is
+granted in the current scope and decide nothing, so a permission held that a deny or a cap refuses is still reported as
+held.
 
 ### Writing policies
 

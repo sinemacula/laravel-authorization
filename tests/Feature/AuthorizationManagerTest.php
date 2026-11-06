@@ -279,7 +279,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertNull($decision->reason);
         self::assertSame(DecisionStage::ALLOW, $decision->stage);
         self::assertSame([], $decision->statements);
-        self::assertEquals([...self::uncapped(), new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD)], $decision->trace);
+        self::assertEquals([...self::uncapped(), new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD, null, [], null, 'posts:create')], $decision->trace);
     }
 
     /**
@@ -684,7 +684,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertEquals([
             ...self::uncapped(),
             new TraceEntry(DecisionStage::ALLOW, TraceOutcome::NOT_APPLICABLE, new StatementReference('unrelated', 0)),
-            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD),
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD, null, [], null, 'posts:create'),
         ], $decision->trace);
     }
 
@@ -720,7 +720,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertEquals([
             ...self::uncapped(),
             new TraceEntry(DecisionStage::ALLOW, TraceOutcome::UNDECIDABLE, new StatementReference('conditional-allow', 0), ['input.tenant' => false]),
-            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD),
+            new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD, null, [], null, 'posts:create'),
         ], $skipped->trace);
 
         $denied = Authorization::for($user)->withPolicies([$deny])->check('posts:create');
@@ -3013,6 +3013,278 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * A permission held allows at the allow stage alone, after every deny and
+     * every cap: an explicit deny, a guardrail, a boundary and a session cap
+     * each refuse the check before the permission is asked, so the trace has no
+     * permission step, and once none refuses, the permission allows, its step
+     * naming the held pattern that covers the action.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPermissionHeldAllowsOnlyAfterEveryDenyAndCap(): void
+    {
+        $user  = StubIdentity::create(['id' => 'user-1']);
+        $actor = self::guardrailManager();
+        $deny  = self::resourcePolicy('no-editing', [['effect' => 'deny', 'actions' => ['posts:edit']]]);
+        $rail  = self::resourcePolicy('read-only', [['effect' => 'allow', 'actions' => ['posts:read']]]);
+
+        $user->givePermission(Permission::create(['name' => 'posts:*']));
+
+        $refused = static function (Decision $decision, DecisionReason $reason, DecisionStage $stage): void {
+            self::assertSame($reason, $decision->reason);
+            self::assertSame($stage, $decision->stage);
+            self::assertNotContains(DecisionStage::ALLOW, \array_map(static fn (TraceEntry $entry): DecisionStage => $entry->stage, $decision->trace));
+        };
+
+        $user->attachPolicy($deny);
+        $refused(Authorization::for($user)->check('posts:edit'), DecisionReason::EXPLICIT_DENY, DecisionStage::DENY);
+        $user->detachPolicy($deny);
+
+        self::guardrails()->set($rail, null, $actor);
+        $refused(Authorization::for($user)->check('posts:edit'), DecisionReason::GUARDRAIL, DecisionStage::GUARDRAIL);
+        self::guardrails()->remove($rail, null, $actor);
+
+        self::boundaries()->set($user, self::resourcePolicy('bounded', [['effect' => 'allow', 'actions' => ['posts:read']]]));
+        $refused(Authorization::for($user)->check('posts:edit'), DecisionReason::BOUNDARY, DecisionStage::BOUNDARY);
+        self::boundaries()->remove($user);
+
+        $refused(Authorization::for($user)->capped(['posts:read'])->check('posts:edit'), DecisionReason::SESSION_POLICY, DecisionStage::SESSION);
+
+        $allowed = Authorization::for($user)->check('posts:edit');
+
+        self::assertTrue($allowed->isAllowed());
+        self::assertSame(DecisionStage::ALLOW, $allowed->stage);
+        self::assertEquals([...self::uncapped(), new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD, null, [], null, 'posts:*')], $allowed->trace);
+        self::assertStringContainsString('[allow] permission "posts:*": held', $allowed->explain());
+    }
+
+    /**
+     * A permission held in a tenant allows a check on a resource only where the
+     * grant reaches it: in the tenant itself, in a tenant below it only when
+     * the grant reaches its subtree, and through an ancestor's grant only when
+     * that reaches below; a resource of a sibling, of another tree or of the
+     * active tenant's ancestor is denied as `tenant_scope`, and a grant made
+     * below the active tenant counts for that tenant's resources alone.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPermissionAllowsAResourceOnlyWhereItsGrantReaches(): void
+    {
+        [$org, $account, $team, $sibling, $other] = $this->tenantTree();
+
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        foreach (['posts:edit', 'posts:archive', 'posts:read', 'posts:share', 'posts:tag'] as $name) {
+            Permission::create(['name' => $name]);
+        }
+
+        $user->givePermission('posts:edit', null, $account);
+        $user->givePermission('posts:archive', null, $account, false);
+        $user->givePermission('posts:read', null, $org);
+        $user->givePermission('posts:share', null, $org, false);
+        $user->givePermission('posts:tag', null, $team);
+
+        $this->resolveInTenant($user, $account);
+
+        $allows = static fn (string $action, StubTenant $tenant): bool => Authorization::check($action, self::postIn($tenant))->isAllowed();
+
+        self::assertTrue($allows('posts:edit', $account));
+        self::assertTrue($allows('posts:edit', $team));
+        self::assertTrue($allows('posts:archive', $account));
+        self::assertFalse($allows('posts:archive', $team));
+        self::assertTrue($allows('posts:read', $account));
+        self::assertTrue($allows('posts:read', $team));
+        self::assertFalse($allows('posts:share', $account));
+        self::assertTrue($allows('posts:tag', $team));
+        self::assertFalse($allows('posts:tag', $account));
+        self::assertFalse(Authorization::can('posts:tag'));
+
+        foreach ([$sibling, $other, $org] as $tenant) {
+            $decision = Authorization::check('posts:edit', self::postIn($tenant));
+
+            self::assertSame(DecisionReason::TENANT_SCOPE, $decision->reason);
+            self::assertSame(DecisionStage::TENANT, $decision->stage);
+            self::assertSame([], $decision->trace);
+        }
+
+        $held = Authorization::check('posts:read', self::postIn($team));
+
+        self::assertEquals(new TraceEntry(DecisionStage::ALLOW, TraceOutcome::HELD, null, [], null, 'posts:read'), $held->trace[\count($held->trace) - 1]);
+        self::assertSame([$account->getMorphClass(), 'account'], TenantScope::currentTenant());
+    }
+
+    /**
+     * A platform-wide grant counts everywhere: it allows a resource of the
+     * active tenant and of a tenant below it, admits and allows one of a
+     * sibling tenant at platform scope, and allows with no tenant active; a
+     * grant in the sibling never admits its resources, and its tenant's
+     * guardrails still cap the admitted check.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPlatformWideGrantAllowsEveryResourceWithinItsTenantsCaps(): void
+    {
+        [, $account, $team, $sibling] = $this->tenantTree();
+
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:edit']));
+        $user->givePermission(Permission::create(['name' => 'posts:delete']));
+        $user->givePermission(Permission::create(['name' => 'posts:archive']), null, $sibling);
+
+        self::guardrails()->set(self::resourcePolicy('sibling-cap', [['effect' => 'allow', 'actions' => ['posts:edit']]]), $sibling, self::guardrailManager());
+
+        foreach ([$account, null] as $active) {
+            $this->resolveInTenant($user, $active);
+
+            foreach ([$account, $team, $sibling] as $tenant) {
+                $decision = Authorization::check('posts:edit', self::postIn($tenant));
+
+                self::assertTrue($decision->isAllowed(), Reference::of($tenant)->id);
+                self::assertSame('posts:edit', $decision->trace[\count($decision->trace) - 1]->permission);
+            }
+
+            self::assertSame(DecisionReason::GUARDRAIL, Authorization::check('posts:delete', self::postIn($sibling))->reason);
+            self::assertSame(DecisionReason::TENANT_SCOPE, Authorization::check('posts:archive', self::postIn($sibling))->reason);
+        }
+    }
+
+    /**
+     * A check on a resource with no tenant, a type alone, an opaque identifier
+     * or no resource counts the grants that hold in the active tenant, those of
+     * the tenant and its ancestors that reach it and platform-wide ones, and
+     * never a sibling's; with no tenant active, only platform-wide grants.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATenantlessCheckCountsOnlyTheGrantsOfTheActiveScope(): void
+    {
+        [$org, $account, , $sibling] = $this->tenantTree();
+
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        foreach (['posts:edit', 'posts:archive', 'posts:read', 'posts:share'] as $name) {
+            Permission::create(['name' => $name]);
+        }
+
+        $user->givePermission('posts:edit', null, $account);
+        $user->givePermission('posts:share', null, $org);
+        $user->givePermission('posts:archive', null, $sibling);
+        $user->givePermission('posts:read');
+
+        $resources = [ResourceReference::record('posts', '7'), ResourceReference::type('posts'), new ResourceReference('opaque-thing'), null];
+        $actions   = ['posts:edit', 'posts:archive', 'posts:read', 'posts:share'];
+        $allowed   = static fn (): array => \array_map(
+            static fn (mixed $resource): array => \array_values(\array_filter($actions, static fn (string $action): bool => Authorization::can($action, $resource))),
+            $resources,
+        );
+
+        $this->resolveInTenant($user, $account);
+
+        self::assertSame(\array_fill(0, 4, ['posts:edit', 'posts:read', 'posts:share']), $allowed());
+
+        $this->resolveInTenant($user, null);
+
+        self::assertSame(\array_fill(0, 4, ['posts:read']), $allowed());
+    }
+
+    /**
+     * A grant limited to one application allows only in checks on that
+     * application, and an expired grant allows nowhere, for a resource of the
+     * tenant as for none.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGrantsApplicationAndExpiryHoldForEveryResource(): void
+    {
+        [, $account] = $this->tenantTree();
+
+        $user = StubIdentity::create(['id' => 'user-1']);
+        $post = self::postIn($account);
+
+        $user->givePermission(Permission::create(['name' => 'posts:edit']), null, $account, true, 'admin');
+        $user->givePermission(Permission::create(['name' => 'posts:read']), Carbon::now()->addHour(), $account);
+
+        $can = function (string $action, mixed $resource, string $application) use ($user, $account): bool {
+            $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($user, $account, $application));
+            $this->app?->forgetInstance(ResolvedTenant::class);
+
+            return Authorization::can($action, $resource);
+        };
+
+        foreach ([$post, null] as $resource) {
+            self::assertTrue($can('posts:edit', $resource, 'admin'));
+            self::assertFalse($can('posts:edit', $resource, 'web'));
+            self::assertTrue($can('posts:read', $resource, 'web'));
+        }
+
+        Carbon::setTestNow(Carbon::now()->addHours(2));
+
+        try {
+            foreach ([$post, null] as $resource) {
+                self::assertFalse($can('posts:read', $resource, 'web'));
+            }
+        } finally {
+            Carbon::setTestNow();
+        }
+    }
+
+    /**
+     * `effectivePermissions()` decides each permission through `check()`, so it
+     * reports what the decision allows, not what is granted: a permission held
+     * that a guardrail caps is reported as not allowed, and one held only in
+     * another tenant is reported as allowed in that tenant alone.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEffectivePermissionsAgreeWithTheDecision(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make(ConfigRepository::class);
+        $config->set('authorization.permission_enums', [PermissionEnum::class]);
+
+        [, $account, , $sibling] = $this->tenantTree();
+
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        $user->givePermission(Permission::create(['name' => PermissionEnum::POSTS_CREATE->value]));
+        $user->givePermission(Permission::create(['name' => PermissionEnum::POSTS_DELETE->value]), null, $sibling);
+
+        self::guardrails()->set(self::resourcePolicy('no-create', [['effect' => 'allow', 'actions' => ['posts:delete']]]), $account, self::guardrailManager());
+
+        $expected = [
+            'account' => [PermissionEnum::POSTS_CREATE->value => false, PermissionEnum::POSTS_DELETE->value => false],
+            'sibling' => [PermissionEnum::POSTS_CREATE->value => true, PermissionEnum::POSTS_DELETE->value => true],
+        ];
+
+        foreach (['account' => $account, 'sibling' => $sibling] as $name => $tenant) {
+            $this->resolveInTenant($user, $tenant);
+
+            $effective = Authorization::effectivePermissions();
+
+            self::assertSame($expected[$name], $effective, $name);
+
+            foreach ($effective as $action => $allowed) {
+                self::assertSame(Authorization::check($action)->isAllowed(), $allowed, "{$name} {$action}");
+            }
+        }
+
+        self::assertTrue($user->hasPermission(PermissionEnum::POSTS_DELETE->value));
+    }
+
+    /**
      * Assert that exactly one decision event was dispatched, for the check of
      * `posts:create` without a resource, carrying the supplied principal,
      * context and decision, and that no failure event was dispatched.
@@ -3215,6 +3487,38 @@ final class AuthorizationManagerTest extends TestCase
         $this->resolvePrincipalAs($user);
         $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($user, $tenant));
         $this->app?->forgetInstance(ResolvedTenant::class);
+    }
+
+    /**
+     * Create the tenants and bind the tree: the organisation at the top, the
+     * account and its sibling below it, the team below the account, and another
+     * organisation in a tree of its own.
+     *
+     * @return list<\Tests\Feature\Stubs\StubTenant>
+     */
+    private function tenantTree(): array
+    {
+        $create                           = static fn (string $id): StubTenant => StubTenant::query()->create(['id' => $id, 'name' => $id]);
+        $tenants                          = \array_map($create, ['org', 'account', 'team', 'sibling', 'other']);
+        [$org, $account, $team, $sibling] = $tenants;
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)
+            ->put(Reference::of($account), Reference::of($org))
+            ->put(Reference::of($team), Reference::of($account))
+            ->put(Reference::of($sibling), Reference::of($org)));
+
+        return $tenants;
+    }
+
+    /**
+     * Return a reference to a post the tenant owns.
+     *
+     * @param  \Tests\Feature\Stubs\StubTenant  $tenant
+     * @return \SineMacula\Laravel\Authorization\Support\ResourceReference
+     */
+    private static function postIn(StubTenant $tenant): ResourceReference
+    {
+        return ResourceReference::record('posts', (string) $tenant->getKey(), Reference::of($tenant)); // @phpstan-ignore cast.string
     }
 
     /**
