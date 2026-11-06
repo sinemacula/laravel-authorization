@@ -11,30 +11,40 @@ use Illuminate\Support\Carbon;
  * (AUTHZ-12.3, N37): within the session it was made in, and until the earliest
  * instant a met requirement it read stops being met.
  *
+ * The session is kept only as a non-reversible fingerprint, its SHA-256 hash,
+ * never the session id itself, so a decision carrying it is still safe to log,
+ * store and put on an event. Every session it is compared with is fingerprinted
+ * the same way first.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
 final readonly class RequirementFreshness
 {
+    /** @var string|null The fingerprint of the session the decision was made in, never its id; null when made outside one. */
+    public ?string $session;
+
+    /** @var \DateTimeImmutable|null The earliest instant a met requirement it read stops being met; null when none gave one. */
+    public ?\DateTimeImmutable $metUntil;
+
     /**
-     * Create a new requirement freshness.
+     * Create a new requirement freshness for the session the decision was made
+     * in, which is fingerprinted and never kept.
      *
      * @param  string|null  $session
      * @param  \DateTimeImmutable|null  $metUntil
      */
-    public function __construct(
-
-        /** The session the decision was made in; null when it was made outside one. */
-        public ?string $session,
-
-        /** The earliest instant a met requirement it read stops being met; null when none gave one. */
-        public ?\DateTimeImmutable $metUntil = null,
-    ) {}
+    public function __construct(?string $session, ?\DateTimeImmutable $metUntil = null)
+    {
+        $this->session  = self::fingerprintOf($session);
+        $this->metUntil = $metUntil;
+    }
 
     /**
      * Determine whether the decision may still be reused in the session at the
      * instant (now when none is given): it is the session the decision was made
-     * in, and no met requirement it read has stopped being met.
+     * in, compared by fingerprint, and no met requirement it read has stopped
+     * being met.
      *
      * @param  string|null  $session
      * @param  \DateTimeInterface|null  $at
@@ -42,7 +52,7 @@ final readonly class RequirementFreshness
      */
     public function holdsFor(?string $session, ?\DateTimeInterface $at = null): bool
     {
-        return $session === $this->session && !$this->hasLapsed($at);
+        return self::fingerprintOf($session) === $this->session && !$this->hasLapsed($at);
     }
 
     /**
@@ -55,5 +65,17 @@ final readonly class RequirementFreshness
     public function hasLapsed(?\DateTimeInterface $at = null): bool
     {
         return $this->metUntil !== null && ($at ?? Carbon::now()) >= $this->metUntil;
+    }
+
+    /**
+     * Return the non-reversible fingerprint of the session, its SHA-256 hash,
+     * or null when there is no session.
+     *
+     * @param  string|null  $session
+     * @return string|null
+     */
+    private static function fingerprintOf(?string $session): ?string
+    {
+        return $session === null ? null : \hash('sha256', $session);
     }
 }

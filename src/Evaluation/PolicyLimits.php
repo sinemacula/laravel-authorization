@@ -11,7 +11,8 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
  * A document may take up so many bytes, measured on its JSON encoding, and hold
  * so many statements; a statement may hold so many conditions, each key test of
  * each operator counting as one; and no action or resource pattern, nor any
- * string operand of a condition, may be longer than so many characters.
+ * string operand of a condition (an authentication requirement's minimum level
+ * among them), may be longer than so many characters.
  *
  * The limits are read from `authorization.policies.limits`. They are enforced
  * when a document is written and again when a stored one is read, so lowering a
@@ -150,8 +151,8 @@ final readonly class PolicyLimits
 
     /**
      * Return every action and resource pattern of the statement, and every
-     * string operand of its conditions, including each string in a list
-     * operand.
+     * string operand of its conditions, including each string in a list operand
+     * and the minimum level each part of an authentication requirement gives.
      *
      * @param  array<array-key, mixed>  $statement
      * @param  array<array-key, mixed>  $conditions
@@ -165,13 +166,54 @@ final readonly class PolicyLimits
             \array_push($values, ...self::listOf($statement[$key] ?? null));
         }
 
-        foreach (\array_filter($conditions, \is_array(...)) as $tests) {
-            foreach ($tests as $operand) {
-                \array_push($values, ...(\is_array($operand) ? \array_values($operand) : [$operand]));
+        foreach ($conditions as $operator => $tests) {
+            foreach (self::listOf($tests) as $operand) {
+                \array_push($values, ...self::valuesOf($operator, $operand));
             }
         }
 
         return \array_filter($values, \is_string(...));
+    }
+
+    /**
+     * Return the values of one operand that are measured: the operand itself,
+     * or each value of a list operand, and for an authentication requirement
+     * the minimum level each part gives.
+     *
+     * @param  int|string  $operator
+     * @param  mixed  $operand
+     * @return list<mixed>
+     */
+    private static function valuesOf(int|string $operator, mixed $operand): array
+    {
+        if ($operator === AuthenticationRequirement::OPERATOR) {
+            return self::minimumsOf($operand);
+        }
+
+        return \is_array($operand) ? \array_values($operand) : [$operand];
+    }
+
+    /**
+     * Return the `min` option of each part of an authentication requirement's
+     * operand that maps the part to its options; the part names themselves are
+     * not measured.
+     *
+     * @param  mixed  $operand
+     * @return list<mixed>
+     */
+    private static function minimumsOf(mixed $operand): array
+    {
+        $minimums = [];
+
+        foreach (self::listOf($operand) as $options) {
+            if (!\is_array($options) || !\array_key_exists('min', $options)) {
+                continue;
+            }
+
+            $minimums[] = $options['min'];
+        }
+
+        return $minimums;
     }
 
     /**

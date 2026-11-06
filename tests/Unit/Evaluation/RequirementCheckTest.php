@@ -94,8 +94,9 @@ final class RequirementCheckTest extends TestCase
     }
 
     /**
-     * Unmet parts the requirement does not name are dropped, and an unmet
-     * result naming none of its parts leaves every part unmet.
+     * Unmet parts the requirement does not name are dropped, an unmet result
+     * naming none of its parts leaves every part unmet, and the parts kept are
+     * a list even when only a later part is unmet.
      *
      * @return void
      */
@@ -106,8 +107,11 @@ final class RequirementCheckTest extends TestCase
         $some = (new RequirementCheck(new StubRequirementChecker(RequirementResult::unmet(['assurance_level', 'multifactor'])), self::subject('s')))->assess($requirement);
         $none = (new RequirementCheck(new StubRequirementChecker(RequirementResult::unmet(['assurance_level'])), self::subject('s')))->assess($requirement);
 
+        $later = (new RequirementCheck(new StubRequirementChecker(RequirementResult::unmet(['phishing_resistant'])), self::subject('s')))->assess($requirement);
+
         self::assertSame(['multifactor'], $some->unmetRequirement?->unmet);
         self::assertSame(['multifactor', 'phishing_resistant'], $none->unmetRequirement?->unmet);
+        self::assertSame(['phishing_resistant'], $later->unmetRequirement?->unmet);
     }
 
     /**
@@ -127,17 +131,20 @@ final class RequirementCheckTest extends TestCase
     }
 
     /**
-     * Without a checker, or without a subject, every part is unmet.
+     * Without a checker, or without a subject, every part is unmet, and a check
+     * without a subject limits its decision to no session.
      *
      * @return void
      */
     public function testWithoutACheckerOrSubjectEveryPartIsUnmet(): void
     {
         $checker = new StubRequirementChecker(RequirementResult::met());
+        $check   = new RequirementCheck($checker);
 
         self::assertSame(['multifactor', 'phishing_resistant'], (new RequirementCheck(null, self::subject('s')))->assess(self::requirement())->unmetRequirement?->unmet);
-        self::assertSame(['multifactor', 'phishing_resistant'], (new RequirementCheck($checker))->assess(self::requirement())->unmetRequirement?->unmet);
+        self::assertSame(['multifactor', 'phishing_resistant'], $check->assess(self::requirement())->unmetRequirement?->unmet);
         self::assertSame([], $checker->calls);
+        self::assertEquals(new RequirementFreshness(null), $check->freshness());
     }
 
     /**
@@ -216,6 +223,32 @@ final class RequirementCheckTest extends TestCase
         $check->assess(new AuthenticationRequirement(['additional_verification' => null]));
 
         self::assertEquals(new RequirementFreshness('session-1', $early), $check->freshness());
+    }
+
+    /**
+     * Of two met requirements that stay met until the same instant, the first
+     * read is the one kept.
+     *
+     * @return void
+     */
+    public function testOfTwoEqualInstantsTheFirstIsKept(): void
+    {
+        $first   = new \DateTimeImmutable('2026-11-06 12:05:00 UTC');
+        $second  = new \DateTimeImmutable('2026-11-06 13:05:00 +01:00');
+        $checker = new StubRequirementChecker(RequirementResult::met(), [
+            'multifactor'        => RequirementResult::met($first),
+            'phishing_resistant' => RequirementResult::met($second),
+        ]);
+        $check = new RequirementCheck($checker, self::subject('session-1'));
+
+        $check->assess(new AuthenticationRequirement(['multifactor' => null]));
+        $check->assess(new AuthenticationRequirement(['phishing_resistant' => null]));
+
+        $freshness = $check->freshness();
+
+        self::assertNotNull($freshness);
+        self::assertSame($first, $freshness->metUntil);
+        self::assertSame('+00:00', $freshness->metUntil->format('P'));
     }
 
     /**

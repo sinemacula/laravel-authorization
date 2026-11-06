@@ -35,6 +35,22 @@ final class RequirementFreshnessTest extends TestCase
     }
 
     /**
+     * It keeps only the session's SHA-256 fingerprint, never the session id
+     * itself, and no session stays none.
+     *
+     * @return void
+     */
+    public function testKeepsOnlyAFingerprintOfTheSession(): void
+    {
+        $freshness = new RequirementFreshness('session-1');
+
+        self::assertSame(\hash('sha256', 'session-1'), $freshness->session);
+        self::assertStringNotContainsString('session-1', \serialize($freshness));
+        self::assertNull((new RequirementFreshness(null))->session);
+        self::assertFalse($freshness->holdsFor(\hash('sha256', 'session-1')));
+    }
+
+    /**
      * It holds in its own session before the instant, and not at or after it.
      *
      * @return void

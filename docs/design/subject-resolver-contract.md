@@ -50,7 +50,7 @@ interface SubjectResolver
 | `tenant`      | The active tenant, or `null` for none.                                                  |
 | `application` | The application the request came in on, or `null`.                                      |
 | `guard`       | The authentication guard the subject was resolved from, or `null`.                      |
-| `session`     | The session the subject signed in with, whose proofs a requirement checker judges.      |
+| `session`     | The session that signed in this very subject; a requirement checker judges its proofs.  |
 
 Evaluation and RBAC run against `subject`; the decision events carry it in their `principal` field.
 
@@ -62,11 +62,15 @@ its user from. The user is the subject and its identity, no tenant is active, an
 (AUTHZ-13.1). A request with no user has no subject. `forUser()` wraps the user it is handed in the same guard and
 application without reading the guard.
 
-The session is the current request's session id, once the session has started, when the subject is the user signed in
-on the guard: the one `resolve()` reads, or that same user handed to `forUser()`, as the Gate does. Any other user, and
-every user outside a session (a console command, a queued job, a stateless request), has none, and a subject without a
-session meets no authentication requirement (N34). The request is read from the container on every resolution, never
-kept. A resolver of the application's own sets `session` to whatever its requirement checker knows the proofs by.
+The session is the current request's session id only when that session signed in that very user: the guard is a
+`SessionGuard` using the request's session, once it has started, and the session's login key names the user, compared
+strictly as strings. The user is the one `resolve()` reads, or that same user handed to `forUser()`, as the Gate does. A
+user set on the guard without the session (through `once()`, `onceUsingId()`, `onceBasic()` or `setUser()`, so over a
+session that may hold another user's login), a user a token or request guard returns, any other user, and every user
+outside a session (a console command, a queued job, a stateless request), has none, and a subject without a session
+meets no authentication requirement (N34). The request is read from the container on every resolution, never kept. A
+resolver of the application's own sets `session` to whatever its requirement checker knows the proofs by, and only for
+the user that session authenticated. A checker should still confirm the proofs it finds belong to `$subject->subject`.
 
 So an application with a `web` guard and a `User` model (AUTHZ-1.1) gets `Authorization::can()`, the `role:` and
 `permission:` middleware and the Blade directives deciding about the signed-in user with no setup. A deployment that

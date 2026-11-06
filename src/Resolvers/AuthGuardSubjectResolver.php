@@ -4,9 +4,13 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Resolvers;
 
+use Illuminate\Auth\SessionGuard;
+use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
+use Illuminate\Contracts\Auth\Guard;
 use Illuminate\Contracts\Config\Repository as Config;
 use Illuminate\Contracts\Container\Container;
+use Illuminate\Contracts\Session\Session;
 use Illuminate\Http\Request;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Subject;
@@ -21,13 +25,16 @@ use SineMacula\Laravel\Authorization\Subject;
  * identity, no tenant is active, and the guard's name is the application. A
  * request with no user has no subject.
  *
- * The subject's session is the current request's session id, once the session
- * has started, when the subject is the user signed in on the guard: the one
- * `resolve()` reads, or the same user handed to `forUser()`. Any other user,
- * and every user outside a session (a console command, a queued job, a
- * stateless request), has none, so no authentication requirement is met for it
- * (N34). The request is read from the container on every resolution, never
- * kept.
+ * The subject's session is the current request's session id only when that
+ * session signed in that very user: the guard is a `SessionGuard` using the
+ * request's session, once it has started, and the session's login key names the
+ * user, compared strictly as strings. The user is the one `resolve()` reads, or
+ * the same user handed to `forUser()`. A user set on the guard without the
+ * session (through `once()`, `onceUsingId()`, `onceBasic()` or `setUser()`), a
+ * user a token or request guard returns, any other user, and every user outside
+ * a session (a console command, a queued job, a stateless request), has none,
+ * so no authentication requirement is met for it (N34). The request is read
+ * from the container on every resolution, never kept.
  *
  * A deployment that wants another guard binds the contract to an instance built
  * with that guard's name.
@@ -69,15 +76,16 @@ final readonly class AuthGuardSubjectResolver implements SubjectResolver
     #[\Override]
     public function resolve(): ?Subject
     {
-        $user = $this->auth->guard($this->guardName())->user();
+        $guard = $this->auth->guard($this->guardName());
+        $user  = $guard->user();
 
-        return $user === null ? null : $this->subjectOf($user, $this->sessionId());
+        return $user === null ? null : $this->subjectOf($user, $this->sessionFor($user, $guard));
     }
 
     /**
      * Make the given user the subject and its identity, with no tenant and the
      * guard's name as the application, and the request's session when the user
-     * is the one signed in on the guard.
+     * is the one signed in on the guard and the session signed it in.
      *
      * @param  object  $user
      * @return \SineMacula\Laravel\Authorization\Subject
@@ -85,9 +93,9 @@ final readonly class AuthGuardSubjectResolver implements SubjectResolver
     #[\Override]
     public function forUser(object $user): Subject
     {
-        $session = $this->sessionId();
+        $guard = $this->requestSession() !== null ? $this->auth->guard($this->guardName()) : null;
 
-        return $this->subjectOf($user, $session !== null && $user === $this->auth->guard($this->guardName())->user() ? $session : null);
+        return $this->subjectOf($user, $guard !== null && $user === $guard->user() ? $this->sessionFor($user, $guard) : null);
     }
 
     /**
@@ -113,17 +121,52 @@ final readonly class AuthGuardSubjectResolver implements SubjectResolver
     }
 
     /**
-     * Return the id of the current request's session, or null when there is no
-     * request, it has no session, or the session has not started.
+     * Return the id of the current request's session when that session signed
+     * the user in on the guard, or null otherwise: the guard is a session guard
+     * using the request's session, and the session's login key names the user,
+     * compared strictly as strings.
      *
+     * @param  object  $user
+     * @param  \Illuminate\Contracts\Auth\Guard  $guard
      * @return string|null
      */
-    private function sessionId(): ?string
+    private function sessionFor(object $user, Guard $guard): ?string
+    {
+        $session = $this->requestSession();
+
+        if ($session === null || !$guard instanceof SessionGuard || !$user instanceof Authenticatable || $guard->getSession()->getId() !== $session->getId()) {
+            return null;
+        }
+
+        return self::isSameIdentifier($session->get($guard->getName()), $user->getAuthIdentifier()) ? $session->getId() : null;
+    }
+
+    /**
+     * Determine whether the identifier the session holds and the user's own are
+     * the same, compared strictly as strings: each must be a string or an
+     * integer.
+     *
+     * @param  mixed  $held
+     * @param  mixed  $identifier
+     * @return bool
+     */
+    private static function isSameIdentifier(mixed $held, mixed $identifier): bool
+    {
+        return (\is_string($held) || \is_int($held)) && (\is_string($identifier) || \is_int($identifier)) && (string) $held === (string) $identifier;
+    }
+
+    /**
+     * Return the current request's session, or null when there is no request,
+     * it has no session, or the session has not started.
+     *
+     * @return \Illuminate\Contracts\Session\Session|null
+     */
+    private function requestSession(): ?Session
     {
         $request = $this->container !== null   && $this->container->bound('request') ? $this->container->make('request') : null;
         $session = $request instanceof Request && $request->hasSession() ? $request->session() : null;
 
-        return $session !== null && $session->isStarted() ? $session->getId() : null;
+        return $session !== null && $session->isStarted() ? $session : null;
     }
 
     /**

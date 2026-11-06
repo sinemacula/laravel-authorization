@@ -10,6 +10,8 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
+use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
+use SineMacula\Laravel\Authorization\Evaluation\RequirementResult;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -19,6 +21,7 @@ use SineMacula\Laravel\Authorization\Testing\Concerns\AuthorizationAssertions;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubRequirementChecker;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
 
@@ -269,6 +272,45 @@ final class AuthorizationAssertionsTest extends TestCase
         self::assertSame($subject, Authorization::forUser($identity)->currentSubject());
         self::assertTrue(Gate::forUser($identity)->allows('posts:create'));
         self::assertFalse($identity->hasPermission('posts:create'));
+    }
+
+    /**
+     * When the Gate hands over the acting subject's principal or identity, the
+     * subject keeps its session, so a requirement the checker meets is met
+     * through the Gate as it is through the facade.
+     *
+     * @return void
+     */
+    public function testTheGateAndTheFacadeAgreeOnARequirementForThePrincipal(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make('config');
+        $config->set('authorization.permission_enums', [PermissionEnum::class]);
+
+        (new AuthorizationServiceProvider($this->app))->boot(); // @phpstan-ignore argument.type
+
+        Permission::create(['name' => 'posts:create', 'guard' => 'web']);
+
+        $principal = StubIdentity::create(['id' => '1d3f5b7a-9c2e-4a6b-8d0f-3e5a7c9b1d2f']);
+        $identity  = AuthenticatableIdentity::create(['id' => '2e4a6c8b-0d3f-4b7c-9e1a-4f6b8d0c2e3a']);
+
+        $principal->attachPolicy(Policy::create([
+            'id'       => '3f5b7d9c-1e4a-4c8d-8f2b-5a7c9e1d3f4b',
+            'name'     => 'step-up-create',
+            'document' => ['statements' => [[
+                'effect'     => 'allow',
+                'actions'    => ['posts:create'],
+                'conditions' => ['authentication_requirement' => ['authentication' => ['multifactor' => []]]],
+            ]]],
+        ]));
+
+        $this->app?->instance(AuthenticationRequirementChecker::class, new StubRequirementChecker(RequirementResult::met()));
+        $this->actingAsSubject(new Subject($principal, $identity, null, 'admin', 'web', session: 'session-1'));
+
+        self::assertTrue(Authorization::can('posts:create'));
+        self::assertSame('session-1', Authorization::forUser($principal)->currentSubject()?->session);
+        self::assertTrue(Gate::forUser($principal)->allows('posts:create'));
+        self::assertTrue(Gate::forUser($identity)->allows('posts:create'));
     }
 
     /**

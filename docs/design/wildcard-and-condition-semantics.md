@@ -422,11 +422,12 @@ pattern, whatever the catalogue says, with a reason that names the key and point
 
 ### `_if_exists`
 
-Any operator but `null` may be written with the `_if_exists` suffix (`ip_in_if_exists`, `eq_if_exists`), and only one
-case changes: a key the context lacks passes that test. A key present with a `null` value, a malformed operand, a
-context value of the wrong type and an unresolved interpolation are decided exactly as without the suffix. A deny whose
-test passes only because of `_if_exists` still applies, since the test holds like any other. `null_if_exists` is an
-unknown operator, as `null` already decides a missing key.
+Any operator but `null` and [`authentication_requirement`](#authentication_requirement) may be written with the
+`_if_exists` suffix (`ip_in_if_exists`, `eq_if_exists`), and only one case changes: a key the context lacks passes that
+test. A key present with a `null` value, a malformed operand, a context value of the wrong type and an unresolved
+interpolation are decided exactly as without the suffix. A deny whose test passes only because of `_if_exists` still
+applies, since the test holds like any other. `null_if_exists` is an unknown operator, as `null` already decides a
+missing key, and `authentication_requirement_if_exists` is refused, as a requirement has no `_if_exists` form.
 
 ```json
 { "ip_in_if_exists": { "request.ip": "10.0.0.0/8" } }
@@ -509,12 +510,13 @@ reasons into one `InvalidPolicyDocumentException` message, separated by semicolo
 - **Limits** (AUTHZ-6.10), from `authorization.policies.limits`: `document_bytes` (65536) on the document's JSON
   encoding, `statements` (100), `conditions` (50) on the key tests of one statement, each key of each operator counting
   as one, and `pattern_length` (512) on the characters of any action or resource pattern and any string operand, strings
-  inside list operands included. A document that cannot be encoded as JSON (one holding NaN, an infinity or a string
-  that is not valid UTF-8) can be neither measured nor stored, so it is refused too. The same limits are checked when a
-  stored document is read (`PolicyDocument::hydrate()`), on the document as it is evaluated, named after its row, so a
-  stored document over a limit denies as `invalid_policy` and is never skipped or partly evaluated. The resolution
-  cache keys cached policies by the limits they were checked under, so a changed limit makes them be read and checked
-  again. Lowering a limit therefore makes every stored document over it deny until it is fixed.
+  inside list operands and an authentication requirement's `min` included. A document that cannot be encoded as JSON
+  (one holding NaN, an infinity or a string that is not valid UTF-8) can be neither measured nor stored, so it is
+  refused too. The same limits are checked when a stored document is read (`PolicyDocument::hydrate()`), on the document
+  as it is evaluated, named after its row, so a stored document over a limit denies as `invalid_policy` and is never
+  skipped or partly evaluated. The resolution cache keys cached policies by the limits they were checked under, so a
+  changed limit makes them be read and checked again. Lowering a limit therefore makes every stored document over it
+  deny until it is fixed.
 - **Context keys** (N25): every condition key must be declared in the context key catalogue, may not be one declared
   untestable, and must be of a type its operator suits; every `${…}` reference in an operand or a resource pattern
   must name a declared key, so a `${principal.…}` reference is refused (see [The key catalogue](#the-key-catalogue)).

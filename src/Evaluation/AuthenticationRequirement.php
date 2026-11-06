@@ -100,7 +100,7 @@ final readonly class AuthenticationRequirement
      * Describe why an operand states no requirement, or return null when it
      * states one: it must map one or more known parts to their options, each an
      * optional `max_age` of at least one second, and `assurance_level` a
-     * non-empty `min`.
+     * non-blank `min`.
      *
      * @param  mixed  $operand
      * @return string|null
@@ -181,7 +181,7 @@ final readonly class AuthenticationRequirement
             $given === null => "requirement part '{$part}' must be an object of options",
             $unknown !== [] => "requirement part '{$part}' has unknown options: " . \implode(', ', $unknown),
             !$hasAge        => "requirement part '{$part}' max_age must be a whole number of seconds, at least 1",
-            !$hasLevel      => "requirement part '{$part}' requires min, a non-empty string",
+            !$hasLevel      => "requirement part '{$part}' requires min, a string that is not empty or blank",
             default         => null,
         };
     }

@@ -180,8 +180,10 @@ final class AuthorizationManager
      * Returns null when the process has not yet produced a decision or when the
      * store was explicitly cleared between requests in a long-running worker. A
      * decision that read an authentication requirement is returned only in the
-     * session it was made in and until the earliest instant a met requirement
-     * it read stops being met (N37).
+     * session of the request that recorded it, as the subject resolver gives
+     * it, whichever subject the decision was about (one named with `for()`
+     * included), and until the earliest instant a met requirement it read stops
+     * being met (N37).
      *
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision|null
      */
@@ -189,13 +191,14 @@ final class AuthorizationManager
     {
         $decision = $this->lastDecisionStore->get();
 
-        return $decision?->freshness === null || $decision->isFreshFor($this->currentSubject()?->session) ? $decision : null;
+        return $decision?->freshness === null || $this->lastDecisionStore->wasRecordedIn($this->subjectResolver->resolve()?->session) ? $decision : null;
     }
 
     /**
      * Decide the supplied action and return the decision's explanation: the
-     * verdict, the stage and statements that decided it, and every step of its
-     * trace. A shortcut over `check(...)->explain()`.
+     * verdict, the stage and statements that decided it, each requirement an
+     * insufficient authentication names with its unmet parts, and every step of
+     * its trace. A shortcut over `check(...)->explain()`.
      *
      * @param  string  $action
      * @param  mixed  $resource
@@ -456,7 +459,9 @@ final class AuthorizationManager
     }
 
     /**
-     * Record the result as the last decision and dispatch its decision event.
+     * Record the result as the last decision, with the session of the request
+     * when it read an authentication requirement, and dispatch its decision
+     * event.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @param  string  $action
@@ -467,7 +472,7 @@ final class AuthorizationManager
      */
     private function record(?Subject $subject, string $action, ?string $resource, array $context, Decision $decision): Decision
     {
-        $this->lastDecisionStore->put($decision);
+        $this->lastDecisionStore->put($decision, $decision->freshness === null ? null : $this->subjectResolver->resolve()?->session);
         $this->dispatch(new DecisionEvaluated($subject?->subject, $action, $resource, $context, $decision));
 
         return $decision;

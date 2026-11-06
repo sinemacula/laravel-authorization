@@ -23,12 +23,13 @@ throws when it does not. It returns a `Decision`:
 - `requirements` -- for an `insufficient_authentication` denial, one `UnmetRequirement` for each statement in
   `statements`, in the same order: the authentication requirement that alone kept it from applying and its unmet parts.
   They are alternatives: any one of them met would allow the check. Empty for every other decision.
-- `freshness` -- for a decision that read an authentication requirement, a `RequirementFreshness`: the session it was
-  made in and the earliest instant a met requirement it read stops being met. `isFreshFor($session)` says whether the
-  decision may still be reused; null when it read none, and such a decision may always be.
+- `freshness` -- for a decision that read an authentication requirement, a `RequirementFreshness`: a fingerprint of
+  the session it was made in (its SHA-256 hash, never the session id itself) and the earliest instant a met requirement
+  it read stops being met. `isFreshFor($session)` fingerprints the session it is given and says whether the decision
+  may still be reused; null when it read none, and such a decision may always be.
 
-The trace never carries a context or attribute value, only key names and results (AUTHZ-8.8), so a decision is safe to
-log, store and put on an event.
+The trace never carries a context or attribute value, only key names and results (AUTHZ-8.8), and the freshness holds
+only a session fingerprint, so a decision is safe to log, store and put on an event.
 
 ## Statements
 
@@ -124,10 +125,11 @@ and leaves a resource-less `posts:delete` check alone. Only a statement without 
    policy, a statement, the trace or a proof.
 
 8. **A decision that read a requirement is never reused beyond its freshness (AUTHZ-12.3, N37).** The last decision is
-   returned only in the session it was made in and until the earliest instant a met requirement it read stops being
-   met. The checker is asked for every requirement of every check and nothing it answers is remembered, so an unmet or
-   undecidable result is never reused. Every other entry point (`can()`, the Gate, the Blade directives and
-   `effectivePermissions()`) decides afresh, and the resolution cache holds grants and policies, never decisions.
+   returned only in the session of the request that recorded it, as the subject resolver gives it, whichever subject the
+   decision was about, and until the earliest instant a met requirement it read stops being met. The checker is asked
+   for every requirement of every check and nothing it answers is remembered, so an unmet or undecidable result is never
+   reused. Every other entry point (`can()`, the Gate, the Blade directives and `effectivePermissions()`) decides
+   afresh, and the resolution cache holds grants and policies, never decisions.
 
 ## Trace
 
@@ -212,8 +214,9 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 - `PolicyEvaluator::evaluate()` -- the deny, allow and implicit stages, each assessing its statements in a fixed
   order; `conclude()` -- the order of the outcomes, `insufficient_authentication` among them.
 - `RequirementCheck` -- one check's requirements put to the checker, the session rule and the freshness;
-  `CheckContext::assessRequirement()` -- where a statement's requirement is judged; `LastDecisionStore::get()` and
-  `AuthorizationManager::lastDecision()` -- the freshness of the last decision.
+  `CheckContext::assessRequirement()` -- where a statement's requirement is judged; `LastDecisionStore::get()`,
+  `LastDecisionStore::wasRecordedIn()` and `AuthorizationManager::lastDecision()` -- the freshness of the last decision
+  and the session of the request that recorded it.
 - `InsufficientAuthenticationException` and `AuthorizationManager::authorize()` -- the exception and when it is raised.
 - `Statement::assess()` -- the assessment, with each condition key's result.
 - `PolicyValidator` -- the write-time checks; `PolicyDocument::hydrate()` and `PolicyLimits` -- the limits on read.

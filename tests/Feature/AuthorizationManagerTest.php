@@ -1534,6 +1534,57 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * A decision that read a requirement with no subject resolved, as in a
+     * console command or a guest request, is made outside a session, and is the
+     * last decision there.
+     *
+     * @return void
+     */
+    public function testALastDecisionMadeWithNoSubjectResolvedIsReturned(): void
+    {
+        $user = StubIdentity::create(['id' => '8f4c5b9a-3eab-4012-8fbc-9d0e1f2a3be8']);
+
+        /** @var \SineMacula\Laravel\Authorization\AuthorizationManager $manager */
+        $manager = $this->app?->make(AuthorizationManager::class);
+
+        self::assertNull($manager->currentSubject());
+
+        $decision = $manager->for($user)->withPolicies([self::requiringPolicy()])->check('reports:export');
+
+        self::assertEquals(new RequirementFreshness(null), $decision->freshness);
+        self::assertSame($decision, $manager->lastDecision());
+    }
+
+    /**
+     * A decision about a subject named with `for()`, which has no session, is
+     * the last decision in the session of the request that recorded it, and in
+     * no other.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     */
+    public function testALastDecisionAboutANamedSubjectIsReturnedInTheRequestsSession(): void
+    {
+        $user  = StubIdentity::create(['id' => '9a5d6c0b-4fbc-4123-9acd-0e1f2a3b4cf9']);
+        $other = StubIdentity::create(['id' => '0b6e7d1c-5acd-4234-8bde-1f2a3b4c5d0a']);
+
+        try {
+            $this->inSession($user, 'session-1')->for($other)->withPolicies([self::requiringPolicy()])->authorize('reports:export');
+            self::fail('The check was allowed.');
+        } catch (InsufficientAuthenticationException $exception) {
+            self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $exception->getReason());
+        }
+
+        $decision = Authorization::lastDecision();
+
+        self::assertNotNull($decision);
+        self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $decision->reason);
+        self::assertEquals(new RequirementFreshness(null), $decision->freshness);
+        self::assertNull($this->inSession($user, 'session-2')->lastDecision());
+    }
+
+    /**
      * Assert that exactly one decision event was dispatched, for the check of
      * `posts:create` without a resource, carrying the supplied principal,
      * context and decision, and that no failure event was dispatched.

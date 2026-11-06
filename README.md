@@ -517,8 +517,8 @@ Conditions name the operator first, then each context key it tests, as a dot pat
   `status` of the `post` of `input`, and a caller passing `['post.status' => 'draft']` supplies a key named
   `post.status`, which the path never reaches.
 - A key the context lacks makes a test undecidable: an allow does not apply and a deny does. `null` decides a missing
-  key instead, and any other operator takes the `_if_exists` suffix (`ip_in_if_exists`, `eq_if_exists`), under which a
-  missing key passes; everything else is decided as without it.
+  key instead, and any other operator but `authentication_requirement` takes the `_if_exists` suffix (`ip_in_if_exists`,
+  `eq_if_exists`), under which a missing key passes; everything else is decided as without it.
 - A context value that is not an IP address is undecidable for `ip_in` and `ip_not_in`, so `ip_not_in` never treats
   an unreadable address as outside every range. PHP's `FILTER_VALIDATE_IP` decides what an address is, on every
   platform, so a zone id (`fe80::1%en0`) or an IPv4 part with a leading zero (`010.0.0.1`) is not one.
@@ -823,13 +823,13 @@ The operand maps one or more parts to their options, `{}` (an empty array) for n
 | `phishing_resistant`      | A phishing-resistant proof, such as a passkey               | `max_age`                       |
 | `assurance_level`         | An assurance level of at least `min`                        | `min` (required), and `max_age` |
 
-`max_age` is a whole number of seconds, at least 1: the proof that meets the part must be no older. `min` is a
-non-empty string, an assurance level your checker knows. Every part named must be met, and the requirement is one test
-judged whole, so it counts as one key test against the `conditions` limit. The policy is refused when it is saved if
-the requirement is on any key but `authentication`, names no part, an unknown part or an unknown option, gives a
-`max_age` that is not a whole number of at least 1, or gives `assurance_level` no `min`. There is no
-`authentication_requirement_if_exists`. `authentication` is not read from the context here, so the requirement needs no
-key declared in the catalogue.
+`max_age` is a whole number of seconds, at least 1: the proof that meets the part must be no older. `min` is a string
+that is not empty or blank, an assurance level your checker knows, and no longer than the `pattern_length` limit. Every
+part named must be met, and the requirement is one test judged whole, so it counts as one key test against the
+`conditions` limit. The policy is refused when it is saved if the requirement is on any key but `authentication`, names
+no part, an unknown part or an unknown option, gives a `max_age` that is not a whole number of at least 1, or gives
+`assurance_level` no `min`. There is no `authentication_requirement_if_exists`. `authentication` is not read from the
+context here, so the requirement needs no key declared in the catalogue.
 
 #### The requirement checker
 
@@ -874,19 +874,24 @@ yourself:
 
 The default, `RefusingRequirementChecker`, finds every part of every requirement unmet, so until you bind a checker an
 allow that states a requirement never applies. The checker is asked afresh for every requirement of every check, and
-nothing it answers is remembered. A met result whose instant has already passed counts as unmet, every part with it.
-An unmet result keeps only the parts the requirement names, and one that names none of them leaves every part unmet. A
+nothing it answers is remembered. A met result whose instant has already passed counts as unmet, every part with it. An
+unmet result keeps only the parts the requirement names, and one that names none of them leaves every part unmet. A
 checker that throws makes the test undecidable, so an allow it guards does not apply and a deny it guards does; the
-failure is logged at debug level by the checker's class alone, never with anything it held.
+failure is logged at debug level by the checker's class and the exception's class alone, never with the exception's
+message or anything the checker held.
 
 #### Sessions
 
 `Subject::$session` is the session the checker judges. The shipped resolver sets it to the current request's session
-id when the subject is the user signed in on its guard, including when the Gate hands it that same user. It is null for
-a subject you name (`Authorization::for($user)`, or `Gate::forUser()` with another user) and outside a session (a
-console command, a queued job, a request without a started session), and a subject without a session meets no
-requirement: every part is unmet and the checker is not asked. A resolver of your own sets `session` to whatever its
-checker knows the proofs by.
+id only when that session signed in that very user: the guard is a `SessionGuard` using the request's session, and the
+session's login key names the user, compared strictly as strings. That holds for the user signed in on its guard,
+including when the Gate hands it that same user. It is null for a user set on the guard without the session
+(`Auth::once()`, `onceUsingId()`, `onceBasic()`, the `auth.basic.once` middleware or `setUser()`), whatever login the
+session holds; for a user a token or request guard returns; for a subject you name (`Authorization::for($user)`, or
+`Gate::forUser()` with another user); and outside a session (a console command, a queued job, a request without a
+started session). A subject without a session meets no requirement: every part is unmet and the checker is not asked.
+A resolver of your own sets `session` to whatever its checker knows the proofs by, and only for the user that session
+authenticated. Your checker should still confirm the proofs it finds belong to `$subject->subject`.
 
 #### The decision and the exception
 
@@ -930,11 +935,13 @@ use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationExcept
 })
 ```
 
-A decision that read a requirement is reused only while it still holds. `Authorization::lastDecision()` returns it
-only in the session it was made in and until the earliest instant a met requirement it read stops being met
-(`$decision->freshness`, and `isFreshFor($session)`). Nothing else keeps a decision: `can()`, the Gate, the Blade
-directives and `effectivePermissions()` decide afresh every time, and the resolution cache holds grants and policies,
-never decisions.
+A decision that read a requirement is reused only while it still holds. `Authorization::lastDecision()` returns it only
+in the session of the request that recorded it, whichever subject it was about (one named with `for()` included), and
+until the earliest instant a met requirement it read stops being met. The decision's own `$decision->freshness` keeps a
+fingerprint of the session it was made in (its SHA-256 hash, never the session id, so the decision stays safe to log)
+and that instant, and `isFreshFor($session)` says whether it may be reused in a session. Nothing else keeps a decision:
+`can()`, the Gate, the Blade directives and `effectivePermissions()` decide afresh every time, and the resolution cache
+holds grants and policies, never decisions.
 
 #### Under the suite
 

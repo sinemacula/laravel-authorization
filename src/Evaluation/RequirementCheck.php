@@ -19,7 +19,8 @@ use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
  * is unmet, every part with it, and so is an unmet one that names none of the
  * requirement's parts; an unmet one keeps only the parts the requirement names.
  * A checker that throws makes the test undecidable; the failure is logged at
- * debug level by class alone, so no proof reaches the log.
+ * debug level by the checker's class and the exception's class alone, so no
+ * proof reaches the log.
  *
  * Nothing is remembered between requirements: every requirement a statement
  * states is put to the checker afresh, so no unmet or undecidable result is

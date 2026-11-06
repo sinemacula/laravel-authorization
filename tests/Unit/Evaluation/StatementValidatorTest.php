@@ -463,7 +463,7 @@ final class StatementValidatorTest extends TestCase
         ];
         yield 'requirement with a level and no min' => [
             ['authentication_requirement' => ['authentication' => ['assurance_level' => []]]],
-            'authentication requirement part \'assurance_level\' requires min, a non-empty string',
+            'authentication requirement part \'assurance_level\' requires min, a string that is not empty or blank',
         ];
     }
 

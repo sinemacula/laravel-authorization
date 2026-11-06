@@ -26,6 +26,9 @@ final class AuthenticationRequirementTest extends TestCase
     /** @var string The reason a part's maximum age is refused, after the part. */
     private const string BAD_AGE = 'max_age must be a whole number of seconds, at least 1';
 
+    /** @var string The refusal of an assurance level without a usable minimum. */
+    private const string NO_MIN = 'requires min, a string that is not empty or blank';
+
     /** @var string The reason an operand maps no parts. */
     private const string NO_PARTS = 'requirement must map one or more parts (additional_verification, multifactor, phishing_resistant, assurance_level) to their options';
 
@@ -87,11 +90,11 @@ final class AuthenticationRequirementTest extends TestCase
         yield 'a numeric string max age' => [['multifactor' => ['max_age' => '900']], 'requirement part \'multifactor\' max_age must be a whole number of seconds, at least 1'];
         yield 'a true max age' => [['multifactor' => ['max_age' => true]], 'requirement part \'multifactor\' max_age must be a whole number of seconds, at least 1'];
         yield 'a null max age' => [['multifactor' => ['max_age' => null]], 'requirement part \'multifactor\' max_age must be a whole number of seconds, at least 1'];
-        yield 'a level without min' => [['assurance_level' => []], 'requirement part \'assurance_level\' requires min, a non-empty string'];
-        yield 'a level with a max age alone' => [['assurance_level' => ['max_age' => 60]], 'requirement part \'assurance_level\' requires min, a non-empty string'];
-        yield 'an empty min' => [['assurance_level' => ['min' => '']], 'requirement part \'assurance_level\' requires min, a non-empty string'];
-        yield 'a blank min' => [['assurance_level' => ['min' => '  ']], 'requirement part \'assurance_level\' requires min, a non-empty string'];
-        yield 'a numeric min' => [['assurance_level' => ['min' => 2]], 'requirement part \'assurance_level\' requires min, a non-empty string'];
+        yield 'a level without min' => [['assurance_level' => []], 'requirement part \'assurance_level\' ' . self::NO_MIN];
+        yield 'a level with a max age alone' => [['assurance_level' => ['max_age' => 60]], 'requirement part \'assurance_level\' ' . self::NO_MIN];
+        yield 'an empty min' => [['assurance_level' => ['min' => '']], 'requirement part \'assurance_level\' ' . self::NO_MIN];
+        yield 'a blank min' => [['assurance_level' => ['min' => '  ']], 'requirement part \'assurance_level\' ' . self::NO_MIN];
+        yield 'a numeric min' => [['assurance_level' => ['min' => 2]], 'requirement part \'assurance_level\' ' . self::NO_MIN];
         yield 'a level with a bad max age' => [['assurance_level' => ['min' => 'aal2', 'max_age' => 0]], 'requirement part \'assurance_level\' ' . self::BAD_AGE];
         yield 'an unknown option on a level' => [['assurance_level' => ['min' => 'aal2', 'level' => 'x']], 'requirement part \'assurance_level\' has unknown options: level'];
         yield 'a fault after a good part' => [['multifactor' => [], 'phishing_resistant' => ['max_age' => 0]], 'requirement part \'phishing_resistant\' ' . self::BAD_AGE];
@@ -193,9 +196,10 @@ final class AuthenticationRequirementTest extends TestCase
         yield 'no parts' => [[], null, 'Authentication ' . self::NO_PARTS . '.'];
         yield 'an unknown part' => [['mfa' => null], null, 'Authentication requirement names an unknown part \'mfa\'.'];
         yield 'a max age of zero' => [['multifactor' => 0], null, 'Authentication requirement part \'multifactor\' max_age must be a whole number of seconds, at least 1.'];
-        yield 'a level without its minimum' => [['assurance_level' => null], null, 'Authentication requirement part \'assurance_level\' requires min, a non-empty string.'];
-        yield 'an empty minimum' => [['assurance_level' => null], '', 'Authentication requirement part \'assurance_level\' requires min, a non-empty string.'];
+        yield 'a level without its minimum' => [['assurance_level' => null], null, 'Authentication requirement part \'assurance_level\' ' . self::NO_MIN . '.'];
+        yield 'an empty minimum' => [['assurance_level' => null], '', 'Authentication requirement part \'assurance_level\' ' . self::NO_MIN . '.'];
         yield 'a minimum without the level' => [['multifactor' => null], 'aal2', 'Authentication requirement gives a minimum level without the assurance_level part.'];
+        yield 'an unknown part and a stray minimum' => [['mfa' => null], 'aal2', 'Authentication requirement names an unknown part \'mfa\'.'];
     }
 
     /**

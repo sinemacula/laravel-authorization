@@ -25,7 +25,9 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
  * unmet parts: alternatives, any one of which met would allow the check. A
  * decision that read an authentication requirement carries how long it may be
  * reused (N37): never beyond the instant a met requirement stops being met, nor
- * in another session.
+ * in another session. It keeps that session only as a non-reversible
+ * fingerprint, never the session id, so the decision stays safe to log or
+ * store.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

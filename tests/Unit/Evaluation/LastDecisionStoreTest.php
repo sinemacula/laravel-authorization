@@ -90,7 +90,8 @@ final class LastDecisionStoreTest extends TestCase
 
     /**
      * A decision whose requirement gives no instant is handed back, whatever
-     * session asks; the session is the reader's to check.
+     * session asks; the session is the reader's to check, with
+     * `wasRecordedIn()`.
      *
      * @return void
      */
@@ -102,5 +103,35 @@ final class LastDecisionStoreTest extends TestCase
         $store->put($decision);
 
         self::assertSame($decision, $store->get());
+    }
+
+    /**
+     * The store remembers the session of the request that put the last
+     * decision, none by default, and forgets it with the decision.
+     *
+     * @return void
+     */
+    public function testRemembersTheSessionTheDecisionWasRecordedIn(): void
+    {
+        $store    = new LastDecisionStore;
+        $decision = Decision::allow(DecisionStage::ALLOW);
+
+        self::assertTrue($store->wasRecordedIn(null));
+
+        $store->put($decision, 'session-1');
+
+        self::assertTrue($store->wasRecordedIn('session-1'));
+        self::assertFalse($store->wasRecordedIn('session-2'));
+        self::assertFalse($store->wasRecordedIn(null));
+
+        $store->put($decision);
+
+        self::assertTrue($store->wasRecordedIn(null));
+        self::assertFalse($store->wasRecordedIn('session-1'));
+
+        $store->put($decision, 'session-1');
+        $store->forget();
+
+        self::assertTrue($store->wasRecordedIn(null));
     }
 }

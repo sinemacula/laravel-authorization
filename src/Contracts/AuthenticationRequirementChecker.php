@@ -19,8 +19,14 @@ use SineMacula\Laravel\Authorization\Subject;
  *
  * The checker is asked only about a subject with a session: a check about a
  * subject without one (one the caller names, or one outside a session) finds
- * the requirement unmet without asking. A checker that throws makes the test
- * undecidable, so an allow it guards does not apply and a deny it guards does.
+ * the requirement unmet without asking. The shipped resolver sets the session
+ * only when that session signed in that very user, through a session guard
+ * whose login key names it; a user set through `once()`, `onceUsingId()`,
+ * `onceBasic()` or `setUser()`, or one a token or request guard returns, has
+ * none. A checker should still confirm the proofs it finds belong to
+ * `$subject->subject`, never judging another user's proofs. A checker that
+ * throws makes the test undecidable, so an allow it guards does not apply and a
+ * deny it guards does.
  *
  * The shipped default, `RefusingRequirementChecker`, finds every part unmet.
  * Under the suite it is `laravel-mfa`'s requirement check (AUTHZ-14.1).

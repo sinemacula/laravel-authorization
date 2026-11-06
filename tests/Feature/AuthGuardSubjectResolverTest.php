@@ -4,10 +4,14 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Auth\GenericUser;
+use Illuminate\Auth\RequestGuard;
+use Illuminate\Auth\SessionGuard;
 use Illuminate\Container\Container;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Contracts\Auth\Factory as AuthFactory;
 use Illuminate\Contracts\Auth\Guard;
+use Illuminate\Contracts\Auth\UserProvider;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Http\Request;
 use Illuminate\Session\ArraySessionHandler;
@@ -194,20 +198,156 @@ final class AuthGuardSubjectResolverTest extends TestCase
     }
 
     /**
-     * The user signed in on the guard has the request's session, once it has
-     * started.
+     * The user the request's session signed in on the session guard has that
+     * session, once it has started.
      *
      * @return void
      */
-    public function testTheSignedInUserHasTheRequestsSession(): void
+    public function testTheUserTheSessionSignedInHasTheRequestsSession(): void
     {
-        $user      = \Mockery::mock(Authenticatable::class);
-        $container = $this->containerWith(self::requestInSession(true));
-        $resolver  = new AuthGuardSubjectResolver($this->factoryReturning('web', $user), $this->configWithDefaultGuard('web'), null, $container);
-        $subject   = $resolver->resolve();
+        $session = self::startedSession();
+        $user    = new GenericUser(['id' => 'user-a']);
+        $guard   = $this->sessionGuard($session, $user);
+
+        $session->put($guard->getName(), 'user-a');
+
+        $subject = $this->resolverOver($guard, $session)->resolve();
 
         $this->assertSubject($subject, $user, 'web');
         self::assertSame(self::SESSION, $subject?->session);
+    }
+
+    /**
+     * The session's login key and the user's identifier are compared as
+     * strings, so an integer key the session holds names the user whose
+     * identifier is the same digits.
+     *
+     * @return void
+     */
+    public function testTheLoginKeyIsComparedAsAString(): void
+    {
+        $session = self::startedSession();
+        $user    = new GenericUser(['id' => '42']);
+        $guard   = $this->sessionGuard($session, $user);
+
+        $session->put($guard->getName(), 42);
+        $guard->setUser($user);
+
+        self::assertSame(self::SESSION, $this->resolverOver($guard, $session)->resolve()?->session);
+    }
+
+    /**
+     * Provide the ways a user is set on the session guard without the session
+     * signing it in, over a session holding another user's login: `once()` (the
+     * way `onceBasic()` signs a user in), `onceUsingId()`, and `setUser()`.
+     *
+     * @return iterable<string, array{\Closure(\Illuminate\Auth\SessionGuard): void}>
+     */
+    public static function signedInWithoutTheSessionProvider(): iterable
+    {
+        yield 'once' => [static function (SessionGuard $guard): void {
+            self::assertTrue($guard->once(['id' => 'user-b']));
+        }];
+        yield 'onceUsingId' => [static function (SessionGuard $guard): void {
+            self::assertNotFalse($guard->onceUsingId('user-b'));
+        }];
+        yield 'setUser' => [static function (SessionGuard $guard): void {
+            $guard->setUser(new GenericUser(['id' => 'user-b']));
+        }];
+    }
+
+    /**
+     * A user set on the session guard without the session, over a session whose
+     * login key names another user, gets no session from `resolve()` or
+     * `forUser()`: the requirement is never judged against another login's
+     * proofs.
+     *
+     * @param  \Closure(\Illuminate\Auth\SessionGuard): void  $signIn
+     * @return void
+     */
+    #[DataProvider('signedInWithoutTheSessionProvider')]
+    public function testAUserTheSessionDidNotSignInHasNoSession(\Closure $signIn): void
+    {
+        $session = self::startedSession();
+        $guard   = $this->sessionGuard($session, new GenericUser(['id' => 'user-a']), new GenericUser(['id' => 'user-b']));
+
+        $session->put($guard->getName(), 'user-a');
+        $signIn($guard);
+
+        $resolver = $this->resolverOver($guard, $session);
+        $subject  = $resolver->resolve();
+
+        self::assertInstanceOf(GenericUser::class, $subject?->subject);
+        self::assertSame('user-b', $subject->subject->getAuthIdentifier());
+        self::assertNull($subject->session);
+        self::assertNull($resolver->forUser($subject->subject)->session);
+    }
+
+    /**
+     * A user set on the session guard over a session that holds no login, or
+     * holds a login key that is not a string or an integer, gets no session.
+     *
+     * @return void
+     */
+    public function testASessionWithoutAUsableLoginKeySignsNoUserIn(): void
+    {
+        foreach ([null, ['user-a'], true, 1.0] as $held) {
+            $session = self::startedSession();
+            $user    = new GenericUser(['id' => \is_float($held) ? '1' : 'user-a']);
+            $guard   = $this->sessionGuard($session, $user);
+
+            $session->put($guard->getName(), $held);
+            $guard->setUser($user);
+
+            self::assertNull($this->resolverOver($guard, $session)->resolve()?->session);
+        }
+    }
+
+    /**
+     * A session guard using a session other than the request's gives the user
+     * no session, even when that other session's login key names the user.
+     *
+     * @return void
+     */
+    public function testASessionGuardOnAnotherSessionGivesNoSession(): void
+    {
+        $session = self::startedSession();
+        $other   = new Store('laravel_session', new ArraySessionHandler(120), 'f0e1d2c3b4a5f6e7d8c9b0a1f2e3d4c5b6a7f8e9');
+        $user    = new GenericUser(['id' => 'user-a']);
+        $guard   = $this->sessionGuard($other, $user);
+
+        $other->start();
+        $other->put($guard->getName(), 'user-a');
+        $session->put($guard->getName(), 'user-a');
+        $guard->setUser($user);
+
+        self::assertNull($this->resolverOver($guard, $session)->resolve()?->session);
+    }
+
+    /**
+     * A guard that is not a session guard (a token or request guard) never
+     * gives its user the request's session, even on a request whose session has
+     * started and whose login key names that user.
+     *
+     * @return void
+     */
+    public function testANonSessionGuardGivesNoSession(): void
+    {
+        $session = self::startedSession();
+        $user    = new GenericUser(['id' => 'user-a']);
+        $request = Request::create('/');
+        $guard   = new RequestGuard(static fn (): Authenticatable => $user, $request);
+
+        $session->put('login_web_' . sha1(SessionGuard::class), 'user-a');
+        $request->setLaravelSession($session);
+
+        $resolver = new AuthGuardSubjectResolver($this->factoryWith('web', $guard), $this->configWithDefaultGuard('web'), null, $this->containerWith($request));
+
+        $subject = $resolver->resolve();
+
+        self::assertSame($user, $subject?->subject);
+        self::assertNull($subject->session);
+        self::assertNull($resolver->forUser($user)->session);
     }
 
     /**
@@ -258,21 +398,84 @@ final class AuthGuardSubjectResolverTest extends TestCase
     }
 
     /**
-     * `forUser()` gives the request's session to the user signed in on the
-     * guard, and none to any other user.
+     * `forUser()` gives the request's session to the user the session signed in
+     * on the guard, and none to any other user, even one with the same
+     * identifier.
      *
      * @return void
      */
     public function testForUserGivesTheSessionToTheSignedInUserAlone(): void
     {
-        $user      = \Mockery::mock(Authenticatable::class);
-        $container = $this->containerWith(self::requestInSession(true));
+        $session = self::startedSession();
+        $user    = new GenericUser(['id' => 'user-a']);
+        $guard   = $this->sessionGuard($session, $user);
 
-        $same  = (new AuthGuardSubjectResolver($this->factoryReturning('web', $user), $this->configWithDefaultGuard('web'), null, $container))->forUser($user);
-        $other = (new AuthGuardSubjectResolver($this->factoryReturning('web', $user), $this->configWithDefaultGuard('web'), null, $container))->forUser(new \stdClass);
+        $session->put($guard->getName(), 'user-a');
 
-        self::assertSame(self::SESSION, $same->session);
-        self::assertNull($other->session);
+        $resolver = $this->resolverOver($guard, $session);
+
+        self::assertSame(self::SESSION, $resolver->forUser($user)->session);
+        self::assertNull($resolver->forUser(new GenericUser(['id' => 'user-a']))->session);
+        self::assertNull($resolver->forUser(new \stdClass)->session);
+    }
+
+    /**
+     * Return a resolver over the session guard, on a request holding the
+     * session.
+     *
+     * @param  \Illuminate\Auth\SessionGuard  $guard
+     * @param  \Illuminate\Session\Store  $session
+     * @return \SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver
+     */
+    private function resolverOver(SessionGuard $guard, Store $session): AuthGuardSubjectResolver
+    {
+        $request = Request::create('/');
+        $request->setLaravelSession($session);
+
+        return new AuthGuardSubjectResolver($this->factoryWith('web', $guard), $this->configWithDefaultGuard('web'), null, $this->containerWith($request));
+    }
+
+    /**
+     * Return a session guard named `web` over the session, whose provider knows
+     * the given users by their identifiers and accepts any credentials naming
+     * one of them.
+     *
+     * @param  \Illuminate\Session\Store  $session
+     * @param  \Illuminate\Auth\GenericUser  ...$users
+     * @return \Illuminate\Auth\SessionGuard
+     */
+    private function sessionGuard(Store $session, GenericUser ...$users): SessionGuard
+    {
+        $byId = static function (mixed $id) use ($users): ?GenericUser {
+            foreach ($users as $user) {
+                if ($user->getAuthIdentifier() === $id) {
+                    return $user;
+                }
+            }
+
+            return null;
+        };
+
+        $provider = \Mockery::mock(UserProvider::class);
+        $provider->shouldReceive('retrieveById')->andReturnUsing($byId);
+        $provider->shouldReceive('retrieveByCredentials')->andReturnUsing(static fn (array $credentials): ?GenericUser => $byId($credentials['id'] ?? null));
+        $provider->shouldReceive('validateCredentials')->andReturnTrue();
+        $provider->shouldReceive('rehashPasswordIfRequired');
+
+        return new SessionGuard('web', $provider, $session, null, null, false);
+    }
+
+    /**
+     * Return a started session with the requests' session id.
+     *
+     * @return \Illuminate\Session\Store
+     */
+    private static function startedSession(): Store
+    {
+        $session = new Store('laravel_session', new ArraySessionHandler(120), self::SESSION);
+        $session->start();
+
+        return $session;
     }
 
     /**
@@ -342,6 +545,21 @@ final class AuthGuardSubjectResolverTest extends TestCase
 
         $factory = \Mockery::mock(AuthFactory::class);
         $factory->shouldReceive('guard')->once()->with($name)->andReturn($guard);
+
+        return $factory;
+    }
+
+    /**
+     * Build an auth factory whose given guard is the guard supplied.
+     *
+     * @param  string|null  $name
+     * @param  \Illuminate\Contracts\Auth\Guard  $guard
+     * @return \Illuminate\Contracts\Auth\Factory
+     */
+    private function factoryWith(?string $name, Guard $guard): AuthFactory
+    {
+        $factory = \Mockery::mock(AuthFactory::class);
+        $factory->shouldReceive('guard')->with($name)->andReturn($guard);
 
         return $factory;
     }
