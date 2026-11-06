@@ -377,6 +377,57 @@ final class ResourceReferencesTest extends TestCase
     }
 
     /**
+     * An identifier holding a NUL byte names nothing, so it cannot be
+     * identified however it is given, and the resolver is never asked about a
+     * pair of one.
+     *
+     * @return void
+     */
+    public function testAnIdentifierHoldingANulByteCannotBeIdentified(): void
+    {
+        $this->bindResolver(null, new Reference('stub_tenant', '7'));
+
+        $stringable = new class {
+            /**
+             * @return string
+             */
+            #[\Override]
+            public function __toString(): string
+            {
+                return "report:9\0";
+            }
+        };
+
+        self::assertFalse(ResourceReferences::of("report:9\0"));
+        self::assertFalse(ResourceReferences::of(['post', "42\0"]));
+        self::assertFalse(ResourceReferences::of(["post\0", '42']));
+        self::assertFalse(ResourceReferences::of(new ResourceReference("report\0")));
+        self::assertFalse(ResourceReferences::of(ResourceReference::record('post', "4\x002")));
+        self::assertFalse(ResourceReferences::of($stringable));
+        self::assertFalse(ResourceReferences::of(self::model("4\x002")));
+        self::assertSame([], $this->resolver->askedRecords);
+    }
+
+    /**
+     * An anonymous model class's name, and so its morph class, holds a NUL
+     * byte, so its records cannot be identified unless a morph map names them.
+     *
+     * @return void
+     */
+    public function testARecordOfAnAnonymousModelClassCannotBeIdentified(): void
+    {
+        $model = new class extends Model {};
+
+        $model->setRawAttributes(['id' => 42]);
+
+        self::assertFalse(ResourceReferences::of($model));
+
+        Relation::morphMap(['anonymous' => $model::class]);
+
+        self::assertEquals(ResourceReference::record('anonymous', '42'), ResourceReferences::of($model));
+    }
+
+    /**
      * A number, a boolean or a plain object cannot be identified.
      *
      * @return void
@@ -414,10 +465,7 @@ final class ResourceReferencesTest extends TestCase
      */
     private static function model(mixed $key): Model
     {
-        $model = new class extends Model {
-            /** @var bool The key is set by hand. */
-            public $incrementing = false;
-        };
+        $model = new StubTenant;
 
         $model->setRawAttributes(['id' => $key]);
 

@@ -4,9 +4,11 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversTrait;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
@@ -27,6 +29,9 @@ use Tests\TestCase;
  * `invalid_policy` reason: every check for the holder denies, whatever its
  * roles, permissions or other policies would allow, until the document is
  * fixed.
+ *
+ * A stored policy over the configured limits, as after a limit is lowered, is
+ * refused the same way.
  *
  * The test uses `DB::table()` to bypass the Eloquent mutator and persist a
  * malformed document directly — the mutator's validation path is the write-side
@@ -148,6 +153,104 @@ final class FailClosedPolicyHydrationTest extends TestCase
             self::assertSame(DecisionReason::INVALID_POLICY, $last->reason);
             self::assertSame(DecisionStage::DENY, $last->stage);
         }
+    }
+
+    /**
+     * A stored policy over a limit, after the limit was lowered, is never
+     * skipped and never partly evaluated: `getPolicies()` throws, and every
+     * check for its holder denies with the `invalid_policy` reason, even when
+     * an RBAC permission is held and another policy allows the action.
+     *
+     * @return void
+     */
+    public function testPolicyOverALimitDeniesEveryCheck(): void
+    {
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard' => 'web']);
+
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user->givePermission('posts:create');
+
+        $user->attachPolicy(Policy::create(['name' => 'allow-create', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:create']]]]]));
+        $user->attachPolicy(Policy::create(['name' => 'wide', 'document' => ['statements' => [
+            ['effect' => 'deny', 'actions' => ['posts:delete']],
+            ['effect' => 'deny', 'actions' => ['posts:archive']],
+        ]]]));
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make(ConfigRepository::class);
+        $config->set('authorization.policies.limits.statements', 1);
+
+        $fresh = $user->fresh();
+        self::assertNotNull($fresh);
+
+        try {
+            $fresh->getPolicies();
+            self::fail('getPolicies() should throw for a policy over a limit.');
+        } catch (InvalidPolicyDocumentException $exception) {
+            self::assertSame('Invalid policy document \'wide\': Policy document has 2 statements, more than the 1 allowed.', $exception->getMessage());
+        }
+
+        $decision = Authorization::for($fresh)->check('posts:create');
+
+        self::assertFalse($decision->isAllowed());
+        self::assertSame(DecisionReason::INVALID_POLICY, $decision->reason);
+        self::assertSame(DecisionStage::DENY, $decision->stage);
+        self::assertSame([], $decision->statements);
+    }
+
+    /**
+     * A policy cached in the persistent store while within the limits denies as
+     * `invalid_policy` on the first check after a limit is lowered below it:
+     * the cached entry is keyed by the limits it was checked under, so it
+     * misses and the policy is read and checked again.
+     *
+     * @return void
+     */
+    public function testACachedPolicyOverALoweredLimitDenies(): void
+    {
+        $config = $this->config();
+        $config->set('authorization.cache.store', 'array');
+
+        $this->app?->forgetInstance(ResolutionCache::class);
+
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard' => 'web']);
+
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user->givePermission('posts:create');
+        $user->attachPolicy(Policy::create(['name' => 'wide', 'document' => ['statements' => [
+            ['effect' => 'deny', 'actions' => ['posts:delete']],
+            ['effect' => 'deny', 'actions' => ['posts:archive']],
+        ]]]));
+
+        $cached = $user->fresh();
+        self::assertNotNull($cached);
+        self::assertTrue(Authorization::for($cached)->check('posts:create')->isAllowed());
+
+        // The next request, under a lowered limit, finds the persistent entry
+        // built under the old one.
+        $config->set('authorization.policies.limits.statements', 1);
+
+        $this->app?->forgetInstance(ResolutionCache::class);
+
+        $fresh = $user->fresh();
+        self::assertNotNull($fresh);
+
+        $decision = Authorization::for($fresh)->check('posts:create');
+
+        self::assertFalse($decision->isAllowed());
+        self::assertSame(DecisionReason::INVALID_POLICY, $decision->reason);
+        self::assertSame(DecisionStage::DENY, $decision->stage);
+    }
+
+    /**
+     * Return the configuration repository.
+     *
+     * @return \Illuminate\Config\Repository
+     */
+    private function config(): ConfigRepository
+    {
+        /** @var \Illuminate\Config\Repository */
+        return $this->app?->make(ConfigRepository::class);
     }
 
     /**

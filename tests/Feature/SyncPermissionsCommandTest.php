@@ -9,7 +9,6 @@ use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
-use SineMacula\Laravel\Authorization\Console\Support\PermissionCatalogue;
 use SineMacula\Laravel\Authorization\Console\Support\PermissionDiff;
 use SineMacula\Laravel\Authorization\Console\Support\PermissionDiffBuilder;
 use SineMacula\Laravel\Authorization\Console\SyncPermissionsCommand;
@@ -18,6 +17,7 @@ use SineMacula\Laravel\Authorization\Events\Permission\Deleted as PermissionDele
 use SineMacula\Laravel\Authorization\Events\Permission\Updated as PermissionUpdated;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Support\PermissionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use SineMacula\Laravel\Authorization\Support\PermissionMetadataReader;
 use SineMacula\Laravel\Authorization\Support\Reference;

@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
@@ -82,5 +83,34 @@ final class PolicyModelEdgeCasesTest extends TestCase
         $this->expectException(InvalidPolicyDocumentException::class);
 
         PolicyDocument::hydrate($policy);
+    }
+
+    /**
+     * A write breaking several rules is refused with every reason, joined into
+     * one sentence.
+     *
+     * @return void
+     */
+    public function testAWriteIsRefusedWithEveryReason(): void
+    {
+        $this->config()->set('authorization.policies.limits.pattern_length', 3);
+
+        $this->expectExceptionMessage(
+            'Invalid policy document \'many\': Policy statement #0 has 1 patterns or operands longer than the 3 characters allowed;'
+            . ' Policy statement #0 condition key \'9a\' must be',
+        );
+
+        Policy::create(['name' => 'many', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['abcd'], 'conditions' => ['eq' => ['9a' => 'x']]]]]]);
+    }
+
+    /**
+     * Return the configuration repository.
+     *
+     * @return \Illuminate\Config\Repository
+     */
+    private function config(): ConfigRepository
+    {
+        /** @var \Illuminate\Config\Repository */
+        return $this->app?->make(ConfigRepository::class);
     }
 }

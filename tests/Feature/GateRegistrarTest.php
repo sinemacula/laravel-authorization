@@ -277,7 +277,7 @@ final class GateRegistrarTest extends TestCase
                     'effect'     => 'allow',
                     'actions'    => ['posts:create'],
                     'resources'  => ['post:42'],
-                    'conditions' => ['tenant' => ['eq' => 'org-1']],
+                    'conditions' => ['eq' => ['tenant' => 'org-1']],
                 ]],
             ],
         ]));

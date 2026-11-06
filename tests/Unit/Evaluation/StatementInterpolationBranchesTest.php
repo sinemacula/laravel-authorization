@@ -14,13 +14,13 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
  * Coverage for the way `Statement` interpolates its operands and resource
  * patterns when an interpolator is supplied:
  *
- * - A plain string condition value, and a string operator operand, is
- *   interpolated; a reference that cannot be resolved makes the condition
- *   undecidable rather than comparing against an empty string.
- * - A non-string operand (integers, booleans) passes through unchanged.
- * - A `string_like` operand and a resource pattern are interpolated as glob
- *   patterns: substituted values only ever match themselves and literal
- *   backslashes stay literal.
+ * - A string operator operand is interpolated; a reference that cannot be
+ *   resolved makes the condition undecidable rather than comparing against an
+ *   empty string.
+ * - A non-string operand (integers, booleans, lists) passes through unchanged.
+ * - A `like` operand and a resource pattern are interpolated as glob patterns:
+ *   substituted values only ever match themselves and literal backslashes stay
+ *   literal.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -36,9 +36,8 @@ final class StatementInterpolationBranchesTest extends TestCase
     private const string UNRESOLVED_TENANT = 'condition \'tenant\' references a value that cannot be resolved';
 
     /**
-     * A plain string condition value is interpolated directly (the payload is
-     * the operand, not an operator map) and compared by identity against the
-     * context value.
+     * A string `eq` operand is interpolated and compared by identity against
+     * the context value.
      *
      * @return void
      */
@@ -47,7 +46,7 @@ final class StatementInterpolationBranchesTest extends TestCase
         $statement = Statement::fromArray([
             'effect'     => 'allow',
             'actions'    => ['posts:update'],
-            'conditions' => ['tenant' => '${principal.id}'],
+            'conditions' => ['eq' => ['tenant' => '${principal.id}']],
         ]);
 
         $principal = self::principal('org-7');
@@ -65,8 +64,7 @@ final class StatementInterpolationBranchesTest extends TestCase
     }
 
     /**
-     * Without an interpolator a plain string condition value is compared as
-     * written.
+     * Without an interpolator a string operand is compared as written.
      *
      * @return void
      */
@@ -75,7 +73,7 @@ final class StatementInterpolationBranchesTest extends TestCase
         $statement = Statement::fromArray([
             'effect'     => 'allow',
             'actions'    => ['posts:update'],
-            'conditions' => ['tenant' => '${principal.id}'],
+            'conditions' => ['eq' => ['tenant' => '${principal.id}']],
         ]);
 
         self::assertTrue($statement->conditionsSatisfiedBy(['tenant' => '${principal.id}']));
@@ -83,18 +81,18 @@ final class StatementInterpolationBranchesTest extends TestCase
     }
 
     /**
-     * A plain string condition value whose reference cannot be resolved makes
-     * the condition undecidable, even when the context value is the empty
-     * string an unresolved token used to become.
+     * A string operand embedding a reference that cannot be resolved makes the
+     * condition undecidable, even when the context value is the empty string an
+     * unresolved token used to become.
      *
      * @return void
      */
-    public function testUnresolvedPlainValueIsUndecidable(): void
+    public function testUnresolvedEmbeddedReferenceIsUndecidable(): void
     {
         $statement = Statement::fromArray([
             'effect'     => 'allow',
             'actions'    => ['posts:update'],
-            'conditions' => ['tenant' => 'org-${principal.id}'],
+            'conditions' => ['eq' => ['tenant' => 'org-${principal.id}']],
         ]);
 
         $result = $statement->assess('posts:update', null, ['tenant' => 'org-'], new ContextInterpolator, new \stdClass);
@@ -105,8 +103,8 @@ final class StatementInterpolationBranchesTest extends TestCase
     }
 
     /**
-     * A string operator operand is interpolated, and one whose reference cannot
-     * be resolved makes the condition undecidable.
+     * A string operand of a deny is interpolated, and one whose reference
+     * cannot be resolved makes the condition undecidable.
      *
      * @return void
      */
@@ -115,7 +113,7 @@ final class StatementInterpolationBranchesTest extends TestCase
         $statement = Statement::fromArray([
             'effect'     => 'deny',
             'actions'    => ['posts:update'],
-            'conditions' => ['tenant' => ['eq' => '${principal.id}']],
+            'conditions' => ['eq' => ['tenant' => '${principal.id}']],
         ]);
 
         $matched = $statement->assess('posts:update', null, ['tenant' => 'org-7'], new ContextInterpolator, self::principal('org-7'));
@@ -140,7 +138,7 @@ final class StatementInterpolationBranchesTest extends TestCase
         $statement = Statement::fromArray([
             'effect'     => 'allow',
             'actions'    => ['posts:update'],
-            'conditions' => ['path' => ['starts_with' => '${context.prefix}']],
+            'conditions' => ['starts_with' => ['path' => '${context.prefix}']],
         ]);
 
         $result = $statement->assess('posts:update', null, ['path' => '/docs', 'prefix' => ''], new ContextInterpolator);
@@ -150,26 +148,28 @@ final class StatementInterpolationBranchesTest extends TestCase
     }
 
     /**
-     * An array operand that contains a non-string entry passes the non-string
-     * through unchanged, e.g. a boolean flag compared against the context.
+     * A list operand is never interpolated: its strings, references included,
+     * are compared as written.
      *
      * @return void
      */
-    public function testNonStringEntryInArrayOperandIsUnchanged(): void
+    public function testListOperandIsNeverInterpolated(): void
     {
         $statement = Statement::fromArray([
             'effect'     => 'allow',
             'actions'    => ['posts:update'],
-            'conditions' => ['flag' => ['eq' => true]],
+            'conditions' => ['in' => ['owner' => ['${principal.id}', 'admin']]],
         ]);
 
-        self::assertTrue($statement->conditionsSatisfiedBy(['flag' => true], new ContextInterpolator, null));
-        self::assertFalse($statement->conditionsSatisfiedBy(['flag' => 'true'], new ContextInterpolator, null));
+        $principal = self::principal('42');
+
+        self::assertFalse($statement->conditionsSatisfiedBy(['owner' => '42'], new ContextInterpolator, $principal));
+        self::assertTrue($statement->conditionsSatisfiedBy(['owner' => '${principal.id}'], new ContextInterpolator, $principal));
     }
 
     /**
-     * A non-string, non-array condition value (boolean) passes through verbatim
-     * and is compared by identity against the context value.
+     * A boolean operand passes through verbatim and is compared by identity
+     * against the context value, never against its string form.
      *
      * @return void
      */
@@ -178,17 +178,17 @@ final class StatementInterpolationBranchesTest extends TestCase
         $statement = Statement::fromArray([
             'effect'     => 'allow',
             'actions'    => ['posts:update'],
-            'conditions' => ['flag' => true],
+            'conditions' => ['eq' => ['flag' => true]],
         ]);
 
         self::assertTrue($statement->conditionsSatisfiedBy(['flag' => true], new ContextInterpolator, null));
+        self::assertFalse($statement->conditionsSatisfiedBy(['flag' => 'true'], new ContextInterpolator, null));
         self::assertFalse($statement->conditionsSatisfiedBy(['flag' => false], new ContextInterpolator, null));
     }
 
     /**
-     * A `string_like` operand is interpolated as a pattern: a substituted
-     * wildcard only matches itself while the pattern's own wildcard keeps its
-     * meaning.
+     * A `like` operand is interpolated as a pattern: a substituted wildcard
+     * only matches itself while the pattern's own wildcard keeps its meaning.
      *
      * @return void
      */
@@ -197,7 +197,7 @@ final class StatementInterpolationBranchesTest extends TestCase
         $statement = Statement::fromArray([
             'effect'     => 'allow',
             'actions'    => ['posts:update'],
-            'conditions' => ['path' => ['string_like' => '${principal.id}/*']],
+            'conditions' => ['like' => ['path' => '${principal.id}/*']],
         ]);
 
         $principal = self::principal('*');
@@ -211,7 +211,7 @@ final class StatementInterpolationBranchesTest extends TestCase
     }
 
     /**
-     * A `string_like` operand keeps its backslashes literal with and without an
+     * A `like` operand keeps its backslashes literal with and without an
      * interpolator.
      *
      * @return void
@@ -221,7 +221,7 @@ final class StatementInterpolationBranchesTest extends TestCase
         $statement = Statement::fromArray([
             'effect'     => 'allow',
             'actions'    => ['posts:update'],
-            'conditions' => ['type' => ['string_like' => 'App\Models\*']],
+            'conditions' => ['like' => ['type' => 'App\Models\*']],
         ]);
 
         self::assertTrue($statement->conditionsSatisfiedBy(['type' => 'App\Models\Post']));
@@ -298,7 +298,7 @@ final class StatementInterpolationBranchesTest extends TestCase
         $statement = Statement::fromArray([
             'effect'     => 'allow',
             'actions'    => ['posts:update'],
-            'conditions' => ['tenant' => '${resource.id}'],
+            'conditions' => ['eq' => ['tenant' => '${resource.id}']],
         ]);
 
         $resolved = $statement->assess('posts:update', 'posts:42', ['tenant' => '42'], new ContextInterpolator);

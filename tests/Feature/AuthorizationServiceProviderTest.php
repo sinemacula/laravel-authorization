@@ -22,6 +22,7 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
@@ -47,11 +48,13 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
+use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\CustomRoleMiddlewareDouble;
 use Tests\Feature\Stubs\FixedResourceTenantResolver;
+use Tests\Feature\Stubs\PermissiveActionCatalogue;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubPolicyStore;
 use Tests\Feature\Stubs\StubSubjectResolver;
@@ -131,8 +134,11 @@ final class AuthorizationServiceProviderTest extends TestCase
      */
     public function testRequestStateBindingsAreRebuiltForEachJob(): void
     {
-        $app       = $this->application();
+        $app = $this->application();
+        $app->forgetExtenders(ActionCatalogue::class);
+
         $abstracts = [
+            ActionCatalogue::class,
             SubjectResolver::class,
             TenantTree::class,
             ResourceTenantResolver::class,
@@ -338,8 +344,8 @@ final class AuthorizationServiceProviderTest extends TestCase
     }
 
     /**
-     * Every package command is registered in the console, the catalogue sync
-     * and the prune included.
+     * Every package command is registered in the console, the catalogue sync,
+     * the prune and the policy validation included.
      *
      * @return void
      */
@@ -347,9 +353,31 @@ final class AuthorizationServiceProviderTest extends TestCase
     {
         $commands = \array_keys(Artisan::all());
 
-        foreach (['list-roles', 'list-permissions', 'grant', 'revoke', 'why-can', 'migrate-spatie', 'sync', 'prune'] as $name) {
+        foreach (['list-roles', 'list-permissions', 'grant', 'revoke', 'why-can', 'migrate-spatie', 'sync', 'prune', 'policy:validate'] as $name) {
             self::assertContains("authorization:{$name}", $commands);
         }
+    }
+
+    /**
+     * The action catalogue a policy document is checked against defaults to the
+     * permissions the code declares, and one the application binds itself
+     * replaces it and survives the reset between jobs.
+     *
+     * @return void
+     */
+    public function testBindsTheDeclaredActionCatalogue(): void
+    {
+        $app = $this->application();
+        $app->forgetExtenders(ActionCatalogue::class);
+
+        self::assertInstanceOf(DeclaredActionCatalogue::class, $app->make(ActionCatalogue::class));
+
+        $bound = new PermissiveActionCatalogue;
+        $app->instance(ActionCatalogue::class, $bound);
+
+        $this->startNextJob();
+
+        self::assertSame($bound, $app->make(ActionCatalogue::class));
     }
 
     /**

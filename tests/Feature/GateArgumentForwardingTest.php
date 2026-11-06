@@ -183,7 +183,7 @@ final class GateArgumentForwardingTest extends TestCase
                 'statements' => [[
                     'effect'     => 'allow',
                     'actions'    => ['posts:create'],
-                    'conditions' => ['tenant' => ['eq' => 'org-1']],
+                    'conditions' => ['eq' => ['tenant' => 'org-1']],
                 ]],
             ],
         ]));
@@ -211,7 +211,7 @@ final class GateArgumentForwardingTest extends TestCase
                     'effect'     => 'allow',
                     'actions'    => ['posts:create'],
                     'resources'  => ['arn:post:42'],
-                    'conditions' => ['tenant' => ['eq' => 'org-1']],
+                    'conditions' => ['eq' => ['tenant' => 'org-1']],
                 ]],
             ],
         ]));

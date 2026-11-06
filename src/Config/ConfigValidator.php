@@ -12,6 +12,7 @@ use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Enums\GateConflictMode;
+use SineMacula\Laravel\Authorization\Evaluation\PolicyLimits;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
@@ -69,6 +70,7 @@ final class ConfigValidator
         self::validatePolicyStore($config['policy_store'] ?? null);
         self::validateCacheStore($config['cache']['store'] ?? null, $container);
         self::validateCacheTtl($config['cache']['ttl'] ?? 300);
+        self::validatePolicyLimits($config['policies']['limits'] ?? []);
     }
 
     /**
@@ -456,6 +458,35 @@ final class ConfigValidator
         }
 
         throw new InvalidAuthorizationConfigException('authorization.cache.ttl', 'expected a whole number of seconds of at least 1, got ' . self::describe($value) . '.');
+    }
+
+    /**
+     * Validate that `policies.limits` is an array, and that each limit it sets
+     * is a whole number of at least 1. A limit it does not set takes its
+     * default.
+     *
+     * @param  mixed  $value
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidAuthorizationConfigException
+     */
+    private static function validatePolicyLimits(mixed $value): void
+    {
+        if (!\is_array($value)) {
+            throw new InvalidAuthorizationConfigException('authorization.policies.limits', 'expected an array of limits, got ' . self::describe($value) . '.');
+        }
+
+        foreach (PolicyLimits::KEYS as $key) {
+            if (!isset($value[$key])) {
+                continue;
+            }
+
+            $limit = $value[$key];
+
+            if (!\is_int($limit) || $limit < 1) {
+                throw new InvalidAuthorizationConfigException("authorization.policies.limits.{$key}", 'expected a whole number of at least 1, got ' . self::describe($limit) . '.');
+            }
+        }
     }
 
     /**

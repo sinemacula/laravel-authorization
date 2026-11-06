@@ -165,38 +165,10 @@ final class MutationKillersTest extends TestCase
         // Missing.
         $this->expectExceptionObjectShape(
             static fn () => Statement::fromArray([
-                'actions' => ['x'],
-            ]),
-            \InvalidArgumentException::class,
-            'Policy statement requires a string effect.',
-        );
-
-        // Present but non-string.
-        $this->expectExceptionObjectShape(
-            static fn () => Statement::fromArray([
-                'effect'  => 42,
-                'actions' => ['x'],
-            ]),
-            \InvalidArgumentException::class,
-            'Policy statement requires a string effect.',
-        );
-    }
-
-    /**
-     * `Statement::fromArray` rejects missing, non-array, and empty actions —
-     * pins each of the three `||` sub-expressions.
-     *
-     * @return void
-     */
-    public function testStatementResolveActionsRejectsAllThreeBranches(): void
-    {
-        // Missing.
-        $this->expectExceptionObjectShape(
-            static fn () => Statement::fromArray([
                 'effect' => 'allow',
             ]),
             \InvalidArgumentException::class,
-            'Policy statement requires at least one action.',
+            'Policy statement requires actions or not_actions.',
         );
 
         // Not array.
@@ -206,7 +178,7 @@ final class MutationKillersTest extends TestCase
                 'actions' => 'x',
             ]),
             \InvalidArgumentException::class,
-            'Policy statement requires at least one action.',
+            'Policy statement actions must be a non-empty list of non-empty strings.',
         );
 
         // Empty array.
@@ -216,7 +188,7 @@ final class MutationKillersTest extends TestCase
                 'actions' => [],
             ]),
             \InvalidArgumentException::class,
-            'Policy statement requires at least one action.',
+            'Policy statement actions must be a non-empty list of non-empty strings.',
         );
     }
 
@@ -240,19 +212,24 @@ final class MutationKillersTest extends TestCase
     }
 
     /**
-     * Default `resources` value is `['*']`. Pins the `public array $resources =
-     * ['*'];` default against ArrayItemRemoval.
+     * A statement without `resources` keeps both resource lists unset, covers
+     * every resource and a resource-less check, and leaves `resources` out when
+     * serialised.
      *
      * @return void
      */
-    public function testStatementDefaultResourcesWildcard(): void
+    public function testStatementWithoutResourcesCoversEveryResource(): void
     {
         $statement = Statement::fromArray([
             'effect'  => 'allow',
             'actions' => ['x'],
         ]);
 
-        self::assertSame(['*'], $statement->resources);
+        self::assertNull($statement->resources);
+        self::assertNull($statement->notResources);
+        self::assertTrue($statement->matches('x', 'post:42'));
+        self::assertTrue($statement->matches('x'));
+        self::assertSame(['effect' => 'allow', 'actions' => ['x']], $statement->toArray());
     }
 
     /**

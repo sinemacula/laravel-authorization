@@ -574,7 +574,7 @@ final class AuthorizationManagerTest extends TestCase
                 new Statement(
                     effect: PolicyEffect::ALLOW,
                     actions: ['posts:create'],
-                    conditions: ['tenant' => ['nope' => 'org-1']],
+                    conditions: ['eq' => ['tenant' => ['org-1']]],
                 ),
             ],
         );
@@ -674,11 +674,11 @@ final class AuthorizationManagerTest extends TestCase
 
         $allow = EvaluationPolicy::fromArray([
             'name'       => 'conditional-allow',
-            'statements' => [['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['tenant' => ['eq' => 'org-1']]]],
+            'statements' => [['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['tenant' => 'org-1']]]],
         ]);
         $deny = EvaluationPolicy::fromArray([
             'name'       => 'conditional-deny',
-            'statements' => [['effect' => 'deny', 'actions' => ['posts:create'], 'conditions' => ['tenant' => ['eq' => 'org-1']]]],
+            'statements' => [['effect' => 'deny', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['tenant' => 'org-1']]]],
         ]);
 
         $skipped = Authorization::for($user)->withPolicies([$allow])->check('posts:create');

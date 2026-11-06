@@ -6,8 +6,8 @@ namespace Tests\Feature;
 
 use Illuminate\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
-use SineMacula\Laravel\Authorization\Console\Support\PermissionCatalogue;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueException;
+use SineMacula\Laravel\Authorization\Support\PermissionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use SineMacula\Laravel\Authorization\Support\PermissionMetadataReader;
 use Tests\Feature\Stubs\ConfigurablePermissionProvider;
@@ -223,11 +223,11 @@ final class PermissionCatalogueTest extends TestCase
     /**
      * Return the catalogue as the container builds it.
      *
-     * @return \SineMacula\Laravel\Authorization\Console\Support\PermissionCatalogue
+     * @return \SineMacula\Laravel\Authorization\Support\PermissionCatalogue
      */
     private function catalogue(): PermissionCatalogue
     {
-        /** @var \SineMacula\Laravel\Authorization\Console\Support\PermissionCatalogue */
+        /** @var \SineMacula\Laravel\Authorization\Support\PermissionCatalogue */
         return $this->app?->make(PermissionCatalogue::class);
     }
 

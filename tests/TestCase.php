@@ -14,6 +14,8 @@ use function Orchestra\Testbench\load_migration_paths;
 use Orchestra\Testbench\TestCase as OrchestraTestCase;
 
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
+use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
+use Tests\Feature\Stubs\PermissiveActionCatalogue;
 
 // phpcs:enable PSR12.Files.FileHeader
 
@@ -41,7 +43,9 @@ abstract class TestCase extends OrchestraTestCase
     private static array $workerDatabases = [];
 
     /**
-     * Clear Testbench's shared compiled-view cache once per phpunit process.
+     * Clear Testbench's shared compiled-view cache once per phpunit process,
+     * then let every test write a policy naming any action.
+     *
      * Blade compiles anonymous templates (including those passed to
      * `Blade::render()`) into
      * `vendor/orchestra/testbench-core/laravel/storage/framework/views/` keyed
@@ -68,6 +72,10 @@ abstract class TestCase extends OrchestraTestCase
         }
 
         parent::setUp();
+
+        // Extended rather than bound, so a test that registers the provider
+        // again keeps it; a test of the catalogue rule binds an instance.
+        $this->app?->extend(ActionCatalogue::class, static fn (): ActionCatalogue => new PermissiveActionCatalogue);
     }
 
     /**

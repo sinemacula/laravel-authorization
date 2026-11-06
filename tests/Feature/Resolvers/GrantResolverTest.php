@@ -267,7 +267,7 @@ final class GrantResolverTest extends TestCase
 
         DB::table('policies')->where('id', $policy->id)->update(['document' => \json_encode($unreadable)]);
 
-        $reason = 'Invalid policy document \'broken\': Policy statement resources must not be empty; omit the key to cover every resource.';
+        $reason = 'Invalid policy document \'broken\': Policy statement resources must be a non-empty list of non-empty strings.';
 
         try {
             GrantResolver::policies($user->policies(), new ResolutionPins);

@@ -88,7 +88,7 @@ final class GateArgumentEdgeCasesTest extends TestCase
                 'statements' => [[
                     'effect'     => 'allow',
                     'actions'    => ['posts:create'],
-                    'conditions' => ['tenant' => ['eq' => 'org-7']],
+                    'conditions' => ['eq' => ['tenant' => 'org-7']],
                 ]],
             ],
         ]));
@@ -97,6 +97,34 @@ final class GateArgumentEdgeCasesTest extends TestCase
         // array argument, hitting the translator's index-0-assoc branch.
         self::assertTrue(Gate::allows('posts:create', [['tenant' => 'org-7']]));
         self::assertFalse(Gate::allows('posts:create', [['tenant' => 'org-9']]));
+    }
+
+    /**
+     * A resource identifier holding a NUL byte names nothing, so the Gate and
+     * `Authorization::can()` deny it as `resource_unresolved` without a
+     * ValueError, even under a statement allowing the action on every post.
+     *
+     * @return void
+     */
+    public function testGateDeniesAResourceHoldingANulByte(): void
+    {
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $this->actAs($user);
+
+        $user->attachPolicy(Policy::create([
+            'name'     => 'every-post',
+            'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:create'], 'resources' => ['post:*']]]],
+        ]));
+
+        self::assertTrue(Gate::allows('posts:create', 'post:1'));
+
+        foreach (["post:1\0", ['post', "1\0"]] as $resource) {
+            self::assertFalse(Gate::allows('posts:create', [$resource]));
+            self::assertSame(DecisionReason::RESOURCE_UNRESOLVED, Authorization::lastDecision()?->reason);
+            self::assertFalse(Gate::forUser($user)->check('posts:create', [$resource]));
+            self::assertFalse(Authorization::can('posts:create', $resource));
+            self::assertSame(DecisionReason::RESOURCE_UNRESOLVED, Authorization::check('posts:create', $resource)->reason);
+        }
     }
 
     /**

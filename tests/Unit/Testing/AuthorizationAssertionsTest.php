@@ -304,7 +304,7 @@ final class AuthorizationAssertionsTest extends TestCase
                     'effect'     => 'allow',
                     'actions'    => ['posts:edit'],
                     'resources'  => ['post:42'],
-                    'conditions' => ['tenant' => ['eq' => 'org-1']],
+                    'conditions' => ['eq' => ['tenant' => 'org-1']],
                 ]],
             ],
         ]));

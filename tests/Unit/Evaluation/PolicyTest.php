@@ -234,7 +234,8 @@ final class PolicyTest extends TestCase
 
     /**
      * toArray emits version, name and statements in canonical order (kills the
-     * version-key literal mutants).
+     * version-key literal mutants), each statement with only the keys it was
+     * given.
      *
      * @return void
      */
@@ -250,9 +251,8 @@ final class PolicyTest extends TestCase
             'name'       => 'sample',
             'statements' => [
                 [
-                    'effect'    => 'allow',
-                    'actions'   => ['x'],
-                    'resources' => ['*'],
+                    'effect'  => 'allow',
+                    'actions' => ['x'],
                 ],
             ],
         ], $policy->toArray());
@@ -273,11 +273,12 @@ final class PolicyTest extends TestCase
     }
 
     /**
-     * Lock the v1 document shape. The fixture exercises every slot — effect,
-     * actions, resources, and a condition map with multiple operators — and
-     * round-trips it through `fromArray` / `toArray`. If a future schema change
-     * alters the canonical layout without bumping `Policy::CURRENT_VERSION`,
-     * this test fails loudly and forces the change to land deliberately.
+     * Lock the v1 document shape. The fixture exercises every slot — sid,
+     * effect, actions and not_actions, resources and not_resources, and an
+     * operator-first condition map with several operators — and round-trips it
+     * through `fromArray` / `toArray`. If a future schema change alters the
+     * canonical layout without bumping `Policy::CURRENT_VERSION`, this test
+     * fails loudly and forces the change to land deliberately.
      *
      * @return void
      */
@@ -288,18 +289,30 @@ final class PolicyTest extends TestCase
             'name'       => 'v1-fixture',
             'statements' => [
                 [
+                    'sid'        => 'AllowWrite',
                     'effect'     => 'allow',
                     'actions'    => ['posts:create', 'posts:update'],
                     'resources'  => ['arn:posts:*'],
                     'conditions' => [
-                        'tenant' => ['eq' => 'org-1'],
-                        'ip'     => ['cidr' => '10.0.0.0/8'],
+                        'eq'              => ['tenant' => 'org-1'],
+                        'ip_in_if_exists' => ['request.ip' => ['10.0.0.0/8', '2001:db8::/32']],
+                        'all_values_in'   => ['tags' => ['draft', 'review']],
                     ],
                 ],
                 [
                     'effect'    => 'deny',
                     'actions'   => ['posts:delete'],
                     'resources' => ['arn:posts:42'],
+                ],
+                [
+                    'sid'           => 'DenyOthers',
+                    'effect'        => 'deny',
+                    'not_actions'   => ['posts:read'],
+                    'not_resources' => ['arn:posts:1'],
+                ],
+                [
+                    'effect'  => 'allow',
+                    'actions' => ['posts:read'],
                 ],
             ],
         ];
@@ -400,5 +413,79 @@ final class PolicyTest extends TestCase
         self::assertArrayNotHasKey('id', $rendered);
         self::assertSame(['version', 'name', 'statements'], \array_keys($rendered));
         self::assertSame($policy->toArray(), $rendered);
+    }
+
+    /**
+     * Statements may share a policy only with distinct sids: two statements
+     * with one sid are refused, naming the sid once, while statements without a
+     * sid never clash.
+     *
+     * @return void
+     */
+    public function testRejectsStatementsSharingASid(): void
+    {
+        $policy = Policy::fromArray([
+            'name'       => 'sids',
+            'statements' => [
+                ['sid' => 'A', 'effect' => 'allow', 'actions' => ['x']],
+                ['effect' => 'allow', 'actions' => ['x']],
+                ['effect' => 'deny', 'actions' => ['x']],
+                ['sid' => 'a', 'effect' => 'deny', 'actions' => ['x']],
+            ],
+        ]);
+
+        self::assertSame(['A', null, null, 'a'], \array_map(static fn (Statement $statement): ?string => $statement->sid, $policy->statements));
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Policy document has statements sharing a sid: A, B.');
+
+        Policy::fromArray([
+            'name'       => 'sids',
+            'statements' => [
+                ['sid' => 'A', 'effect' => 'allow', 'actions' => ['x']],
+                ['sid' => 'B', 'effect' => 'allow', 'actions' => ['x']],
+                ['sid' => 'A', 'effect' => 'deny', 'actions' => ['x']],
+                ['sid' => 'B', 'effect' => 'deny', 'actions' => ['x']],
+                ['sid' => 'A', 'effect' => 'deny', 'actions' => ['y']],
+            ],
+        ]);
+    }
+
+    /**
+     * A malformed sid is refused with the statement, whatever the others say.
+     *
+     * @return void
+     */
+    public function testRejectsAMalformedSid(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Policy statement sid must be 1 to 64 letters, digits, \'_\', \'-\', \':\' or \'.\'.');
+
+        Policy::fromArray([
+            'name'       => 'sids',
+            'statements' => [
+                ['sid' => 'Allow', 'effect' => 'allow', 'actions' => ['x']],
+                ['sid' => 'Deny all', 'effect' => 'deny', 'actions' => ['x']],
+            ],
+        ]);
+    }
+
+    /**
+     * A document in the shape the language replaced, with key-first conditions,
+     * is refused rather than read.
+     *
+     * @return void
+     */
+    public function testRejectsKeyFirstConditions(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Policy statement conditions have an unknown operator \'tenant\'.');
+
+        Policy::fromArray([
+            'name'       => 'legacy',
+            'statements' => [
+                ['effect' => 'allow', 'actions' => ['x'], 'conditions' => ['tenant' => ['eq' => 'org-1']]],
+            ],
+        ]);
     }
 }

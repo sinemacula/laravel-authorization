@@ -176,6 +176,29 @@ final class AuthorizeActionTest extends TestCase
     }
 
     /**
+     * A raw parameter holding a NUL byte names nothing: it denies as
+     * `resource_unresolved`, even under a statement allowing the action on
+     * every resource, and never reaches a pattern match.
+     *
+     * @return void
+     */
+    public function testARawParameterHoldingANulByteDenies(): void
+    {
+        Event::fake([DecisionEvaluated::class, AuthorizationFailed::class]);
+
+        $identity = StubIdentity::create(['id' => 'reader']);
+        self::attachStatement($identity, 'allow', [self::ACTION], ['*']);
+
+        $this->actAs($identity);
+
+        $this->getJson('/reports/report-7')->assertOk();
+        $this->getJson('/reports/report-7%00')->assertForbidden();
+
+        Event::assertDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => $event->resource === null
+            && $event->decision->reason                                                                                  === DecisionReason::RESOURCE_UNRESOLVED);
+    }
+
+    /**
      * A parameter nothing binds is the caller's own text, an opaque identifier,
      * even when it spells a model class: it is never read as the class's type
      * (`post:*`), so a statement on every post does not admit it.

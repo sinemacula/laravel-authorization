@@ -13,11 +13,14 @@ use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
  * that cannot be decided never reads as a plain "no":
  *
  * - a context value of the wrong type (a non-numeric value for `gt`, an
- *   unparseable time, a string that is not an IP address) is undecidable;
+ *   unparseable time, a string that is not an IP address, a value that is not a
+ *   list for `any_value_in`) is undecidable;
  * - an operand of the wrong type (`in` without a list, `between` without two
  *   bounds, a malformed range) or an unknown operator is invalid.
  *
- * It is not part of the public API.
+ * Any operator but `null` may be written with the `_if_exists` suffix, which
+ * makes a key the context lacks pass the test; the suffix changes nothing else
+ * (see `operatorOf()`). It is not part of the public API.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,57 +35,71 @@ final class ConditionEvaluator
         'neq',
         'in',
         'not_in',
-        'null',
-        'not_null',
-        'cidr',
         'starts_with',
         'ends_with',
-        'string_like',
-        'before',
-        'after',
-        'between',
+        'like',
         'gt',
         'gte',
         'lt',
         'lte',
+        'before',
+        'after',
+        'between',
         'bool',
+        'null',
+        'ip_in',
+        'ip_not_in',
+        'any_value_in',
+        'all_values_in',
     ];
 
-    /** @var list<string> Operators whose operand is a glob pattern. */
-    public const array PATTERN_OPERATORS = ['string_like'];
+    /** @var string The suffix that makes a key the context lacks pass an operator's test. */
+    public const string IF_EXISTS = '_if_exists';
 
-    /** @var list<string> Operators whose operand is never interpolated (a list or a pair of bounds). */
-    private const array LITERAL_OPERAND_OPERATORS = ['in', 'not_in', 'between'];
+    /** @var list<string> Operators whose operand is a glob pattern. */
+    public const array PATTERN_OPERATORS = ['like'];
+
+    /** @var list<string> Operators whose operand is never interpolated (a list, a pair of bounds or a flag). */
+    private const array LITERAL_OPERAND_OPERATORS = ['in', 'not_in', 'between', 'null', 'any_value_in', 'all_values_in'];
 
     /** @var array<string, string> The family each operator is evaluated by. */
     private const array FAMILIES = [
-        'eq'          => 'equality',
-        'neq'         => 'equality',
-        'in'          => 'equality',
-        'not_in'      => 'equality',
-        'null'        => 'equality',
-        'not_null'    => 'equality',
-        'starts_with' => 'string',
-        'ends_with'   => 'string',
-        'string_like' => 'string',
-        'before'      => 'time',
-        'after'       => 'time',
-        'between'     => 'between',
-        'gt'          => 'number',
-        'gte'         => 'number',
-        'lt'          => 'number',
-        'lte'         => 'number',
-        'cidr'        => 'cidr',
-        'bool'        => 'bool',
+        'eq'            => 'equality',
+        'neq'           => 'equality',
+        'in'            => 'membership',
+        'not_in'        => 'membership',
+        'starts_with'   => 'string',
+        'ends_with'     => 'string',
+        'like'          => 'string',
+        'gt'            => 'number',
+        'gte'           => 'number',
+        'lt'            => 'number',
+        'lte'           => 'number',
+        'before'        => 'time',
+        'after'         => 'time',
+        'between'       => 'between',
+        'bool'          => 'bool',
+        'null'          => 'null',
+        'ip_in'         => 'ip',
+        'ip_not_in'     => 'ip',
+        'any_value_in'  => 'values',
+        'all_values_in' => 'values',
     ];
 
-    /** @var array<int|string, bool> Values the `bool` operator accepts, by their boolean meaning. */
-    private const array BOOLEAN_FORMS = [
-        'true'  => true,
-        '1'     => true,
-        'false' => false,
-        '0'     => false,
-    ];
+    /**
+     * Return the operator an operator name tests with: the name itself, or the
+     * name without its `_if_exists` suffix. Returns null for an unknown name,
+     * including `null_if_exists`, since `null` already decides a missing key.
+     *
+     * @param  string  $name
+     * @return string|null
+     */
+    public static function operatorOf(string $name): ?string
+    {
+        $operator = \str_ends_with($name, self::IF_EXISTS) ? \substr($name, 0, -\strlen(self::IF_EXISTS)) : $name;
+
+        return \in_array($operator, self::OPERATORS, true) && ($operator !== 'null' || $operator === $name) ? $operator : null;
+    }
 
     /**
      * Evaluate a single operator against the context value.
@@ -95,14 +112,17 @@ final class ConditionEvaluator
     public static function evaluate(string $operator, mixed $operand, mixed $actual): MatchResult
     {
         return match (self::FAMILIES[$operator] ?? null) {
-            'equality' => self::matchesEquality($operator, $operand, $actual),
-            'string'   => self::matchesString($operator, $operand, $actual),
-            'time'     => self::matchesTimeComparison($operator, $operand, $actual),
-            'between'  => self::matchesBetween($operand, $actual),
-            'number'   => self::matchesNumericComparison($operator, $operand, $actual),
-            'cidr'     => self::matchesCidr($operand, $actual),
-            'bool'     => self::matchesBool($operand, $actual),
-            default    => self::unknownOperator($operator),
+            'equality'   => self::matchesEquality($operator, $operand, $actual),
+            'membership' => self::matchesMembership($operator, $operand, $actual),
+            'string'     => self::matchesString($operator, $operand, $actual),
+            'number'     => self::matchesNumericComparison($operator, $operand, $actual),
+            'time'       => self::matchesTimeComparison($operator, $operand, $actual),
+            'between'    => self::matchesBetween($operand, $actual),
+            'bool'       => self::matchesBool($operand, $actual),
+            'null'       => self::matchesNull($operand, $actual),
+            'ip'         => self::matchesIp($operator, $operand, $actual),
+            'values'     => self::matchesValues($operator, $operand, $actual),
+            default      => self::unknownOperator($operator),
         };
     }
 
@@ -112,8 +132,10 @@ final class ConditionEvaluator
      *
      * A string operand containing a `${…}` reference is accepted for the
      * operators that interpolate their operand, since its value is known only
-     * at evaluation time. The operands of `in`, `not_in` and `between` are
-     * never interpolated, so they are always checked.
+     * at evaluation time, unless it holds a NUL byte, which is then checked as
+     * a literal one is. The operands of `in`, `not_in`, `between`, `null`,
+     * `any_value_in` and `all_values_in` are never interpolated, so they are
+     * always checked.
      *
      * @param  string  $operator
      * @param  mixed  $operand
@@ -125,9 +147,12 @@ final class ConditionEvaluator
             return "unknown operator '{$operator}'";
         }
 
-        $deferred = \is_string($operand) && ContextInterpolator::containsReference($operand) && !\in_array($operator, self::LITERAL_OPERAND_OPERATORS, true);
+        $deferred = \is_string($operand)
+            && !\str_contains($operand, "\0")
+            && ContextInterpolator::containsReference($operand)
+            && !\in_array($operator, self::LITERAL_OPERAND_OPERATORS, true);
 
-        return $deferred || self::isValidOperand($operator, $operand) ? null : "invalid operand for operator '{$operator}'";
+        return $deferred || ConditionOperands::isValid($operator, $operand) ? null : self::invalidOperand($operator);
     }
 
     /**
@@ -157,28 +182,20 @@ final class ConditionEvaluator
     }
 
     /**
-     * Determine whether a literal operand has the type its operator needs.
+     * Describe an operand of the wrong type for its operator.
      *
      * @param  string  $operator
-     * @param  mixed  $operand
-     * @return bool
+     * @return string
      */
-    private static function isValidOperand(string $operator, mixed $operand): bool
+    private static function invalidOperand(string $operator): string
     {
-        return match ($operator) {
-            'in', 'not_in'                            => \is_array($operand),
-            'cidr'                                    => \is_string($operand) && self::parseRange($operand) !== null,
-            'starts_with', 'ends_with', 'string_like' => \is_string($operand) && $operand                   !== '',
-            'before', 'after'                         => self::toTimestamp($operand)                        !== null,
-            'between'                                 => self::isTimeRange($operand),
-            'gt', 'gte', 'lt', 'lte'                  => self::isNumber($operand),
-            'bool'                                    => self::isBooleanForm($operand),
-            default                                   => true,
-        };
+        return "invalid operand for operator '{$operator}'";
     }
 
     /**
-     * Evaluate the equality and membership operators.
+     * Evaluate `eq` and `neq`, which compare one scalar strictly. A value that
+     * is neither a scalar nor null is undecidable, so `neq` never holds for a
+     * list or a map.
      *
      * @param  string  $operator
      * @param  mixed  $operand
@@ -187,23 +204,56 @@ final class ConditionEvaluator
      */
     private static function matchesEquality(string $operator, mixed $operand, mixed $actual): MatchResult
     {
-        if (\in_array($operator, ['in', 'not_in'], true) && !\is_array($operand)) {
-            return MatchResult::invalid("invalid operand for operator '{$operator}'");
+        if (!\is_scalar($operand)) {
+            return MatchResult::invalid(self::invalidOperand($operator));
         }
 
-        return MatchResult::fromBool(match ($operator) {
-            'eq'     => $actual === $operand,
-            'neq'    => $actual !== $operand,
-            'in'     => \in_array($actual, $operand, true),
-            'not_in' => !\in_array($actual, $operand, true),
-            'null'   => $actual === null,
-            default  => $actual !== null,
-        });
+        if (!self::isComparable($actual)) {
+            return MatchResult::undecidable("operator '{$operator}' needs a scalar");
+        }
+
+        return MatchResult::fromBool(($actual === $operand) === ($operator === 'eq'));
+    }
+
+    /**
+     * Evaluate `in` and `not_in`, which compare the value strictly with each
+     * member of a set.
+     *
+     * @param  string  $operator
+     * @param  mixed  $operand
+     * @param  mixed  $actual
+     * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
+     */
+    private static function matchesMembership(string $operator, mixed $operand, mixed $actual): MatchResult
+    {
+        if (!ConditionOperands::isScalarSet($operand)) {
+            return MatchResult::invalid(self::invalidOperand($operator));
+        }
+
+        if (!self::isComparable($actual)) {
+            return MatchResult::undecidable("operator '{$operator}' needs a scalar");
+        }
+
+        return MatchResult::fromBool(\in_array($actual, $operand, true) === ($operator === 'in'));
+    }
+
+    /**
+     * Determine whether a context value can be compared by the equality and
+     * membership operators: a scalar, or null, which equals no operand.
+     *
+     * @param  mixed  $actual
+     * @return bool
+     */
+    private static function isComparable(mixed $actual): bool
+    {
+        return $actual === null || \is_scalar($actual);
     }
 
     /**
      * Evaluate the string operators. A pattern operand reaches here already
-     * prepared for `fnmatch()` without `FNM_NOESCAPE`.
+     * prepared for `fnmatch()` without `FNM_NOESCAPE`. A value or substituted
+     * operand holding a NUL byte is undecidable, since `fnmatch()` cannot test
+     * it and the three operators are kept alike.
      *
      * @param  string  $operator
      * @param  mixed  $operand
@@ -213,11 +263,15 @@ final class ConditionEvaluator
     private static function matchesString(string $operator, mixed $operand, mixed $actual): MatchResult
     {
         if (!\is_string($operand)) {
-            return MatchResult::invalid("invalid operand for operator '{$operator}'");
+            return MatchResult::invalid(self::invalidOperand($operator));
         }
 
-        if ($operand === '' || !\is_string($actual)) {
-            return MatchResult::undecidable($operand === '' ? "operator '{$operator}' has an empty operand" : "operator '{$operator}' needs a string value");
+        if ($operand === '' || !\is_string($actual) || \str_contains($operand . $actual, "\0")) {
+            return MatchResult::undecidable(match (true) {
+                $operand === ''      => "operator '{$operator}' has an empty operand",
+                !\is_string($actual) => "operator '{$operator}' needs a string value",
+                default              => "operator '{$operator}' cannot test a NUL byte",
+            });
         }
 
         return MatchResult::fromBool(match ($operator) {
@@ -228,75 +282,30 @@ final class ConditionEvaluator
     }
 
     /**
-     * Evaluate the `cidr` operator: the value is an IPv4 or IPv6 address within
-     * the range, or equal to the address when the operand has no prefix length.
-     * An address of the other family is not within the range.
+     * Evaluate `gt`, `gte`, `lt` and `lte`.
      *
+     * @param  string  $operator
      * @param  mixed  $operand
      * @param  mixed  $actual
      * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
      */
-    private static function matchesCidr(mixed $operand, mixed $actual): MatchResult
+    private static function matchesNumericComparison(string $operator, mixed $operand, mixed $actual): MatchResult
     {
-        $range   = \is_string($operand) ? self::parseRange($operand) : null;
-        $address = \is_string($actual) ? \inet_pton($actual) : false;
-
-        if ($range === null || $address === false) {
-            return $range === null
-                ? MatchResult::invalid('invalid operand for operator \'cidr\'')
-                : MatchResult::undecidable('operator \'cidr\' needs an IP address');
+        if (!ConditionOperands::isNumber($operand) || !ConditionOperands::isNumber($actual)) {
+            return ConditionOperands::isNumber($operand)
+                ? MatchResult::undecidable("operator '{$operator}' needs a number")
+                : MatchResult::invalid(self::invalidOperand($operator));
         }
 
-        [$network, $bits] = $range;
+        $left  = (float) $actual;
+        $right = (float) $operand;
 
-        return MatchResult::fromBool(
-            \strlen($address)                === \strlen($network)
-            && self::prefix($address, $bits) === self::prefix($network, $bits),
-        );
-    }
-
-    /**
-     * Parse an address or CIDR range into its packed network and prefix length,
-     * or null when it is malformed.
-     *
-     * @param  string  $range
-     * @return array{0: string, 1: int}|null
-     */
-    private static function parseRange(string $range): ?array
-    {
-        [$subnet, $bits] = \str_contains($range, '/') ? \explode('/', $range, 2) : [$range, null];
-
-        $network = \inet_pton($subnet);
-
-        if ($network === false) {
-            return null;
-        }
-
-        $maximum = \strlen($network) * 8;
-
-        if ($bits === null) {
-            return [$network, $maximum];
-        }
-
-        return \ctype_digit($bits) && (int) $bits <= $maximum ? [$network, (int) $bits] : null;
-    }
-
-    /**
-     * Return the first `$bits` bits of a packed address as a bit string.
-     *
-     * @param  string  $packed
-     * @param  int  $bits
-     * @return string
-     */
-    private static function prefix(string $packed, int $bits): string
-    {
-        $binary = '';
-
-        foreach (\str_split($packed) as $byte) {
-            $binary .= \str_pad(\decbin(\ord($byte)), 8, '0', \STR_PAD_LEFT);
-        }
-
-        return \substr($binary, 0, $bits);
+        return MatchResult::fromBool(match ($operator) {
+            'gt'    => $left > $right,
+            'gte'   => $left >= $right,
+            'lt'    => $left < $right,
+            default => $left <= $right,
+        });
     }
 
     /**
@@ -309,12 +318,12 @@ final class ConditionEvaluator
      */
     private static function matchesTimeComparison(string $operator, mixed $operand, mixed $actual): MatchResult
     {
-        $right = self::toTimestamp($operand);
-        $left  = self::toTimestamp($actual);
+        $right = ConditionOperands::toTimestamp($operand);
+        $left  = ConditionOperands::toTimestamp($actual);
 
         if ($right === null || $left === null) {
             return $right === null
-                ? MatchResult::invalid("invalid operand for operator '{$operator}'")
+                ? MatchResult::invalid(self::invalidOperand($operator))
                 : MatchResult::undecidable("operator '{$operator}' needs a time");
         }
 
@@ -330,77 +339,19 @@ final class ConditionEvaluator
      */
     private static function matchesBetween(mixed $operand, mixed $actual): MatchResult
     {
-        $left = self::toTimestamp($actual);
+        $left = ConditionOperands::toTimestamp($actual);
 
-        if (!self::isTimeRange($operand) || $left === null) {
-            return self::isTimeRange($operand)
+        if (!ConditionOperands::isTimeRange($operand) || $left === null) {
+            return ConditionOperands::isTimeRange($operand)
                 ? MatchResult::undecidable('operator \'between\' needs a time')
-                : MatchResult::invalid('invalid operand for operator \'between\'');
+                : MatchResult::invalid(self::invalidOperand('between'));
         }
 
-        /** @var array{0: mixed, 1: mixed} $operand */
-        return MatchResult::fromBool($left >= (int) self::toTimestamp($operand[0]) && $left <= (int) self::toTimestamp($operand[1]));
+        return MatchResult::fromBool($left >= (int) ConditionOperands::toTimestamp($operand[0]) && $left <= (int) ConditionOperands::toTimestamp($operand[1]));
     }
 
     /**
-     * Determine whether the operand is a pair of parseable time bounds.
-     *
-     * @param  mixed  $operand
-     * @return bool
-     */
-    private static function isTimeRange(mixed $operand): bool
-    {
-        if (!\is_array($operand) || !\array_key_exists(0, $operand) || !\array_key_exists(1, $operand)) {
-            return false;
-        }
-
-        return self::toTimestamp($operand[0]) !== null && self::toTimestamp($operand[1]) !== null;
-    }
-
-    /**
-     * Evaluate `gt`, `gte`, `lt` and `lte`.
-     *
-     * @param  string  $operator
-     * @param  mixed  $operand
-     * @param  mixed  $actual
-     * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
-     */
-    private static function matchesNumericComparison(string $operator, mixed $operand, mixed $actual): MatchResult
-    {
-        if (!self::isNumber($operand) || !self::isNumber($actual)) {
-            return self::isNumber($operand)
-                ? MatchResult::undecidable("operator '{$operator}' needs a number")
-                : MatchResult::invalid("invalid operand for operator '{$operator}'");
-        }
-
-        $left  = (float) $actual;
-        $right = (float) $operand;
-
-        return MatchResult::fromBool(match ($operator) {
-            'gt'    => $left > $right,
-            'gte'   => $left >= $right,
-            'lt'    => $left < $right,
-            default => $left <= $right,
-        });
-    }
-
-    /**
-     * Determine whether the value is a finite number, or a numeric string. NaN
-     * and the infinities cannot be compared, so they are not numbers here.
-     *
-     * @param  mixed  $value
-     * @return bool
-     *
-     * @phpstan-assert-if-true int|float|numeric-string $value
-     */
-    private static function isNumber(mixed $value): bool
-    {
-        return \is_numeric($value) && \is_finite((float) $value);
-    }
-
-    /**
-     * Evaluate the `bool` operator. Both sides must be a boolean, or one of
-     * `1`, `0`, `'1'`, `'0'`, `'true'` and `'false'`.
+     * Evaluate the `bool` operator. Both sides must be in a boolean form.
      *
      * @param  mixed  $operand
      * @param  mixed  $actual
@@ -408,67 +359,81 @@ final class ConditionEvaluator
      */
     private static function matchesBool(mixed $operand, mixed $actual): MatchResult
     {
-        if (!self::isBooleanForm($operand) || !self::isBooleanForm($actual)) {
-            return self::isBooleanForm($operand)
+        if (!ConditionOperands::isBooleanForm($operand) || !ConditionOperands::isBooleanForm($actual)) {
+            return ConditionOperands::isBooleanForm($operand)
                 ? MatchResult::undecidable('operator \'bool\' needs a boolean')
-                : MatchResult::invalid('invalid operand for operator \'bool\'');
+                : MatchResult::invalid(self::invalidOperand('bool'));
         }
 
-        return MatchResult::fromBool(self::isTrue($actual) === self::isTrue($operand));
+        return MatchResult::fromBool(ConditionOperands::isTrue($actual) === ConditionOperands::isTrue($operand));
     }
 
     /**
-     * Determine whether the value is a boolean or one of the forms the `bool`
-     * operator accepts.
+     * Evaluate the `null` operator for a key the context carries: `true` holds
+     * when its value is null, `false` when it is not. A key the context lacks
+     * is decided by the statement, before any operator is evaluated.
      *
-     * @param  mixed  $value
-     * @return bool
+     * @param  mixed  $operand
+     * @param  mixed  $actual
+     * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
      */
-    private static function isBooleanForm(mixed $value): bool
+    private static function matchesNull(mixed $operand, mixed $actual): MatchResult
     {
-        return \is_bool($value) || ((\is_int($value) || \is_string($value)) && \array_key_exists((string) $value, self::BOOLEAN_FORMS));
+        if (!\is_bool($operand)) {
+            return MatchResult::invalid(self::invalidOperand('null'));
+        }
+
+        return MatchResult::fromBool(($actual === null) === $operand);
     }
 
     /**
-     * Determine whether a value in an accepted boolean form means true.
+     * Evaluate `ip_in` and `ip_not_in`. The value must be an IPv4 or IPv6
+     * address: `ip_in` holds when it is within any of the ranges and
+     * `ip_not_in` when it is within none. A value that is not an address,
+     * including one with a zone id or a NUL byte, is undecidable for both, so
+     * `ip_not_in` never reads it as outside.
      *
-     * @param  mixed  $value
-     * @return bool
+     * @param  string  $operator
+     * @param  mixed  $operand
+     * @param  mixed  $actual
+     * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
      */
-    private static function isTrue(mixed $value): bool
+    private static function matchesIp(string $operator, mixed $operand, mixed $actual): MatchResult
     {
-        return $value === true || ((\is_int($value) || \is_string($value)) && (self::BOOLEAN_FORMS[(string) $value] ?? false));
+        $ranges  = IpRanges::parse($operand);
+        $address = IpRanges::pack($actual);
+
+        if ($ranges === null || $address === null) {
+            return $ranges === null
+                ? MatchResult::invalid(self::invalidOperand($operator))
+                : MatchResult::undecidable("operator '{$operator}' needs an IP address");
+        }
+
+        return MatchResult::fromBool(IpRanges::contains($ranges, $address) === ($operator === 'ip_in'));
     }
 
     /**
-     * Coerce a time-like value into a UNIX timestamp, returning null when the
-     * value cannot be parsed.
+     * Evaluate `any_value_in` and `all_values_in`. The value must be a list of
+     * scalars: `any_value_in` holds when some element is in the set, and
+     * `all_values_in` when the list is not empty and every element is in it.
      *
-     * @param  mixed  $value
-     * @return int|null
+     * @param  string  $operator
+     * @param  mixed  $operand
+     * @param  mixed  $actual
+     * @return \SineMacula\Laravel\Authorization\Evaluation\MatchResult
      */
-    private static function toTimestamp(mixed $value): ?int
+    private static function matchesValues(string $operator, mixed $operand, mixed $actual): MatchResult
     {
-        return match (true) {
-            $value instanceof \DateTimeInterface     => $value->getTimestamp(),
-            \is_int($value)                          => $value,
-            \is_float($value)  && \is_finite($value) => (int) $value,
-            \is_string($value) && $value !== ''      => self::parseTime($value),
-            default                                  => null,
-        };
-    }
+        if (!ConditionOperands::isScalarSet($operand) || !ConditionOperands::isScalarList($actual)) {
+            return ConditionOperands::isScalarSet($operand)
+                ? MatchResult::undecidable("operator '{$operator}' needs a list of values")
+                : MatchResult::invalid(self::invalidOperand($operator));
+        }
 
-    /**
-     * Parse a time string with `strtotime()`, returning null when it cannot be
-     * parsed.
-     *
-     * @param  string  $value
-     * @return int|null
-     */
-    private static function parseTime(string $value): ?int
-    {
-        $timestamp = \strtotime($value);
+        $members = \array_filter($actual, static fn (mixed $element): bool => \in_array($element, $operand, true));
 
-        return $timestamp === false ? null : $timestamp;
+        return MatchResult::fromBool($operator === 'any_value_in'
+            ? $members !== []
+            : $actual  !== [] && \count($members) === \count($actual));
     }
 }

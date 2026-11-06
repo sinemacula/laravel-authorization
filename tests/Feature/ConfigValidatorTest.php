@@ -33,7 +33,8 @@ use Tests\TestCase;
 /**
  * Feature tests for the boot-time validation of `authorization.models.*`, the
  * connection, the backing of `authorization.permission_enums`, the subject
- * resolver, the tenant tree and the resource tenant resolver.
+ * resolver, the tenant tree, the resource tenant resolver and the policy
+ * limits.
  *
  * Each model entry must name an existing class that is the shipped model or a
  * subclass of it, and each permission enum must be backed by strings; anything
@@ -165,6 +166,86 @@ final class ConfigValidatorTest extends TestCase
             fn () => ConfigValidator::validate($config, $this->app),
             'authorization.cache.ttl',
             'expected a whole number of seconds of at least 1, got \'300\' (string).',
+        );
+    }
+
+    /**
+     * The policy limits pass from 1, and each limit, or all of them, may be
+     * left unset or null.
+     *
+     * @return void
+     */
+    public function testPolicyLimitsFromOnePass(): void
+    {
+        $config                       = $this->authorizationConfig();
+        $config['policies']['limits'] = ['document_bytes' => 1, 'statements' => 1, 'conditions' => 1, 'pattern_length' => 1];
+
+        ConfigValidator::validate($config, $this->app);
+
+        unset($config['policies']['limits']['statements']);
+        $config['policies']['limits']['conditions'] = null;
+
+        ConfigValidator::validate($config, $this->app);
+
+        unset($config['policies']);
+
+        ConfigValidator::validate($config, $this->app);
+
+        $this->expectNotToPerformAssertions();
+    }
+
+    /**
+     * Return each policy limit set below 1 or to something that is not a whole
+     * number, with how it is described.
+     *
+     * @return iterable<string, array{string, mixed, string}>
+     */
+    public static function invalidPolicyLimits(): iterable
+    {
+        foreach (['document_bytes', 'statements', 'conditions', 'pattern_length'] as $key) {
+            yield "{$key} of 0" => [$key, 0, '0 (int)'];
+            yield "{$key} below 0" => [$key, -1, '-1 (int)'];
+            yield "{$key} as a string" => [$key, '10', '\'10\' (string)'];
+            yield "{$key} as a float" => [$key, 10.5, '10.5 (float)'];
+        }
+    }
+
+    /**
+     * A policy limit below 1, or that is not a whole number, is refused with
+     * its key.
+     *
+     * @param  string  $key
+     * @param  mixed  $limit
+     * @param  string  $described
+     * @return void
+     */
+    #[DataProvider('invalidPolicyLimits')]
+    public function testInvalidPolicyLimitIsRejected(string $key, mixed $limit, string $described): void
+    {
+        $config                             = $this->authorizationConfig();
+        $config['policies']['limits'][$key] = $limit;
+
+        $this->assertRejected(
+            fn () => ConfigValidator::validate($config, $this->app),
+            "authorization.policies.limits.{$key}",
+            "expected a whole number of at least 1, got {$described}.",
+        );
+    }
+
+    /**
+     * Policy limits that are not an array are refused.
+     *
+     * @return void
+     */
+    public function testNonArrayPolicyLimitsAreRejected(): void
+    {
+        $config                       = $this->authorizationConfig();
+        $config['policies']['limits'] = 100;
+
+        $this->assertRejected(
+            fn () => ConfigValidator::validate($config, $this->app),
+            'authorization.policies.limits',
+            'expected an array of limits, got 100 (int).',
         );
     }
 
