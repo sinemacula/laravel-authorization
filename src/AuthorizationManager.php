@@ -6,8 +6,11 @@ namespace SineMacula\Laravel\Authorization;
 
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Translation\Translator;
+use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
@@ -18,6 +21,8 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 
 /**
@@ -275,6 +280,29 @@ final class AuthorizationManager
         $scoped->policyOverride = \array_values($policies);
 
         return $scoped;
+    }
+
+    /**
+     * Report a change to the application's tenant tree at the tenant: it moved
+     * under another parent, or was deleted (AUTHZ-12.8).
+     *
+     * Every resolution built in the tenant or below it is dropped, in every
+     * worker, and the current tenant's ancestors are read afresh, so a moved
+     * tenant never keeps grants inherited from its old ancestors. A failure of
+     * the cache store is thrown, so the caller can retry.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant|\SineMacula\Laravel\Authorization\Support\Reference  $tenant
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
+     */
+    public function treeChanged(AuthorizableTenant|Model|Reference $tenant): void
+    {
+        $reference = $tenant instanceof Reference ? $tenant : new Reference(...TenantScope::extractTenantPair($tenant));
+
+        ResolutionCache::instance()?->treeChanged($reference);
+
+        (new TenantScope)->flushResolvedTenant();
     }
 
     /**

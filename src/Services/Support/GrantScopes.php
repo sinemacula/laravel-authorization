@@ -9,6 +9,7 @@ use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
  * Where the grant service writes a grant (AUTHZ-5.1, AUTHZ-5.2, D15): in the
@@ -87,7 +88,8 @@ final class GrantScopes
     }
 
     /**
-     * Refuse a target one tenant owns in any scope but that tenant.
+     * Refuse a target one tenant owns in any scope but that tenant and the
+     * tenants below it.
      *
      * @param  \SineMacula\Laravel\Authorization\Enums\GrantTarget  $kind
      * @param  \Illuminate\Database\Eloquent\Model  $target
@@ -100,7 +102,7 @@ final class GrantScopes
     {
         $owner = Reference::tenantOf($target);
 
-        if ($owner === null || self::isSameTenant($owner, $scope)) {
+        if ($owner === null || TenantChain::isWithin($scope, $owner)) {
             return;
         }
 

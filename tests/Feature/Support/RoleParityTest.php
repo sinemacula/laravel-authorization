@@ -5,13 +5,16 @@ declare(strict_types = 1);
 namespace Tests\Feature\Support;
 
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Exceptions\GranteeGuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\GuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\OwnerMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\ParentGuardMismatchException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\RoleParity;
+use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
 /**
@@ -101,6 +104,32 @@ final class RoleParityTest extends TestCase
             self::assertSame('parent role', $exception->getRelatedKind());
             self::assertNull($exception->getRoleOwner());
         }
+    }
+
+    /**
+     * In the bound tree, a role carries a permission and sits under a parent
+     * its tenant's ancestors own; a role above them takes neither of its
+     * descendants'.
+     *
+     * @return void
+     */
+    public function testARoleTakesItsTenantsAncestorsRecords(): void
+    {
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(new Reference('stub_tenant', 'tenant-a'), new Reference('stub_tenant', 'tenant-b')));
+
+        RoleParity::assertCarries(self::role('author', null, self::TENANT_A), self::permission('posts:org', null, self::TENANT_B));
+        RoleParity::assertUnder(self::role('child', null, self::TENANT_A), self::role('parent', null, self::TENANT_B));
+
+        try {
+            RoleParity::assertUnder(self::role('child-2', null, self::TENANT_B), self::role('parent-2', null, self::TENANT_A));
+            self::fail('A role sat under a parent its tenant\'s descendant owns.');
+        } catch (OwnerMismatchException $exception) {
+            self::assertSame('parent role', $exception->getRelatedKind());
+        }
+
+        $this->expectException(OwnerMismatchException::class);
+
+        RoleParity::assertCarries(self::role('editor', null, self::TENANT_B), self::permission('posts:account', null, self::TENANT_A));
     }
 
     /**

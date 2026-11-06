@@ -13,6 +13,7 @@ use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Cache\VersionedStore;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
@@ -23,6 +24,7 @@ use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\FailingCacheStore;
 use Tests\Feature\Stubs\NonTaggableCacheStore;
 use Tests\Feature\Stubs\RecordingLogger;
+use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
 /**
@@ -110,6 +112,58 @@ final class ResolutionCacheTest extends TestCase
 
         self::assertSame(2, $this->resolutions);
         self::assertSame([], $cache->versionKeys([new RoleAssigned(Operation::begin(), self::grantee(), new Reference('role', 'role-1'), 'editor', GrantScope::platform(), null)]));
+    }
+
+    /**
+     * An entry built in a tenant records the versions of the tenant and its
+     * ancestors, so a change to the tree at any of them drops it, in the memo
+     * and the store; a change elsewhere leaves it.
+     *
+     * @return void
+     */
+    public function testATreeChangeAtOrAboveTheTenantDropsItsEntries(): void
+    {
+        [$account, $org] = \array_map(self::createTenant(...), ['account', 'org']);
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($account), Reference::of($org)));
+        $this->actAsTenant($account);
+
+        $cache = $this->request();
+
+        $this->permissions($cache);
+        $this->permissions($this->request());
+        $this->request()->treeChanged(new Reference('stub_tenant', 'elsewhere'));
+        $this->permissions($this->request());
+
+        self::assertSame(1, $this->resolutions);
+
+        $cache->treeChanged(Reference::of($org));
+
+        $this->permissions($cache);
+        $this->permissions($this->request());
+
+        self::assertSame(2, $this->resolutions);
+
+        $this->request()->treeChanged(Reference::of($account));
+        $this->permissions($this->request());
+
+        self::assertSame(3, $this->resolutions);
+    }
+
+    /**
+     * Without a store a tree change empties the memo only.
+     *
+     * @return void
+     */
+    public function testWithoutAStoreATreeChangeEmptiesTheMemo(): void
+    {
+        $cache = new ResolutionCache;
+
+        $this->permissions($cache);
+        $cache->treeChanged(new Reference('stub_tenant', 'org'));
+        $this->permissions($cache);
+
+        self::assertSame(2, $this->resolutions);
     }
 
     /**

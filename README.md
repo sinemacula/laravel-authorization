@@ -310,18 +310,30 @@ $user->assignRole('admin', tenant: $organisationA);
 $user->assignRole('viewer', tenant: $organisationB);
 ```
 
-A check counts the grants made platform-wide and those made in the current tenant; without a tenant, only
-platform-wide grants. Granting a tenant's own role in another tenant, or platform-wide, is refused with
+A check counts the grants made platform-wide and those made in the current tenant; without a tenant, only platform-wide
+grants. Granting a tenant's own role outside that tenant and the tenants below it, or platform-wide, is refused with
 `GrantScopeMismatchException`. A revocation removes the grant in the same scope, and a sync replaces the grants of one
 scope: the tenant named, else the tenant that owns every target, else the platform. Every grant is for every
 application.
 
-A role takes only the platform's permissions and parent roles and its own tenant's, so a platform role takes only the
-platform's; anything else is refused with `OwnerMismatchException`. Guards follow the same rule as a role and its
-permissions: two concrete guards must match, and a guard-agnostic side suits any. A parent of another guard is refused
-with `ParentGuardMismatchException`, and a role or permission granted to a grantee of another guard with
-`GranteeGuardMismatchException`. A role's, permission's or policy's owner is fixed once it is created
+A role takes only the platform's permissions and parent roles, its own tenant's and its tenant's ancestors', so a
+platform role takes only the platform's; anything else is refused with `OwnerMismatchException`. Guards follow the same
+rule as a role and its permissions: two concrete guards must match, and a guard-agnostic side suits any. A parent of
+another guard is refused with `ParentGuardMismatchException`, and a role or permission granted to a grantee of another
+guard with `GranteeGuardMismatchException`. A role's, permission's or policy's owner is fixed once it is created
 (`OwnerChangedException`): to move one, create it in the new owner and grant it again.
+
+Tenants can form a tree (an organisation above its accounts, say). The package never stores it: bind a class
+implementing `SineMacula\Laravel\Authorization\Contracts\TenantTree` as `tenant_tree` in `config/authorization.php`,
+answering a tenant's ancestors, whether one tenant is within another, and a tenant's subtree as a query. The default is
+a flat set of tenants. With a tree, a grant in a tenant also applies in every tenant below it, unless its
+`include_subtree` is false, and a tenant sees the roles, permissions and policies its ancestors own as well as its own
+and the platform's; the nearest owner's wins a lookup by name. When the tree changes (a tenant moved under another
+parent, or deleted), report it so cached answers below it are dropped and the move takes effect at once:
+
+```php
+Authorization::treeChanged($account);
+```
 
 The trait methods (`assignRole()`, `givePermission()`, `attachPolicy()`, `$role->givePermission()` and the others)
 still work and go through the same services, with no actor. A raw relation write such as

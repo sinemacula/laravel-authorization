@@ -8,11 +8,14 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
+use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
 /**
@@ -96,6 +99,39 @@ final class GuardScopedLookupTest extends TestCase
 
         self::assertSame([$owned->id, $platform->id], $keys(GuardScopedLookup::allForGuard(Role::class, 'editor', 'web', new Reference($tenantA->getMorphClass(), 'tenant-a'))));
         self::assertCount(2, GuardScopedLookup::allForGuard(Role::class, 'editor', 'web'));
+    }
+
+    /**
+     * Below other tenants in the bound tree, the nearest owner's row wins: the
+     * tenant's, then each ancestor's in turn, then the platform's, for the
+     * current tenant and for one named alike.
+     *
+     * @return void
+     */
+    public function testTheNearestOwnersRowWins(): void
+    {
+        [$account, $org, $group] = \array_map(self::createTenant(...), ['account', 'org', 'group']);
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($account), Reference::of($org))->put(Reference::of($org), Reference::of($group)));
+
+        $rows = [];
+
+        foreach (['platform' => null, 'group' => $group, 'account' => $account, 'org' => $org] as $owner => $tenant) {
+            $rows[$owner] = Role::query()->withoutGlobalScope(TenantScope::class)->create(['name' => 'editor', 'guard' => 'web'] + self::ownedBy($tenant))->id;
+        }
+
+        $expected = [$rows['account'], $rows['org'], $rows['group'], $rows['platform']];
+        $keys     = static fn (array $models): array => \array_map(static fn (Model $model): mixed => $model->getKey(), $models);
+
+        $this->actAsTenant($account);
+
+        self::assertSame($expected, $keys(GuardScopedLookup::allForGuard(Role::class, 'editor', 'web')));
+        self::assertSame($rows['account'], GuardScopedLookup::findForGuard(Role::class, 'editor', 'web')?->getKey());
+
+        $this->actAsTenant(null);
+
+        self::assertSame($expected, $keys(GuardScopedLookup::allForGuard(Role::class, 'editor', 'web', Reference::of($account))));
+        self::assertSame([$rows['org'], $rows['group'], $rows['platform']], $keys(GuardScopedLookup::allForGuard(Role::class, 'editor', 'web', Reference::of($org))));
     }
 
     /**

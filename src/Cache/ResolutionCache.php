@@ -10,6 +10,7 @@ use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
+use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Two-tier cache (in-memory memo plus optional persistent store) for what a
@@ -19,11 +20,12 @@ use SineMacula\Laravel\Authorization\Support\AuthorizationLog;
  * applies, since the roles and permissions a grantee resolves to depend on it.
  * The memo is keyed by kind and grantee only, so a hit costs no lookup of the
  * tenant, and is emptied whenever the held tenant changes. Each persistent
- * entry records the version tokens of the grantee and of every role and policy
- * it was built from, and holds only while all of them are unchanged; every
- * write bumps the tokens it affects (see `Invalidation`), so a change takes
- * effect on the next check in every worker, on any store. A hit costs two reads
- * of the store and no query.
+ * entry records the version tokens of the grantee, of every role and policy it
+ * was built from, and of the tenant it was built in and that tenant's
+ * ancestors, and holds only while all of them are unchanged; every write bumps
+ * the tokens it affects (see `Invalidation`), so a change takes effect on the
+ * next check in every worker, on any store. A hit costs two reads of the store
+ * and no query.
  *
  * Every entry, in either tier, lives no longer than the nearest expiry of a
  * grant it counts and never longer than the configured maximum. The memo lasts
@@ -128,6 +130,20 @@ final readonly class ResolutionCache
     }
 
     /**
+     * Empty the memo and bump the version of the tenant, which every entry
+     * built in it or below it records, because the tree changed there: it moved
+     * under another parent, or was deleted. Throws when the store fails, so the
+     * caller can retry rather than leave stale entries.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
+     * @return void
+     */
+    public function treeChanged(Reference $tenant): void
+    {
+        $this->invalidate($this->store === null ? [] : [$this->store->tenantKey($tenant)]);
+    }
+
+    /**
      * Return the version keys the events of a write bump, or none without a
      * persistent store.
      *
@@ -191,6 +207,7 @@ final readonly class ResolutionCache
 
         $pins = new ResolutionPins($this->store);
         $pins->grantee($grantee);
+        $pins->tenants(TenantScope::currentChain());
 
         $resolution = $resolve($pins);
         $lifetime   = $this->lifetime($resolution->expiresIn);

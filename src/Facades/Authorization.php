@@ -13,6 +13,8 @@ use Illuminate\Support\Facades\Facade;
  * forwarded to a fresh manager scope so `for()` / `withPolicies()` chains do
  * not leak between requests.
  *
+ * @phpcs:disable Generic.Files.LineLength.TooLong
+ *
  * @method static bool can(string $action, string|null $resource = null, array<string, mixed> $context = [])
  * @method static void authorize(string $action, string|null $resource = null, array<string, mixed> $context = [])
  * @method static \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult evaluate(string $action, string|null $resource = null, array<string, mixed> $context = [])
@@ -25,6 +27,9 @@ use Illuminate\Support\Facades\Facade;
  * @method static array<string, bool> effectivePermissions(array<string, mixed> $context = [])
  * @method static \SineMacula\Laravel\Authorization\Subject|null currentSubject()
  * @method static \SineMacula\Laravel\Authorization\Evaluation\EvaluationResult refuseUnidentifiedResource(string $action, array<string, mixed> $context = [])
+ * @method static void treeChanged(\Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant|\SineMacula\Laravel\Authorization\Support\Reference $tenant)
+ *
+ * @phpcs:enable Generic.Files.LineLength.TooLong
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

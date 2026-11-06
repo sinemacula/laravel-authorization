@@ -16,6 +16,7 @@ use SineMacula\Laravel\Authorization\Concerns\HasPermissions;
 use SineMacula\Laravel\Authorization\Concerns\HasPolicies;
 use SineMacula\Laravel\Authorization\Concerns\HasRoles;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceDecision;
@@ -38,6 +39,8 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Feature\Stubs\AuthenticatableIdentity;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
@@ -45,6 +48,8 @@ use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\Feature\Stubs\StubSubjectResolver;
+use Tests\Feature\Stubs\StubTenant;
+use Tests\Feature\Stubs\StubTenantTree;
 use Tests\Feature\Stubs\SuspendableIdentity;
 use Tests\TestCase;
 
@@ -65,6 +70,51 @@ use Tests\TestCase;
 #[CoversTrait(HasPolicies::class)]
 final class AuthorizationManagerTest extends TestCase
 {
+    /**
+     * A role granted in an organisation allows in an account below it and not
+     * in one beside it; once the account moves away and the tree change is
+     * reported, the cached grant no longer reaches it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGrantReachesTheTenantsBelowItUntilTheTreeChanges(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make(ConfigRepository::class);
+        $config->set('authorization.cache.store', 'array');
+
+        (new AuthorizationServiceProvider($this->app))->register(); // @phpstan-ignore argument.type
+
+        [$org, $account, $sibling] = \array_map(static fn (string $id): StubTenant => StubTenant::query()->create(['id' => $id, 'name' => $id]), ['org', 'account', 'sibling']);
+        $tree                      = (new StubTenantTree)->put(Reference::of($account), Reference::of($org));
+        $user                      = StubIdentity::create(['id' => 'user-1']);
+
+        $this->app?->instance(TenantTree::class, $tree);
+
+        Role::create(['name' => 'editor'])->givePermission(Permission::create(['name' => 'posts:edit']));
+        $user->assignRole('editor', null, $org);
+
+        $in = function (StubTenant $tenant) use ($user): bool {
+            $this->app?->instance(SubjectResolver::class, new StubSubjectResolver($user, $tenant));
+            $this->app?->forgetInstance(ResolvedTenant::class);
+
+            return Authorization::can('posts:edit');
+        };
+
+        self::assertTrue($in($account));
+        self::assertFalse($in($sibling));
+
+        $tree->put(Reference::of($account), Reference::of($sibling));
+
+        self::assertTrue($in($account));
+
+        Authorization::treeChanged($account);
+
+        self::assertFalse($in($account));
+    }
+
     /**
      * A subject that is inactive, or whose identity is, is denied everything as
      * `subject_inactive`, before any grant or policy is read.

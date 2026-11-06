@@ -5,12 +5,14 @@ declare(strict_types = 1);
 namespace Tests\Feature\Services;
 
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\Support\GrantScopes;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\StubTenant;
+use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
 /**
@@ -104,6 +106,34 @@ final class GrantScopesTest extends TestCase
             self::assertNull($exception->getScope());
             self::assertSame('owned-2', $exception->getName());
         }
+    }
+
+    /**
+     * An owned target is grantable in the tenants below its owner in the bound
+     * tree, and not in a tenant beside it.
+     *
+     * @return void
+     */
+    public function testAnOwnedTargetIsGrantableBelowItsTenant(): void
+    {
+        $org     = new Reference('stub_tenant', 'org');
+        $account = new Reference('stub_tenant', 'account');
+        $sibling = new Reference('stub_tenant', 'sibling');
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put($account, $org));
+
+        GrantScopes::assertGrantableIn(GrantTarget::ROLE, self::role('owned', $org), $account);
+
+        try {
+            GrantScopes::assertGrantableIn(GrantTarget::ROLE, self::role('owned-2', $account), $org);
+            self::fail('A role was grantable above its tenant.');
+        } catch (GrantScopeMismatchException $exception) {
+            self::assertEquals($org, $exception->getScope());
+        }
+
+        $this->expectException(GrantScopeMismatchException::class);
+
+        GrantScopes::assertGrantableIn(GrantTarget::ROLE, self::role('owned-3', $org), $sibling);
     }
 
     /**

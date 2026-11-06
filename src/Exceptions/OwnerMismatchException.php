@@ -8,8 +8,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * Thrown when a role would take a permission or a parent role that another
- * tenant owns. A role takes only the platform's and its own tenant's, so a
- * platform role takes only the platform's.
+ * tenant owns. A role takes only the platform's, its own tenant's and its
+ * tenant's ancestors', so a platform role takes only the platform's.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

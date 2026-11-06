@@ -8,12 +8,15 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversTrait;
 use SineMacula\Laravel\Authorization\Concerns\ResolvesPivotExpiry;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
 /**
@@ -74,6 +77,35 @@ final class ResolvesPivotExpiryTest extends TestCase
 
         $this->actAsTenant(null);
         self::assertSame(['member'], $user->getRoles());
+    }
+
+    /**
+     * A grant in an ancestor of the current tenant counts there when it reaches
+     * the tenants below it, and not when it is limited to its own tenant; a
+     * grant in the tenant itself counts either way, and one in a tenant beside
+     * it never.
+     *
+     * @return void
+     */
+    public function testGrantsInAnAncestorReachTheTenantsBelowIt(): void
+    {
+        [$account, $org, $sibling] = \array_map(self::createTenant(...), ['account', 'org', 'sibling']);
+        $user                      = StubIdentity::query()->create(['id' => 'user-1']);
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($account), Reference::of($org))->put(Reference::of($sibling), Reference::of($org)));
+
+        foreach (['org-wide' => $org, 'org-only' => $org, 'account-only' => $account, 'sibling' => $sibling] as $name => $tenant) {
+            Role::query()->create(['name' => $name]);
+            $user->assignRole($name, null, $tenant);
+        }
+
+        DB::table('authorizable_roles')->whereIn('role_id', Role::query()->whereIn('name', ['org-only', 'account-only'])->pluck('id'))->update(['include_subtree' => false]);
+
+        $this->actAsTenant($account);
+        self::assertEqualsCanonicalizing(['org-wide', 'account-only'], $user->getRoles());
+
+        $this->actAsTenant($org);
+        self::assertEqualsCanonicalizing(['org-wide', 'org-only'], $user->getRoles());
     }
 
     /**

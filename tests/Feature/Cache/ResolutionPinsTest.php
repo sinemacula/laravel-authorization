@@ -10,6 +10,7 @@ use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Cache\VersionedStore;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\TenantChain;
 use Tests\Feature\Stubs\FailingCacheStore;
 use Tests\Feature\Stubs\RecordingLogger;
 use Tests\TestCase;
@@ -39,6 +40,7 @@ final class ResolutionPinsTest extends TestCase
         $pins->grantee(new Reference('user', 'user-1'));
         $pins->roles(['role-1', 'role-2']);
         $pins->policies(['policy-1']);
+        $pins->tenants(new TenantChain([new Reference('stub_tenant', 'account'), new Reference('stub_tenant', 'org')]));
         $pins->roles([]);
 
         self::assertSame([
@@ -46,6 +48,8 @@ final class ResolutionPinsTest extends TestCase
             'authz:version:role:role-1',
             'authz:version:role:role-2',
             'authz:version:policy:policy-1',
+            'authz:version:tenant:stub_tenant:account',
+            'authz:version:tenant:stub_tenant:org',
         ], \array_keys($pins->tokens()));
         self::assertSame($store->tokens(\array_keys($pins->tokens())), $pins->tokens());
         self::assertTrue($pins->isComplete());
@@ -63,6 +67,7 @@ final class ResolutionPinsTest extends TestCase
         $pins->grantee(new Reference('user', 'user-1'));
         $pins->roles(['role-1']);
         $pins->policies(['policy-1']);
+        $pins->tenants(new TenantChain([new Reference('stub_tenant', 'account')]));
 
         self::assertSame([], $pins->tokens());
         self::assertTrue($pins->isComplete());
@@ -80,6 +85,7 @@ final class ResolutionPinsTest extends TestCase
 
         $pins->roles([]);
         $pins->policies([]);
+        $pins->tenants(new TenantChain);
 
         self::assertSame(0, $driver->calls);
         self::assertTrue($pins->isComplete());
