@@ -200,7 +200,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $policy = Policy::fromArray([
             'name'       => 'tenant-only',
-            'statements' => [['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['tenant' => ['eq' => 'org-1']]]],
+            'statements' => [['effect' => 'allow', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['tenant' => 'org-1']]]],
         ]);
 
         $failed = new TraceEntry(DecisionStage::ALLOW, TraceOutcome::CONDITION_FAILED, new StatementReference('tenant-only', 0), ['tenant' => false]);

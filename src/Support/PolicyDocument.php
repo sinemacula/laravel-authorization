@@ -6,15 +6,18 @@ namespace SineMacula\Laravel\Authorization\Support;
 
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
+use SineMacula\Laravel\Authorization\Evaluation\PolicyLimits;
+use SineMacula\Laravel\Authorization\Evaluation\PolicyValidator;
 use SineMacula\Laravel\Authorization\Models\Policy;
 
 /**
  * Reads a stored policy document: decodes it, names it after the stored policy,
  * and hydrates it into an evaluation policy.
  *
- * The policy model's `document` attribute validates a write through here, and
- * the grant resolver hydrates every attached policy through `hydrate()`, so a
- * document is read the same way going in and coming out.
+ * The policy model's `document` attribute decodes and names a write through
+ * here, and the grant resolver hydrates every attached policy through
+ * `hydrate()`, so a document is read the same way going in and coming out. The
+ * size limits are checked both ways too.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -28,6 +31,11 @@ final class PolicyDocument
      * Hydrate the stored policy into an evaluation policy, under the stored
      * policy's name whatever the document says.
      *
+     * A stored document over the configured limits is refused, as an invalid
+     * one is, so it denies every check for its holder rather than being skipped
+     * or partly evaluated: lowering a limit makes the documents over it deny
+     * until they are fixed.
+     *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @return \SineMacula\Laravel\Authorization\Evaluation\Policy
      *
@@ -36,7 +44,13 @@ final class PolicyDocument
     public static function hydrate(Policy $policy): EvaluationPolicy
     {
         $name     = self::nameOf($policy->getAttribute('name'));
-        $document = self::named(self::decode($policy->getAttribute('document'), $name), $policy->getAttribute('name'), true);
+        $stored   = self::decode($policy->getAttribute('document'), $name);
+        $over     = PolicyLimits::fromConfig()->violations($stored);
+        $document = self::named($stored, $policy->getAttribute('name'), true);
+
+        if ($over !== []) {
+            throw new InvalidPolicyDocumentException(policyName: $name, reason: PolicyValidator::joined($over));
+        }
 
         try {
             $key = $policy->getKey();

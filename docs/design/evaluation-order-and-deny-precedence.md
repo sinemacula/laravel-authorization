@@ -15,13 +15,29 @@ throws when it does not. It returns a `Decision`:
 - `effect` -- `DecisionEffect::ALLOW` or `DecisionEffect::DENY`; `isAllowed()` reads it.
 - `reason` -- why it denies, a `DecisionReason` (AUTHZ-7.10); null when it allows.
 - `stage` -- the `DecisionStage` that decided it.
-- `statements` -- the statements that decided it, each a `StatementReference` (the policy's name, its stored key and
-  the statement's position, shown as `name[key]#position`); none for a permission held or a denial no statement made.
+- `statements` -- the statements that decided it, each a `StatementReference` (the policy's name, its stored key, the
+  statement's position and its `sid` when it has one, shown as `name[key]#position sid="…"`); none for a permission held
+  or a denial no statement made. The `sid` only names the statement: it never changes the decision or the order.
 - `trace` -- every step taken, in order, each a `TraceEntry`: its stage, its `TraceOutcome`, the statement it
   assessed (none for the permission step), and the condition keys it tested with whether each held.
 
 The trace never carries a context or attribute value, only key names and results (AUTHZ-8.8), so a decision is safe to
 log, store and put on an event.
+
+## Statements
+
+A statement names its actions with `actions`, or with `not_actions` (every action none of its patterns matches), and its
+resources with `resources`, with `not_resources` (every resource none of its patterns matches), or with neither (every
+resource, and a check that names none). Its `conditions` map each operator to the context keys it tests, and every test
+must hold: `{"ip_not_in": {"request.ip": ["10.0.0.0/8"]}, "eq": {"tenant": "${principal.tenant}"}}`. A key the context
+lacks makes a test undecidable, except under the `_if_exists` suffix, which passes it, and for `null`, which decides it.
+The shape, the operators and the operands are in
+[Wildcard and Condition Semantics](wildcard-and-condition-semantics.md).
+
+`not_resources` counts as resource scoping: a statement with it never covers a check that names no resource, so
+`{"effect": "deny", "actions": ["posts:delete"], "not_resources": ["post:1"]}` denies deleting every post but `post:1`
+and leaves a resource-less `posts:delete` check alone. Only a statement without either resource list, or whose
+`resources` include `*`, covers a resource-less check.
 
 ## Invariants
 
@@ -37,8 +53,8 @@ log, store and put on an event.
       (AUTHZ-4.4, AUTHZ-5.5, N9).
    4. *Deny*: every deny statement of every applicable policy is assessed. One that matches, or whose test cannot be
       decided, denies as `explicit_deny`. Failing that, a deny statement that cannot be evaluated denies as
-      `invalid_policy`. A stored policy that cannot be read denies as `invalid_policy` before any statement is
-      assessed.
+      `invalid_policy`. A stored policy that cannot be read, or whose document is over a configured limit, denies as
+      `invalid_policy` before any statement is assessed.
    5. *Allow*: only when no deny decided, every allow statement is assessed. One that cannot be evaluated denies as
       `invalid_policy`; failing that, one that matches allows. Failing that, a permission the subject holds that the
       action names (directly or through a role) allows.
@@ -94,17 +110,24 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 
 - **No subject**: `subject_unresolved` at the subject stage, without consulting any policy. This covers anonymous
   requests and a subject resolver that resolves no subject.
-- **Malformed policy document**: writes are refused -- the `Policy` model validates the document on assignment, and
-  `Statement::fromArray()` refuses unknown keys, an empty resource list, an empty operator map, a non-string operator
-  key, an unknown operator, a malformed literal operand and a malformed `${…}` reference. A row that still cannot be
+- **Malformed policy document**: writes are refused -- the `Policy` model validates the document on assignment with
+  `PolicyValidator`, which refuses whatever `Policy::fromArray()` and `Statement::fromArray()` refuse (unknown keys, a
+  malformed or repeated `sid`, both or neither of `actions` and `not_actions`, both `resources` and `not_resources`, an
+  empty pattern list, conditions that do not map operators to key tests, an unknown operator, a malformed literal
+  operand and a malformed `${…}` reference), a document over the configured limits, a condition key outside the key
+  syntax, and an `actions` or `not_actions` pattern that matches no declared permission. A row that still cannot be
   hydrated on read is never skipped: `HasPolicies::getPolicies()` logs a warning on the package's log channel and
   rethrows, and the decision is `invalid_policy`. A custom `PolicyResolver` must do the same: throw
   `InvalidPolicyDocumentException` rather than leave a policy out.
-- **Invalid statement at decision time**: a directly constructed statement with an unknown operator, a malformed
-  literal operand or a malformed `${…}` reference in a condition is `invalid` as soon as it is assessed, whatever the
-  context holds. An interpolated operand that resolves to a value of the wrong type is `undecidable`, not invalid. A
-  statement whose action or resource does not cover the check is `not_applicable` before its conditions are looked
-  at, so it never makes the check invalid.
+- **Limits on read**: `PolicyDocument::hydrate()` checks a stored document against `authorization.policies.limits`
+  before it is evaluated, and one over a limit throws `InvalidPolicyDocumentException`, so it denies as
+  `invalid_policy`: it is never skipped and never partly evaluated. Lowering a limit therefore makes every stored
+  document over it deny until it is fixed; `authorization:policy:validate --database` lists them.
+- **Invalid statement at decision time**: a directly constructed statement with an unknown operator, conditions that do
+  not map operators to key tests, a malformed literal operand or a malformed `${…}` reference in a condition is
+  `invalid` as soon as it is assessed, whatever the context holds. An interpolated operand that resolves to a value of
+  the wrong type is `undecidable`, not invalid. A statement whose action or resource does not cover the check is
+  `not_applicable` before its conditions are looked at, so it never makes the check invalid.
 - **Resource references**: every check names its resource the same way (`ResourceReferences::of()`): a model as
   `type:id` with the tenant the bound `ResourceTenantResolver` gives it (none by default, N10), a `(type, id)` pair the
   same way, its type a model class's morph class and its tenant the resolver's `tenantOfRecord()` (N17), a model class
@@ -113,10 +136,10 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   `resource_unresolved`. A type alone is covered only by a pattern that covers every record of the type (`*`,
   `post:*`), never by one that needs an id character (`post:?`). Through the Gate, the arguments Laravel spreads from
   `['post', 42]` name the pair, and a route parameter no binding resolved is an opaque identifier.
-- **Resource-less check**: a check without a resource matches only statements whose resources include `*`. An argument
-  that cannot be identified as a resource denies as `resource_unresolved` at the resource stage, without reading any
-  policy or permission, rather than becoming a resource-less check; the denial is recorded and reported like any
-  other decision.
+- **Resource-less check**: a check without a resource matches only statements with neither `resources` nor
+  `not_resources`, or whose `resources` include `*`. An argument that cannot be identified as a resource denies as
+  `resource_unresolved` at the resource stage, without reading any policy or permission, rather than becoming a
+  resource-less check; the denial is recorded and reported like any other decision.
 - **Empty statements list**: a policy with zero statements contributes nothing to the trace and does not affect the
   decision.
 
@@ -128,6 +151,7 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 - `PolicyEvaluator::evaluate()` -- the deny, allow and implicit stages, each assessing its statements in a fixed
   order.
 - `Statement::assess()` -- the assessment, with each condition key's result.
+- `PolicyValidator` -- the write-time checks; `PolicyDocument::hydrate()` and `PolicyLimits` -- the limits on read.
 - `Decision`, `TraceEntry`, `StatementReference`, and the `DecisionEffect`, `DecisionReason`, `DecisionStage` and
   `TraceOutcome` enums.
 
@@ -138,7 +162,8 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 - `DecisionTest` -- the decision's construction, the permission step and the explanation.
 - `AuthorizationManagerTest` (Unit and Feature) -- the subject stage, the RBAC allow, deny over RBAC and over a role,
   and `invalid_policy` over a held permission.
-- `FailClosedPolicyHydrationTest` -- an unreadable row is never skipped.
+- `FailClosedPolicyHydrationTest` -- an unreadable row, or one over a limit, is never skipped.
+- `PolicyValidatorTest` and `PolicyDocumentTest` -- the write-time checks and the limits on read.
 - `GateRegistrarTest` and `AuthorizeActionTest` -- an argument that cannot be identified denies as
   `resource_unresolved`.
 - `ResourceReferencesTest` and `ResourceScopeTest` -- resource references and the tenant stage.

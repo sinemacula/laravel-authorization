@@ -172,7 +172,7 @@ final class PolicyEvaluator
 
             foreach ($policy->statements as $index => $statement) {
                 $isDeny    = $statement->effect === PolicyEffect::DENY;
-                $reference = new StatementReference($policy->name, $index, $policy->id);
+                $reference = new StatementReference($policy->name, $index, $policy->id, $statement->sid);
 
                 $stage = $isDeny ? DecisionStage::DENY : DecisionStage::ALLOW;
 

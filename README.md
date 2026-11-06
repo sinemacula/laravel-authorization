@@ -49,9 +49,12 @@ denied.
   `sso.connection.trust` are all valid; anything else is refused when the name is saved.
 - **Wildcard permissions** (`posts:*`, `posts.*`, `*:create`, and `*` for everything; `*:*` matches only names with a
   `:`) and **role hierarchy**: a role inherits its parent's permissions, with cycle checks on write.
-- **Policy documents** with `effect`, `actions`, `resources` and `conditions`, eighteen condition operators (equality,
-  set membership, prefix, suffix and glob, IPv4 and IPv6 CIDR, numeric and time comparisons, booleans and nulls) and
-  `${…}` interpolation from the check's context. Malformed documents are refused when they are saved.
+- **Policy documents** of statements with an optional `sid`, an `effect`, `actions` or `not_actions`, `resources` or
+  `not_resources`, and operator-first `conditions`: twenty operators (equality, set membership, prefix, suffix and glob,
+  numeric and time comparisons, booleans, null tests, IPv4 and IPv6 ranges, and multi-valued keys), each with an
+  `_if_exists` form, and `${…}` interpolation from the check's context. A document is refused when it is saved if it is
+  malformed, over the configured limits, or names an action no declared permission matches, and
+  `authorization:policy:validate` checks files or stored policies against the same rules.
 - **Gate auto-wiring**: every case of a configured permission enum is registered as a Gate ability, with a choice of
   what happens when an ability of the same name already exists.
 - **A permission catalogue in code**: enums and providers declare each permission with a description, a category and
@@ -127,6 +130,9 @@ List the enums whose cases should become Gate abilities and permissions, and any
 ],
 ```
 
+The same declarations are the actions a policy may name: a policy is refused when it is saved if one of its `actions` or
+`not_actions` patterns matches no declared permission, and with nothing declared no policy can be saved.
+
 Booting the package never queries or writes the database, so `config:cache`, `route:cache` and `migrate` run before
 the tables exist. The permissions the enums and providers declare reach the database when you sync them, which belongs
 in your deployment after the migrations:
@@ -144,7 +150,8 @@ AUTHORIZATION_LOG_CHANNEL=stderr
 ```
 
 `config/authorization.php` documents every other option: models, tables, the default guard, permission providers, the
-Gate conflict mode, the policy store, the subject resolver, the cache, and the role hierarchy and rank.
+Gate conflict mode, the policy store, the policy limits, the subject resolver, the cache, and the role hierarchy and
+rank.
 
 ## Usage
 
@@ -380,10 +387,10 @@ $user->attachPolicy(Policy::create([
     'document' => [
         'statements' => [
             [
+                'sid'        => 'deny-off-network',
                 'effect'     => 'deny',
                 'actions'    => ['posts:delete'],
-                'resources'  => ['*'],
-                'conditions' => ['ip' => ['not_in' => ['10.0.0.1', '10.0.0.2']]],
+                'conditions' => ['ip_not_in' => ['ip' => ['10.0.0.0/8', '192.168.0.0/16']]],
             ],
         ],
     ],
@@ -408,7 +415,7 @@ $decision = Authorization::for($user)->check('posts:delete', 'posts/42', ['ip' =
 
 $decision->isAllowed();        // false
 $decision->reason;             // DecisionReason::EXPLICIT_DENY
-$decision->statements;         // [StatementReference('no-deletes-off-network', 0, <its key>)]
+$decision->statements;         // [StatementReference('no-deletes-off-network', 0, <its key>, 'deny-off-network')]
 ```
 
 A check's resource can be a model (`type:id`), a `[type, id]` pair, a model class for a check on the type alone
@@ -425,9 +432,10 @@ is read, unless a platform-wide grant of the permission covers it. The default k
 string is never given a tenant, so a tenant-owned resource that is not a model should implement `AuthorizableResource`
 and carry its tenant.
 
-Policies fail closed. A deny whose condition cannot be decided, such as a check made without `ip` in its context,
-still applies, while an allow in the same position does not. A check without a resource matches only statements whose
-resources include `*`. A stored policy that cannot be read denies every check for its holder, with the reason
+Policies fail closed. A deny whose condition cannot be decided, such as a check made without `ip` in its context or with
+an `ip` that is not an address, still applies, while an allow in the same position does not. A check without a resource
+matches only statements with neither `resources` nor `not_resources`, or whose `resources` include `*`. A stored policy
+that cannot be read, or that is over a configured limit, denies every check for its holder, with the reason
 `invalid_policy`, until it is fixed.
 
 `Authorization::authorize()` throws `SineMacula\Laravel\Authorization\Exceptions\AuthorizationException` when the check
@@ -440,6 +448,75 @@ locale, publish the language files:
 ```bash
 php artisan vendor:publish --tag=authorization-lang
 ```
+
+### Writing policies
+
+A policy document is a `version` (1, the default) and a list of `statements`. Each statement takes:
+
+| Key             | Holds                                                                                     |
+|-----------------|-------------------------------------------------------------------------------------------|
+| `sid`           | Optional: 1 to 64 letters, digits, `_`, `-`, `:` or `.`, unique within the policy         |
+| `effect`        | `allow` or `deny`                                                                         |
+| `actions`       | The action patterns the statement names                                                   |
+| `not_actions`   | Instead of `actions`: the statement names every action none of these patterns matches     |
+| `resources`     | Optional: the resource patterns the statement names                                       |
+| `not_resources` | Instead of `resources`: the statement names every resource none of these patterns matches |
+| `conditions`    | Optional: a map of operator to context key to operand, every test of which must hold      |
+
+A statement takes exactly one of `actions` and `not_actions`, and at most one of `resources` and `not_resources`; each
+is a non-empty list of non-empty strings. Without either resource list a statement names every resource and a check that
+names none. `not_resources` still scopes the statement to resources, so it never covers a check without one. The `sid`
+names the statement in the decision and the trace, and never changes how it is evaluated.
+
+Conditions name the operator first, then each context key it tests:
+
+```php
+'conditions' => [
+    'ip_in'        => ['ip' => ['10.0.0.0/8', '2001:db8::/32']],
+    'eq'           => ['tenant' => '${principal.tenant_id}'],
+    'any_value_in' => ['groups' => ['editors', 'admins']],
+    'null'         => ['suspended_at' => true],
+],
+```
+
+| Operator                        | Operand                               | Holds when the context value                                   |
+|---------------------------------|---------------------------------------|----------------------------------------------------------------|
+| `eq`, `neq`                     | one scalar                            | is, or is not, strictly equal to it                            |
+| `in`, `not_in`                  | a non-empty list of scalars           | is, or is not, in the list (strictly)                          |
+| `starts_with`, `ends_with`      | a non-empty string                    | is a string that starts, or ends, with it                      |
+| `like`                          | a non-empty glob                      | is a string that matches it                                    |
+| `gt`, `gte`, `lt`, `lte`        | a number or numeric string            | is a number above, at least, below or at most it               |
+| `before`, `after`               | a time                                | is a time before, or after, it                                 |
+| `between`                       | a pair of times                       | is a time within them, inclusive                               |
+| `bool`                          | `true`, `false`, `1`, `0`, `'true'` … | has the same boolean meaning                                   |
+| `null`                          | `true` or `false`                     | `true`: is missing or null; `false`: is present and not null   |
+| `ip_in`, `ip_not_in`            | an address or range, or a list        | is an IPv4 or IPv6 address within any, or within none, of them |
+| `any_value_in`, `all_values_in` | a non-empty list of scalars           | is a list with some element, or only elements, in it           |
+
+- A key the context lacks makes a test undecidable: an allow does not apply and a deny does. `null` decides a missing
+  key instead, and any other operator takes the `_if_exists` suffix (`ip_in_if_exists`, `eq_if_exists`), under which a
+  missing key passes; everything else is decided as without it.
+- A context value that is not an IP address is undecidable for `ip_in` and `ip_not_in`, so `ip_not_in` never treats
+  an unreadable address as outside every range.
+- `any_value_in` and `all_values_in` need the context value to be a list, such as a token's scopes. An empty list never
+  passes `all_values_in`.
+- `eq` and `neq` never take a list: use `in` or `not_in`. String operands may use `${…}` interpolation; list operands
+  are literal.
+
+A policy is checked whenever it is saved, through the model or `PolicyService`, and refused with every reason at once: a
+malformed document, a condition key that is not letters, digits and `_` with `.`-separated segments, an `actions` or
+`not_actions` pattern that matches no declared permission, or a document over the limits in `policies.limits`
+(`AUTHORIZATION_POLICY_DOCUMENT_BYTES`, `_STATEMENTS`, `_CONDITIONS` and `_PATTERN_LENGTH`: 64 KiB of JSON, 100
+statements, 50 key tests a statement and 512 characters a pattern or string operand). The limits are checked again when
+a stored policy is read, so lowering one makes the stored policies over it deny as `invalid_policy` until they are
+fixed. To find them, or to check policy files before you deploy them:
+
+```bash
+php artisan authorization:policy:validate --database
+php artisan authorization:policy:validate policies/
+```
+
+The [condition semantics note](docs/design/wildcard-and-condition-semantics.md) has every operand and edge case.
 
 ### Listening to events
 
@@ -494,8 +571,8 @@ Route::get('/api/admin', ApiAdmin::class)->middleware('role:admin,api');
 
 - `permission:` decides each listed action on the same full decision as `Authorization::can()`, `@can` and the Gate:
   policies, explicit denies, the permissions held and the subject's tenant. An explicit deny wins over a held
-  permission, and a policy allow admits without one. The check has no resource, so only statements whose resources
-  include `*` apply to it.
+  permission, and a policy allow admits without one. The check has no resource, so only statements with neither
+  `resources` nor `not_resources`, or whose `resources` include `*`, apply to it.
 - `authorize:{action},{route parameter}` decides the action on the parameter's bound model, referenced as every
   check references it, or on the parameter's value when nothing binds it. A value that cannot be identified, such as
   an unsaved model, or a parameter the route does not carry, denies as `resource_unresolved`. Without a parameter, the
@@ -562,6 +639,7 @@ php artisan authorization:revoke user:1 editor
 php artisan authorization:list-roles
 php artisan authorization:list-permissions
 php artisan authorization:why-can user:1 posts:delete posts/42
+php artisan authorization:policy:validate --database
 php artisan authorization:prune --pretend
 ```
 

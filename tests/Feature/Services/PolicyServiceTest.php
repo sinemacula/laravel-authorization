@@ -8,6 +8,7 @@ use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Events\Policy\Created as PolicyCreated;
 use SineMacula\Laravel\Authorization\Events\Policy\Deleted as PolicyDeleted;
@@ -17,12 +18,14 @@ use SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
+use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\DocumentDigest;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\CustomPolicy;
+use Tests\Feature\Stubs\Enums\CataloguePermission;
 use Tests\TestCase;
 
 /**
@@ -89,6 +92,40 @@ final class PolicyServiceTest extends TestCase
         } catch (InvalidPolicyDocumentException) {
             self::assertSame(0, Policy::query()->count());
         }
+    }
+
+    /**
+     * A document over a limit, or naming an action the code does not declare,
+     * is refused through the policy validator and nothing is written.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRefusesADocumentThePolicyValidatorRefuses(): void
+    {
+        $this->config()->set('authorization.policies.limits.statements', 1);
+
+        try {
+            self::service()->create('wide', ['statements' => [self::READ['statements'][0], self::READ['statements'][0]]]);
+            self::fail('The document was not refused.');
+        } catch (InvalidPolicyDocumentException $exception) {
+            self::assertSame('Invalid policy document \'wide\': Policy document has 2 statements, more than the 1 allowed.', $exception->getMessage());
+        }
+
+        $this->config()->set('authorization.permission_enums', [CataloguePermission::class]);
+        $this->app?->instance(ActionCatalogue::class, $this->app->make(DeclaredActionCatalogue::class));
+
+        $policy = self::service()->create('creators', ['statements' => [['effect' => 'allow', 'actions' => ['posts:create']]]]);
+
+        try {
+            self::service()->rewrite($policy, self::READ);
+            self::fail('The document was not refused.');
+        } catch (InvalidPolicyDocumentException $exception) {
+            self::assertSame('Invalid policy document \'creators\': Policy statement #0 actions pattern \'posts:read\' matches no declared permission.', $exception->getMessage());
+        }
+
+        self::assertSame(['posts:create'], PolicyDocument::hydrate(Policy::query()->sole())->statements[0]->actions);
     }
 
     /**

@@ -146,7 +146,9 @@ A stale row is drift only under `--prune`, since without it the sync would leave
 - Attribute: `src/Attributes/Permission.php`
 - Definition: `src/Support/PermissionDefinition.php`
 - Reader: `src/Support/PermissionMetadataReader.php`
-- Catalogue: `src/Console/Support/PermissionCatalogue.php`
+- Catalogue: `src/Support/PermissionCatalogue.php`
+- Policy actions: `src/Support/DeclaredActionCatalogue.php`, the declared names a policy's `actions` and `not_actions`
+  patterns must match when it is written
 - Diff: `src/Console/Support/PermissionDiffBuilder.php`, `src/Console/Support/PermissionDiff.php`
 - Command: `src/Console/SyncPermissionsCommand.php`
 - Exception: `src/Exceptions/InvalidPermissionCatalogueException.php`

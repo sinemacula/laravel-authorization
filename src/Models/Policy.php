@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Models;
 
+use Illuminate\Container\Container;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Casts\Attribute;
 use Illuminate\Database\Eloquent\Concerns\HasUuids;
@@ -12,7 +13,7 @@ use Illuminate\Database\Eloquent\Relations\MorphTo;
 use SineMacula\Laravel\Authorization\Concerns\HasSystemProtection;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
-use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
+use SineMacula\Laravel\Authorization\Evaluation\PolicyValidator;
 use SineMacula\Laravel\Authorization\Exceptions\SystemPolicyProtectedException;
 use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
@@ -20,16 +21,15 @@ use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 /**
  * Eloquent model for policy rows.
  *
- * The `document` column persists the full statement body as JSON. Reads
- * round-trip the column through the evaluation policy's `fromArray()` factory;
- * a failing round-trip raises an invalid policy document exception rather than
- * leaving the consumer with a partial object. The `is_system` flag marks
- * platform-shipped policies as protected: deleting, editing or clearing the
- * flag of a persisted `is_system = true` row raises
- * `SystemPolicyProtectedException` unless `forceSystem()` is invoked to unlock
- * the next operation on the instance. A policy is owned by the platform (both
- * tenant columns null) or by one tenant (both set), and its name is unique
- * within its owner.
+ * The `document` column persists the full statement body as JSON. A write is
+ * refused, with an invalid policy document exception, unless the policy
+ * validator accepts the document: a valid policy, within the limits, naming
+ * only actions the code declares. The `is_system` flag marks platform-shipped
+ * policies as protected: deleting, editing or clearing the flag of a persisted
+ * `is_system = true` row raises `SystemPolicyProtectedException` unless
+ * `forceSystem()` is invoked to unlock the next operation on the instance. A
+ * policy is owned by the platform (both tenant columns null) or by one tenant
+ * (both set), and its name is unique within its owner.
  *
  * @property string $id
  * @property string $name
@@ -128,8 +128,9 @@ class Policy extends Model
     }
 
     /**
-     * Interact with the document attribute, validating writes round-trip
-     * through the evaluation policy factory.
+     * Interact with the document attribute, refusing a write the policy
+     * validator does not accept: an invalid policy, one over the limits, or one
+     * naming actions the code does not declare.
      *
      * @return \Illuminate\Database\Eloquent\Casts\Attribute<array<string, mixed>, mixed>
      *
@@ -143,20 +144,14 @@ class Policy extends Model
                 $name     = PolicyDocument::nameOf($this->getAttribute('name'));
                 $document = PolicyDocument::named(PolicyDocument::decode($value, $name), $this->getAttribute('name'));
 
-                try {
-                    EvaluationPolicy::fromArray($document);
-                } catch (\InvalidArgumentException $exception) {
-                    throw new InvalidPolicyDocumentException(policyName: $name, reason: $exception->getMessage(), previous: $exception);
-                }
+                Container::getInstance()->make(PolicyValidator::class)->assertValid($document, $name);
 
                 $encoded = \json_encode($document);
 
                 // @codeCoverageIgnoreStart
-                // Defensive: the preceding `EvaluationPolicy::fromArray`
-                // round-trip would itself have failed on a non-JSON-encodable
-                // payload (it calls `json_encode` during trace normalisation),
-                // so reaching this branch requires a resource type or a
-                // circular reference smuggled past the factory validator.
+                // Defensive: a document the validator accepts holds only arrays
+                // and scalars, which always encode unless a string is not valid
+                // UTF-8.
                 if ($encoded === false) {
                     throw new InvalidPolicyDocumentException(policyName: $name, reason: 'policy document is not JSON-encodable.');
                 }

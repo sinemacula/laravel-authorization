@@ -14,16 +14,17 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
  *
  * Conditions are the heaviest per-statement work the evaluator does: every
  * matching statement walks its condition map and dispatches each operator
- * through the `matchesOperator()` match arm. The bench carves the 18-operator
+ * through `ConditionEvaluator::evaluate()`. The bench carves the 20-operator
  * surface into four natural classes so drift in any single arm shows up under
  * its own subject:
  *
- * - string ops     — `eq`, `neq`, `starts_with`, `ends_with`, `string_like`;
- * - numeric ops    — `gt`, `gte`, `lt`, `lte`;
- * - temporal ops   — `before`, `after`, `between`;
- * - set ops        — `in`, `not_in`, `bool`, `null`, `not_null`, `cidr`.
+ * - string ops — `eq`, `neq`, `starts_with`, `ends_with`, `like`;
+ * - numeric ops — `gt`, `gte`, `lt`, `lte`;
+ * - temporal ops — `before`, `after`, `between`;
+ * - set ops — `in`, `not_in`, `bool`, `null`, `ip_in`, `ip_not_in`,
+ *   `any_value_in`, `all_values_in`.
  *
- * A fifth subject runs the full 18-operator chain so the matching budget test
+ * A fifth subject runs the full 20-operator chain so the matching budget test
  * has a direct comparator.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -45,10 +46,10 @@ final class ConditionEvaluatorBench
     /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement covering temporal operators. */
     private Statement $temporalStatement; // @phpstan-ignore property.uninitialized
 
-    /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement covering set / boolean / null / CIDR operators. */
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement covering set / boolean / null / IP range operators. */
     private Statement $setStatement; // @phpstan-ignore property.uninitialized
 
-    /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement running the full 18-operator chain in one pass. */
+    /** @var \SineMacula\Laravel\Authorization\Evaluation\Statement Statement running the full 20-operator chain in one pass. */
     private Statement $fullStatement; // @phpstan-ignore property.uninitialized
 
     /** @var array<string, mixed> Matching context reused across revolutions. */
@@ -73,7 +74,7 @@ final class ConditionEvaluatorBench
 
     /**
      * Benchmark: string operators (`eq`, `neq`, `starts_with`, `ends_with`,
-     * `string_like`).
+     * `like`).
      *
      * @return void
      */
@@ -113,7 +114,7 @@ final class ConditionEvaluatorBench
     }
 
     /**
-     * Benchmark: set, boolean, null, and CIDR operators.
+     * Benchmark: set, boolean, null, IP range and multi-valued operators.
      *
      * @return void
      */
@@ -126,7 +127,7 @@ final class ConditionEvaluatorBench
     }
 
     /**
-     * Benchmark: the full 18-operator chain — matches the budget reference
+     * Benchmark: the full 20-operator chain — matches the budget reference
      * shape so both surfaces measure identical work.
      *
      * @return void
@@ -150,11 +151,11 @@ final class ConditionEvaluatorBench
             effect: PolicyEffect::ALLOW,
             actions: ['*'],
             conditions: [
-                'tenant' => ['eq' => 'tenant-99'],
-                'role'   => ['neq' => 'guest'],
-                'path'   => ['starts_with' => '/admin'],
-                'file'   => ['ends_with' => '.json'],
-                'agent'  => ['string_like' => 'Mozilla/*'],
+                'eq'          => ['tenant' => 'tenant-99'],
+                'neq'         => ['role' => 'guest'],
+                'starts_with' => ['path' => '/admin'],
+                'ends_with'   => ['file' => '.json'],
+                'like'        => ['agent' => 'Mozilla/*'],
             ],
         );
     }
@@ -170,10 +171,10 @@ final class ConditionEvaluatorBench
             effect: PolicyEffect::ALLOW,
             actions: ['*'],
             conditions: [
-                'age'      => ['gt' => 17],
-                'quota'    => ['gte' => 0],
-                'strikes'  => ['lt' => 3],
-                'priority' => ['lte' => 10],
+                'gt'  => ['age' => 17],
+                'gte' => ['quota' => 0],
+                'lt'  => ['strikes' => 3],
+                'lte' => ['priority' => 10],
             ],
         );
     }
@@ -189,15 +190,16 @@ final class ConditionEvaluatorBench
             effect: PolicyEffect::ALLOW,
             actions: ['*'],
             conditions: [
-                'scheduled_at' => ['before' => '2099-01-01T00:00:00Z'],
-                'created_at'   => ['after' => '2000-01-01T00:00:00Z'],
-                'window'       => ['between' => ['2000-01-01T00:00:00Z', '2099-01-01T00:00:00Z']],
+                'before'  => ['scheduled_at' => '2099-01-01T00:00:00Z'],
+                'after'   => ['created_at' => '2000-01-01T00:00:00Z'],
+                'between' => ['window' => ['2000-01-01T00:00:00Z', '2099-01-01T00:00:00Z']],
             ],
         );
     }
 
     /**
-     * Build the statement covering set, boolean, null, and CIDR operators.
+     * Build the statement covering set, boolean, null, IP range and
+     * multi-valued operators.
      *
      * @return \SineMacula\Laravel\Authorization\Evaluation\Statement
      */
@@ -207,18 +209,20 @@ final class ConditionEvaluatorBench
             effect: PolicyEffect::ALLOW,
             actions: ['*'],
             conditions: [
-                'country'    => ['in' => ['US', 'GB', 'CA']],
-                'blocklist'  => ['not_in' => ['blocked', 'banned']],
-                'verified'   => ['bool' => true],
-                'deleted_at' => ['null' => true],
-                'email'      => ['not_null' => true],
-                'ip'         => ['cidr' => '10.0.0.0/8'],
+                'in'            => ['country' => ['US', 'GB', 'CA']],
+                'not_in'        => ['blocklist' => ['blocked', 'banned']],
+                'bool'          => ['verified' => true],
+                'null'          => ['deleted_at' => true, 'email' => false],
+                'ip_in'         => ['ip' => '10.0.0.0/8'],
+                'ip_not_in'     => ['ip' => ['192.168.0.0/16', '2001:db8::/32']],
+                'any_value_in'  => ['groups' => ['admins', 'editors']],
+                'all_values_in' => ['scopes' => ['posts:read', 'posts:write', 'posts:delete']],
             ],
         );
     }
 
     /**
-     * Build the statement running the full 18-operator chain.
+     * Build the statement running the full 20-operator chain.
      *
      * @return \SineMacula\Laravel\Authorization\Evaluation\Statement
      */

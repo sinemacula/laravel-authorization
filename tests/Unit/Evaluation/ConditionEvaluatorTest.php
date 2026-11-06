@@ -10,7 +10,9 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 use Psr\Log\AbstractLogger;
 use SineMacula\Laravel\Authorization\Evaluation\ConditionEvaluator;
+use SineMacula\Laravel\Authorization\Evaluation\ConditionOperands;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
+use SineMacula\Laravel\Authorization\Evaluation\IpRanges;
 
 /**
  * Unit tests for the condition operator evaluator.
@@ -27,8 +29,13 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome;
  * @SuppressWarnings("php:S1448")
  */
 #[CoversClass(ConditionEvaluator::class)]
+#[CoversClass(ConditionOperands::class)]
+#[CoversClass(IpRanges::class)]
 final class ConditionEvaluatorTest extends TestCase
 {
+    /** @var string Trace detail for an `ip_in` value that is not an address. */
+    private const string IP_IN_NEEDS_ADDRESS = 'operator \'ip_in\' needs an IP address';
+
     /**
      * Provide every operator case for evaluate().
      *
@@ -39,15 +46,17 @@ final class ConditionEvaluatorTest extends TestCase
         yield from self::equalityCases();
         yield from self::membershipCases();
         yield from self::nullCases();
-        yield from self::ipv4CidrCases();
-        yield from self::ipv6CidrCases();
-        yield from self::invalidCidrCases();
+        yield from self::ipv4RangeCases();
+        yield from self::ipv6RangeCases();
+        yield from self::ipRangeSetCases();
+        yield from self::invalidRangeCases();
         yield from self::stringCases();
-        yield from self::stringLikeCases();
+        yield from self::likeCases();
         yield from self::timeComparisonCases();
         yield from self::betweenCases();
         yield from self::numericComparisonCases();
         yield from self::boolCases();
+        yield from self::valueSetCases();
         yield from self::unknownOperatorCases();
     }
 
@@ -77,13 +86,14 @@ final class ConditionEvaluatorTest extends TestCase
      */
     public static function operandErrorProvider(): iterable
     {
-        yield from self::untypedOperandCases();
-        yield from self::membershipOperandCases();
-        yield from self::cidrOperandCases();
+        yield from self::scalarOperandCases();
+        yield from self::setOperandCases();
+        yield from self::ipOperandCases();
         yield from self::stringOperandCases();
         yield from self::timeOperandCases();
         yield from self::numericOperandCases();
         yield from self::boolOperandCases();
+        yield from self::nullOperandCases();
     }
 
     /**
@@ -102,7 +112,8 @@ final class ConditionEvaluatorTest extends TestCase
     }
 
     /**
-     * OPERATORS lists exactly the eighteen supported operators, in order.
+     * OPERATORS lists exactly the twenty supported operators, in order, and
+     * none of the names they replaced.
      *
      * @return void
      */
@@ -113,31 +124,78 @@ final class ConditionEvaluatorTest extends TestCase
             'neq',
             'in',
             'not_in',
-            'null',
-            'not_null',
-            'cidr',
             'starts_with',
             'ends_with',
-            'string_like',
-            'before',
-            'after',
-            'between',
+            'like',
             'gt',
             'gte',
             'lt',
             'lte',
+            'before',
+            'after',
+            'between',
             'bool',
+            'null',
+            'ip_in',
+            'ip_not_in',
+            'any_value_in',
+            'all_values_in',
         ], ConditionEvaluator::OPERATORS);
     }
 
     /**
-     * PATTERN_OPERATORS lists only string_like.
+     * PATTERN_OPERATORS lists only like, and IF_EXISTS is the suffix.
      *
      * @return void
      */
-    public function testPatternOperatorsListsStringLikeOnly(): void
+    public function testPatternOperatorsAndSuffix(): void
     {
-        self::assertSame(['string_like'], ConditionEvaluator::PATTERN_OPERATORS);
+        self::assertSame(['like'], ConditionEvaluator::PATTERN_OPERATORS);
+        self::assertSame('_if_exists', ConditionEvaluator::IF_EXISTS);
+    }
+
+    /**
+     * Provide operator names with the operator each tests with.
+     *
+     * @return \Generator<string, array{0: string, 1: string|null}>
+     */
+    public static function operatorNameProvider(): iterable
+    {
+        foreach (ConditionEvaluator::OPERATORS as $operator) {
+            yield $operator => [$operator, $operator];
+
+            if ($operator === 'null') {
+                continue;
+            }
+
+            yield "{$operator}_if_exists" => ["{$operator}_if_exists", $operator];
+        }
+
+        yield 'null_if_exists' => ['null_if_exists', null];
+        yield 'cidr' => ['cidr', null];
+        yield 'string_like' => ['string_like', null];
+        yield 'not_null' => ['not_null', null];
+        yield 'cidr_if_exists' => ['cidr_if_exists', null];
+        yield 'suffix alone' => ['_if_exists', null];
+        yield 'suffix twice' => ['eq_if_exists_if_exists', null];
+        yield 'upper case' => ['EQ', null];
+        yield 'upper-case suffix' => ['eq_IF_EXISTS', null];
+        yield 'empty' => ['', null];
+        yield 'key-first key' => ['tenant', null];
+    }
+
+    /**
+     * operatorOf() returns the operator a name tests with, stripping the
+     * `_if_exists` suffix, and null for an unknown name or `null_if_exists`.
+     *
+     * @param  string  $name
+     * @param  string|null  $expected
+     * @return void
+     */
+    #[DataProvider('operatorNameProvider')]
+    public function testOperatorOf(string $name, ?string $expected): void
+    {
+        self::assertSame($expected, ConditionEvaluator::operatorOf($name));
     }
 
     /**
@@ -151,6 +209,24 @@ final class ConditionEvaluatorTest extends TestCase
         foreach (ConditionEvaluator::OPERATORS as $operator) {
             self::assertNotSame("unknown operator '{$operator}'", ConditionEvaluator::operandError($operator, null));
             self::assertNotSame("unknown operator '{$operator}'", ConditionEvaluator::evaluate($operator, null, null)->detail);
+        }
+    }
+
+    /**
+     * The names the operators replaced are unknown, both as operands are
+     * checked and as they are evaluated.
+     *
+     * @return void
+     */
+    public function testReplacedOperatorNamesAreUnknown(): void
+    {
+        foreach (['cidr', 'string_like', 'not_null', 'null_if_exists'] as $name) {
+            self::assertSame("unknown operator '{$name}'", ConditionEvaluator::operandError($name, 'x'));
+
+            $result = ConditionEvaluator::evaluate($name, 'x', 'x');
+
+            self::assertSame(MatchOutcome::INVALID, $result->outcome);
+            self::assertSame("unknown operator '{$name}'", $result->detail);
         }
     }
 
@@ -234,7 +310,7 @@ final class ConditionEvaluatorTest extends TestCase
     }
 
     /**
-     * Cases for eq and neq, which compare strictly.
+     * Cases for eq and neq, which compare one scalar strictly.
      *
      * @return \Generator<string, array{0: string, 1: mixed, 2: mixed, 3: \SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome, 4: string}>
      */
@@ -243,9 +319,19 @@ final class ConditionEvaluatorTest extends TestCase
         yield 'eq identical' => ['eq', 'a', 'a', MatchOutcome::MATCHES, ''];
         yield 'eq different' => ['eq', 'a', 'b', MatchOutcome::DOES_NOT_MATCH, ''];
         yield 'eq strict int string' => ['eq', 1, '1', MatchOutcome::DOES_NOT_MATCH, ''];
+        yield 'eq bool' => ['eq', false, false, MatchOutcome::MATCHES, ''];
+        yield 'eq float' => ['eq', 1.5, 1.5, MatchOutcome::MATCHES, ''];
+        yield 'eq null value' => ['eq', 'a', null, MatchOutcome::DOES_NOT_MATCH, ''];
+        yield 'eq list value' => ['eq', 'a', ['a'], MatchOutcome::DOES_NOT_MATCH, ''];
         yield 'neq different' => ['neq', 'a', 'b', MatchOutcome::MATCHES, ''];
         yield 'neq identical' => ['neq', 'a', 'a', MatchOutcome::DOES_NOT_MATCH, ''];
         yield 'neq strict int string' => ['neq', 1, '1', MatchOutcome::MATCHES, ''];
+        yield 'neq null value' => ['neq', 'a', null, MatchOutcome::MATCHES, ''];
+
+        foreach (['eq', 'neq'] as $operator) {
+            yield "{$operator} list operand" => [$operator, ['a'], 'a', MatchOutcome::INVALID, "invalid operand for operator '{$operator}'"];
+            yield "{$operator} null operand" => [$operator, null, null, MatchOutcome::INVALID, "invalid operand for operator '{$operator}'"];
+        }
     }
 
     /**
@@ -258,93 +344,157 @@ final class ConditionEvaluatorTest extends TestCase
         yield 'in member' => ['in', ['a', 'b'], 'b', MatchOutcome::MATCHES, ''];
         yield 'in non-member' => ['in', ['a', 'b'], 'c', MatchOutcome::DOES_NOT_MATCH, ''];
         yield 'in strict' => ['in', ['1'], 1, MatchOutcome::DOES_NOT_MATCH, ''];
-        yield 'in without list' => ['in', 'a', 'a', MatchOutcome::INVALID, 'invalid operand for operator \'in\''];
+        yield 'in null value' => ['in', ['a'], null, MatchOutcome::DOES_NOT_MATCH, ''];
         yield 'not_in non-member' => ['not_in', ['a'], 'c', MatchOutcome::MATCHES, ''];
         yield 'not_in member' => ['not_in', ['a'], 'a', MatchOutcome::DOES_NOT_MATCH, ''];
         yield 'not_in strict' => ['not_in', ['1'], 1, MatchOutcome::MATCHES, ''];
-        yield 'not_in without list' => ['not_in', 'a', 'x', MatchOutcome::INVALID, 'invalid operand for operator \'not_in\''];
+
+        foreach (['in', 'not_in'] as $operator) {
+            $invalid = "invalid operand for operator '{$operator}'";
+
+            yield "{$operator} without list" => [$operator, 'a', 'a', MatchOutcome::INVALID, $invalid];
+            yield "{$operator} empty list" => [$operator, [], 'a', MatchOutcome::INVALID, $invalid];
+            yield "{$operator} null member" => [$operator, ['a', null], 'a', MatchOutcome::INVALID, $invalid];
+            yield "{$operator} nested member" => [$operator, [['a']], 'a', MatchOutcome::INVALID, $invalid];
+            yield "{$operator} map" => [$operator, ['x' => 'a'], 'a', MatchOutcome::INVALID, $invalid];
+        }
     }
 
     /**
-     * Cases for null and not_null.
+     * Cases for null, whose operand is strictly true or false, against a key
+     * the context carries.
      *
      * @return \Generator<string, array{0: string, 1: mixed, 2: mixed, 3: \SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome, 4: string}>
      */
     private static function nullCases(): iterable
     {
-        yield 'null on null' => ['null', true, null, MatchOutcome::MATCHES, ''];
-        yield 'null on empty string' => ['null', true, '', MatchOutcome::DOES_NOT_MATCH, ''];
-        yield 'not_null on value' => ['not_null', true, 'x', MatchOutcome::MATCHES, ''];
-        yield 'not_null on false' => ['not_null', true, false, MatchOutcome::MATCHES, ''];
-        yield 'not_null on null' => ['not_null', true, null, MatchOutcome::DOES_NOT_MATCH, ''];
+        yield 'null true on null' => ['null', true, null, MatchOutcome::MATCHES, ''];
+        yield 'null true on value' => ['null', true, 'x', MatchOutcome::DOES_NOT_MATCH, ''];
+        yield 'null true on empty string' => ['null', true, '', MatchOutcome::DOES_NOT_MATCH, ''];
+        yield 'null false on value' => ['null', false, 'x', MatchOutcome::MATCHES, ''];
+        yield 'null false on false' => ['null', false, false, MatchOutcome::MATCHES, ''];
+        yield 'null false on null' => ['null', false, null, MatchOutcome::DOES_NOT_MATCH, ''];
+
+        foreach (['string true' => 'true', 'int' => 1, 'null' => null, 'list' => [true]] as $label => $operand) {
+            yield "null {$label} operand" => ['null', $operand, null, MatchOutcome::INVALID, 'invalid operand for operator \'null\''];
+        }
     }
 
     /**
-     * Cases for cidr with IPv4 ranges, including the prefix boundaries.
+     * Cases for ip_in and ip_not_in with IPv4 ranges, including the prefix
+     * boundaries.
      *
      * @return \Generator<string, array{0: string, 1: mixed, 2: mixed, 3: \SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome, 4: string}>
      */
-    private static function ipv4CidrCases(): iterable
+    private static function ipv4RangeCases(): iterable
     {
-        yield 'ipv4 /8 inside' => ['cidr', '10.0.0.0/8', '10.1.2.3', MatchOutcome::MATCHES, ''];
-        yield 'ipv4 /8 outside' => ['cidr', '10.0.0.0/8', '11.0.0.0', MatchOutcome::DOES_NOT_MATCH, ''];
-        yield 'ipv4 /8 left-padded bits' => ['cidr', '10.0.0.0/8', '160.0.0.0', MatchOutcome::DOES_NOT_MATCH, ''];
-        yield 'ipv4 /7 sub-byte inside' => ['cidr', '10.0.0.0/7', '11.0.0.0', MatchOutcome::MATCHES, ''];
-        yield 'ipv4 /9 sub-byte inside' => ['cidr', '10.0.0.0/9', '10.127.255.255', MatchOutcome::MATCHES, ''];
-        yield 'ipv4 /9 sub-byte outside' => ['cidr', '10.0.0.0/9', '10.128.0.0', MatchOutcome::DOES_NOT_MATCH, ''];
-        yield 'ipv4 /24 last address' => ['cidr', '192.168.1.0/24', '192.168.1.255', MatchOutcome::MATCHES, ''];
-        yield 'ipv4 /24 next block' => ['cidr', '192.168.1.0/24', '192.168.2.0', MatchOutcome::DOES_NOT_MATCH, ''];
-        yield 'ipv4 /0 low' => ['cidr', '0.0.0.0/0', '8.8.8.8', MatchOutcome::MATCHES, ''];
-        yield 'ipv4 /0 high' => ['cidr', '0.0.0.0/0', '255.255.255.255', MatchOutcome::MATCHES, ''];
-        yield 'ipv4 /32 same' => ['cidr', '1.2.3.4/32', '1.2.3.4', MatchOutcome::MATCHES, ''];
-        yield 'ipv4 /32 neighbour' => ['cidr', '1.2.3.4/32', '1.2.3.5', MatchOutcome::DOES_NOT_MATCH, ''];
-        yield 'ipv4 exact without prefix' => ['cidr', '10.0.0.1', '10.0.0.1', MatchOutcome::MATCHES, ''];
-        yield 'ipv4 exact other address' => ['cidr', '10.0.0.1', '10.0.0.2', MatchOutcome::DOES_NOT_MATCH, ''];
-        yield 'ipv4 range, ipv6 address' => ['cidr', '0.0.0.0/0', '::1', MatchOutcome::DOES_NOT_MATCH, ''];
-        yield 'ipv4 value not an address' => ['cidr', '10.0.0.0/8', 'not-an-ip', MatchOutcome::UNDECIDABLE, 'operator \'cidr\' needs an IP address'];
-        yield 'ipv4 value empty' => ['cidr', '10.0.0.0/8', '', MatchOutcome::UNDECIDABLE, 'operator \'cidr\' needs an IP address'];
-        yield 'ipv4 value not a string' => ['cidr', '10.0.0.0/8', 167772161, MatchOutcome::UNDECIDABLE, 'operator \'cidr\' needs an IP address'];
+        $cases = [
+            '/8 inside'           => ['10.0.0.0/8', '10.1.2.3', true],
+            '/8 outside'          => ['10.0.0.0/8', '11.0.0.0', false],
+            '/8 left-padded bits' => ['10.0.0.0/8', '160.0.0.0', false],
+            '/7 sub-byte inside'  => ['10.0.0.0/7', '11.0.0.0', true],
+            '/9 sub-byte inside'  => ['10.0.0.0/9', '10.127.255.255', true],
+            '/9 sub-byte outside' => ['10.0.0.0/9', '10.128.0.0', false],
+            '/24 last address'    => ['192.168.1.0/24', '192.168.1.255', true],
+            '/24 next block'      => ['192.168.1.0/24', '192.168.2.0', false],
+            '/0 low'              => ['0.0.0.0/0', '8.8.8.8', true],
+            '/0 high'             => ['0.0.0.0/0', '255.255.255.255', true],
+            '/32 same'            => ['1.2.3.4/32', '1.2.3.4', true],
+            '/32 neighbour'       => ['1.2.3.4/32', '1.2.3.5', false],
+            'exact'               => ['10.0.0.1', '10.0.0.1', true],
+            'exact other address' => ['10.0.0.1', '10.0.0.2', false],
+            'ipv6 address'        => ['0.0.0.0/0', '::1', false],
+        ];
+
+        foreach ($cases as $label => [$range, $address, $isWithin]) {
+            yield "ip_in ipv4 {$label}" => ['ip_in', $range, $address, $isWithin ? MatchOutcome::MATCHES : MatchOutcome::DOES_NOT_MATCH, ''];
+            yield "ip_not_in ipv4 {$label}" => ['ip_not_in', $range, $address, $isWithin ? MatchOutcome::DOES_NOT_MATCH : MatchOutcome::MATCHES, ''];
+        }
+
+        foreach (['ip_in', 'ip_not_in'] as $operator) {
+            $undecidable = "operator '{$operator}' needs an IP address";
+
+            yield "{$operator} value not an address" => [$operator, '10.0.0.0/8', 'not-an-ip', MatchOutcome::UNDECIDABLE, $undecidable];
+            yield "{$operator} value empty" => [$operator, '10.0.0.0/8', '', MatchOutcome::UNDECIDABLE, $undecidable];
+            yield "{$operator} value a range" => [$operator, '10.0.0.0/8', '10.0.0.0/8', MatchOutcome::UNDECIDABLE, $undecidable];
+            yield "{$operator} value not a string" => [$operator, '10.0.0.0/8', 167772161, MatchOutcome::UNDECIDABLE, $undecidable];
+            yield "{$operator} value null" => [$operator, '10.0.0.0/8', null, MatchOutcome::UNDECIDABLE, $undecidable];
+        }
     }
 
     /**
-     * Cases for cidr with IPv6 ranges, including the prefix boundaries.
+     * Cases for ip_in and ip_not_in with IPv6 ranges, including the prefix
+     * boundaries.
      *
      * @return \Generator<string, array{0: string, 1: mixed, 2: mixed, 3: \SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome, 4: string}>
      */
-    private static function ipv6CidrCases(): iterable
+    private static function ipv6RangeCases(): iterable
     {
-        yield 'ipv6 /32 inside' => ['cidr', '2001:db8::/32', '2001:db8::1', MatchOutcome::MATCHES, ''];
-        yield 'ipv6 /32 outside' => ['cidr', '2001:db8::/32', '2001:db9::1', MatchOutcome::DOES_NOT_MATCH, ''];
-        yield 'ipv6 /33 sub-group inside' => ['cidr', '2001:db8::/33', '2001:db8:7fff::1', MatchOutcome::MATCHES, ''];
-        yield 'ipv6 /33 sub-group outside' => ['cidr', '2001:db8::/33', '2001:db8:8000::', MatchOutcome::DOES_NOT_MATCH, ''];
-        yield 'ipv6 /0' => ['cidr', '::/0', 'ffff::1', MatchOutcome::MATCHES, ''];
-        yield 'ipv6 /128 same' => ['cidr', '::1/128', '::1', MatchOutcome::MATCHES, ''];
-        yield 'ipv6 /128 neighbour' => ['cidr', '::1/128', '::2', MatchOutcome::DOES_NOT_MATCH, ''];
-        yield 'ipv6 exact without prefix' => ['cidr', '2001:db8::1', '2001:db8::1', MatchOutcome::MATCHES, ''];
-        yield 'ipv6 exact other address' => ['cidr', '2001:db8::1', '2001:db8::2', MatchOutcome::DOES_NOT_MATCH, ''];
-        yield 'ipv6 range, ipv4 address' => ['cidr', '::/0', '10.0.0.1', MatchOutcome::DOES_NOT_MATCH, ''];
-        yield 'ipv6 value not an address' => ['cidr', '::/0', 'zz::1', MatchOutcome::UNDECIDABLE, 'operator \'cidr\' needs an IP address'];
+        yield 'ipv6 /32 inside' => ['ip_in', '2001:db8::/32', '2001:db8::1', MatchOutcome::MATCHES, ''];
+        yield 'ipv6 /32 outside' => ['ip_in', '2001:db8::/32', '2001:db9::1', MatchOutcome::DOES_NOT_MATCH, ''];
+        yield 'ipv6 /33 sub-group inside' => ['ip_in', '2001:db8::/33', '2001:db8:7fff::1', MatchOutcome::MATCHES, ''];
+        yield 'ipv6 /33 sub-group outside' => ['ip_in', '2001:db8::/33', '2001:db8:8000::', MatchOutcome::DOES_NOT_MATCH, ''];
+        yield 'ipv6 /0' => ['ip_in', '::/0', 'ffff::1', MatchOutcome::MATCHES, ''];
+        yield 'ipv6 /128 same' => ['ip_in', '::1/128', '::1', MatchOutcome::MATCHES, ''];
+        yield 'ipv6 /128 neighbour' => ['ip_in', '::1/128', '::2', MatchOutcome::DOES_NOT_MATCH, ''];
+        yield 'ipv6 exact' => ['ip_in', '2001:db8::1', '2001:db8::1', MatchOutcome::MATCHES, ''];
+        yield 'ipv6 range, ipv4 address' => ['ip_in', '::/0', '10.0.0.1', MatchOutcome::DOES_NOT_MATCH, ''];
+        yield 'ipv6 mapped ipv4 address' => ['ip_in', '10.0.0.0/8', '::ffff:10.0.0.1', MatchOutcome::DOES_NOT_MATCH, ''];
+        yield 'ipv6 not_in outside' => ['ip_not_in', '2001:db8::/32', '2001:db9::1', MatchOutcome::MATCHES, ''];
+        yield 'ipv6 not_in inside' => ['ip_not_in', '2001:db8::/32', '2001:db8::1', MatchOutcome::DOES_NOT_MATCH, ''];
+        yield 'ipv6 value not an address' => ['ip_in', '::/0', 'zz::1', MatchOutcome::UNDECIDABLE, self::IP_IN_NEEDS_ADDRESS];
     }
 
     /**
-     * Cases for cidr with a malformed range.
+     * Cases for ip_in and ip_not_in with a list of ranges, read as one set.
      *
      * @return \Generator<string, array{0: string, 1: mixed, 2: mixed, 3: \SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome, 4: string}>
      */
-    private static function invalidCidrCases(): iterable
+    private static function ipRangeSetCases(): iterable
     {
-        $detail = 'invalid operand for operator \'cidr\'';
+        $ranges = ['10.0.0.0/8', '192.168.0.0/16', '2001:db8::/32'];
 
-        yield 'cidr ipv4 prefix 33' => ['cidr', '10.0.0.0/33', '10.0.0.1', MatchOutcome::INVALID, $detail];
-        yield 'cidr ipv6 prefix 129' => ['cidr', '::1/129', '::1', MatchOutcome::INVALID, $detail];
-        yield 'cidr empty prefix' => ['cidr', '10.0.0.0/', '10.0.0.1', MatchOutcome::INVALID, $detail];
-        yield 'cidr non-digit prefix' => ['cidr', '10.0.0.0/abc', '10.0.0.1', MatchOutcome::INVALID, $detail];
-        yield 'cidr negative prefix' => ['cidr', '10.0.0.0/-1', '10.0.0.1', MatchOutcome::INVALID, $detail];
-        yield 'cidr malformed network' => ['cidr', 'not-an-ip/8', '10.0.0.1', MatchOutcome::INVALID, $detail];
-        yield 'cidr malformed address' => ['cidr', 'nonsense', '10.0.0.1', MatchOutcome::INVALID, $detail];
-        yield 'cidr non-string operand' => ['cidr', 42, '10.0.0.1', MatchOutcome::INVALID, $detail];
-        yield 'cidr invalid before value' => ['cidr', '10.0.0.0/33', 'not-an-ip', MatchOutcome::INVALID, $detail];
-        yield 'cidr double prefix' => ['cidr', '10.0.0.0/8/8', '10.0.0.1', MatchOutcome::INVALID, $detail];
+        yield 'ip_in set first range' => ['ip_in', $ranges, '10.1.1.1', MatchOutcome::MATCHES, ''];
+        yield 'ip_in set later range' => ['ip_in', $ranges, '192.168.4.4', MatchOutcome::MATCHES, ''];
+        yield 'ip_in set ipv6 range' => ['ip_in', $ranges, '2001:db8::5', MatchOutcome::MATCHES, ''];
+        yield 'ip_in set no range' => ['ip_in', $ranges, '172.16.0.1', MatchOutcome::DOES_NOT_MATCH, ''];
+        yield 'ip_not_in set no range' => ['ip_not_in', $ranges, '172.16.0.1', MatchOutcome::MATCHES, ''];
+        yield 'ip_not_in set later range' => ['ip_not_in', $ranges, '192.168.4.4', MatchOutcome::DOES_NOT_MATCH, ''];
+        yield 'ip_in set of one' => ['ip_in', ['1.2.3.4'], '1.2.3.4', MatchOutcome::MATCHES, ''];
+        yield 'ip_not_in set invalid address' => ['ip_not_in', $ranges, 'not-an-ip', MatchOutcome::UNDECIDABLE, 'operator \'ip_not_in\' needs an IP address'];
+    }
+
+    /**
+     * Cases for ip_in and ip_not_in with a malformed range or range set.
+     *
+     * @return \Generator<string, array{0: string, 1: mixed, 2: mixed, 3: \SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome, 4: string}>
+     */
+    private static function invalidRangeCases(): iterable
+    {
+        $operands = [
+            'ipv4 prefix 33'       => '10.0.0.0/33',
+            'ipv6 prefix 129'      => '::1/129',
+            'empty prefix'         => '10.0.0.0/',
+            'non-digit prefix'     => '10.0.0.0/abc',
+            'negative prefix'      => '10.0.0.0/-1',
+            'malformed network'    => 'not-an-ip/8',
+            'malformed address'    => 'nonsense',
+            'non-string operand'   => 42,
+            'double prefix'        => '10.0.0.0/8/8',
+            'empty list'           => [],
+            'list with bad range'  => ['10.0.0.0/8', 'bad'],
+            'list with non-string' => ['10.0.0.0/8', 10],
+            'list with null'       => ['10.0.0.0/8', null],
+            'map'                  => ['a' => '10.0.0.0/8'],
+        ];
+
+        foreach (['ip_in', 'ip_not_in'] as $operator) {
+            foreach ($operands as $label => $operand) {
+                yield "{$operator} {$label}" => [$operator, $operand, '10.0.0.1', MatchOutcome::INVALID, "invalid operand for operator '{$operator}'"];
+            }
+
+            yield "{$operator} invalid before value" => [$operator, '10.0.0.0/33', 'not-an-ip', MatchOutcome::INVALID, "invalid operand for operator '{$operator}'"];
+        }
     }
 
     /**
@@ -358,6 +508,7 @@ final class ConditionEvaluatorTest extends TestCase
             yield "{$operator} matches" => [$operator, $hit, 'abc', MatchOutcome::MATCHES, ''];
             yield "{$operator} does not match" => [$operator, $miss, 'abc', MatchOutcome::DOES_NOT_MATCH, ''];
             yield "{$operator} non-string operand" => [$operator, 5, 'abc', MatchOutcome::INVALID, "invalid operand for operator '{$operator}'"];
+            yield "{$operator} list operand" => [$operator, [$hit], 'abc', MatchOutcome::INVALID, "invalid operand for operator '{$operator}'"];
             yield "{$operator} invalid before value" => [$operator, 5, 5, MatchOutcome::INVALID, "invalid operand for operator '{$operator}'"];
             yield "{$operator} empty operand" => [$operator, '', 'abc', MatchOutcome::UNDECIDABLE, "operator '{$operator}' has an empty operand"];
             yield "{$operator} empty operand first" => [$operator, '', 5, MatchOutcome::UNDECIDABLE, "operator '{$operator}' has an empty operand"];
@@ -367,21 +518,21 @@ final class ConditionEvaluatorTest extends TestCase
     }
 
     /**
-     * Cases for string_like, whose operand is a glob for fnmatch() with
-     * backslash escapes honoured.
+     * Cases for like, whose operand is a glob for fnmatch() with backslash
+     * escapes honoured.
      *
      * @return \Generator<string, array{0: string, 1: mixed, 2: mixed, 3: \SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome, 4: string}>
      */
-    private static function stringLikeCases(): iterable
+    private static function likeCases(): iterable
     {
-        yield 'string_like star' => ['string_like', 'a*c', 'abbbc', MatchOutcome::MATCHES, ''];
-        yield 'string_like question mark' => ['string_like', 'a?c', 'abc', MatchOutcome::MATCHES, ''];
-        yield 'string_like miss' => ['string_like', 'a?c', 'abbc', MatchOutcome::DOES_NOT_MATCH, ''];
-        yield 'string_like escaped star hit' => ['string_like', 'a\*', 'a*', MatchOutcome::MATCHES, ''];
-        yield 'string_like escaped star miss' => ['string_like', 'a\*', 'ab', MatchOutcome::DOES_NOT_MATCH, ''];
-        yield 'string_like non-string' => ['string_like', ['a*'], 'abc', MatchOutcome::INVALID, 'invalid operand for operator \'string_like\''];
-        yield 'string_like empty operand' => ['string_like', '', 'abc', MatchOutcome::UNDECIDABLE, 'operator \'string_like\' has an empty operand'];
-        yield 'string_like non-string value' => ['string_like', 'a*', 5, MatchOutcome::UNDECIDABLE, 'operator \'string_like\' needs a string value'];
+        yield 'like star' => ['like', 'a*c', 'abbbc', MatchOutcome::MATCHES, ''];
+        yield 'like question mark' => ['like', 'a?c', 'abc', MatchOutcome::MATCHES, ''];
+        yield 'like miss' => ['like', 'a?c', 'abbc', MatchOutcome::DOES_NOT_MATCH, ''];
+        yield 'like escaped star hit' => ['like', 'a\*', 'a*', MatchOutcome::MATCHES, ''];
+        yield 'like escaped star miss' => ['like', 'a\*', 'ab', MatchOutcome::DOES_NOT_MATCH, ''];
+        yield 'like list operand' => ['like', ['a*'], 'abc', MatchOutcome::INVALID, 'invalid operand for operator \'like\''];
+        yield 'like empty operand' => ['like', '', 'abc', MatchOutcome::UNDECIDABLE, 'operator \'like\' has an empty operand'];
+        yield 'like non-string value' => ['like', 'a*', 5, MatchOutcome::UNDECIDABLE, 'operator \'like\' needs a string value'];
     }
 
     /**
@@ -437,8 +588,9 @@ final class ConditionEvaluatorTest extends TestCase
      */
     private static function betweenCases(): iterable
     {
-        $june    = ['2026-06-01', '2026-06-30'];
-        $invalid = 'invalid operand for operator \'between\'';
+        $june        = ['2026-06-01', '2026-06-30'];
+        $invalid     = 'invalid operand for operator \'between\'';
+        $undecidable = 'operator \'between\' needs a time';
 
         yield 'between inside dates' => ['between', $june, '2026-06-15', MatchOutcome::MATCHES, ''];
         yield 'between lower date' => ['between', $june, '2026-06-01', MatchOutcome::MATCHES, ''];
@@ -461,12 +613,12 @@ final class ConditionEvaluatorTest extends TestCase
         yield 'between bad lower bound' => ['between', ['bad', '2026-06-30'], '2026-06-15', MatchOutcome::INVALID, $invalid];
         yield 'between bad upper bound' => ['between', ['2026-06-01', 'bad'], '2026-06-15', MatchOutcome::INVALID, $invalid];
         yield 'between invalid before value' => ['between', ['bad', 'bad'], 'not-a-time', MatchOutcome::INVALID, $invalid];
-        yield 'between unparseable value' => ['between', $june, 'not-a-time', MatchOutcome::UNDECIDABLE, 'operator \'between\' needs a time'];
-        yield 'between null value' => ['between', $june, null, MatchOutcome::UNDECIDABLE, 'operator \'between\' needs a time'];
+        yield 'between unparseable value' => ['between', $june, 'not-a-time', MatchOutcome::UNDECIDABLE, $undecidable];
+        yield 'between null value' => ['between', $june, null, MatchOutcome::UNDECIDABLE, $undecidable];
         yield 'between NaN lower bound' => ['between', [\NAN, 200], 150, MatchOutcome::INVALID, $invalid];
         yield 'between INF upper bound' => ['between', [100, \INF], 150, MatchOutcome::INVALID, $invalid];
-        yield 'between INF value' => ['between', [100, 200], \INF, MatchOutcome::UNDECIDABLE, 'operator \'between\' needs a time'];
-        yield 'between -INF value' => ['between', [100, 200], -\INF, MatchOutcome::UNDECIDABLE, 'operator \'between\' needs a time'];
+        yield 'between INF value' => ['between', [100, 200], \INF, MatchOutcome::UNDECIDABLE, $undecidable];
+        yield 'between -INF value' => ['between', [100, 200], -\INF, MatchOutcome::UNDECIDABLE, $undecidable];
     }
 
     /**
@@ -491,6 +643,7 @@ final class ConditionEvaluatorTest extends TestCase
             }
 
             yield "{$operator} non-numeric operand" => [$operator, 'abc', 5, MatchOutcome::INVALID, "invalid operand for operator '{$operator}'"];
+            yield "{$operator} list operand" => [$operator, [5], 5, MatchOutcome::INVALID, "invalid operand for operator '{$operator}'"];
             yield "{$operator} invalid before value" => [$operator, 'abc', 'abc', MatchOutcome::INVALID, "invalid operand for operator '{$operator}'"];
             yield "{$operator} non-numeric value" => [$operator, 5, 'abc', MatchOutcome::UNDECIDABLE, "operator '{$operator}' needs a number"];
             yield "{$operator} null value" => [$operator, 5, null, MatchOutcome::UNDECIDABLE, "operator '{$operator}' needs a number"];
@@ -539,6 +692,43 @@ final class ConditionEvaluatorTest extends TestCase
     }
 
     /**
+     * Cases for any_value_in and all_values_in, whose value is a list of
+     * scalars.
+     *
+     * @return \Generator<string, array{0: string, 1: mixed, 2: mixed, 3: \SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome, 4: string}>
+     */
+    private static function valueSetCases(): iterable
+    {
+        $set = ['a', 'b', 1];
+
+        yield 'any_value_in one member' => ['any_value_in', $set, ['x', 'b'], MatchOutcome::MATCHES, ''];
+        yield 'any_value_in every member' => ['any_value_in', $set, ['a', 'b'], MatchOutcome::MATCHES, ''];
+        yield 'any_value_in no member' => ['any_value_in', $set, ['x', 'y'], MatchOutcome::DOES_NOT_MATCH, ''];
+        yield 'any_value_in strict' => ['any_value_in', $set, ['1'], MatchOutcome::DOES_NOT_MATCH, ''];
+        yield 'any_value_in empty list' => ['any_value_in', $set, [], MatchOutcome::DOES_NOT_MATCH, ''];
+        yield 'all_values_in every member' => ['all_values_in', $set, ['a', 1], MatchOutcome::MATCHES, ''];
+        yield 'all_values_in repeated member' => ['all_values_in', $set, ['a', 'a'], MatchOutcome::MATCHES, ''];
+        yield 'all_values_in one outsider' => ['all_values_in', $set, ['a', 'x'], MatchOutcome::DOES_NOT_MATCH, ''];
+        yield 'all_values_in strict' => ['all_values_in', $set, ['a', '1'], MatchOutcome::DOES_NOT_MATCH, ''];
+        yield 'all_values_in empty list' => ['all_values_in', $set, [], MatchOutcome::DOES_NOT_MATCH, ''];
+
+        foreach (['any_value_in', 'all_values_in'] as $operator) {
+            $invalid     = "invalid operand for operator '{$operator}'";
+            $undecidable = "operator '{$operator}' needs a list of values";
+
+            yield "{$operator} scalar value" => [$operator, $set, 'a', MatchOutcome::UNDECIDABLE, $undecidable];
+            yield "{$operator} null value" => [$operator, $set, null, MatchOutcome::UNDECIDABLE, $undecidable];
+            yield "{$operator} map value" => [$operator, $set, ['k' => 'a'], MatchOutcome::UNDECIDABLE, $undecidable];
+            yield "{$operator} nested value" => [$operator, $set, [['a']], MatchOutcome::UNDECIDABLE, $undecidable];
+            yield "{$operator} null element" => [$operator, $set, ['a', null], MatchOutcome::UNDECIDABLE, $undecidable];
+            yield "{$operator} scalar operand" => [$operator, 'a', ['a'], MatchOutcome::INVALID, $invalid];
+            yield "{$operator} empty operand" => [$operator, [], ['a'], MatchOutcome::INVALID, $invalid];
+            yield "{$operator} null member" => [$operator, ['a', null], ['a'], MatchOutcome::INVALID, $invalid];
+            yield "{$operator} invalid before value" => [$operator, 'a', 'a', MatchOutcome::INVALID, $invalid];
+        }
+    }
+
+    /**
      * Cases for operators that are not supported.
      *
      * @return \Generator<string, array{0: string, 1: mixed, 2: mixed, 3: \SineMacula\Laravel\Authorization\Evaluation\Enums\MatchOutcome, 4: string}>
@@ -548,75 +738,94 @@ final class ConditionEvaluatorTest extends TestCase
         yield 'unknown operator' => ['bogus', 'x', 'x', MatchOutcome::INVALID, 'unknown operator \'bogus\''];
         yield 'operator case-sensitive' => ['EQ', 'x', 'x', MatchOutcome::INVALID, 'unknown operator \'EQ\''];
         yield 'empty operator' => ['', 'x', 'x', MatchOutcome::INVALID, 'unknown operator \'\''];
+        yield 'suffixed name' => ['eq_if_exists', 'x', 'x', MatchOutcome::INVALID, 'unknown operator \'eq_if_exists\''];
     }
 
     /**
-     * Operand cases for unknown operators and the operators whose operand takes
-     * any type.
+     * Operand cases for unknown operators, eq and neq.
      *
      * @return \Generator<string, array{0: string, 1: mixed, 2: string|null}>
      */
-    private static function untypedOperandCases(): iterable
+    private static function scalarOperandCases(): iterable
     {
         yield 'unknown operator' => ['bogus', 'x', 'unknown operator \'bogus\''];
         yield 'unknown upper-case' => ['EQ', 'x', 'unknown operator \'EQ\''];
-        yield 'eq any string' => ['eq', 'x', null];
-        yield 'eq list' => ['eq', ['x'], null];
-        yield 'neq null' => ['neq', null, null];
-        yield 'null flag' => ['null', true, null];
-        yield 'not_null flag' => ['not_null', false, null];
+        yield 'suffixed name' => ['eq_if_exists', 'x', 'unknown operator \'eq_if_exists\''];
+
+        foreach (['eq', 'neq'] as $operator) {
+            $error = "invalid operand for operator '{$operator}'";
+
+            yield "{$operator} string" => [$operator, 'x', null];
+            yield "{$operator} int" => [$operator, 1, null];
+            yield "{$operator} float" => [$operator, 1.5, null];
+            yield "{$operator} bool" => [$operator, false, null];
+            yield "{$operator} interpolated" => [$operator, '${context.tenant}', null];
+            yield "{$operator} list" => [$operator, ['x'], $error];
+            yield "{$operator} null" => [$operator, null, $error];
+            yield "{$operator} object" => [$operator, new \stdClass, $error];
+        }
     }
 
     /**
-     * Operand cases for in and not_in.
+     * Operand cases for in, not_in, any_value_in and all_values_in.
      *
      * @return \Generator<string, array{0: string, 1: mixed, 2: string|null}>
      */
-    private static function membershipOperandCases(): iterable
+    private static function setOperandCases(): iterable
     {
-        yield 'in list' => ['in', ['a'], null];
-        yield 'in empty list' => ['in', [], null];
-        yield 'in string' => ['in', 'a', 'invalid operand for operator \'in\''];
-        yield 'in interpolated string' => ['in', '${context.list}', 'invalid operand for operator \'in\''];
-        yield 'not_in list' => ['not_in', ['a'], null];
-        yield 'not_in string' => ['not_in', 'a', 'invalid operand for operator \'not_in\''];
+        foreach (['in', 'not_in', 'any_value_in', 'all_values_in'] as $operator) {
+            $error = "invalid operand for operator '{$operator}'";
+
+            yield "{$operator} list" => [$operator, ['a', 1, 1.5, true], null];
+            yield "{$operator} empty list" => [$operator, [], $error];
+            yield "{$operator} string" => [$operator, 'a', $error];
+            yield "{$operator} interpolated string" => [$operator, '${context.list}', $error];
+            yield "{$operator} null member" => [$operator, ['a', null], $error];
+            yield "{$operator} nested member" => [$operator, ['a', ['b']], $error];
+            yield "{$operator} map" => [$operator, ['x' => 'a'], $error];
+        }
     }
 
     /**
-     * Operand cases for cidr.
+     * Operand cases for ip_in and ip_not_in.
      *
      * @return \Generator<string, array{0: string, 1: mixed, 2: string|null}>
      */
-    private static function cidrOperandCases(): iterable
+    private static function ipOperandCases(): iterable
     {
-        $error = 'invalid operand for operator \'cidr\'';
+        foreach (['ip_in', 'ip_not_in'] as $operator) {
+            $error = "invalid operand for operator '{$operator}'";
 
-        yield 'cidr ipv4 range' => ['cidr', '10.0.0.0/8', null];
-        yield 'cidr ipv4 /0' => ['cidr', '0.0.0.0/0', null];
-        yield 'cidr ipv4 /32' => ['cidr', '1.2.3.4/32', null];
-        yield 'cidr ipv4 address' => ['cidr', '1.2.3.4', null];
-        yield 'cidr ipv6 /128' => ['cidr', '::1/128', null];
-        yield 'cidr ipv6 address' => ['cidr', '2001:db8::1', null];
-        yield 'cidr interpolated' => ['cidr', '${context.network}', null];
-        yield 'cidr interpolated prefix' => ['cidr', '${context.network}/8', null];
-        yield 'cidr ipv4 /33' => ['cidr', '10.0.0.0/33', $error];
-        yield 'cidr ipv6 /129' => ['cidr', '::1/129', $error];
-        yield 'cidr empty prefix' => ['cidr', '10.0.0.0/', $error];
-        yield 'cidr non-digit prefix' => ['cidr', '10.0.0.0/x', $error];
-        yield 'cidr malformed' => ['cidr', 'bad', $error];
-        yield 'cidr non-string' => ['cidr', 42, $error];
-        yield 'cidr double prefix' => ['cidr', '10.0.0.0/8/8', $error];
-        yield 'cidr escaped reference' => ['cidr', '\${context.network}', $error];
+            yield "{$operator} ipv4 range" => [$operator, '10.0.0.0/8', null];
+            yield "{$operator} ipv4 /0" => [$operator, '0.0.0.0/0', null];
+            yield "{$operator} ipv4 address" => [$operator, '1.2.3.4', null];
+            yield "{$operator} ipv6 /128" => [$operator, '::1/128', null];
+            yield "{$operator} ipv6 address" => [$operator, '2001:db8::1', null];
+            yield "{$operator} range set" => [$operator, ['10.0.0.0/8', '2001:db8::/32'], null];
+            yield "{$operator} interpolated" => [$operator, '${context.network}', null];
+            yield "{$operator} interpolated prefix" => [$operator, '${context.network}/8', null];
+            yield "{$operator} ipv4 /33" => [$operator, '10.0.0.0/33', $error];
+            yield "{$operator} ipv6 /129" => [$operator, '::1/129', $error];
+            yield "{$operator} empty prefix" => [$operator, '10.0.0.0/', $error];
+            yield "{$operator} non-digit prefix" => [$operator, '10.0.0.0/x', $error];
+            yield "{$operator} malformed" => [$operator, 'bad', $error];
+            yield "{$operator} non-string" => [$operator, 42, $error];
+            yield "{$operator} double prefix" => [$operator, '10.0.0.0/8/8', $error];
+            yield "{$operator} escaped reference" => [$operator, '\${context.network}', $error];
+            yield "{$operator} empty set" => [$operator, [], $error];
+            yield "{$operator} set with a bad range" => [$operator, ['10.0.0.0/8', 'bad'], $error];
+            yield "{$operator} set with an interpolated range" => [$operator, ['${context.network}'], $error];
+        }
     }
 
     /**
-     * Operand cases for starts_with, ends_with and string_like.
+     * Operand cases for starts_with, ends_with and like.
      *
      * @return \Generator<string, array{0: string, 1: mixed, 2: string|null}>
      */
     private static function stringOperandCases(): iterable
     {
-        foreach (['starts_with', 'ends_with', 'string_like'] as $operator) {
+        foreach (['starts_with', 'ends_with', 'like'] as $operator) {
             $error = "invalid operand for operator '{$operator}'";
 
             yield "{$operator} string" => [$operator, 'a', null];
@@ -665,7 +874,7 @@ final class ConditionEvaluatorTest extends TestCase
         yield 'between bad upper bound' => ['between', [100, 'bad'], $error];
         yield 'between string' => ['between', '2026-01-01', $error];
         yield 'between interpolated list' => ['between', ['${context.from}', '${context.to}'], $error];
-        yield 'between interpolated string' => ['between', '${context.window}', 'invalid operand for operator \'between\''];
+        yield 'between interpolated string' => ['between', '${context.window}', $error];
         yield 'between NaN lower bound' => ['between', [\NAN, 200], $error];
         yield 'between INF upper bound' => ['between', [100, \INF], $error];
     }
@@ -712,6 +921,22 @@ final class ConditionEvaluatorTest extends TestCase
 
         foreach (['yes', 'TRUE', 2, 1.0, null, '', '\${context.flag}'] as $form) {
             yield 'bool ' . \var_export($form, true) => ['bool', $form, 'invalid operand for operator \'bool\''];
+        }
+    }
+
+    /**
+     * Operand cases for null, which takes strictly true or false and is never
+     * interpolated.
+     *
+     * @return \Generator<string, array{0: string, 1: mixed, 2: string|null}>
+     */
+    private static function nullOperandCases(): iterable
+    {
+        yield 'null true' => ['null', true, null];
+        yield 'null false' => ['null', false, null];
+
+        foreach (['string true' => 'true', 'one' => 1, 'zero' => 0, 'null' => null, 'interpolated' => '${context.flag}', 'list' => [true]] as $label => $operand) {
+            yield "null {$label}" => ['null', $operand, 'invalid operand for operator \'null\''];
         }
     }
 

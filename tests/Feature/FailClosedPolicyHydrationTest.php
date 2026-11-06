@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversTrait;
@@ -27,6 +28,9 @@ use Tests\TestCase;
  * `invalid_policy` reason: every check for the holder denies, whatever its
  * roles, permissions or other policies would allow, until the document is
  * fixed.
+ *
+ * A stored policy over the configured limits, as after a limit is lowered, is
+ * refused the same way.
  *
  * The test uses `DB::table()` to bypass the Eloquent mutator and persist a
  * malformed document directly — the mutator's validation path is the write-side
@@ -148,6 +152,49 @@ final class FailClosedPolicyHydrationTest extends TestCase
             self::assertSame(DecisionReason::INVALID_POLICY, $last->reason);
             self::assertSame(DecisionStage::DENY, $last->stage);
         }
+    }
+
+    /**
+     * A stored policy over a limit, after the limit was lowered, is never
+     * skipped and never partly evaluated: `getPolicies()` throws, and every
+     * check for its holder denies with the `invalid_policy` reason, even when
+     * an RBAC permission is held and another policy allows the action.
+     *
+     * @return void
+     */
+    public function testPolicyOverALimitDeniesEveryCheck(): void
+    {
+        Permission::create(['id' => (string) Str::uuid(), 'name' => 'posts:create', 'guard' => 'web']);
+
+        $user = StubIdentity::create(['id' => (string) Str::uuid()]);
+        $user->givePermission('posts:create');
+
+        $user->attachPolicy(Policy::create(['name' => 'allow-create', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:create']]]]]));
+        $user->attachPolicy(Policy::create(['name' => 'wide', 'document' => ['statements' => [
+            ['effect' => 'deny', 'actions' => ['posts:delete']],
+            ['effect' => 'deny', 'actions' => ['posts:archive']],
+        ]]]));
+
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make(ConfigRepository::class);
+        $config->set('authorization.policies.limits.statements', 1);
+
+        $fresh = $user->fresh();
+        self::assertNotNull($fresh);
+
+        try {
+            $fresh->getPolicies();
+            self::fail('getPolicies() should throw for a policy over a limit.');
+        } catch (InvalidPolicyDocumentException $exception) {
+            self::assertSame('Invalid policy document \'wide\': Policy document has 2 statements, more than the 1 allowed.', $exception->getMessage());
+        }
+
+        $decision = Authorization::for($fresh)->check('posts:create');
+
+        self::assertFalse($decision->isAllowed());
+        self::assertSame(DecisionReason::INVALID_POLICY, $decision->reason);
+        self::assertSame(DecisionStage::DENY, $decision->stage);
+        self::assertSame([], $decision->statements);
     }
 
     /**

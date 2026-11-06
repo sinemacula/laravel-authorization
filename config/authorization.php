@@ -102,13 +102,20 @@ return [
     | the `#[Permission]` attribute on the case. Booting never writes them, so
     | run the sync after `migrate` when you deploy.
     |
+    | Policies are checked against the same catalogue: every `actions` and
+    | `not_actions` pattern in a policy document must match at least one
+    | permission declared here or by a provider, so a misspelt action is
+    | refused rather than stored. With nothing declared, every policy write is
+    | refused.
+    |
     | **Required for Laravel's Gate surface.** The `Authorization` facade
     | (`Authorization::can(...)`, `Authorization::for($user)->can(...)`) works
     | out of the box, but Laravel's Gate never dispatches to an action it has
     | not been told about — `Gate::allows('posts:edit')` silently returns false
     | until a `PermissionEnum` case is listed here. Consumers who want the
     | standard Laravel authorization surface must register at least one enum;
-    | consumers who only use the facade can leave this empty.
+    | consumers who only use the facade can leave this empty, as long as a
+    | provider declares the permissions their policies name.
     |
     */
 
@@ -124,12 +131,13 @@ return [
     | category and guard, so modular packages can ship their own permission
     | sets without the host application editing a central enum. The classes
     | are validated at boot, but a provider is read only by
-    | `authorization:sync`, which writes its permissions alongside the enums'.
-    | A provider's permissions can be checked through the `Authorization`
-    | facade and `hasPermission()`, but they are not registered as Gate
-    | abilities and do not appear in `effectivePermissions()`; declare a
-    | permission as an enum case when it must work with `Gate`, `@can` or the
-    | `can:` middleware.
+    | `authorization:sync`, which writes its permissions alongside the enums',
+    | and by the policy validator, which accepts a policy pattern that matches
+    | one of them. A provider's permissions can be checked through the
+    | `Authorization` facade and `hasPermission()`, but they are not
+    | registered as Gate abilities and do not appear in
+    | `effectivePermissions()`; declare a permission as an enum case when it
+    | must work with `Gate`, `@can` or the `can:` middleware.
     |
     */
 
@@ -180,6 +188,34 @@ return [
     */
 
     'policy_store' => null,
+
+    /*
+    |---------------------------------------------------------------------------
+    | Policy limits
+    |---------------------------------------------------------------------------
+    |
+    | Caps on a policy document, so a policy cannot be made expensive to store
+    | or evaluate: `document_bytes` on its JSON encoding, `statements` on how
+    | many statements it holds, `conditions` on how many key tests one
+    | statement's conditions hold, and `pattern_length` on the characters of
+    | any action or resource pattern and any string operand. Each must be a
+    | whole number of at least 1.
+    |
+    | A document over a limit is refused when it is written, and a stored one
+    | over a limit denies every check for its holder as an invalid policy. So
+    | lowering a limit makes the stored documents over it deny until they are
+    | fixed; `php artisan authorization:policy:validate --database` lists them.
+    |
+    */
+
+    'policies' => [
+        'limits' => [
+            'document_bytes' => (int) env('AUTHORIZATION_POLICY_DOCUMENT_BYTES', 65536),
+            'statements'     => (int) env('AUTHORIZATION_POLICY_STATEMENTS', 100),
+            'conditions'     => (int) env('AUTHORIZATION_POLICY_CONDITIONS', 50),
+            'pattern_length' => (int) env('AUTHORIZATION_POLICY_PATTERN_LENGTH', 512),
+        ],
+    ],
 
     /*
     |---------------------------------------------------------------------------

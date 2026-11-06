@@ -4,15 +4,21 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
+use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
+
 /**
- * Internal helper refusing malformed statements before they are stored or
- * evaluated.
+ * Internal helper reading the parts of a statement document and refusing
+ * malformed statements before they are stored or evaluated.
  *
  * A statement is refused whole when any part is wrong: an unknown key (so a
- * mistyped `conditions` never becomes an unconditional statement), an empty
- * resource list, a condition that is neither a value nor a non-empty operator
- * map, an unknown operator, an operand of the wrong type or a malformed `${…}`
- * reference. It is not part of the public API.
+ * mistyped `conditions` never becomes an unconditional statement), a malformed
+ * `sid`, both or neither of `actions` and `not_actions`, both `resources` and
+ * `not_resources`, a pattern list that is not a non-empty list of non-empty
+ * strings, conditions that do not map operators to key tests, an unknown
+ * operator, an operand of the wrong type or a malformed `${…}` reference. It is
+ * not part of the public API.
+ *
+ * @phpstan-type ConditionTest array{key: string, operator: string, isOptional: bool, operand: mixed, error: string|null}
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -22,7 +28,10 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
 final class StatementValidator
 {
     /** @var list<string> The keys a statement may carry. */
-    public const array KEYS = ['effect', 'actions', 'resources', 'conditions'];
+    public const array KEYS = ['sid', 'effect', 'actions', 'not_actions', 'resources', 'not_resources', 'conditions'];
+
+    /** @var string What a statement id may be: 1 to 64 letters, digits, `_`, `-`, `:` and `.`. */
+    public const string SID_PATTERN = '/\A[A-Za-z0-9_:.\-]{1,64}\z/';
 
     /**
      * Refuse keys a statement does not define.
@@ -42,20 +51,29 @@ final class StatementValidator
     }
 
     /**
-     * Refuse a condition that cannot be evaluated.
+     * Refuse a statement that names both or neither of `actions` and
+     * `not_actions`, or both `resources` and `not_resources`.
      *
-     * @param  string  $key
-     * @param  mixed  $condition
+     * @param  array<int, string>|null  $actions
+     * @param  array<int, string>|null  $notActions
+     * @param  array<int, string>|null  $resources
+     * @param  array<int, string>|null  $notResources
      * @return void
      *
      * @throws \InvalidArgumentException
      */
-    public static function assertValidCondition(string $key, mixed $condition): void
+    public static function assertTargets(?array $actions, ?array $notActions, ?array $resources, ?array $notResources): void
     {
-        $error = self::conditionError($key, $condition);
+        if ($actions === null && $notActions === null) {
+            throw new \InvalidArgumentException('Policy statement requires actions or not_actions.');
+        }
 
-        if ($error !== null) {
-            throw new \InvalidArgumentException("Policy statement {$error}.");
+        if ($actions !== null && $notActions !== null) {
+            throw new \InvalidArgumentException('Policy statement takes actions or not_actions, not both.');
+        }
+
+        if ($resources !== null && $notResources !== null) {
+            throw new \InvalidArgumentException('Policy statement takes resources or not_resources, not both.');
         }
     }
 
@@ -75,94 +93,207 @@ final class StatementValidator
     }
 
     /**
-     * Work out why each malformed condition of a condition map cannot be
-     * evaluated, keyed by the condition's key; well-formed conditions are left
-     * out.
+     * Extract the effect from a statement document.
+     *
+     * @param  array<array-key, mixed>  $data
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect
+     *
+     * @throws \InvalidArgumentException
+     */
+    public static function effectOf(array $data): PolicyEffect
+    {
+        if (!isset($data['effect']) || !\is_string($data['effect'])) {
+            throw new \InvalidArgumentException('Policy statement requires a string effect.');
+        }
+
+        return PolicyEffect::tryFrom($data['effect'])
+            ?? throw new \InvalidArgumentException("Invalid policy effect: '{$data['effect']}'");
+    }
+
+    /**
+     * Extract the statement id from a statement document, or null when it has
+     * none.
+     *
+     * @param  array<array-key, mixed>  $data
+     * @return string|null
+     *
+     * @throws \InvalidArgumentException
+     */
+    public static function sidOf(array $data): ?string
+    {
+        if (!\array_key_exists('sid', $data)) {
+            return null;
+        }
+
+        $sid = $data['sid'];
+
+        if (!\is_string($sid) || \preg_match(self::SID_PATTERN, $sid) !== 1) {
+            throw new \InvalidArgumentException('Policy statement sid must be 1 to 64 letters, digits, \'_\', \'-\', \':\' or \'.\'.');
+        }
+
+        return $sid;
+    }
+
+    /**
+     * Extract a pattern list (`actions`, `not_actions`, `resources` or
+     * `not_resources`) from a statement document, or null when it is absent.
+     * Resource patterns are also checked for malformed `${…}` references.
+     *
+     * @param  array<array-key, mixed>  $data
+     * @param  string  $field
+     * @return list<string>|null
+     *
+     * @throws \InvalidArgumentException
+     */
+    public static function patternsOf(array $data, string $field): ?array
+    {
+        if (!\array_key_exists($field, $data)) {
+            return null;
+        }
+
+        $patterns = $data[$field];
+
+        if (!self::isPatternList($patterns)) {
+            throw new \InvalidArgumentException("Policy statement {$field} must be a non-empty list of non-empty strings.");
+        }
+
+        if (\str_ends_with($field, 'resources')) {
+            \array_walk($patterns, static fn (string $pattern) => self::assertValidResource($pattern));
+        }
+
+        return $patterns;
+    }
+
+    /**
+     * Extract the conditions map from a statement document.
+     *
+     * @param  array<array-key, mixed>  $data
+     * @return array<array-key, mixed>
+     *
+     * @throws \InvalidArgumentException
+     */
+    public static function conditionsOf(array $data): array
+    {
+        $conditions = \array_key_exists('conditions', $data) ? $data['conditions'] : [];
+
+        if (!\is_array($conditions)) {
+            throw new \InvalidArgumentException('Policy statement conditions must map operators to key tests.');
+        }
+
+        return $conditions;
+    }
+
+    /**
+     * Work out why the conditions cannot be evaluated as a whole: each entry
+     * whose name is not a known operator, or which does not map context keys to
+     * operands. Faults in one key's test are left to `conditionTests()`.
      *
      * @param  array<array-key, mixed>  $conditions
-     * @return array<array-key, string>
+     * @return list<string>
      */
-    public static function conditionErrors(array $conditions): array
+    public static function operatorErrors(array $conditions): array
     {
         $errors = [];
 
-        foreach ($conditions as $key => $condition) {
-            $errors[$key] = \is_string($key) ? self::conditionError($key, $condition) : 'a condition key is not a string';
+        foreach ($conditions as $name => $tests) {
+            $operator = \is_string($name) ? ConditionEvaluator::operatorOf($name) : null;
+
+            $errors[] = match (true) {
+                !\is_string($name)        => 'conditions must map operator names to key tests',
+                $operator === null        => "conditions have an unknown operator '{$name}'",
+                !self::isKeyedMap($tests) => "condition operator '{$name}' must map context keys to operands",
+                default                   => null,
+            };
         }
 
-        return \array_filter($errors, static fn (?string $error): bool => $error !== null);
+        return \array_values(\array_filter($errors, static fn (?string $error): bool => $error !== null));
     }
 
     /**
-     * Describe why a condition cannot be evaluated, or return null when it is
-     * well formed: an empty operator map, a non-string operator name, an
-     * unknown operator, an operand of the wrong type, or a malformed `${…}`
-     * reference in a string value or operand.
+     * Return every key test of the well-formed operator entries, in order: its
+     * context key, the operator it tests with, whether the `_if_exists` suffix
+     * lets a missing key pass, the operand, and why it cannot be evaluated, or
+     * null when it can.
      *
-     * @param  string  $key
-     * @param  mixed  $condition
-     * @return string|null
+     * @param  array<array-key, mixed>  $conditions
+     * @return list<ConditionTest>
      */
-    public static function conditionError(string $key, mixed $condition): ?string
+    public static function conditionTests(array $conditions): array
     {
-        return \is_array($condition)
-            ? self::operatorMapError($key, $condition)
-            : self::referenceError($key, $condition);
+        $tests = [];
+
+        foreach ($conditions as $name => $keyTests) {
+            $operator = ConditionEvaluator::operatorOf((string) $name);
+
+            if (!\is_string($name) || $operator === null || !self::isKeyedMap($keyTests)) {
+                continue;
+            }
+
+            foreach ($keyTests as $key => $operand) {
+                $tests[] = [
+                    'key'        => $key,
+                    'operator'   => $operator,
+                    'isOptional' => $operator !== $name,
+                    'operand'    => $operand,
+                    'error'      => self::testError($key, $operator, $operand),
+                ];
+            }
+        }
+
+        return $tests;
     }
 
     /**
-     * Describe why an operator map cannot be evaluated, reporting the first
-     * fault.
+     * Describe why one key test cannot be evaluated: an operand of the wrong
+     * type, or a malformed `${…}` reference in a string operand.
      *
      * @param  string  $key
-     * @param  array<array-key, mixed>  $operators
-     * @return string|null
-     */
-    private static function operatorMapError(string $key, array $operators): ?string
-    {
-        if ($operators === []) {
-            return "condition '{$key}' has no operators";
-        }
-
-        $error = null;
-
-        foreach ($operators as $operator => $operand) {
-            $error ??= self::operatorError($key, $operator, $operand);
-        }
-
-        return $error;
-    }
-
-    /**
-     * Describe why one operator of a condition cannot be evaluated.
-     *
-     * @param  string  $key
-     * @param  int|string  $operator
+     * @param  string  $operator
      * @param  mixed  $operand
      * @return string|null
      */
-    private static function operatorError(string $key, int|string $operator, mixed $operand): ?string
+    private static function testError(string $key, string $operator, mixed $operand): ?string
     {
-        if (!\is_string($operator)) {
-            return "condition '{$key}' must map operator names to operands";
-        }
-
         $error = ConditionEvaluator::operandError($operator, $operand);
 
-        return $error !== null ? "condition '{$key}' has an {$error}" : self::referenceError($key, $operand);
+        if ($error !== null) {
+            return "condition '{$key}' has an {$error}";
+        }
+
+        return \is_string($operand) && ContextInterpolator::hasMalformedReference($operand)
+            ? "condition '{$key}' has a malformed \${…} reference"
+            : null;
     }
 
     /**
-     * Describe a malformed `${…}` reference in a string value or operand.
+     * Determine whether an operator entry maps one or more context keys to
+     * operands.
      *
-     * @param  string  $key
-     * @param  mixed  $value
-     * @return string|null
+     * @param  mixed  $tests
+     * @return bool
+     *
+     * @phpstan-assert-if-true non-empty-array<string, mixed> $tests
      */
-    private static function referenceError(string $key, mixed $value): ?string
+    private static function isKeyedMap(mixed $tests): bool
     {
-        return \is_string($value) && ContextInterpolator::hasMalformedReference($value)
-            ? "condition '{$key}' has a malformed \${…} reference"
-            : null;
+        return \is_array($tests)
+            && $tests !== []
+            && \array_filter(\array_keys($tests), static fn (int|string $key): bool => !\is_string($key)) === [];
+    }
+
+    /**
+     * Determine whether the value is a non-empty list of non-empty strings.
+     *
+     * @param  mixed  $patterns
+     * @return bool
+     *
+     * @phpstan-assert-if-true non-empty-list<non-empty-string> $patterns
+     */
+    private static function isPatternList(mixed $patterns): bool
+    {
+        return \is_array($patterns)
+            && $patterns !== []
+            && \array_is_list($patterns)
+            && \array_filter($patterns, static fn (mixed $pattern): bool => !\is_string($pattern) || $pattern === '') === [];
     }
 }

@@ -223,7 +223,7 @@ final class HasPoliciesTest extends TestCase
             'authorizable_id'   => (string) $user->getKey(), // @phpstan-ignore cast.string
         ]);
 
-        $reason = 'Invalid policy document \'malformed\': Policy statement resources must not be empty; omit the key to cover every resource.';
+        $reason = 'Invalid policy document \'malformed\': Policy statement resources must be a non-empty list of non-empty strings.';
 
         try {
             $user->fresh()?->getPolicies();

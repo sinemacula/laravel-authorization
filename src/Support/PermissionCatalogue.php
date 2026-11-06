@@ -2,14 +2,12 @@
 
 declare(strict_types = 1);
 
-namespace SineMacula\Laravel\Authorization\Console\Support;
+namespace SineMacula\Laravel\Authorization\Support;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Container\Container;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueException;
 use SineMacula\Laravel\Authorization\Models\Permission;
-use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
-use SineMacula\Laravel\Authorization\Support\PermissionMetadataReader;
 
 /**
  * The platform's permission catalogue as the application declares it in code.

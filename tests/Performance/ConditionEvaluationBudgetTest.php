@@ -14,10 +14,10 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
  * Performance budget for `Statement::conditionsSatisfiedBy()`.
  *
  * Conditions are the heaviest per-statement work the evaluator does. The full
- * 18-operator surface (string, numeric, temporal, set, boolean, null, CIDR) is
- * exercised in one chain to guard against drift in any individual arm — a
- * regression in a single operator moves the aggregate enough to trip the budget
- * well before it affects a production workload.
+ * 20-operator surface (string, numeric, temporal, set, boolean, null, IP range,
+ * multi-valued) is exercised in one chain to guard against drift in any
+ * individual arm — a regression in a single operator moves the aggregate enough
+ * to trip the budget well before it affects a production workload.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -31,7 +31,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Statement;
 final class ConditionEvaluationBudgetTest extends TestCase
 {
     /**
-     * Evaluating an 18-operator condition chain 1,000 times must complete in
+     * Evaluating a 20-operator condition chain 1,000 times must complete in
      * under half a second on the reference machine. Observed ~55μs per call on
      * the reference machine (≈55ms total); budget is ~10× to tolerate CI
      * variance.
@@ -47,6 +47,8 @@ final class ConditionEvaluationBudgetTest extends TestCase
         );
         $context = self::buildContext();
 
+        self::assertTrue($statement->conditionsSatisfiedBy($context));
+
         $start = \microtime(true);
 
         for ($i = 0; $i < 1000; $i++) {
@@ -58,39 +60,41 @@ final class ConditionEvaluationBudgetTest extends TestCase
         self::assertLessThan(
             0.5,
             $elapsed,
-            "Statement::conditionsSatisfiedBy() budget exceeded ({$elapsed}s for 1,000 iterations of an 18-operator chain).",
+            "Statement::conditionsSatisfiedBy() budget exceeded ({$elapsed}s for 1,000 iterations of a 20-operator chain).",
         );
     }
 
     /**
-     * Build the 18-operator condition chain — every branch in
-     * `Statement::matchesOperator()` appears exactly once. Kept here rather
-     * than in a shared helper so the performance suite has no runtime
-     * dependency on the benchmark-support tree.
+     * Build the 20-operator condition chain — every operator of
+     * `ConditionEvaluator` appears exactly once. Kept here rather than in a
+     * shared helper so the performance suite has no runtime dependency on the
+     * benchmark-support tree.
      *
      * @return array<string, mixed>
      */
     private static function buildConditionChain(): array
     {
         return [
-            'tenant'       => ['eq' => 'tenant-99'],
-            'role'         => ['neq' => 'guest'],
-            'country'      => ['in' => ['US', 'GB', 'CA']],
-            'blocklist'    => ['not_in' => ['blocked', 'banned']],
-            'ip'           => ['cidr' => '10.0.0.0/8'],
-            'path'         => ['starts_with' => '/admin'],
-            'file'         => ['ends_with' => '.json'],
-            'scheduled_at' => ['before' => '2099-01-01T00:00:00Z'],
-            'created_at'   => ['after' => '2000-01-01T00:00:00Z'],
-            'window'       => ['between' => ['2000-01-01T00:00:00Z', '2099-01-01T00:00:00Z']],
-            'agent'        => ['string_like' => 'Mozilla/*'],
-            'deleted_at'   => ['null' => true],
-            'email'        => ['not_null' => true],
-            'age'          => ['gt' => 17],
-            'quota'        => ['gte' => 0],
-            'strikes'      => ['lt' => 3],
-            'priority'     => ['lte' => 10],
-            'verified'     => ['bool' => true],
+            'eq'            => ['tenant' => 'tenant-99'],
+            'neq'           => ['role' => 'guest'],
+            'in'            => ['country' => ['US', 'GB', 'CA']],
+            'not_in'        => ['blocklist' => ['blocked', 'banned']],
+            'starts_with'   => ['path' => '/admin'],
+            'ends_with'     => ['file' => '.json'],
+            'like'          => ['agent' => 'Mozilla/*'],
+            'gt'            => ['age' => 17],
+            'gte'           => ['quota' => 0],
+            'lt'            => ['strikes' => 3],
+            'lte'           => ['priority' => 10],
+            'before'        => ['scheduled_at' => '2099-01-01T00:00:00Z'],
+            'after'         => ['created_at' => '2000-01-01T00:00:00Z'],
+            'between'       => ['window' => ['2000-01-01T00:00:00Z', '2099-01-01T00:00:00Z']],
+            'bool'          => ['verified' => true],
+            'null'          => ['deleted_at' => true, 'email' => false],
+            'ip_in'         => ['ip' => '10.0.0.0/8'],
+            'ip_not_in'     => ['ip' => ['192.168.0.0/16', '2001:db8::/32']],
+            'any_value_in'  => ['groups' => ['admins', 'editors']],
+            'all_values_in' => ['scopes' => ['posts:read', 'posts:write', 'posts:delete']],
         ];
     }
 
@@ -121,6 +125,8 @@ final class ConditionEvaluationBudgetTest extends TestCase
             'strikes'      => 0,
             'priority'     => 5,
             'verified'     => true,
+            'groups'       => ['members', 'editors'],
+            'scopes'       => ['posts:read', 'posts:write'],
         ];
     }
 }

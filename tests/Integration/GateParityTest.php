@@ -148,7 +148,7 @@ final class GateParityTest extends TestCase
                         'effect'     => 'allow',
                         'actions'    => [PermissionEnum::POSTS_CREATE->value],
                         'resources'  => [self::MATCHING_RESOURCE],
-                        'conditions' => ['tenant' => ['eq' => 'org-1']],
+                        'conditions' => ['eq' => ['tenant' => 'org-1']],
                     ],
                 ],
             ],

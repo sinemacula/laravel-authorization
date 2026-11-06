@@ -20,7 +20,9 @@ use SineMacula\Laravel\Authorization\Console\MigrateSpatieCommand;
 use SineMacula\Laravel\Authorization\Console\PruneGrantsCommand;
 use SineMacula\Laravel\Authorization\Console\RevokeRoleCommand;
 use SineMacula\Laravel\Authorization\Console\SyncPermissionsCommand;
+use SineMacula\Laravel\Authorization\Console\ValidatePolicyCommand;
 use SineMacula\Laravel\Authorization\Console\WhyCanCommand;
+use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\PolicyStore;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
@@ -43,6 +45,7 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\PermissionService;
 use SineMacula\Laravel\Authorization\Services\PolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
+use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 
 /**
@@ -58,20 +61,20 @@ use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
  *   quartet and Spatie-compat aliases.
  *
  * Every binding that holds state for one request or job (the resolvers, the
- * policy store, the resolved tenant, the resolution cache, the last decision
- * and the manager that holds them) is registered with `scoped()`, so Laravel's
- * queue worker drops it before each job and Octane builds it afresh on each
- * request's sandbox. They are scoped together: a singleton holding a scoped
- * instance would keep the old instance alive.
+ * policy store, the resolved tenant, the resolution cache, the last decision,
+ * the action catalogue and the manager that holds them) is registered with
+ * `scoped()`, so Laravel's queue worker drops it before each job and Octane
+ * builds it afresh on each request's sandbox. They are scoped together: a
+ * singleton holding a scoped instance would keep the old instance alive.
  *
  * The management services (roles, permissions, policies and grants) hold no
  * state and are bound as singletons.
  *
  * The contracts an application may bind itself (the subject resolver, the
- * policy store and the policy resolver) resolve through a package-owned key
- * that holds the scoped default. An application's own binding of the contract
- * therefore replaces the default without being scoped itself, and an instance
- * it binds survives the reset between jobs.
+ * policy store, the policy resolver and the action catalogue) resolve through a
+ * package-owned key that holds the scoped default. An application's own binding
+ * of the contract therefore replaces the default without being scoped itself,
+ * and an instance it binds survives the reset between jobs.
  *
  * Row-lifecycle behaviour for `Role` / `Permission` / `Policy` is attached via
  * the `#[ObservedBy]` attribute on each model; the service provider does not
@@ -173,6 +176,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
             MigrateSpatieCommand::class,
             SyncPermissionsCommand::class,
             PruneGrantsCommand::class,
+            ValidatePolicyCommand::class,
         ]);
     }
 
@@ -316,13 +320,18 @@ final class AuthorizationServiceProvider extends ServiceProvider
     }
 
     /**
-     * Bind the policy evaluator.
+     * Bind the policy evaluator, and the action catalogue a policy document's
+     * action patterns are checked against when it is written: by default the
+     * permissions the code declares, read once per request or job. The
+     * catalogue is bound as a default an application may replace.
      *
      * @return void
      */
     protected function registerPolicyEvaluator(): void
     {
         $this->app->scoped(PolicyEvaluator::class);
+
+        $this->bindScopedDefault(ActionCatalogue::class, DeclaredActionCatalogue::class);
     }
 
     /**

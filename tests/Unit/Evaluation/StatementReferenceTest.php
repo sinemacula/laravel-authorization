@@ -73,4 +73,48 @@ final class StatementReferenceTest extends TestCase
         self::assertSame('billing[policy-key]#3', (new StatementReference('billing', 3, 'policy-key'))->toString());
         self::assertSame('p[0]#0', (new StatementReference('p', 0, '0'))->toString());
     }
+
+    /**
+     * The sid defaults to null and is stored when given.
+     *
+     * @return void
+     */
+    public function testSidDefaultsToNullAndIsStored(): void
+    {
+        self::assertNull((new StatementReference('billing', 3, 'policy-key'))->sid);
+
+        $reference = new StatementReference('billing', 3, 'policy-key', 'AllowRead');
+
+        self::assertSame('policy-key', $reference->policyId);
+        self::assertSame('AllowRead', $reference->sid);
+        self::assertSame('AllowRead', (new StatementReference('billing', 3, sid: 'AllowRead'))->sid);
+    }
+
+    /**
+     * toString() appends the sid, JSON-encoded, after the statement's position,
+     * with or without the stored key, and nothing when there is no sid.
+     *
+     * @return void
+     */
+    public function testToStringAppendsTheSid(): void
+    {
+        self::assertSame('billing[policy-key]#3 sid="AllowRead"', (new StatementReference('billing', 3, 'policy-key', 'AllowRead'))->toString());
+        self::assertSame('billing#3 sid="Allow.read:posts-1"', (new StatementReference('billing', 3, null, 'Allow.read:posts-1'))->toString());
+        self::assertSame('billing[policy-key]#3', (new StatementReference('billing', 3, 'policy-key', null))->toString());
+    }
+
+    /**
+     * toString() encodes a sid of a directly built reference as JSON, so a
+     * quote or a backslash in it cannot break the line, while a slash is left
+     * as it is.
+     *
+     * @return void
+     */
+    public function testToStringEncodesTheSidAsJson(): void
+    {
+        self::assertSame('p#0 sid="a\"b"', (new StatementReference('p', 0, null, 'a"b'))->toString());
+        self::assertSame('p#0 sid="a\\\b"', (new StatementReference('p', 0, null, 'a\b'))->toString());
+        self::assertSame('p#0 sid="a/b"', (new StatementReference('p', 0, null, 'a/b'))->toString());
+        self::assertSame('p#0 sid="a\ufffd"', (new StatementReference('p', 0, null, "a\xff"))->toString());
+    }
 }

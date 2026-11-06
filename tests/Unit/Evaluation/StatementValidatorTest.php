@@ -7,10 +7,12 @@ namespace Tests\Unit\Evaluation;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\StatementValidator;
 
 /**
- * Unit tests for the statement validator.
+ * Unit tests for the statement validator: the parts of a statement document it
+ * reads and the malformed statements it refuses.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -18,509 +20,406 @@ use SineMacula\Laravel\Authorization\Evaluation\StatementValidator;
  * @internal
  *
  * @SuppressWarnings("php:S1192")
+ * @SuppressWarnings("php:S1448")
  */
 #[CoversClass(StatementValidator::class)]
 final class StatementValidatorTest extends TestCase
 {
     /**
-     * KEYS lists exactly the four keys a statement may carry.
+     * KEYS lists exactly the seven keys a statement may carry.
      *
      * @return void
      */
     public function testKeysConstant(): void
     {
-        self::assertSame(['effect', 'actions', 'resources', 'conditions'], StatementValidator::KEYS);
+        self::assertSame(['sid', 'effect', 'actions', 'not_actions', 'resources', 'not_resources', 'conditions'], StatementValidator::KEYS);
     }
 
     /**
-     * assertKnownKeys() accepts a statement carrying every known key.
+     * assertKnownKeys() accepts every known key, and any subset of them.
      *
      * @return void
      */
-    public function testAssertKnownKeysAcceptsEveryKnownKey(): void
+    public function testAssertKnownKeysAcceptsKnownKeys(): void
     {
-        StatementValidator::assertKnownKeys([
-            'effect'     => 'allow',
-            'actions'    => ['x'],
-            'resources'  => ['*'],
-            'conditions' => ['tenant' => 'org-1'],
-        ]);
-
-        $this->addToAssertionCount(1);
-    }
-
-    /**
-     * assertKnownKeys() accepts a statement carrying a subset of the known
-     * keys, and an empty one.
-     *
-     * @return void
-     */
-    public function testAssertKnownKeysAcceptsSubsetOfKnownKeys(): void
-    {
-        StatementValidator::assertKnownKeys(['effect' => 'deny', 'actions' => ['x']]);
+        StatementValidator::assertKnownKeys(\array_fill_keys(StatementValidator::KEYS, 'x'));
+        StatementValidator::assertKnownKeys(['effect' => 'allow']);
         StatementValidator::assertKnownKeys([]);
 
-        $this->addToAssertionCount(2);
+        $this->addToAssertionCount(3);
     }
 
     /**
-     * assertKnownKeys() refuses a single unknown key, naming it.
+     * Provide documents carrying keys a statement does not define.
      *
+     * @return iterable<string, array{0: array<array-key, mixed>, 1: string}>
+     */
+    public static function unknownKeyProvider(): iterable
+    {
+        yield 'one' => [['effect' => 'allow', 'condition' => []], 'Policy statement has unknown keys: condition.'];
+        yield 'several' => [['principal' => '*', 'effect' => 'allow', 'notActions' => []], 'Policy statement has unknown keys: principal, notActions.'];
+        yield 'numeric' => [['effect' => 'allow', 0 => 'x'], 'Policy statement has unknown keys: 0.'];
+    }
+
+    /**
+     * assertKnownKeys() lists every unknown key, in order.
+     *
+     * @param  array<array-key, mixed>  $data
+     * @param  string  $message
      * @return void
      */
-    public function testAssertKnownKeysRefusesUnknownKey(): void
+    #[DataProvider('unknownKeyProvider')]
+    public function testAssertKnownKeysRefusesUnknownKeys(array $data, string $message): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Policy statement has unknown keys: condition.');
+        $this->expectExceptionMessage($message);
 
-        StatementValidator::assertKnownKeys([
-            'effect'    => 'allow',
-            'actions'   => ['x'],
-            'condition' => ['tenant' => 'org-1'],
-        ]);
+        StatementValidator::assertKnownKeys($data);
     }
 
     /**
-     * assertKnownKeys() lists every unknown key, in order, separated by commas.
+     * Provide action and resource pattern lists with the fault in them, or null
+     * when they are acceptable.
      *
+     * @return iterable<string, array{0: array<int, string>|null, 1: array<int, string>|null, 2: array<int, string>|null, 3: array<int, string>|null, 4: string|null}>
+     */
+    public static function targetProvider(): iterable
+    {
+        yield 'actions' => [['a'], null, null, null, null];
+        yield 'not_actions' => [null, ['a'], null, null, null];
+        yield 'actions and resources' => [['a'], null, ['r'], null, null];
+        yield 'not_actions and not_resources' => [null, ['a'], null, ['r'], null];
+        yield 'empty actions' => [[], null, null, null, null];
+        yield 'neither actions' => [null, null, null, null, 'Policy statement requires actions or not_actions.'];
+        yield 'neither actions with resources' => [null, null, ['r'], null, 'Policy statement requires actions or not_actions.'];
+        yield 'both actions' => [['a'], ['b'], null, null, 'Policy statement takes actions or not_actions, not both.'];
+        yield 'both resources' => [['a'], null, ['r'], ['s'], 'Policy statement takes resources or not_resources, not both.'];
+    }
+
+    /**
+     * assertTargets() requires exactly one of actions and not_actions, and at
+     * most one of resources and not_resources.
+     *
+     * @param  array<int, string>|null  $actions
+     * @param  array<int, string>|null  $notActions
+     * @param  array<int, string>|null  $resources
+     * @param  array<int, string>|null  $notResources
+     * @param  string|null  $message
      * @return void
      */
-    public function testAssertKnownKeysListsEveryUnknownKey(): void
+    #[DataProvider('targetProvider')]
+    public function testAssertTargets(?array $actions, ?array $notActions, ?array $resources, ?array $notResources, ?string $message): void
     {
-        try {
-            StatementValidator::assertKnownKeys([
-                'effect'   => 'allow',
-                'Action'   => ['x'],
-                'actions'  => ['x'],
-                'resource' => ['doc:1'],
-            ]);
-            self::fail('Expected an InvalidArgumentException.');
-        } catch (\InvalidArgumentException $exception) {
-            self::assertSame('Policy statement has unknown keys: Action, resource.', $exception->getMessage());
+        if ($message !== null) {
+            $this->expectException(\InvalidArgumentException::class);
+            $this->expectExceptionMessage($message);
         }
-    }
 
-    /**
-     * assertKnownKeys() refuses numeric keys, as a list-shaped statement would
-     * carry.
-     *
-     * @return void
-     */
-    public function testAssertKnownKeysRefusesNumericKeys(): void
-    {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Policy statement has unknown keys: 0, 1.');
-
-        StatementValidator::assertKnownKeys(['allow', ['x']]);
-    }
-
-    /**
-     * assertKnownKeys() refuses a numeric key mixed with known keys.
-     *
-     * @return void
-     */
-    public function testAssertKnownKeysRefusesNumericKeyAlongsideKnownKeys(): void
-    {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Policy statement has unknown keys: 7.');
-
-        StatementValidator::assertKnownKeys(['effect' => 'allow', 7 => 'x']);
-    }
-
-    /**
-     * Data provider for conditions that are plain values rather than operator
-     * maps.
-     *
-     * @return \Generator<string, array{0: mixed}>
-     */
-    public static function plainValueProvider(): iterable
-    {
-        yield 'string' => ['org-1'];
-        yield 'empty string' => [''];
-        yield 'interpolated' => ['${principal.id}'];
-        yield 'escaped reference' => ['\${principal.id}'];
-        yield 'integer' => [42];
-        yield 'float' => [1.5];
-        yield 'true' => [true];
-        yield 'false' => [false];
-        yield 'null' => [null];
-        yield 'object' => [new \stdClass];
-    }
-
-    /**
-     * assertValidCondition() accepts any condition that is not an array.
-     *
-     * @param  mixed  $condition
-     * @return void
-     */
-    #[DataProvider('plainValueProvider')]
-    public function testAssertValidConditionAcceptsPlainValue(mixed $condition): void
-    {
-        StatementValidator::assertValidCondition('tenant', $condition);
+        StatementValidator::assertTargets($actions, $notActions, $resources, $notResources);
 
         $this->addToAssertionCount(1);
     }
 
     /**
-     * assertValidCondition() refuses an empty operator map.
+     * assertValidResource() accepts well-formed patterns and refuses one with a
+     * malformed reference, naming it.
      *
      * @return void
      */
-    public function testAssertValidConditionRefusesEmptyOperatorMap(): void
+    public function testAssertValidResource(): void
     {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Policy statement condition \'tenant\' has no operators.');
-
-        StatementValidator::assertValidCondition('tenant', []);
-    }
-
-    /**
-     * assertValidCondition() refuses a list in place of an operator map.
-     *
-     * @return void
-     */
-    public function testAssertValidConditionRefusesNonStringOperator(): void
-    {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Policy statement condition \'tenant\' must map operator names to operands.');
-
-        StatementValidator::assertValidCondition('tenant', ['org-1', 'org-2']);
-    }
-
-    /**
-     * assertValidCondition() refuses a non-string operator that follows a valid
-     * one.
-     *
-     * @return void
-     */
-    public function testAssertValidConditionRefusesNonStringOperatorAfterValidOne(): void
-    {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Policy statement condition \'level\' must map operator names to operands.');
-
-        StatementValidator::assertValidCondition('level', ['gt' => 1, 0 => 5]);
-    }
-
-    /**
-     * assertValidCondition() refuses an unknown operator, naming it.
-     *
-     * @return void
-     */
-    public function testAssertValidConditionRefusesUnknownOperator(): void
-    {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Policy statement condition \'tenant\' has an unknown operator \'equals\'.');
-
-        StatementValidator::assertValidCondition('tenant', ['equals' => 'org-1']);
-    }
-
-    /**
-     * assertValidCondition() refuses an unknown operator that follows a valid
-     * one.
-     *
-     * @return void
-     */
-    public function testAssertValidConditionRefusesUnknownOperatorAfterValidOne(): void
-    {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Policy statement condition \'tenant\' has an unknown operator \'like\'.');
-
-        StatementValidator::assertValidCondition('tenant', ['neq' => 'org-2', 'like' => 'org-*']);
-    }
-
-    /**
-     * Data provider for operator maps with a malformed literal operand.
-     *
-     * @return \Generator<string, array{0: array<string, mixed>, 1: string}>
-     */
-    public static function malformedOperandProvider(): iterable
-    {
-        yield 'in without array' => [['in' => 'org-1'], 'in'];
-        yield 'not_in without array' => [['not_in' => 'org-1'], 'not_in'];
-        yield 'cidr malformed' => [['cidr' => '10.0.0.0/33'], 'cidr'];
-        yield 'cidr not a string' => [['cidr' => 10], 'cidr'];
-        yield 'starts_with empty' => [['starts_with' => ''], 'starts_with'];
-        yield 'ends_with not a string' => [['ends_with' => 5], 'ends_with'];
-        yield 'string_like empty' => [['string_like' => ''], 'string_like'];
-        yield 'before unparseable' => [['before' => 'not a time'], 'before'];
-        yield 'after unparseable' => [['after' => 'not a time'], 'after'];
-        yield 'between single bound' => [['between' => ['2026-01-01']], 'between'];
-        yield 'gt non-numeric' => [['gt' => 'ten'], 'gt'];
-        yield 'lte non-numeric' => [['lte' => [1]], 'lte'];
-        yield 'bool unrecognised' => [['bool' => 'yes'], 'bool'];
-    }
-
-    /**
-     * assertValidCondition() refuses a malformed literal operand, naming the
-     * operator.
-     *
-     * @param  array<string, mixed>  $condition
-     * @param  string  $operator
-     * @return void
-     */
-    #[DataProvider('malformedOperandProvider')]
-    public function testAssertValidConditionRefusesMalformedOperand(array $condition, string $operator): void
-    {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage("Policy statement condition 'attr' has an invalid operand for operator '{$operator}'.");
-
-        StatementValidator::assertValidCondition('attr', $condition);
-    }
-
-    /**
-     * assertValidCondition() refuses a malformed operand that follows a valid
-     * operator.
-     *
-     * @return void
-     */
-    public function testAssertValidConditionRefusesMalformedOperandAfterValidOne(): void
-    {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Policy statement condition \'level\' has an invalid operand for operator \'lt\'.');
-
-        StatementValidator::assertValidCondition('level', ['gt' => 1, 'lt' => 'ten']);
-    }
-
-    /**
-     * Data provider for operator maps whose operands are well formed.
-     *
-     * @return \Generator<string, array{0: array<string, mixed>}>
-     */
-    public static function validOperatorMapProvider(): iterable
-    {
-        yield 'eq' => [['eq' => 'org-1']];
-        yield 'neq and in' => [['neq' => 'org-2', 'in' => ['org-1', 'org-3']]];
-        yield 'null' => [['null' => true]];
-        yield 'cidr literal' => [['cidr' => '10.0.0.0/8']];
-        yield 'starts_with literal' => [['starts_with' => 'org-']];
-        yield 'between literal' => [['between' => ['2026-01-01', '2026-12-31']]];
-        yield 'numeric comparisons' => [['gt' => 1, 'gte' => 1.5, 'lt' => '10', 'lte' => 20]];
-        yield 'bool literal' => [['bool' => 'true']];
-        yield 'cidr interpolated' => [['cidr' => '${context.network}']];
-        yield 'starts_with interpolated' => [['starts_with' => '${principal.id}']];
-        yield 'before interpolated' => [['before' => '${context.deadline}']];
-        yield 'after interpolated' => [['after' => '${context.start}']];
-        yield 'gt interpolated' => [['gt' => '${context.minimum}']];
-        yield 'bool interpolated' => [['bool' => '${context.flag}']];
-        yield 'eq escaped reference' => [['eq' => '\${principal.id}']];
-        yield 'starts_with escaped reference' => [['starts_with' => '\${x}']];
-    }
-
-    /**
-     * assertValidCondition() accepts operator maps with well-formed literal
-     * operands and with interpolated operands, which are only type-checked.
-     *
-     * @param  array<string, mixed>  $condition
-     * @return void
-     */
-    #[DataProvider('validOperatorMapProvider')]
-    public function testAssertValidConditionAcceptsValidOperatorMap(array $condition): void
-    {
-        StatementValidator::assertValidCondition('attr', $condition);
-
-        $this->addToAssertionCount(1);
-    }
-
-    /**
-     * assertValidCondition() refuses a plain value with a malformed `${…}`
-     * reference.
-     *
-     * @return void
-     */
-    public function testAssertValidConditionRefusesMalformedReferenceInValue(): void
-    {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Policy statement condition \'tenant\' has a malformed ${…} reference.');
-
-        StatementValidator::assertValidCondition('tenant', '${context.tenant-id}');
-    }
-
-    /**
-     * assertValidCondition() refuses an operand with a malformed `${…}`
-     * reference.
-     *
-     * @return void
-     */
-    public function testAssertValidConditionRefusesMalformedReferenceInOperand(): void
-    {
-        $this->expectException(\InvalidArgumentException::class);
-        $this->expectExceptionMessage('Policy statement condition \'owner\' has a malformed ${…} reference.');
-
-        StatementValidator::assertValidCondition('owner', ['starts_with' => '${principal']);
-    }
-
-    /**
-     * Data provider for conditionError() with every fault and the well-formed
-     * conditions it accepts.
-     *
-     * @return \Generator<string, array{0: mixed, 1: string|null}>
-     */
-    public static function conditionErrorProvider(): iterable
-    {
-        $malformed = 'condition \'k\' has a malformed ${…} reference';
-
-        yield 'plain value' => ['org-1', null];
-        yield 'plain interpolated value' => ['${principal.id}', null];
-        yield 'plain escaped value' => ['\${principal.id}', null];
-        yield 'plain integer' => [42, null];
-        yield 'plain null' => [null, null];
-        yield 'well-formed operator map' => [['eq' => 'org-1', 'gt' => '${context.minimum}'], null];
-        yield 'list operand not interpolated' => [['in' => ['${foo']], null];
-        yield 'empty operator map' => [[], 'condition \'k\' has no operators'];
-        yield 'list in place of map' => [['org-1', 'org-2'], 'condition \'k\' must map operator names to operands'];
-        yield 'unknown operator' => [['x' => 'org-1'], 'condition \'k\' has an unknown operator \'x\''];
-        yield 'invalid operand' => [['gt' => 'ten'], 'condition \'k\' has an invalid operand for operator \'gt\''];
-        yield 'empty starts_with operand' => [['starts_with' => ''], 'condition \'k\' has an invalid operand for operator \'starts_with\''];
-        yield 'malformed reference in value' => ['${context.tenant-id}', $malformed];
-        yield 'empty reference in value' => ['${}', $malformed];
-        yield 'digit-led reference in value' => ['${1x}', $malformed];
-        yield 'unterminated reference in value' => ['${foo', $malformed];
-        yield 'malformed reference in operand' => [['eq' => '${context.tenant-id}'], $malformed];
-        yield 'malformed reference in string operand' => [['ends_with' => '${}'], $malformed];
-        yield 'malformed reference beside a valid one' => [['eq' => '${principal.id}${1x}'], $malformed];
-        yield 'malformed reference in numeric operand' => [['gt' => '${foo'], 'condition \'k\' has an invalid operand for operator \'gt\''];
-    }
-
-    /**
-     * conditionError() returns the exact detail for each fault, and null for a
-     * well-formed condition.
-     *
-     * @param  mixed  $condition
-     * @param  string|null  $expected
-     * @return void
-     */
-    #[DataProvider('conditionErrorProvider')]
-    public function testConditionError(mixed $condition, ?string $expected): void
-    {
-        self::assertSame($expected, StatementValidator::conditionError('k', $condition));
-    }
-
-    /**
-     * Data provider for operator maps with several faults, and the first one,
-     * which is the fault reported.
-     *
-     * @return \Generator<string, array{0: array<array-key, mixed>, 1: string}>
-     */
-    public static function firstFaultProvider(): iterable
-    {
-        yield 'invalid operand before unknown operator' => [['gt' => 'ten', 'bogus' => 1], 'condition \'k\' has an invalid operand for operator \'gt\''];
-        yield 'unknown operator before invalid operand' => [['bogus' => 1, 'gt' => 'ten'], 'condition \'k\' has an unknown operator \'bogus\''];
-        yield 'non-string operator before unknown operator' => [[0 => 5, 'bogus' => 1], 'condition \'k\' must map operator names to operands'];
-        yield 'malformed reference before invalid operand' => [['eq' => '${foo', 'gt' => 'ten'], 'condition \'k\' has a malformed ${…} reference'];
-        yield 'invalid operand before malformed reference' => [['gt' => 'ten', 'eq' => '${foo'], 'condition \'k\' has an invalid operand for operator \'gt\''];
-        yield 'first of several invalid operands' => [['gt' => 1, 'lt' => 'ten', 'bool' => 'yes'], 'condition \'k\' has an invalid operand for operator \'lt\''];
-        yield 'unknown operator with malformed operand' => [['bogus' => '${foo'], 'condition \'k\' has an unknown operator \'bogus\''];
-    }
-
-    /**
-     * conditionError() reports the first fault when several operators are bad.
-     *
-     * @param  array<array-key, mixed>  $condition
-     * @param  string  $expected
-     * @return void
-     */
-    #[DataProvider('firstFaultProvider')]
-    public function testConditionErrorReportsFirstFault(array $condition, string $expected): void
-    {
-        self::assertSame($expected, StatementValidator::conditionError('k', $condition));
-    }
-
-    /**
-     * Data provider for resource patterns without a malformed reference.
-     *
-     * @return \Generator<string, array{0: string}>
-     */
-    public static function wellFormedResourceProvider(): iterable
-    {
-        yield 'wildcard' => ['*'];
-        yield 'empty' => [''];
-        yield 'literal' => ['document:1'];
-        yield 'glob' => ['document:*'];
-        yield 'reference' => ['document:${principal.id}'];
-        yield 'several references' => ['tenant:${principal.tenant_id}/document:${resource.id}'];
-        yield 'escaped reference' => ['document:\${principal.id}'];
-        yield 'escaped malformed reference' => ['document:\${tenant-id}'];
-        yield 'escaped beside reference' => ['\${x}:${principal.id}'];
-        yield 'dollar without brace' => ['price:$5'];
-    }
-
-    /**
-     * assertValidResource() accepts well-formed and escaped references.
-     *
-     * @param  string  $pattern
-     * @return void
-     */
-    #[DataProvider('wellFormedResourceProvider')]
-    public function testAssertValidResourceAcceptsWellFormedPattern(string $pattern): void
-    {
-        StatementValidator::assertValidResource($pattern);
-
-        $this->addToAssertionCount(1);
-    }
-
-    /**
-     * Data provider for resource patterns with a malformed reference.
-     *
-     * @return \Generator<string, array{0: string}>
-     */
-    public static function malformedResourceProvider(): iterable
-    {
-        yield 'hyphenated key' => ['document:${context.tenant-id}'];
-        yield 'empty reference' => ['document:${}'];
-        yield 'digit-led reference' => ['document:${1x}'];
-        yield 'unterminated reference' => ['document:${foo'];
-        yield 'malformed beside well-formed' => ['${principal.id}:${1x}'];
-    }
-
-    /**
-     * assertValidResource() refuses a malformed reference, quoting the pattern.
-     *
-     * @param  string  $pattern
-     * @return void
-     */
-    #[DataProvider('malformedResourceProvider')]
-    public function testAssertValidResourceRefusesMalformedReference(string $pattern): void
-    {
-        try {
+        foreach (['*', 'posts:*', 'posts:${principal.id}', 'posts:\${literal}', 'App\Models\Post:*'] as $pattern) {
             StatementValidator::assertValidResource($pattern);
-            self::fail('Expected an InvalidArgumentException.');
-        } catch (\InvalidArgumentException $exception) {
-            self::assertSame("Policy statement resource pattern '{$pattern}' has a malformed \${…} reference.", $exception->getMessage());
+        }
+
+        $this->addToAssertionCount(1);
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('Policy statement resource pattern \'posts:${foo\' has a malformed ${…} reference.');
+
+        StatementValidator::assertValidResource('posts:${foo');
+    }
+
+    /**
+     * effectOf() reads the effect, and refuses a missing, non-string or unknown
+     * one.
+     *
+     * @return void
+     */
+    public function testEffectOf(): void
+    {
+        self::assertSame(PolicyEffect::ALLOW, StatementValidator::effectOf(['effect' => 'allow']));
+        self::assertSame(PolicyEffect::DENY, StatementValidator::effectOf(['effect' => 'deny']));
+
+        foreach ([[], ['effect' => null], ['effect' => 1]] as $data) {
+            self::assertRefused('Policy statement requires a string effect.', static fn () => StatementValidator::effectOf($data));
+        }
+
+        self::assertRefused('Invalid policy effect: \'audit\'', static fn () => StatementValidator::effectOf(['effect' => 'audit']));
+    }
+
+    /**
+     * Provide statement ids with whether they are accepted.
+     *
+     * @return iterable<string, array{0: mixed, 1: bool}>
+     */
+    public static function sidProvider(): iterable
+    {
+        yield 'one letter' => ['a', true];
+        yield 'every allowed character' => ['Allow_Read-posts:1.2', true];
+        yield 'digits' => ['42', true];
+        yield 'sixty-four characters' => [\str_repeat('a', 64), true];
+        yield 'empty' => ['', false];
+        yield 'sixty-five characters' => [\str_repeat('a', 65), false];
+        yield 'space' => ['allow read', false];
+        yield 'slash' => ['allow/read', false];
+        yield 'asterisk' => ['allow*', false];
+        yield 'trailing newline' => ["allow\n", false];
+        yield 'non-ascii letter' => ['allöw', false];
+        yield 'int' => [42, false];
+        yield 'null' => [null, false];
+        yield 'list' => [['a'], false];
+    }
+
+    /**
+     * sidOf() reads a statement id of 1 to 64 letters, digits, `_`, `-`, `:`
+     * and `.`, and refuses anything else, null included.
+     *
+     * @param  mixed  $sid
+     * @param  bool  $isAccepted
+     * @return void
+     */
+    #[DataProvider('sidProvider')]
+    public function testSidOf(mixed $sid, bool $isAccepted): void
+    {
+        if (!$isAccepted) {
+            $this->expectException(\InvalidArgumentException::class);
+            $this->expectExceptionMessage('Policy statement sid must be 1 to 64 letters, digits, \'_\', \'-\', \':\' or \'.\'.');
+        }
+
+        self::assertSame($sid, StatementValidator::sidOf(['sid' => $sid]));
+    }
+
+    /**
+     * sidOf() returns null for a statement without a sid.
+     *
+     * @return void
+     */
+    public function testSidOfIsNullWhenAbsent(): void
+    {
+        self::assertNull(StatementValidator::sidOf(['effect' => 'allow']));
+    }
+
+    /**
+     * Provide pattern lists that are not a non-empty list of non-empty strings.
+     *
+     * @return iterable<string, array{0: mixed}>
+     */
+    public static function malformedPatternListProvider(): iterable
+    {
+        yield 'string' => ['posts:read'];
+        yield 'null' => [null];
+        yield 'empty list' => [[]];
+        yield 'empty string' => [['posts:read', '']];
+        yield 'int' => [[42]];
+        yield 'nested list' => [[['posts:read']]];
+        yield 'map' => [['a' => 'posts:read']];
+        yield 'list not from zero' => [[1 => 'posts:read']];
+    }
+
+    /**
+     * patternsOf() refuses a malformed list for every pattern field.
+     *
+     * @param  mixed  $patterns
+     * @return void
+     */
+    #[DataProvider('malformedPatternListProvider')]
+    public function testPatternsOfRefusesMalformedLists(mixed $patterns): void
+    {
+        foreach (['actions', 'not_actions', 'resources', 'not_resources'] as $field) {
+            self::assertRefused(
+                "Policy statement {$field} must be a non-empty list of non-empty strings.",
+                static fn () => StatementValidator::patternsOf([$field => $patterns], $field),
+            );
         }
     }
 
     /**
-     * conditionErrors() maps each malformed condition to its fault, keyed by
-     * the condition's key, and leaves well-formed conditions out.
+     * patternsOf() reads a list as given, and returns null for an absent field.
      *
      * @return void
      */
-    public function testConditionErrorsMapsOnlyMalformedConditions(): void
+    public function testPatternsOfReadsListsAndAbsentFields(): void
     {
-        $errors = StatementValidator::conditionErrors([
-            'tenant' => ['eq' => 'org-1'],
-            'region' => 'eu',
-            'empty'  => [],
-            7        => 'x',
-            'op'     => ['bogus' => 1],
+        $data = ['actions' => ['posts:*', 'users:read'], 'not_resources' => ['post:1']];
+
+        self::assertSame(['posts:*', 'users:read'], StatementValidator::patternsOf($data, 'actions'));
+        self::assertSame(['post:1'], StatementValidator::patternsOf($data, 'not_resources'));
+        self::assertNull(StatementValidator::patternsOf($data, 'not_actions'));
+        self::assertNull(StatementValidator::patternsOf($data, 'resources'));
+    }
+
+    /**
+     * patternsOf() checks resource patterns for malformed references, in
+     * `resources` and `not_resources`, but leaves action patterns alone.
+     *
+     * @return void
+     */
+    public function testPatternsOfChecksResourceReferences(): void
+    {
+        self::assertSame(['posts:${foo'], StatementValidator::patternsOf(['actions' => ['posts:${foo']], 'actions'));
+        self::assertSame(['posts:${foo'], StatementValidator::patternsOf(['not_actions' => ['posts:${foo']], 'not_actions'));
+
+        foreach (['resources', 'not_resources'] as $field) {
+            self::assertRefused(
+                'Policy statement resource pattern \'posts:${foo\' has a malformed ${…} reference.',
+                static fn () => StatementValidator::patternsOf([$field => ['posts:*', 'posts:${foo']], $field),
+            );
+        }
+    }
+
+    /**
+     * conditionsOf() reads the conditions map, defaults it to empty, and
+     * refuses one that is not an array, null included.
+     *
+     * @return void
+     */
+    public function testConditionsOf(): void
+    {
+        self::assertSame(['eq' => ['k' => 1]], StatementValidator::conditionsOf(['conditions' => ['eq' => ['k' => 1]]]));
+        self::assertSame([], StatementValidator::conditionsOf([]));
+
+        foreach (['nope', null, 1] as $conditions) {
+            self::assertRefused(
+                'Policy statement conditions must map operators to key tests.',
+                static fn () => StatementValidator::conditionsOf(['conditions' => $conditions]),
+            );
+        }
+    }
+
+    /**
+     * Provide condition maps with the faults that make them unreadable as a
+     * whole.
+     *
+     * @return iterable<string, array{0: array<array-key, mixed>, 1: list<string>}>
+     */
+    public static function operatorErrorProvider(): iterable
+    {
+        yield 'well formed' => [['eq' => ['tenant' => 'org-1'], 'ip_in_if_exists' => ['ip' => '10.0.0.0/8']], []];
+        yield 'empty' => [[], []];
+        yield 'key-first shape' => [['tenant' => ['eq' => 'org-1']], ['conditions have an unknown operator \'tenant\'']];
+        yield 'bare value' => [['tenant' => 'org-1'], ['conditions have an unknown operator \'tenant\'']];
+        yield 'cidr' => [['cidr' => ['ip' => '10.0.0.0/8']], ['conditions have an unknown operator \'cidr\'']];
+        yield 'string_like' => [['string_like' => ['name' => 'a*']], ['conditions have an unknown operator \'string_like\'']];
+        yield 'not_null' => [['not_null' => ['name' => true]], ['conditions have an unknown operator \'not_null\'']];
+        yield 'null_if_exists' => [['null_if_exists' => ['name' => true]], ['conditions have an unknown operator \'null_if_exists\'']];
+        yield 'list of conditions' => [[['eq' => ['k' => 1]]], ['conditions must map operator names to key tests']];
+        yield 'operator without tests' => [['eq' => []], ['condition operator \'eq\' must map context keys to operands']];
+        yield 'operator with a value' => [['eq' => 'org-1'], ['condition operator \'eq\' must map context keys to operands']];
+        yield 'operator with a list' => [['in' => ['a', 'b']], ['condition operator \'in\' must map context keys to operands']];
+        yield 'operator with a numeric key' => [['eq' => ['tenant' => 'a', 0 => 'b']], ['condition operator \'eq\' must map context keys to operands']];
+        yield 'several faults in order' => [
+            ['bogus' => ['k' => 1], 'eq' => ['k' => 1], 'gt' => 5],
+            ['conditions have an unknown operator \'bogus\'', 'condition operator \'gt\' must map context keys to operands'],
+        ];
+    }
+
+    /**
+     * operatorErrors() lists every operator entry that is not a known operator
+     * mapping context keys to operands, in order.
+     *
+     * @param  array<array-key, mixed>  $conditions
+     * @param  list<string>  $expected
+     * @return void
+     */
+    #[DataProvider('operatorErrorProvider')]
+    public function testOperatorErrors(array $conditions, array $expected): void
+    {
+        self::assertSame($expected, StatementValidator::operatorErrors($conditions));
+    }
+
+    /**
+     * conditionTests() lists every key test of the well-formed operator entries
+     * in order, with the operator it tests with and whether a missing key
+     * passes it, and leaves out the malformed entries.
+     *
+     * @return void
+     */
+    public function testConditionTestsListsEveryKeyTest(): void
+    {
+        $tests = StatementValidator::conditionTests([
+            'eq'              => ['tenant' => 'org-1', 'role' => 'admin'],
+            'bogus'           => ['tenant' => 'x'],
+            'ip_in_if_exists' => ['ip' => '10.0.0.0/8'],
+            'gt'              => 5,
+            'null'            => ['deleted_at' => true],
+            0                 => ['eq' => ['k' => 1]],
         ]);
 
         self::assertSame([
-            'empty' => 'condition \'empty\' has no operators',
-            7       => 'a condition key is not a string',
-            'op'    => 'condition \'op\' has an unknown operator \'bogus\'',
-        ], $errors);
+            ['key' => 'tenant', 'operator' => 'eq', 'isOptional' => false, 'operand' => 'org-1', 'error' => null],
+            ['key' => 'role', 'operator' => 'eq', 'isOptional' => false, 'operand' => 'admin', 'error' => null],
+            ['key' => 'ip', 'operator' => 'ip_in', 'isOptional' => true, 'operand' => '10.0.0.0/8', 'error' => null],
+            ['key' => 'deleted_at', 'operator' => 'null', 'isOptional' => false, 'operand' => true, 'error' => null],
+        ], $tests);
     }
 
     /**
-     * conditionErrors() returns an empty map for an empty or well-formed
-     * condition map.
+     * Provide key tests with the fault each carries, or null when it is well
+     * formed.
      *
+     * @return iterable<string, array{0: array<string, mixed>, 1: string|null}>
+     */
+    public static function keyTestErrorProvider(): iterable
+    {
+        yield 'valid operand' => [['eq' => ['k' => 'x']], null];
+        yield 'valid interpolated operand' => [['eq' => ['k' => '${context.k}']], null];
+        yield 'valid suffixed operand' => [['eq_if_exists' => ['k' => 'x']], null];
+        yield 'list operand for eq' => [['eq' => ['k' => ['x']]], 'condition \'k\' has an invalid operand for operator \'eq\''];
+        yield 'list operand for suffixed eq' => [['eq_if_exists' => ['k' => ['x']]], 'condition \'k\' has an invalid operand for operator \'eq\''];
+        yield 'string operand for in' => [['in' => ['k' => 'x']], 'condition \'k\' has an invalid operand for operator \'in\''];
+        yield 'empty set for any_value_in' => [['any_value_in' => ['k' => []]], 'condition \'k\' has an invalid operand for operator \'any_value_in\''];
+        yield 'string operand for null' => [['null' => ['k' => 'true']], 'condition \'k\' has an invalid operand for operator \'null\''];
+        yield 'empty set for ip_in' => [['ip_in' => ['k' => []]], 'condition \'k\' has an invalid operand for operator \'ip_in\''];
+        yield 'malformed reference' => [['eq' => ['k' => '${foo']], 'condition \'k\' has a malformed ${…} reference'];
+        yield 'malformed reference in a pattern' => [['like' => ['k' => 'a-${context.tenant-id}*']], 'condition \'k\' has a malformed ${…} reference'];
+        yield 'malformed reference in a number' => [['gt' => ['k' => '${context.tenant-id}']], 'condition \'k\' has an invalid operand for operator \'gt\''];
+    }
+
+    /**
+     * conditionTests() records why a key test cannot be evaluated: a literal
+     * operand of the wrong type, then a malformed reference.
+     *
+     * @param  array<string, mixed>  $conditions
+     * @param  string|null  $expected
      * @return void
      */
-    public function testConditionErrorsIsEmptyForWellFormedConditions(): void
+    #[DataProvider('keyTestErrorProvider')]
+    public function testConditionTestsRecordEachFault(array $conditions, ?string $expected): void
     {
-        self::assertSame([], StatementValidator::conditionErrors([]));
-        self::assertSame([], StatementValidator::conditionErrors(['tenant' => ['eq' => 'org-1'], 'flag' => true]));
+        $tests = StatementValidator::conditionTests($conditions);
+
+        self::assertCount(1, $tests);
+        self::assertSame($expected, $tests[0]['error']);
+    }
+
+    /**
+     * Assert that the callback throws an invalid-argument exception with the
+     * message.
+     *
+     * @param  string  $message
+     * @param  \Closure(): mixed  $callback
+     * @return void
+     */
+    private static function assertRefused(string $message, \Closure $callback): void
+    {
+        try {
+            $callback();
+        } catch (\InvalidArgumentException $exception) {
+            self::assertSame($message, $exception->getMessage());
+
+            return;
+        }
+
+        self::fail("Expected the refusal: {$message}");
     }
 }

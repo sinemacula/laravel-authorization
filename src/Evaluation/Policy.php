@@ -11,7 +11,8 @@ namespace SineMacula\Laravel\Authorization\Evaluation;
  * evaluator. Policy documents are versioned so future schema changes can be
  * detected without a database migration; a document without a version is
  * version 1, and a version this package does not know is refused, as is any key
- * other than `version`, `name` and `statements`.
+ * other than `version`, `name` and `statements`, and two statements that share
+ * a `sid`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -92,6 +93,8 @@ final readonly class Policy
             return Statement::fromArray($statement);
         }, $data['statements']));
 
+        self::assertUniqueSids($statements);
+
         return new self(
             name: $data['name'],
             statements: $statements,
@@ -114,6 +117,24 @@ final readonly class Policy
                 $this->statements,
             ),
         ];
+    }
+
+    /**
+     * Refuse statements that share a sid, naming each sid used more than once.
+     *
+     * @param  list<\SineMacula\Laravel\Authorization\Evaluation\Statement>  $statements
+     * @return void
+     *
+     * @throws \InvalidArgumentException
+     */
+    private static function assertUniqueSids(array $statements): void
+    {
+        $sids       = \array_filter(\array_map(static fn (Statement $statement): ?string => $statement->sid, $statements), static fn (?string $sid): bool => $sid !== null);
+        $duplicates = \array_unique(\array_diff_key($sids, \array_unique($sids)));
+
+        if ($duplicates !== []) {
+            throw new \InvalidArgumentException('Policy document has statements sharing a sid: ' . \implode(', ', $duplicates) . '.');
+        }
     }
 
     /**

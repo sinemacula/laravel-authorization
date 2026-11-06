@@ -55,8 +55,8 @@ final class BenchmarkFixtures
                     "posts:resource_{$i}_c",
                 ],
                 'conditions' => [
-                    'tenant' => ['eq' => "tenant_{$i}"],
-                    'rank'   => ['lt' => 100],
+                    'eq' => ['tenant' => "tenant_{$i}"],
+                    'lt' => ['rank' => 100],
                 ],
             ];
         }
@@ -158,40 +158,42 @@ final class BenchmarkFixtures
     }
 
     /**
-     * Full 18-operator condition map covering every branch in
-     * `Statement::matchesOperator()` — string ops, numeric ops, temporal ops,
-     * set ops, boolean, CIDR, and null checks. Used by the condition-evaluation
-     * bench and its matching budget test so both surfaces measure the same
-     * operator chain.
+     * Full 20-operator condition map covering every operator of
+     * `ConditionEvaluator` — string ops, numeric ops, temporal ops, set ops,
+     * boolean, null, IP range and multi-valued checks. Used by the
+     * condition-evaluation bench and its matching budget test so both surfaces
+     * measure the same operator chain.
      *
      * @return array<string, mixed>
      */
     public static function conditionChain(): array
     {
         return [
-            'tenant'       => ['eq' => 'tenant-99'],
-            'role'         => ['neq' => 'guest'],
-            'country'      => ['in' => ['US', 'GB', 'CA']],
-            'blocklist'    => ['not_in' => ['blocked', 'banned']],
-            'ip'           => ['cidr' => '10.0.0.0/8'],
-            'path'         => ['starts_with' => '/admin'],
-            'file'         => ['ends_with' => '.json'],
-            'scheduled_at' => ['before' => '2099-01-01T00:00:00Z'],
-            'created_at'   => ['after' => '2000-01-01T00:00:00Z'],
-            'window'       => ['between' => ['2000-01-01T00:00:00Z', '2099-01-01T00:00:00Z']],
-            'agent'        => ['string_like' => 'Mozilla/*'],
-            'deleted_at'   => ['null' => true],
-            'email'        => ['not_null' => true],
-            'age'          => ['gt' => 17],
-            'quota'        => ['gte' => 0],
-            'strikes'      => ['lt' => 3],
-            'priority'     => ['lte' => 10],
-            'verified'     => ['bool' => true],
+            'eq'            => ['tenant' => 'tenant-99'],
+            'neq'           => ['role' => 'guest'],
+            'in'            => ['country' => ['US', 'GB', 'CA']],
+            'not_in'        => ['blocklist' => ['blocked', 'banned']],
+            'starts_with'   => ['path' => '/admin'],
+            'ends_with'     => ['file' => '.json'],
+            'like'          => ['agent' => 'Mozilla/*'],
+            'gt'            => ['age' => 17],
+            'gte'           => ['quota' => 0],
+            'lt'            => ['strikes' => 3],
+            'lte'           => ['priority' => 10],
+            'before'        => ['scheduled_at' => '2099-01-01T00:00:00Z'],
+            'after'         => ['created_at' => '2000-01-01T00:00:00Z'],
+            'between'       => ['window' => ['2000-01-01T00:00:00Z', '2099-01-01T00:00:00Z']],
+            'bool'          => ['verified' => true],
+            'null'          => ['deleted_at' => true, 'email' => false],
+            'ip_in'         => ['ip' => '10.0.0.0/8'],
+            'ip_not_in'     => ['ip' => ['192.168.0.0/16', '2001:db8::/32']],
+            'any_value_in'  => ['groups' => ['admins', 'editors']],
+            'all_values_in' => ['scopes' => ['posts:read', 'posts:write', 'posts:delete']],
         ];
     }
 
     /**
-     * Context matching the 18-operator `conditionChain()` fixture — every key
+     * Context matching the 20-operator `conditionChain()` fixture — every key
      * resolves to a value that makes its operator pass.
      *
      * @return array<string, mixed>
@@ -217,6 +219,8 @@ final class BenchmarkFixtures
             'strikes'      => 0,
             'priority'     => 5,
             'verified'     => true,
+            'groups'       => ['members', 'editors'],
+            'scopes'       => ['posts:read', 'posts:write'],
         ];
     }
 }

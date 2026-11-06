@@ -4,12 +4,17 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Config\Repository as ConfigRepository;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Contracts\ActionCatalogue;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
+use SineMacula\Laravel\Authorization\Evaluation\PolicyValidator;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Observers\PolicyObserver;
+use SineMacula\Laravel\Authorization\Support\DeclaredActionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
+use Tests\Feature\Stubs\Enums\CataloguePermission;
 use Tests\TestCase;
 
 /**
@@ -91,5 +96,76 @@ final class PolicyModelTest extends TestCase
         ]);
 
         self::assertCount(1, PolicyDocument::hydrate($policy)->statements);
+    }
+
+    /**
+     * A document over a limit is refused at write time.
+     *
+     * @return void
+     */
+    public function testRejectsADocumentOverALimitOnWrite(): void
+    {
+        $this->config()->set('authorization.policies.limits.statements', 1);
+
+        $this->expectException(InvalidPolicyDocumentException::class);
+        $this->expectExceptionMessage('Invalid policy document \'wide\': Policy document has 2 statements, more than the 1 allowed.');
+
+        Policy::create(['name' => 'wide', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['a']], ['effect' => 'allow', 'actions' => ['b']]]]]);
+    }
+
+    /**
+     * Every document is refused at write time when the code declares no
+     * permissions.
+     *
+     * @return void
+     */
+    public function testRejectsEveryWriteWhenNoPermissionsAreDeclared(): void
+    {
+        $this->app?->instance(ActionCatalogue::class, $this->app->make(DeclaredActionCatalogue::class));
+
+        $this->expectExceptionMessage('Invalid policy document \'readers\': ' . PolicyValidator::NOTHING_DECLARED);
+
+        Policy::create(['name' => 'readers', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:create']]]]]);
+    }
+
+    /**
+     * A document naming only declared actions is written, and one naming an
+     * action the code does not declare is refused at write time.
+     *
+     * @return void
+     */
+    public function testRejectsAnUndeclaredActionOnWrite(): void
+    {
+        $this->config()->set('authorization.permission_enums', [CataloguePermission::class]);
+        $this->app?->instance(ActionCatalogue::class, $this->app->make(DeclaredActionCatalogue::class));
+
+        self::assertTrue(Policy::create(['name' => 'readers', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:*']]]]])->exists);
+
+        $this->expectExceptionMessage('Invalid policy document \'writers\': Policy statement #0 actions pattern \'posts:delete\' matches no declared permission.');
+
+        Policy::create(['name' => 'writers', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:delete']]]]]);
+    }
+
+    /**
+     * A condition key outside the key syntax is refused at write time.
+     *
+     * @return void
+     */
+    public function testRejectsAMalformedConditionKeyOnWrite(): void
+    {
+        $this->expectExceptionMessage('Invalid policy document \'keyed\': Policy statement #0 condition key \'request ip\' must be');
+
+        Policy::create(['name' => 'keyed', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['a'], 'conditions' => ['eq' => ['request ip' => 'x']]]]]]);
+    }
+
+    /**
+     * Return the configuration repository.
+     *
+     * @return \Illuminate\Config\Repository
+     */
+    private function config(): ConfigRepository
+    {
+        /** @var \Illuminate\Config\Repository */
+        return $this->app?->make(ConfigRepository::class);
     }
 }

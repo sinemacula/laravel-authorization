@@ -7,13 +7,13 @@ namespace SineMacula\Laravel\Authorization\Console;
 use Illuminate\Console\Command;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Console\Support\ActorOption;
-use SineMacula\Laravel\Authorization\Console\Support\PermissionCatalogue;
 use SineMacula\Laravel\Authorization\Console\Support\PermissionDiff;
 use SineMacula\Laravel\Authorization\Console\Support\PermissionDiffBuilder;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
+use SineMacula\Laravel\Authorization\Support\PermissionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
@@ -77,7 +77,7 @@ final class SyncPermissionsCommand extends Command
     /**
      * Execute the console command.
      *
-     * @param  \SineMacula\Laravel\Authorization\Console\Support\PermissionCatalogue  $catalogue
+     * @param  \SineMacula\Laravel\Authorization\Support\PermissionCatalogue  $catalogue
      * @param  \SineMacula\Laravel\Authorization\Console\Support\PermissionDiffBuilder  $builder
      * @return int
      */
