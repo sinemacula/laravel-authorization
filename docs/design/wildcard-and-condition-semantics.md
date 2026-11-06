@@ -247,10 +247,10 @@ The context a check's statements read is nested namespaces (N24), each made by o
   failure kept as the previous exception: the check is never decided with the attribute missing, so a failing provider
   never allows anything. The message names the provider's class and the namespace, never a value, and nothing the
   provider returned or threw reaches the decision, an event or the trace (AUTHZ-8.8).
-- **Caller values** (N27). The `$context` of `check()` and every helper over it (`can()`, `authorize()`, `explain()`,
-  `effectivePermissions()`, the Gate's string-keyed and associative arguments and the testing assertions) is wrapped
-  under `input` once, where the manager builds the check's context. A caller passing
-  `['request' => ['ip' => '10.0.0.1']]` supplies `input.request.ip`, never `request.ip`.
+- **Caller values** (N27). The `$context` of `check()` and every helper over it (`can()`, `cannot()`, `any()`, `all()`,
+  `authorize()`, `explain()`, `effectivePermissions()`, a policy class's `decide()`, the Gate's string-keyed and
+  associative arguments and the testing assertions) is wrapped under `input` once, where the manager builds the check's
+  context. A caller passing `['request' => ['ip' => '10.0.0.1']]` supplies `input.request.ip`, never `request.ip`.
 - **Application namespaces** (N26). A `ContextSource` names one namespace and returns its values, nested by key. A
   source that does not implement the contract, one claiming a reserved namespace (`authentication`, `request`,
   `environment`, `input`, `subject`, `resource`), two sources claiming one namespace, and a source claiming a namespace
@@ -596,8 +596,8 @@ document, then a summary, and exits 1 when any is invalid.
 - `PolicyValidator`, `PolicyLimits` and the `ActionCatalogue` contract -- the write-time checks, and the limits on read.
 - `CheckContext::lookup()` and `find()` -- the one strict dot-path resolver for conditions and references, and the
   per-check memo of built namespaces; `CheckContextFactory::make()` -- a check's context, the caller's values under
-  `input` and every other namespace from its source; `AuthorizationManager::decideGrants()` -- where the caller's values
-  are wrapped.
+  `input` and every other namespace from its source; `DecisionPipeline::decideGrants()` -- where the caller's values are
+  wrapped.
 - `AttributeNamespaces::builders()` -- the `subject` and `resource` namespaces of a check, their built-ins and their
   providers' values; `AttributeProviders` -- the providers by morph type, the declared keys only, and
   `AttributeProviderFailed`; the `SubjectAttributeProvider` and `ResourceAttributeProvider` contracts;

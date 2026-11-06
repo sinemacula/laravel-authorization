@@ -3285,6 +3285,119 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
+     * `cannot()`, `any()` and `all()` take every resource form `check()` takes:
+     * a model, a `(type, id)` pair, a reference, a model class and an opaque
+     * string, each reported by its identifier.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
+     */
+    public function testCannotAnyAndAllTakeEveryResourceForm(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+        $post = StubIdentity::create(['id' => 'post-1']);
+
+        $identifiers = [StubIdentity::class . ':post-1', 'posts:7', 'comments:9', StubTenant::class . ':*', 'arn:posts'];
+        $policy      = EvaluationPolicy::fromArray(['name' => 'by-identifier', 'statements' => [['effect' => 'allow', 'actions' => ['posts:read'], 'resources' => $identifiers]]]);
+
+        Event::fake([DecisionEvaluated::class]);
+
+        $scope = Authorization::for($user)->withPolicies([$policy]);
+
+        foreach ([$post, ['posts', 7], ResourceReference::record('comments', '9'), StubTenant::class, 'arn:posts'] as $resource) {
+            self::assertFalse($scope->cannot('posts:read', $resource));
+            self::assertTrue($scope->any(['posts:delete', 'posts:read'], $resource));
+            self::assertFalse($scope->all(['posts:read', 'posts:delete'], $resource));
+            self::assertTrue($scope->cannot('posts:read', StubIdentity::class . ':post-2'));
+        }
+
+        $resources = Event::dispatched(DecisionEvaluated::class)
+            ->map(static fn (array $arguments): ?string => $arguments[0]->resource)
+            ->values()
+            ->all();
+
+        $expected = [];
+
+        foreach ($identifiers as $identifier) {
+            $expected = [...$expected, ...\array_fill(0, 5, $identifier), StubIdentity::class . ':post-2'];
+        }
+
+        self::assertSame($expected, $resources);
+    }
+
+    /**
+     * `any()` and `all()` resolve their resource once, however many actions
+     * they decide, so a bound resource tenant resolver is asked once.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
+     */
+    public function testAnyAndAllResolveTheResourceOnce(): void
+    {
+        $user     = StubIdentity::create(['id' => 'user-1']);
+        $model    = StubTenant::create(['id' => 'tenant-a', 'name' => 'Tenant A']);
+        $resolver = new FixedResourceTenantResolver;
+
+        $this->app?->instance(ResourceTenantResolver::class, $resolver);
+
+        self::assertFalse(Authorization::for($user)->any(['posts:read', 'posts:edit'], $model));
+        self::assertSame([$model], $resolver->asked);
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']));
+        $user->givePermission(Permission::create(['name' => 'posts:edit']));
+
+        self::assertTrue(Authorization::for($user)->all(['posts:read', 'posts:edit'], ['posts', 7]));
+        self::assertSame([['posts', '7']], $resolver->askedRecords);
+    }
+
+    /**
+     * An `insufficient_authentication` decision is a refusal for `cannot()`,
+     * `any()` and `all()`, which raise no step-up exception, and the last
+     * decision keeps its reason.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
+     */
+    public function testInsufficientAuthenticationIsARefusalForCannotAnyAndAll(): void
+    {
+        $user    = StubIdentity::create(['id' => '5c1f2e6d-0b7a-4def-9c8b-6a7b8c9d0eb5']);
+        $checker = new StubRequirementChecker(RequirementResult::unmet(['multifactor']));
+        $manager = $this->inSession($user, 'session-1', $checker)->withPolicies([self::requiringPolicy()]);
+
+        self::assertTrue($manager->cannot('reports:export'));
+        self::assertFalse($manager->any(['reports:export']));
+        self::assertFalse($manager->all(['reports:export', 'reports:read']));
+        self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $manager->lastDecision()?->reason);
+    }
+
+    /**
+     * The facade forwards `cannot()`, `any()` and `all()` to the manager the
+     * current request is about.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
+     */
+    public function testTheFacadeDecidesCannotAnyAndAllForTheCurrentSubject(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:read']));
+        $this->resolvePrincipalAs($user);
+
+        Authorization::clearResolvedInstance('authorization');
+
+        self::assertFalse(Authorization::cannot('posts:read'));
+        self::assertTrue(Authorization::cannot('posts:edit'));
+        self::assertTrue(Authorization::any(['posts:edit', 'posts:read']));
+        self::assertFalse(Authorization::all(['posts:read', 'posts:edit']));
+        self::assertSame(DecisionReason::NO_MATCH, Authorization::lastDecision()?->reason);
+    }
+
+    /**
      * Assert that exactly one decision event was dispatched, for the check of
      * `posts:create` without a resource, carrying the supplied principal,
      * context and decision, and that no failure event was dispatched.

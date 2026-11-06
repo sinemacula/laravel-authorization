@@ -1,0 +1,249 @@
+<?php
+
+declare(strict_types = 1);
+
+namespace SineMacula\Laravel\Authorization\Evaluation;
+
+use SineMacula\Laravel\Authorization\Context\AttributeNamespaces;
+use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
+use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
+use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
+use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
+use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
+use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use SineMacula\Laravel\Authorization\Support\ResourceScope;
+use SineMacula\Laravel\Authorization\Support\SubjectGrants;
+
+/**
+ * Decides a check for the authorization manager, stage by stage (AUTHZ-7.1).
+ *
+ * The pipeline admits the check (the subject, resource and tenant stages) and
+ * gathers every source, the session caps included; the policy evaluator runs
+ * the rest of the stages, the denies, the caps, the allows and the implicit
+ * deny, each recorded in the decision's trace. It records nothing and reports
+ * nothing: the manager's `check()` is the one decision entry point (D22) and
+ * owns the recording, so every decision the pipeline makes reaches the caller
+ * through it.
+ *
+ * A pipeline is immutable: `withPolicies()` and `capped()` return a new one, as
+ * the manager's scoped clones do.
+ *
+ * @author      Ben Carey <bdmc@sinemacula.co.uk>
+ * @copyright   2026 Sine Macula Limited
+ *
+ * @internal
+ */
+final class DecisionPipeline
+{
+    /** @var array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>|null Per-call policy override supplied via `withPolicies()`. */
+    private ?array $policyOverride = null;
+
+    /** @var list<list<string>> The explicit session caps supplied via `capped()`, outermost first, every one of which must cover the action. */
+    private array $caps = [];
+
+    /**
+     * Create a new decision pipeline instance.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator  $evaluator
+     * @param  \SineMacula\Laravel\Authorization\Contracts\PolicyResolver  $policyResolver
+     * @param  \SineMacula\Laravel\Authorization\Context\CheckContextFactory|null  $contexts
+     * @param  \SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver|null  $resourcePolicies
+     * @param  \SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver|null  $guardrails
+     * @param  \SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver|null  $sessionCaps
+     */
+    public function __construct(
+
+        /** Policy evaluator used to walk statements for every check. */
+        private readonly PolicyEvaluator $evaluator,
+
+        /** Gathers the policy set applicable to a principal per check. */
+        private readonly PolicyResolver $policyResolver,
+
+        /** Makes each check's context from its sources; null gives a check only what the caller passes, under `input`. */
+        private readonly ?CheckContextFactory $contexts = null,
+
+        /** Reads the policies attached to a check's resource and its type; null reads none. */
+        private readonly ?ResourcePolicyResolver $resourcePolicies = null,
+
+        /** Reads the guardrails that apply to a check; null reads none. */
+        private readonly ?GuardrailResolver $guardrails = null,
+
+        /** Makes the session caps of a check; null reads no credential's scopes, so only `capped()` and a machine's missing scopes cap it. */
+        private readonly ?SessionCapResolver $sessionCaps = null,
+    ) {}
+
+    /**
+     * Return a pipeline that evaluates only the supplied policies, bypassing
+     * the principal's own attached policies, any configured policy store and
+     * the policies attached to the resource. The guardrails, the subject's
+     * permission boundaries, the session caps and its permissions still count.
+     *
+     * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
+     * @return self
+     */
+    public function withPolicies(array $policies): self
+    {
+        $pipeline                 = clone $this;
+        $pipeline->policyOverride = $policies;
+
+        return $pipeline;
+    }
+
+    /**
+     * Return a pipeline whose checks are also capped by the supplied actions,
+     * each an action or an action pattern, intersected with the caps already in
+     * place.
+     *
+     * @param  list<string>  $actions
+     * @return self
+     */
+    public function capped(array $actions): self
+    {
+        $pipeline         = clone $this;
+        $pipeline->caps[] = $actions;
+
+        return $pipeline;
+    }
+
+    /**
+     * Decide the action for the supplied subject, stage by stage (AUTHZ-7.1),
+     * admitting the check first: a subject that is missing, or inactive (it or
+     * its identity), is denied before anything else is read; a resource that
+     * cannot be identified is denied next; a tenant-owned resource is decided
+     * in its tenant's scope, or denied as out of scope (see `ResourceScope`);
+     * then the grants decide.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
+     * @param  string  $action
+     * @param  false|\SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
+     * @param  array<string, mixed>  $context
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
+     */
+    public function decide(?Subject $subject, string $action, false|ResourceReference|null $resource, array $context): Decision
+    {
+        if ($subject === null || SubjectGrants::isInactive($subject)) {
+            return Decision::deny($subject === null ? DecisionReason::SUBJECT_UNRESOLVED : DecisionReason::SUBJECT_INACTIVE, DecisionStage::SUBJECT);
+        }
+
+        if ($resource === false) {
+            return Decision::deny(DecisionReason::RESOURCE_UNRESOLVED, DecisionStage::RESOURCE);
+        }
+
+        $decide = fn (): Decision => $this->decideGrants($subject, $action, $resource, $context);
+
+        return $resource === null ? $decide() : ResourceScope::decide($subject, $action, $resource, $decide);
+    }
+
+    /**
+     * Decide the admitted action from every source the subject's grants and the
+     * resource give, in the evaluator's stages: every explicit deny, from the
+     * subject's policies, its identity's, those attached to the resource and
+     * its type, the guardrails and its boundaries; then the caps, the
+     * guardrails of the check's tenant, its ancestors and the platform, then
+     * the boundaries of the subject and its identity; then every allow, a
+     * policy's, a resource policy's naming the subject, and a permission the
+     * subject holds; then the implicit deny. No allow is weighed before every
+     * deny and cap, so a guardrail, a boundary or a session cap caps a resource
+     * policy's allow and a permission held as it caps a policy's. A permission
+     * held is asked for at the allow stage alone (AUTHZ-7.7), and its step
+     * names the permission that allowed. It counts only when the grant it came
+     * from reaches the check: the permissions are resolved in the scope the
+     * check is decided in (see `ResourceScope`): for a resource within the
+     * active tenant's subtree, its own tenant, so a grant there, an ancestor's
+     * grant that reaches its subtree, or a platform-wide grant; for a resource
+     * admitted from outside the scope, platform scope, so only a platform-wide
+     * grant; for a resource with no tenant, a type alone, an opaque identifier
+     * or no resource, the grants that hold in the active tenant, or only
+     * platform-wide ones with none. A grant for another application, or one
+     * that has expired, never counts. The session caps are the scopes of the
+     * subject's credential, mapped to actions, and those `capped()` supplied,
+     * every one of which must cover the action (see `SessionCapResolver`); a
+     * machine without credential scopes is allowed nothing.
+     *
+     * The guardrails are those of the resource's tenant when it has one, also
+     * when a platform-wide grant admitted it from outside the scope, else of
+     * the tenant the check is decided in (see `GuardrailResolver`). A check of
+     * exactly `authorization:guardrails:manage` is exempt from them: no
+     * guardrail is read for it, so none of their denies or allows applies, nor
+     * does one that cannot be read, and the guardrail stage records it as
+     * exempt. A guardrail therefore never keeps anyone from changing the
+     * guardrails, its own removal included; every other deny and cap still
+     * applies, and the guardrail service still asks for the right from above
+     * the scope it changes (see `GuardrailAuthority`).
+     *
+     * A resource policy's denies apply to everyone, and its allows to the
+     * subjects their `principals` name, with no permission held; by now the
+     * tenant stage has admitted the resource, so a resource policy never allows
+     * across tenants, and a deny attached to the resource in its own tenant
+     * applies even once the check falls back to platform scope. A policy,
+     * guardrail or boundary document that cannot be read denies the check as an
+     * invalid policy. The subject's identity, when it is another model of the
+     * same kind (both machines or neither, see
+     * `SubjectGrants::grantingIdentity()`), contributes its policies and its
+     * grants; its deny statements and its boundaries cap the check whatever its
+     * kind. A `withPolicies()` override replaces the policies alone: the
+     * guardrails, the subject's boundaries, the session caps and its
+     * permissions still count.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @param  string  $action
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
+     * @param  array<string, mixed>  $context
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
+     */
+    private function decideGrants(Subject $subject, string $action, ?ResourceReference $resource, array $context): Decision
+    {
+        try {
+            $policies   = $this->gatherPolicies($subject, $resource);
+            $guardrails = $action === PackagePermissions::GUARDRAILS_MANAGE ? null : ($this->guardrails?->guardrailsFor($resource) ?? []);
+            $boundaries = SubjectGrants::boundaries($subject);
+        } catch (InvalidPolicyDocumentException) {
+            return Decision::deny(DecisionReason::INVALID_POLICY, DecisionStage::DENY);
+        }
+
+        // What the caller passes is held under `input` alone, never promoted
+        // into another namespace, so it cannot stand in for the request, the
+        // authentication, the subject, the resource or any source's values
+        // (N27). Without a factory, the subject and resource still supply their
+        // built-in keys.
+        $checkContext = $this->contexts?->make($context, $subject, $resource)
+            ?? new CheckContext([CheckContextFactory::INPUT => $context], (new AttributeNamespaces)->builders($subject, $resource), null, new PrincipalSelectors($subject));
+
+        $permission = static fn (): ?string => SubjectGrants::permissionFor($subject, $action);
+        $session    = ($this->sessionCaps ?? new SessionCapResolver)->capsFor($subject, $this->caps);
+
+        return $this->evaluator->capped($session)->evaluate($policies, $action, $resource?->identifier, $checkContext, $boundaries, $permission, $guardrails);
+    }
+
+    /**
+     * Gather the policies applicable to the supplied subject and resource.
+     *
+     * When a per-call override is in effect, it is returned verbatim. Otherwise
+     * the pipeline delegates to the bound `PolicyResolver` for the subject —
+     * consumers swap the resolver to introduce tenant scoping or other
+     * gathering strategies without touching the manager — and adds the policies
+     * attached to its identity when that is another model, whole when it grants
+     * to the subject (another model of the same kind, see
+     * `SubjectGrants::grantingIdentity()`) and as their deny statements alone
+     * otherwise, and those attached to the resource and its type (see
+     * `ResourcePolicyResolver`).
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
+     * @return array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
+     */
+    private function gatherPolicies(Subject $subject, ?ResourceReference $resource): array
+    {
+        if ($this->policyOverride !== null) {
+            return $this->policyOverride;
+        }
+
+        return [...$this->policyResolver->policiesFor($subject->subject), ...SubjectGrants::identityPolicies($subject), ...$this->resourcePolicies?->policiesFor($resource) ?? []];
+    }
+}

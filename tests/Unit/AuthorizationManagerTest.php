@@ -34,6 +34,7 @@ use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
 use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
@@ -1009,12 +1010,11 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * `withPolicies()` wraps the input through `array_values()`. Pins the
-     * UnwrapArrayValues mutant on line 267.
+     * `withPolicies()` decides with policies given under any keys.
      *
      * @return void
      */
-    public function testWithPoliciesReindexesArray(): void
+    public function testWithPoliciesAcceptsPoliciesUnderAnyKeys(): void
     {
         $manager = new AuthorizationManager(
             evaluator: new PolicyEvaluator,
@@ -1426,6 +1426,220 @@ final class AuthorizationManagerTest extends TestCase
 
         self::assertSame(DecisionReason::SESSION_POLICY, $uncredentialed->check('posts:edit')->reason);
         self::assertSame(DecisionReason::SESSION_POLICY, $uncredentialed->capped(['*'])->check('posts:edit')->reason);
+    }
+
+    /**
+     * `cannot()` is the negation of `can()`, on the current subject and on
+     * every scoped clone, and its decision is recorded as `check()` records it.
+     *
+     * @return void
+     */
+    public function testCannotIsTheNegationOfCan(): void
+    {
+        $reported  = [];
+        $principal = $this->stubAuthorizable(['posts:create']);
+        $manager   = $this->recordingManager($principal, $reported);
+
+        self::assertFalse($manager->cannot('posts:create'));
+        self::assertTrue($manager->cannot('posts:delete'));
+        self::assertSame(DecisionReason::NO_MATCH, $manager->lastDecision()?->reason);
+        self::assertTrue($manager->for($this->stubAuthorizable())->cannot('posts:create'));
+        self::assertFalse($manager->forUser($principal)->cannot('posts:create'));
+        self::assertTrue($manager->forUser(null)->cannot('posts:create'));
+        self::assertTrue($manager->capped(['posts:delete'])->cannot('posts:create'));
+        self::assertFalse($manager->withPolicies([self::allowingPolicy('posts:delete')])->cannot('posts:delete'));
+        self::assertSame(['posts:create', 'posts:delete', 'posts:create', 'posts:create', 'posts:create', 'posts:create', 'posts:delete'], \array_column($reported, 'action'));
+    }
+
+    /**
+     * `any()` decides each action through `check()` in the order given and is
+     * allowed at the first allow, deciding no action after it; the last
+     * decision is that of the action that allowed.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
+     */
+    public function testAnyIsAllowedAtTheFirstAllowAndDecidesNoMore(): void
+    {
+        $reported = [];
+        $manager  = $this->recordingManager($this->stubAuthorizable(['posts:create', 'posts:read']), $reported);
+
+        self::assertTrue($manager->any(['posts:delete', 'posts:create', 'posts:read'], 'posts:7', ['k' => 'v']));
+        self::assertSame(['posts:delete', 'posts:create'], \array_column($reported, 'action'));
+        self::assertSame(['posts:7', 'posts:7'], \array_column($reported, 'resource'));
+        self::assertSame([['k' => 'v'], ['k' => 'v']], \array_column($reported, 'context'));
+        self::assertTrue($reported[1]['decision']->isAllowed());
+        self::assertSame($reported[1]['decision'], $manager->lastDecision());
+    }
+
+    /**
+     * `any()` is refused when no action is allowed, every action decided in
+     * order, and the last decision is that of the last action.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
+     */
+    public function testAnyIsRefusedWhenNoActionIsAllowed(): void
+    {
+        $reported  = [];
+        $principal = $this->stubAuthorizable([], [Policy::fromArray(['name' => 'no-archiving', 'statements' => [['effect' => 'deny', 'actions' => ['posts:archive']]]])]);
+        $manager   = $this->recordingManager($principal, $reported);
+
+        self::assertFalse($manager->any(['posts:delete', 'posts:archive']));
+        self::assertSame(['posts:delete', 'posts:archive'], \array_column($reported, 'action'));
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $manager->lastDecision()?->reason);
+    }
+
+    /**
+     * `all()` decides each action through `check()` in the order given and is
+     * refused at the first refusal, deciding no action after it; the last
+     * decision is that of the action refused.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
+     */
+    public function testAllIsRefusedAtTheFirstRefusalAndDecidesNoMore(): void
+    {
+        $reported = [];
+        $manager  = $this->recordingManager($this->stubAuthorizable(['posts:create', 'posts:read']), $reported);
+
+        self::assertFalse($manager->all(['posts:create', 'posts:delete', 'posts:read']));
+        self::assertSame(['posts:create', 'posts:delete'], \array_column($reported, 'action'));
+        self::assertSame(DecisionReason::NO_MATCH, $manager->lastDecision()?->reason);
+        self::assertSame($reported[1]['decision'], $manager->lastDecision());
+    }
+
+    /**
+     * `all()` is allowed when every action is allowed, each decided in order,
+     * and the last decision is that of the last action.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
+     */
+    public function testAllIsAllowedWhenEveryActionIsAllowed(): void
+    {
+        $reported = [];
+        $manager  = $this->recordingManager($this->stubAuthorizable(['posts:create', 'posts:read']), $reported);
+
+        self::assertTrue($manager->all(['posts:read', 'posts:create'], ResourceReference::record('posts', '7')));
+        self::assertSame(['posts:read', 'posts:create'], \array_column($reported, 'action'));
+        self::assertSame(['posts:7', 'posts:7'], \array_column($reported, 'resource'));
+        self::assertSame($reported[1]['decision'], $manager->lastDecision());
+    }
+
+    /**
+     * Return the checks over several actions.
+     *
+     * @return iterable<string, array{string, \Closure(\SineMacula\Laravel\Authorization\AuthorizationManager): bool}>
+     */
+    public static function severalActionChecks(): iterable
+    {
+        yield 'any' => ['any', static fn (AuthorizationManager $manager): bool => $manager->any([], 'posts:7')];
+        yield 'all' => ['all', static fn (AuthorizationManager $manager): bool => $manager->all([], 'posts:7')];
+    }
+
+    /**
+     * An empty list is refused by `any()` and `all()` before anything is
+     * decided: no decision is recorded or reported, and the subject is never
+     * resolved.
+     *
+     * @param  string  $method
+     * @param  \Closure(\SineMacula\Laravel\Authorization\AuthorizationManager): bool  $decide
+     * @return void
+     */
+    #[DataProvider('severalActionChecks')]
+    public function testAnEmptyListIsRefusedBeforeAnythingIsDecided(string $method, \Closure $decide): void
+    {
+        $events = \Mockery::mock(Dispatcher::class);
+        $events->shouldNotReceive('dispatch');
+
+        $resolver = \Mockery::mock(SubjectResolver::class);
+        $resolver->shouldNotReceive('resolve');
+
+        $store   = new LastDecisionStore;
+        $manager = new AuthorizationManager(
+            evaluator: new PolicyEvaluator,
+            subjectResolver: $resolver,
+            policyResolver: new DefaultPolicyResolver,
+            lastDecisionStore: $store,
+            events: $events,
+        );
+
+        try {
+            $decide($manager);
+            self::fail('Expected InvalidCheckArgumentException.');
+        } catch (InvalidCheckArgumentException $exception) {
+            self::assertInstanceOf(\InvalidArgumentException::class, $exception);
+            self::assertSame("{$method}() takes at least one action to decide, none given.", $exception->getMessage());
+        }
+
+        self::assertNull($store->get());
+    }
+
+    /**
+     * `any()` and `all()` decide on every scoped clone: `for()`, `forUser()`,
+     * `capped()` and `withPolicies()`, a guest refused everything.
+     *
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
+     */
+    public function testAnyAndAllDecideOnEveryScopedClone(): void
+    {
+        $reported  = [];
+        $principal = $this->stubAuthorizable(['posts:create', 'posts:read']);
+        $manager   = $this->recordingManager(null, $reported);
+
+        self::assertFalse($manager->any(['posts:create']));
+        self::assertTrue($manager->for($principal)->all(['posts:create', 'posts:read']));
+        self::assertTrue($manager->forUser($principal)->any(['posts:delete', 'posts:read']));
+        self::assertFalse($manager->forUser(null)->any(['posts:create', 'posts:read']));
+        self::assertFalse($manager->for($principal)->capped(['posts:read'])->all(['posts:read', 'posts:create']));
+        self::assertTrue($manager->for($principal)->capped(['posts:read'])->any(['posts:create', 'posts:read']));
+        self::assertTrue($manager->for($principal)->withPolicies([self::allowingPolicy('posts:publish')])->all(['posts:publish', 'posts:read']));
+        self::assertSame(DecisionReason::SESSION_POLICY, $reported[8]['decision']->reason);
+        self::assertSame(DecisionReason::SUBJECT_UNRESOLVED, $reported[0]['decision']->reason);
+        self::assertCount(13, $reported);
+    }
+
+    /**
+     * Build a manager resolving the supplied principal, or no subject, that
+     * records every decision event's action, resource, context and decision.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Contracts\AuthorizableIdentity|null  $principal
+     * @param  list<array{action: string, resource: string|null, context: array<string, mixed>, decision: \SineMacula\Laravel\Authorization\Evaluation\Decision}>  $reported
+     * @return \SineMacula\Laravel\Authorization\AuthorizationManager
+     */
+    private function recordingManager(?AuthorizableIdentity $principal, array &$reported): AuthorizationManager
+    {
+        $events = \Mockery::mock(Dispatcher::class);
+        $events->shouldReceive('dispatch')
+            ->andReturnUsing(static function (DecisionEvaluated $event) use (&$reported): void {
+                $reported[] = ['action' => $event->action, 'resource' => $event->resource, 'context' => $event->context, 'decision' => $event->decision];
+            });
+
+        return new AuthorizationManager(
+            evaluator: new PolicyEvaluator,
+            subjectResolver: new StubSubjectResolver($principal),
+            policyResolver: new DefaultPolicyResolver,
+            lastDecisionStore: new LastDecisionStore,
+            events: $events,
+        );
+    }
+
+    /**
+     * Return a policy allowing the action.
+     *
+     * @param  string  $action
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Policy
+     */
+    private static function allowingPolicy(string $action): Policy
+    {
+        return Policy::fromArray(['name' => 'allowing', 'statements' => [['effect' => 'allow', 'actions' => [$action]]]]);
     }
 
     /**

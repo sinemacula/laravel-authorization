@@ -39,6 +39,7 @@ use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SessionPolicySource;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Evaluation\DecisionPipeline;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
@@ -259,10 +260,12 @@ final class AuthorizationServiceProviderTest extends TestCase
             self::assertSame($instance, $app->make($contract), "{$contract} bound by the application should survive the reset.");
         }
 
-        $manager = $app->make(AuthorizationManager::class);
+        $manager  = $app->make(AuthorizationManager::class);
+        $pipeline = (new \ReflectionProperty($manager, 'pipeline'))->getValue($manager);
 
+        self::assertInstanceOf(DecisionPipeline::class, $pipeline);
         self::assertSame($bound[SubjectResolver::class], (new \ReflectionProperty($manager, 'subjectResolver'))->getValue($manager));
-        self::assertSame($bound[PolicyResolver::class], (new \ReflectionProperty($manager, 'policyResolver'))->getValue($manager));
+        self::assertSame($bound[PolicyResolver::class], (new \ReflectionProperty($pipeline, 'policyResolver'))->getValue($pipeline));
     }
 
     /**

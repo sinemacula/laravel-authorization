@@ -23,9 +23,11 @@ identity.
    authentication-layer concept remain unchanged. This is a deliberate boundary: impersonation at the auth layer is a
    separate concern with its own security implications.
 
-4. **The scoped clone composes with `withPolicies()`.** Callers can chain `for($user)->withPolicies($policies)` to
-   evaluate a hypothetical policy set against a specific principal. Each method returns a fresh clone, so the chain
-   produces a scope with both overrides active and no mutation of intermediaries.
+4. **The scoped clone composes with `withPolicies()` and `capped()`.** Callers can chain
+   `for($user)->withPolicies($policies)` to evaluate a hypothetical policy set against a specific principal, and
+   `capped($actions)` to cap its checks as well. Each method returns a fresh clone, so the chain produces a scope with
+   every override active and no mutation of intermediaries, and every method of the programmatic API (`can()`,
+   `cannot()`, `authorize()`, `check()`, `any()`, `all()`, `explain()` and `effectivePermissions()`) works on it.
 
 ## Usage
 
@@ -67,16 +69,21 @@ $result = Authorization::for($targetUser)
 
 ## Scoped Clone Semantics
 
-`for()` clones the manager and pins the supplied subject on the clone. The clone inherits the evaluator, policy
-resolver, last-decision store, and event dispatcher by reference -- only the subject override is clone-local.
+`for()` clones the manager and pins the supplied subject on the clone. The clone inherits the decision pipeline (the
+evaluator, the policy resolver and the other sources, with any policy override and explicit caps), the last-decision
+store and the event dispatcher by reference -- only the subject override is clone-local. `withPolicies()` and
+`capped()` clone the manager the same way, each with a new pipeline carrying its override or its cap, so the pipeline
+they were called on is never changed.
 `forUser()` scopes the same way, to the subject the resolver translates a user into; Laravel's Gate uses it for the user
 it hands over.
 
-- **No cross-request leak.** The scoped clone is a local variable -- it is garbage-collected when the calling scope
-  exits. Long-running workers (Octane, queue) are safe.
+- **No cross-request leak.** The `Authorization` facade resolves the manager scoped to the current request or job,
+  and the scoped clone is a local variable -- it is garbage-collected when the calling scope exits. Long-running
+  workers (Octane, queue) are safe.
 - **Last-decision store is shared.** A scoped evaluation writes to the same `LastDecisionStore` as the root manager.
-  This is intentional -- `Authorization::lastDecision()` always reflects the most recent evaluation regardless of
-  scope, which is the behaviour error handlers and audit listeners expect.
+  This is intentional -- `Authorization::lastDecision()` always reflects the most recent evaluation regardless of scope,
+  which is the behaviour error handlers and audit listeners expect. `any()` and `all()` record every action they decide,
+  so after one of them it is the decision of the last action decided.
 
 ## Trade-offs
 
@@ -92,7 +99,8 @@ it hands over.
 ## Implementation Anchors
 
 - `AuthorizationManager::for()` -- the scoped-clone factory.
-- `AuthorizationManager::withPolicies()` -- the policy-override clone.
+- `AuthorizationManager::withPolicies()` and `capped()` -- the policy-override and capped clones, over
+  `Evaluation\DecisionPipeline::withPolicies()` and `capped()`.
 - `AuthorizationManager::forUser()` -- the scoped clone for a user the subject resolver translates.
 - `AuthorizationManager::currentSubject()` -- the override-aware resolution method.
 - `AuthorizationManager::effectivePermissions()` -- the full permission map used for UI rendering.
