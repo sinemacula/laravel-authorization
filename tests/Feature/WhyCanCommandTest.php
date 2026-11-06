@@ -114,7 +114,7 @@ final class WhyCanCommandTest extends TestCase
         self::assertStringContainsString('DENIED', $output);
         self::assertStringContainsString('  Reason:   explicit_deny', $output);
         self::assertStringContainsString('  Stage:    deny', $output);
-        self::assertStringContainsString('    [deny] deny-delete#0: matched', $output);
+        self::assertStringContainsString("    [deny] deny-delete[{$policy->id}]#0: matched", $output);
         self::assertStringNotContainsString('permission:', $output);
     }
 
@@ -225,7 +225,7 @@ final class WhyCanCommandTest extends TestCase
         $output = Artisan::output();
 
         self::assertSame(0, $exitCode);
-        self::assertStringContainsString("  Trace:\n    [deny] trace-policy#0: not_applicable\n    [allow] trace-policy#1: matched\n", $output);
+        self::assertStringContainsString("  Trace:\n    [deny] trace-policy[{$policy->id}]#0: not_applicable\n    [allow] trace-policy[{$policy->id}]#1: matched\n", $output);
     }
 
     /**

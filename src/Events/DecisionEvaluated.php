@@ -9,7 +9,7 @@ use SineMacula\Laravel\Authorization\Evaluation\Decision;
 
 /**
  * Dispatched every time the authorization manager completes an evaluation —
- * `can()`, `authorize()`, `evaluate()`, every path.
+ * `check()`, `can()`, `authorize()`, every path.
  *
  * Carries the principal, action, resource, context, and the full evaluation
  * decision — including its reproducible trace — so audit listeners can persist

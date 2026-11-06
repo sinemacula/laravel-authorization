@@ -440,6 +440,75 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
+     * A cached policy keeps its stored key across a round trip through the
+     * store, which holds each policy as its key beside its document; a policy
+     * without a key comes back without one.
+     *
+     * @return void
+     */
+    public function testACachedPolicyKeepsItsKey(): void
+    {
+        $keyed   = EvaluationPolicy::fromArray(['name' => 'readers', 'statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]])->withId('policy-key');
+        $unkeyed = EvaluationPolicy::fromArray(['name' => 'writers', 'statements' => [['effect' => 'allow', 'actions' => ['posts:write']]]]);
+
+        $this->request()->rememberPolicies(self::grantee(), fn (): Resolution => $this->resolve([$keyed, $unkeyed]));
+
+        $entry = $this->store->get('authorization-test:policies:' . PrincipalCacheKey::for(self::grantee()) . ':platform:every');
+        self::assertIsArray($entry);
+        self::assertSame([
+            ['id' => 'policy-key', 'document' => $keyed->toArray()],
+            ['id' => null, 'document' => $unkeyed->toArray()],
+        ], $entry['value']);
+
+        $read = $this->request()->rememberPolicies(self::grantee(), fn (): Resolution => $this->resolve([]));
+
+        self::assertSame(1, $this->resolutions);
+        self::assertEquals([$keyed, $unkeyed], $read);
+        self::assertSame('policy-key', $read[0]->id);
+        self::assertNull($read[1]->id);
+    }
+
+    /**
+     * A cached policy that is not a document with its key, such as a bare
+     * document in the shape stored before keys were kept, a key that is not a
+     * string or a document that is missing or not an array, is discarded as
+     * corrupt: it is written to the log channel and resolved again.
+     *
+     * @return void
+     */
+    public function testAPolicyEntryWithoutItsKeyIsDiscardedAsCorrupt(): void
+    {
+        $logger = $this->recordLogs();
+        $policy = EvaluationPolicy::fromArray(['name' => 'readers', 'statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]])->withId('policy-key');
+
+        $this->request()->rememberPolicies(self::grantee(), fn (): Resolution => $this->resolve([$policy]));
+
+        $key   = 'authorization-test:policies:' . PrincipalCacheKey::for(self::grantee()) . ':platform:every';
+        $entry = $this->store->get($key);
+        self::assertIsArray($entry);
+
+        $damages = [
+            $policy->toArray(),
+            ['id' => 42, 'document' => $policy->toArray()],
+            ['id' => 'policy-key'],
+            ['id' => 'policy-key', 'document' => 'not a document'],
+            ['id' => 'policy-key', 'document' => null],
+        ];
+
+        foreach ($damages as $damage) {
+            $this->store->put($key, [...$entry, 'value' => [$damage]], 60);
+
+            self::assertEquals([$policy], $this->request()->rememberPolicies(self::grantee(), fn (): Resolution => $this->resolve([$policy])));
+        }
+
+        self::assertSame(1 + \count($damages), $this->resolutions);
+        self::assertSame(
+            \array_fill(0, \count($damages), "Authorization: discarding corrupt resolution-cache entry '{$key}' — Cached policy entry is not a policy document with its key."),
+            $logger->messages(),
+        );
+    }
+
+    /**
      * Roles are stored under their own kind, apart from permissions.
      *
      * @return void

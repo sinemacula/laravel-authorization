@@ -111,7 +111,7 @@ final readonly class ResolutionCache
             $grantee,
             $resolve,
             static fn (array $stored): array => self::policies($stored),
-            static fn (Policy $policy): array => $policy->toArray(),
+            static fn (Policy $policy): array => ['id' => $policy->id, 'document' => $policy->toArray()],
         );
     }
 
@@ -382,7 +382,8 @@ final readonly class ResolutionCache
     }
 
     /**
-     * Hydrate stored policy documents back into evaluation policies.
+     * Hydrate stored policy documents back into evaluation policies, each with
+     * its stored key.
      *
      * @param  array<mixed>  $stored
      * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>
@@ -393,12 +394,16 @@ final readonly class ResolutionCache
     {
         $policies = [];
 
-        foreach ($stored as $document) {
-            if (!\is_array($document)) {
-                throw new \UnexpectedValueException('Cached policy entry is not an array document.');
+        foreach ($stored as $entry) {
+            $id = \is_array($entry) ? $entry['id'] ?? null : null;
+
+            if (!\is_array($entry) || !\is_array($entry['document'] ?? null) || ($id !== null && !\is_string($id))) {
+                throw new \UnexpectedValueException('Cached policy entry is not a policy document with its key.');
             }
 
-            $policies[] = Policy::fromArray($document);
+            /** @var array<string, mixed> $document */
+            $document   = $entry['document'];
+            $policies[] = Policy::fromArray($document)->withId($id);
         }
 
         return $policies;

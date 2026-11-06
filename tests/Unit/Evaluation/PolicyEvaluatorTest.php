@@ -314,6 +314,92 @@ final class PolicyEvaluatorTest extends TestCase
     }
 
     /**
+     * Policies that share a name, as a platform policy and a tenant policy may,
+     * are assessed in order of their stored key after their name, whatever
+     * order they are passed in and whatever their documents, and each reference
+     * carries its policy's key.
+     *
+     * @return void
+     */
+    public function testPoliciesOfOneNameAreAssessedInOrderOfKey(): void
+    {
+        // The policy keyed b sorts first by its document, so only ordering by
+        // key puts the policy keyed a first.
+        $keyedB = Policy::fromArray([
+            'name'       => 'shared',
+            'statements' => [
+                ['effect' => 'allow', 'actions' => ['posts:read']],
+                ['effect' => 'allow', 'actions' => ['users:read']],
+            ],
+        ])->withId('b');
+
+        $keyedA = Policy::fromArray([
+            'name'       => 'shared',
+            'statements' => [['effect' => 'allow', 'actions' => ['posts:read']]],
+        ])->withId('a');
+
+        $alpha = Policy::fromArray([
+            'name'       => 'alpha',
+            'statements' => [['effect' => 'allow', 'actions' => ['posts:read']]],
+        ])->withId('z');
+
+        $expected = Decision::allow(DecisionStage::ALLOW, [
+            self::reference('alpha', 0, 'z'),
+            self::reference('shared', 0, 'a'),
+            self::reference('shared', 0, 'b'),
+        ], [
+            self::entry(DecisionStage::ALLOW, TraceOutcome::MATCHED, 'alpha', 0, [], 'z'),
+            self::entry(DecisionStage::ALLOW, TraceOutcome::MATCHED, 'shared', 0, [], 'a'),
+            self::entry(DecisionStage::ALLOW, TraceOutcome::MATCHED, 'shared', 0, [], 'b'),
+            self::entry(DecisionStage::ALLOW, TraceOutcome::NOT_APPLICABLE, 'shared', 1, [], 'b'),
+        ]);
+
+        $evaluator = new PolicyEvaluator;
+
+        self::assertEquals($expected, $evaluator->evaluate([$keyedB, $keyedA, $alpha], 'posts:read'));
+        self::assertEquals($expected, $evaluator->evaluate([$alpha, $keyedA, $keyedB], 'posts:read'));
+    }
+
+    /**
+     * Policies that share a name and have no stored key, as policies built in
+     * code may, are assessed in order of their documents, so the order they are
+     * passed in does not change the trace.
+     *
+     * @return void
+     */
+    public function testUnkeyedPoliciesOfOneNameAreAssessedInOrderOfDocument(): void
+    {
+        $single = Policy::fromArray([
+            'name'       => 'shared',
+            'statements' => [['effect' => 'allow', 'actions' => ['posts:read']]],
+        ]);
+
+        // This document sorts before the single-statement one, since its first
+        // statement is followed by a comma rather than the end of the list.
+        $double = Policy::fromArray([
+            'name'       => 'shared',
+            'statements' => [
+                ['effect' => 'allow', 'actions' => ['posts:read']],
+                ['effect' => 'allow', 'actions' => ['users:read']],
+            ],
+        ]);
+
+        $expected = Decision::allow(DecisionStage::ALLOW, [
+            self::reference('shared', 0),
+            self::reference('shared', 0),
+        ], [
+            self::entry(DecisionStage::ALLOW, TraceOutcome::MATCHED, 'shared', 0),
+            self::entry(DecisionStage::ALLOW, TraceOutcome::NOT_APPLICABLE, 'shared', 1),
+            self::entry(DecisionStage::ALLOW, TraceOutcome::MATCHED, 'shared', 0),
+        ]);
+
+        $evaluator = new PolicyEvaluator;
+
+        self::assertEquals($expected, $evaluator->evaluate([$single, $double], 'posts:read'));
+        self::assertEquals($expected, $evaluator->evaluate([$double, $single], 'posts:read'));
+    }
+
+    /**
      * Every matching allow is named as deciding the allow; an allow whose
      * resource does not match is traced as not_applicable and not named.
      *
@@ -836,15 +922,17 @@ final class PolicyEvaluatorTest extends TestCase
     }
 
     /**
-     * Return a reference to the statement at the index of the named policy.
+     * Return a reference to the statement at the index of the named policy,
+     * carrying the policy's stored key when it has one.
      *
      * @param  string  $policy
      * @param  int  $index
+     * @param  string|null  $policyId
      * @return \SineMacula\Laravel\Authorization\Evaluation\StatementReference
      */
-    private static function reference(string $policy, int $index): StatementReference
+    private static function reference(string $policy, int $index, ?string $policyId = null): StatementReference
     {
-        return new StatementReference($policy, $index);
+        return new StatementReference($policy, $index, $policyId);
     }
 
     /**
@@ -856,11 +944,12 @@ final class PolicyEvaluatorTest extends TestCase
      * @param  string  $policy
      * @param  int  $index
      * @param  array<string, bool>  $conditions
+     * @param  string|null  $policyId
      * @return \SineMacula\Laravel\Authorization\Evaluation\TraceEntry
      */
-    private static function entry(DecisionStage $stage, TraceOutcome $outcome, string $policy, int $index, array $conditions = []): TraceEntry
+    private static function entry(DecisionStage $stage, TraceOutcome $outcome, string $policy, int $index, array $conditions = [], ?string $policyId = null): TraceEntry
     {
-        return new TraceEntry($stage, $outcome, self::reference($policy, $index), $conditions);
+        return new TraceEntry($stage, $outcome, self::reference($policy, $index, $policyId), $conditions);
     }
 
     /**

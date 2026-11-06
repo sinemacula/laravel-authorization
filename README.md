@@ -406,7 +406,7 @@ $decision = Authorization::for($user)->check('posts:delete', 'posts/42', ['ip' =
 
 $decision->isAllowed();        // false
 $decision->reason;             // DecisionReason::EXPLICIT_DENY
-$decision->statements;         // [StatementReference('blocked-ips', 0)]
+$decision->statements;         // [StatementReference('no-deletes-off-network', 0, <its key>)]
 ```
 
 Policies fail closed. A deny whose condition cannot be decided, such as a check made without `ip` in its context,

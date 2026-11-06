@@ -299,7 +299,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertFalse($decision->isAllowed());
         self::assertSame(DecisionReason::EXPLICIT_DENY, $decision->reason);
         self::assertSame(DecisionStage::DENY, $decision->stage);
-        self::assertEquals([new StatementReference('deny-posts-delete', 0)], $decision->statements);
+        self::assertEquals([new StatementReference('deny-posts-delete', 0, $policy->id)], $decision->statements);
     }
 
     /**

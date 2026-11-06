@@ -231,7 +231,7 @@ final class GateRegistrarTest extends TestCase
         self::assertTrue(Gate::forUser($user)->allows('posts:create', [null]));
         self::assertSame([null, null], $this->evaluatedResources());
         self::assertSame($user, $this->decisions()[1]->principal);
-        self::assertEquals([new StatementReference('wildcard-allow', 0)], Authorization::lastDecision()?->statements);
+        self::assertEquals([$this->wildcardAllowReference()], Authorization::lastDecision()?->statements);
     }
 
     /**
@@ -270,7 +270,7 @@ final class GateRegistrarTest extends TestCase
 
         self::assertTrue(Gate::allows('posts:create', [null]));
         self::assertSame([null], $this->evaluatedResources());
-        self::assertEquals([new StatementReference('wildcard-allow', 0)], Authorization::lastDecision()?->statements);
+        self::assertEquals([$this->wildcardAllowReference()], Authorization::lastDecision()?->statements);
     }
 
     /**
@@ -584,7 +584,7 @@ final class GateRegistrarTest extends TestCase
 
         self::assertCount($previousCount + 1, $decisions);
         self::assertNull($decisions[$previousCount]->resource);
-        self::assertEquals([new StatementReference('wildcard-allow', 0)], $decisions[$previousCount]->decision->statements);
+        self::assertEquals([$this->wildcardAllowReference()], $decisions[$previousCount]->decision->statements);
         self::assertSame($decisions[$previousCount]->decision, Authorization::lastDecision());
     }
 
@@ -638,6 +638,19 @@ final class GateRegistrarTest extends TestCase
         $this->actAs($user);
 
         return $user;
+    }
+
+    /**
+     * Return the reference to the stored wildcard-resource allow policy's only
+     * statement, carrying the policy's key.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\StatementReference
+     */
+    private function wildcardAllowReference(): StatementReference
+    {
+        $policy = Policy::query()->where('name', 'wildcard-allow')->sole();
+
+        return new StatementReference('wildcard-allow', 0, $policy->id);
     }
 
     /**

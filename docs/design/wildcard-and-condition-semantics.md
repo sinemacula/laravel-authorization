@@ -80,11 +80,12 @@ compared literally, so a role name containing `*` is migrated.
 
 ### RBAC interaction
 
-Wildcard matching applies at the RBAC fallback step (step 3 of the four-step evaluator). The manager consults RBAC only
-when the evaluator returns `ImplicitDeny`; it then checks `$principal->hasPermission($action)`. A principal holding
-`posts:*` satisfies an RBAC check for `posts:create`, yielding `RbacAllow`. An explicit deny from a policy statement,
-including one applied because its test was undecidable, and an `invalid_policy` denial still win -- wildcard RBAC
-grants never override a policy-layer decision.
+Wildcard matching applies at the permission step of the allow stage. The manager consults RBAC only when the policies
+leave the check at the implicit stage (`no_match` or `condition_failed`: no deny and no allow statement decided it); it
+then checks whether the subject holds the action as a permission. A subject holding `posts:*` satisfies the check for
+`posts:create`, and the decision allows at the allow stage with a `held` permission step. An explicit deny from a policy
+statement, including one applied because its test was undecidable, and an `invalid_policy` denial still win --
+wildcard grants never override a policy-layer decision.
 
 ## Match Outcomes
 

@@ -6,6 +6,7 @@ namespace Tests\Unit\Evaluation;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 
@@ -345,5 +346,59 @@ final class PolicyTest extends TestCase
             'name'       => 'forward-compat',
             'statements' => [['effect' => 'allow', 'actions' => ['x']]],
         ]);
+    }
+
+    /**
+     * A policy has no stored key unless given one, whether built in code or
+     * read from its array representation.
+     *
+     * @return void
+     */
+    public function testIdDefaultsToNull(): void
+    {
+        self::assertNull((new Policy('x', []))->id);
+        self::assertNull(Policy::fromArray(['name' => 'x', 'statements' => []])->id);
+    }
+
+    /**
+     * withId() returns a new policy with the key and every other field kept,
+     * and leaves the original policy as it was.
+     *
+     * @return void
+     */
+    public function testWithIdKeepsEverythingElse(): void
+    {
+        $statement = new Statement(PolicyEffect::ALLOW, ['posts:read']);
+        $policy    = new Policy('example', [$statement], 1);
+
+        $keyed = $policy->withId('policy-key');
+
+        self::assertNotSame($policy, $keyed);
+        self::assertSame('policy-key', $keyed->id);
+        self::assertSame('example', $keyed->name);
+        self::assertSame([$statement], $keyed->statements);
+        self::assertSame(1, $keyed->version);
+        self::assertNull($policy->id);
+        self::assertNull($keyed->withId(null)->id);
+    }
+
+    /**
+     * toArray() renders the document alone and never the stored key, so a keyed
+     * policy renders the same document as one without a key.
+     *
+     * @return void
+     */
+    public function testToArrayNeverIncludesTheId(): void
+    {
+        $policy = Policy::fromArray([
+            'name'       => 'example',
+            'statements' => [['effect' => 'allow', 'actions' => ['posts:read']]],
+        ]);
+
+        $rendered = $policy->withId('policy-key')->toArray();
+
+        self::assertArrayNotHasKey('id', $rendered);
+        self::assertSame(['version', 'name', 'statements'], \array_keys($rendered));
+        self::assertSame($policy->toArray(), $rendered);
     }
 }

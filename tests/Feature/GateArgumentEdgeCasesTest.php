@@ -115,7 +115,7 @@ final class GateArgumentEdgeCasesTest extends TestCase
         $user->givePermission('posts:create');
         $this->actAs($user);
 
-        $user->attachPolicy(Policy::create([
+        $policy = Policy::create([
             'id'       => (string) Str::uuid(),
             'name'     => 'resourceless-allow',
             'document' => [
@@ -123,7 +123,9 @@ final class GateArgumentEdgeCasesTest extends TestCase
                     ['effect' => 'allow', 'actions' => ['posts:create']],
                 ],
             ],
-        ]));
+        ]);
+
+        $user->attachPolicy($policy);
 
         // An integer at index 0 is not a resource identifier; the Gate records
         // a denial at the resource stage without consulting the policy or the
@@ -140,7 +142,7 @@ final class GateArgumentEdgeCasesTest extends TestCase
         // The same principal is allowed when no resource is supplied, so the
         // denial above is down to the argument alone.
         self::assertTrue(Gate::allows('posts:create'));
-        self::assertEquals([new StatementReference('resourceless-allow', 0)], Authorization::lastDecision()?->statements);
+        self::assertEquals([new StatementReference('resourceless-allow', 0, $policy->id)], Authorization::lastDecision()?->statements);
     }
 
     /**

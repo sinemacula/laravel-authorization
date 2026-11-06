@@ -121,17 +121,30 @@ final class PolicyEvaluator
      */
     private static function statementsOf(array $policies): array
     {
-        \usort($policies, static fn (Policy $left, Policy $right): int => \strcmp($left->name, $right->name));
+        \usort($policies, static fn (Policy $left, Policy $right): int => \strcmp(self::orderOf($left), self::orderOf($right)));
 
         $statements = [self::DENY => [], self::ALLOW => []];
 
         foreach ($policies as $policy) {
             foreach ($policy->statements as $index => $statement) {
-                $statements[$statement->effect === PolicyEffect::DENY ? self::DENY : self::ALLOW][] = [new StatementReference($policy->name, $index), $statement];
+                $statements[$statement->effect === PolicyEffect::DENY ? self::DENY : self::ALLOW][] = [new StatementReference($policy->name, $index, $policy->id), $statement];
             }
         }
 
         return $statements;
+    }
+
+    /**
+     * Return what a policy is ordered by: its name, then its stored key, then
+     * its document, so policies of one name take a fixed order too and two that
+     * tie on all three are the same policy.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $policy
+     * @return string
+     */
+    private static function orderOf(Policy $policy): string
+    {
+        return $policy->name . "\0" . ($policy->id ?? '') . "\0" . \json_encode($policy->toArray(), \JSON_THROW_ON_ERROR);
     }
 
     /**

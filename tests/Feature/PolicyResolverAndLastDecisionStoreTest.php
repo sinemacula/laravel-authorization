@@ -282,19 +282,21 @@ final class PolicyResolverAndLastDecisionStoreTest extends TestCase
     {
         $user = $this->bindResolvableUser();
 
-        $user->attachPolicy(PolicyModel::create([
+        $policy = PolicyModel::create([
             'id'       => (string) Str::uuid(),
             'name'     => 'deny-destruct',
             'document' => [
                 'statements' => [['effect' => 'deny', 'actions' => ['posts:destroy']]],
             ],
-        ]));
+        ]);
+
+        $user->attachPolicy($policy);
 
         $explanation = Authorization::for($user)->explain('posts:destroy');
 
         self::assertSame(
-            "DENY (explicit_deny: an applicable statement denies it) at the deny stage by deny-destruct#0.\n"
-            . '  [deny] deny-destruct#0: matched',
+            "DENY (explicit_deny: an applicable statement denies it) at the deny stage by deny-destruct[{$policy->id}]#0.\n"
+            . "  [deny] deny-destruct[{$policy->id}]#0: matched",
             $explanation,
         );
         self::assertSame(Authorization::for($user)->check('posts:destroy')->explain(), $explanation);
