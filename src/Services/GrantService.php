@@ -36,7 +36,9 @@ use SineMacula\Laravel\Authorization\Support\RoleParity;
  * else platform-wide. A name is looked up among the rows visible in the tenant
  * named, else in the current tenant. A revocation follows the same rule, and a
  * sync replaces the grants in one scope: the tenant named, else the tenant that
- * owns every target, else the platform. Every grant is for every application.
+ * owns every target, else the platform. A grant holds in the application the
+ * call names as `$application`, else in every application (AUTHZ-5.6, D24); a
+ * revocation and a sync stay in it the same way.
  *
  * A grant in a tenant also holds in the tenants below it in the tenant tree
  * (AUTHZ-5.3), unless the call passes `$includeSubtree` false to limit it to
@@ -86,6 +88,7 @@ final class GrantService
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  bool  $includeSubtree
+     * @param  string|null  $application
      * @return \SineMacula\Laravel\Authorization\Enums\GrantOutcome
      *
      * @throws \Throwable
@@ -97,8 +100,9 @@ final class GrantService
         Model|Reference|null $actor = null,
         Model|Reference|null $tenant = null,
         bool $includeSubtree = true,
+        ?string $application = null,
     ): GrantOutcome {
-        return $this->grant(GrantTarget::ROLE, $grantee, $role, $expiresAt, $actor, $tenant, $includeSubtree);
+        return $this->grant(GrantTarget::ROLE, $grantee, $role, $expiresAt, $actor, self::named($tenant, $includeSubtree, $application));
     }
 
     /**
@@ -112,13 +116,19 @@ final class GrantService
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  string|null  $application
      * @return int
      *
      * @throws \Throwable
      */
-    public function revokeRole(Model|Reference $grantee, Role|string $role, Model|Reference|null $actor = null, Model|Reference|null $tenant = null): int
-    {
-        return $this->revoke(GrantTarget::ROLE, $grantee, $role, $actor, $tenant);
+    public function revokeRole(
+        Model|Reference $grantee,
+        Role|string $role,
+        Model|Reference|null $actor = null,
+        Model|Reference|null $tenant = null,
+        ?string $application = null,
+    ): int {
+        return $this->revoke(GrantTarget::ROLE, $grantee, $role, $actor, $tenant, $application);
     }
 
     /**
@@ -135,6 +145,7 @@ final class GrantService
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  bool  $includeSubtree
+     * @param  string|null  $application
      * @return \SineMacula\Laravel\Authorization\Services\SyncResult
      *
      * @throws \Throwable
@@ -146,8 +157,9 @@ final class GrantService
         Model|Reference|null $actor = null,
         Model|Reference|null $tenant = null,
         bool $includeSubtree = true,
+        ?string $application = null,
     ): SyncResult {
-        return $this->sync(GrantTarget::ROLE, $grantee, $roles, $expiresAt, $actor, $tenant, $includeSubtree);
+        return $this->sync(GrantTarget::ROLE, $grantee, $roles, $expiresAt, $actor, self::named($tenant, $includeSubtree, $application));
     }
 
     /**
@@ -160,6 +172,7 @@ final class GrantService
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  bool  $includeSubtree
+     * @param  string|null  $application
      * @return \SineMacula\Laravel\Authorization\Enums\GrantOutcome
      *
      * @throws \Throwable
@@ -171,8 +184,9 @@ final class GrantService
         Model|Reference|null $actor = null,
         Model|Reference|null $tenant = null,
         bool $includeSubtree = true,
+        ?string $application = null,
     ): GrantOutcome {
-        return $this->grant(GrantTarget::PERMISSION, $grantee, $permission, $expiresAt, $actor, $tenant, $includeSubtree);
+        return $this->grant(GrantTarget::PERMISSION, $grantee, $permission, $expiresAt, $actor, self::named($tenant, $includeSubtree, $application));
     }
 
     /**
@@ -186,13 +200,19 @@ final class GrantService
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  string|null  $application
      * @return int
      *
      * @throws \Throwable
      */
-    public function revokePermission(Model|Reference $grantee, Permission|string $permission, Model|Reference|null $actor = null, Model|Reference|null $tenant = null): int
-    {
-        return $this->revoke(GrantTarget::PERMISSION, $grantee, $permission, $actor, $tenant);
+    public function revokePermission(
+        Model|Reference $grantee,
+        Permission|string $permission,
+        Model|Reference|null $actor = null,
+        Model|Reference|null $tenant = null,
+        ?string $application = null,
+    ): int {
+        return $this->revoke(GrantTarget::PERMISSION, $grantee, $permission, $actor, $tenant, $application);
     }
 
     /**
@@ -205,6 +225,7 @@ final class GrantService
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  bool  $includeSubtree
+     * @param  string|null  $application
      * @return \SineMacula\Laravel\Authorization\Services\SyncResult
      *
      * @throws \Throwable
@@ -216,8 +237,9 @@ final class GrantService
         Model|Reference|null $actor = null,
         Model|Reference|null $tenant = null,
         bool $includeSubtree = true,
+        ?string $application = null,
     ): SyncResult {
-        return $this->sync(GrantTarget::PERMISSION, $grantee, $permissions, $expiresAt, $actor, $tenant, $includeSubtree);
+        return $this->sync(GrantTarget::PERMISSION, $grantee, $permissions, $expiresAt, $actor, self::named($tenant, $includeSubtree, $application));
     }
 
     /**
@@ -229,6 +251,7 @@ final class GrantService
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  bool  $includeSubtree
+     * @param  string|null  $application
      * @return \SineMacula\Laravel\Authorization\Enums\GrantOutcome
      *
      * @throws \Throwable
@@ -240,8 +263,9 @@ final class GrantService
         Model|Reference|null $actor = null,
         Model|Reference|null $tenant = null,
         bool $includeSubtree = true,
+        ?string $application = null,
     ): GrantOutcome {
-        return $this->grant(GrantTarget::POLICY, $grantee, $policy, $expiresAt, $actor, $tenant, $includeSubtree);
+        return $this->grant(GrantTarget::POLICY, $grantee, $policy, $expiresAt, $actor, self::named($tenant, $includeSubtree, $application));
     }
 
     /**
@@ -252,13 +276,19 @@ final class GrantService
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  string|null  $application
      * @return int
      *
      * @throws \Throwable
      */
-    public function detachPolicy(Model|Reference $grantee, Policy $policy, Model|Reference|null $actor = null, Model|Reference|null $tenant = null): int
-    {
-        return $this->revoke(GrantTarget::POLICY, $grantee, $policy, $actor, $tenant);
+    public function detachPolicy(
+        Model|Reference $grantee,
+        Policy $policy,
+        Model|Reference|null $actor = null,
+        Model|Reference|null $tenant = null,
+        ?string $application = null,
+    ): int {
+        return $this->revoke(GrantTarget::POLICY, $grantee, $policy, $actor, $tenant, $application);
     }
 
     /**
@@ -271,6 +301,7 @@ final class GrantService
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  bool  $includeSubtree
+     * @param  string|null  $application
      * @return \SineMacula\Laravel\Authorization\Services\SyncResult
      *
      * @throws \Throwable
@@ -282,8 +313,9 @@ final class GrantService
         Model|Reference|null $actor = null,
         Model|Reference|null $tenant = null,
         bool $includeSubtree = true,
+        ?string $application = null,
     ): SyncResult {
-        return $this->sync(GrantTarget::POLICY, $grantee, $policies, $expiresAt, $actor, $tenant, $includeSubtree);
+        return $this->sync(GrantTarget::POLICY, $grantee, $policies, $expiresAt, $actor, self::named($tenant, $includeSubtree, $application));
     }
 
     /**
@@ -360,8 +392,7 @@ final class GrantService
      * @param  mixed  $target
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
-     * @param  bool  $below
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $named
      * @return \SineMacula\Laravel\Authorization\Enums\GrantOutcome
      *
      * @throws \Throwable
@@ -372,17 +403,15 @@ final class GrantService
         mixed $target,
         ?\DateTimeInterface $expiresAt,
         Model|Reference|null $actor,
-        Model|Reference|null $tenant,
-        bool $below,
+        GrantScope $named,
     ): GrantOutcome {
         $reference = self::grantee($grantee);
-        $named     = GrantScopes::named($tenant);
         $operation = Operation::begin($actor);
 
         /** @var \SineMacula\Laravel\Authorization\Enums\GrantOutcome $outcome */
-        $outcome = OperationScope::run($operation, static function (Operation $operation) use ($kind, $grantee, $reference, $named, $target, $expiresAt, $below): GrantOutcome {
-            $model = $kind->resolve($target, self::guard($grantee), $named);
-            $scope = self::scope(GrantScopes::of($kind, $model, $named), $below);
+        $outcome = OperationScope::run($operation, static function (Operation $operation) use ($kind, $grantee, $reference, $named, $target, $expiresAt): GrantOutcome {
+            $model = $kind->resolve($target, self::guard($grantee), $named->tenant);
+            $scope = self::scope(GrantScopes::of($kind, $model, $named->tenant), $named->includeSubtree, $named->application);
 
             RoleParity::assertGrantable($kind->value, $model, self::guard($grantee));
 
@@ -407,23 +436,24 @@ final class GrantService
      * @param  mixed  $target
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  string|null  $application
      * @return int
      *
      * @throws \Throwable
      */
-    private function revoke(GrantTarget $kind, Model|Reference $grantee, mixed $target, Model|Reference|null $actor, Model|Reference|null $tenant): int
+    private function revoke(GrantTarget $kind, Model|Reference $grantee, mixed $target, Model|Reference|null $actor, Model|Reference|null $tenant, ?string $application): int
     {
         $reference = self::grantee($grantee);
         $named     = GrantScopes::named($tenant);
         $operation = Operation::begin($actor);
 
-        $revoked = OperationScope::run($operation, static function (Operation $operation) use ($kind, $grantee, $reference, $named, $target): int {
+        $revoked = OperationScope::run($operation, static function (Operation $operation) use ($kind, $grantee, $reference, $named, $target, $application): int {
             $candidates = \is_string($target) ? $kind->named($target, self::guard($grantee), $named) : [$kind->assertTarget($target)];
             $events     = [];
 
             foreach ($candidates as $model) {
                 $scope = GrantScopes::of($kind, $model, $named);
-                $table = self::table($kind, $reference, $operation, new GrantScope($scope));
+                $table = self::table($kind, $reference, $operation, new GrantScope($scope, $application));
                 $key   = self::key($model);
                 $reach = $table->reaches([$key]);
 
@@ -433,7 +463,7 @@ final class GrantService
 
                 $table->revoke([$key]);
 
-                $events[] = $kind->revokedEvent($operation, $reference, $model, new GrantScope($scope, null, $reach[$key]));
+                $events[] = $kind->revokedEvent($operation, $reference, $model, new GrantScope($scope, $application, $reach[$key]));
             }
 
             OperationScope::dispatch(...$events);
@@ -456,8 +486,7 @@ final class GrantService
      * @param  array<int, mixed>  $targets
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
-     * @param  bool  $below
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $named
      * @return \SineMacula\Laravel\Authorization\Services\SyncResult
      *
      * @throws \Throwable
@@ -468,17 +497,15 @@ final class GrantService
         array $targets,
         ?\DateTimeInterface $expiresAt,
         Model|Reference|null $actor,
-        Model|Reference|null $tenant,
-        bool $below,
+        GrantScope $named,
     ): SyncResult {
         $reference = self::grantee($grantee);
-        $named     = GrantScopes::named($tenant);
         $operation = Operation::begin($actor);
 
         /** @var \SineMacula\Laravel\Authorization\Services\SyncResult $result */
-        $result = OperationScope::run($operation, static function (Operation $operation) use ($kind, $grantee, $reference, $named, $targets, $expiresAt, $below): SyncResult {
-            $scope   = $named ?? GrantScopes::commonOwner($kind, self::guard($grantee), $targets);
-            $written = self::scope($scope, $below);
+        $result = OperationScope::run($operation, static function (Operation $operation) use ($kind, $grantee, $reference, $named, $targets, $expiresAt): SyncResult {
+            $scope   = $named->tenant ?? GrantScopes::commonOwner($kind, self::guard($grantee), $targets);
+            $written = self::scope($scope, $named->includeSubtree, $named->application);
             $table   = self::table($kind, $reference, $operation, $written);
             $held    = $table->held();
             $keep    = self::toKeep($kind, $grantee, $targets, $held, $scope);
@@ -499,7 +526,7 @@ final class GrantService
             }
 
             foreach ($kind->find($revoked) as $model) {
-                $events[] = $kind->revokedEvent($operation, $reference, $model, new GrantScope($scope, null, $reaches[self::key($model)]));
+                $events[] = $kind->revokedEvent($operation, $reference, $model, new GrantScope($scope, $named->application, $reaches[self::key($model)]));
             }
 
             OperationScope::dispatch(...$events);
@@ -603,21 +630,40 @@ final class GrantService
             $operation->actor,
             $scope->tenant,
             $scope->includeSubtree,
+            $scope->application,
         );
     }
 
     /**
-     * Return the scope a grant is written in: its tenant, and whether it also
-     * holds in the tenants below it. A platform-wide grant counts everywhere,
-     * so it always does.
+     * Return the scope a call names: the tenant it names (a model taken as its
+     * reference), whether a grant reaches the tenants below it, and the
+     * application, each before the target's owner settles the tenant.
+     *
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  bool  $includeSubtree
+     * @param  string|null  $application
+     * @return \SineMacula\Laravel\Authorization\Support\GrantScope
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException
+     */
+    private static function named(Model|Reference|null $tenant, bool $includeSubtree, ?string $application): GrantScope
+    {
+        return new GrantScope(GrantScopes::named($tenant), $application, $includeSubtree);
+    }
+
+    /**
+     * Return the scope a grant is written in: its tenant, whether it also holds
+     * in the tenants below it, and its application. A platform-wide grant
+     * counts in every tenant, so it always reaches below.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  bool  $includeSubtree
+     * @param  string|null  $application
      * @return \SineMacula\Laravel\Authorization\Support\GrantScope
      */
-    private static function scope(?Reference $tenant, bool $includeSubtree): GrantScope
+    private static function scope(?Reference $tenant, bool $includeSubtree, ?string $application): GrantScope
     {
-        return new GrantScope($tenant, null, $includeSubtree || $tenant === null);
+        return new GrantScope($tenant, $application, $includeSubtree || $tenant === null);
     }
 
     /**

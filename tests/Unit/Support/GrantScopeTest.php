@@ -21,6 +21,27 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 final class GrantScopeTest extends TestCase
 {
     /**
+     * An application is named by at least one byte and at most 191; none means
+     * every application.
+     *
+     * @return void
+     */
+    public function testAnApplicationIsAShortName(): void
+    {
+        self::assertNull((new GrantScope)->application);
+        self::assertSame(\str_repeat('a', 191), (new GrantScope(null, \str_repeat('a', 191)))->application);
+
+        foreach (['', \str_repeat('a', 192)] as $application) {
+            try {
+                new GrantScope(null, $application);
+                self::fail("The application '{$application}' was accepted.");
+            } catch (\InvalidArgumentException $exception) {
+                self::assertSame('An application is named by at most 191 bytes, and at least one.', $exception->getMessage());
+            }
+        }
+    }
+
+    /**
      * The platform scope names no tenant and no application.
      *
      * @return void

@@ -313,8 +313,18 @@ $user->assignRole('viewer', tenant: $organisationB);
 A check counts the grants made platform-wide and those made in the current tenant; without a tenant, only platform-wide
 grants. Granting a tenant's own role outside that tenant and the tenants below it, or platform-wide, is refused with
 `GrantScopeMismatchException`. A revocation removes the grant in the same scope, and a sync replaces the grants of one
-scope: the tenant named, else the tenant that owns every target, else the platform. Every grant is for every
-application.
+scope: the tenant named, else the tenant that owns every target, else the platform. A grant is for every
+application unless the call names one.
+
+A grant can also be limited to one application (a guard's name, as `laravel-authentication` names it): it counts only
+when the subject resolver reports that application, and a grant for every application counts on all of them. Each
+application is a grant of its own, revoked, synced and reported on its own:
+
+```php
+$user->assignRole('staff', application: 'admin');  // only in the admin app
+$user->assignRole('member');                       // in every app
+$user->revokeRole('staff', application: 'admin');
+```
 
 A role takes only the platform's permissions and parent roles, its own tenant's and its tenant's ancestors', so a
 platform role takes only the platform's; anything else is refused with `OwnerMismatchException`. Guards follow the same

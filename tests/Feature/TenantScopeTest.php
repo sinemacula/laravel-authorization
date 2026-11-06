@@ -256,6 +256,72 @@ final class TenantScopeTest extends TestCase
     }
 
     /**
+     * The current application is the one the resolved subject is on, or none.
+     *
+     * @return void
+     */
+    public function testCurrentApplicationIsTheSubjectsApplication(): void
+    {
+        self::assertNull(TenantScope::currentApplication());
+
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver(new \stdClass, null, 'admin'));
+        (new TenantScope)->flushResolvedTenant();
+
+        self::assertSame('admin', TenantScope::currentApplication());
+    }
+
+    /**
+     * A change of the default guard, as Laravel's `auth:` middleware makes
+     * during a request, reads the subject again, so an application named after
+     * the guard is never held from the guard before.
+     *
+     * @return void
+     */
+    public function testAChangeOfDefaultGuardReadsTheApplicationAgain(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make('config');
+
+        $this->app?->instance(SubjectResolver::class, new class implements SubjectResolver {
+            /**
+             * Resolve a subject on the application the default guard names.
+             *
+             * @return \SineMacula\Laravel\Authorization\Subject
+             */
+            #[\Override]
+            public function resolve(): Subject
+            {
+                return $this->forUser(new \stdClass);
+            }
+
+            /**
+             * Return the user as the subject, on the default guard's
+             * application.
+             *
+             * @param  object  $user
+             * @return \SineMacula\Laravel\Authorization\Subject
+             */
+            #[\Override]
+            public function forUser(object $user): Subject
+            {
+                /** @var string $guard */
+                $guard = config('auth.defaults.guard');
+
+                return new Subject($user, $user, null, $guard);
+            }
+        });
+
+        $config->set('auth.defaults.guard', 'web');
+
+        self::assertSame('web', TenantScope::currentApplication());
+
+        $config->set('auth.defaults.guard', 'admin');
+
+        self::assertSame('admin', TenantScope::currentApplication());
+        self::assertSame('admin', $this->app?->make(ResolvedTenant::class)->guard);
+    }
+
+    /**
      * Flushing the resolved tenant empties the resolution cache's memo, whose
      * entries were resolved under it.
      *

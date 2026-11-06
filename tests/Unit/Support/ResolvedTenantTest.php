@@ -35,12 +35,13 @@ final class ResolvedTenantTest extends TestCase
     {
         $tenant   = new \stdClass;
         $resolver = $this->createMock(SubjectResolver::class);
-        $resolver->expects(self::once())->method('resolve')->willReturn(new Subject(new \stdClass, tenant: $tenant));
+        $resolver->expects(self::once())->method('resolve')->willReturn(new Subject(new \stdClass, tenant: $tenant, application: 'admin'));
 
         $resolved = ResolvedTenant::from($resolver);
 
         self::assertSame($resolver, $resolved->resolver);
         self::assertSame($tenant, $resolved->tenant);
+        self::assertSame('admin', $resolved->application);
     }
 
     /**
@@ -73,6 +74,7 @@ final class ResolvedTenantTest extends TestCase
 
         try {
             self::assertNull(ResolvedTenant::from($resolver)->tenant);
+            self::assertNull(ResolvedTenant::from($resolver)->application);
         } finally {
             \restore_error_handler();
         }
@@ -80,7 +82,7 @@ final class ResolvedTenantTest extends TestCase
 
     /**
      * The holder recognises the resolver it came from, and no other resolver,
-     * even one of the same class.
+     * even one of the same class, under the default guard it was read under.
      *
      * @return void
      */
@@ -89,9 +91,14 @@ final class ResolvedTenantTest extends TestCase
         $resolver = self::createStub(SubjectResolver::class);
         $other    = clone $resolver;
         $resolved = new ResolvedTenant($resolver, null);
+        $guarded  = ResolvedTenant::from($resolver, 'web');
 
         self::assertTrue($resolved->isFrom($resolver));
         self::assertFalse($resolved->isFrom($other));
+        self::assertFalse($resolved->isFrom($resolver, 'web'));
+        self::assertSame('web', $guarded->guard);
+        self::assertTrue($guarded->isFrom($resolver, 'web'));
+        self::assertFalse($guarded->isFrom($resolver, 'admin'));
     }
 
     /**

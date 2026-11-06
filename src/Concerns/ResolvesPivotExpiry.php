@@ -7,6 +7,7 @@ namespace SineMacula\Laravel\Authorization\Concerns;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection as EloquentCollection;
 use Illuminate\Database\Eloquent\Relations\MorphToMany;
+use SineMacula\Laravel\Authorization\Database\GrantApplications;
 use SineMacula\Laravel\Authorization\Database\GrantRelation;
 use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
@@ -37,6 +38,8 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
      * Only the grants that hold in the current tenant count: those made
      * platform-wide, and those made in the tenant the tenant scope applies.
      * Without a tenant only platform-wide grants count (AUTHZ-5.1, AUTHZ-5.7).
+     * Likewise only the grants for every application and those for the
+     * subject's application count, and with none, only the former (AUTHZ-5.6).
      *
      * Shared by the roles, permissions and policies relations so the grant
      * tables are always read the same way. The relation compares the grantee's
@@ -67,6 +70,7 @@ trait ResolvesPivotExpiry // @phpstan-ignore trait.unused
             ->withTimestamps()
             ->where(static function (Builder $query) use ($table): void {
                 TenantScope::currentChain()->grants($query, $table);
+                GrantApplications::only($query, $table, TenantScope::currentApplication());
             });
 
         LiveGrants::only($relation->getQuery(), $table);

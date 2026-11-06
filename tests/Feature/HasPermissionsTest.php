@@ -53,6 +53,34 @@ final class HasPermissionsTest extends TestCase
     }
 
     /**
+     * The trait passes an application on to the grant, the revocation and the
+     * sync, each staying in it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAPermissionForAnApplication(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        Permission::create(['name' => 'posts:edit']);
+
+        $user->givePermission('posts:edit', application: 'admin');
+        $user->givePermission('posts:edit', application: 'mobile');
+
+        self::assertEqualsCanonicalizing(['admin', 'mobile'], DB::table('authorizable_permissions')->pluck('application')->all());
+
+        $user->revokePermission('posts:edit', application: 'admin');
+
+        self::assertSame(['mobile'], DB::table('authorizable_permissions')->pluck('application')->all());
+
+        $user->syncPermissions([], application: 'mobile');
+
+        self::assertSame([], DB::table('authorizable_permissions')->pluck('application')->all());
+    }
+
+    /**
      * A grant in a tenant through the trait can be limited to that tenant, and
      * reaches the tenants below it by default.
      *

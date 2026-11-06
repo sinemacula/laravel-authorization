@@ -316,7 +316,7 @@ final readonly class ResolutionCache
 
     /**
      * Return the key of the kind's entry for the grantee under the tenant the
-     * tenant scope applies.
+     * tenant scope applies and the subject's application.
      *
      * @param  string  $kind
      * @param  object  $grantee
@@ -324,9 +324,12 @@ final readonly class ResolutionCache
      */
     private function key(string $kind, object $grantee): string
     {
-        $tenant = TenantScope::currentTenant();
+        $tenant      = TenantScope::currentTenant();
+        $application = TenantScope::currentApplication();
 
-        return "{$this->prefix}:{$kind}:" . PrincipalCacheKey::for($grantee) . ':' . ($tenant === null ? 'platform' : \implode(':', $tenant));
+        return "{$this->prefix}:{$kind}:" . PrincipalCacheKey::for($grantee)
+            . ':' . ($tenant === null ? 'platform' : \implode(':', $tenant))
+            . ':' . ($application === null ? 'every' : 'app:' . $application);
     }
 
     /**

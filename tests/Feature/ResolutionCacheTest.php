@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Cache\Resolution;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Cache\VersionedStore;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
@@ -21,17 +22,19 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\FailingCacheStore;
 use Tests\Feature\Stubs\NonTaggableCacheStore;
 use Tests\Feature\Stubs\RecordingLogger;
+use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
 /**
  * Feature tests for the two-tier resolution cache: the memo, the persistent
  * entries and the versions that decide whether an entry still holds, entry
- * lifetimes, the tenant in the key, and a store that fails.
+ * lifetimes, the tenant and application in the key, and a store that fails.
  *
  * Each "request" is a fresh cache instance over the same store, as the service
  * provider's scoped binding gives every request or job.
@@ -241,6 +244,25 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
+     * An entry is kept per application, so a grant made for one application is
+     * never served on another.
+     *
+     * @return void
+     */
+    public function testEntriesAreKeptPerApplication(): void
+    {
+        foreach (['admin', 'mobile', 'admin'] as $application) {
+            $this->app?->instance(SubjectResolver::class, new StubSubjectResolver(new \stdClass, null, $application));
+            $this->app?->forgetInstance(ResolvedTenant::class);
+
+            $this->permissions($this->request());
+        }
+
+        self::assertSame(2, $this->resolutions);
+        self::assertIsArray($this->store->get('authorization-test:permissions:' . PrincipalCacheKey::for(self::grantee()) . ':platform:app:mobile'));
+    }
+
+    /**
      * An entry lives no longer than the configured maximum, in either tier.
      *
      * @return void
@@ -447,7 +469,7 @@ final class ResolutionCacheTest extends TestCase
 
         $this->permissions($cache);
 
-        $key   = 'authorization-test:permissions:' . PrincipalCacheKey::for(self::grantee()) . ':platform';
+        $key   = 'authorization-test:permissions:' . PrincipalCacheKey::for(self::grantee()) . ':platform:every';
         $entry = $this->store->get($key);
         self::assertIsArray($entry);
 
@@ -476,7 +498,7 @@ final class ResolutionCacheTest extends TestCase
 
         $this->permissions($this->request());
 
-        $key   = 'authorization-test:permissions:' . PrincipalCacheKey::for(self::grantee()) . ':platform';
+        $key   = 'authorization-test:permissions:' . PrincipalCacheKey::for(self::grantee()) . ':platform:every';
         $entry = $this->store->get($key);
         self::assertIsArray($entry);
 
@@ -503,7 +525,7 @@ final class ResolutionCacheTest extends TestCase
 
         self::assertSame(['posts:read'], $this->permissions($cache));
 
-        $key   = 'authorization-test:permissions:' . PrincipalCacheKey::for(self::grantee()) . ':platform';
+        $key   = 'authorization-test:permissions:' . PrincipalCacheKey::for(self::grantee()) . ':platform:every';
         $entry = $this->store->get($key);
         self::assertIsArray($entry);
 
@@ -527,7 +549,7 @@ final class ResolutionCacheTest extends TestCase
         $this->recordLogs();
         $this->request()->rememberPolicies(self::grantee(), fn (): Resolution => $this->resolve([]));
 
-        $key   = 'authorization-test:policies:' . PrincipalCacheKey::for(self::grantee()) . ':platform';
+        $key   = 'authorization-test:policies:' . PrincipalCacheKey::for(self::grantee()) . ':platform:every';
         $entry = $this->store->get($key);
         self::assertIsArray($entry);
 

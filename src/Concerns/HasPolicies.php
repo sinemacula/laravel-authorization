@@ -38,9 +38,9 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * Filters out pivot rows whose `expires_at` is in the past — temporal
      * policy attachments disappear from the relation automatically at expiry
      * without requiring a sweeper run. The pivot's `expires_at` column is
-     * surfaced via `withPivot()`, and the attachment's timestamps are kept. The
-     * scope columns keep their defaults: every attachment made here is
-     * platform-wide, for every application.
+     * surfaced via `withPivot()`, and the attachment's timestamps are kept.
+     * Only the attachments that hold in the current tenant and application
+     * count.
      *
      * @phpcs:disable Generic.Files.LineLength.TooLong
      *
@@ -84,13 +84,19 @@ trait HasPolicies // @phpstan-ignore trait.unused
      * @param  \DateTimeInterface|null  $expiresAt
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  bool  $includeSubtree
+     * @param  string|null  $application
      * @return static
      *
      * @throws \Throwable
      */
-    public function attachPolicy(Policy $policy, ?\DateTimeInterface $expiresAt = null, Model|Reference|null $tenant = null, bool $includeSubtree = true): static
-    {
-        self::authorizationGrants()->attachPolicy($this, $policy, $expiresAt, null, $tenant, $includeSubtree);
+    public function attachPolicy(
+        Policy $policy,
+        ?\DateTimeInterface $expiresAt = null,
+        Model|Reference|null $tenant = null,
+        bool $includeSubtree = true,
+        ?string $application = null,
+    ): static {
+        self::authorizationGrants()->attachPolicy($this, $policy, $expiresAt, null, $tenant, $includeSubtree, $application);
 
         return $this;
     }
@@ -101,13 +107,14 @@ trait HasPolicies // @phpstan-ignore trait.unused
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  string|null  $application
      * @return static
      *
      * @throws \Throwable
      */
-    public function detachPolicy(Policy $policy, Model|Reference|null $tenant = null): static
+    public function detachPolicy(Policy $policy, Model|Reference|null $tenant = null, ?string $application = null): static
     {
-        self::authorizationGrants()->detachPolicy($this, $policy, null, $tenant);
+        self::authorizationGrants()->detachPolicy($this, $policy, null, $tenant, $application);
 
         return $this;
     }
@@ -128,13 +135,14 @@ trait HasPolicies // @phpstan-ignore trait.unused
      *
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Policy>  $policies
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @param  string|null  $application
      * @return static
      *
      * @throws \Throwable
      */
-    public function syncPolicies(array $policies, Model|Reference|null $tenant = null): static
+    public function syncPolicies(array $policies, Model|Reference|null $tenant = null, ?string $application = null): static
     {
-        self::authorizationGrants()->syncPolicies($this, $policies, null, null, $tenant);
+        self::authorizationGrants()->syncPolicies($this, $policies, tenant: $tenant, application: $application);
 
         return $this;
     }

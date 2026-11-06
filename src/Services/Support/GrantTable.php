@@ -16,10 +16,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * The rows one grantee holds in one grant table within one scope, read and
  * written by the grant service inside its transaction.
  *
- * The scope is a tenant, or the platform when it is null; every row is written
- * for every application (a null application). Grants, re-arms, reads of what is
- * held and revocations stay within the scope, so a role held in one tenant and
- * in another, or platform-wide, are separate grants. Only a grantee's deletion
+ * The scope is a tenant, or the platform when it is null, and an application,
+ * or every application when it is null. Grants, re-arms, reads of what is held
+ * and revocations stay within the scope, so a role held in one tenant and in
+ * another, or platform-wide, are separate grants. Only a grantee's deletion
  * revokes in every scope.
  *
  * A grant inserts its row with insert-or-ignore against the table's unique key,
@@ -48,6 +48,7 @@ final readonly class GrantTable extends ExpiringGrants
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $grantedBy
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  bool  $includeSubtree
+     * @param  string|null  $application
      */
     public function __construct(
 
@@ -74,6 +75,9 @@ final readonly class GrantTable extends ExpiringGrants
 
         /** Whether the grants written also hold in the tenants below the tenant. */
         private bool $includeSubtree = true,
+
+        /** The application the grants hold in; null for every application. */
+        private ?string $application = null,
     ) {}
 
     /**
@@ -157,12 +161,12 @@ final readonly class GrantTable extends ExpiringGrants
     {
         $grants = [];
 
-        foreach ($this->grantee()->get([$this->column . ' as target_id', 'tenant_type', 'tenant_id', 'include_subtree']) as $row) {
-            /** @var array{target_id: string, tenant_type: string|null, tenant_id: string|null, include_subtree: bool|int|string} $columns */
+        foreach ($this->grantee()->get([$this->column . ' as target_id', 'tenant_type', 'tenant_id', 'include_subtree', 'application']) as $row) {
+            /** @var array{target_id: string, tenant_type: string|null, tenant_id: string|null, include_subtree: bool|int|string, application: string|null} $columns */
             $columns  = (array) $row;
             $type     = $columns['tenant_type'];
             $tenant   = $type === null ? null : new Reference($type, (string) $columns['tenant_id']);
-            $grants[] = [$columns['target_id'], new GrantScope($tenant, null, (bool) $columns['include_subtree'])];
+            $grants[] = [$columns['target_id'], new GrantScope($tenant, $columns['application'], (bool) $columns['include_subtree'])];
         }
 
         return $grants;
@@ -198,6 +202,7 @@ final readonly class GrantTable extends ExpiringGrants
             'tenant_type'       => $this->tenant?->type,
             'tenant_id'         => $this->tenant?->id,
             'include_subtree'   => $this->includeSubtree,
+            'application'       => $this->application,
             'expires_at'        => $expiresAt,
             'granted_by_type'   => $this->grantedBy?->type,
             'granted_by_id'     => $this->grantedBy?->id,
@@ -255,13 +260,14 @@ final readonly class GrantTable extends ExpiringGrants
     }
 
     /**
-     * Query the grantee's rows in the scope, for every application.
+     * Query the grantee's rows in the scope: its tenant, or platform-wide, and
+     * its application, or every application.
      *
      * @return \Illuminate\Database\Query\Builder
      */
     private function inScope(): Builder
     {
-        $query = $this->grantee()->whereNull('application');
+        $query = $this->application === null ? $this->grantee()->whereNull('application') : $this->grantee()->where('application', $this->application);
 
         if ($this->tenant === null) {
             return $query->whereNull('tenant_type')->whereNull('tenant_id');

@@ -403,6 +403,80 @@ final class GrantServiceTest extends TestCase
     }
 
     /**
+     * A grant can be made for one application, apart from the grant for every
+     * application, and each kind's grant, revocation and sync stays in the
+     * application named, every event reporting it (D24).
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAGrantCanBeMadeForOneApplication(): void
+    {
+        $user   = self::user();
+        $policy = Policy::query()->create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]);
+
+        Role::query()->create(['name' => 'editor']);
+        Permission::query()->create(['name' => 'posts:edit']);
+
+        Event::fake();
+
+        $outcomes = [
+            self::service()->grantRole($user, 'editor', application: 'admin'),
+            self::service()->grantRole($user, 'editor'),
+            self::service()->grantRole($user, 'editor', application: 'admin'),
+            self::service()->grantPermission($user, 'posts:edit', application: 'admin'),
+            self::service()->attachPolicy($user, $policy, application: 'admin'),
+        ];
+
+        $applications = \array_map(static fn (RoleAssigned $event): ?string => $event->scope->application, self::dispatchedEvents(RoleAssigned::class));
+
+        self::assertSame([GrantOutcome::GRANTED, GrantOutcome::GRANTED, GrantOutcome::UNCHANGED, GrantOutcome::GRANTED, GrantOutcome::GRANTED], $outcomes);
+        self::assertSame(['admin', null], $applications);
+        self::assertSame('admin', self::dispatchedEvents(PermissionGranted::class)[0]->scope->application);
+        self::assertSame('admin', self::dispatchedEvents(PolicyAttached::class)[0]->scope->application);
+
+        self::assertSame(0, self::service()->revokePermission($user, 'posts:edit', application: 'mobile'));
+        self::assertSame(1, self::service()->revokeRole($user, 'editor', application: 'admin'));
+        self::assertSame(1, self::service()->detachPolicy($user, $policy, application: 'admin'));
+        self::assertSame('admin', self::dispatchedEvents(RoleRevoked::class)[0]->scope->application);
+        self::assertSame([null], DB::table('authorizable_roles')->pluck('application')->all());
+
+        self::assertCount(1, self::service()->syncRoles($user, ['editor'], application: 'mobile')->granted);
+        self::assertCount(1, self::service()->syncPermissions($user, [], application: 'admin')->revoked);
+        self::assertCount(1, self::service()->syncPolicies($user, [$policy], application: 'mobile')->granted);
+        self::assertEqualsCanonicalizing([null, 'mobile'], DB::table('authorizable_roles')->pluck('application')->all());
+        self::assertSame(0, DB::table('authorizable_permissions')->count());
+        self::assertSame(['mobile'], DB::table('authorizable_policies')->pluck('application')->all());
+
+        self::service()->revokeAll($user);
+
+        $revoked = \array_map(static fn (RoleRevoked $event): ?string => $event->scope->application, self::dispatchedEvents(RoleRevoked::class));
+
+        self::assertEqualsCanonicalizing([null, 'mobile', 'admin'], $revoked);
+    }
+
+    /**
+     * A sync in a named tenant works there, not in the tenant its targets
+     * share, so a target that other tenant owns is refused.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASyncInANamedTenantRefusesATargetOwnedByAnother(): void
+    {
+        $user  = self::user();
+        $owner = self::createTenant('tenant-a');
+
+        Role::query()->create(['name' => 'editor', ...self::ownedBy($owner)]);
+
+        $this->expectException(GrantScopeMismatchException::class);
+
+        self::service()->syncRoles($user, [Role::query()->withoutGlobalScopes()->sole()], tenant: Reference::of(self::createTenant('tenant-b')));
+    }
+
+    /**
      * A sync writes its reach to what it grants and re-arms, reporting each,
      * and leaves a live grant it keeps as it is; by default it reaches below.
      *
