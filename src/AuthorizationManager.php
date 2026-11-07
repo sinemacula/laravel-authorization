@@ -70,12 +70,6 @@ final class AuthorizationManager
 {
     use BuildsScopedManagers, HasContainerInstance;
 
-    /** @var \SineMacula\Laravel\Authorization\Subject|null The subject named through `for()` or `forUser()`, null for a guest. */
-    private ?Subject $subjectOverride = null;
-
-    /** @var bool Whether `for()` or `forUser()` named the subject; until one does, the bound resolver resolves it. */
-    private bool $isSubjectNamed = false;
-
     /** @var \SineMacula\Laravel\Authorization\Evaluation\DecisionPipeline Decides each check, with the policy override and the caps of this scope. */
     private DecisionPipeline $pipeline;
 
@@ -551,22 +545,6 @@ final class AuthorizationManager
     public function currentSubject(): ?Subject
     {
         return $this->isSubjectNamed ? $this->subjectOverride : $this->subjectResolver->resolve();
-    }
-
-    /**
-     * Return a clone of this manager deciding about the supplied subject, or
-     * about no subject when it is null.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
-     * @return self
-     */
-    private function scopedTo(?Subject $subject): self
-    {
-        $scoped                  = clone $this;
-        $scoped->subjectOverride = $subject;
-        $scoped->isSubjectNamed  = true;
-
-        return $scoped;
     }
 
     /**
