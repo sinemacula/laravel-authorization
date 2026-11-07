@@ -18,10 +18,10 @@ use Tests\TestCase;
  * make for every ability a page asks about: a check on its own is decided as it
  * stands, reading nothing ahead and holding nothing for later, so it costs what
  * the decision costs, not the machinery of a bulk check. The budget bounds
- * 1,000 warm checks of each kind well above the observed cost (about 15µs
- * each locally, and up to about 160µs on a CI runner shared with parallel
- * test processes), so it catches a check that does several times the work
- * without failing on runner variance.
+ * 1,000 warm checks of each kind well above the observed cost (about 15µs each
+ * locally, and up to about 160µs on a CI runner shared with parallel test
+ * processes), so it catches a check that does several times the work without
+ * failing on runner variance.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
