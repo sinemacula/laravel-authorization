@@ -5,6 +5,8 @@ declare(strict_types = 1);
 namespace Tests\Unit\Support;
 
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Cache\Resolution;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
@@ -179,6 +181,135 @@ final class AuthorizationScopeTest extends TestCase
     }
 
     /**
+     * A reference without a key is refused as a tenant, as a model without one
+     * is, when the scope is made.
+     *
+     * @return void
+     */
+    public function testAReferenceWithoutAKeyIsRefused(): void
+    {
+        $this->expectException(InvalidTenantException::class);
+
+        AuthorizationScope::tenant(new Reference('accounts', ''));
+    }
+
+    /**
+     * A scope whose tenant and application are those in place is not applied
+     * again, so the tenant the request holds stays as it is; one that differs
+     * in its tenant, its tenant's type or its application is applied, and the
+     * request's tenant is resolved again afterwards.
+     *
+     * @return void
+     */
+    public function testAScopeInPlaceIsNotAppliedAgain(): void
+    {
+        $request = StubTenant::query()->create(['id' => 't1', 'name' => 't1']);
+
+        $this->resolve(new StubSubjectResolver(StubIdentity::create(['id' => 'user-1']), $request, 'web'));
+
+        $held = $this->held();
+
+        $inPlace = [
+            AuthorizationScope::current(),
+            AuthorizationScope::tenant($request, 'web'),
+            AuthorizationScope::tenant(new Reference($request->getMorphClass(), 't1'), 'web'),
+        ];
+
+        foreach ($inPlace as $scope) {
+            self::assertSame($held, $scope->within($this->held(...)));
+            self::assertSame($held, $this->held());
+        }
+
+        $differing = [
+            AuthorizationScope::tenant($request, 'admin'),
+            AuthorizationScope::tenant($request),
+            AuthorizationScope::tenant(new Reference($request->getMorphClass(), 't2'), 'web'),
+            AuthorizationScope::tenant(new Reference('accounts', 't1'), 'web'),
+            AuthorizationScope::platform('web'),
+        ];
+
+        foreach ($differing as $scope) {
+            $held = $this->held();
+
+            self::assertNotSame($held, $scope->within($this->held(...)));
+            self::assertNotSame($held, $this->held());
+        }
+
+        $this->resolve(new StubSubjectResolver(StubIdentity::create(['id' => 'user-2'])));
+
+        $held = $this->held();
+
+        self::assertSame($held, AuthorizationScope::platform()->within($this->held(...)));
+    }
+
+    /**
+     * Checks decided just below the request's tenant are not in the scope of
+     * that tenant, so applying it decides in the tenant again.
+     *
+     * @return void
+     */
+    public function testAScopeIsAppliedOverChecksDecidedBelowItsTenant(): void
+    {
+        $request = StubTenant::query()->create(['id' => 't1', 'name' => 't1']);
+
+        $this->resolve(new StubSubjectResolver(StubIdentity::create(['id' => 'user-1']), $request, 'web'));
+
+        $isBelow = TenantScope::within($request, 'web', static fn (): array => [
+            TenantScope::isBelowTenant(),
+            AuthorizationScope::current()->within(static fn (): bool => TenantScope::isBelowTenant()),
+        ], true);
+
+        self::assertSame([true, false], $isBelow);
+    }
+
+    /**
+     * A request whose tenant cannot be read is in no scope, so a scope is
+     * applied over it.
+     *
+     * @return void
+     */
+    public function testAScopeIsAppliedOverATenantThatCannotBeRead(): void
+    {
+        $this->resolve(new StubSubjectResolver(StubIdentity::create(['id' => 'user-1']), new StubTenant, 'web'));
+
+        self::assertSame([null, 'admin'], AuthorizationScope::platform('admin')->within(static fn (): array => [TenantScope::currentTenant(), TenantScope::currentApplication()]));
+    }
+
+    /**
+     * What the resolution cache held for the request's scope is back once a
+     * callback run in another scope returns, so it is not resolved again, and a
+     * scope in place leaves it as it is.
+     *
+     * @return void
+     */
+    public function testWhatTheCacheHeldForTheRequestIsKept(): void
+    {
+        $request = StubTenant::query()->create(['id' => 't1', 'name' => 't1']);
+        $cache   = new ResolutionCache;
+
+        /** @var \ArrayObject<int, string|null> $read */
+        $read = new \ArrayObject;
+
+        $this->resolve(new StubSubjectResolver(StubIdentity::create(['id' => 'user-1']), $request, 'web'));
+        $this->app?->instance(ResolutionCache::class, $cache);
+
+        $remember = static fn (): array => $cache->rememberPermissions(new Reference('users', '1'), static function () use ($read): Resolution {
+            $read[] = TenantScope::currentApplication();
+
+            return new Resolution(['posts:read']);
+        });
+
+        $remember();
+
+        AuthorizationScope::platform('admin')->within($remember);
+        AuthorizationScope::current()->within($remember);
+
+        $remember();
+
+        self::assertSame(['web', 'admin'], $read->getArrayCopy());
+    }
+
+    /**
      * Fail, as a callback run within a scope may.
      *
      * @return mixed
@@ -188,6 +319,17 @@ final class AuthorizationScopeTest extends TestCase
     private static function failing(): mixed
     {
         throw new \RuntimeException('failed');
+    }
+
+    /**
+     * Return the tenant held for the request, or for the scope in place.
+     *
+     * @return \SineMacula\Laravel\Authorization\Support\ResolvedTenant
+     */
+    private function held(): ResolvedTenant
+    {
+        /** @var \SineMacula\Laravel\Authorization\Support\ResolvedTenant */
+        return $this->app?->make(ResolvedTenant::class);
     }
 
     /**

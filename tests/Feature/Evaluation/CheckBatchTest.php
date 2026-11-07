@@ -520,6 +520,48 @@ final class CheckBatchTest extends TestCase
     }
 
     /**
+     * A reference several checks share is read for once, across chunks too,
+     * whether its provider reads in bulk or one record at a time, and kept
+     * until the last check on it is decided; a record its own check alone holds
+     * is still read for on its own.
+     *
+     * @return void
+     */
+    public function testAReferenceSharedByChecksIsReadForOnce(): void
+    {
+        $posts  = $this->posts(2);
+        $shared = ResourceReference::record((new ScopedPost)->getMorphClass(), self::key($posts[0]), null, $posts[0]);
+        $checks = [
+            'a' => new CheckInput('posts:list', $shared),
+            'b' => new CheckInput(self::ACTION, $shared),
+            'c' => new CheckInput(self::ACTION, $posts[1]),
+            'd' => new CheckInput(self::ACTION, $shared),
+            'e' => new CheckInput(self::ACTION, $shared),
+        ];
+
+        $this->subject();
+        $this->config()->set('authorization.bulk.chunk_size', 2);
+
+        $single  = $this->attributes(new StatusAttributes);
+        $allowed = ['a' => false, 'b' => true, 'c' => false, 'd' => true, 'e' => true];
+
+        self::assertSame($allowed, \array_map(self::isAllowed(...), Authorization::withPolicies([$this->statusPolicy()])->checkMany($checks)));
+        self::assertSame([self::key($posts[0]), self::key($posts[1])], $single->calls);
+
+        $bulk = $this->attributes(new BulkStatusAttributes);
+
+        foreach ([CheckContextFactory::class, AuthorizationManager::class, 'authorization'] as $abstract) {
+            $this->app?->forgetInstance($abstract);
+        }
+
+        Authorization::clearResolvedInstance('authorization');
+
+        self::assertSame($allowed, \array_map(self::isAllowed(...), Authorization::withPolicies([$this->statusPolicy()])->checkMany($checks)));
+        self::assertSame([[self::key($posts[0])], [self::key($posts[1])]], $bulk->bulkCalls);
+        self::assertSame([], $bulk->calls);
+    }
+
+    /**
      * Each record's attributes are read in the scope its own check is decided
      * in, with the other records of that scope alone: those of each tenant
      * below the request's in that tenant, those of none where the request is,

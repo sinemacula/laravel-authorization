@@ -25,15 +25,21 @@ action through the one decision path rather than computing allows less denies, a
    request's tenant and application as the resolvers report them, `platform()` names no tenant and `tenant()` names
    one; null never means "inherit". The scope is applied with `TenantScope::within()`, so the checks see it as the
    ambient grant scope, and the subject's tenant and application are replaced by it (`subjectIn()`), so `subject.tenant`
-   reads it too. The request's scope is restored in `finally`, even when a check throws.
+   reads it too. The request's scope is restored in `finally`, even when a check throws. A scope already in place
+   (the same tenant and application, decided in the tenant rather than below it), such as `current()`, is not entered
+   again, so the resolution cache's memo is neither set aside nor emptied. Another scope is entered inside a resolution
+   cache batch that sets the request's memo aside and puts it back once the scope is restored, unless a write emptied
+   the cache meanwhile (`ResolutionCache::batch(..., isAside: true)`).
 
 4. **Admission still applies.** The resource's own tenant goes through `ResourceScope` as for `check()`: a resource
    below the scope's tenant is decided in its own tenant, one outside it at platform scope only when a platform-wide
    grant admits it, else as `tenant_scope`. Naming a resource never replaces the scope's tenant.
 
-5. **The subject.** A resolved `Subject` is used as it is, its identity, guard and session kept. Any other object is
-   named as `for()` names it (`currentSubject()->withSubject()`), so it has no session and meets no authentication
-   requirement. Null is a guest, allowed nothing, on whatever manager the call is made.
+5. **The subject (N74).** A resolved `Subject` is used as it is, its identity, guard and session kept. Any other object
+   is named as `for()` names it (`currentSubject()->withSubject()`), so it has no session and meets no authentication
+   requirement. Null is the manager's current subject, exactly as `check()` takes it: the request's on the facade, the
+   named one on `Authorization::for($user)`, and a guest, allowed nothing, on `Authorization::forUser(null)` or when the
+   request has none. The subject is resolved before the scope is entered.
 
 6. **Introspection records nothing (N70).** The batch is made with `isRecording` false, a recording policy on the shared
    path rather than a copy of the decision loop: it records no last decision and dispatches no `DecisionEvaluated`;
@@ -58,16 +64,20 @@ action through the one decision path rather than computing allows less denies, a
 ## Success Path
 
 `Authorization::permissionsFor($user, AuthorizationScope::tenant($account, 'admin'))` reads the catalogue, names the
-user as `for()` would, and enters the account's scope on the admin application. It decides one `CheckInput` per
-declared action, with no resource, as one batch that records nothing: the subject's grants, roles, policies, boundary
-and caps and the guardrails are read once for the scope, and each action is decided through the pipeline. The actions
+user as `for()` would, and enters the account's scope on the admin application. It decides one `CheckInput` per declared
+action, with no resource, as one batch that records nothing: the subject's grants, roles, policies, boundary and caps
+and the guardrails are read once for the scope, and each action is decided through the pipeline. Given a resource, it is
+told once, in the scope, and every action is decided on that one `ResourceReference`, so its tenant, attached policies
+and attributes are read once for the listing: `CheckBatch` keeps a reference several checks share, and what its
+attribute provider answered, values or failure, until the last of them is decided, across chunks too. The actions
 allowed are returned in the catalogue's order, the request's scope is restored, and the last decision is the one the
 request recorded before.
 
 ## Failure / Edge Cases
 
-- **A failing attribute provider.** With a resource whose provider fails, the first action whose check reads
-  `resource` throws `AttributeProviderFailed`; nothing is listed and the scope is restored.
+- **A failing attribute provider.** With a resource whose provider fails, the provider is asked once, and only when an
+  action's check reads `resource`; that action throws `AttributeProviderFailed`, nothing is listed and the scope is
+  restored. An action whose check never reads `resource` does not see the failure.
 - **A catalogue that cannot be read.** It throws `InvalidPermissionCatalogueException` before any action is decided.
 - **A name for two guards.** It is listed once, where it is first declared.
 - **No catalogue.** The package's own permissions are always declared, so a subject allowed none of them lists nothing.
@@ -76,8 +86,12 @@ request recorded before.
 ## Implementation Anchors
 
 - `AuthorizationManager::permissionsFor()` -- the subject, the catalogue's actions, the scope entered and the batch.
-- `Support\AuthorizationScope` -- the named constructors, `withResource()`, `within()` and `subjectIn()`.
-- `Evaluation\CheckBatch` -- `isRecording`, the recording policy introspection turns off.
+- `Support\AuthorizationScope` -- the named constructors, `withResource()`, `within()` (which skips a scope already in
+  place and sets the memo aside for another) and `subjectIn()`.
+- `Evaluation\CheckBatch` -- `isRecording`, the recording policy introspection turns off, and the shared reference's
+  attributes kept until its last check.
+- `Context\ResourceAttributeBatch` -- one item per shared reference, its bulk or single answer kept for every check.
+- `Cache\ResolutionMemo::aside()` -- the request's memo set aside and put back around another scope.
 - `Support\PermissionCatalogue::definitions()` -- the actions, and the bad enum entries skipped.
 - `Concerns\HasPermissions::permissionsFor()` and the facade's docblock -- the delegates.
 
@@ -87,11 +101,14 @@ request recorded before.
   overrides, conditions, requirements, subjects and scopes, each listing compared with a fresh `check()` in the same
   scope, its exceptions included, and the last decision and events left untouched, with cold and warm caches (seeded by
   `AUTHZ_PARITY_SEED`, `AUTHZ_PARITY_RUNS` runs).
-- `Feature\PermissionsFor\AuthorizationManagerTest` -- grants, roles and denies, the guest, a `Subject` and a model,
+- `Feature\PermissionsFor\AuthorizationManagerTest` -- grants, roles and denies, null as the manager's subject and the
+  guest, a `Subject` and a model,
   another tenant, an application, a resource of another tenant and of a descendant, a resource-specific listing, the
   context, recording nothing, a failing provider restoring the scope, a throwing permission provider, an unreadable
   catalogue, the catalogue's order and bad enum entries.
-- `PermissionsForQueryBudgetTest` -- fifty actions cost the queries five cost, with and without a resource.
+- `PermissionsForQueryBudgetTest` -- fifty actions cost the queries five cost, with and without a resource, and with a
+  condition reading `resource.*` through plain and bulk providers on a `ResourceReference` and a model; a listing in
+  the current scope, and the check after it, cost no query once the request's memo is warm.
 - `AuthorizationScopeTest`, `CheckBatchTest`, `PermissionCatalogueTest` and `HasPermissionsTest` -- the scope, the
   recording policy, the skipped entries and the delegate.
 

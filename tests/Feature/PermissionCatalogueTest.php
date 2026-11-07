@@ -260,6 +260,30 @@ final class PermissionCatalogueTest extends TestCase
     }
 
     /**
+     * The configuration is read after boot, so configured enums that are not a
+     * list are read as one: a single enum class as the list holding it, and
+     * none as no enum.
+     *
+     * @return void
+     */
+    public function testReadsConfiguredEnumsThatAreNotAList(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make(ConfigRepository::class);
+
+        $config->set('authorization.permission_enums', PermissionEnum::class);
+
+        self::assertEquals(
+            [...(new PackagePermissions)->permissions(), new PermissionDefinition('posts:create'), new PermissionDefinition('posts:delete')],
+            $this->catalogue()->definitions(),
+        );
+
+        $config->set('authorization.permission_enums', null);
+
+        self::assertEquals((new PackagePermissions)->permissions(), $this->catalogue()->definitions());
+    }
+
+    /**
      * Set the configured enums and providers.
      *
      * @param  list<class-string>  $enums

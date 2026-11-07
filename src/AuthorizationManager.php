@@ -448,22 +448,26 @@ final class AuthorizationManager
      * resource, with the context, would allow, in the scope, about the subject.
      *
      * A resolved `Subject` is taken as it is, its identity, guard and session
-     * kept; any other object is named as `for()` names it, and null is a guest,
-     * who is allowed nothing. The scope's tenant and application are put in
-     * place of the request's, both as the subject's and as the scope of the
-     * grants that count, and the request's are restored once the actions are
-     * decided, even when deciding one throws (see `AuthorizationScope`).
+     * kept; any other object is named as `for()` names it; and null is the
+     * subject this manager's checks are about, as `check()` takes it: the
+     * request's, or the one `for()` or `forUser()` named, so
+     * `forUser(null)->permissionsFor(null, ...)` lists a guest's actions, which
+     * are none. The scope's tenant and application are put in place of the
+     * request's, both as the subject's and as the scope of the grants that
+     * count, and the request's are restored once the actions are decided, even
+     * when deciding one throws, with what the resolution cache held for them
+     * (see `AuthorizationScope`).
      *
      * The listing is exact: each action is decided through the one decision
-     * path `checkMany()` takes, over what the checks share read once, so its
-     * denies, conditions, boundaries, guardrails, caps and authentication
-     * requirements are weighed exactly as `check()` weighs them, never as the
-     * allows less the denies. An action whose check would be
-     * `insufficient_authentication` is not listed, and one whose check would
-     * throw makes the listing throw what it throws, so nothing is ever listed
-     * that the check would not allow. A listing for one resource can differ
-     * from a listing for none, and the action is still to be authorized when it
-     * is taken.
+     * path `checkMany()` takes, over what the checks share read once, the
+     * resource's tenant and attributes among it, so its denies, conditions,
+     * boundaries, guardrails, caps and authentication requirements are weighed
+     * exactly as `check()` weighs them, never as the allows less the denies. An
+     * action whose check would be `insufficient_authentication` is not listed,
+     * and one whose check would throw makes the listing throw what it throws,
+     * so nothing is ever listed that the check would not allow. A listing for
+     * one resource can differ from a listing for none, and the action is still
+     * to be authorized when it is taken.
      *
      * Listing is introspection, not a check (N70): it records no last decision
      * and dispatches no `DecisionEvaluated` and no `AuthorizationFailed`. The
@@ -483,14 +487,21 @@ final class AuthorizationManager
      */
     public function permissionsFor(?object $subject, AuthorizationScope $scope, array $context = []): array
     {
-        $named = $subject === null || $subject instanceof Subject ? $subject : $this->for($subject)->currentSubject();
+        $named = match (true) {
+            $subject === null           => $this->currentSubject(),
+            $subject instanceof Subject => $subject,
+            default                     => $this->for($subject)->currentSubject(),
+        };
 
         /** @var \SineMacula\Laravel\Authorization\Support\PermissionCatalogue $catalogue */
         $catalogue = Container::getInstance()->make(PermissionCatalogue::class);
-        $actions   = \array_values(\array_unique(\array_map(static fn (PermissionDefinition $definition): string => $definition->name, $catalogue->definitions())));
-        $checks    = \array_map(static fn (string $action): CheckInput => new CheckInput($action, $scope->resource, $context), $actions);
+        $actions   = \array_unique(\array_map(static fn (PermissionDefinition $definition): string => $definition->name, $catalogue->definitions()));
 
-        return $scope->within(function () use ($named, $scope, $actions, $checks): array {
+        return $scope->within(function () use ($named, $scope, $actions, $context): array {
+            // Every action is decided on the one reference, so the resource is
+            // told, and its attributes read, once for the listing.
+            $resource  = ResourceReferences::of($scope->resource);
+            $checks    = \array_map(static fn (string $action): CheckInput => new CheckInput($action, $resource, $context), $actions);
             $decisions = $this->batch(false)->decide($scope->subjectIn($named), $checks);
 
             return \array_values(\array_filter($actions, static fn (int $key): bool => $decisions[$key]->isAllowed(), \ARRAY_FILTER_USE_KEY));
@@ -534,6 +545,22 @@ final class AuthorizationManager
     public function currentSubject(): ?Subject
     {
         return $this->isSubjectNamed ? $this->subjectOverride : $this->subjectResolver->resolve();
+    }
+
+    /**
+     * Return a clone of this manager deciding about the supplied subject, or
+     * about no subject when it is null.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
+     * @return self
+     */
+    private function scopedTo(?Subject $subject): self
+    {
+        $scoped                  = clone $this;
+        $scoped->subjectOverride = $subject;
+        $scoped->isSubjectNamed  = true;
+
+        return $scoped;
     }
 
     /**

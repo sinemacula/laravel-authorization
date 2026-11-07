@@ -1760,11 +1760,12 @@ or about the subject of the scoped manager it is called on:
 decides a batch of one: every other method but `queryScope()` and `permissionsFor()` adapts one of them, and each
 decision they make is recorded as the last decision and reported with `DecisionEvaluated`; `queryScope()` compiles a
 scope from the same pipeline without deciding a check, and `permissionsFor()` decides each action through the path
-`checkMany()` takes but as introspection, so both record and report nothing. `permissionsFor()` takes its subject as
-an argument (see [Effective permissions](#effective-permissions)). The resource and the context take the same forms
-everywhere: a model, a `[type, id]` pair, a `ResourceReference`, an `AuthorizableResource`, a model class or a string
-names the resource (see [Managing roles, permissions and grants](#managing-roles-permissions-and-grants)), and the
-context is the caller's values, read under `input` (see [The check's context](#the-checks-context)).
+`checkMany()` takes but as introspection, so both record and report nothing. `permissionsFor()` takes its subject as an
+argument, null for the one the manager's checks are about (see [Effective permissions](#effective-permissions)). The
+resource and the context take the same forms everywhere: a model, a `[type, id]` pair, a `ResourceReference`, an
+`AuthorizableResource`, a model class or a string names the resource (see
+[Managing roles, permissions and grants](#managing-roles-permissions-and-grants)), and the context is the caller's
+values, read under `input` (see [The check's context](#the-checks-context)).
 
 ```php
 use SineMacula\Laravel\Authorization\Facades\Authorization;
@@ -1931,7 +1932,9 @@ in the chunk in the same scope as that check (where the request is, the record's
 platform scope for a record admitted from outside it), and asks it in that scope, so a provider reading through the
 tenant scope finds for each record what it would find on its own; the records of another scope are read when the first
 of them reads `resource`. A provider can be asked about a record whose own check never reads `resource`; that answer is
-used by no check. Two models with the same key are two items, since each may hold other attributes in memory.
+used by no check. Two models with the same key are two items, since each may hold other attributes in memory, while one
+`ResourceReference` given to several checks is one item, read once for all of them, in every chunk. A provider that does
+not read in bulk is asked about each item once, however many of its checks read `resource`.
 
 The checks are decided in chunks of `authorization.bulk.chunk_size` (`AUTHORIZATION_BULK_CHUNK_SIZE`, 500 by default,
 a whole number of at least 1, checked at boot), and what a chunk read is released once it is decided. The decisions
@@ -1943,7 +1946,8 @@ attachment, boundary or guardrail written while the batch runs, by a listener re
 included, empties the resolution cache, so every later check reads it; so does a change to the tenant tree reported
 through `Authorization::treeChanged()`, after which the tree is asked again. The resources' tenants and attributes are
 read for each chunk, the tenants as it starts and the attributes when its first check on a type reads them, so a change
-to a resource's tenant or attributes made after it was read is seen from the next chunk.
+to a resource's tenant or attributes made after it was read is seen from the next chunk, except by the later checks on
+a `ResourceReference` they share, which keep what was read for it.
 
 ### Effective permissions
 
@@ -1966,6 +1970,13 @@ $actions = Authorization::permissionsFor($user, AuthorizationScope::current()->w
 
 // The same from the model, through `HasPermissions`.
 $actions = $user->permissionsFor(AuthorizationScope::current());
+
+// A null subject is the one the manager's checks are about: the request's, or the one named.
+$actions = Authorization::permissionsFor(null, AuthorizationScope::current());
+$actions = Authorization::for($user)->permissionsFor(null, AuthorizationScope::current());
+
+// A guest's actions, which are none.
+$actions = Authorization::forUser(null)->permissionsFor(null, AuthorizationScope::current()); // []
 ```
 
 **The scope.** An `AuthorizationScope` names the tenant, or none for the platform, the application, or none, and the
@@ -1986,7 +1997,9 @@ through admission, as for `check()`: a resource of a tenant outside the scope's 
 
 **The subject.** A resolved `Subject` is taken as it is, keeping its identity, guard and session, so a session that
 meets an authentication requirement still meets it. Any other object is named as `for()` names it, in the request's
-guard, with no session. `null` is a guest, who is allowed nothing, whatever manager the call is made on.
+guard, with no session. `null` is the subject the manager's checks are about, exactly as `check()` takes it: the
+request's subject on the facade, the subject named on a manager from `for()` or `forUser()`, and a guest, who is allowed
+nothing, on `forUser(null)` or when the request has no subject.
 
 **What a listed action means.** The listing is exact: it holds the actions the permission catalogue declares (the
 package's own permissions, the cases of the configured enums and the definitions of the configured providers), each
@@ -2017,8 +2030,10 @@ relies on one is reported.
 **What it costs.** The actions are decided together, through the path `checkMany()` takes, so the subject is resolved
 once and its grants, roles, policies, boundaries and caps, the guardrails and the resource's tenant, attached policies
 and attributes are read once for the listing: listing fifty actions costs the queries listing five costs. The catalogue
-is read from code on each call and touches no database. See
-[Effective permissions](docs/design/effective-permissions.md) for the design.
+is read from code on each call and touches no database. A scope already in place, such as `current()`, is not applied
+again, so a listing in it reads what the request's checks have already resolved, and a check after it still does. A
+listing in another scope keeps what the request has resolved and puts it back once it returns, unless a write emptied
+the cache meanwhile. See [Effective permissions](docs/design/effective-permissions.md) for the design.
 
 ### Query scoping
 

@@ -233,7 +233,7 @@ final class ParityPropertyTest extends TestCase
         array|\Throwable $single,
         string $cache,
     ): int {
-        $manager  = $scenario->manager();
+        $manager  = $scenario->lister();
         $before   = $manager->check('other:act');
         $reported = 0;
 
@@ -275,9 +275,10 @@ final class ParityPropertyTest extends TestCase
 
     /**
      * Return the subject a check is about when the listing names the given one
-     * in the scope: none for a guest, a resolved subject with the scope's
-     * tenant and application, and a model as `for()` names it, from the
-     * request's subject, in the scope.
+     * in the scope: a resolved subject with the scope's tenant and application;
+     * a model as `for()` names it, from the request's subject, in the scope;
+     * and null as the manager's own subject: the request's, the model `for()`
+     * names, or a guest's on `forUser(null)`.
      *
      * @param  \Tests\Integration\PermissionsFor\ListingScenario  $scenario
      * @param  \SineMacula\Laravel\Authorization\Subject|\Tests\Feature\Stubs\StubIdentity|null  $named
@@ -290,11 +291,17 @@ final class ParityPropertyTest extends TestCase
             return new Subject($named->subject, $named->identity, $scope->tenant, $scope->application, $named->guard, $named->session);
         }
 
-        // The model is the request's own, so `for()` keeps its identity and
-        // guard, and drops its session.
         $request = $scenario->request;
 
-        return $named === null ? null : new Subject($named, $request?->identity, $scope->tenant, $scope->application, $request?->guard);
+        if ($named === null && $scenario->naming !== 'named') {
+            return $scenario->naming === 'guest' ? null : $scope->subjectIn($request);
+        }
+
+        // The model is the request's own, named by the listing or by `for()`,
+        // so it keeps the request's identity and guard, and drops its session.
+        $model = $named ?? $request?->subject;
+
+        return $model === null ? null : new Subject($model, $request?->identity, $scope->tenant, $scope->application, $request?->guard);
     }
 
     /**

@@ -547,6 +547,43 @@ final class ResourcePolicyResolverTest extends TestCase
     }
 
     /**
+     * A record named more than once is read for once, its key bound once in the
+     * query, and each resource naming it reads its policies.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARecordNamedMoreThanOnceIsReadForOnce(): void
+    {
+        self::service()->attach(self::sharing('record'), ['posts', 'seven']);
+
+        // The attachments table's key column is inspected once a request.
+        ResourcePolicyResolver::resolveMany('posts', [], new ResolutionPins);
+
+        $this->app?->forgetInstance(ResolutionCache::class);
+
+        DB::enableQueryLog();
+        DB::flushQueryLog();
+
+        $many = (new ResourcePolicyResolver)->policiesForMany([
+            'a' => ResourceReference::record('posts', 'seven'),
+            'b' => ResourceReference::record('posts', 'seven'),
+            'c' => ResourceReference::record('posts', 'eight'),
+        ]);
+        $bindings = \array_merge(...\array_map(static fn (array $query): array => $query['bindings'], DB::getQueryLog()));
+
+        DB::disableQueryLog();
+
+        $named = static fn (array $policies): array => \array_map(static fn (EvaluationPolicy $policy): string => $policy->name . '@' . $policy->resource, $policies);
+
+        self::assertSame(['record@posts:seven'], $named($many['a']));
+        self::assertSame(['record@posts:seven'], $named($many['b']));
+        self::assertSame([], $many['c']);
+        self::assertSame([1, 1], [\count(\array_keys($bindings, 'seven', true)), \count(\array_keys($bindings, 'eight', true))]);
+    }
+
+    /**
      * A record whose policies include a document that cannot be read is left
      * out of the bulk read, its document read once, and is read on its own,
      * which throws; a record of a key that is not UTF-8 is read on its own.

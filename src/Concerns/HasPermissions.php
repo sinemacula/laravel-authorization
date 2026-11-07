@@ -182,8 +182,8 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * policy, deny, guardrail, boundary or session cap, and no resource's
      * tenant. To ask whether the subject may perform an action, decide it with
      * `Authorization::check()` or `can()`, through which the Gate, the Blade
-     * permission directives, the `permission:` middleware and
-     * `permissionsFor()` all decide.
+     * permission directives and the `permission:` middleware decide, and as
+     * which `permissionsFor()` decides each action it lists.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return bool

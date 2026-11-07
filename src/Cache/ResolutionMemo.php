@@ -16,14 +16,15 @@ use Illuminate\Support\Carbon;
  *
  * Its entries hold in one scope (a tenant, whether checks are decided just
  * below it, and an application), so they are dropped whenever the scope
- * changes. While a batch of checks is open, they are kept for each scope
- * instead: the entries of the scope left are set aside under its key, and those
- * of the scope entered are taken back once it is read again, so a batch reads
- * what each scope resolves to once, however often its checks move between
- * scopes. A write drops the entries of every scope, so the next check reads
- * afresh in any of them; once the outermost batch closes, the entries set aside
- * are dropped, and the current ones too when the scope changed since they were
- * taken.
+ * changes, unless they were set aside for a callback run in another scope (see
+ * `aside()`), which puts them back once it returns. While a batch of checks is
+ * open, they are kept for each scope instead: the entries of the scope left are
+ * set aside under its key, and those of the scope entered are taken back once
+ * it is read again, so a batch reads what each scope resolves to once, however
+ * often its checks move between scopes. A write drops the entries of every
+ * scope, so the next check reads afresh in any of them; once the outermost
+ * batch closes, the entries set aside are dropped, and the current ones too
+ * when the scope changed since they were taken.
  *
  * While a batch is open, the memo also holds what the tenant tree answered, a
  * tenant's ancestors and whether a tenant is within another, which holds in
@@ -57,6 +58,9 @@ final class ResolutionMemo
     /** @var array<string, mixed> While a batch is open, what the tenant tree answered, keyed by the question. */
     private array $answers = [];
 
+    /** @var object A token replaced whenever every entry is dropped, so entries set aside are put back only while it is the one they were set aside under. */
+    private object $generation;
+
     /**
      * Create a new memo.
      *
@@ -66,7 +70,9 @@ final class ResolutionMemo
 
         /** Returns the key of the current scope; null keeps no scope apart, so every change of scope drops the entries. */
         private readonly ?\Closure $scopeKey = null,
-    ) {}
+    ) {
+        $this->generation = new \stdClass;
+    }
 
     /**
      * Return the entry for the key, or null when there is none or it has
@@ -142,9 +148,10 @@ final class ResolutionMemo
      */
     public function flush(): void
     {
-        $this->entries = [];
-        $this->parked  = [];
-        $this->answers = [];
+        $this->generation = new \stdClass;
+        $this->entries    = [];
+        $this->parked     = [];
+        $this->answers    = [];
     }
 
     /**
@@ -193,6 +200,32 @@ final class ResolutionMemo
         $this->entries        = [];
         $this->scope          = null;
         $this->isScopeChanged = $this->batches > 0;
+    }
+
+    /**
+     * Run the callback in another scope, keeping the entries of the scope it is
+     * run from: they are set aside as it starts and, however it ends, put back
+     * once it returns to that scope, unless a write dropped every entry
+     * meanwhile, so what the scope resolves to is not read again.
+     *
+     * @template TResult
+     *
+     * @param  \Closure(): TResult  $callback
+     * @return TResult
+     */
+    public function aside(\Closure $callback): mixed
+    {
+        [$entries, $scope, $isScopeChanged, $generation] = [$this->entries, $this->scope, $this->isScopeChanged, $this->generation];
+
+        try {
+            return $callback();
+        } finally {
+            if ($this->generation === $generation) {
+                $this->entries        = $entries;
+                $this->scope          = $scope;
+                $this->isScopeChanged = $isScopeChanged;
+            }
+        }
     }
 
     /**

@@ -37,6 +37,7 @@ use Tests\Feature\Stubs\Enums\CataloguePermission;
 use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\FailingResourceAttributes;
+use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
@@ -111,19 +112,54 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * Null is a guest, allowed nothing, whoever the request is about.
+     * Null is the subject the manager's checks are about, as `check()` takes
+     * it: the request's on the facade, the one `for()` names on a scoped
+     * manager, and a guest, allowed nothing, on `forUser(null)` or when the
+     * request is about no one.
      *
      * @return void
      */
-    public function testAGuestIsAllowedNothing(): void
+    public function testNullIsTheSubjectTheManagersChecksAreAbout(): void
     {
-        $user = $this->resolve(StubIdentity::create(['id' => 'user-1']));
+        $user  = $this->resolve(StubIdentity::create(['id' => 'user-1']));
+        $other = StubIdentity::create(['id' => 'user-2']);
 
         $user->givePermission(Permission::create(['name' => self::CREATE]));
+        $other->givePermission(Permission::create(['name' => self::DELETE]));
 
-        self::assertSame([self::CREATE], Authorization::permissionsFor($user, AuthorizationScope::current()));
+        self::assertSame([self::CREATE], Authorization::permissionsFor(null, AuthorizationScope::current()));
+        self::assertSame([self::CREATE], Authorization::for($user)->permissionsFor(null, AuthorizationScope::current()));
+        self::assertSame([self::DELETE], Authorization::for($other)->permissionsFor(null, AuthorizationScope::current()));
+        self::assertSame([], Authorization::forUser(null)->permissionsFor(null, AuthorizationScope::current()));
+
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver);
+        $this->manager();
+
         self::assertSame([], Authorization::permissionsFor(null, AuthorizationScope::current()));
-        self::assertSame([], Authorization::for($user)->permissionsFor(null, AuthorizationScope::current()));
+    }
+
+    /**
+     * Null on a manager about the request's subject keeps the request's
+     * session, as `check()` does, so an action its session meets the
+     * authentication requirement of is listed.
+     *
+     * @return void
+     */
+    public function testNullKeepsTheRequestsSession(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        $this->app?->instance(AuthenticationRequirementChecker::class, new InvariantRequirementChecker(true));
+        $this->app?->instance(SubjectResolver::class, new FixedSubjectResolver(new Subject($user, $user, null, null, 'web', 'session-1')));
+        $this->manager();
+
+        $user->attachPolicy(Policy::create(['name' => 'step-up', 'document' => ['statements' => [
+            ['effect' => 'allow', 'actions' => [self::CREATE], 'conditions' => ['authentication_requirement' => ['authentication' => ['multifactor' => []]]]],
+        ]]]));
+
+        self::assertTrue(Authorization::can(self::CREATE));
+        self::assertSame([self::CREATE], Authorization::permissionsFor(null, AuthorizationScope::current()));
+        self::assertSame([], Authorization::permissionsFor($user, AuthorizationScope::current()));
     }
 
     /**

@@ -5,7 +5,9 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Support;
 
 use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidTenantException;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 
@@ -26,7 +28,10 @@ use SineMacula\Laravel\Authorization\Subject;
  * The scope is applied through `TenantScope::within()`, so the checks see its
  * tenant and application both as the ambient grant scope and as the subject's,
  * and the request's are back in place once they are decided, even when one
- * throws.
+ * throws. What the resolution cache holds for the request's scope is kept
+ * meanwhile and is back with it, unless a write dropped it, and a scope that is
+ * already in place, such as `current()`, is not applied again, so listing in it
+ * costs what checking in it costs.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -91,7 +96,9 @@ final readonly class AuthorizationScope
      */
     public static function tenant(AuthorizableTenant|Model|Reference $tenant, ?string $application = null): self
     {
-        return new self($tenant instanceof Reference ? $tenant : new Reference(...TenantScope::extractTenantPair($tenant)), $application);
+        $pair = TenantScope::extractTenantPair($tenant);
+
+        return new self($tenant instanceof Reference ? $tenant : new Reference(...$pair), $application);
     }
 
     /**
@@ -108,7 +115,9 @@ final readonly class AuthorizationScope
 
     /**
      * Run the callback with this scope's tenant and application in place of the
-     * request's, which are restored afterwards, even when it throws.
+     * request's, which are restored afterwards, even when it throws, with what
+     * the resolution cache held for them. A scope already in place runs the
+     * callback as it is.
      *
      * @template TResult
      *
@@ -117,7 +126,14 @@ final readonly class AuthorizationScope
      */
     public function within(\Closure $callback): mixed
     {
-        return TenantScope::within($this->tenant, $this->application, $callback);
+        if ($this->isInPlace()) {
+            return $callback();
+        }
+
+        $enter = fn (): mixed => TenantScope::within($this->tenant, $this->application, $callback);
+        $cache = ResolutionCache::instance();
+
+        return $cache === null ? $enter() : $cache->batch($enter, true);
     }
 
     /**
@@ -130,5 +146,26 @@ final readonly class AuthorizationScope
     public function subjectIn(?Subject $subject): ?Subject
     {
         return $subject === null ? null : new Subject($subject->subject, $subject->identity, $this->tenant, $this->application, $subject->guard, $subject->session);
+    }
+
+    /**
+     * Determine whether this scope's tenant and application are those in place
+     * already, with checks decided in the tenant rather than just below it, so
+     * applying it would change nothing. A tenant in place that cannot be read
+     * is never this scope's.
+     *
+     * @return bool
+     */
+    private function isInPlace(): bool
+    {
+        try {
+            $tenant = TenantScope::currentTenant();
+        } catch (InvalidTenantException) {
+            return false;
+        }
+
+        $own = $this->tenant === null ? null : [$this->tenant->type, $this->tenant->id];
+
+        return $tenant === $own && TenantScope::currentApplication() === $this->application && !TenantScope::isBelowTenant();
     }
 }

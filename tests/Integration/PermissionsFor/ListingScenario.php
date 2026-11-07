@@ -49,10 +49,10 @@ use Tests\Fixtures\QueryScoping\TenantScopedPost;
  * conditions over the caller's input, the subject, the frozen clock, the
  * resource's status and an authentication requirement; the request's tenant,
  * application and session; the manager the listing runs through, the subject it
- * names (a guest, a resolved subject or a model) and the scope it names: the
- * platform, a tenant or a descendant one, an application or none, and a post
- * named one way or another, or none. Every choice is logged, so a failure names
- * the scenario.
+ * names (null on a manager about the request's subject, the model or a guest, a
+ * resolved subject or a model) and the scope it names: the platform, a tenant
+ * or a descendant one, an application or none, and a post named one way or
+ * another, or none. Every choice is logged, so a failure names the scenario.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -77,6 +77,9 @@ final class ListingScenario
 
     /** @var \SineMacula\Laravel\Authorization\Subject|null The request's subject. */
     public ?Subject $request = null;
+
+    /** @var string How the listing names its subject: as an argument, or as null on a manager about the request's subject, on one `for()` names the model on, or on one `forUser(null)` makes a guest's. */
+    public string $naming = 'argument';
 
     /** @var array<string, mixed> The caller's context. */
     public array $context = [];
@@ -170,21 +173,41 @@ final class ListingScenario
     }
 
     /**
-     * Draw the subject the listing names: a guest, a resolved subject with a
-     * session or without one, or the request's model.
+     * Return the manager the listing runs through: the one `manager()` makes,
+     * about the subject the listing names as null, when it names it so.
+     *
+     * @return \SineMacula\Laravel\Authorization\AuthorizationManager
+     */
+    public function lister(): AuthorizationManager
+    {
+        $manager = $this->manager();
+
+        return match ($this->naming) {
+            'guest' => $manager->forUser(null),
+            'named' => $manager->for($this->user),
+            default => $manager,
+        };
+    }
+
+    /**
+     * Draw the subject the listing names: null, on a manager about the
+     * request's subject, on one `for()` names the model on, or on one
+     * `forUser(null)` makes a guest's; a resolved subject with a session or
+     * without one; or the request's model.
      *
      * @return \SineMacula\Laravel\Authorization\Subject|\Tests\Feature\Stubs\StubIdentity|null
      */
     public function subject(): StubIdentity|Subject|null
     {
-        $subject = $this->pick(['guest', 'subject', 'subject', 'model', 'model']);
+        $subject = $this->pick(['guest', 'request', 'named', 'subject', 'subject', 'model', 'model']);
 
-        $this->log[] = "subject {$subject}";
+        $this->naming = \in_array($subject, ['guest', 'request', 'named'], true) ? $subject : 'argument';
+        $this->log[]  = "subject {$subject}";
 
         return match ($subject) {
-            'guest'   => null,
-            'subject' => new Subject($this->user, $this->user, null, null, $this->pick([null, 'web']), $this->pick([null, 'session-2'])),
-            default   => $this->user,
+            'guest', 'request', 'named' => null,
+            'subject'                   => new Subject($this->user, $this->user, null, null, $this->pick([null, 'web']), $this->pick([null, 'session-2'])),
+            default                     => $this->user,
         };
     }
 

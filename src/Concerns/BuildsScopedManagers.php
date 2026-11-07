@@ -88,20 +88,4 @@ trait BuildsScopedManagers
 
         return $scoped;
     }
-
-    /**
-     * Return a clone of this manager deciding about the supplied subject, or
-     * about no subject when it is null.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
-     * @return self
-     */
-    private function scopedTo(?Subject $subject): self
-    {
-        $scoped                  = clone $this;
-        $scoped->subjectOverride = $subject;
-        $scoped->isSubjectNamed  = true;
-
-        return $scoped;
-    }
 }
