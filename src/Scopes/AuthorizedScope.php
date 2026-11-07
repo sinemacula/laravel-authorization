@@ -92,10 +92,9 @@ final readonly class AuthorizedScope implements Scope
                 $this->refuseReentrant($model);
             }
 
-            $scope = $manager->queryScope($model, $this->action, $this->context);
-
-            $scope->assertScopable($builder->getQuery());
-            $scope->apply($builder, $model);
+            // The scope's guard and its condition refuse a query they cannot
+            // hold for, as they do for `whereAuthorized()`.
+            $manager->queryScope($model, $this->action, $this->context)->apply($builder, $model);
         });
     }
 

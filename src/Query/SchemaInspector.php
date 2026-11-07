@@ -8,7 +8,7 @@ use Illuminate\Database\Connection;
 use SineMacula\Laravel\Authorization\Query\Contracts\Dialect;
 
 /**
- * Reads what `whereAuthorized()` needs to know about a model's table and
+ * Reads what an authorized scope needs to know about a model's table and
  * connection, and about the authorization tables, once for each: the columns of
  * a table, as the schema builder describes them, whether a column compares byte
  * for byte, whether an integer key holds only what PHP reads, and whether the

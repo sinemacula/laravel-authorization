@@ -1933,19 +1933,40 @@ bounded:
 ```php
 // config/authorization.php
 'query_scoping' => [
-    'max_anchors'     => 64, // tenants the sources may sit at, over which `too_many_scopes`
+    'max_anchors'     => 64, // the active tenant and those the sources may sit at, over which `too_many_scopes`
     'max_scopes'      => 16, // classes one query is decided in, over which `too_many_scopes`
-    'max_attachments' => 64, // policies one class reads attached to records, over which `too_many_attachments`
+    'max_attachments' => 64, // record attachments naming the action in a scope, over which `too_many_attachments`
 ],
 ```
+
+`max_anchors` counts the active tenant and every other tenant the decision's sources may sit at: those of the grants,
+policies and boundaries of the subject and its identity, of the policies of the roles they hold and every role above
+those, of the tenants owning those roles and the granted permissions, of the guardrails, and of the policies attached to
+the type or its records. Under the flat tree, where only a platform-wide grant cuts the rows, only the guardrail and
+attached-policy tenants count. Both limits are checked before any class is cut, so the work of cutting is bounded by
+them. `max_attachments` bounds the policies attached to records of the type, in one scope, that name the action; the
+read also stops, and refuses as `too_many_attachments`, once four times as many are attached there whatever their
+actions, so it is bounded by the rows it scans as well as by those it keeps. Each scope's attachments are read once per
+compile. Each limit is a whole number of at least 1.
 
 The comparisons are exact only where the database compares bytes as PHP does. When the rows are cut below a tenant
 or admitted from outside the active tenant's subtree, the tenant columns of every authorization table must compare
 bytes: no collation or `BINARY` on SQLite, a deterministic collation on PostgreSQL, and `utf8mb4_0900_bin` or `binary`
 on MySQL, as the package's migrations create them. A string key compared with a value must compare bytes the same
 way. An integer key compared with a value must hold only integers PHP reads as they are: on SQLite it must be the
-table's rowid (`INTEGER PRIMARY KEY`), and on MySQL it must not be an unsigned `BIGINT`. The column of an attached
-record's key must compare bytes on SQLite and PostgreSQL; on MySQL its own utf8mb4 collation is followed.
+table's rowid (`INTEGER PRIMARY KEY`, never `INTEGER PRIMARY KEY DESC`, which SQLite does not make the rowid), and on
+MySQL it must be neither an unsigned `BIGINT` nor `ZEROFILL`, whose digits PHP reads padded. The column of an attached
+record's key must compare bytes on SQLite and PostgreSQL; on MySQL its own utf8mb4 collation is followed. On PostgreSQL
+a table is looked up as Laravel finds it, the connection's prefix before the table's own name and after any schema, and
+a column not found there is treated as not exact.
+
+A record attachment, and a subtree of a tree other than the flat one, are read in the condition itself, with every value
+they are bound to (a tenant, an application, a policy) inlined as the database reads it bound, its characters written
+as hex or escaped code points, so a quote, a backslash, a question mark or a NUL byte is never read as SQL; a value that
+cannot be written so, and a subtree query whose text holds a question mark that is not a placeholder, refuse as
+`inline_value`. `check()` reads the authorization tables on the write connection, so on a model connection with a
+separate read connection such a condition refuses as `read_replica`, unless the query runs inside a transaction, where
+Laravel reads on the write connection too.
 
 A statement gathered for the type is refused only when a check would weigh it: it names the action, its target can
 name a row and, for an allow, it applies to the subject. A document that cannot be read always refuses. Everything
@@ -1965,7 +1986,9 @@ else that could change a decision refuses, with no pruning:
 | `subtree_connection`                                     | A tenant tree whose subtree query runs on another connection than the model's                                                                        |
 | `attachment_connection`, `attachment_collation`          | Policies attached to records kept on another connection, or whose key column cannot be compared with the key, once one is attached                   |
 | `too_many_scopes`, `too_many_attachments`                | More tenants, classes or record attachments than `authorization.query_scoping` allows                                                                |
-| `resource_pattern`                                       | A pattern with `?` or `[`, more than one `*` or one before its end, or an integer id beyond 64 bits                                                  |
+| `inline_value`                                           | A tenant, application or policy value, or a subtree query, that cannot be inlined exactly as the database reads it bound                             |
+| `read_replica`                                           | A record attachment or subtree read on a separate read connection, outside a transaction, while `check()` reads the write connection                 |
+| `resource_pattern`                                       | A pattern with `?` or `[`, a `*` not at its end or more than one, a trailing `\`, one too long for `fnmatch()`, or an integer id beyond 64 bits      |
 | `resource_namespace`, `scope_variant_source`             | A statement reading the resource, or a source not marked `ScopeInvariant`                                                                            |
 | `invalid_statement`, `invalid_policy`                    | A statement that cannot be evaluated, or a document that cannot be read                                                                              |
 | `query_union`, `query_from`, `query_or`, `query_changed` | A query that would escape the condition                                                                                                              |
@@ -1996,8 +2019,9 @@ a model the decision reads while deciding (the grants, roles, policies and tenan
 
 #### The exception
 
-`QueryScopeRefusedException` is a `RuntimeException`, not an `AuthorizationException`: a refusal is a developer or
-configuration fault, which Laravel renders as a 500. It carries the `action`, the model's `resourceType` (its morph
+`QueryScopeRefusedException` is a `RuntimeException`, not an `AuthorizationException`, thrown alike by
+`whereAuthorized()` and `AuthorizedScope`: a refusal is a developer or configuration fault, which Laravel renders as a
+500. It carries the `action`, the model's `resourceType` (its morph
 type, through the morph map when it has one) and every `refusal`, each with its `reason`, the `policy` and `statement`
 it names, the condition key, namespace, column or seam class (`key`) and a fixed `detail`, and `reasons()` lists their
 reasons. Neither it nor its message ever carries an operand, a pattern, a context value, a row's value or a tenant id,

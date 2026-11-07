@@ -35,6 +35,7 @@ use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
+use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ScopesQueries;
@@ -417,6 +418,79 @@ final class QueryAuthorizerTest extends TestCase
         $overridden = self::authorizer(self::pipeline()->withPolicies([]))->compile($subject, new ScopedPost, 'posts:view');
 
         self::assertSame([3, 4, 5], ScopedPost::query()->whereRaw($overridden)->orderBy('id')->pluck('id')->all());
+    }
+
+    /**
+     * An allow attached to a record grants only the subjects it names: one
+     * naming another subject grants nothing on its record, one naming the
+     * subject grants its own, as `check()` decides each.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnAttachedAllowGrantsOnlyThePrincipalsItNames(): void
+    {
+        $user    = StubIdentity::create(['id' => 'u1']);
+        $manager = $this->resolveRequest($user);
+
+        foreach ([4, 5] as $id) {
+            ScopedPost::query()->create(['id' => $id, 'title' => 'post']);
+        }
+
+        self::attachToResource([ScopedPost::class, '4'], [['effect' => 'allow', 'actions' => ['posts:view'], 'principals' => [$user->getMorphClass() . ':u2']]]);
+        self::attachToResource([ScopedPost::class, '5'], [['effect' => 'allow', 'actions' => ['posts:view'], 'principals' => [$user->getMorphClass() . ':u1']]]);
+
+        $condition = self::authorizer()->compile($manager->currentSubject(), new ScopedPost, 'posts:view');
+        $checked   = \array_values(\array_filter([4, 5], static fn (int $id): bool => $manager->can('posts:view', ScopedPost::query()->find($id))));
+
+        self::assertSame([5], $checked);
+        self::assertSame($checked, ScopedPost::query()->whereRaw($condition)->orderBy('id')->pluck('id')->all());
+    }
+
+    /**
+     * A tenant, and an application, holding question marks, a doubled one, a
+     * quote, a backslash or, where the database stores one, a NUL byte decide
+     * exactly the rows `check()` allows, a deny attached to a record there
+     * included.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATenantOfAnyBytesDecidesAsCheckDoes(): void
+    {
+        $user = StubIdentity::create(['id' => 'u1']);
+        $ids  = ['a??b', 'a?b', 'a\'b', 'a\\', 'a\\\'b', ...(DB::connection()->getDriverName() === 'pgsql' ? [] : ["a\0b"])];
+
+        foreach ($ids as $index => $id) {
+            $tenant      = StubTenant::query()->create(['id' => $id]);
+            $application = 'app?' . $index . '??';
+            $deny        = self::storedPolicy('deny-' . $index, [['effect' => 'deny', 'actions' => ['posts:view']]]);
+
+            $user->givePermission(Permission::firstOrCreate(['name' => 'posts:view']), null, $tenant, true, $application);
+
+            $denied = TenantScopedPost::query()->create(['title' => "denied-{$index}", 'tenant_type' => $tenant->getMorphClass(), 'tenant_id' => $id]);
+
+            TenantScopedPost::query()->create(['title' => "kept-{$index}", 'tenant_type' => $tenant->getMorphClass(), 'tenant_id' => $id]);
+            app(ResourcePolicyService::class)->attach($deny, [TenantScopedPost::class, (string) $denied->getKey()], $tenant, true, $application); // @phpstan-ignore cast.string
+
+            $manager = $this->resolveRequest($user, $tenant, $application);
+            $checked = [];
+
+            foreach (TenantScopedPost::query()->orderBy('id')->get() as $post) {
+                if (!$manager->can('posts:view', $post)) {
+                    continue;
+                }
+
+                $checked[] = $post->getAttribute('title');
+            }
+
+            $condition = self::authorizer()->compile($manager->currentSubject(), new TenantScopedPost, 'posts:view');
+
+            self::assertSame(["kept-{$index}"], $checked, \bin2hex($id));
+            self::assertSame($checked, TenantScopedPost::query()->whereRaw($condition)->orderBy('id')->pluck('title')->all(), \bin2hex($id));
+        }
     }
 
     /**

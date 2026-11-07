@@ -441,7 +441,9 @@ final class ResourcePolicyResolverTest extends TestCase
 
     /**
      * The attached policies are read a page at a time, on the write connection,
-     * and none after one more than the limit has been found.
+     * and none after one more than the limit has been found, or after four
+     * times the limit have been scanned whatever their actions: either is
+     * reported as more than allowed.
      *
      * @return void
      *
@@ -465,15 +467,17 @@ final class ResourcePolicyResolverTest extends TestCase
             $pages[] = \strtolower($query->sql);
         });
 
-        self::assertCount(4, (new ResourcePolicyResolver)->recordPoliciesFor('posts', 'posts:read', 3));
+        self::assertNull((new ResourcePolicyResolver)->recordPoliciesFor('posts', 'posts:read', 3));
         self::assertCount(1, $pages);
         self::assertStringContainsString('limit 100', $pages[0]);
         self::assertTrue(QueryRecorder::recorded()[0]->useWritePdo);
+        self::assertCount(101, (new ResourcePolicyResolver)->recordPoliciesFor('posts', 'posts:read', 101) ?? []);
 
         $pages->exchangeArray([]);
 
-        self::assertSame([], (new ResourcePolicyResolver)->recordPoliciesFor('posts', 'posts:edit', 3));
+        self::assertSame([], (new ResourcePolicyResolver)->recordPoliciesFor('posts', 'posts:edit', 26));
         self::assertCount(2, $pages);
+        self::assertNull((new ResourcePolicyResolver)->recordPoliciesFor('posts', 'posts:edit', 25));
 
         DB::getEventDispatcher()?->forget(QueryExecuted::class);
     }

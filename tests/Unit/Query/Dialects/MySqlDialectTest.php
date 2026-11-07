@@ -154,12 +154,15 @@ final class MySqlDialectTest extends TestCase
         self::assertTrue($dialect->isExactCollation($connection, 'posts', ['collation' => null]));
         self::assertTrue($dialect->isExactCollation($connection, 'posts', ['collation' => 'utf8mb4_0900_bin']));
         self::assertTrue($dialect->isExactCollation($connection, 'posts', ['collation' => 'binary']));
+        self::assertTrue($dialect->isExactCollation($connection, 'posts', ['collation' => 'UTF8MB4_0900_BIN']));
+        self::assertTrue($dialect->isExactCollation($connection, 'posts', ['collation' => 'BINARY']));
         self::assertFalse($dialect->isExactCollation($connection, 'posts', ['collation' => 'utf8mb4_unicode_ci']));
         self::assertFalse($dialect->isExactCollation($connection, 'posts', ['collation' => 'utf8mb4_bin']));
     }
 
     /**
-     * An unsigned `BIGINT` key is not exact; every other integer type is.
+     * An unsigned `BIGINT` key is not exact, nor is a `ZEROFILL` one of any
+     * size, signed or not; every other integer type is.
      *
      * @return void
      */
@@ -169,6 +172,9 @@ final class MySqlDialectTest extends TestCase
         $connection = \Mockery::mock(Connection::class);
 
         self::assertFalse($dialect->isExactInteger($connection, 'posts', ['type' => 'bigint unsigned']));
+        self::assertFalse($dialect->isExactInteger($connection, 'posts', ['type' => 'BIGINT UNSIGNED']));
+        self::assertFalse($dialect->isExactInteger($connection, 'posts', ['type' => 'int(5) unsigned zerofill']));
+        self::assertFalse($dialect->isExactInteger($connection, 'posts', ['type' => 'INT(5) ZEROFILL']));
         self::assertTrue($dialect->isExactInteger($connection, 'posts', ['type' => 'bigint']));
         self::assertTrue($dialect->isExactInteger($connection, 'posts', ['type' => 'int unsigned']));
         self::assertTrue($dialect->isExactInteger($connection, 'posts', []));
@@ -188,8 +194,31 @@ final class MySqlDialectTest extends TestCase
         self::assertSame('X\'6162\'', $dialect->bytes('ab'));
         self::assertSame('LEFT(CAST(k AS BINARY), 2) = X\'6162\'', $dialect->startsWith('k', 'ab'));
         self::assertSame('a = CAST(k AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci', $dialect->equalsKeyText('a', 'k', ['collation' => 'utf8mb4_unicode_ci'], false));
+        self::assertSame('a = CAST(k AS CHAR CHARACTER SET utf8mb4) COLLATE utf8mb4_unicode_ci', $dialect->equalsKeyText('a', 'k', ['collation' => 'UTF8MB4_UNICODE_CI'], false));
         self::assertNull($dialect->equalsKeyText('a', 'k', ['collation' => 'latin1_swedish_ci'], true));
         self::assertNull($dialect->equalsKeyText('a', 'k', ['collation' => 'utf8mb4_x; drop'], true));
+    }
+
+    /**
+     * A value is inlined as MySQL reads it bound: null, an integer's digits, a
+     * boolean as `1` or `0`, and UTF-8 text as a utf8mb4 string of its bytes;
+     * anything else is not inlined.
+     *
+     * @return void
+     */
+    public function testAValueIsInlinedAsMySqlReadsItBound(): void
+    {
+        $dialect = new MySqlDialect;
+
+        self::assertSame('NULL', $dialect->parameter(null));
+        self::assertSame('1', $dialect->parameter(true));
+        self::assertSame('0', $dialect->parameter(false));
+        self::assertSame('42', $dialect->parameter(42));
+        self::assertSame('(-42)', $dialect->parameter(-42));
+        self::assertSame('_utf8mb4 X\'613f3f27625c00\'', $dialect->parameter("a??'b\\\0"));
+        self::assertSame('_utf8mb4 X\'\'', $dialect->parameter(''));
+        self::assertNull($dialect->parameter("\xff"));
+        self::assertNull($dialect->parameter(1.5));
     }
 
     /**

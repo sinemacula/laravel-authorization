@@ -5,7 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Query;
 
 /**
- * Tells which records of a type a resolved resource pattern matches (C9), as
+ * Tells which records of a type a resolved resource pattern matches, as
  * `Statement::covers()` matches it against each record's identifier, `T:` and
  * the record's key, so the scope can compare the key in SQL exactly as
  * `fnmatch()` would.

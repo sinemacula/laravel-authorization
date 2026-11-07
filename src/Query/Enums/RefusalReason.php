@@ -5,7 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Query\Enums;
 
 /**
- * Why `whereAuthorized()` refused to scope a query (AUTHZ-10.2, N64): the scope
+ * Why an authorized scope, `whereAuthorized()` or the model-level
+ * `AuthorizedScope`, refused to scope a query (AUTHZ-10.2, N64): the scope
  * cannot prove that the rows it keeps are exactly those `check()` allows, so it
  * changes nothing and throws instead.
  *
@@ -59,8 +60,14 @@ enum RefusalReason: string
     /** The policies attached to records are kept on another connection than the model's. */
     case ATTACHMENT_CONNECTION = 'attachment_connection';
 
-    /** The column holding an attached record's key compares other than byte for byte, as the key's own text cannot be compared under it. */
+    /** The column holding an attached record's key has a collation the key's text cannot be compared under: one not byte for byte on SQLite or PostgreSQL, or not utf8mb4 on MySQL. */
     case ATTACHMENT_COLLATION = 'attachment_collation';
+
+    /** A value the condition must inline, a tenant's, an application's, a policy's or one the tenant tree's subtree query is bound to, cannot be written as the database reads it bound, or that query's text holds a question mark that is not a placeholder. */
+    case INLINE_VALUE = 'inline_value';
+
+    /** The condition would read the authorization tables on a connection with a separate read connection, outside a transaction, while `check()` reads them on the write connection. */
+    case READ_REPLICA = 'read_replica';
 
     /** The tenants the subject's grants and the type's policies are kept in, or the classes of rows they make, are more than `authorization.query_scoping` allows. */
     case TOO_MANY_SCOPES = 'too_many_scopes';

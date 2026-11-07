@@ -8,7 +8,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
  * One class of a model's rows, every row of which `check()` decides from the
- * same sources (§5.3): the condition a row of it meets, the tenant its rows are
+ * same sources: the condition a row of it meets, the tenant its rows are
  * decided as having, whether they stand below that tenant rather than in it,
  * and whether they are admitted from outside the request's scope by a
  * platform-wide grant.

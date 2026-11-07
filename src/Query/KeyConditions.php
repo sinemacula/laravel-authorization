@@ -9,9 +9,8 @@ use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
 
 /**
  * Compiles which records a resource pattern names (`KeyTarget`) into the
- * condition a row's key meets (C4, C9), each proved to hold exactly when the
- * text PHP reads from the key, `(string) getKey()`, is what `fnmatch()` would
- * match.
+ * condition a row's key meets, each proved to hold exactly when the text PHP
+ * reads from the key, `(string) getKey()`, is what `fnmatch()` would match.
  *
  * - An integer key equals a value only when the value is an integer's canonical
  *   decimal text, `0` or an optional `-` and digits without a leading zero (so

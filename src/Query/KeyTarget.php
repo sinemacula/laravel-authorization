@@ -6,7 +6,7 @@ namespace SineMacula\Laravel\Authorization\Query;
 
 /**
  * What one resolved resource pattern matches among the records of a type, as
- * `Statement::covers()` matches it against each record's identifier (C9): every
+ * `Statement::covers()` matches it against each record's identifier: every
  * record, none, the record whose key is exactly a value, or every record whose
  * key starts with a value, byte for byte, the key exactly the value left out
  * when the value ends in `:*` or is `*`, since `covers()` then also needs the

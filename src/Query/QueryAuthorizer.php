@@ -23,9 +23,9 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 
 /**
- * Compiles the condition `whereAuthorized()` adds to a query: the rows it keeps
- * are exactly the rows `check()` allows (AUTHZ-10.1), or it refuses
- * (AUTHZ-10.2, N64).
+ * Compiles the condition an authorized scope, `whereAuthorized()` or the
+ * model-level `AuthorizedScope`, adds to a query: the rows it keeps are exactly
+ * the rows `check()` allows (AUTHZ-10.1), or it refuses (AUTHZ-10.2, N64).
  *
  * The rows of the model are split into classes, each decided in one scope as
  * `check()` decides its rows (see `ScopeClasses` and `ResourceScope`): a

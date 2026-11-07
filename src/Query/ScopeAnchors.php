@@ -13,10 +13,10 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
 
 /**
- * Reads the tenants a decision's sources may sit at (§5.2), the anchors the
- * scope's classes of rows are cut at: rows whose tenant chains meet the anchors
- * alike read the same sources, since every source is matched to a chain by the
- * tenant it sits at (`TenantChain::grants()`, `owners()`).
+ * Reads the tenants a decision's sources may sit at, the anchors the scope's
+ * classes of rows are cut at: rows whose tenant chains meet the anchors alike
+ * read the same sources, since every source is matched to a chain by the tenant
+ * it sits at (`TenantChain::grants()`, `owners()`).
  *
  * The candidates are read on the authorization connection, with no filter on
  * tenant, expiry or application, so they are never fewer than the tenants the

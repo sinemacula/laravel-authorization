@@ -6,6 +6,7 @@ namespace Tests\Feature\Query;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
@@ -25,6 +26,7 @@ use Tests\Concerns\ScopesQueries;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
+use Tests\Fixtures\QueryScoping\CountingTenantTree;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\Fixtures\QueryScoping\TenantScopedPost;
 use Tests\TestCase;
@@ -236,6 +238,141 @@ final class ScopeClassesTest extends TestCase
         self::assertAgrees($manager, 'posts:view', 'view in o1');
         self::assertNotContains('o2', self::kept($manager, 'posts:view'));
         self::assertContains('b1', self::kept($manager, 'posts:view'));
+    }
+
+    /**
+     * At exactly the limits the classes are cut: four anchors (the active
+     * tenant and three others) under `max_anchors` of four, and the nine
+     * classes they make under `max_scopes` of nine; one fewer of either is
+     * refused, naming the limit.
+     *
+     * @return void
+     */
+    public function testTheLimitsHoldAtTheirBoundaries(): void
+    {
+        [$user, $tenants] = $this->tree();
+        $config           = $this->app?->make(ConfigRepository::class);
+
+        foreach (['a1', 'a2', 's1'] as $id) {
+            $user->givePermission(Permission::firstOrCreate(['name' => 'posts:view']), null, $tenants[$id]);
+        }
+
+        $manager = $this->resolveRequest($user, $tenants['o1']);
+
+        $config?->set('authorization.query_scoping.max_anchors', 4);
+
+        self::assertCount(9, self::classes($manager, new TenantScopedPost));
+
+        $config?->set('authorization.query_scoping.max_anchors', 3);
+
+        self::assertSame('authorization.query_scoping.max_anchors', self::refusal($manager)->refusals[0]->key);
+
+        $config?->set('authorization.query_scoping.max_anchors', 4);
+        $config?->set('authorization.query_scoping.max_scopes', 9);
+
+        self::assertCount(9, self::classes($manager, new TenantScopedPost));
+
+        $config?->set('authorization.query_scoping.max_scopes', 8);
+
+        self::assertSame('authorization.query_scoping.max_scopes', self::refusal($manager)->refusals[0]->key);
+    }
+
+    /**
+     * The classes are counted before any is cut, so a query over `max_scopes`
+     * is refused without asking the tree where each anchor lies.
+     *
+     * @return void
+     */
+    public function testTheClassesAreCountedBeforeTheTreeIsWalked(): void
+    {
+        [$user, $tenants] = $this->tree();
+
+        foreach (['a1', 'a2', 's1'] as $id) {
+            $user->givePermission(Permission::firstOrCreate(['name' => 'posts:view']), null, $tenants[$id]);
+        }
+
+        $manager = $this->resolveRequest($user, $tenants['o1']);
+        $tree    = new CountingTenantTree(new ClosureTenantTree);
+
+        $this->app?->instance(TenantTree::class, $tree);
+        $this->app?->make(ConfigRepository::class)->set('authorization.query_scoping.max_scopes', 8);
+
+        self::refusal($manager);
+
+        // Only the active tenant's own chain is read, and where each other
+        // anchor lies asked once.
+        self::assertSame(1, $tree->ancestorsRead);
+        self::assertSame(3, $tree->withinAsked);
+
+        $this->app?->make(ConfigRepository::class)->set('authorization.query_scoping.max_scopes', 16);
+
+        self::assertCount(9, self::classes($manager, new TenantScopedPost));
+        self::assertSame(1 + 1 + 4, $tree->ancestorsRead);
+        self::assertSame(3 + 3, $tree->withinAsked);
+    }
+
+    /**
+     * A deny attached in a sibling organisation to the type, not to a record,
+     * applies to that organisation's rows and its subtree's when a
+     * platform-wide grant admits them, as `check()` applies it, and leaves the
+     * active organisation's rows alone.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnOwnTenantTypeDenyAppliesToAdmittedRows(): void
+    {
+        [$user, $tenants] = $this->tree();
+
+        $user->givePermission(Permission::create(['name' => 'posts:view']));
+
+        $deny = self::storedPolicy('own-type-deny', [['effect' => 'deny', 'actions' => ['posts:view']]]);
+
+        app(ResourcePolicyService::class)->attach($deny, TenantScopedPost::class, $tenants['o2']);
+
+        $manager = $this->resolveRequest($user, $tenants['o1']);
+        $kept    = self::kept($manager, 'posts:view');
+
+        self::assertAgrees($manager, 'posts:view', 'view in o1');
+        self::assertNotContains('o2', $kept);
+        self::assertNotContains('b1', $kept);
+        self::assertContains('o1', $kept);
+        self::assertContains('s1', $kept);
+    }
+
+    /**
+     * A row below the active tenant whose tenant id is longer than any tenant
+     * can be, which the tree still places in the subtree, is kept by no class,
+     * since the tenant resolver cannot read it.
+     *
+     * @return void
+     */
+    public function testARowBelowAnAnchorWithAnUnreadableTenantIsNotKept(): void
+    {
+        if (DB::connection()->getDriverName() !== 'sqlite') {
+            self::markTestSkipped('Only SQLite stores a tenant id longer than the closure table declares.');
+        }
+
+        [$user, $tenants] = $this->tree();
+
+        $user->givePermission(Permission::create(['name' => 'posts:view']), null, $tenants['o1']);
+
+        $long = \str_repeat('t', 192);
+
+        DB::table(ClosureTenantTree::TABLE)->insert([
+            'ancestor_type'   => self::tenantType(),
+            'ancestor_id'     => 'o1',
+            'descendant_type' => self::tenantType(),
+            'descendant_id'   => $long,
+            'depth'           => 1,
+        ]);
+        TenantScopedPost::query()->create(['title' => 'long', 'tenant_type' => self::tenantType(), 'tenant_id' => $long]);
+
+        $kept = self::kept($this->resolveRequest($user, $tenants['o1']), 'posts:view');
+
+        self::assertNotContains('long', $kept);
+        self::assertContains('s1', $kept);
     }
 
     /**

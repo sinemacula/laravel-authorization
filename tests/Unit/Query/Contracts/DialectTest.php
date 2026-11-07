@@ -34,7 +34,7 @@ final class DialectTest extends TestCase
 
         self::assertSame([
             'kindOf', 'isUtf8', 'keyGuard', 'keyLength', 'readable', 'equalsBytes', 'equalsIndexed',
-            'isExactCollation', 'isExactInteger', 'textImage', 'bytes', 'startsWith', 'equalsKeyText',
+            'isExactCollation', 'isExactInteger', 'textImage', 'bytes', 'startsWith', 'equalsKeyText', 'parameter',
         ], $methods);
 
         foreach ([SqliteDialect::class, PostgresDialect::class, MySqlDialect::class] as $dialect) {

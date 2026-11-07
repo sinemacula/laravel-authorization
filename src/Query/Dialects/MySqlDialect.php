@@ -10,7 +10,7 @@ use SineMacula\Laravel\Authorization\Query\Enums\ColumnKind;
 use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
 
 /**
- * The SQL `whereAuthorized()` writes on MySQL.
+ * The SQL an authorized scope writes on MySQL.
  *
  * A value is compared through its bytes, `CAST(x AS BINARY)`, which for an
  * integer are its decimal digits, as PHP reads them (an unsigned value beyond
@@ -176,7 +176,9 @@ final readonly class MySqlDialect implements Dialect
     /**
      * Determine whether an integer key column holds only integers PHP reads as
      * they are: every type but an unsigned `BIGINT`, whose values beyond PHP's
-     * largest integer PHP would read otherwise.
+     * largest integer PHP would read otherwise, and a `ZEROFILL` one, whose
+     * digits PHP and the column's text read padded with zeros while the
+     * integer, and the key an attachment stores, are not.
      *
      * @param  \Illuminate\Database\Connection  $connection
      * @param  string  $table
@@ -188,7 +190,7 @@ final readonly class MySqlDialect implements Dialect
     {
         $type = \is_string($column['type'] ?? null) ? \strtolower($column['type']) : '';
 
-        return !(\str_starts_with($type, 'bigint') && \str_contains($type, 'unsigned'));
+        return !(\str_contains($type, 'zerofill') || (\str_starts_with($type, 'bigint') && \str_contains($type, 'unsigned')));
     }
 
     /**
@@ -248,5 +250,26 @@ final readonly class MySqlDialect implements Dialect
         $collation = \is_string($column['collation'] ?? null) ? \strtolower($column['collation']) : '';
 
         return \preg_match('/\Autf8mb4_[a-z0-9_]+\z/', $collation) === 1 ? "{$attached} = CAST({$key} AS CHAR CHARACTER SET utf8mb4) COLLATE {$collation}" : null;
+    }
+
+    /**
+     * Return a literal MySQL reads as it reads the value bound: null, an
+     * integer's digits (a boolean as Laravel binds it, `1` or `0`), and a
+     * string of UTF-8 as a utf8mb4 string of its bytes, which takes the
+     * collation of what it is compared with, as a bound string does.
+     *
+     * @param  mixed  $value
+     * @return string|null
+     */
+    #[\Override]
+    public function parameter(mixed $value): ?string
+    {
+        return match (true) {
+            $value === null                                           => 'NULL',
+            \is_bool($value)                                          => $value ? '1' : '0',
+            \is_int($value)                                           => $value < 0 ? "({$value})" : (string) $value,
+            \is_string($value) && \mb_check_encoding($value, 'UTF-8') => '_utf8mb4 ' . $this->bytes($value),
+            default                                                   => null,
+        };
     }
 }

@@ -8,10 +8,11 @@ use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
 use SineMacula\Laravel\Authorization\Query\Refusal;
 
 /**
- * Thrown when `whereAuthorized()` cannot prove that the rows it would keep are
- * exactly those `check()` allows (AUTHZ-10.2, N64): before the builder is
- * changed when it is called, and from the call that runs the query when it is
- * compiled again then. It never filters rows after loading them.
+ * Thrown when an authorized scope, `whereAuthorized()` or the model-level
+ * `AuthorizedScope`, cannot prove that the rows it would keep are exactly those
+ * `check()` allows (AUTHZ-10.2, N64): from `whereAuthorized()` before the
+ * builder is changed, and from the call that runs the query when either is
+ * compiled then. It never filters rows after loading them.
  *
  * A refusal is a developer or configuration fault, not a denial, so this is not
  * an `AuthorizationException`: Laravel renders it as a 500, never a 403. Its
@@ -45,7 +46,7 @@ final class QueryScopeRefusedException extends \RuntimeException
     ) {
         $described = \array_map(static fn (Refusal $refusal): string => $refusal->describe(), $refusals);
 
-        parent::__construct("whereAuthorized('{$action}') cannot be compiled exactly for '{$resourceType}': " . \implode('; ', $described) . '.');
+        parent::__construct("The authorized scope for '{$action}' cannot be compiled exactly for '{$resourceType}': " . \implode('; ', $described) . '.');
     }
 
     /**

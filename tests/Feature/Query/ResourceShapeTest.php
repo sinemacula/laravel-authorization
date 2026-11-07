@@ -294,6 +294,42 @@ final class ResourceShapeTest extends TestCase
     }
 
     /**
+     * A key PHP reads otherwise than its integer is not exact: on MySQL one
+     * declared `ZEROFILL`, which PHP and the column's text read padded with
+     * zeros, and on SQLite one declared `INTEGER PRIMARY KEY DESC`, which is
+     * not the rowid and holds reals and text; so is refused once a comparison
+     * of the key is material.
+     *
+     * @return void
+     */
+    public function testAPaddedOrNonRowidIntegerKeyIsNotExact(): void
+    {
+        $driver = DB::connection()->getDriverName();
+        $create = [
+            'mysql'  => 'create table scoped_padded_posts (id int(5) unsigned zerofill not null primary key, title varchar(191))',
+            'sqlite' => 'create table scoped_padded_posts (id integer primary key desc, title text)',
+        ][$driver] ?? null;
+
+        if ($create === null) {
+            self::markTestSkipped('Every PostgreSQL integer key is exact.');
+        }
+
+        DB::statement($create);
+
+        $padded = new class extends AbstractQueryablePost {
+            /** @var bool The key is given, never generated. */
+            public $incrementing = false;
+
+            /** @var string|null Backing table. */
+            protected $table = 'scoped_padded_posts';
+        };
+
+        $shape = ResourceShape::of($padded, 'posts:view', new SchemaInspector);
+
+        self::assertSame([ColumnKind::INTEGER, RefusalReason::COLUMN_TYPE], [$shape->keyKind, $shape->keyRefusal]);
+    }
+
+    /**
      * Forget the tenancy and the morph map a test declared.
      *
      * @return void

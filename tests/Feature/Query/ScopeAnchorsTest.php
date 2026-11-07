@@ -72,4 +72,53 @@ final class ScopeAnchorsTest extends TestCase
         self::assertEqualsCanonicalizing(['attached', 'railed'], $ids($admitted));
         self::assertSame($ids($admitted), $ids(ScopeAnchors::read(new Subject($user, $identity), (new ScopedPost)->getMorphClass(), false)[0]));
     }
+
+    /**
+     * Tenants of different types with the same id are told apart, among the
+     * sources and among those a row admitted from outside reads.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTenantsOfTheSameIdAndAnotherTypeAreToldApart(): void
+    {
+        $user = StubIdentity::create(['id' => 'u1']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:view']), null, new Reference('teams', '5'));
+        DB::table('guardrails')->insert(['policy_id' => self::storedPolicy('railed', [])->getKey(), 'tenant_type' => 'orgs', 'tenant_id' => '5']);
+        app(ResourcePolicyService::class)->attach(self::storedPolicy('typed', []), ScopedPost::class, new Reference('teams', '5'));
+
+        [$sources, $admitted] = ScopeAnchors::read(new Subject($user, $user), (new ScopedPost)->getMorphClass(), true);
+
+        $pairs = static fn (array $tenants): array => \array_map(static fn (Reference $tenant): string => $tenant->type . ':' . $tenant->id, $tenants);
+
+        self::assertEqualsCanonicalizing(['teams:5', 'orgs:5'], $pairs($sources));
+        self::assertEqualsCanonicalizing(['teams:5', 'orgs:5'], $pairs($admitted));
+    }
+
+    /**
+     * A subject that is not a model holds no grant, so none of another model's
+     * grant tenants is read: only the tenants a row admitted from outside
+     * reads.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASubjectThatIsNotAModelReadsNoGrantTenant(): void
+    {
+        $other = StubIdentity::create(['id' => 'u3']);
+
+        $other->givePermission(Permission::create(['name' => 'posts:view']), null, new Reference('teams', 'stranger'));
+        $other->assignRole(Role::create(['name' => 'held']), null, new Reference('teams', 'held'));
+        DB::table('guardrails')->insert(['policy_id' => self::storedPolicy('railed', [])->getKey(), 'tenant_type' => 'teams', 'tenant_id' => 'railed']);
+
+        [$sources, $admitted] = ScopeAnchors::read(new Subject(new \stdClass), (new ScopedPost)->getMorphClass(), true);
+
+        $ids = static fn (array $tenants): array => \array_map(static fn (Reference $tenant): string => $tenant->id, $tenants);
+
+        self::assertSame(['railed'], $ids($sources));
+        self::assertSame(['railed'], $ids($admitted));
+    }
 }

@@ -20,40 +20,49 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
 /**
  * Reads the policies attached to records of the model's type that hold in the
  * scope a class of rows is decided in, and compiles, for each, the condition a
- * row meets when the policy is attached to its record (C7, §6): an `EXISTS`
- * over the attachments, matching the policy, the type and the row's key, and
- * the scope's tenant chain and application, written by the same query builders
- * the resolver reads attachments with (`TenantChain::grants()`,
+ * row meets when the policy is attached to its record: an `EXISTS` over the
+ * attachments, matching the policy, the type and the row's key, and the scope's
+ * tenant chain and application, written by the same query builders the resolver
+ * reads attachments with (`TenantChain::grants()`,
  * `GrantApplications::only()`), so it is the resolver's own predicate on the
  * row; and the key one an attachment can name, at most 191 bytes, not `*` (as
- * `ResourcePolicyResolver` stores no other).
+ * `ResourcePolicyResolver` stores no other). Every value of that predicate is
+ * inlined as the dialect writes a bound value (`InlinedQuery`), never through
+ * the connection's escaping.
  *
  * The key's text is compared with the attachment's under the attachment
  * column's own collation, as the resolver's comparison with that text is: byte
  * for byte on SQLite and PostgreSQL, whose column must compare so, and under
- * the column's collation on MySQL. The policies are read once per class, with
- * no query per row, at most `authorization.query_scoping.max_attachments` of
- * them.
+ * the column's collation on MySQL. The policies are read with no query per row,
+ * once for each scope a compile decides classes in, at most
+ * `authorization.query_scoping.max_attachments` of them that name the action,
+ * and at most four times as many in all.
  *
  * Refused: a document that cannot be read (`invalid_policy`); more policies
  * than allowed (`too_many_attachments`); and, only when a policy is attached,
  * attachments kept on another connection than the model's
- * (`attachment_connection`), an attachment column whose collation the key's
- * text cannot be compared under (`attachment_collation`), and an integer key
- * that may hold what PHP reads otherwise (`column_type`).
+ * (`attachment_connection`), a model connection that reads them on a separate
+ * read connection while `check()` reads them on the write connection
+ * (`read_replica`), an attachment column whose collation the key's text cannot
+ * be compared under (`attachment_collation`), an integer key that may hold what
+ * PHP reads otherwise (`column_type`), and a value that cannot be inlined as
+ * the database reads it bound (`inline_value`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
  * @internal
  */
-final readonly class RecordAttachments
+final class RecordAttachments
 {
     /** @var string The alias the attachments table is read under. */
     private const string ALIAS = 'authz_rp';
 
     /** @var string The column holding an attached record's key. */
     private const string KEY_COLUMN = 'resource_id';
+
+    /** @var array<string, list<\SineMacula\Laravel\Authorization\Evaluation\Policy>|null> The policies read in each scope, null for more than allowed, by the scope's chain and application. */
+    private array $read = [];
 
     /**
      * Create a new reader of record attachments.
@@ -66,16 +75,16 @@ final readonly class RecordAttachments
     public function __construct(
 
         /** Reads the policies attached to records. */
-        private ResourcePolicyResolver $resolver,
+        private readonly ResourcePolicyResolver $resolver,
 
         /** The model queried. */
-        private ResourceShape $shape,
+        private readonly ResourceShape $shape,
 
         /** Describes the attachments table. */
-        private SchemaInspector $inspector,
+        private readonly SchemaInspector $inspector,
 
         /** The most policies one scope may attach to records of the type. */
-        private int $limit,
+        private readonly int $limit,
     ) {}
 
     /**
@@ -91,29 +100,54 @@ final readonly class RecordAttachments
      */
     public function inScope(string $action, StatementScreen $screen, bool $isDenyOnly): array
     {
+        $chain       = TenantScope::currentChain();
+        $application = TenantScope::currentApplication();
+
         try {
-            $policies = $this->resolver->recordPoliciesFor($this->shape->type, $action, $this->limit);
+            $policies = $this->policiesIn($chain, $application, $action);
         } catch (InvalidPolicyDocumentException) {
             $screen->refuse(new Refusal(RefusalReason::INVALID_POLICY, null, null, null, 'a policy attached to a record cannot be read'));
 
             return [];
         }
 
-        $keyText = $policies === [] ? null : $this->keyTextOr($screen, \count($policies) > $this->limit);
+        $keyText = $policies === [] ? null : $this->keyTextOr($screen, $policies === null);
 
-        if ($keyText === null) {
+        if ($keyText === null || $policies === null) {
             return [];
         }
 
-        $chain       = TenantScope::currentChain();
-        $application = TenantScope::currentApplication();
-        $attached    = [];
+        $attached = [];
 
         foreach ($policies as $policy) {
-            $attached[] = [$policy, Conditions::all([$this->existsFor($policy, $keyText, $chain, $application), $this->storable()]), $isDenyOnly];
+            $exists     = $this->existsFor($policy, $keyText, $chain, $application) ?? $this->refuseInline($screen);
+            $attached[] = [$policy, Conditions::all([$exists, $this->storable()]), $isDenyOnly];
         }
 
         return $attached;
+    }
+
+    /**
+     * Return the policies attached to records of the type in the scope that
+     * name the action, or null for more than allowed, read once for each scope.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\TenantChain  $chain
+     * @param  string|null  $application
+     * @param  string  $action
+     * @return list<\SineMacula\Laravel\Authorization\Evaluation\Policy>|null
+     *
+     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
+     */
+    private function policiesIn(TenantChain $chain, ?string $application, string $action): ?array
+    {
+        $scope = [$application, $chain->isBelow, ...\array_map(static fn (Reference $tenant): array => [$tenant->type, $tenant->id], $chain->tenants)];
+        $key   = \serialize($scope);
+
+        if (!\array_key_exists($key, $this->read)) {
+            $this->read[$key] = $this->resolver->recordPoliciesFor($this->shape->type, $action, $this->limit);
+        }
+
+        return $this->read[$key];
     }
 
     /**
@@ -131,17 +165,36 @@ final readonly class RecordAttachments
         $keyText    = $connection === null ? null : $this->keyTextOn($connection);
 
         $reason = match (true) {
-            $isOverLimit                                                                 => RefusalReason::TOO_MANY_ATTACHMENTS,
-            $connection?->getName() !== AuthorizationConnection::connection()->getName() => RefusalReason::ATTACHMENT_CONNECTION,
-            $keyText === null                                                            => RefusalReason::ATTACHMENT_COLLATION,
-            default                                                                      => $this->shape->keyRefusal,
+            $isOverLimit                                                                  => RefusalReason::TOO_MANY_ATTACHMENTS,
+            $connection?->getName() !== AuthorizationConnection::connection()->getName()  => RefusalReason::ATTACHMENT_CONNECTION,
+            $connection             !== null && !InlinedQuery::isReadOnWrite($connection) => RefusalReason::READ_REPLICA,
+            $keyText === null                                                             => RefusalReason::ATTACHMENT_COLLATION,
+            default                                                                       => $this->shape->keyRefusal,
         };
 
         if ($reason !== null) {
-            $screen->refuse(new Refusal($reason, null, null, $reason === RefusalReason::COLUMN_TYPE ? $this->shape->keyName : self::KEY_COLUMN));
+            $screen->refuse(new Refusal($reason, null, null, $this->refusedKey($reason)));
         }
 
         return $reason === null ? $keyText : null;
+    }
+
+    /**
+     * Return what a refusal of the attachments names: the key column for an
+     * integer key that may hold what PHP reads otherwise, the connection for
+     * one that reads on a separate read connection, else the attachment's key
+     * column.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Query\Enums\RefusalReason  $reason
+     * @return string
+     */
+    private function refusedKey(RefusalReason $reason): string
+    {
+        return match ($reason) {
+            RefusalReason::COLUMN_TYPE  => $this->shape->keyName,
+            RefusalReason::READ_REPLICA => (string) $this->shape->connection?->getName(),
+            default                     => self::KEY_COLUMN,
+        };
     }
 
     /**
@@ -165,16 +218,17 @@ final readonly class RecordAttachments
 
     /**
      * Return the condition a row meets when the policy is attached to its
-     * record in the scope: the resolver's predicate, written by its builders
-     * and inlined.
+     * record in the scope: the resolver's predicate, written by its builders,
+     * with every value inlined as the dialect writes it bound; or null when a
+     * value cannot be.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy  $policy
      * @param  string  $keyText
      * @param  \SineMacula\Laravel\Authorization\Support\TenantChain  $chain
      * @param  string|null  $application
-     * @return string
+     * @return string|null
      */
-    private function existsFor(Policy $policy, string $keyText, TenantChain $chain, ?string $application): string
+    private function existsFor(Policy $policy, string $keyText, TenantChain $chain, ?string $application): ?string
     {
         /** @var \Illuminate\Database\Connection $connection */
         $connection = $this->shape->connection;
@@ -191,9 +245,23 @@ final readonly class RecordAttachments
                 GrantApplications::only($query, $alias, $application);
             });
 
-        // Each value is inlined as the connection escapes it, a boolean as the
-        // database writes one, never cast to an integer first.
-        return 'EXISTS (' . $query->getGrammar()->substituteBindingsIntoRawSql($query->toSql(), $query->getBindings()) . ')';
+        $sql = InlinedQuery::sqlOf($query, $this->shape->dialect);
+
+        return $sql === null ? null : 'EXISTS (' . $sql . ')';
+    }
+
+    /**
+     * Keep the refusal of a value the attachments' predicate cannot inline, and
+     * return the condition no row meets.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Query\StatementScreen  $screen
+     * @return string
+     */
+    private function refuseInline(StatementScreen $screen): string
+    {
+        $screen->refuse(new Refusal(RefusalReason::INLINE_VALUE, null, null, self::KEY_COLUMN, 'a value of an attachment cannot be inlined'));
+
+        return QueryAuthorizer::NO_ROW;
     }
 
     /**
@@ -205,10 +273,15 @@ final readonly class RecordAttachments
      */
     private function storable(): string
     {
-        $shape  = $this->shape;
+        $shape = $this->shape;
+
+        if ($shape->keyKind !== ColumnKind::STRING) {
+            return QueryAuthorizer::EVERY_ROW;
+        }
+
         $length = $shape->dialect->keyLength($shape->key, $shape->keyKind, $shape->isIntegerCast);
 
-        if ($length === null || $shape->keyKind !== ColumnKind::STRING) {
+        if ($length === null) {
             return QueryAuthorizer::EVERY_ROW;
         }
 

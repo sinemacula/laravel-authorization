@@ -16,7 +16,7 @@ use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
 use SineMacula\Laravel\Authorization\Support\ResourceTenancy;
 
 /**
- * What `whereAuthorized()` knows of the model it scopes, checked before
+ * What an authorized scope knows of the model it scopes, checked before
  * anything is compiled (AUTHZ-10.1, N68): its morph type, its table and
  * connection, the dialect it is written in, its key and its tenant columns,
  * wrapped and qualified, and their kinds, and whether its key can be compared

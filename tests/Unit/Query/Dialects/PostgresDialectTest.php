@@ -177,20 +177,46 @@ final class PostgresDialectTest extends TestCase
     public function testAnExactCollationIsDeterministic(): void
     {
         $dialect = new PostgresDialect;
-        $column  = static function (?object $row): Connection {
+        $column  = static function (?object $row, string $relation = '"app"."pre_Po""sts"'): Connection {
             $connection = \Mockery::mock(Connection::class);
             $catalogue  = \Mockery::on(static fn (string $query): bool => \str_contains($query, 'collisdeterministic') && \str_contains($query, 'to_regclass'));
 
-            $connection->shouldReceive('getTablePrefix')->andReturn('');
-            $connection->shouldReceive('selectOne')->with($catalogue, ['"app"."Posts"', 'code'])->andReturn($row);
+            $connection->shouldReceive('getTablePrefix')->andReturn('pre_');
+            $connection->shouldReceive('selectOne')->with($catalogue, [$relation, 'code'])->andReturn($row);
 
             return $connection;
         };
 
-        self::assertTrue($dialect->isExactCollation($column((object) ['exact' => true]), 'app.Posts', ['name' => 'code']));
-        self::assertFalse($dialect->isExactCollation($column((object) ['exact' => false]), 'app.Posts', ['name' => 'code']));
-        self::assertTrue($dialect->isExactCollation($column(null), 'app.Posts', ['name' => 'code']));
+        self::assertTrue($dialect->isExactCollation($column((object) ['exact' => true]), 'app.Po"sts', ['name' => 'code']));
+        self::assertTrue($dialect->isExactCollation($column((object) ['exact' => true], '"pre_posts"'), 'posts', ['name' => 'code']));
+        self::assertFalse($dialect->isExactCollation($column((object) ['exact' => false]), 'app.Po"sts', ['name' => 'code']));
+        self::assertFalse($dialect->isExactCollation($column((object) ['exact' => null]), 'app.Po"sts', ['name' => 'code']));
+        self::assertFalse($dialect->isExactCollation($column(null), 'app.Po"sts', ['name' => 'code']));
+        self::assertFalse($dialect->isExactCollation(\Mockery::mock(Connection::class), 'db.app.posts', ['name' => 'code']));
         self::assertTrue($dialect->isExactInteger(\Mockery::mock(Connection::class), 'posts', []));
+    }
+
+    /**
+     * A value is inlined as PostgreSQL reads it bound, as text of no type:
+     * null, an integer's or a boolean's digits quoted, and UTF-8 text with no
+     * NUL byte with every character escaped by its code point; anything else is
+     * not inlined.
+     *
+     * @return void
+     */
+    public function testAValueIsInlinedAsPostgresReadsItBound(): void
+    {
+        $dialect = new PostgresDialect;
+
+        self::assertSame('NULL', $dialect->parameter(null));
+        self::assertSame('\'1\'', $dialect->parameter(true));
+        self::assertSame('\'0\'', $dialect->parameter(false));
+        self::assertSame('\'-42\'', $dialect->parameter(-42));
+        self::assertSame('U&\'\0061\003F\003F\0027\005C\00E9\+01F600\'', $dialect->parameter('a??\'\é😀'));
+        self::assertSame('U&\'\'', $dialect->parameter(''));
+        self::assertNull($dialect->parameter("a\0b"));
+        self::assertNull($dialect->parameter("\xff"));
+        self::assertNull($dialect->parameter(1.5));
     }
 
     /**

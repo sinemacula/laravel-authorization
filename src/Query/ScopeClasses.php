@@ -16,8 +16,8 @@ use SineMacula\Laravel\Authorization\Support\SubjectGrants;
 use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
- * Splits a model's rows into the classes `check()` decides alike (§5.1, §5.3),
- * as `ResourceScope` decides each row:
+ * Splits a model's rows into the classes `check()` decides alike, as
+ * `ResourceScope` decides each row:
  *
  * - every row of a tenantless model, or a row of no tenant, in the request's
  *   scope (A);
@@ -33,16 +33,19 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  *   (C(none)). Otherwise `check()` denies those rows as `tenant_scope`.
  *
  * The anchors are the tenants the decision's sources sit at (`ScopeAnchors`),
- * and the forest they form is read through the bound tree, `isWithin()`. Rows
- * strictly below an anchor with no anchor between read exactly the sources the
- * anchor's scope standing below it reads, since no source sits between them.
+ * and the forest they form is read through the bound tree: which anchors are
+ * within the active tenant's subtree by `isWithin()`, and which lie below which
+ * by each anchor's chain of ancestors, read once. Rows strictly below an anchor
+ * with no anchor between read exactly the sources the anchor's scope standing
+ * below it reads, since no source sits between them.
  *
  * The classes compare tenants as PHP does, while `check()` matches sources to
  * tenants in SQL; so whenever a class is cut below an anchor or admitted from
  * outside, the tenant columns of the authorization tables must compare bytes
  * (`column_collation`). More anchors than
  * `authorization.query_scoping.max_anchors`, or more classes than `max_scopes`,
- * are refused (`too_many_scopes`).
+ * are refused (`too_many_scopes`), each counted before a class is cut, so the
+ * work of cutting is bounded by the limits.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -94,35 +97,40 @@ final class ScopeClasses
             self::assertExactTables($shape, $action, $inspector);
         }
 
-        [$inScope, $outside] = self::anchorsOf($shape, $subject, $action, $active, $isFlat, $isAdmitted);
+        [$inScope, $outside] = self::anchorsOf($shape, $subject, $action, $active, $isAdmitted);
+
+        // Each anchor makes one class, two unless the tree is flat, and rows
+        // admitted from outside one more on no anchor's chain.
+        $each  = $isFlat ? 1 : 2;
+        $count = 1 + \count($inScope) * $each + ($isAdmitted ? \count($outside) * $each + 1 : 0);
+
+        if ($count > self::limit('max_scopes', self::MAX_SCOPES)) {
+            self::refuse($shape, $action, 'max_scopes');
+        }
 
         $classes = [$none, ...self::branch($membership, $inScope, $isFlat, false, [])];
 
-        if ($isAdmitted) {
-            $classes = [...$classes, ...self::admitted($membership, $outside, $isFlat, $active)];
-        }
-
-        return \count($classes) > self::limit('max_scopes', self::MAX_SCOPES) ? self::refuse($shape, $action, 'max_scopes') : $classes;
+        return $isAdmitted ? [...$classes, ...self::admitted($membership, $outside, $isFlat, $active)] : $classes;
     }
 
     /**
      * Return the anchors within the active tenant's subtree, the active tenant
      * first, and those outside it a row admitted from outside reads the own
-     * sources of, refusing more anchors than allowed.
+     * sources of, refusing more anchors than allowed. Under the flat tree only
+     * the active tenant is within its own subtree.
      *
      * @param  \SineMacula\Laravel\Authorization\Query\ResourceShape  $shape
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $active
-     * @param  bool  $isFlat
      * @param  bool  $isAdmitted
      * @return array{list<\SineMacula\Laravel\Authorization\Support\Reference>, list<\SineMacula\Laravel\Authorization\Support\Reference>}
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException
      */
-    private static function anchorsOf(ResourceShape $shape, Subject $subject, string $action, ?Reference $active, bool $isFlat, bool $isAdmitted): array
+    private static function anchorsOf(ResourceShape $shape, Subject $subject, string $action, ?Reference $active, bool $isAdmitted): array
     {
-        $isGrantRead           = !$isFlat && $active !== null;
+        $isGrantRead           = !(TenantChain::tree() instanceof FlatTenantTree) && $active !== null;
         [$sources, $admitting] = $isGrantRead || $isAdmitted ? ScopeAnchors::read($subject, $shape->type, $isGrantRead) : [[], []];
 
         $others = \array_values(\array_filter($sources, static fn (Reference $tenant): bool => $active === null || !self::isSame($tenant, $active)));
@@ -134,7 +142,7 @@ final class ScopeClasses
         $inScope = $active === null ? [] : [$active, ...\array_values(\array_filter($others, static fn (Reference $tenant): bool => TenantChain::isWithin($tenant, $active)))];
         $outside = \array_values(\array_filter($admitting, static fn (Reference $tenant): bool => $active === null || !TenantChain::isWithin($tenant, $active)));
 
-        return [$isFlat ? \array_slice($inScope, 0, 1) : $inScope, $outside];
+        return [$inScope, $outside];
     }
 
     /**
@@ -153,6 +161,7 @@ final class ScopeClasses
      */
     private static function branch(TenantMembership $membership, array $anchors, bool $isFlat, bool $isAdmitted, array $outside): array
     {
+        $chains  = $isFlat ? [] : self::chainsOf($anchors);
         $classes = [];
 
         foreach ($anchors as $anchor) {
@@ -162,7 +171,7 @@ final class ScopeClasses
                 continue;
             }
 
-            $lower = \array_filter($anchors, static fn (Reference $other): bool => !self::isSame($other, $anchor) && TenantChain::isWithin($other, $anchor));
+            $lower = \array_filter($anchors, static fn (Reference $other): bool => !self::isSame($other, $anchor) && self::isOnChain($anchor, $chains[self::keyOf($other)] ?? []));
             $apart = \array_map(static fn (Reference $other): string => Conditions::not($membership->within($other)), \array_values($lower));
 
             $below     = Conditions::all([$membership->present(), $membership->within($anchor), Conditions::not($membership->equalTo($anchor)), ...$apart, ...$outside]);
@@ -170,6 +179,38 @@ final class ScopeClasses
         }
 
         return $classes;
+    }
+
+    /**
+     * Return each anchor's chain, the anchor and then its ancestors, read once
+     * through the bound tree, keyed by the anchor: an anchor lies within
+     * another exactly when the other is on its chain.
+     *
+     * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>  $anchors
+     * @return array<string, list<\SineMacula\Laravel\Authorization\Support\Reference>>
+     */
+    private static function chainsOf(array $anchors): array
+    {
+        $tree   = TenantChain::tree();
+        $chains = [];
+
+        foreach ($anchors as $anchor) {
+            $chains[self::keyOf($anchor)] ??= [$anchor, ...$tree->ancestors($anchor)];
+        }
+
+        return $chains;
+    }
+
+    /**
+     * Determine whether the tenant is on the chain, byte for byte.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
+     * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>  $chain
+     * @return bool
+     */
+    private static function isOnChain(Reference $tenant, array $chain): bool
+    {
+        return \array_filter($chain, static fn (Reference $link): bool => self::isSame($link, $tenant)) !== [];
     }
 
     /**
@@ -251,6 +292,17 @@ final class ScopeClasses
     private static function refuse(ResourceShape $shape, string $action, string $limit): never
     {
         throw QueryScopeRefusedException::of($action, $shape->type, new Refusal(RefusalReason::TOO_MANY_SCOPES, null, null, "authorization.query_scoping.{$limit}"));
+    }
+
+    /**
+     * Return the tenant as a key, its type and id apart.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
+     * @return string
+     */
+    private static function keyOf(Reference $tenant): string
+    {
+        return $tenant->type . "\0" . $tenant->id;
     }
 
     /**

@@ -6,6 +6,7 @@ namespace Tests\Feature\Query;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
@@ -21,16 +22,18 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ScopesQueries;
+use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Fixtures\QueryScoping\LooseKeyedPost;
 use Tests\Fixtures\QueryScoping\OtherConnectionPost;
+use Tests\Fixtures\QueryScoping\ReplicatedPost;
 use Tests\Fixtures\QueryScoping\ScopedDocument;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\TestCase;
 
 /**
  * Feature tests for the policies attached to records a class of rows reads, and
- * the condition a row meets when one is attached to its record (C7).
+ * the condition a row meets when one is attached to its record.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -42,7 +45,7 @@ use Tests\TestCase;
 #[CoversClass(RecordAttachments::class)]
 final class RecordAttachmentsTest extends TestCase
 {
-    use ScopesQueries;
+    use ScopesQueries, UsesAnAuthorizationConnection;
 
     /**
      * With no policy attached to a record of the type, nothing is read further
@@ -230,6 +233,201 @@ final class RecordAttachmentsTest extends TestCase
 
         self::assertSame(DB::connection()->getDriverName() === 'pgsql' ? [] : [[RefusalReason::COLUMN_TYPE, 'id']], self::refused($screen));
         self::assertCount(DB::connection()->getDriverName() === 'pgsql' ? 1 : 0, $attached);
+    }
+
+    /**
+     * A policy attached to one record for an application and to another for
+     * every application holds on the first only in that application, and on the
+     * second in every application and with none.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnAttachmentHoldsOnlyInItsApplication(): void
+    {
+        $keys = [];
+
+        foreach (['admin-only', 'everywhere', 'neither'] as $title) {
+            $keys[] = (string) ScopedPost::query()->create(['title' => $title])->getKey(); // @phpstan-ignore cast.string
+        }
+
+        $policy = self::attachToResource([ScopedPost::class, $keys[1]], [['effect' => 'deny', 'actions' => ['posts:*']]]);
+
+        DB::table('resource_policies')->insert([
+            'policy_id'     => $policy->getKey(),
+            'resource_type' => (new ScopedPost)->getMorphClass(),
+            'resource_id'   => $keys[0],
+            'application'   => 'admin',
+        ]);
+
+        [$attachments, $screen] = $this->reader(new ScopedPost);
+
+        $kept = static fn (?string $application): array => TenantScope::within(null, $application, static function () use ($attachments, $screen): array {
+            $attached = $attachments->inScope('posts:view', $screen, false);
+
+            self::assertCount(1, $attached);
+
+            return ScopedPost::query()->whereRaw($attached[0][1])->orderBy('id')->pluck('title')->all();
+        });
+
+        self::assertSame(['everywhere'], $kept('web'));
+        self::assertSame(['admin-only', 'everywhere'], $kept('admin'));
+        self::assertSame(['everywhere'], $kept(null));
+        self::assertSame([], $screen->refusals());
+    }
+
+    /**
+     * Tenants and applications holding question marks, doubled ones, quotes,
+     * backslashes and, where the database stores one, a NUL byte are inlined
+     * exactly: a policy attached in such a tenant holds on its record there and
+     * nowhere else, as `check()` finds it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATenantOrApplicationOfAnyBytesIsInlinedExactly(): void
+    {
+        $isPostgres = DB::connection()->getDriverName() === 'pgsql';
+        $tenants    = ['a??b', 'a?b', 'a\'b', 'a\\', 'a\\\'b', '??', ...($isPostgres ? [] : ["a\0b"])];
+
+        foreach ($tenants as $index => $tenant) {
+            $post = ScopedPost::query()->create(['title' => \bin2hex($tenant)]);
+
+            $policy = self::storedPolicy('escaped-' . $index, [['effect' => 'deny', 'actions' => ['posts:*']]]);
+
+            DB::table('resource_policies')->insert([
+                'policy_id'     => $policy->getKey(),
+                'resource_type' => (new ScopedPost)->getMorphClass(),
+                'resource_id'   => (string) $post->getKey(), // @phpstan-ignore cast.string
+                'tenant_type'   => 'teams',
+                'tenant_id'     => $tenant,
+                'application'   => $tenant,
+            ]);
+        }
+
+        [$attachments, $screen] = $this->reader(new ScopedPost);
+
+        foreach ($tenants as $tenant) {
+            $kept = TenantScope::within(new Reference('teams', $tenant), $tenant, static function () use ($attachments, $screen): array {
+                $titles = [];
+
+                foreach ($attachments->inScope('posts:view', $screen, false) as [, $condition]) {
+                    \array_push($titles, ...ScopedPost::query()->whereRaw($condition)->pluck('title')->all());
+                }
+
+                return $titles;
+            });
+
+            self::assertSame([\bin2hex($tenant)], $kept, \bin2hex($tenant));
+        }
+
+        self::assertSame([], $screen->refusals());
+    }
+
+    /**
+     * On PostgreSQL, which no text holds a NUL byte in, a tenant holding one
+     * cannot be inlined, so the attachments are refused rather than compared
+     * with nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testATenantThatCannotBeInlinedIsRefused(): void
+    {
+        if (DB::connection()->getDriverName() !== 'pgsql') {
+            self::markTestSkipped('Only PostgreSQL cannot hold a NUL byte in text.');
+        }
+
+        self::attachToResource([ScopedPost::class, '1'], [['effect' => 'deny', 'actions' => ['posts:*']]]);
+
+        [$attachments, $screen] = $this->reader(new ScopedPost);
+
+        TenantScope::within(new Reference('teams', "a\0b"), null, static fn (): array => $attachments->inScope('posts:view', $screen, false));
+
+        self::assertSame([[RefusalReason::INLINE_VALUE, 'resource_id']], self::refused($screen));
+    }
+
+    /**
+     * A model connection with a separate read connection would read the
+     * attachments there while `check()` reads them on the write connection, so
+     * it is refused, naming the connection; inside a transaction, where Laravel
+     * reads on the write connection, it is not.
+     *
+     * @return void
+     *
+     * @throws \LogicException
+     */
+    public function testAttachmentsReadOnAReadConnectionAreRefused(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        Schema::connection(ReplicatedPost::CONNECTION)->create('scoped_posts', static function (Blueprint $schema): void {
+            $schema->increments('id');
+            $schema->string('tenant_type')->nullable();
+            $schema->string('tenant_id')->nullable();
+        });
+
+        self::attachToResource([ReplicatedPost::class, '1'], [['effect' => 'deny', 'actions' => ['posts:*']]]);
+
+        /** @var \Illuminate\Database\Connection $connection */
+        $connection = DB::connection(ReplicatedPost::CONNECTION);
+
+        [$attachments, $screen] = $this->reader(new ReplicatedPost);
+        [, $kept]               = $this->reader(new ReplicatedPost);
+
+        // Read once without a read connection, so what is read of the tables is
+        // known before one is set.
+        self::assertCount(1, $attachments->inScope('posts:view', $screen, false));
+
+        $connection->setReadPdo(static fn (): never => throw new \LogicException('The read connection was used.'));
+
+        self::assertSame([], $attachments->inScope('posts:view', $screen, false));
+        self::assertSame([[RefusalReason::READ_REPLICA, ReplicatedPost::CONNECTION]], self::refused($screen));
+
+        self::assertCount(1, $connection->transaction(static fn (): array => $attachments->inScope('posts:view', $kept, false)));
+        self::assertSame([], $kept->refusals());
+
+        $connection->setReadPdo(null);
+    }
+
+    /**
+     * The policies attached in one scope are read once however many classes are
+     * decided there, and afresh in another scope.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheAttachmentsOfAScopeAreReadOnce(): void
+    {
+        self::attachToResource([ScopedPost::class, '1'], [['effect' => 'deny', 'actions' => ['posts:*']]]);
+
+        [$attachments, $screen] = $this->reader(new ScopedPost);
+
+        /** @var \ArrayObject<int, string> $reads */
+        $reads = new \ArrayObject;
+
+        DB::listen(static function (QueryExecuted $query) use ($reads): void {
+            if (!\str_contains($query->sql, 'policy_id')) {
+                return;
+            }
+
+            $reads[] = $query->sql;
+        });
+
+        $attachments->inScope('posts:view', $screen, false);
+        $attachments->inScope('posts:view', $screen, true);
+
+        self::assertCount(1, $reads);
+
+        TenantScope::within(new Reference('teams', '5'), null, static fn (): array => $attachments->inScope('posts:view', $screen, false));
+
+        self::assertCount(2, $reads);
+
+        DB::getEventDispatcher()?->forget(QueryExecuted::class);
     }
 
     /**

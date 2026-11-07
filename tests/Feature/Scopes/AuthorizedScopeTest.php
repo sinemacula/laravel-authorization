@@ -6,11 +6,17 @@ namespace Tests\Feature\Scopes;
 
 use Illuminate\Container\Container;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
 use SineMacula\Laravel\Authorization\Query\Reentrancy;
 use SineMacula\Laravel\Authorization\Scopes\AuthorizedScope;
+use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use Tests\Concerns\ScopesQueries;
+use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Fixtures\QueryScoping\GuardedPost;
 use Tests\Fixtures\QueryScoping\ScopedPost;
@@ -129,6 +135,30 @@ final class AuthorizedScopeTest extends TestCase
 
         self::assertSame([RefusalReason::REENTRANT], self::refusalOf(static fn (): mixed => GuardedPost::query()->get())->reasons());
         self::assertFalse(Reentrancy::isDeciding());
+    }
+
+    /**
+     * The scope on the model of the subject's identity alone, or of the subject
+     * alone, refuses as reentrant, whichever of the two the model is.
+     *
+     * @return void
+     */
+    public function testTheScopeRefusesOnTheModelOfEitherHalfOfTheSubject(): void
+    {
+        $user = StubIdentity::create(['id' => 'u1']);
+        $post = GuardedPost::query()->withoutGlobalScope(AuthorizedScope::class)->create(['id' => 9, 'title' => 'post']);
+
+        foreach ([new Subject($user, $post), new Subject($post, $user)] as $subject) {
+            $this->app?->instance(SubjectResolver::class, new FixedSubjectResolver($subject));
+
+            foreach (['authorization', AuthorizationManager::class, ResolvedTenant::class] as $abstract) {
+                $this->app?->forgetInstance($abstract);
+            }
+
+            Authorization::clearResolvedInstance('authorization');
+
+            self::assertSame([RefusalReason::REENTRANT], self::refusalOf(static fn (): mixed => GuardedPost::query()->get())->reasons());
+        }
     }
 
     /**

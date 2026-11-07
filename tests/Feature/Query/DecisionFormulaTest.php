@@ -113,6 +113,44 @@ final class DecisionFormulaTest extends TestCase
     }
 
     /**
+     * An allow attached to a record and naming another subject grants nothing
+     * there, while one naming the subject grants on its own record.
+     *
+     * @return void
+     */
+    public function testAnAttachedAllowNamingAnotherSubjectGrantsNothing(): void
+    {
+        [$screen, $subject] = $this->screen();
+
+        /** @var \Tests\Feature\Stubs\StubIdentity $user */
+        $user   = $subject->subject;
+        $theirs = (new Policy('theirs', [new Statement(PolicyEffect::ALLOW, [self::ACTION], principals: [$user->getMorphClass() . ':u2'])]))->withResource(self::type() . ':*');
+        $ours   = (new Policy('ours', [new Statement(PolicyEffect::ALLOW, [self::ACTION], principals: [$user->getMorphClass() . ':u1'])]))->withResource(self::type() . ':*');
+
+        self::assertSame(['five', false], DecisionFormula::of(self::ACTION, $screen, $this->sources($subject, []), false, [[$theirs, 'four', false], [$ours, 'five', false]]));
+        self::assertSame([QueryAuthorizer::NO_ROW, false], DecisionFormula::of(self::ACTION, $screen, $this->sources($subject, []), false, [[$theirs, 'four', false]]));
+    }
+
+    /**
+     * A deny attached to a record whose own pattern resolves is weighed only
+     * where it is attached, so its pattern does not count as matched against
+     * every row's identifier; the same deny attached to the type does.
+     *
+     * @return void
+     */
+    public function testAnAttachedDenysPatternIsNotMatchedOnEveryRow(): void
+    {
+        [$screen, $subject] = $this->screen();
+
+        $deny     = new Statement(PolicyEffect::DENY, [self::ACTION], [self::type() . ':1*']);
+        $attached = (new Policy('attached-deny', [$deny]))->withResource(self::type() . ':*');
+        $typed    = new Policy('typed-deny', [$deny]);
+
+        self::assertFalse(DecisionFormula::of(self::ACTION, $screen, $this->sources($subject, []), true, [[$attached, 'here', true]])[1]);
+        self::assertTrue(DecisionFormula::of(self::ACTION, $screen, $this->sources($subject, [$typed]), true)[1]);
+    }
+
+    /**
      * Return a screen of `posts:view` on posts, for a stored subject.
      *
      * @return array{\SineMacula\Laravel\Authorization\Query\StatementScreen, \SineMacula\Laravel\Authorization\Subject}

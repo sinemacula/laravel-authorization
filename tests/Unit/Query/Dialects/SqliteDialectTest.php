@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Unit\Query\Dialects;
 
 use Illuminate\Database\Connection;
+use Illuminate\Database\SQLiteConnection;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -141,25 +142,77 @@ final class SqliteDialectTest extends TestCase
     }
 
     /**
-     * An integer key is exact only as the rowid of a table that has one.
+     * An integer key is exact only as the rowid of a table that has one, its
+     * primary key given no index of its own.
      *
      * @return void
      */
     public function testAnExactIntegerKeyIsTheRowid(): void
     {
         $dialect = new SqliteDialect;
-        $table   = static function (string $sql): Connection {
+        $table   = static function (string $sql, array $indexes = []): Connection {
             $connection = \Mockery::mock(Connection::class);
 
             $connection->shouldReceive('getTablePrefix')->andReturn('app_');
             $connection->shouldReceive('selectOne')->with('select sql from sqlite_master where type = \'table\' and name = ?', ['app_posts'])->andReturn((object) ['sql' => $sql]);
+            $connection->shouldReceive('select')->with('PRAGMA index_list("app_posts")')->andReturn($indexes);
 
             return $connection;
         };
 
         self::assertTrue($dialect->isExactInteger($table('create table posts (id integer primary key)'), 'posts', ['auto_increment' => true]));
+        self::assertTrue($dialect->isExactInteger($table('create table posts (id integer primary key)', [(object) ['origin' => 'u']]), 'posts', ['auto_increment' => true]));
+        self::assertFalse($dialect->isExactInteger($table('create table posts (id integer primary key desc)', [(object) ['origin' => 'pk']]), 'posts', ['auto_increment' => true]));
         self::assertFalse($dialect->isExactInteger($table('create table posts (id integer primary key) without rowid'), 'posts', ['auto_increment' => true]));
         self::assertFalse($dialect->isExactInteger(\Mockery::mock(Connection::class), 'posts', ['auto_increment' => false]));
+    }
+
+    /**
+     * Against SQLite itself, only a key that is the rowid is exact: one
+     * declared `INTEGER PRIMARY KEY DESC`, which holds reals and text, is not,
+     * however it is named.
+     *
+     * @return void
+     */
+    public function testOnlyARowidAliasIsAnExactIntegerKey(): void
+    {
+        $dialect = new SqliteDialect;
+        $forms   = [
+            'id integer primary key'                   => true,
+            'id integer primary key asc'               => true,
+            'id integer, primary key (id desc)'        => true,
+            'id integer primary key desc'              => false,
+            'id integer constraint k primary key desc' => false,
+            'id integer primary key, x text unique'    => true,
+        ];
+
+        foreach ($forms as $columns => $isExact) {
+            $connection = new SQLiteConnection(new \PDO('sqlite::memory:'));
+
+            $connection->statement("create table \"po\"\"sts\" ({$columns})");
+
+            self::assertSame($isExact, $dialect->isExactInteger($connection, 'po"sts', ['auto_increment' => true]), $columns);
+        }
+    }
+
+    /**
+     * A value is inlined as SQLite reads it bound: null, an integer's digits, a
+     * boolean as `1` or `0`, and a string as text of its bytes with no
+     * affinity; anything else is not inlined.
+     *
+     * @return void
+     */
+    public function testAValueIsInlinedAsSqliteReadsItBound(): void
+    {
+        $dialect = new SqliteDialect;
+
+        self::assertSame('NULL', $dialect->parameter(null));
+        self::assertSame('1', $dialect->parameter(true));
+        self::assertSame('0', $dialect->parameter(false));
+        self::assertSame('42', $dialect->parameter(42));
+        self::assertSame('(-42)', $dialect->parameter(-42));
+        self::assertSame('+CAST(X\'613f3f27625c00ff\' AS TEXT)', $dialect->parameter("a??'b\\\0\xff"));
+        self::assertNull($dialect->parameter(1.5));
     }
 
     /**

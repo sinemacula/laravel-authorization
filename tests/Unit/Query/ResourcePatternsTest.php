@@ -52,6 +52,7 @@ final class ResourcePatternsTest extends TestCase
         yield 'a prefix ending as a type' => ['posts:x:\**', [KeyTarget::PREFIX, 'x:*', true]];
         yield 'a prefix that is the star key' => ['posts:\**', [KeyTarget::PREFIX, '*', true]];
         yield 'a backslash prefix' => ['posts:\\\*', [KeyTarget::PREFIX, '\\', false]];
+        yield 'an escaped newline' => ["posts:a\\\nb", [KeyTarget::EQUALS, "a\nb", false]];
         yield 'a question mark' => ['posts:?', null];
         yield 'a bracket' => ['posts:[0-9]', null];
         yield 'two stars' => ['**', null];

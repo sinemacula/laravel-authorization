@@ -38,7 +38,7 @@ final class QueryScopeRefusedExceptionTest extends TestCase
         self::assertSame('posts', $exception->resourceType);
         self::assertSame($refusals, $exception->refusals);
         self::assertSame([RefusalReason::RESOURCE_PATTERN, RefusalReason::TOO_MANY_ATTACHMENTS], $exception->reasons());
-        $message = 'whereAuthorized(\'posts:view\') cannot be compiled exactly for \'posts\': '
+        $message = 'The authorized scope for \'posts:view\' cannot be compiled exactly for \'posts\': '
             . 'resource_pattern (statement p#0); too_many_attachments (statement q[2]).';
 
         self::assertSame($message, $exception->getMessage());

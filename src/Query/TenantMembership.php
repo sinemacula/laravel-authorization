@@ -15,17 +15,21 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\TenantChain;
 
 /**
- * Writes the conditions a row of a tenant-bearing model meets for its tenant
- * (C3, C5, C6): it has none, as the tenant resolver reads it; it has one the
- * resolver can read, at most 191 bytes in each part; it is exactly a tenant,
- * byte for byte, the plain comparison an index can serve first; or it is within
- * a tenant's subtree, as the bound tenant tree selects it.
+ * Writes the conditions a row of a tenant-bearing model meets for its tenant:
+ * it has none, as the tenant resolver reads it; it has one the resolver can
+ * read, at most 191 bytes in each part; it is exactly a tenant, byte for byte,
+ * the plain comparison an index can serve first; or it is within a tenant's
+ * subtree, as the bound tenant tree selects it.
  *
  * The subtree is the tree's own query (`TenantTree::subtree()`), nested whole,
  * its text image of each tenant compared byte for byte with the text PHP reads
- * from the row's columns; under the flat tree a tenant's subtree is the tenant
- * alone, compared as such. A subtree query run on another connection than the
- * model's cannot be nested, so it is refused (`subtree_connection`).
+ * from the row's columns, with every value it is bound to inlined as the
+ * dialect writes a bound value (`InlinedQuery`); under the flat tree a tenant's
+ * subtree is the tenant alone, compared as such. A subtree query run on another
+ * connection than the model's cannot be nested, so it is refused
+ * (`subtree_connection`); so is one the model's connection would run on a
+ * separate read connection (`read_replica`), and one a value of which cannot be
+ * inlined exactly (`inline_value`).
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -135,7 +139,8 @@ final class TenantMembership
 
     /**
      * Return the condition a row meets when the subtree query selects its
-     * tenant, refusing a query on another connection than the model's.
+     * tenant, refusing a query on another connection than the model's, one read
+     * on a separate read connection, and one that cannot be inlined.
      *
      * @param  mixed  $subtree
      * @return string
@@ -145,24 +150,39 @@ final class TenantMembership
     private function subtreeOf(mixed $subtree): string
     {
         $shape      = $this->shape;
-        $connection = $subtree instanceof Builder || $subtree instanceof EloquentBuilder ? $subtree->getConnection() : null;
+        $query      = $subtree instanceof EloquentBuilder ? $subtree->toBase() : $subtree;
+        $connection = $query instanceof Builder ? $query->getConnection() : null;
 
-        if (!$connection instanceof Connection || $shape->connection === null || $connection->getName() !== $shape->connection->getName()) {
-            throw QueryScopeRefusedException::of($this->action, $shape->type, new Refusal(RefusalReason::SUBTREE_CONNECTION, null, null, TenantChain::tree()::class));
+        if (!$query instanceof Builder || !$connection instanceof Connection || $connection->getName() !== $shape->connection?->getName()) {
+            throw $this->refusal(RefusalReason::SUBTREE_CONNECTION);
         }
 
-        /** @var \Illuminate\Database\Eloquent\Builder<\Illuminate\Database\Eloquent\Model>|\Illuminate\Database\Query\Builder $subtree */
-        $grammar = $shape->connection->getQueryGrammar();
+        $isReadOnWrite = InlinedQuery::isReadOnWrite($connection);
+        $raw           = $isReadOnWrite ? InlinedQuery::sqlOf($query, $shape->dialect) : null;
+
+        if ($raw === null) {
+            throw $this->refusal($isReadOnWrite ? RefusalReason::INLINE_VALUE : RefusalReason::READ_REPLICA);
+        }
+
+        $grammar = $connection->getQueryGrammar();
         $dialect = $shape->dialect;
         $type    = $shape->typeColumn === null ? $dialect->bytes((string) $shape->tenancy->type) : $dialect->textImage($shape->typeColumn);
 
         $isType = $dialect->textImage($grammar->wrap(self::ALIAS . '.tenant_type')) . ' = ' . $type;
         $isId   = $dialect->textImage($grammar->wrap(self::ALIAS . '.tenant_id')) . ' = ' . $dialect->textImage((string) $shape->idColumn);
 
-        $query = $subtree instanceof EloquentBuilder ? $subtree->toBase() : $subtree;
-        $raw   = $query->getGrammar()->substituteBindingsIntoRawSql($query->toSql(), $query->getBindings());
-
         return 'EXISTS (SELECT 1 FROM (' . $raw . ') AS ' . $grammar->wrap(self::ALIAS) . " WHERE {$isType} AND {$isId})";
+    }
+
+    /**
+     * Return the refusal of the bound tree's subtree query for the reason.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Query\Enums\RefusalReason  $reason
+     * @return \SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException
+     */
+    private function refusal(RefusalReason $reason): QueryScopeRefusedException
+    {
+        return QueryScopeRefusedException::of($this->action, $this->shape->type, new Refusal($reason, null, null, TenantChain::tree()::class));
     }
 
     /**

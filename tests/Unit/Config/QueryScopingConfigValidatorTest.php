@@ -35,36 +35,43 @@ final class QueryScopingConfigValidatorTest extends TestCase
     }
 
     /**
-     * Return each invalid block, with the key it is refused under.
+     * Return each invalid block, with the key it is refused under and why.
      *
-     * @return iterable<string, array{mixed, string}>
+     * @return iterable<string, array{mixed, string, string}>
      */
     public static function invalidBlocks(): iterable
     {
-        yield 'not an array' => ['64', 'authorization.query_scoping'];
-        yield 'an unknown limit' => [['max_classes' => 4], 'authorization.query_scoping'];
-        yield 'zero' => [['max_scopes' => 0], 'authorization.query_scoping.max_scopes'];
-        yield 'negative' => [['max_anchors' => -1], 'authorization.query_scoping.max_anchors'];
-        yield 'a string' => [['max_attachments' => '64'], 'authorization.query_scoping.max_attachments'];
-        yield 'a float' => [['max_scopes' => 1.5], 'authorization.query_scoping.max_scopes'];
+        $whole = 'expected a whole number of at least 1, got ';
+
+        yield 'not an array' => ['64', 'authorization.query_scoping', 'expected an array of limits, got \'64\' (string).'];
+        $unknown = 'unknown limit \'max_classes\'; expected one of max_anchors, max_scopes, max_attachments.';
+
+        yield 'an unknown limit' => [['max_classes' => 4], 'authorization.query_scoping', $unknown];
+        yield 'zero' => [['max_scopes' => 0], 'authorization.query_scoping.max_scopes', $whole . '0 (int).'];
+        yield 'negative' => [['max_anchors' => -1], 'authorization.query_scoping.max_anchors', $whole . '-1 (int).'];
+        yield 'a string' => [['max_attachments' => '64'], 'authorization.query_scoping.max_attachments', $whole . '\'64\' (string).'];
+        yield 'a float' => [['max_scopes' => 1.5], 'authorization.query_scoping.max_scopes', $whole . '1.5 (float).'];
+        yield 'a list' => [['max_scopes' => [1]], 'authorization.query_scoping.max_scopes', $whole . '\'array\' (array).'];
     }
 
     /**
-     * Anything else is refused under its key.
+     * Anything else is refused under its key, saying exactly why.
      *
      * @param  mixed  $config
      * @param  string  $key
+     * @param  string  $reason
      * @return void
      */
     #[DataProvider('invalidBlocks')]
-    public function testAnInvalidBlockIsRefused(mixed $config, string $key): void
+    public function testAnInvalidBlockIsRefused(mixed $config, string $key, string $reason): void
     {
         try {
             QueryScopingConfigValidator::validate($config);
 
             self::fail('The block was accepted.');
         } catch (InvalidAuthorizationConfigException $exception) {
-            self::assertStringContainsString($key, $exception->getMessage());
+            self::assertSame("Invalid authorization config at '{$key}': {$reason}", $exception->getMessage());
+            self::assertSame($key, $exception->getConfigKey());
         }
     }
 }

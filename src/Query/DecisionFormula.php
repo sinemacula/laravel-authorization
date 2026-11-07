@@ -15,8 +15,8 @@ use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 
 /**
  * Compiles how one class of rows is decided from the sources gathered for it
- * into the condition a row of the class meets when `check()` allows it (§4.5),
- * stage by stage as the policy evaluator decides a check (`PolicyEvaluator`):
+ * into the condition a row of the class meets when `check()` allows it, stage
+ * by stage as the policy evaluator decides a check (`PolicyEvaluator`):
  *
  * - no deny applies: every deny statement of every policy, guardrail and
  *   boundary that names the action, each applying where it matches the row or

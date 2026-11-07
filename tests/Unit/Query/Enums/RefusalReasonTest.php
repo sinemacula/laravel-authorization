@@ -49,7 +49,12 @@ final class RefusalReasonTest extends TestCase
     {
         $values = \array_map(static fn (RefusalReason $reason): string => $reason->value, RefusalReason::cases());
 
-        foreach (['column_collation', 'subtree_connection', 'attachment_connection', 'attachment_collation', 'too_many_scopes', 'too_many_attachments', 'reentrant'] as $value) {
+        $declared = [
+            'column_collation', 'subtree_connection', 'attachment_connection', 'attachment_collation', 'too_many_scopes', 'too_many_attachments', 'inline_value', 'read_replica',
+            'reentrant',
+        ];
+
+        foreach ($declared as $value) {
             self::assertContains($value, $values);
         }
 

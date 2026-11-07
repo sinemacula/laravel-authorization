@@ -245,15 +245,22 @@ return [
     | decided once, every time the query runs. These limits bound that work,
     | and a query over any of them is refused rather than slowed down.
     |
-    | `max_anchors` is the most tenants the subject's grants, policies and
-    | boundaries, the guardrails and the type's attached policies may sit at
-    | when the rows are cut by tenant (a tenant tree with subtrees, or rows a
-    | platform-wide grant admits from other tenants); over it, the query is
-    | refused as `too_many_scopes`. `max_scopes` is the most classes of rows
-    | one query may be decided in; over it, `too_many_scopes` too.
-    | `max_attachments` is the most policies attached to records of the type
-    | that one class reads; over it, `too_many_attachments`. Each is a whole
-    | number of at least 1.
+    | `max_anchors` is the most anchors a query's rows may be cut at when they
+    | are cut by tenant (a tenant tree with subtrees, or rows a platform-wide
+    | grant admits from other tenants): the active tenant, plus every other
+    | tenant the decision's sources may sit at. Those are the tenants of the
+    | grants, policies and boundaries of the subject and its identity, of the
+    | policies of the roles they hold and of every role above those, of the
+    | tenants that own those roles and the granted permissions, of the
+    | guardrails, and of the policies attached to the type or its records.
+    | Under a flat tenant tree, where only a platform-wide grant cuts the rows,
+    | only the guardrail and attached-policy tenants are counted. Over it, the
+    | query is refused as `too_many_scopes`. `max_scopes` is the most classes
+    | of rows one query may be decided in; over it, `too_many_scopes` too.
+    | `max_attachments` is the most policies attached to records of the type,
+    | naming the action, that one scope reads; over it, or over four times as
+    | many attached to the type's records there whatever their actions,
+    | `too_many_attachments`. Each is a whole number of at least 1.
     |
     */
 

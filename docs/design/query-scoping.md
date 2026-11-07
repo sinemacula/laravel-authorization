@@ -58,26 +58,29 @@ evaluates, and refuses whatever it cannot prove (N64).
 The rows of the model are split into classes, each decided in one scope, as `ResourceScope` decides a check
 (`ScopeClasses`):
 
-| Class   | Rows                                                                                                  | Decided in                                                             |
-|---------|-------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------|
-| A       | every row of a tenantless model, or a row of no tenant (either tenant column null)                    | the request's scope, `isBelow` included                                |
-| B(D,=)  | a row whose tenant is the anchor D, within the active tenant's subtree, byte for byte                 | `within(D, app)`                                                       |
-| B(D,<)  | a row strictly below D within the subtree, with no anchor between                                     | `within(D, app, isBelow: true)`                                        |
-| C(X,=)  | with Adm, a row of the anchor X outside the active tenant's subtree (every tenant's with none active) | platform sources; X's guardrails and attached denies, `within(X, app)` |
-| C(X,<)  | with Adm, a row strictly below X, outside the subtree, with no anchor between                         | as C(X,=), X's own sources read standing below it                      |
-| C(none) | with Adm, every other row of a tenant                                                                 | platform sources alone                                                 |
+| Class   | Rows                                                                                                                              | Decided in                                                             |
+|---------|-----------------------------------------------------------------------------------------------------------------------------------|------------------------------------------------------------------------|
+| A       | every row of a tenantless model, or a row of no tenant (either tenant column null)                                                | the request's scope, `isBelow` included                                |
+| B(D,=)  | a row whose tenant is the anchor D, within the active tenant's subtree, byte for byte                                             | `within(D, app)`                                                       |
+| B(D,<)  | a row strictly below D within the subtree, with no anchor between                                                                 | `within(D, app, isBelow: true)`                                        |
+| C(X,=)  | when a platform-wide grant admits it, a row of the anchor X outside the active tenant's subtree (every tenant's with none active) | platform sources; X's guardrails and attached denies, `within(X, app)` |
+| C(X,<)  | when a platform-wide grant admits it, a row strictly below X, outside the subtree, with no anchor between                         | as C(X,=), X's own sources read standing below it                      |
+| C(none) | when a platform-wide grant admits it, every other row of a tenant                                                                 | platform sources alone                                                 |
 
 The anchors are the tenants the decision's sources may sit at (`ScopeAnchors`), read on the authorization connection
 with no filter on tenant, expiry or application, so they are never fewer than the tenants a check's sources sit at:
 the grants, policies and boundaries of the subject and its identity, the policies of the roles they hold and every
 role above, the owners of those roles and of the permissions granted, every guardrail, and every policy attached to
-the type or its records. K_B is the active tenant and the anchors within its subtree; K_C, the guardrail and
-attachment anchors outside it. A row strictly below an anchor D with no anchor between reads exactly the sources
-`within(D, isBelow)` reads: `TenantChain::grants()` then needs `include_subtree` at D, as at any ancestor, and no
-source sits between. Under `FlatTenantTree` there are no `(·,<)` classes and K_B is the active tenant. Adm is the
-admission `ResourceScope` computes, once, at platform scope; without it `check()` denies every row outside the subtree
-as `tenant_scope`, and branch C is no row. More anchors than `max_anchors`, or more classes than `max_scopes`
-(`authorization.query_scoping`), refuse as `too_many_scopes`.
+the type or its records. The B classes are cut at the active tenant and the anchors within its subtree; the C
+classes at the guardrail and attachment anchors outside it. A row strictly below an anchor D with no anchor between
+reads exactly the sources `within(D, isBelow)` reads: `TenantChain::grants()` then needs `include_subtree` at D, as at
+any ancestor, and no source sits between. Under `FlatTenantTree` there are no `(·,<)` classes, and the only anchor
+within the active tenant's subtree is the active tenant. A platform-wide grant admits the rows outside the subtree when
+the subject holds the action's permission at platform scope, as `ResourceScope` asks it, once; without that grant
+`check()` denies every row outside the subtree as `tenant_scope`, and no C class keeps a row. More anchors than
+`max_anchors`, or more classes than `max_scopes` (`authorization.query_scoping`), refuse as `too_many_scopes`. Both
+are counted before any class is cut, and the classes are cut from each anchor's chain of ancestors, read once through
+the tree, so the tree is asked a number of times bounded by the anchors, never by their pairs.
 
 Membership compares tenants as PHP does, while `check()` matches sources to tenants in SQL, so whenever a class is cut
 below an anchor or admitted from outside, the tenant columns of every authorization table must compare bytes (null or
@@ -90,8 +93,9 @@ records, `T:*`, whose key `*` no attachment can name, so it reads the type's att
 are fresh for the class. A C class composes the platform's sources with the guardrails and the deny statements of the
 type's attachments that its anchor's chain reads, both through the production resolvers under `within(X, app[,
 isBelow])`. The policies attached to the type's records in the class's scope are read too (`RecordAttachments`), once
-per class, at most `max_attachments` of them (`too_many_attachments`); in a C class the platform's whole, and the
-anchor chain's denies alone.
+for each scope a compile decides classes in, at most `max_attachments` of them naming the action, and at most four
+times as many in all whatever their actions, so the read is bounded by the rows it scans (`too_many_attachments`); in
+a C class the platform's whole, and the anchor chain's denies alone.
 
 The class's condition is compiled stage by stage, as `PolicyEvaluator` decides (`DecisionFormula`): no deny applies,
 every guardrail (unless the action is `authorization:guardrails:manage`) and every boundary has a matching allow,
@@ -116,6 +120,19 @@ the row's key text and the class's tenant chain and application, written by `Ten
 `GrantApplications::only()` and inlined, with the key one an attachment can name (1 to 191 bytes, not `*`). Its denies
 apply to everyone, its allows to the subjects their principals name. A `withPolicies()` override reads no attachment.
 
+That `EXISTS`, and a nested subtree, are inlined by the package's own code (`InlinedQuery`), never through Laravel's
+`toRawSql()` or the connection's escaping: each binding, in order, becomes the literal the dialect writes for it
+(`Dialect::parameter()`), which the database reads as it reads the value bound, with no character of a string written
+as it is. SQLite reads `+CAST(X'…' AS TEXT)`, text with no affinity, as a bound string is; PostgreSQL reads a string of
+no type with every character escaped by its code point, `U&'\0061'`, and an integer's digits quoted, as it receives
+every bound value, untyped; MySQL reads `_utf8mb4 X'…'`, which takes the collation of what it is compared with, and an
+integer's digits. A value no literal can stand for (a NUL byte or a string that is not UTF-8 on PostgreSQL, a string
+that is not UTF-8 on MySQL), and a query whose text holds a question mark that is not a placeholder (which a
+PostgreSQL `??` operator would), refuse as `inline_value`. `check()` reads the attachments and the pairs of a declared
+model on the write connection, so such a condition runs on the model's connection only where it reads there too: with
+no separate read connection, or inside a transaction; otherwise it refuses as `read_replica`, since a replica that lags
+could miss a deny `check()` sees.
+
 The condition is `KeyGuard ∧ ⋁ (Member_c ∧ Decision_c ∧ LongGuard_c)` over the classes:
 
 | Fragment                | SQLite                                                                                                                                        | PostgreSQL                                                                          | MySQL                                                                                      |
@@ -128,6 +145,7 @@ The condition is `KeyGuard ∧ ⋁ (Member_c ∧ Decision_c ∧ LongGuard_c)` ov
 | Within D                | `EXISTS (SELECT 1 FROM (subtree) AS s WHERE CAST(s.tenant_type AS BLOB) = CAST(Tt AS BLOB) AND …)`                                            | the same with `convert_to(CAST(x AS TEXT), 'UTF8')`                                 | the same with `CAST(CAST(x AS CHAR CHARACTER SET utf8mb4) AS BINARY)`                      |
 | Key equals an integer   | `K = digits`, the least 64-bit value as a sum                                                                                                 | the same                                                                            | the same                                                                                   |
 | Key starts with `p`     | `substr(CAST(K AS BLOB), 1, n) = X'…'`                                                                                                        | `substring(convert_to(CAST(K AS TEXT), 'UTF8') from 1 for n) = decode(…)`           | `LEFT(CAST(K AS BINARY), n) = X'…'`                                                        |
+| Inlined value           | `NULL`, digits, `(-digits)` or `+CAST(X'…' AS TEXT)`                                                                                          | `NULL`, `'digits'` or `U&'\XXXX…'`                                                  | `NULL`, digits, `(-digits)` or `_utf8mb4 X'…'`                                             |
 | Attached key            | `rp.resource_id = CAST(K AS TEXT) COLLATE BINARY`                                                                                             | `convert_to(rp.resource_id, 'UTF8') = convert_to(CAST(K AS TEXT), 'UTF8')`          | `rp.resource_id = CAST(K AS CHAR CHARACTER SET utf8mb4) COLLATE <its own collation>`       |
 | LongGuard               | `length(CAST(K AS BLOB)) <= PHP_MAXPATHLEN - strlen(T) - 2`, unless cast to an integer                                                        | `octet_length(K) <= …`, for a string key                                            | `OCTET_LENGTH(K) <= …`, for a string key                                                   |
 
@@ -138,8 +156,12 @@ on which `check()` throws; every class of a tenant needs both columns so read an
 canonical lower-case text, a string as its bytes, whatever the column's collation, so `T1`, `t1` with a trailing space
 or `05` never stand for `t1` or `5`. Its first part compares the bare column, which an index can serve, and keeps
 every row the exact part keeps. A key is compared with a value only where the column proves what PHP reads: an integer
-key must be SQLite's rowid, and not an unsigned `BIGINT` on MySQL (`column_type`); a string key's collation must be
-exact (`column_collation`); a canonical integer id beyond 64 bits refuses (`resource_pattern`). The attached key is
+key must be SQLite's rowid, which a column declared `INTEGER PRIMARY KEY DESC` is not (SQLite gives such a key an index
+of its own, `PRAGMA index_list` origin `pk`, and lets it hold reals and text), and neither an unsigned `BIGINT` nor
+`ZEROFILL` on MySQL, whose text PHP reads padded with zeros (`column_type`); a string key's collation must be exact
+(`column_collation`); a canonical integer id beyond 64 bits refuses (`resource_pattern`). On PostgreSQL a column's
+collation is looked up in the table Laravel names, the connection's prefix before the table's own name and after any
+schema, and a table or column not found there is not exact. The attached key is
 compared under the attachment column's own collation, as the resolver compares it: byte for byte on SQLite and
 PostgreSQL, whose column must compare so (`attachment_collation`), and under its utf8mb4 collation on MySQL; the
 attachments must be on the model's connection (`attachment_connection`). A negation counts a condition the database
@@ -164,7 +186,9 @@ class has a pattern that resolves, since `fnmatch()` refuses an identifier of `P
 | `subtree_connection`                                     | A tree whose `subtree()` query runs on another connection than the model's                                                                                                                           |
 | `column_collation`                                       | A string key compared under a collation that is not exact, or an authorization table's tenant column so, once a class is cut below an anchor or admitted from outside                                |
 | `attachment_connection`, `attachment_collation`          | Record attachments on another connection, or whose key column cannot be compared with the key, once one is attached                                                                                  |
-| `too_many_scopes`, `too_many_attachments`                | More anchors, classes or record attachments than `authorization.query_scoping` allows                                                                                                                |
+| `too_many_scopes`, `too_many_attachments`                | More anchors, classes or record attachments than `authorization.query_scoping` allows, or four times `max_attachments` attached to the type's records in one scope whatever their actions            |
+| `inline_value`                                           | A value of a record attachment's or a subtree's query that no literal can stand for as the database reads it bound, or a subtree query whose text holds a question mark that is not a placeholder    |
+| `read_replica`                                           | A record attachment or a nested subtree on a model connection with a separate read connection, outside a transaction, while `check()` reads the write connection                                     |
 | `resource_pattern`                                       | A material pattern with `?` or `[`, a `*` not at its end or more than one, a trailing `\`, one too long for `fnmatch()`, or an integer id beyond 64 bits                                             |
 | `resource_namespace`                                     | A material statement reading `resource`, in a condition, an operand or a pattern                                                                                                                     |
 | `scope_variant_source`                                   | A material statement reading a namespace, or stating a requirement, through an unmarked seam                                                                                                         |
@@ -223,6 +247,8 @@ recurses.
 - `src/Query/DecisionFormula.php`, `StatementScreen.php`, `ResourcePatterns.php`, `KeyTarget.php`, `KeyConditions.php`
   and `Conditions.php`: what compiles, and how.
 - `src/Query/RecordAttachments.php` and `ResourcePolicyResolver::recordPoliciesFor()`: record attachments.
+- `src/Query/InlinedQuery.php` and `Dialect::parameter()`: nested queries with their values inlined, and where they
+  read.
 - `src/Scopes/AuthorizedScope.php` and `src/Query/Reentrancy.php`: the model-level scope.
 - `src/Query/ResourceShape.php`, `src/Query/SchemaInspector.php` and `src/Query/Dialects/`: the model, the columns and
   the SQL.
@@ -240,8 +266,11 @@ recurses.
   refuse when material.
 - `tests/Feature/Query/ScopeClassesTest.php`, `TenantMembershipTest.php`, `RecordAttachmentsTest.php`,
   `KeyConditionsTest.php` and `tests/Feature/Scopes/AuthorizedScopeTest.php`: tenant transitions, platform admission
-  under guardrails, own-tenant denies, attachments under their column's collation, the key-kind proofs, every new
-  refusal reason, and reentrancy.
+  under guardrails, own-tenant denies, attachments under their column's collation and in their application, tenants
+  and applications holding `?`, `??`, quotes, backslashes and NUL bytes, the key-kind proofs, the limits at their
+  boundaries, every new refusal reason, and reentrancy.
+- `tests/Feature/Query/InlinedQueryTest.php`: each inlined value finding exactly what the value bound finds, on every
+  database, and the read connection.
 - `tests/Feature/Registrars/QueryScopeRegistrarTest.php`: grouping, raw and expression conditions holding `OR`, a
   comment ending a raw condition, refusals at the call and at execution, nested and relation-definition use, subqueries
   taken whole and as text, `beforeQuery()` callbacks, base queries run again, pagination, chunks and counts,

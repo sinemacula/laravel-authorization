@@ -8,16 +8,17 @@ use Illuminate\Database\Connection;
 use SineMacula\Laravel\Authorization\Query\Enums\ColumnKind;
 
 /**
- * The SQL `whereAuthorized()` writes on one database, each fragment proved to
+ * The SQL an authorized scope writes on one database, each fragment proved to
  * hold exactly when PHP, reading the row, would find the same (N65): the kind
  * of a column, whether the connection is UTF-8, whether a column compares byte
  * for byte and an integer key holds only what PHP reads, the guard on a
  * record's key, its byte length, whether PHP can read a tenant column, the
  * byte-exact comparison of a column with a value, with the plain comparison an
  * index can serve that keeps every row the exact one does, whether a key's text
- * starts with a value, the bytes of the text PHP reads from any expression, and
- * the comparison of an attached record's key with a row's key under the
- * attachment column's own collation.
+ * starts with a value, the bytes of the text PHP reads from any expression, the
+ * comparison of an attached record's key with a row's key under the attachment
+ * column's own collation, and the literal the database reads as it reads a
+ * value bound as a parameter.
  *
  * Every fragment is written without bindings: a value is inlined as the hex of
  * its bytes, or as digits or a uuid it has been proved to be, so it never needs
@@ -165,4 +166,15 @@ interface Dialect
      * @return string|null
      */
     public function equalsKeyText(string $attached, string $key, array $column, bool $isExact): ?string;
+
+    /**
+     * Return a literal the database reads exactly as it reads the value bound
+     * as a parameter of a prepared statement, as Laravel binds it, with no
+     * character of a string written as it is, so none can be read as a quote,
+     * an escape or a placeholder; or null when no such literal can be written.
+     *
+     * @param  mixed  $value
+     * @return string|null
+     */
+    public function parameter(mixed $value): ?string;
 }

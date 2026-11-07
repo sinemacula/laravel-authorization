@@ -6,7 +6,9 @@ namespace Tests\Feature\Query;
 
 use Illuminate\Contracts\Database\Query\Builder;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Schema\Blueprint;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Schema;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
@@ -17,8 +19,11 @@ use SineMacula\Laravel\Authorization\Query\SchemaInspector;
 use SineMacula\Laravel\Authorization\Query\TenantMembership;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Fixtures\QueryScoping\ClosureTenantTree;
+use Tests\Fixtures\QueryScoping\ReplicatedPost;
 use Tests\Fixtures\QueryScoping\ScopedTicket;
+use Tests\Fixtures\QueryScoping\SubtreeQueryTree;
 use Tests\Fixtures\QueryScoping\TenantScopedPost;
 use Tests\TestCase;
 
@@ -36,6 +41,8 @@ use Tests\TestCase;
 #[CoversClass(TenantMembership::class)]
 final class TenantMembershipTest extends TestCase
 {
+    use UsesAnAuthorizationConnection;
+
     /**
      * A row of no tenant has either column null; one with a tenant has neither,
      * each at most 191 bytes; one exactly a tenant matches its bytes.
@@ -148,6 +155,141 @@ final class TenantMembershipTest extends TestCase
         }
 
         self::assertSame(AuthorizationConnection::resolve(), DB::getDefaultConnection());
+    }
+
+    /**
+     * A subtree whose tenants hold question marks, a doubled one, quotes and
+     * backslashes is nested with each value inlined exactly, so it selects the
+     * rows of that subtree and no other.
+     *
+     * @return void
+     */
+    public function testASubtreeOfAnyBytesIsNestedExactly(): void
+    {
+        $this->app?->instance(TenantTree::class, new ClosureTenantTree);
+
+        $roots = ['a??b', 'a?b', 'a\'b', 'a\\', 'a\\\'b'];
+
+        foreach ($roots as $index => $root) {
+            ClosureTenantTree::add(new Reference('teams', $root));
+            ClosureTenantTree::add(new Reference('teams', "{$root}-child"), new Reference('teams', $root));
+            TenantScopedPost::query()->create(['title' => "root-{$index}", 'tenant_type' => 'teams', 'tenant_id' => $root]);
+            TenantScopedPost::query()->create(['title' => "child-{$index}", 'tenant_type' => 'teams', 'tenant_id' => "{$root}-child"]);
+        }
+
+        $membership = self::membership(new TenantScopedPost);
+
+        foreach ($roots as $index => $root) {
+            self::assertSame(["root-{$index}", "child-{$index}"], self::titles($membership->within(new Reference('teams', $root))), \bin2hex($root));
+        }
+    }
+
+    /**
+     * A subtree written as an Eloquent query on the model's connection is
+     * nested as its base query; one on another connection is refused.
+     *
+     * @return void
+     */
+    public function testAnEloquentSubtreeIsNestedOnTheModelsConnectionAlone(): void
+    {
+        $closure = static fn (?string $connection): \Closure => static function (Reference $tenant) use ($connection): Builder {
+            $model = new class extends Model {
+                /** @var string|null Backing table. */
+                protected $table = ClosureTenantTree::TABLE;
+            };
+
+            $model->setConnection($connection);
+
+            return $model->newQuery()
+                ->select(['descendant_type as tenant_type', 'descendant_id as tenant_id'])
+                ->where('ancestor_type', $tenant->type)
+                ->where('ancestor_id', $tenant->id);
+        };
+
+        ClosureTenantTree::add(new Reference('teams', '5'));
+        ClosureTenantTree::add(new Reference('teams', '7'), new Reference('teams', '5'));
+
+        foreach (['five' => '5', 'seven' => '7', 'nine' => '9'] as $title => $id) {
+            TenantScopedPost::query()->create(['title' => $title, 'tenant_type' => 'teams', 'tenant_id' => $id]);
+        }
+
+        $this->app?->instance(TenantTree::class, new SubtreeQueryTree($closure(null)));
+
+        self::assertSame(['five', 'seven'], self::titles(self::membership(new TenantScopedPost)->within(new Reference('teams', '5'))));
+
+        config()->set('database.connections.tenants', config('database.connections.' . DB::getDefaultConnection()));
+
+        $this->app?->instance(TenantTree::class, new SubtreeQueryTree($closure('tenants')));
+
+        $within = static fn (): string => self::membership(new TenantScopedPost)->within(new Reference('teams', '5'));
+
+        self::assertSame([RefusalReason::SUBTREE_CONNECTION], self::refusedReasons($within));
+    }
+
+    /**
+     * A subtree whose text holds a question mark that is not a placeholder
+     * cannot be inlined exactly, so it is refused.
+     *
+     * @return void
+     */
+    public function testASubtreeThatCannotBeInlinedIsRefused(): void
+    {
+        $this->app?->instance(TenantTree::class, new SubtreeQueryTree(static fn (Reference $tenant): Builder => DB::table(ClosureTenantTree::TABLE)
+            ->selectRaw('descendant_type as tenant_type, descendant_id as tenant_id, \'?\' as mark')
+            ->where('ancestor_id', $tenant->id)));
+
+        self::assertSame([RefusalReason::INLINE_VALUE], self::refusedReasons(static fn (): string => self::membership(new TenantScopedPost)->within(new Reference('teams', '5'))));
+    }
+
+    /**
+     * A subtree the model's connection would read on a separate read connection
+     * is refused, since `check()` reads the tree as it reads it; inside a
+     * transaction it is nested.
+     *
+     * @return void
+     *
+     * @throws \LogicException
+     */
+    public function testASubtreeReadOnAReadConnectionIsRefused(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        Schema::connection(ReplicatedPost::CONNECTION)->create('scoped_posts', static function (Blueprint $schema): void {
+            $schema->increments('id');
+            $schema->string('tenant_type')->nullable();
+            $schema->string('tenant_id')->nullable();
+        });
+
+        $this->app?->instance(TenantTree::class, new SubtreeQueryTree(static fn (Reference $tenant): Builder => DB::connection(ReplicatedPost::CONNECTION)->query()
+            ->selectRaw('? as tenant_type, ? as tenant_id', [$tenant->type, $tenant->id])));
+
+        /** @var \Illuminate\Database\Connection $connection */
+        $connection = DB::connection(ReplicatedPost::CONNECTION);
+        $membership = self::membership(new ReplicatedPost);
+
+        $connection->setReadPdo(static fn (): never => throw new \LogicException('The read connection was used.'));
+
+        self::assertSame([RefusalReason::READ_REPLICA], self::refusedReasons(static fn (): string => $membership->within(new Reference('teams', '5'))));
+        self::assertStringStartsWith('EXISTS (', $connection->transaction(static fn (): string => $membership->within(new Reference('teams', '6'))));
+
+        $connection->setReadPdo(null);
+    }
+
+    /**
+     * Return the reasons the callback is refused for, failing when it is not.
+     *
+     * @param  \Closure(): mixed  $callback
+     * @return list<\SineMacula\Laravel\Authorization\Query\Enums\RefusalReason>
+     */
+    private static function refusedReasons(\Closure $callback): array
+    {
+        try {
+            $callback();
+        } catch (QueryScopeRefusedException $exception) {
+            return $exception->reasons();
+        }
+
+        self::fail('The subtree was nested.');
     }
 
     /**
