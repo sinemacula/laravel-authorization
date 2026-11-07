@@ -47,6 +47,7 @@ use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked as IdentityRole
 use SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
+use SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownPermissionException;
 use SineMacula\Laravel\Authorization\Exceptions\UnknownRoleException;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
@@ -83,6 +84,7 @@ use Tests\Feature\Stubs\StubSubjectResolver;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\Feature\Stubs\StubTenantTree;
 use Tests\Feature\Stubs\SuspendableIdentity;
+use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\TestCase;
 
 /**
@@ -3395,6 +3397,44 @@ final class AuthorizationManagerTest extends TestCase
         self::assertTrue(Authorization::any(['posts:edit', 'posts:read']));
         self::assertFalse(Authorization::all(['posts:read', 'posts:edit']));
         self::assertSame(DecisionReason::NO_MATCH, Authorization::lastDecision()?->reason);
+    }
+
+    /**
+     * A query scope is compiled when it is made, so a model it cannot scope is
+     * refused at once, and again when it is applied, from the grants then;
+     * compiling decides no check, so no decision is recorded or reported.
+     *
+     * @return void
+     */
+    public function testAQueryScopeIsCompiledNowAndWhenAppliedRecordingNothing(): void
+    {
+        Event::fake([DecisionEvaluated::class, AuthorizationFailed::class]);
+
+        $user = StubIdentity::create(['id' => 'user-1']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:view']));
+        $this->resolvePrincipalAs($user);
+        ScopedPost::query()->create(['title' => 'one']);
+
+        /** @var \SineMacula\Laravel\Authorization\AuthorizationManager $manager */
+        $manager = $this->app?->make(AuthorizationManager::class);
+        $manager->forgetLastDecision();
+
+        $scope   = $manager->queryScope(new ScopedPost, 'posts:view');
+        $builder = ScopedPost::query()->withGlobalScope($scope->identifier, $scope);
+
+        self::assertCount(1, $builder->get());
+        self::assertNull($manager->lastDecision());
+        Event::assertNotDispatched(DecisionEvaluated::class);
+
+        $user->revokePermission('posts:view');
+
+        self::assertCount(0, $builder->get());
+
+        $this->expectException(QueryScopeRefusedException::class);
+        $this->expectExceptionMessage('model_undeclared');
+
+        $manager->queryScope(new StubIdentity, 'posts:view');
     }
 
     /**

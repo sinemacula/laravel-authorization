@@ -347,6 +347,21 @@ final class AttributeProvidersTest extends TestCase
     }
 
     /**
+     * The class of the subject attribute provider registered for a morph type
+     * is named, and a type with none has none.
+     *
+     * @return void
+     */
+    public function testNamesTheSubjectProviderOfAType(): void
+    {
+        $providers = new AttributeProviders(new Container, ['post' => RecordingResourceAttributes::class], ['user' => RecordingSubjectAttributes::class]);
+
+        self::assertSame(RecordingSubjectAttributes::class, $providers->subjectProviderClass('user'));
+        self::assertNull($providers->subjectProviderClass('post'));
+        self::assertNull($providers->subjectProviderClass('machine'));
+    }
+
+    /**
      * Return the values a `post` provider declaring the attributes exposes for
      * a record when it returns the given values.
      *

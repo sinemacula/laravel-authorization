@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Resolvers\DeclaredResourceTenant;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceReferences;
@@ -91,8 +92,9 @@ final class NoResourceTenantTest extends TestCase
     }
 
     /**
-     * It is the configured and bound resolver until the application binds its
-     * own, the same one for the whole request.
+     * It is the configured resolver, which the bound declared resolver answers
+     * every undeclared model through, until the application binds its own, the
+     * same one for the whole request.
      *
      * @return void
      */
@@ -102,7 +104,8 @@ final class NoResourceTenantTest extends TestCase
         $config = $this->app?->make(ConfigRepository::class);
 
         self::assertSame(NoResourceTenant::class, $config->get('authorization.resource_tenant_resolver'));
-        self::assertInstanceOf(NoResourceTenant::class, $this->app?->make(ResourceTenantResolver::class));
+        self::assertInstanceOf(DeclaredResourceTenant::class, $this->app?->make(ResourceTenantResolver::class));
+        self::assertInstanceOf(NoResourceTenant::class, (fn (): ResourceTenantResolver => $this->fallback)->call($this->app->make(ResourceTenantResolver::class)));
         self::assertSame($this->app->make(ResourceTenantResolver::class), $this->app->make(ResourceTenantResolver::class));
     }
 

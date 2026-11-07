@@ -50,8 +50,14 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  */
 final readonly class ResourcePolicyResolver
 {
+    /** @var string The column of an attachment holding the attached record's key, null for a type's. */
+    private const string ATTACHED_KEY = '.resource_id';
+
     /** @var string The column the query reads the attached resource's key into. */
     private const string RESOURCE_ID = 'attached_resource_id';
+
+    /** @var int How many policies attached to records are read at a time. */
+    private const int RECORD_PAGE = 100;
 
     /**
      * Return the policies attached to the resource and to its type, each as a
@@ -91,6 +97,52 @@ final readonly class ResourcePolicyResolver
     }
 
     /**
+     * Determine whether a policy attached to a record of the type, in any
+     * tenant and for any application, has a statement naming the action, so
+     * `whereAuthorized()` can refuse it: it compiles no attachment to a record
+     * (N68). The attached policies are read on the write connection, past the
+     * resolution cache, so an attachment made since the last check counts, a
+     * page at a time, each parsed once and none after the first that names the
+     * action; a type with no record attachments reads one empty page. A type
+     * longer than the table stores has none.
+     *
+     * @param  string  $type
+     * @param  string  $action
+     * @return bool
+     *
+     * @throws \SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException
+     */
+    public function hasRecordPolicyFor(string $type, string $action): bool
+    {
+        if (\strlen($type) > Reference::MAX_BYTES) {
+            return false;
+        }
+
+        /** @var class-string<\SineMacula\Laravel\Authorization\Models\Policy> $class */
+        $class = config('authorization.models.policy', Policy::class);
+
+        /** @var string $table */
+        $table = config('authorization.tables.resource_policies', 'resource_policies');
+
+        $model    = new $class;
+        $policies = $class::query()->withoutGlobalScopes()->useWritePdo()
+            ->whereIn($model->getQualifiedKeyName(), static function (Builder $query) use ($table, $type): void {
+                $query->select($table . '.policy_id')->from($table)->where($table . '.resource_type', $type)->whereNotNull($table . self::ATTACHED_KEY);
+            })
+            ->lazyById(self::RECORD_PAGE);
+
+        $names = static fn (Statement $statement): bool => $statement->coversAction($action);
+
+        foreach ($policies as $policy) {
+            if (\array_filter(GrantResolver::hydrate($policy)->statements, $names) !== []) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * Resolve the policies attached to the record of the type with the key, and
      * to the type, or to the type alone when there is no key, having pinned the
      * versions the type's attachments and every policy share.
@@ -117,13 +169,13 @@ final readonly class ResourcePolicyResolver
             ->join($table, $table . '.policy_id', '=', $model->getQualifiedKeyName())
             ->where($table . '.resource_type', $type)
             ->where(static function (Builder $query) use ($table, $id): void {
-                $query->whereNull($table . '.resource_id');
+                $query->whereNull($table . self::ATTACHED_KEY);
 
                 if ($id === null) {
                     return;
                 }
 
-                $query->orWhere($table . '.resource_id', $id);
+                $query->orWhere($table . self::ATTACHED_KEY, $id);
             })
             ->where(static function (Builder $query) use ($table): void {
                 TenantScope::currentChain()->grants($query, $table);

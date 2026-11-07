@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Context;
 
+use SineMacula\Laravel\Authorization\Contracts\ScopeInvariant;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
@@ -65,6 +66,21 @@ final readonly class AttributeNamespaces
         }
 
         return $builders;
+    }
+
+    /**
+     * Determine whether the subject's namespace depends on the request alone:
+     * the subject's type has no attribute provider, or one marked
+     * `ScopeInvariant`, so `whereAuthorized()` may read it once for a query.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @return bool
+     */
+    public function isSubjectScopeInvariant(Subject $subject): bool
+    {
+        $class = $this->providers?->subjectProviderClass(self::typeOf($subject->subject));
+
+        return $class === null || \is_subclass_of($class, ScopeInvariant::class);
     }
 
     /**

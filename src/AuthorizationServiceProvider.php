@@ -39,9 +39,12 @@ use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Http\Middleware\AuthorizeAction;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequirePermission;
 use SineMacula\Laravel\Authorization\Http\Middleware\RequireRole;
+use SineMacula\Laravel\Authorization\Query\SchemaInspector;
 use SineMacula\Laravel\Authorization\Registrars\BladeDirectiveRegistrar;
 use SineMacula\Laravel\Authorization\Registrars\GateRegistrar;
+use SineMacula\Laravel\Authorization\Registrars\QueryScopeRegistrar;
 use SineMacula\Laravel\Authorization\Resolvers\AuthGuardSubjectResolver;
+use SineMacula\Laravel\Authorization\Resolvers\DeclaredResourceTenant;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
@@ -75,6 +78,7 @@ use SineMacula\Laravel\Authorization\Support\SessionScopes;
  *   `authorization.gate.enabled` is false.
  * - `BladeDirectiveRegistrar` — wires the `@role` / `@permission` directive
  *   quartet and Spatie-compat aliases.
+ * - `QueryScopeRegistrar` — registers the `whereAuthorized()` builder macro.
  *
  * Every binding that holds state for one request or job (the resolvers, the
  * policy store, the resolved tenant, the resolution cache, the last decision,
@@ -161,6 +165,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
         $this->registerRouteMiddleware();
 
         (new BladeDirectiveRegistrar($this->app))->register();
+        (new QueryScopeRegistrar)->register();
     }
 
     /**
@@ -238,7 +243,10 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
     /**
      * Bind the configured resource tenant resolver as the default, scoped to
-     * the request or job like the subject resolver.
+     * the request or job like the subject resolver, wrapped in the declared
+     * resolver, which answers a model that declares its tenancy from its
+     * declaration, as `whereAuthorized()` reads it, and passes every other to
+     * the configured one.
      *
      * @return void
      */
@@ -247,7 +255,7 @@ final class AuthorizationServiceProvider extends ServiceProvider
         /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver> $class */
         $class = $this->app['config']->get('authorization.resource_tenant_resolver', NoResourceTenant::class);
 
-        $this->bindScopedDefault(ResourceTenantResolver::class, $class);
+        $this->bindScopedDefault(ResourceTenantResolver::class, static fn (Application $app): DeclaredResourceTenant => new DeclaredResourceTenant($app->make($class)));
     }
 
     /**
@@ -391,7 +399,8 @@ final class AuthorizationServiceProvider extends ServiceProvider
 
     /**
      * Bind the authorization manager, scoped to the request or job together
-     * with the resolvers and stores it holds.
+     * with the resolvers and stores it holds, and the schema inspector its
+     * query scopes read through.
      *
      * @return void
      */
@@ -411,6 +420,10 @@ final class AuthorizationServiceProvider extends ServiceProvider
         ));
 
         $this->app->alias('authorization', AuthorizationManager::class);
+
+        // What `whereAuthorized()` reads of each table and connection, once a
+        // request or job.
+        $this->app->scoped(SchemaInspector::class);
     }
 
     /**

@@ -6,6 +6,7 @@ namespace Tests\Unit\Resolvers;
 
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Contracts\ScopeInvariant;
 use SineMacula\Laravel\Authorization\Evaluation\AuthenticationRequirement;
 use SineMacula\Laravel\Authorization\Resolvers\RefusingRequirementChecker;
 use SineMacula\Laravel\Authorization\Subject;
@@ -36,5 +37,16 @@ final class RefusingRequirementCheckerTest extends TestCase
         self::assertFalse($result->isMet);
         self::assertSame(['multifactor', 'phishing_resistant', 'assurance_level'], $result->unmet);
         self::assertNull($result->metUntil);
+    }
+
+    /**
+     * It reads the request alone, so it is marked `ScopeInvariant` and a query
+     * scope reads it once for a query.
+     *
+     * @return void
+     */
+    public function testItIsMarkedScopeInvariant(): void
+    {
+        self::assertContains(ScopeInvariant::class, \class_implements(RefusingRequirementChecker::class));
     }
 }

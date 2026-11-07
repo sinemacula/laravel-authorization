@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Context;
 
 use Illuminate\Support\Facades\Date;
 use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
+use SineMacula\Laravel\Authorization\Contracts\ScopeInvariant;
 
 /**
  * The default environment context: the current time (AUTHZ-8.6).
@@ -16,10 +17,13 @@ use SineMacula\Laravel\Authorization\Contracts\EnvironmentContext;
  * `environment`, then kept for the rest of the check, so every statement of the
  * check reads the same time.
  *
+ * It is marked `ScopeInvariant`: it reads the request alone, never the record a
+ * check is about, so `whereAuthorized()` reads it once for a query.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
-final readonly class ClockEnvironmentContext implements EnvironmentContext
+final readonly class ClockEnvironmentContext implements EnvironmentContext, ScopeInvariant
 {
     /** @var string The format of `environment.time`: ISO 8601 in UTC, to the second. */
     public const string TIME_FORMAT = 'Y-m-d\TH:i:s\Z';

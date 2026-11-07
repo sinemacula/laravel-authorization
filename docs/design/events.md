@@ -6,7 +6,8 @@ named and the operation they belong to, and are dispatched only once the write c
 
 ## Purpose
 
-- **Decision events.** `DecisionEvaluated` for every decision, `AuthorizationFailed` when `authorize()` refuses.
+- **Decision events.** `DecisionEvaluated` for every decision `check()` makes (query scoping dispatches none),
+  `AuthorizationFailed` when `authorize()` refuses.
 - **Record events.** `Role\Created`, `Role\Updated`, `Role\Deleted`, and the same three under `Permission\` and
   `Policy\`.
 - **Role permission events.** `Role\PermissionGranted` (with the grant's expiry), `Role\PermissionRevoked` and

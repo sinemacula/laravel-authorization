@@ -146,6 +146,7 @@ abstract class TestCase extends OrchestraTestCase
     protected function defineDatabaseMigrationsAfterDatabaseRefreshed(): void
     {
         $this->createStubIdentityTables();
+        $this->createQueryScopingTables();
     }
 
     /**
@@ -170,6 +171,54 @@ abstract class TestCase extends OrchestraTestCase
             $schema->string('name')->nullable();
             $schema->timestamps();
             $schema->softDeletes();
+        });
+    }
+
+    /**
+     * Create the tables that back the query scoping fixture models: posts with
+     * an integer key, documents with a long string key column that is not the
+     * table's primary key (so it can hold null, empty and long keys), each with
+     * tenant columns, tickets whose tenant is an integer team id, posts whose
+     * tenant id column is an integer, and documents keyed by a uuid.
+     *
+     * @return void
+     */
+    private function createQueryScopingTables(): void
+    {
+        Schema::create('scoped_posts', static function (Blueprint $schema): void {
+            $schema->increments('id');
+            $schema->string('title')->nullable();
+            $schema->string('status')->nullable();
+            $schema->string('tenant_type')->nullable();
+            $schema->string('tenant_id')->nullable();
+        });
+
+        Schema::create('scoped_documents', static function (Blueprint $schema): void {
+            $schema->increments('row_id');
+            $schema->string('code', 4200)->nullable();
+            $schema->string('title')->nullable();
+            $schema->string('tenant_type')->nullable();
+            $schema->string('tenant_id')->nullable();
+        });
+
+        Schema::create('scoped_tickets', static function (Blueprint $schema): void {
+            $schema->increments('id');
+            $schema->unsignedBigInteger('team_id')->nullable();
+            $schema->string('title')->nullable();
+        });
+
+        Schema::create('scoped_numbered_posts', static function (Blueprint $schema): void {
+            $schema->increments('id');
+            $schema->string('title')->nullable();
+            $schema->string('tenant_type')->nullable();
+            $schema->bigInteger('tenant_id')->nullable();
+            $schema->index(['tenant_type', 'tenant_id']);
+        });
+
+        Schema::create('scoped_uuid_documents', static function (Blueprint $schema): void {
+            $schema->uuid('id')->primary();
+            $schema->string('tenant_type')->nullable();
+            $schema->string('tenant_id')->nullable();
         });
     }
 

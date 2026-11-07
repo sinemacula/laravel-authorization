@@ -17,8 +17,11 @@ use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Evaluation\TraceEntry;
+use SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
+use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
+use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
 use SineMacula\Laravel\Authorization\Resolvers\DefaultPolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
@@ -33,6 +36,7 @@ use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubSecondIdentity;
 use Tests\Feature\Stubs\StubSessionPolicySource;
 use Tests\Feature\Stubs\SuspendableIdentity;
+use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\TestCase;
 
 /**
@@ -360,6 +364,65 @@ final class DecisionPipelineTest extends TestCase
             self::assertFalse($pipeline->decide($subject, 'posts:edit', null, ['status' => 'live'])->isAllowed());
             self::assertFalse($pipeline->decide($subject, 'posts:publish', null, ['request' => ['ip' => '10.0.0.1']])->isAllowed());
         }
+    }
+
+    /**
+     * The sources of a check are those the decision is weighed from: the
+     * subject's policies, the guardrails (none read for a check exempt from
+     * them), the boundaries, a context holding the caller's input, the
+     * permission held and the session caps; weighing them decides the check as
+     * `decide()` does.
+     *
+     * @return void
+     */
+    public function testTheSourcesGatheredAreTheOnesWeighed(): void
+    {
+        $user    = StubIdentity::create(['id' => 'u1']);
+        $subject = new Subject($user, $user);
+        $policy  = self::stored('mine', [['effect' => 'allow', 'actions' => ['posts:view'], 'conditions' => ['eq' => ['input.flag' => 'on']]]]);
+
+        $user->attachPolicy($policy);
+        $user->givePermission(Permission::create(['name' => 'posts:edit']));
+
+        $pipeline = $this->pipeline()->capped(['posts:*']);
+        $sources  = $pipeline->sources($subject, 'posts:view', null, ['flag' => 'on']);
+
+        self::assertSame(['mine'], \array_map(static fn (EvaluationPolicy $policy): string => $policy->name, $sources->policies));
+        self::assertSame([], $sources->guardrails);
+        self::assertSame([], $sources->boundaries);
+        self::assertSame([true, 'on'], $sources->context->lookup('input.flag'));
+        self::assertNull(($sources->permission)());
+        self::assertSame([['capped[1]', ['posts:*']]], $sources->session->caps);
+        self::assertTrue($pipeline->weigh($sources, 'posts:view', null)->isAllowed());
+        self::assertFalse($pipeline->weigh($pipeline->sources($subject, 'posts:view', null, ['flag' => 'off']), 'posts:view', null)->isAllowed());
+        self::assertSame('posts:edit', ($pipeline->sources($subject, 'posts:edit', null, [])->permission)());
+        self::assertNull($pipeline->sources($subject, PackagePermissions::GUARDRAILS_MANAGE, null, [])->guardrails);
+    }
+
+    /**
+     * The query compiler shares the pipeline's sources: it reads the policies
+     * attached to the type's records, unless an override replaces them.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheQueryCompilerSeesTheRecordAttachmentsUnlessOverridden(): void
+    {
+        $user    = StubIdentity::create(['id' => 'u1']);
+        $subject = new Subject($user, $user);
+
+        self::resourcePolicies()->attach(self::stored('record', [['effect' => 'deny', 'actions' => ['posts:view']]]), [ScopedPost::class, '1']);
+
+        try {
+            $this->pipeline()->queryAuthorizer()->compile($subject, new ScopedPost, 'posts:view');
+
+            self::fail('The record attachment was not refused.');
+        } catch (QueryScopeRefusedException $exception) {
+            self::assertSame([RefusalReason::RECORD_ATTACHMENT], $exception->reasons());
+        }
+
+        self::assertSame(QueryAuthorizer::NO_ROW, $this->pipeline()->withPolicies([])->queryAuthorizer()->compile($subject, new ScopedPost, 'posts:view'));
     }
 
     /**

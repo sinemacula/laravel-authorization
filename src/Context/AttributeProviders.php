@@ -158,6 +158,18 @@ final class AttributeProviders
     }
 
     /**
+     * Return the class of the subject attribute provider registered for the
+     * morph type, or null when none is.
+     *
+     * @param  string  $type
+     * @return string|null
+     */
+    public function subjectProviderClass(string $type): ?string
+    {
+        return $this->classes[self::SUBJECT][$type] ?? null;
+    }
+
+    /**
      * Read the attributes of the namespace's provider for the type, or none
      * when no provider is registered for it, turning any failure into
      * `AttributeProviderFailed`.

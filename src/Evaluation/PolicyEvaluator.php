@@ -188,6 +188,28 @@ final class PolicyEvaluator
     }
 
     /**
+     * Determine whether an allow statement applies to the check's subject, as
+     * its source admits: in a resource policy, only when one of its
+     * `principals` names the subject; in a policy attached any other way, a
+     * guardrail or a boundary included, only when it names no principals.
+     * `whereAuthorized()` asks it too, to tell which allows a check would
+     * weigh.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\StatementReference  $reference
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
+     * @return bool
+     */
+    public static function isForSubject(StatementReference $reference, Statement $statement, CheckContext $context): bool
+    {
+        if ($reference->resource === null) {
+            return $statement->principals === null;
+        }
+
+        return $statement->principals !== null && $context->isSubjectNamedBy($statement->principals);
+    }
+
+    /**
      * Decide the check from the statements, stage by stage: the denies, then
      * the caps, then the allows.
      *
@@ -413,26 +435,6 @@ final class PolicyEvaluator
         }
 
         return [$found, $requirements];
-    }
-
-    /**
-     * Determine whether an allow statement applies to the check's subject, as
-     * its source admits: in a resource policy, only when one of its
-     * `principals` names the subject; in a policy attached any other way, a
-     * guardrail or a boundary included, only when it names no principals.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\StatementReference  $reference
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckContext  $context
-     * @return bool
-     */
-    private static function isForSubject(StatementReference $reference, Statement $statement, CheckContext $context): bool
-    {
-        if ($reference->resource === null) {
-            return $statement->principals === null;
-        }
-
-        return $statement->principals !== null && $context->isSubjectNamedBy($statement->principals);
     }
 
     /**
