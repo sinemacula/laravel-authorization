@@ -21,8 +21,10 @@ use SineMacula\Laravel\Authorization\Exceptions\UnwrittenGrantException;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\InterleavesWrites;
@@ -46,7 +48,7 @@ use Tests\TestCase;
 #[CoversClass(ResourcePolicyService::class)]
 final class ResourcePolicyServiceTest extends TestCase
 {
-    use ActsAsTenant, ComparesReferences, InterleavesWrites, ReadsDispatchedEvents;
+    use ActsAsAdministrator, ActsAsTenant, ComparesReferences, InterleavesWrites, ReadsDispatchedEvents;
 
     /**
      * The service is bound once in the container.
@@ -62,7 +64,7 @@ final class ResourcePolicyServiceTest extends TestCase
     /**
      * A policy is attached to a record and to a whole type, each in its own
      * row, platform-wide and for every application by default, and each
-     * attachment is reported once with the actor.
+     * attachment is reported once, as trusted work with no actor.
      *
      * @return void
      *
@@ -73,9 +75,8 @@ final class ResourcePolicyServiceTest extends TestCase
         Event::fake([PolicyAttached::class]);
 
         $policy = self::sharing();
-        $actor  = new Reference('admin', '1');
 
-        self::assertSame(GrantOutcome::GRANTED, self::service()->attach($policy, ['posts', 7], actor: $actor));
+        self::assertSame(GrantOutcome::GRANTED, self::service()->attach($policy, ['posts', 7]));
         self::assertSame(GrantOutcome::GRANTED, self::service()->attach($policy, 'posts'));
 
         $columns = ['resource_type', 'resource_id', 'tenant_type', 'tenant_id', 'include_subtree', 'application'];
@@ -91,7 +92,8 @@ final class ResourcePolicyServiceTest extends TestCase
         self::assertCount(2, $events);
         self::assertSame(['posts', '7', 'sharing'], [$events[0]->resourceType, $events[0]->resourceId, $events[0]->name]);
         self::assertTrue(self::refersTo($events[0]->policy, $policy));
-        self::assertTrue(self::refersTo($events[0]->operation->actor, $actor));
+        self::assertNull($events[0]->operation->actor);
+        self::assertSame([PackagePermissions::RESOURCE_POLICY_ATTACH], $events[0]->operation->actions);
         self::assertNull($events[0]->scope->tenant);
         self::assertSame(['posts', null], [$events[1]->resourceType, $events[1]->resourceId]);
         self::assertNull($events[1]->operation->actor);
@@ -401,7 +403,9 @@ final class ResourcePolicyServiceTest extends TestCase
 
         self::assertSame(0, self::service()->detach($policy, ['posts', 7]));
         self::assertSame(0, self::service()->detach($policy, ['posts', 7], $tenant));
-        self::assertSame(1, self::service()->detach($policy, ['posts', 7], $tenant, 'admin', new Reference('admin', '1')));
+        $admin = self::administrator();
+
+        self::assertSame(1, self::service()->detach($policy, ['posts', 7], $tenant, 'admin', $admin));
         self::assertSame(0, self::service()->detach($policy, ['posts', 7], $tenant, 'admin'));
         self::assertSame(1, self::service()->detach($policy, 'posts'));
         self::assertSame(0, DB::table('resource_policies')->count());
@@ -412,7 +416,7 @@ final class ResourcePolicyServiceTest extends TestCase
         self::assertSame(['posts', '7', 'sharing', 'admin'], [$events[0]->resourceType, $events[0]->resourceId, $events[0]->name, $events[0]->scope->application]);
         self::assertFalse($events[0]->scope->includeSubtree);
         self::assertTrue(self::refersTo($events[0]->scope->tenant, $tenant));
-        self::assertTrue(self::refersTo($events[0]->operation->actor, new Reference('admin', '1')));
+        self::assertTrue(self::refersTo($events[0]->operation->actor, $admin->principal()));
         self::assertSame([null, null], [$events[1]->resourceId, $events[1]->scope->tenant]);
         self::assertTrue($events[1]->scope->includeSubtree);
     }
@@ -550,7 +554,9 @@ final class ResourcePolicyServiceTest extends TestCase
         self::service()->attach($policy, ['posts', 8]);
         self::service()->attach($policy, 'posts');
 
-        self::assertSame(3, self::service()->detachAll(['posts', 7], new Reference('admin', '1')));
+        $admin = self::administrator();
+
+        self::assertSame(3, self::service()->detachAll(['posts', 7], $admin));
         self::assertSame(0, self::service()->detachAll(['posts', 7]));
 
         $rows = \array_map(self::identifierOf(...), DB::table('resource_policies')->get(['resource_type', 'resource_id'])->all());
@@ -565,7 +571,7 @@ final class ResourcePolicyServiceTest extends TestCase
         \sort($scopes);
 
         self::assertSame(['other@platform/every/subtree on posts:7', 'sharing@platform/every/subtree on posts:7', 'sharing@tenant-a/admin/own on posts:7'], $scopes);
-        self::assertTrue(self::refersTo($events[0]->operation->actor, new Reference('admin', '1')));
+        self::assertTrue(self::refersTo($events[0]->operation->actor, $admin->principal()));
 
         $this->expectException(InvalidResourceException::class);
 

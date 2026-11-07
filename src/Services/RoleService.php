@@ -6,8 +6,10 @@ namespace SineMacula\Laravel\Authorization\Services;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
-use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
+use SineMacula\Laravel\Authorization\Database\LiveGrants;
 use SineMacula\Laravel\Authorization\Database\UtcDateTime;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
@@ -21,9 +23,11 @@ use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\Support\GrantChange;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
 use SineMacula\Laravel\Authorization\Services\Support\RolePermissionTable;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\GuardScopedLookup;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
 /**
@@ -49,10 +53,27 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * commits, on the package's connection, and only for a write that changed
  * something.
  *
- * Each method takes the actor making the call as `$actor`, a model or a
- * reference, the reads as well as the writes: null for console and system work.
- * Every event a write dispatches carries it, with one operation id the call's
- * events share; it is never read from the authenticated user.
+ * Each method takes the acting context making the call as `$actor`, the reads
+ * as well as the writes: null for trusted system work, such as seeders,
+ * migrations and console commands (N75). A write with an acting context is
+ * delegated administration (AUTHZ-11.1): each change it makes is decided as the
+ * actor, through `check()`, on the change's operation resource, inside the
+ * write's transaction before anything is written, and the first refused throws
+ * the decision's `AuthorizationException`, leaving nothing written. A change to
+ * the role itself is decided under `authorization:role.create`, `.rename`,
+ * `.update`, `.delete` or `.parent.set`; adding a permission, a new grant or a
+ * changed expiry, under `authorization:permission.grant`, and removing one
+ * under `authorization:permission.revoke`, each in the tenant that owns the
+ * role. A sync decides a grant of each listed permission the role does not
+ * carry live and a revocation of each it drops; one it carries live decides
+ * nothing. A revocation by name decides each permission the role carries of
+ * that name; one by model decides that permission whether the role carries it
+ * or not. Removing a permission only narrows, so it is allowed on its action
+ * alone; every other change waits for the owner, grantable and impact rules of
+ * the later parts of BL-65 and is refused as `administration.unprovable` once
+ * the action is allowed. A read is not decided yet. Every event a write
+ * dispatches carries the operation, with the actor, its mode and the actions,
+ * once the write commits; the actor is never read from the authenticated user.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -71,17 +92,17 @@ final class RoleService
      * @param  string|null  $description
      * @param  int|null  $rank
      * @param  string|null  $id
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return \SineMacula\Laravel\Authorization\Models\Role
      *
      * @throws \Throwable
      */
-    public function create(string $name, ?string $guard = null, ?string $description = null, ?int $rank = null, ?string $id = null, Model|Reference|null $actor = null): Role
+    public function create(string $name, ?string $guard = null, ?string $description = null, ?int $rank = null, ?string $id = null, ?ActingContext $actor = null): Role
     {
         $class = self::roleClass();
         $model = new $class;
 
-        return RecordWriter::save($actor, static fn (): Role => $model, [
+        return RecordWriter::save($actor, PackagePermissions::ROLE_CREATE, static fn (): Role => $model, [
             $model->getKeyName() => $id,
             'name'               => $name,
             'guard'              => $guard,
@@ -95,14 +116,14 @@ final class RoleService
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  string  $name
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return \SineMacula\Laravel\Authorization\Models\Role
      *
      * @throws \Throwable
      */
-    public function rename(Role|string $role, string $name, Model|Reference|null $actor = null): Role
+    public function rename(Role|string $role, string $name, ?ActingContext $actor = null): Role
     {
-        return RecordWriter::save($actor, static fn (): Role => self::resolve($role), ['name' => $name]);
+        return RecordWriter::save($actor, PackagePermissions::ROLE_RENAME, static fn (): Role => self::resolve($role), ['name' => $name]);
     }
 
     /**
@@ -110,14 +131,14 @@ final class RoleService
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  string|null  $description
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return \SineMacula\Laravel\Authorization\Models\Role
      *
      * @throws \Throwable
      */
-    public function describe(Role|string $role, ?string $description, Model|Reference|null $actor = null): Role
+    public function describe(Role|string $role, ?string $description, ?ActingContext $actor = null): Role
     {
-        return RecordWriter::save($actor, static fn (): Role => self::resolve($role), ['description' => $description]);
+        return RecordWriter::save($actor, PackagePermissions::ROLE_UPDATE, static fn (): Role => self::resolve($role), ['description' => $description]);
     }
 
     /**
@@ -125,14 +146,14 @@ final class RoleService
      * every grantee that held it and every permission it carried.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return void
      *
      * @throws \Throwable
      */
-    public function delete(Role|string $role, Model|Reference|null $actor = null): void
+    public function delete(Role|string $role, ?ActingContext $actor = null): void
     {
-        RecordWriter::delete($actor, static fn (): Role => self::resolve($role));
+        RecordWriter::delete($actor, PackagePermissions::ROLE_DELETE, static fn (): Role => self::resolve($role));
     }
 
     /**
@@ -157,10 +178,10 @@ final class RoleService
      * of that guard or guard-agnostic.
      *
      * @param  string|null  $guard
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return \Illuminate\Database\Eloquent\Collection<int, \SineMacula\Laravel\Authorization\Models\Role>
      */
-    public function list(?string $guard = null, Model|Reference|null $actor = null): Collection
+    public function list(?string $guard = null, ?ActingContext $actor = null): Collection
     {
         // @phpstan-ignore staticMethod.dynamicCall
         return self::roleClass()::query()
@@ -180,17 +201,19 @@ final class RoleService
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string|null  $parent
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return \SineMacula\Laravel\Authorization\Models\Role
      *
      * @throws \Throwable
      */
-    public function setParent(Role|string $role, Role|string|null $parent, Model|Reference|null $actor = null): Role
+    public function setParent(Role|string $role, Role|string|null $parent, ?ActingContext $actor = null): Role
     {
         /** @var \SineMacula\Laravel\Authorization\Models\Role */
-        return OperationScope::run(Operation::begin($actor), static function () use ($role, $parent): Role {
+        return OperationScope::run(Operation::begin($actor, [PackagePermissions::ROLE_PARENT_SET]), static function (Operation $operation) use ($actor, $role, $parent): Role {
             $model       = self::resolve($role);
             $parentModel = $parent === null ? null : self::resolve($parent, $model->guard);
+
+            $actor?->authorizeIn($operation, OperationResource::definition(PackagePermissions::ROLE_PARENT_SET, $model, ['parent' => $parentModel?->id]));
 
             self::roleClass()::query()
                 ->withoutGlobalScope(TenantScope::class)
@@ -216,16 +239,20 @@ final class RoleService
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @param  \DateTimeInterface|null  $expiresAt
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return \SineMacula\Laravel\Authorization\Enums\GrantOutcome
      *
      * @throws \Throwable
      */
-    public function grantPermission(Role|string $role, Permission|string $permission, ?\DateTimeInterface $expiresAt = null, Model|Reference|null $actor = null): GrantOutcome
+    public function grantPermission(Role|string $role, Permission|string $permission, ?\DateTimeInterface $expiresAt = null, ?ActingContext $actor = null): GrantOutcome
     {
-        return OperationScope::run(Operation::begin($actor), static function (Operation $operation) use ($role, $permission, $expiresAt): GrantOutcome {
+        $operation = Operation::begin($actor, [PackagePermissions::PERMISSION_GRANT]);
+
+        return OperationScope::run($operation, static function (Operation $operation) use ($actor, $role, $permission, $expiresAt): GrantOutcome {
             $model  = self::resolve($role);
             $target = self::permissionFor($model, $permission);
+
+            $actor?->authorizeIn($operation, OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $model, $target, self::scopeOf($model), $expiresAt));
 
             $model->unsetRelation('permissions');
 
@@ -246,20 +273,27 @@ final class RoleService
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return int
      *
      * @throws \Throwable
      */
-    public function revokePermission(Role|string $role, Permission|string $permission, Model|Reference|null $actor = null): int
+    public function revokePermission(Role|string $role, Permission|string $permission, ?ActingContext $actor = null): int
     {
-        return OperationScope::run(Operation::begin($actor), static function (Operation $operation) use ($role, $permission): int {
+        return OperationScope::run(Operation::begin($actor, [PackagePermissions::PERMISSION_REVOKE]), static function (Operation $operation) use ($actor, $role, $permission): int {
             $model = self::resolve($role);
             $held  = self::heldPermissionIds($model);
 
             /** @var list<\SineMacula\Laravel\Authorization\Models\Permission> $candidates */
             $candidates = \is_string($permission) ? GrantTarget::PERMISSION->named($permission, $model->guard) : [self::permissionFor($model, $permission)];
             $revoked    = \array_values(\array_filter($candidates, static fn (Permission $target): bool => \in_array($target->id, $held, true)));
+            $checked    = \is_string($permission) ? $revoked : $candidates;
+
+            $scope = self::scopeOf($model);
+
+            $revoke = static fn (Permission $target): OperationResource => OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, $model, $target, $scope);
+
+            $actor?->authorizeIn($operation, ...\array_map($revoke, $checked));
 
             $model->unsetRelation('permissions');
             $model->permissions()->detach(\array_map(static fn (Permission $target): string => $target->id, $revoked));
@@ -280,15 +314,17 @@ final class RoleService
      * @param  \SineMacula\Laravel\Authorization\Models\Role|string  $role
      * @param  array<int, \SineMacula\Laravel\Authorization\Models\Permission|string>  $permissions
      * @param  \DateTimeInterface|null  $expiresAt
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return \SineMacula\Laravel\Authorization\Services\SyncResult
      *
      * @throws \Throwable
      */
-    public function syncPermissions(Role|string $role, array $permissions, ?\DateTimeInterface $expiresAt = null, Model|Reference|null $actor = null): SyncResult
+    public function syncPermissions(Role|string $role, array $permissions, ?\DateTimeInterface $expiresAt = null, ?ActingContext $actor = null): SyncResult
     {
+        $operation = Operation::begin($actor, [PackagePermissions::PERMISSION_GRANT, PackagePermissions::PERMISSION_REVOKE]);
+
         /** @var \SineMacula\Laravel\Authorization\Services\SyncResult */
-        return OperationScope::run(Operation::begin($actor), static function (Operation $operation) use ($role, $permissions, $expiresAt): SyncResult {
+        return OperationScope::run($operation, static function (Operation $operation) use ($actor, $role, $permissions, $expiresAt): SyncResult {
             $model   = self::resolve($role);
             $held    = self::heldPermissionIds($model);
             $desired = self::desired($model, $permissions, $held);
@@ -296,6 +332,8 @@ final class RoleService
             $table   = new RolePermissionTable($model);
             $changed = [];
             $events  = [];
+
+            $actor?->authorizeIn($operation, ...self::syncChanges($model, $desired, $revoked, $expiresAt));
 
             $model->unsetRelation('permissions');
             $model->permissions()->detach($revoked);
@@ -318,6 +356,57 @@ final class RoleService
 
             return new SyncResult($changed[GrantOutcome::GRANTED->value] ?? [], $changed[GrantOutcome::REARMED->value] ?? [], $revoked);
         });
+    }
+
+    /**
+     * Return the changes a sync of the role's permissions makes, each to be
+     * decided before any is written: a grant of each listed permission the role
+     * does not carry live (a new one, or one whose grant has expired and is
+     * re-armed), and a revocation of each it carries and the list leaves out. A
+     * listed permission the role carries live is left as it is, and decides
+     * nothing.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+     * @param  array<array-key, \SineMacula\Laravel\Authorization\Models\Permission>  $desired
+     * @param  list<string>  $revoked
+     * @param  \DateTimeInterface|null  $expiresAt
+     * @return list<\SineMacula\Laravel\Authorization\Administration\OperationResource>
+     */
+    private static function syncChanges(Role $role, array $desired, array $revoked, ?\DateTimeInterface $expiresAt): array
+    {
+        $scope   = self::scopeOf($role);
+        $pivot   = LiveGrants::only($role->permissions()->newPivotQuery(), $role->permissions()->getTable());
+        $live    = \array_map(static fn (mixed $key): string => \is_scalar($key) ? (string) $key : '', $pivot->pluck('permission_id')->all());
+        $changes = [];
+
+        foreach ($desired as $target) {
+            if (\in_array($target->id, $live, true)) {
+                continue;
+            }
+
+            $changes[] = OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $role, $target, $scope, $expiresAt);
+        }
+
+        /** @var list<\SineMacula\Laravel\Authorization\Models\Permission> $removed */
+        $removed = GrantTarget::PERMISSION->find($revoked);
+
+        foreach ($removed as $target) {
+            $changes[] = OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, $role, $target, $scope);
+        }
+
+        return $changes;
+    }
+
+    /**
+     * Return the scope a change to the role's permissions is decided in: the
+     * tenant that owns the role, or the platform.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+     * @return \SineMacula\Laravel\Authorization\Support\GrantScope
+     */
+    private static function scopeOf(Role $role): GrantScope
+    {
+        return new GrantScope(Reference::tenantOf($role));
     }
 
     /**

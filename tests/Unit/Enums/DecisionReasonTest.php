@@ -22,12 +22,13 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 final class DecisionReasonTest extends TestCase
 {
     /**
-     * The enum defines exactly the twelve denial reasons, in declaration order:
-     * an allowed check carries no reason, so there is no allow case.
+     * The enum defines exactly the twenty denial reasons, in declaration order,
+     * the administration constraints' last: an allowed check carries no reason,
+     * so there is no allow case.
      *
      * @return void
      */
-    public function testExactlyTwelveCases(): void
+    public function testExactlyTwentyCases(): void
     {
         self::assertSame(
             [
@@ -43,6 +44,14 @@ final class DecisionReasonTest extends TestCase
                 DecisionReason::GUARDRAIL,
                 DecisionReason::BOUNDARY,
                 DecisionReason::SESSION_POLICY,
+                DecisionReason::ADMINISTRATION_SCOPE,
+                DecisionReason::ADMINISTRATION_OWNER,
+                DecisionReason::ADMINISTRATION_RANK_UNCOMPARABLE,
+                DecisionReason::ADMINISTRATION_RANK,
+                DecisionReason::ADMINISTRATION_SELF,
+                DecisionReason::ADMINISTRATION_NOT_GRANTABLE,
+                DecisionReason::ADMINISTRATION_UNPROVABLE,
+                DecisionReason::ADMINISTRATION_IMPERSONATING,
             ],
             DecisionReason::cases(),
         );
@@ -67,6 +76,14 @@ final class DecisionReasonTest extends TestCase
         self::assertSame('guardrail', DecisionReason::GUARDRAIL->value);
         self::assertSame('boundary', DecisionReason::BOUNDARY->value);
         self::assertSame('session_policy', DecisionReason::SESSION_POLICY->value);
+        self::assertSame('administration.scope', DecisionReason::ADMINISTRATION_SCOPE->value);
+        self::assertSame('administration.owner', DecisionReason::ADMINISTRATION_OWNER->value);
+        self::assertSame('administration.rank_uncomparable', DecisionReason::ADMINISTRATION_RANK_UNCOMPARABLE->value);
+        self::assertSame('administration.rank', DecisionReason::ADMINISTRATION_RANK->value);
+        self::assertSame('administration.self', DecisionReason::ADMINISTRATION_SELF->value);
+        self::assertSame('administration.not_grantable', DecisionReason::ADMINISTRATION_NOT_GRANTABLE->value);
+        self::assertSame('administration.unprovable', DecisionReason::ADMINISTRATION_UNPROVABLE->value);
+        self::assertSame('administration.impersonating', DecisionReason::ADMINISTRATION_IMPERSONATING->value);
     }
 
     /**
@@ -101,6 +118,14 @@ final class DecisionReasonTest extends TestCase
         self::assertSame('a guardrail does not allow it', DecisionReason::GUARDRAIL->label());
         self::assertSame('a permission boundary does not allow it', DecisionReason::BOUNDARY->label());
         self::assertSame('a session cap does not allow it', DecisionReason::SESSION_POLICY->label());
+        self::assertSame('it reaches beyond the scope the actor administers', DecisionReason::ADMINISTRATION_SCOPE->label());
+        self::assertSame('it edits a record from outside the tenant that owns it', DecisionReason::ADMINISTRATION_OWNER->label());
+        self::assertSame('the ranks of the actor and the target cannot be compared', DecisionReason::ADMINISTRATION_RANK_UNCOMPARABLE->label());
+        self::assertSame('the target is not junior to the actor', DecisionReason::ADMINISTRATION_RANK->label());
+        self::assertSame('it benefits the actor itself', DecisionReason::ADMINISTRATION_SELF->label());
+        self::assertSame('it hands out what the actor neither holds nor may grant', DecisionReason::ADMINISTRATION_NOT_GRANTABLE->label());
+        self::assertSame('it may widen authority in a way that cannot yet be proved permitted', DecisionReason::ADMINISTRATION_UNPROVABLE->label());
+        self::assertSame('it is made while impersonating', DecisionReason::ADMINISTRATION_IMPERSONATING->label());
     }
 
     /**
@@ -134,6 +159,14 @@ final class DecisionReasonTest extends TestCase
         self::assertSame(DecisionReason::GUARDRAIL, DecisionReason::tryFrom('guardrail'));
         self::assertSame(DecisionReason::BOUNDARY, DecisionReason::tryFrom('boundary'));
         self::assertSame(DecisionReason::SESSION_POLICY, DecisionReason::tryFrom('session_policy'));
+        self::assertSame(DecisionReason::ADMINISTRATION_SCOPE, DecisionReason::tryFrom('administration.scope'));
+        self::assertSame(DecisionReason::ADMINISTRATION_OWNER, DecisionReason::tryFrom('administration.owner'));
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK_UNCOMPARABLE, DecisionReason::tryFrom('administration.rank_uncomparable'));
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, DecisionReason::tryFrom('administration.rank'));
+        self::assertSame(DecisionReason::ADMINISTRATION_SELF, DecisionReason::tryFrom('administration.self'));
+        self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, DecisionReason::tryFrom('administration.not_grantable'));
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, DecisionReason::tryFrom('administration.unprovable'));
+        self::assertSame(DecisionReason::ADMINISTRATION_IMPERSONATING, DecisionReason::tryFrom('administration.impersonating'));
     }
 
     /**

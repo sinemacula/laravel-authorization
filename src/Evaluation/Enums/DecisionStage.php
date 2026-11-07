@@ -11,7 +11,9 @@ namespace SineMacula\Laravel\Authorization\Evaluation\Enums;
  * The subject, resource and tenant stages admit the check; then every explicit
  * deny is assessed, from every source; then the caps, guardrails, boundaries
  * and session caps, each of which can only deny; then the allows, from every
- * source; then the implicit deny. No allow is reached before every deny and
+ * source; then, for a check of an administration action on its operation
+ * resource, the operation's constraints, which can only refuse what an allow
+ * permitted; then the implicit deny. No allow is reached before every deny and
  * every cap has run.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -42,6 +44,9 @@ enum DecisionStage: string
 
     /** An allow from a policy statement, a resource policy naming the subject, or a permission the subject holds. */
     case ALLOW = 'allow';
+
+    /** A constraint of the administration operation the check is about refuses what the allow permitted. */
+    case ADMINISTRATION = 'administration';
 
     /** Nothing allowed the check. */
     case IMPLICIT = 'implicit';

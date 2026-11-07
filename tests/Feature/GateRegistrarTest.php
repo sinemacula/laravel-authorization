@@ -821,21 +821,21 @@ final class GateRegistrarTest extends TestCase
     {
         config(['authorization.permission_providers' => [StubPermissionProvider::class]]);
 
-        foreach (['media:upload', PackagePermissions::GUARDRAILS_MANAGE] as $name) {
+        foreach (['media:upload', PackagePermissions::GUARDRAIL_MANAGE] as $name) {
             Permission::create(['id' => (string) Str::uuid(), 'name' => $name, 'guard' => 'web']);
             Gate::define($name, static fn (?object $user = null): bool => false);
         }
 
         $user = StubIdentity::create(['id' => (string) Str::uuid()]);
         $user->givePermission('media:upload');
-        $user->givePermission(PackagePermissions::GUARDRAILS_MANAGE);
+        $user->givePermission(PackagePermissions::GUARDRAIL_MANAGE);
 
         $this->actAs($user);
 
         self::assertTrue(Gate::allows('media:upload'));
-        self::assertTrue(Gate::allows(PackagePermissions::GUARDRAILS_MANAGE));
+        self::assertTrue(Gate::allows(PackagePermissions::GUARDRAIL_MANAGE));
         self::assertFalse(Gate::allows('media:delete'));
-        self::assertSame(['media:upload', PackagePermissions::GUARDRAILS_MANAGE, 'media:delete'], $this->evaluatedActions());
+        self::assertSame(['media:upload', PackagePermissions::GUARDRAIL_MANAGE, 'media:delete'], $this->evaluatedActions());
     }
 
     /**

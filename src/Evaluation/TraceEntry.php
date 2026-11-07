@@ -10,10 +10,10 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\TraceOutcome;
 /**
  * One step of a decision: the stage it belongs to, what it found, the statement
  * it assessed (none for a permission, a session cap, or a cap stage that found
- * nothing to cap by), the guardrail, permission boundary or session cap it is
- * about when it is about no one statement, the held permission that allowed the
- * check when the step is the permission's and found one, and the condition keys
- * it tested with whether each held.
+ * nothing to cap by), the guardrail, permission boundary, session cap or
+ * administration constraint it is about when it is about no one statement, the
+ * held permission that allowed the check when the step is the permission's and
+ * found one, and the condition keys it tested with whether each held.
  *
  * Never a value: only key names and results reach the trace (AUTHZ-8.8).
  *
@@ -46,7 +46,7 @@ final readonly class TraceEntry
         /** Each condition key tested, with whether it held. */
         public array $conditions = [],
 
-        /** The guardrail or permission boundary a step about no one statement is about, as `name[key]`, or the session cap, by its name (see `SessionCaps`), such as one that refused the check; null for none. */
+        /** The guardrail or permission boundary a step about no one statement is about, as `name[key]`, the session cap, by its name (see `SessionCaps`), such as one that refused the check, or the administration constraint that refused it, by its reason code; null for none. */
         public ?string $cap = null,
 
         /** The held permission, as it was granted (a pattern such as `posts:*` included), that allowed the check at the permission step; null for any other step. */
@@ -84,10 +84,11 @@ final readonly class TraceEntry
         $held = $this->permission === null ? null : 'permission "' . $this->permission . '"';
 
         return $this->statement?->toString() ?? $this->cap ?? $held ?? match ($this->stage) {
-            DecisionStage::GUARDRAIL => 'guardrails',
-            DecisionStage::BOUNDARY  => 'boundaries',
-            DecisionStage::SESSION   => 'session caps',
-            default                  => 'permission',
+            DecisionStage::GUARDRAIL      => 'guardrails',
+            DecisionStage::BOUNDARY       => 'boundaries',
+            DecisionStage::SESSION        => 'session caps',
+            DecisionStage::ADMINISTRATION => 'administration constraints',
+            default                       => 'permission',
         };
     }
 }

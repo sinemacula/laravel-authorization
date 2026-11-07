@@ -542,7 +542,7 @@ reasons into one `InvalidPolicyDocumentException` message, separated by semicolo
   segments of letters, digits, `_` and `-`, at most 128 characters, so a malformed key is refused as undeclared. Each
   reason is given once for its statement; a reason naming an undeclared key says how to declare it.
 - **Actions** (N19): every `actions` and `not_actions` pattern must match at least one permission the code declares in
-  `permission_enums` or `permission_providers`, or one the package declares itself (`authorization:guardrails:manage`,
+  `permission_enums` or `permission_providers`, or one the package declares itself (`authorization:guardrail.manage`,
   `Support\PackagePermissions`), compared with `fnmatch($pattern, $name, FNM_NOESCAPE)` or as the same string, so a
   misspelt action cannot be stored. The bound `ActionCatalogue` answers for the application's; the default,
   `DeclaredActionCatalogue`, reads the declared names once per request or job, the package's own left out, which the

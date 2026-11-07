@@ -113,7 +113,7 @@ return [
     | `not_actions` pattern in a policy document must match at least one
     | permission declared here, by a provider or by the package itself, so a
     | misspelt action is refused rather than stored. The package always declares
-    | `authorization:guardrails:manage`, the right to set and remove guardrails,
+    | `authorization:guardrail.manage`, the right to set and remove guardrails,
     | so the sync writes it, it can be granted, and the Gate asks the package
     | about it.
     |
@@ -568,12 +568,13 @@ return [
     |
     | Controls whether rank-based seniority checks are active. When enabled
     | (the default), `canActOn()` on an authorizable identity compares the
-    | actor's highest-ranked role (lowest numeric `rank` value) against the
-    | target's. When disabled, `canActOn()` always returns true — consumers
-    | who do not need rank-based authority can skip the feature entirely.
-    |
-    | Roles with a null `rank` are unranked and exempt from rank checks
-    | regardless of this toggle.
+    | actor's most senior role (lowest numeric `rank` value) against the
+    | target's, each among the roles held in the current tenant and
+    | application: the actor must be strictly senior, a target holding no
+    | ranked role counts as the most junior, and an actor holding none acts
+    | on no one. When disabled, rank is no constraint and `canActOn()`
+    | returns true. Either way the comparison grants nothing by itself;
+    | delegated administration weighs it beside every other check.
     |
     */
 

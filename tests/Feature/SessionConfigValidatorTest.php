@@ -77,7 +77,7 @@ final class SessionConfigValidatorTest extends TestCase
                 'creator' => ['posts:create', 'posts:delete'],
                 'posts:create',
                 'posts:*',
-                'admin' => [PackagePermissions::GUARDRAILS_MANAGE],
+                'admin' => [PackagePermissions::GUARDRAIL_MANAGE],
             ],
         ], $this->container());
 

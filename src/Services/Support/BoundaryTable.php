@@ -128,18 +128,53 @@ final readonly class BoundaryTable
      */
     public function removeEverywhere(): array
     {
-        $removed = [];
-
-        foreach ($this->grantee()->lockForUpdate()->get(['policy_id', 'tenant_type', 'tenant_id', 'include_subtree']) as $row) {
-            /** @var array{policy_id: int|string, tenant_type: string|null, tenant_id: string|null, include_subtree: bool|int|string} $columns */
-            $columns   = (array) $row;
-            $tenant    = $columns['tenant_type'] === null ? null : new Reference($columns['tenant_type'], (string) $columns['tenant_id']);
-            $removed[] = [(string) $columns['policy_id'], new GrantScope($tenant, null, (bool) $columns['include_subtree'] || $tenant === null)];
-        }
+        $removed = $this->everywhere();
 
         $this->grantee()->delete();
 
         return $removed;
+    }
+
+    /**
+     * Read the grantee's boundaries in every scope, under a row lock, as the
+     * key of each policy with the scope it holds in, so a removal can be
+     * decided before anything is removed.
+     *
+     * @return list<array{string, \SineMacula\Laravel\Authorization\Support\GrantScope}>
+     */
+    public function everywhere(): array
+    {
+        $boundaries = [];
+
+        foreach ($this->grantee()->lockForUpdate()->get(['policy_id', 'tenant_type', 'tenant_id', 'include_subtree']) as $row) {
+            /** @var array{policy_id: int|string, tenant_type: string|null, tenant_id: string|null, include_subtree: bool|int|string} $columns */
+            $columns      = (array) $row;
+            $tenant       = $columns['tenant_type'] === null ? null : new Reference($columns['tenant_type'], (string) $columns['tenant_id']);
+            $boundaries[] = [(string) $columns['policy_id'], new GrantScope($tenant, null, (bool) $columns['include_subtree'] || $tenant === null)];
+        }
+
+        return $boundaries;
+    }
+
+    /**
+     * Read the key of the policy the grantee's boundary in the scope is and its
+     * reach, under a row lock, or null when it has none there, so a removal can
+     * be decided before anything is removed.
+     *
+     * @return array{string, bool}|null
+     */
+    public function held(): ?array
+    {
+        $row = $this->inScope()->lockForUpdate()->first(['policy_id', 'include_subtree']);
+
+        if ($row === null) {
+            return null;
+        }
+
+        /** @var array{policy_id: int|string, include_subtree: bool|int|string} $columns */
+        $columns = (array) $row;
+
+        return [(string) $columns['policy_id'], (bool) $columns['include_subtree']];
     }
 
     /**
@@ -193,26 +228,6 @@ final readonly class BoundaryTable
             'created_at'        => $now,
             'updated_at'        => $now,
         ]) === 1;
-    }
-
-    /**
-     * Read the key of the policy the grantee's boundary in the scope is and its
-     * reach, under a row lock, or null when it has none there.
-     *
-     * @return array{string, bool}|null
-     */
-    private function held(): ?array
-    {
-        $row = $this->inScope()->lockForUpdate()->first(['policy_id', 'include_subtree']);
-
-        if ($row === null) {
-            return null;
-        }
-
-        /** @var array{policy_id: int|string, include_subtree: bool|int|string} $columns */
-        $columns = (array) $row;
-
-        return [(string) $columns['policy_id'], (bool) $columns['include_subtree']];
     }
 
     /**

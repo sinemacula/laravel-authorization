@@ -47,7 +47,7 @@ final class GuardrailExceptionTest extends TestCase
         $exception = GuardrailException::notPermitted($actor, $tenant);
 
         self::assertSame(
-            '\'user:user-1\' may not change the guardrails of tenant \'stub_tenant:tenant-a\': it must hold \'authorization:guardrails:manage\' through a grant held at'
+            '\'user:user-1\' may not change the guardrails of tenant \'stub_tenant:tenant-a\': it must hold \'authorization:guardrail.manage\' through a grant held at'
             . ' an ancestor of the tenant that reaches it, or a platform-wide one, never one held within the tenant.',
             $exception->getMessage(),
         );
@@ -68,7 +68,7 @@ final class GuardrailExceptionTest extends TestCase
         $exception = GuardrailException::notPermitted(new Reference('user', 'user-1'), null);
 
         self::assertSame(
-            '\'user:user-1\' may not change the guardrails of the platform: it must hold \'authorization:guardrails:manage\' through a platform-wide grant.',
+            '\'user:user-1\' may not change the guardrails of the platform: it must hold \'authorization:guardrail.manage\' through a platform-wide grant.',
             $exception->getMessage(),
         );
         self::assertSame([null], $exception->getTenants());

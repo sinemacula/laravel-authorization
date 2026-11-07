@@ -8,8 +8,11 @@ use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
+use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
+use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Events\Guardrail\GuardrailRemoved;
 use SineMacula\Laravel\Authorization\Events\Guardrail\GuardrailSet;
 use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
@@ -73,7 +76,7 @@ final class GuardrailServiceTest extends TestCase
         $actor  = self::manager();
         $policy = self::rail('platform-cap');
 
-        self::assertSame(GrantOutcome::GRANTED, self::service()->set($policy, null, $actor));
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($policy, null, ActingContext::for($actor)));
 
         $row = (array) DB::table('guardrails')->sole();
 
@@ -107,15 +110,15 @@ final class GuardrailServiceTest extends TestCase
         $first  = self::rail('first');
         $second = self::rail('second');
 
-        self::service()->set($first, null, $actor);
+        self::service()->set($first, null, ActingContext::for($actor));
 
         Event::fake([GuardrailSet::class]);
 
-        self::assertSame(GrantOutcome::UNCHANGED, self::service()->set($first, null, $actor));
+        self::assertSame(GrantOutcome::UNCHANGED, self::service()->set($first, null, ActingContext::for($actor)));
         self::assertSame([], self::dispatchedEvents(GuardrailSet::class));
-        self::assertSame(GrantOutcome::GRANTED, self::service()->set($first, $tenant, $actor));
-        self::assertSame(GrantOutcome::GRANTED, self::service()->set($second, null, $actor));
-        self::assertSame(GrantOutcome::GRANTED, self::service()->set($second, Reference::of($tenant), $actor));
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($first, $tenant, ActingContext::for($actor)));
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($second, null, ActingContext::for($actor)));
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($second, Reference::of($tenant), ActingContext::for($actor)));
         self::assertSame(4, DB::table('guardrails')->count());
 
         $events = self::dispatchedEvents(GuardrailSet::class);
@@ -140,13 +143,13 @@ final class GuardrailServiceTest extends TestCase
         $actor  = self::manager();
         $policy = self::rail('tenant-cap');
 
-        self::service()->set($policy, $tenant, $actor);
+        self::service()->set($policy, $tenant, ActingContext::for($actor));
 
         Event::fake([GuardrailRemoved::class]);
 
-        self::assertFalse(self::service()->remove($policy, null, $actor));
-        self::assertTrue(self::service()->remove($policy, $tenant, $actor));
-        self::assertFalse(self::service()->remove($policy, $tenant, $actor));
+        self::assertFalse(self::service()->remove($policy, null, ActingContext::for($actor)));
+        self::assertTrue(self::service()->remove($policy, $tenant, ActingContext::for($actor)));
+        self::assertFalse(self::service()->remove($policy, $tenant, ActingContext::for($actor)));
         self::assertSame(0, DB::table('guardrails')->count());
 
         $events = self::dispatchedEvents(GuardrailRemoved::class);
@@ -157,6 +160,41 @@ final class GuardrailServiceTest extends TestCase
         self::assertSame('tenant-cap', $events[0]->name);
         self::assertTrue(self::refersTo($events[0]->scope->tenant, $tenant));
         self::assertTrue($events[0]->scope->includeSubtree);
+    }
+
+    /**
+     * The right is decided inside the change's transaction, setting and
+     * removing alike, and the change is reported with the acting principal,
+     * delegated, under `authorization:guardrail.manage`.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheRightIsDecidedInsideTheTransaction(): void
+    {
+        $actor  = self::manager();
+        $policy = self::rail('cap');
+        $levels = [];
+        $base   = AuthorizationConnection::connection()->transactionLevel();
+
+        Event::listen(DecisionEvaluated::class, static function (DecisionEvaluated $event) use (&$levels): void {
+            if ($event->action !== PackagePermissions::GUARDRAIL_MANAGE) {
+                return;
+            }
+
+            $levels[] = AuthorizationConnection::connection()->transactionLevel();
+        });
+
+        Event::fake([GuardrailSet::class]);
+
+        self::service()->set($policy, null, ActingContext::for($actor));
+        self::service()->remove($policy, null, ActingContext::for($actor));
+
+        self::assertSame([$base + 1, $base + 1], $levels);
+        Event::assertDispatched(GuardrailSet::class, static fn (GuardrailSet $event): bool => !$event->operation->isTrusted
+            && $event->operation->actor?->id === 'admin-1'
+            && $event->operation->actions    === [PackagePermissions::GUARDRAIL_MANAGE]);
     }
 
     /**
@@ -174,13 +212,18 @@ final class GuardrailServiceTest extends TestCase
         $actor  = StubIdentity::create(['id' => 'user-1']);
         $policy = self::rail('cap');
 
-        self::service()->set($policy, $tenant, self::manager());
+        self::service()->set($policy, $tenant, ActingContext::for(self::manager()));
 
         Event::fake([GuardrailSet::class, GuardrailRemoved::class]);
 
         $actor->givePermission(Permission::create(['name' => 'posts:read']));
 
-        foreach ([static fn () => self::service()->set(self::rail('other'), null, $actor), static fn () => self::service()->remove($policy, $tenant, $actor)] as $call) {
+        $calls = [
+            static fn () => self::service()->set(self::rail('other'), null, ActingContext::for($actor)),
+            static fn () => self::service()->remove($policy, $tenant, ActingContext::for($actor)),
+        ];
+
+        foreach ($calls as $call) {
             try {
                 $call();
                 self::fail('The actor was not refused.');
@@ -210,7 +253,7 @@ final class GuardrailServiceTest extends TestCase
 
         $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($account), Reference::of($org)));
 
-        $permission = Permission::create(['name' => PackagePermissions::GUARDRAILS_MANAGE]);
+        $permission = Permission::create(['name' => PackagePermissions::GUARDRAIL_MANAGE]);
         $above      = StubIdentity::create(['id' => 'org-admin']);
         $within     = StubIdentity::create(['id' => 'account-admin']);
         $policy     = self::rail('cap');
@@ -218,11 +261,11 @@ final class GuardrailServiceTest extends TestCase
         $above->givePermission($permission, tenant: $org);
         $within->givePermission($permission, tenant: $account);
 
-        self::assertSame(GrantOutcome::GRANTED, self::service()->set($policy, $account, $above));
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($policy, $account, ActingContext::for($above)));
 
         $this->expectException(GuardrailException::class);
 
-        self::service()->remove($policy, $account, $within);
+        self::service()->remove($policy, $account, ActingContext::for($within));
     }
 
     /**
@@ -241,10 +284,10 @@ final class GuardrailServiceTest extends TestCase
         $posts  = self::policy('posts-only', [['effect' => 'allow', 'actions' => ['posts:*']]]);
         $other  = self::rail('other');
 
-        self::assertSame(GrantOutcome::GRANTED, self::service()->set($posts, null, $actor));
-        self::assertSame(GrantOutcome::GRANTED, self::service()->set($other, null, $actor));
-        self::assertSame(GrantOutcome::GRANTED, self::service()->set($other, $tenant, $actor));
-        self::assertTrue(self::service()->remove($posts, null, $actor));
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($posts, null, ActingContext::for($actor)));
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($other, null, ActingContext::for($actor)));
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($other, $tenant, ActingContext::for($actor)));
+        self::assertTrue(self::service()->remove($posts, null, ActingContext::for($actor)));
         self::assertSame(0, DB::table('guardrails')->where('policy_id', $posts->id)->count());
     }
 
@@ -261,11 +304,11 @@ final class GuardrailServiceTest extends TestCase
         $actor  = self::manager();
         $broken = self::rail('broken');
 
-        self::service()->set($broken, null, $actor);
+        self::service()->set($broken, null, ActingContext::for($actor));
 
         DB::table('policies')->where('id', $broken->id)->update(['document' => '{"statements": "broken"}']);
 
-        self::assertTrue(self::service()->remove($broken, null, $actor));
+        self::assertTrue(self::service()->remove($broken, null, ActingContext::for($actor)));
         self::assertSame(0, DB::table('guardrails')->count());
     }
 
@@ -290,12 +333,12 @@ final class GuardrailServiceTest extends TestCase
         $blocking = self::rail('blocking');
         $other    = self::rail('other');
 
-        self::service()->set($blocking, $account, $actor);
+        self::service()->set($blocking, $account, ActingContext::for($actor));
 
-        self::assertSame(GrantOutcome::GRANTED, self::service()->set($other, $account, $actor));
-        self::assertSame(GrantOutcome::GRANTED, self::service()->set($other, $team, $actor));
-        self::assertTrue(self::service()->remove($other, $team, $actor));
-        self::assertTrue(self::service()->remove($blocking, $account, $actor));
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($other, $account, ActingContext::for($actor)));
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($other, $team, ActingContext::for($actor)));
+        self::assertTrue(self::service()->remove($other, $team, ActingContext::for($actor)));
+        self::assertTrue(self::service()->remove($blocking, $account, ActingContext::for($actor)));
     }
 
     /**
@@ -313,7 +356,7 @@ final class GuardrailServiceTest extends TestCase
         $policy = self::rail('cap');
         $locks  = $this->recordRowLocks();
 
-        self::service()->set($policy, null, $actor);
+        self::service()->set($policy, null, ActingContext::for($actor));
 
         self::assertEquals(['policies', [$policy->id]], $locks[0] ?? null);
     }
@@ -335,12 +378,12 @@ final class GuardrailServiceTest extends TestCase
         $actor  = self::manager();
         $policy = self::rail('owned', ['tenant_type' => $org->getMorphClass(), 'tenant_id' => 'org']);
 
-        self::assertSame(GrantOutcome::GRANTED, self::service()->set($policy, $org, $actor));
-        self::assertSame(GrantOutcome::GRANTED, self::service()->set($policy, $account, $actor));
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($policy, $org, ActingContext::for($actor)));
+        self::assertSame(GrantOutcome::GRANTED, self::service()->set($policy, $account, ActingContext::for($actor)));
 
         foreach ([null, $other] as $tenant) {
             try {
-                self::service()->set($policy, $tenant, $actor);
+                self::service()->set($policy, $tenant, ActingContext::for($actor));
                 self::fail('The tenant\'s policy was set outside its tenant.');
             } catch (GrantScopeMismatchException) {
                 // Expected.
@@ -365,9 +408,9 @@ final class GuardrailServiceTest extends TestCase
         $named  = self::policy('named', [['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']]]);
 
         $refusals = [
-            [static fn () => self::service()->set($inline, null, $actor), GuardrailException::class, 'Inline policy \'mine\''],
-            [static fn () => self::service()->set($named, null, $actor), ResourcePolicyException::class, 'Policy \'named\''],
-            [static fn () => self::service()->set(new Policy(['name' => 'unsaved']), null, $actor), InvalidGrantTargetException::class, ''],
+            [static fn () => self::service()->set($inline, null, ActingContext::for($actor)), GuardrailException::class, 'Inline policy \'mine\''],
+            [static fn () => self::service()->set($named, null, ActingContext::for($actor)), ResourcePolicyException::class, 'Policy \'named\''],
+            [static fn () => self::service()->set(new Policy(['name' => 'unsaved']), null, ActingContext::for($actor)), InvalidGrantTargetException::class, ''],
         ];
 
         foreach ($refusals as [$call, $class, $message]) {
@@ -381,7 +424,7 @@ final class GuardrailServiceTest extends TestCase
         }
 
         self::assertSame(0, DB::table('guardrails')->count());
-        self::assertFalse(self::service()->remove(new Policy(['name' => 'unsaved']), null, $actor));
+        self::assertFalse(self::service()->remove(new Policy(['name' => 'unsaved']), null, ActingContext::for($actor)));
     }
 
     /**
@@ -401,7 +444,7 @@ final class GuardrailServiceTest extends TestCase
 
         try {
             DB::transaction(static function () use ($actor, $policy): void {
-                self::service()->set($policy, null, $actor);
+                self::service()->set($policy, null, ActingContext::for($actor));
 
                 self::assertSame([], self::dispatchedEvents(GuardrailSet::class));
 
@@ -415,8 +458,8 @@ final class GuardrailServiceTest extends TestCase
         self::assertSame(0, DB::table('guardrails')->count());
 
         DB::transaction(static function () use ($actor, $policy): void {
-            self::service()->set($policy, null, $actor);
-            self::service()->remove($policy, null, $actor);
+            self::service()->set($policy, null, ActingContext::for($actor));
+            self::service()->remove($policy, null, ActingContext::for($actor));
 
             self::assertSame([], self::dispatchedEvents(GuardrailSet::class));
             self::assertSame([], self::dispatchedEvents(GuardrailRemoved::class));
@@ -442,8 +485,8 @@ final class GuardrailServiceTest extends TestCase
         $actor  = self::manager();
         $policy = self::rail('cap');
 
-        self::service()->set($policy, null, $actor);
-        self::service()->set($policy, $tenant, $actor);
+        self::service()->set($policy, null, ActingContext::for($actor));
+        self::service()->set($policy, $tenant, ActingContext::for($actor));
 
         foreach ([[null, 'guardrail on the platform'], [$tenant, 'guardrail on ' . $tenant->getMorphClass() . ':tenant-a']] as [$scope, $named]) {
             $row = (array) DB::table('guardrails')->where('tenant_id', $scope?->getKey())->sole();
@@ -453,7 +496,7 @@ final class GuardrailServiceTest extends TestCase
             Event::fake([GuardrailSet::class]);
 
             try {
-                self::service()->set($policy, $scope, $actor);
+                self::service()->set($policy, $scope, ActingContext::for($actor));
                 self::fail('The unwritten guardrail was reported set.');
             } catch (UnwrittenGrantException $exception) {
                 self::assertSame($named, $exception->getGrant());
@@ -534,7 +577,7 @@ final class GuardrailServiceTest extends TestCase
     {
         $actor = StubIdentity::create(['id' => 'admin-1']);
 
-        $actor->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAILS_MANAGE]));
+        $actor->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
 
         return $actor;
     }

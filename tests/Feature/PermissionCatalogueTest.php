@@ -90,14 +90,14 @@ final class PermissionCatalogueTest extends TestCase
 
         $this->configure([], [InjectedPermissionProvider::class]);
 
-        self::assertSame($definition, $this->catalogue()->definitions()[1]);
-        self::assertCount(2, $this->catalogue()->definitions());
+        self::assertSame($definition, $this->catalogue()->definitions()[self::packageCount()]);
+        self::assertCount(self::packageCount() + 1, $this->catalogue()->definitions());
     }
 
     /**
      * With nothing configured the catalogue holds the package's own permissions
-     * alone: the right to manage guardrails, guard-agnostic, filed under the
-     * package's category.
+     * alone: the administration actions, guard-agnostic, filed under the
+     * package's category, the right to manage guardrails among them.
      *
      * @return void
      */
@@ -105,13 +105,11 @@ final class PermissionCatalogueTest extends TestCase
     {
         $this->configure([], []);
 
-        self::assertEquals([
-            new PermissionDefinition(
-                'authorization:guardrails:manage',
-                'Set and remove guardrails from above the scope they cap.',
-                'authorization',
-            ),
-        ], $this->catalogue()->definitions());
+        self::assertEquals((new PackagePermissions)->permissions(), $this->catalogue()->definitions());
+        self::assertContainsEquals(
+            new PermissionDefinition('authorization:guardrail.manage', 'Set and remove guardrails from above the scope they cap.', 'authorization'),
+            $this->catalogue()->definitions(),
+        );
     }
 
     /**
@@ -126,9 +124,9 @@ final class PermissionCatalogueTest extends TestCase
 
         $this->configure([], [ConfigurablePermissionProvider::class]);
 
-        self::assertCount(1, $this->catalogue()->definitions());
+        self::assertCount(self::packageCount(), $this->catalogue()->definitions());
 
-        ConfigurablePermissionProvider::$permissions = [new PermissionDefinition(PackagePermissions::GUARDRAILS_MANAGE, 'Mine')];
+        ConfigurablePermissionProvider::$permissions = [new PermissionDefinition(PackagePermissions::GUARDRAIL_MANAGE, 'Mine')];
 
         $this->expectException(InvalidPermissionCatalogueException::class);
 
@@ -152,9 +150,9 @@ final class PermissionCatalogueTest extends TestCase
 
         $definitions = $this->catalogue()->definitions();
 
-        self::assertCount(6, $definitions);
-        self::assertEquals(new PermissionDefinition(name: 'posts:create', description: 'Create posts', category: 'Posts'), $definitions[1]);
-        self::assertEquals(new PermissionDefinition(name: 'posts:create', description: 'Create posts', category: 'Posts', guard: 'web'), $definitions[5]);
+        self::assertCount(self::packageCount() + 5, $definitions);
+        self::assertEquals(new PermissionDefinition(name: 'posts:create', description: 'Create posts', category: 'Posts'), $definitions[self::packageCount()]);
+        self::assertEquals(new PermissionDefinition(name: 'posts:create', description: 'Create posts', category: 'Posts', guard: 'web'), $definitions[self::packageCount() + 4]);
     }
 
     /**
@@ -327,5 +325,15 @@ final class PermissionCatalogueTest extends TestCase
             self::assertSame($source, $exception->getSource());
             self::assertSame($reason, $exception->getReason());
         }
+    }
+
+    /**
+     * Return how many permissions the package declares.
+     *
+     * @return int
+     */
+    private static function packageCount(): int
+    {
+        return \count((new PackagePermissions)->permissions());
     }
 }

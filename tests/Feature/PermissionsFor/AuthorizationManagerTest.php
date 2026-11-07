@@ -460,13 +460,14 @@ final class AuthorizationManagerTest extends TestCase
 
         $user->givePermission(Permission::create(['name' => '*']));
 
-        $everything = [PackagePermissions::GUARDRAILS_MANAGE, 'posts:create', 'posts.publish', 'posts:archive', 'reports:view'];
+        $package    = \array_map(static fn (PermissionDefinition $definition): string => $definition->name, (new PackagePermissions)->permissions());
+        $everything = [...$package, 'posts:create', 'posts.publish', 'posts:archive', 'reports:view'];
 
         self::assertSame($everything, Authorization::permissionsFor($user, AuthorizationScope::current()));
 
         $user->attachPolicy(Policy::create(['name' => 'no-posts', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:*']]]]]));
 
-        self::assertSame([PackagePermissions::GUARDRAILS_MANAGE, 'posts.publish', 'reports:view'], Authorization::permissionsFor($user, AuthorizationScope::current()));
+        self::assertSame([...$package, 'posts.publish', 'reports:view'], Authorization::permissionsFor($user, AuthorizationScope::current()));
     }
 
     /**

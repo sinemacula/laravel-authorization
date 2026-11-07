@@ -22,13 +22,13 @@ use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 final class DecisionStageTest extends TestCase
 {
     /**
-     * The enum defines exactly the nine stages, in the order a decision runs
+     * The enum defines exactly the ten stages, in the order a decision runs
      * them (AUTHZ-7.1): subject, resource, tenant, deny, guardrail, boundary,
-     * session, allow, implicit.
+     * session, allow, administration, implicit.
      *
      * @return void
      */
-    public function testExactlyNineCasesInRunOrder(): void
+    public function testExactlyTenCasesInRunOrder(): void
     {
         self::assertSame(
             [
@@ -40,6 +40,7 @@ final class DecisionStageTest extends TestCase
                 DecisionStage::BOUNDARY,
                 DecisionStage::SESSION,
                 DecisionStage::ALLOW,
+                DecisionStage::ADMINISTRATION,
                 DecisionStage::IMPLICIT,
             ],
             DecisionStage::cases(),
@@ -61,6 +62,7 @@ final class DecisionStageTest extends TestCase
         self::assertSame('boundary', DecisionStage::BOUNDARY->value);
         self::assertSame('session', DecisionStage::SESSION->value);
         self::assertSame('allow', DecisionStage::ALLOW->value);
+        self::assertSame('administration', DecisionStage::ADMINISTRATION->value);
         self::assertSame('implicit', DecisionStage::IMPLICIT->value);
     }
 
@@ -79,6 +81,7 @@ final class DecisionStageTest extends TestCase
         self::assertSame(DecisionStage::GUARDRAIL, DecisionStage::tryFrom('guardrail'));
         self::assertSame(DecisionStage::BOUNDARY, DecisionStage::tryFrom('boundary'));
         self::assertSame(DecisionStage::SESSION, DecisionStage::tryFrom('session'));
+        self::assertSame(DecisionStage::ADMINISTRATION, DecisionStage::tryFrom('administration'));
         self::assertSame(DecisionStage::ALLOW, DecisionStage::tryFrom('allow'));
         self::assertSame(DecisionStage::IMPLICIT, DecisionStage::tryFrom('implicit'));
         self::assertNull(DecisionStage::tryFrom('unknown'));

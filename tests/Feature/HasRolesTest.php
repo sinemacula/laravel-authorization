@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversTrait;
+use SineMacula\Laravel\Authorization\Administration\RankComparison;
 use SineMacula\Laravel\Authorization\Concerns\HasRoles;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged;
@@ -49,6 +50,32 @@ final class HasRolesTest extends TestCase
         Carbon::setTestNow();
 
         parent::tearDown();
+    }
+
+    /**
+     * `canActOn()` returns the rank comparison alone, as `RankComparison` makes
+     * it: strictly senior, an equal rank refused, and a target that holds no
+     * roles not comparable.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testCanActOnReturnsTheRankComparisonAlone(): void
+    {
+        $senior = StubIdentity::query()->create(['id' => 'senior']);
+        $junior = StubIdentity::query()->create(['id' => 'junior']);
+
+        $senior->assignRole(Role::query()->create(['name' => 'lead', 'rank' => 1]));
+        $junior->assignRole(Role::query()->create(['name' => 'member', 'rank' => 1]));
+
+        self::assertFalse($senior->canActOn($junior));
+        self::assertSame(RankComparison::canActOn($senior, $junior), $senior->canActOn($junior));
+
+        $senior->assignRole(Role::query()->create(['name' => 'head', 'rank' => 0]));
+
+        self::assertTrue(StubIdentity::query()->findOrFail('senior')->canActOn($junior));
+        self::assertFalse($junior->canActOn(new \stdClass));
     }
 
     /**

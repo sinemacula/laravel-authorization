@@ -77,8 +77,9 @@ final class InsufficientAuthenticationExceptionTest extends TestCase
     }
 
     /**
-     * The exception holds the candidates alone: no policy, statement, trace or
-     * proof is among its own properties.
+     * The exception holds the candidates and the decision that refused, for
+     * audit, alone: no policy, statement or proof is among its own properties,
+     * and the decision is none unless one is given.
      *
      * @return void
      */
@@ -89,7 +90,8 @@ final class InsufficientAuthenticationExceptionTest extends TestCase
             (new \ReflectionClass(InsufficientAuthenticationException::class))->getProperties(),
         );
 
-        self::assertSame(['requirements'], \array_values(\array_diff($properties, \array_map(
+        self::assertNull((new InsufficientAuthenticationException([]))->getDecision());
+        self::assertSame(['requirements', 'decision'], \array_values(\array_diff($properties, \array_map(
             static fn (\ReflectionProperty $property): string => $property->getName(),
             (new \ReflectionClass(LaravelAuthorizationException::class))->getProperties(),
         ))));

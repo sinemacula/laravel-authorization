@@ -125,7 +125,7 @@ final class ResourceReferences
             return $reference;
         }
 
-        return new ResourceReference($reference->identifier, $reference->type, $reference->id, $reference->tenant, $resource);
+        return new ResourceReference($reference->identifier, $reference->type, $reference->id, $reference->tenant, $resource, $reference->source);
     }
 
     /**

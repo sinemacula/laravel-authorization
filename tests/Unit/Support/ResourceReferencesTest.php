@@ -201,6 +201,11 @@ final class ResourceReferencesTest extends TestCase
         self::assertInstanceOf(ResourceReference::class, $reference);
         self::assertSame(['docs/7', 'document', '7', $tenant, $model], [$reference->identifier, $reference->type, $reference->id, $reference->tenant, $reference->model]);
 
+        $source = self::resourceModel(new ResourceReference('docs/8'));
+        $handed = ResourceReferences::of(self::resourceModel(new ResourceReference('docs/8', 'document', '8', null, null, $source)));
+
+        self::assertSame($source, $handed instanceof ResourceReference ? $handed->source : null);
+
         $carried = ResourceReference::record('document', '7', null, $other);
 
         self::assertSame($carried, ResourceReferences::of(self::resourceModel($carried)));

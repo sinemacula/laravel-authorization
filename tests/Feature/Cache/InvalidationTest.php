@@ -7,6 +7,7 @@ namespace Tests\Feature\Cache;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Cache;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Cache\Invalidation;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\VersionedStore;
@@ -427,12 +428,12 @@ final class InvalidationTest extends TestCase
 
         // A first check pins every version it reads, so what follows is told
         // apart from a version given its first token.
-        self::assertTrue(Authorization::for($actor)->can(PackagePermissions::GUARDRAILS_MANAGE));
+        self::assertTrue(Authorization::for($actor)->can(PackagePermissions::GUARDRAIL_MANAGE));
         self::assertNotNull($service);
-        self::assertSame($key, $this->bumpedBy(static fn () => $service->set($policy, null, $actor), $user, $role, $policy));
-        self::assertSame([], $this->bumpedBy(static fn () => $service->set($policy, null, $actor), $user, $role, $policy));
-        self::assertSame($key, $this->bumpedBy(static fn () => $service->remove($policy, null, $actor), $user, $role, $policy));
-        self::assertSame([], $this->bumpedBy(static fn () => $service->remove($policy, null, $actor), $user, $role, $policy));
+        self::assertSame($key, $this->bumpedBy(static fn () => $service->set($policy, null, ActingContext::for($actor)), $user, $role, $policy));
+        self::assertSame([], $this->bumpedBy(static fn () => $service->set($policy, null, ActingContext::for($actor)), $user, $role, $policy));
+        self::assertSame($key, $this->bumpedBy(static fn () => $service->remove($policy, null, ActingContext::for($actor)), $user, $role, $policy));
+        self::assertSame([], $this->bumpedBy(static fn () => $service->remove($policy, null, ActingContext::for($actor)), $user, $role, $policy));
     }
 
     /**
@@ -457,11 +458,11 @@ final class InvalidationTest extends TestCase
         self::assertNotNull($service);
         self::assertSame([], $names());
 
-        $service->set($policy, null, $actor);
+        $service->set($policy, null, ActingContext::for($actor));
 
         self::assertSame(['rail'], $names());
 
-        $service->remove($policy, null, $actor);
+        $service->remove($policy, null, ActingContext::for($actor));
 
         self::assertSame([], $names());
     }
@@ -476,7 +477,7 @@ final class InvalidationTest extends TestCase
     {
         $actor = StubIdentity::create(['id' => 'admin-1']);
 
-        $actor->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAILS_MANAGE]));
+        $actor->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
 
         return $actor;
     }

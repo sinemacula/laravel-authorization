@@ -52,8 +52,11 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
   transaction, idempotent grants, re-armed expiries, the locked hierarchy check, the scope each grant holds in, a
   role's policies as its grants, inline policies attached to their grantee alone and deleted with it, and policies
   attached to resources and resource types, permission boundaries set on principals and identities, and guardrails
-  set on tenants and the platform by an actor allowed to.
-- `events.md`: the one marker every event implements, the snapshot payloads, the actor the caller passes, one
+  set on tenants and the platform by an acting subject allowed to.
+- `delegated-administration.md`: the administration actions, the acting context, trusted and delegated calls, the
+  operation resource and its attributes, the administration stage of a decision, what each part of BL-65 enforces,
+  the reasons and the audit.
+- `events.md`: the one marker every event implements, the snapshot payloads, the call's operation and actor, one
   operation id per call, dispatch after commit, the grantees a delete reports, the boundary and guardrail events and the
   document digests.
 - `query-scoping.md`: the `whereAuthorized()` and model-level `AuthorizedScope` contract over a query's candidate

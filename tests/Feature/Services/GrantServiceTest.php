@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\PermissionGranted;
@@ -24,6 +25,7 @@ use SineMacula\Laravel\Authorization\Events\Identity\PolicyExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleAssigned;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleExpiryChanged;
 use SineMacula\Laravel\Authorization\Events\Identity\RoleRevoked;
+use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\GranteeGuardMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\GrantScopeMismatchException;
 use SineMacula\Laravel\Authorization\Exceptions\InlinePolicyAttachmentException;
@@ -37,9 +39,12 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\SyncResult;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\AssertsTransactions;
+use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
 use Tests\Concerns\ReadsDispatchedEvents;
 use Tests\Concerns\UsesAnAuthorizationConnection;
@@ -64,7 +69,7 @@ use Tests\TestCase;
 #[CoversClass(SyncResult::class)]
 final class GrantServiceTest extends TestCase
 {
-    use ActsAsTenant, AssertsTransactions, ComparesReferences, ReadsDispatchedEvents, UsesAnAuthorizationConnection;
+    use ActsAsAdministrator, ActsAsTenant, AssertsTransactions, CatchesRefusals, ComparesReferences, ReadsDispatchedEvents, UsesAnAuthorizationConnection;
 
     /** @var string The instant every test starts at. */
     private const string NOW = '2026-07-01 12:00:00';
@@ -271,8 +276,9 @@ final class GrantServiceTest extends TestCase
 
     /**
      * Revoking everything removes every role, permission and policy the grantee
-     * holds, and its boundaries, in one operation that reports each revocation
-     * and removal with the actor, and leaves other grantees' grants alone.
+     * holds, and its boundaries, in one trusted operation that reports each
+     * revocation and removal, with no actor, and leaves other grantees' grants
+     * alone.
      *
      * @return void
      *
@@ -284,7 +290,6 @@ final class GrantServiceTest extends TestCase
         $other  = StubIdentity::create(['id' => 'user-2']);
         $role   = Role::create(['name' => 'editor']);
         $policy = Policy::create(['name' => 'readers', 'document' => ['version' => 1, 'statements' => []]]);
-        $actor  = new Reference('admin', 'admin-1');
 
         self::service()->grantRole($user, $role);
         self::service()->grantRole($other, $role);
@@ -294,7 +299,7 @@ final class GrantServiceTest extends TestCase
 
         Event::fake();
 
-        self::assertSame(4, self::service()->revokeAll($user, $actor));
+        self::assertSame(4, self::service()->revokeAll($user));
 
         self::assertSame(0, DB::table('authorizable_roles')->where('authorizable_id', $user->getKey())->count());
         self::assertSame(0, DB::table('authorizable_permissions')->where('authorizable_id', $user->getKey())->count());
@@ -303,7 +308,7 @@ final class GrantServiceTest extends TestCase
 
         Event::assertDispatched(
             RoleRevoked::class,
-            static fn (RoleRevoked $event): bool => self::refersTo($event->grantee, $user) && self::refersTo($event->operation->actor, $actor),
+            static fn (RoleRevoked $event): bool => self::refersTo($event->grantee, $user) && $event->operation->actor === null && $event->operation->isTrusted,
         );
         Event::assertDispatched(PermissionRevoked::class, static fn (PermissionRevoked $event): bool => self::refersTo($event->grantee, $user));
         Event::assertDispatched(PolicyDetached::class, static fn (PolicyDetached $event): bool => self::refersTo($event->grantee, $user));
@@ -1348,38 +1353,47 @@ final class GrantServiceTest extends TestCase
     }
 
     /**
-     * Every event a call dispatches carries the actor the caller passed, and
-     * every grant row it writes records that actor; a call that names none
-     * records none.
+     * A call that names no acting context is trusted: every event it dispatches
+     * carries a trusted operation with no actor, under the action it is decided
+     * under, and every grant row it writes records no actor. One that names an
+     * acting context is delegated, and a grant, which may widen what the
+     * grantee may do, is refused as unprovable before anything is written.
      *
      * @return void
      *
      * @throws \Throwable
      */
-    public function testRecordsTheActorOnTheEventsAndTheRows(): void
+    public function testATrustedCallRecordsNoActorAndADelegatedGrantIsRefused(): void
     {
+        $admin = self::administrator();
+        $user  = self::user();
+
         Event::fake();
 
-        $user  = self::user();
-        $actor = StubIdentity::query()->create(['id' => 'admin-1']);
-
-        self::service()->grantRole($user, self::role('editor'), actor: $actor);
-        self::service()->grantPermission($user, Permission::query()->create(['name' => 'posts:edit']), actor: new Reference('service', 'importer'));
+        self::service()->grantRole($user, self::role('editor'));
         self::service()->attachPolicy($user, self::policy('audit'));
 
-        self::assertSame([$actor->getMorphClass(), 'admin-1'], self::grantor('authorizable_roles'));
-        self::assertSame(['service', 'importer'], self::grantor('authorizable_permissions'));
+        self::assertSame([null, null], self::grantor('authorizable_roles'));
         self::assertSame([null, null], self::grantor('authorizable_policies'));
-        Event::assertDispatched(RoleAssigned::class, static fn (RoleAssigned $event): bool => self::refersTo($event->operation->actor, $actor));
         Event::assertDispatched(
-            PermissionGranted::class,
-            static fn (PermissionGranted $event): bool => self::refersTo($event->operation->actor, new Reference('service', 'importer')),
+            RoleAssigned::class,
+            static fn (RoleAssigned $event): bool => $event->operation->actor === null
+                && $event->operation->isTrusted
+                && $event->operation->actions === [PackagePermissions::ROLE_GRANT],
         );
-        Event::assertDispatched(PolicyAttached::class, static fn (PolicyAttached $event): bool => $event->operation->actor === null);
+
+        $refusal = self::refusalOf(static fn (): GrantOutcome => self::service()->grantPermission($user, Permission::query()->create(['name' => 'posts:edit']), actor: $admin));
+
+        self::assertInstanceOf(AuthorizationException::class, $refusal);
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $refusal->getReason());
+        self::assertSame(0, DB::table('authorizable_permissions')->where('authorizable_id', 'user-1')->count());
+        Event::assertNotDispatched(PermissionGranted::class);
     }
 
     /**
-     * A revocation and a sync carry the actor too.
+     * A revocation and a sync that only revokes carry the acting context: its
+     * principal and identity, delegated, under the actions they are decided
+     * under.
      *
      * @return void
      *
@@ -1387,20 +1401,31 @@ final class GrantServiceTest extends TestCase
      */
     public function testRevocationsAndSyncsCarryTheActor(): void
     {
+        $admin = self::administrator();
         $user  = self::user();
-        $actor = new Reference('user', 'admin-1');
 
         self::service()->grantRole($user, self::role('editor'));
-        self::role('author');
+        self::service()->grantRole($user, self::role('author'));
 
         Event::fake();
 
-        self::service()->revokeRole($user, 'editor', $actor);
-        self::service()->syncRoles($user, ['author'], actor: $actor);
+        self::assertSame(1, self::service()->revokeRole($user, 'editor', $admin));
+        self::assertCount(1, self::service()->syncRoles($user, [], actor: $admin)->revoked);
 
-        Event::assertDispatched(RoleRevoked::class, static fn (RoleRevoked $event): bool => self::refersTo($event->operation->actor, $actor));
-        Event::assertDispatched(RoleAssigned::class, static fn (RoleAssigned $event): bool => self::refersTo($event->operation->actor, $actor));
-        self::assertSame(['user', 'admin-1'], self::grantor('authorizable_roles'));
+        $delegated = static fn (RoleRevoked $event): bool => self::refersTo($event->operation->actor, $admin->principal())
+            && self::refersTo($event->operation->identity, $admin->principal())
+            && !$event->operation->isTrusted;
+
+        Event::assertDispatched(
+            RoleRevoked::class,
+            static fn (RoleRevoked $event): bool => $delegated($event) && $event->name === 'editor' && $event->operation->actions === [PackagePermissions::ROLE_REVOKE],
+        );
+        Event::assertDispatched(
+            RoleRevoked::class,
+            static fn (RoleRevoked $event): bool => $delegated($event)
+                && $event->name               === 'author'
+                && $event->operation->actions === [PackagePermissions::ROLE_GRANT, PackagePermissions::ROLE_REVOKE],
+        );
     }
 
     /**
@@ -1498,7 +1523,7 @@ final class GrantServiceTest extends TestCase
     /**
      * The events name the grantee, the target and the actor by their morph
      * types under the application's morph map, and the grant as platform-wide
-     * with its expiry in UTC.
+     * with its expiry in UTC; a trusted grant names no actor.
      *
      * @return void
      *
@@ -1514,18 +1539,24 @@ final class GrantServiceTest extends TestCase
             $user = self::user();
             $role = self::role('editor');
 
-            self::service()->grantRole($user, $role, Carbon::parse('2026-07-02 14:00:00', 'Europe/Paris'), StubIdentity::query()->create(['id' => 'admin-1']));
+            $admin = self::administrator();
+
+            self::service()->grantRole($user, $role, Carbon::parse('2026-07-02 14:00:00', 'Europe/Paris'));
+            self::service()->revokeRole($user, $role, $admin);
 
             Event::assertDispatched(RoleAssigned::class, static fn (RoleAssigned $event): bool => $event->grantee->type === 'member'
                 && $event->grantee->id                                                                                  === 'user-1'
                 && $event->role->type                                                                                   === 'role'
                 && $event->role->id                                                                                     === $role->id
                 && $event->name                                                                                         === 'editor'
-                && $event->operation->actor?->type                                                                      === 'member'
+                && $event->operation->actor                                                                             === null
                 && $event->scope->tenant                                                                                === null
                 && $event->scope->application                                                                           === null
                 && $event->expiresAt?->format('Y-m-d H:i:s e')                                                          === '2026-07-02 12:00:00 UTC');
-            self::assertSame(['member', 'admin-1'], self::grantor('authorizable_roles'));
+            Event::assertDispatched(
+                RoleRevoked::class,
+                static fn (RoleRevoked $event): bool => $event->operation->actor?->type === 'member' && $event->operation->actor->id === 'admin-1',
+            );
         } finally {
             Relation::morphMap([], false);
         }

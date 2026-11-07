@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Services;
 
 use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
@@ -22,6 +23,7 @@ use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\PolicyPrincipals;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -37,18 +39,22 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * tenant holds in the tenant and its subtree, through the tenant tree
  * (AUTHZ-5.3), and the platform's everywhere; with none, nothing is capped.
  *
- * Every call names the tenant, or null for the platform, and the actor making
- * the change, which must hold `authorization:guardrails:manage` from above the
+ * Every call names the tenant, or null for the platform, and the acting context
+ * making the change, which is never optional: there is no trusted guardrail
+ * change. Its subject must hold `authorization:guardrail.manage` from above the
  * scope: through a grant held at an ancestor of the tenant that reaches it, or
  * platform-wide, never one held within the tenant itself, and for the platform
- * a platform-wide grant (see `GuardrailAuthority`). Any other actor is refused
- * with `GuardrailException` before anything is read or written, so a tenant's
- * own administrators never lift the guardrails their tenant is set under. The
- * right is decided through `check()` with the guardrails left out, as every
- * check of `authorization:guardrails:manage` is, so no guardrail locks the
- * guardrails: one that does not allow the permission, or whose document cannot
- * be read, a platform guardrail included, is still removed through here. Every
- * other deny and cap that applies to the actor still counts.
+ * a platform-wide grant (see `GuardrailAuthority`). The right is decided inside
+ * the change's transaction, before anything is read or written, and any other
+ * actor is refused with `GuardrailException`, an impersonated one with
+ * `AuthorizationException` as `administration.impersonating` unless
+ * `authorization:administration.impersonated` is allowed it, so a tenant's own
+ * administrators never lift the guardrails their tenant is set under. The right
+ * is decided through `check()` with the guardrails left out, as every check of
+ * `authorization:guardrail.manage` is, so no guardrail locks the guardrails:
+ * one that does not allow the permission, or whose document cannot be read, a
+ * platform guardrail included, is still removed through here. Every other deny
+ * and cap that applies to the actor still counts.
  *
  * A scope may have any number of guardrails, a policy at most once in each. A
  * policy one tenant owns is set on that tenant or a tenant below it, and naming
@@ -84,18 +90,20 @@ final class GuardrailService
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
-     * @param  \Illuminate\Database\Eloquent\Model  $actor
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext  $actor
      * @return \SineMacula\Laravel\Authorization\Enums\GrantOutcome
      *
      * @throws \Throwable
      */
-    public function set(Policy $policy, Model|Reference|null $tenant, Model $actor): GrantOutcome
+    public function set(Policy $policy, Model|Reference|null $tenant, ActingContext $actor): GrantOutcome
     {
         $named = GrantScopes::named($tenant);
 
-        GuardrailAuthority::assertPermitted($actor, $named);
+        $operation = Operation::begin($actor, [PackagePermissions::GUARDRAIL_MANAGE]);
 
-        return OperationScope::run(Operation::begin($actor), static function (Operation $operation) use ($policy, $named): GrantOutcome {
+        return OperationScope::run($operation, static function (Operation $operation) use ($actor, $policy, $named): GrantOutcome {
+            GuardrailAuthority::assertPermitted($actor, $named);
+
             // Read under a lock on the policy's row, so the checks below weigh
             // the document as committed, and an edit or a deletion of the
             // policy made meanwhile waits until the guardrail is there to
@@ -121,19 +129,21 @@ final class GuardrailService
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
-     * @param  \Illuminate\Database\Eloquent\Model  $actor
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext  $actor
      * @return bool
      *
      * @throws \Throwable
      */
-    public function remove(Policy $policy, Model|Reference|null $tenant, Model $actor): bool
+    public function remove(Policy $policy, Model|Reference|null $tenant, ActingContext $actor): bool
     {
         $named = GrantScopes::named($tenant);
 
-        GuardrailAuthority::assertPermitted($actor, $named);
+        $operation = Operation::begin($actor, [PackagePermissions::GUARDRAIL_MANAGE]);
 
         /** @var bool */
-        return OperationScope::run(Operation::begin($actor), static function (Operation $operation) use ($policy, $named): bool {
+        return OperationScope::run($operation, static function (Operation $operation) use ($actor, $policy, $named): bool {
+            GuardrailAuthority::assertPermitted($actor, $named);
+
             // A guardrail's policy cannot be deleted from under it, so a policy
             // that is not stored is a guardrail nowhere.
             $stored = InlinePolicies::stored($policy->getKey());

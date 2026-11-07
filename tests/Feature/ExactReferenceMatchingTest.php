@@ -7,6 +7,7 @@ namespace Tests\Feature;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversNothing;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Database\ExactReferences;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
@@ -198,13 +199,13 @@ final class ExactReferenceMatchingTest extends TestCase
         $actor = StubIdentity::create(['id' => 'guardrail-admin']);
 
         $user->givePermission(Permission::create(['name' => 'posts:edit']));
-        $actor->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAILS_MANAGE]));
+        $actor->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
 
         $guardrails = GuardrailService::instance();
 
         self::assertInstanceOf(GuardrailService::class, $guardrails);
 
-        $guardrails->set(self::policy('read-only', ['effect' => 'allow', 'actions' => ['posts:read']]), self::tenant(self::KEY), $actor);
+        $guardrails->set(self::policy('read-only', ['effect' => 'allow', 'actions' => ['posts:read']]), self::tenant(self::KEY), ActingContext::for($actor));
 
         self::assertTrue($this->canIn($user, self::tenant($twin), 'posts:edit'));
         self::assertFalse($this->canIn($user, self::tenant(self::KEY), 'posts:edit'));

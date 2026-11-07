@@ -10,6 +10,7 @@ use Illuminate\Foundation\Application;
 use Illuminate\Support\Carbon;
 use Random\Engine\Mt19937;
 use Random\Randomizer;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
@@ -315,7 +316,7 @@ final class ListingScenario
     private function grants(): void
     {
         for ($index = $this->random->getInt(1, 5); $index > 0; $index--) {
-            $permission = Permission::query()->firstOrCreate(['name' => $this->pick([...self::ACTIONS, 'posts:*', '*', PackagePermissions::GUARDRAILS_MANAGE])]);
+            $permission = Permission::query()->firstOrCreate(['name' => $this->pick([...self::ACTIONS, 'posts:*', '*', PackagePermissions::GUARDRAIL_MANAGE])]);
             $tenant     = $this->pick([null, ...$this->tenants]);
             $app        = $this->pick([null, null, 'admin', 'mobile']);
             $kind       = $this->pick(['permission', 'permission', 'role', 'inherited-role']);
@@ -372,8 +373,8 @@ final class ListingScenario
         $admin  = StubIdentity::create(['id' => 'guardrail-admin']);
         $tenant = $this->pick($this->tenants);
 
-        $admin->givePermission(Permission::query()->firstOrCreate(['name' => PackagePermissions::GUARDRAILS_MANAGE]));
-        $this->app->make(GuardrailService::class)->set($this->policy('guardrail', $cap()), $tenant, $admin);
+        $admin->givePermission(Permission::query()->firstOrCreate(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
+        $this->app->make(GuardrailService::class)->set($this->policy('guardrail', $cap()), $tenant, ActingContext::for($admin));
 
         $this->log[] = 'guardrail in ' . self::nameOf($tenant);
     }

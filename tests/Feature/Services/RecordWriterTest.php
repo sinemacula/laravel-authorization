@@ -7,14 +7,25 @@ namespace Tests\Feature\Services;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\OperationResource;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
+use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\Role\Created as RoleCreated;
 use SineMacula\Laravel\Authorization\Events\Role\Deleted as RoleDeleted;
+use SineMacula\Laravel\Authorization\Events\Role\Updated as RoleUpdated;
+use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\ReservedRoleNameException;
 use SineMacula\Laravel\Authorization\Exceptions\UnsavedRecordException;
+use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
-use SineMacula\Laravel\Authorization\Support\Reference;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
+use Tests\Concerns\ActsAsAdministrator;
+use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\UsesAnAuthorizationConnection;
+use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
 /**
@@ -29,7 +40,7 @@ use Tests\TestCase;
 #[CoversClass(RecordWriter::class)]
 final class RecordWriterTest extends TestCase
 {
-    use UsesAnAuthorizationConnection;
+    use ActsAsAdministrator, CatchesRefusals, UsesAnAuthorizationConnection;
 
     /**
      * The row is looked up and saved inside one transaction on the package's
@@ -44,7 +55,7 @@ final class RecordWriterTest extends TestCase
         $base  = self::authorizationConnection()->transactionLevel();
         $level = null;
 
-        $role = RecordWriter::save(null, static function () use (&$level): Role {
+        $role = RecordWriter::save(null, PackagePermissions::ROLE_CREATE, static function () use (&$level): Role {
             $level = self::authorizationConnection()->transactionLevel();
 
             return new Role;
@@ -68,7 +79,9 @@ final class RecordWriterTest extends TestCase
         Role::query()->create(['name' => 'admin', 'is_system' => true]);
 
         try {
-            RecordWriter::save(null, static fn (): Role => new Role, ['name' => 'admin', 'tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a']);
+            $tenantAdmin = ['name' => 'admin', 'tenant_type' => 'stub_tenant', 'tenant_id' => 'tenant-a'];
+
+            RecordWriter::save(null, PackagePermissions::ROLE_CREATE, static fn (): Role => new Role, $tenantAdmin);
             self::fail('The save was not refused.');
         } catch (ReservedRoleNameException) {
             self::assertSame(1, DB::table('roles')->count());
@@ -86,7 +99,7 @@ final class RecordWriterTest extends TestCase
         $base  = DB::connection()->transactionLevel();
         $level = null;
 
-        RecordWriter::delete(null, static function () use (&$level, $role): Role {
+        RecordWriter::delete(null, PackagePermissions::ROLE_DELETE, static function () use (&$level, $role): Role {
             $level = DB::connection()->transactionLevel();
 
             return $role;
@@ -120,24 +133,100 @@ final class RecordWriterTest extends TestCase
     }
 
     /**
-     * The events a save and a delete dispatch carry the given actor, once the
-     * write commits.
+     * The events a trusted save and delete dispatch carry a trusted operation
+     * with no actor, under the action, once the write commits.
      *
      * @return void
      *
      * @throws \Throwable
      */
-    public function testTheEventsCarryTheActor(): void
+    public function testTheEventsCarryTheTrustedOperation(): void
     {
-        $actor = new Reference('user', 'admin-1');
-
         Event::fake([RoleCreated::class, RoleDeleted::class]);
 
-        $role = RecordWriter::save($actor, static fn (): Role => new Role, ['name' => 'editor']);
+        $role = RecordWriter::save(null, PackagePermissions::ROLE_CREATE, static fn (): Role => new Role, ['name' => 'editor']);
 
-        RecordWriter::delete($actor, static fn (): Role => $role);
+        RecordWriter::delete(null, PackagePermissions::ROLE_DELETE, static fn (): Role => $role);
 
-        Event::assertDispatched(RoleCreated::class, static fn (RoleCreated $event): bool => $event->operation->actor === $actor);
-        Event::assertDispatched(RoleDeleted::class, static fn (RoleDeleted $event): bool => $event->operation->actor === $actor);
+        Event::assertDispatched(RoleCreated::class, static fn (RoleCreated $event): bool => $event->operation->actor === null
+            && $event->operation->isTrusted
+            && $event->operation->actions === [PackagePermissions::ROLE_CREATE]);
+        Event::assertDispatched(RoleDeleted::class, static fn (RoleDeleted $event): bool => $event->operation->actions === [PackagePermissions::ROLE_DELETE]);
+    }
+
+    /**
+     * A delegated save is decided once the row is looked up, inside the
+     * transaction, on the definition's operation resource, which offers the
+     * proposed change to policies: an actor not allowed the action is refused
+     * as the decision refuses it, and one allowed it is refused as unprovable,
+     * each writing nothing and reporting no change.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedSaveIsDecidedBeforeItWrites(): void
+    {
+        Event::fake([RoleUpdated::class, AuthorizationFailed::class]);
+
+        $admin = self::administrator([]);
+        $role  = Role::query()->create(['name' => 'editor']);
+        $level = null;
+
+        self::grants()?->attachPolicy(StubIdentity::query()->findOrFail('admin-1'), Policy::query()->create(['name' => 'renamer', 'document' => ['statements' => [[
+            'effect'     => 'allow',
+            'actions'    => [PackagePermissions::ROLE_RENAME],
+            'resources'  => [OperationResource::TYPE . ':*'],
+            'conditions' => ['eq' => ['resource.change.name' => 'writer', 'resource.role' => 'editor']],
+        ]]]]));
+
+        $refused = self::refusalOf(static fn (): Role => RecordWriter::save($admin, PackagePermissions::ROLE_RENAME, static fn (): Role => $role, ['name' => 'author']));
+        $proved  = self::refusalOf(static function () use (&$level, $admin, $role): void {
+            RecordWriter::save($admin, PackagePermissions::ROLE_RENAME, static function () use (&$level, $role): Role {
+                $level = DB::connection()->transactionLevel();
+
+                return $role;
+            }, ['name' => 'writer']);
+        });
+
+        self::assertInstanceOf(AuthorizationException::class, $refused);
+        self::assertSame(DecisionReason::CONDITION_FAILED, $refused->getReason());
+        self::assertInstanceOf(AuthorizationException::class, $proved);
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $proved->getReason());
+        self::assertSame(DecisionStage::ADMINISTRATION, $proved->getDecision()?->stage);
+        self::assertNotNull($level);
+        self::assertSame('editor', Role::query()->sole()->name);
+        Event::assertNotDispatched(RoleUpdated::class);
+        Event::assertDispatched(AuthorizationFailed::class, static fn (AuthorizationFailed $event): bool => $event->action === PackagePermissions::ROLE_RENAME
+            && \str_starts_with((string) $event->resource, OperationResource::TYPE . ':'));
+    }
+
+    /**
+     * A delegated deletion is decided as a save is, before the row is deleted.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedDeleteIsDecidedBeforeItDeletes(): void
+    {
+        $admin = self::administrator();
+        $role  = Role::query()->create(['name' => 'editor']);
+
+        $refusal = self::refusalOf(static fn () => RecordWriter::delete($admin, PackagePermissions::ROLE_DELETE, static fn (): Role => $role));
+
+        self::assertInstanceOf(AuthorizationException::class, $refusal);
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $refusal->getReason());
+        self::assertSame(1, Role::query()->count());
+    }
+
+    /**
+     * Return the grant service.
+     *
+     * @return \SineMacula\Laravel\Authorization\Services\GrantService|null
+     */
+    private static function grants(): ?GrantService
+    {
+        return GrantService::instance();
     }
 }

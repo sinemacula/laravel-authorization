@@ -38,7 +38,7 @@ and how it fails.
    that model's connection (`authorization.connection`, else the default). A failure part-way rolls back every write.
 
 8. **The package's own permissions are always declared.** `Support\PackagePermissions`, the package's own provider,
-   comes first in every catalogue, whatever the application configures: today `authorization:guardrails:manage`, the
+   comes first in every catalogue, whatever the application configures: today `authorization:guardrail.manage`, the
    right `GuardrailService` checks (AUTHZ-7.6), guard-agnostic and under the `authorization` category. The sync adds and
    updates it as any declared permission, so it can be granted, and the policy validator accepts a pattern covering it,
    so a policy naming it validates. The action catalogue the validator asks (`DeclaredActionCatalogue`) leaves it out,

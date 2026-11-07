@@ -25,12 +25,14 @@ final class TraceOutcomeTest extends TestCase
      * The enum defines exactly the six statement outcomes, the two permission
      * outcomes, the outcome of a guardrail, boundary or session cap that
      * refuses the check, that of a session cap that covers it, the outcome of a
-     * cap stage that caps nothing and that of a cap stage the check is exempt
-     * from, in declaration order.
+     * cap stage that caps nothing, that of a cap stage the check is exempt
+     * from, and that of an administration stage whose every constraint holds,
+     * in declaration order. A refusing administration constraint is reported as
+     * refused.
      *
      * @return void
      */
-    public function testExactlyTwelveCases(): void
+    public function testExactlyThirteenCases(): void
     {
         self::assertSame(
             [
@@ -46,6 +48,7 @@ final class TraceOutcomeTest extends TestCase
                 TraceOutcome::COVERED,
                 TraceOutcome::UNCAPPED,
                 TraceOutcome::EXEMPT,
+                TraceOutcome::SATISFIED,
             ],
             TraceOutcome::cases(),
         );
@@ -70,6 +73,7 @@ final class TraceOutcomeTest extends TestCase
         self::assertSame('covered', TraceOutcome::COVERED->value);
         self::assertSame('uncapped', TraceOutcome::UNCAPPED->value);
         self::assertSame('exempt', TraceOutcome::EXEMPT->value);
+        self::assertSame('satisfied', TraceOutcome::SATISFIED->value);
     }
 
     /**
@@ -92,6 +96,7 @@ final class TraceOutcomeTest extends TestCase
         self::assertSame(TraceOutcome::COVERED, TraceOutcome::tryFrom('covered'));
         self::assertSame(TraceOutcome::UNCAPPED, TraceOutcome::tryFrom('uncapped'));
         self::assertSame(TraceOutcome::EXEMPT, TraceOutcome::tryFrom('exempt'));
+        self::assertSame(TraceOutcome::SATISFIED, TraceOutcome::tryFrom('satisfied'));
         self::assertNull(TraceOutcome::tryFrom('skipped'));
         self::assertNull(TraceOutcome::tryFrom('unknown'));
     }

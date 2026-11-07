@@ -126,7 +126,7 @@ final class PolicyModelTest extends TestCase
     {
         $this->app?->instance(ActionCatalogue::class, $this->app->make(DeclaredActionCatalogue::class));
 
-        $managers = Policy::create(['name' => 'managers', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['authorization:guardrails:manage']]]]]);
+        $managers = Policy::create(['name' => 'managers', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['authorization:guardrail.manage']]]]]);
 
         self::assertTrue($managers->exists);
 

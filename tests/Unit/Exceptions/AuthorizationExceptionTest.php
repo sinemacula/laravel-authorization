@@ -8,7 +8,9 @@ use Illuminate\Auth\Access\AuthorizationException as LaravelAuthorizationExcepti
 use Illuminate\Contracts\Translation\Translator;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
+use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Support\Messages;
 
@@ -51,8 +53,13 @@ final class AuthorizationExceptionTest extends TestCase
     public function testCarriesTheReasonCode(): void
     {
         $exception = new AuthorizationException(DecisionReason::EXPLICIT_DENY);
+        $decision  = Decision::deny(DecisionReason::ADMINISTRATION_UNPROVABLE, DecisionStage::ADMINISTRATION);
 
         self::assertSame(DecisionReason::EXPLICIT_DENY, $exception->getReason());
+        self::assertNull($exception->getDecision());
+        self::assertSame($decision, (new AuthorizationException(DecisionReason::ADMINISTRATION_UNPROVABLE, null, $decision))->getDecision());
+        self::assertSame($decision, AuthorizationException::translated(DecisionReason::ADMINISTRATION_UNPROVABLE, null, $decision)->getDecision());
+        self::assertNull(AuthorizationException::translated(DecisionReason::NO_MATCH, null)->getDecision());
     }
 
     /**

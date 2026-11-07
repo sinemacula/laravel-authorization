@@ -52,7 +52,7 @@ final class DeclaredAbilitiesTest extends TestCase
     {
         $abilities = $this->abilities([PermissionEnum::class], [StubPermissionProvider::class]);
 
-        foreach (['posts:create', 'posts:delete', 'media:upload', 'media:delete', 'billing:view', PackagePermissions::GUARDRAILS_MANAGE] as $name) {
+        foreach (['posts:create', 'posts:delete', 'media:upload', 'media:delete', 'billing:view', PackagePermissions::GUARDRAIL_MANAGE] as $name) {
             self::assertTrue($abilities->holds($name), $name);
         }
     }
@@ -77,7 +77,7 @@ final class DeclaredAbilitiesTest extends TestCase
         $nothing = $this->abilities([], []);
 
         self::assertFalse($nothing->holds('posts:create'));
-        self::assertTrue($nothing->holds(PackagePermissions::GUARDRAILS_MANAGE));
+        self::assertTrue($nothing->holds(PackagePermissions::GUARDRAIL_MANAGE));
     }
 
     /**

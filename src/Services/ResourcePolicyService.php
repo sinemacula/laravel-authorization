@@ -5,6 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Services;
 
 use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
@@ -21,6 +23,7 @@ use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\OperationScope;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\PolicyPrincipals;
 use SineMacula\Laravel\Authorization\Support\Reference;
@@ -63,10 +66,23 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  * in every application. A detachment finds the attachment in the same scope.
  *
  * Every call runs in one transaction on the package's connection, is one
- * operation for the actor the call names (null for console and system work),
- * and dispatches `PolicyAttached` or `PolicyDetached` once it commits, only
- * when it changed something, invalidating the resolution cache for the
- * resource's type.
+ * operation for the acting context the call names, or trusted system work with
+ * none (N75), and dispatches `PolicyAttached` or `PolicyDetached` once it
+ * commits, only when it changed something, invalidating the resolution cache
+ * for the resource's type.
+ *
+ * A call with an acting context is delegated administration (AUTHZ-11.1): an
+ * attachment is decided under `authorization:resource-policy.attach`, and each
+ * detachment, of the policy named or of every policy attached to the record,
+ * under `authorization:resource-policy.detach`, as the actor, through
+ * `check()`, on the change's operation resource (whose grantee is the resource,
+ * `*` for its whole type), inside the transaction before anything is written;
+ * the first refused throws the decision's `AuthorizationException`, leaving
+ * nothing written. An attachment's allows can grant without any permission
+ * held, so it waits for the rules of the later parts of BL-65 and is refused as
+ * `administration.unprovable` once the action is allowed; detaching a policy
+ * with no deny statement only narrows, and is allowed on its action alone,
+ * while detaching one that denies is refused as unprovable.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -84,7 +100,7 @@ final class ResourcePolicyService
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  bool  $includeSubtree
      * @param  string|null  $application
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return \SineMacula\Laravel\Authorization\Enums\GrantOutcome
      *
      * @throws \Throwable
@@ -95,19 +111,24 @@ final class ResourcePolicyService
         Model|Reference|null $tenant = null,
         bool $includeSubtree = true,
         ?string $application = null,
-        Model|Reference|null $actor = null,
+        ?ActingContext $actor = null,
     ): GrantOutcome {
         $reference = self::resource($resource);
         $named     = new GrantScope(GrantScopes::named($tenant), $application, $includeSubtree);
 
+        $operation = Operation::begin($actor, [PackagePermissions::RESOURCE_POLICY_ATTACH]);
+
         /** @var \SineMacula\Laravel\Authorization\Enums\GrantOutcome */
-        return OperationScope::run(Operation::begin($actor), static function (Operation $operation) use ($policy, $reference, $named): GrantOutcome {
+        return OperationScope::run($operation, static function (Operation $operation) use ($actor, $policy, $reference, $named): GrantOutcome {
             $stored = self::stored($policy);
 
             PolicyPrincipals::assertAttachableToResource($stored);
 
-            $owner   = GrantScopes::of(GrantTarget::POLICY, $policy, $named->tenant);
-            $scope   = new GrantScope($owner, $named->application, $named->includeSubtree || $owner === null);
+            $owner = GrantScopes::of(GrantTarget::POLICY, $policy, $named->tenant);
+            $scope = new GrantScope($owner, $named->application, $named->includeSubtree || $owner === null);
+
+            $actor?->authorizeIn($operation, OperationResource::grant(PackagePermissions::RESOURCE_POLICY_ATTACH, self::granteeOf($reference), $stored, $scope));
+
             $outcome = self::table($reference, $scope)->attach(self::key($stored)) ?? throw self::unwritten($stored, $reference);
 
             if ($outcome !== GrantOutcome::UNCHANGED) {
@@ -127,20 +148,27 @@ final class ResourcePolicyService
      * @param  mixed  $resource
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  string|null  $application
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return int
      *
      * @throws \Throwable
      */
-    public function detach(Policy $policy, mixed $resource, Model|Reference|null $tenant = null, ?string $application = null, Model|Reference|null $actor = null): int
+    public function detach(Policy $policy, mixed $resource, Model|Reference|null $tenant = null, ?string $application = null, ?ActingContext $actor = null): int
     {
         $reference = self::resource($resource);
         $named     = GrantScopes::named($tenant) ?? Reference::tenantOf($policy);
 
+        $operation = Operation::begin($actor, [PackagePermissions::RESOURCE_POLICY_DETACH]);
+
         /** @var int */
-        return OperationScope::run(Operation::begin($actor), static function (Operation $operation) use ($policy, $reference, $named, $application): int {
+        return OperationScope::run($operation, static function (Operation $operation) use ($actor, $policy, $reference, $named, $application): int {
             $stored = self::stored($policy);
-            $scope  = self::table($reference, new GrantScope($named, $application))->detach(self::key($stored));
+
+            $detach = OperationResource::revoke(PackagePermissions::RESOURCE_POLICY_DETACH, self::granteeOf($reference), $stored, new GrantScope($named, $application));
+
+            $actor?->authorizeIn($operation, $detach);
+
+            $scope = self::table($reference, new GrantScope($named, $application))->detach(self::key($stored));
 
             if ($scope === null) {
                 return 0;
@@ -160,21 +188,28 @@ final class ResourcePolicyService
      * `InvalidResourceException`.
      *
      * @param  mixed  $resource
-     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $actor
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
      * @return int
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidResourceException
      * @throws \Throwable
      */
-    public function detachAll(mixed $resource, Model|Reference|null $actor = null): int
+    public function detachAll(mixed $resource, ?ActingContext $actor = null): int
     {
         $reference = self::record($resource);
 
         /** @var int<0, max> */
-        return OperationScope::run(Operation::begin($actor), static function (Operation $operation) use ($reference): int {
-            $events = [];
+        return OperationScope::run(Operation::begin($actor, [PackagePermissions::RESOURCE_POLICY_DETACH]), static function (Operation $operation) use ($actor, $reference): int {
+            $attachments = self::attachmentsOf($reference);
+            $events      = [];
 
-            foreach (self::attachmentsOf($reference) as [$policy, $scope]) {
+            $grantee = self::granteeOf($reference);
+
+            $detach = static fn (array $attachment): OperationResource => OperationResource::revoke(PackagePermissions::RESOURCE_POLICY_DETACH, $grantee, ...$attachment);
+
+            $actor?->authorizeIn($operation, ...\array_map($detach, $attachments));
+
+            foreach ($attachments as [$policy, $scope]) {
                 $held = self::table($reference, $scope)->detach(self::key($policy));
 
                 if ($held === null) {
@@ -188,6 +223,18 @@ final class ResourcePolicyService
 
             return \count($events);
         });
+    }
+
+    /**
+     * Return the resource a policy is attached to as the grantee of the change,
+     * by its type and key, `*` for its whole type.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
+     * @return \SineMacula\Laravel\Authorization\Support\Reference
+     */
+    private static function granteeOf(ResourceReference $resource): Reference
+    {
+        return new Reference((string) $resource->type, $resource->id ?? '*');
     }
 
     /**

@@ -20,14 +20,18 @@ permission catalogue through the permission model in its own transaction on the 
   (AUTHZ-7.3).
 - `BoundaryService`: set, replace and remove the permission boundary of a principal or an identity, platform-wide or in
   a tenant (AUTHZ-7.4).
-- `GuardrailService`: set and remove the guardrails of a tenant or of the platform (AUTHZ-7.6), for an actor allowed to.
+- `GuardrailService`: set and remove the guardrails of a tenant or of the platform (AUTHZ-7.6), for an acting subject
+  allowed to.
 
 Each is a final class bound as a singleton (it holds no state), resolved from the container or injected. Every public
-method takes the actor making the call as an optional `$actor`, a model or a `Support\Reference`: null for console and
-system work. `GuardrailService` alone requires it, as a model, since it decides whether the actor may make the change.
-Every event the call dispatches carries it, and every grant row it writes records it in `granted_by_type` and
-`granted_by_id`. It is never read from the authenticated user or the subject resolver. The events themselves are
-described in [Events](events.md).
+method takes the acting context making the call as an optional `$actor`, an `Administration\ActingContext`: null for
+trusted system work, such as seeders, migrations and console commands (N75), whose changes are not decided. A call with
+one is delegated administration (AUTHZ-11.1): each change it makes is decided as the actor, through `check()`, on the
+change's operation resource, inside the call's transaction and before anything is written (see
+[Delegated administration](delegated-administration.md)). `GuardrailService` alone requires it, since it decides
+whether the actor may make the change. Every event the call dispatches carries the call's operation, and every grant row
+it writes records the actor in `granted_by_type` and `granted_by_id`. It is never read from the authenticated user or
+the subject resolver. The events themselves are described in [Events](events.md).
 
 ## Invariants
 
@@ -63,14 +67,14 @@ described in [Events](events.md).
    the tenant named, else the tenant that owns every target, else the platform. Only a grantee's deletion revokes in
    every scope. A grant is for the application the call names, else every application (D24).
 
-6. **Reported once it commits, and nothing for a no-op.** Each call is one operation: every event it dispatches
-   carries the same operation id and the caller's actor, and is dispatched once the write commits on the package's
-   connection, at the outermost commit when the call runs inside an application transaction, and never when that
-   transaction rolls back. Only a write that changed something is reported: granting what is held, revoking what is
+6. **Reported once it commits, and nothing for a no-op.** Each call is one operation: every event it dispatches carries
+   the same operation, its id, its actor and mode and its actions, and is dispatched once the write commits on the
+   package's connection, at the outermost commit when the call runs inside an application transaction, and never when
+   that transaction rolls back. Only a write that changed something is reported: granting what is held, revoking what is
    not held and a sync that changes nothing dispatch nothing. A re-armed grant or a changed expiry dispatches the
    granted event as well as the expiry-changed one. Every dispatched event bumps the resolution cache versions it
-   affects, so the change takes effect on the next check. Record writes go through the models, so their observers
-   report them, as part of the call's operation.
+   affects, so the change takes effect on the next check. Record writes go through the models, so their observers report
+   them, as part of the call's operation.
 
 7. **The hierarchy is checked under a lock.** `setParent()` locks the role and the parent, in key order, then the
    observer walks the parent's ancestors, each locked for update and read outside the tenant scope. Reaching the role
@@ -147,7 +151,7 @@ described in [Events](events.md).
     `previous` policy it replaced) or `Identity\BoundaryRemoved` after commit only when it changed something, and
     refreshes the grantee's cached resolutions through its version.
 
-14. **A guardrail is one row per policy per scope, and only an actor allowed to may write it (AUTHZ-7.6).**
+14. **A guardrail is one row per policy per scope, and only an acting subject allowed to may write it (AUTHZ-7.6).**
     `GuardrailService::set()` writes a row of `guardrails`: the policy, the tenant (both columns null for the platform)
     and the actor. A null-folding unique key over the policy and the tenant keeps a policy once per scope, while a
     scope may have any number of guardrails; the write is insert-or-ignore followed by a read-back
@@ -155,8 +159,9 @@ described in [Events](events.md).
     guardrail has no application and no reach flag: it holds in every application and, on a tenant, in its subtree. A
     tenant's policy is set on that tenant or below it, and anywhere else, the platform included, is refused with
     `GrantScopeMismatchException`. `remove()` removes the policy's guardrail from the scope named and returns whether
-    there was one. Before either call reads or writes anything, `Services\Support\GuardrailAuthority` decides through
-    `check()` whether the actor holds `authorization:guardrails:manage` from above the scope: for a tenant, just below
+    there was one. Inside the call's transaction, before it reads or writes anything else,
+    `Services\Support\GuardrailAuthority` decides through `check()`, as the acting context's subject, whether it holds
+    `authorization:guardrail.manage` from above the scope: for a tenant, just below
     its parent, so a grant held at an ancestor counts only when it reaches below it, a platform-wide grant counts, and
     one held within the tenant never does; for a root tenant and the platform, at platform scope. The check is exempt
     from the guardrails, as every check of that exact action is, so no guardrail caps it; every other deny and cap
@@ -221,7 +226,7 @@ working: each forwards to the matching service method with no actor.
   (`in_use`), naming every scope the policy caps, and the foreign key on `guardrails.policy_id` restricts a delete made
   past the model; remove each guardrail through `GuardrailService` first, then set the edited policy again.
 - **No guardrail locks the guardrails.** The actor's right is decided through `check()`, but a check of exactly
-  `authorization:guardrails:manage` is exempt from the guardrails: none is read for it, so a guardrail that does not
+  `authorization:guardrail.manage` is exempt from the guardrails: none is read for it, so a guardrail that does not
   allow the permission, one that denies it and one that cannot be read, a platform guardrail included, keep no actor
   from changing the guardrails of any scope, its own removal included. The actor's other denies and its boundaries
   still count.

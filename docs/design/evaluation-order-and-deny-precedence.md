@@ -222,14 +222,14 @@ A guardrail (AUTHZ-7.6, N41) is a managed policy set on a tenant, or on the plat
   policy's allows would be, conditions and `not_actions` included; passing it only lets the boundaries and the allows
   be weighed. Its deny statements are explicit denies at the deny stage, after every policy's and before every
   boundary's. It never names `principals`, so its allows apply to every subject.
-- **Who may change them.** Only an actor holding `authorization:guardrails:manage`, a permission the package declares
+- **Who may change them.** Only an actor holding `authorization:guardrail.manage`, a permission the package declares
   in its own catalogue (`Support\PackagePermissions`), from above the scope. The right is decided through `check()`
   (D22), so every deny and boundary that applies to the actor counts, run just below the parent of the tenant changed
   (`TenantScope::within()` with `isBelow`): a grant held at an ancestor counts only when it reaches below it, a
   platform-wide grant counts, and one held within the tenant itself never does. A tenant with no parent, and the
   platform, are decided at platform scope, where only a platform-wide grant counts (`GuardrailAuthority`). An actor
   refused is refused with `GuardrailException` (`not_permitted`) before anything is read or written.
-- **No guardrail lockout (N49).** A check of exactly `authorization:guardrails:manage`, the guardrail service's or any
+- **No guardrail lockout (N49).** A check of exactly `authorization:guardrail.manage`, the guardrail service's or any
   other, is exempt from the guardrail stage: `AuthorizationManager` reads no guardrail for it and gives the evaluator
   none at all (`null`), so no guardrail's deny or allow applies, nor does a guardrail that cannot be read, and the
   stage records `[guardrail] guardrails: exempt`. No guardrail, a platform guardrail included, can therefore keep an
@@ -336,7 +336,7 @@ refuses never reads the permissions, since the session stage runs before the all
       at all included, denies as `guardrail`, and each guardrail that refuses adds a `refused` step naming it. An allow
       whose authentication requirement is unmet does not allow, so the guardrail denies as `guardrail`, never as a
       step-up. With no guardrail the stage records `uncapped` and caps nothing. A check of exactly
-      `authorization:guardrails:manage` is exempt: the stage records `exempt`, and the deny stage weighs no guardrail's
+      `authorization:guardrail.manage` is exempt: the stage records `exempt`, and the deny stage weighs no guardrail's
       denies for it (N49).
    4. *Boundary*: every permission boundary of the principal and of its identity that applies must allow the check,
       each through its allow statements, conditions included (see [Permission Boundaries](#permission-boundaries)).
@@ -455,7 +455,7 @@ refuses never reads the permissions, since the session stage runs before the all
     and one that cannot be read or evaluated denies as `invalid_policy` (invariant 6). The check's tenant is the
     resource's when it has one, so a platform-wide permission that admits a resource of another tenant never gets past
     that tenant's guardrails. A guardrail changes only through `GuardrailService`, for an actor holding
-    `authorization:guardrails:manage` from above the scope, decided through `check()`, and its policy is neither
+    `authorization:guardrail.manage` from above the scope, decided through `check()`, and its policy is neither
     edited nor deleted while it is one, so a tenant can never lift the guardrails it is set under. That one check is
     exempt from the guardrails (N49), so no guardrail can ever lock the guardrails.
 
@@ -605,7 +605,7 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 - **An unreadable guardrail**: a guardrail whose document cannot be hydrated, or is over a limit, denies every check in
   its scope as `invalid_policy` at the deny stage (every check, for a platform guardrail), logged as an unreadable
   policy is. Its policy cannot be edited while it is a guardrail, so it is fixed by removing the guardrail, correcting
-  the policy and setting it again. The check of `authorization:guardrails:manage` reads no guardrail, so an unreadable
+  the policy and setting it again. The check of `authorization:guardrail.manage` reads no guardrail, so an unreadable
   guardrail, a platform one included, never blocks its own removal through the service.
 - **A guardrail and `withPolicies()`**: the override replaces the policies, never the guardrails, so an override never
   lifts a guardrail.
@@ -613,10 +613,10 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 - **A resource admitted from outside the scope**: a subject admitted at platform scope to another tenant's resource
   through a platform-wide permission is capped by that tenant's guardrails and its ancestors', read in the resource's
   tenant, besides the platform's.
-- **A guardrail that does not allow managing guardrails**: the check of `authorization:guardrails:manage` is exempt
+- **A guardrail that does not allow managing guardrails**: the check of `authorization:guardrail.manage` is exempt
   from the guardrails, so such a guardrail, or one that denies the permission, caps every other check in its scope but
   never that one, and keeps no actor from changing the guardrails of any scope, its own removal included.
-- **A check of another `authorization:` action**: only the exact action `authorization:guardrails:manage` is exempt;
+- **A check of another `authorization:` action**: only the exact action `authorization:guardrail.manage` is exempt;
   any other action, one a pattern of it would match included, is capped by the guardrails as ever.
 - **No authorization manager bound**: `GuardrailAuthority` refuses every actor, so no guardrail is changed unchecked.
 - **No session policy source bound**: the default `NoSessionPolicy` answers null for every subject, so no credential
@@ -640,7 +640,7 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   still denies it.
 - **A session policy source that throws**: the check is aborted with the exception, and no decision is made, recorded
   or dispatched.
-- **Nothing declared**: the package declares `authorization:guardrails:manage` whatever the application configures,
+- **Nothing declared**: the package declares `authorization:guardrail.manage` whatever the application configures,
   but the shipped `DeclaredActionCatalogue` holds the application's declarations alone. With none, a policy whose
   patterns need any action but the package's own is refused with the one reason that nothing is declared
   (`PolicyValidator::NOTHING_DECLARED`), and one naming only the package's own, such as `authorization:*`, is
@@ -650,7 +650,7 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
 
 - `AuthorizationManager::check()` -- the core decision and its recording; `DecisionPipeline::decide()` -- the subject
   and resource stages; `DecisionPipeline::sources()` -- the check's context (`CheckContextFactory::make()`), the
-  policies, the guardrails (none at all, `null`, for the exempt `authorization:guardrails:manage`), the boundaries, the
+  policies, the guardrails (none at all, `null`, for the exempt `authorization:guardrail.manage`), the boundaries, the
   permission callback and the session caps; `DecisionPipeline::weigh()` -- the evaluator given those sources under the
   session caps; `DecisionPipeline::decideGrants()` -- `invalid_policy` when the sources cannot be gathered;
   `AuthorizationManager::capped()` and `DecisionPipeline::capped()` -- the scoped manager carrying the explicit caps;

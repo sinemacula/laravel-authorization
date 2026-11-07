@@ -77,7 +77,7 @@ must each allow the check, then an explicit allow or a permission held allows it
   boundary that applies must allow the check, a boundary grants nothing, and its denies count with every other deny.
 - **Guardrails**: a managed policy set on a tenant, reaching its subtree, or on the platform caps every check in its
   scope, whoever the subject is, as a boundary caps one grantee's. Every guardrail that applies must allow the check,
-  a guardrail grants nothing, and only an actor holding `authorization:guardrails:manage` from above the scope, a
+  a guardrail grants nothing, and only an actor holding `authorization:guardrail.manage` from above the scope, a
   permission the package declares itself and no guardrail caps, may set or remove one.
 - **Session caps and machines**: a check is capped by the scopes of the subject's credential, from a session policy
   source you bind and mapped to actions through a scope map checked at boot, and by any actions the caller passes to
@@ -128,6 +128,13 @@ must each allow the check, then an explicit allow or a permission held allows it
   cleared unless `forceSystem()` unlocks the next change.
 - **Explanations**: `Authorization::explain()`, the last decision of the request, and `authorization:why-can` on the
   command line.
+- **Delegated administration**: every change a management service makes is an administration action the package
+  declares (`authorization:role.grant`, `authorization:policy.update` and the rest), decided through `check()` as the
+  acting subject on an operation resource naming the change, inside the change's transaction and before anything is
+  written, when the call names an acting context; a call that names none is trusted system work. A screen checking the
+  same operation gets the same decision. This release decides each action and refuses, as `administration.unprovable`,
+  every change that could widen authority, until the scope, owner, rank, self and impact rules arrive (see
+  [Delegated administration](#delegated-administration)).
 - **Management services** that own every write of a role, permission, policy, grant, resource attachment, permission
   boundary or guardrail: each call runs in one transaction on the package's connection, through the configured models,
   and grants are idempotent under concurrency. The traits, the grant and revoke commands and the Spatie import write
@@ -135,8 +142,9 @@ must each allow the check, then an explicit allow or a permission held allows it
   transaction.
 - **Events** for every grant, revocation, expiry change, resource attachment, boundary or guardrail change and model
   change that changes something, for each use of the system override, for each decision, and when `authorize()` refuses.
-  All implement one marker interface; the change events are snapshots of plain values that carry the actor the caller
-  named, and are dispatched only once the write commits.
+  All implement one marker interface; the change events are snapshots of plain values that carry the call's operation
+  (its id, its actor and identity, whether it was trusted or delegated, and its actions), and are dispatched only once
+  the write commits.
 - **Resolution cache** for roles, permissions, policies, boundaries and guardrails, in memory and optionally in any
   cache store, versioned so every write takes effect on the next check in every worker, and falling back to the database
   when the store fails.
@@ -196,7 +204,7 @@ about every permission either declares:
 
 The same declarations are the actions a policy may name: a policy is refused when it is saved if one of its `actions` or
 `not_actions` patterns matches no declared permission. Until you declare yours, a policy is refused with the reason
-that no permissions are declared, unless it names only the package's own permission, `authorization:guardrails:manage`
+that no permissions are declared, unless it names only the package's own permission, `authorization:guardrail.manage`
 (see [Guardrails](#guardrails)), which a policy may always name.
 
 Booting the package never queries or writes the database, so `config:cache`, `route:cache` and `migrate` run before
@@ -340,26 +348,32 @@ Every write goes through seven services, which you inject or resolve from the co
 `ResourcePolicyService` for the policies attached to resources (see [Resource-based
 policies](#resource-based-policies)), `BoundaryService` for the permission boundaries of principals and identities (see
 [Permission boundaries](#permission-boundaries)), and `GuardrailService` for the guardrails of tenants and the platform,
-whose actor is required (see [Guardrails](#guardrails)). Each call runs in one transaction on the package's connection
-(`authorization.connection`), through the models `authorization.models` configures, and takes the actor making the call
-as an optional `actor`, a model or a reference (null for console and system work). Every event the call dispatches
-carries it, and every grant row it writes records it in `granted_by_type` and `granted_by_id`; it is never read from the
-signed-in user:
+whose acting context is required (see [Guardrails](#guardrails)). Each call runs in one transaction on the package's
+connection (`authorization.connection`), through the models `authorization.models` configures, and takes an optional
+`actor`, the `ActingContext` making the call. A call without one is trusted system work, as seeders, migrations and
+console commands are, and is not decided; a call with one is delegated administration, each change decided as that
+actor (see [Delegated administration](#delegated-administration)). Every event the call dispatches carries its
+operation, and every grant row it writes records the actor in `granted_by_type` and `granted_by_id`; it is never read
+from the signed-in user:
 
 ```php
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 
 $roles  = app(RoleService::class);
 $grants = app(GrantService::class);
 
-$editor = $roles->create('editor', 'web', 'Edits posts', actor: $admin);
-$roles->grantPermission($editor, 'posts:update', actor: $admin);
-$roles->setParent($editor, 'author', actor: $admin);
+// Trusted work, such as a seeder: nothing is decided.
+$editor = $roles->create('editor', 'web', 'Edits posts');
+$roles->grantPermission($editor, 'posts:update');
+$roles->setParent($editor, 'author');
 
-$grants->grantRole($user, $editor, now()->addMonth(), actor: $admin); // GrantOutcome::GRANTED
-$grants->syncPermissions($user, ['posts:delete'], actor: $admin);     // SyncResult
-$grants->revokeRole($user, 'editor', actor: $admin);                  // 1, the roles revoked
+$grants->grantRole($user, $editor, now()->addMonth()); // GrantOutcome::GRANTED
+$grants->syncPermissions($user, ['posts:delete']);     // SyncResult
+
+// Delegated administration: decided as the request's subject.
+$grants->revokeRole($user, 'editor', actor: ActingContext::current()); // 1, the roles revoked
 ```
 
 Grants are idempotent: granting what the grantee holds, with the same expiry, changes nothing, dispatches no event and
@@ -550,7 +564,7 @@ whoever holds the role:
 ```php
 $editor->attachPolicy($noDeletesOffNetwork);                  // for every holder of editor
 $editor->attachPolicy($businessHours, tenant: $organisation); // only in the organisation
-$grants->detachPolicy($editor, $noDeletesOffNetwork, actor: $admin);
+$grants->detachPolicy($editor, $noDeletesOffNetwork);
 ```
 
 A role's policy applies only where both grants hold: the holder's grant of the role and the role's attachment of the
@@ -588,8 +602,8 @@ $policy = $user->createInlinePolicy('own-posts-only', $document);
 
 $user->attachPolicy($policy);
 
-// Or through the service, with an actor, here for a role:
-$editors = app(PolicyService::class)->createInline($editor, 'own-posts-only', $document, actor: $admin);
+// Or through the service, here for a role:
+$editors = app(PolicyService::class)->createInline($editor, 'own-posts-only', $document);
 
 $editor->attachPolicy($editors);
 ```
@@ -647,9 +661,9 @@ $sharing = Policy::create([
 
 $resources = app(ResourcePolicyService::class);
 
-$resources->attach($sharing, $post, actor: $admin);                // GrantOutcome::GRANTED, on post:42
+$resources->attach($sharing, $post);                                // GrantOutcome::GRANTED, on post:42
 $resources->attach($archiving, Post::class, tenant: $organisation); // every post, in the organisation
-$resources->detach($sharing, $post, actor: $admin);                // 1, the attachments removed
+$resources->detach($sharing, $post);                                // 1, the attachments removed
 
 Authorization::for($user)->can('posts:read', $post);    // true for user 17, with no posts:read permission
 Authorization::for($admin)->can('posts:delete', $post); // false: the deny applies to everyone
@@ -748,11 +762,11 @@ $supportCap = Policy::create([
 
 $boundaries = app(BoundaryService::class);
 
-$boundaries->set($user, $supportCap, actor: $admin);                // GrantOutcome::GRANTED, platform-wide
+$boundaries->set($user, $supportCap);                               // GrantOutcome::GRANTED, platform-wide
 $boundaries->set($user, $tenantCap, tenant: $organisation);         // GRANTED, in the organisation and below it
 $boundaries->set($user, $stricterCap, tenant: $organisation);       // REPLACED: one boundary per scope
 $boundaries->set($user, $stricterCap, $organisation, false);        // REACH_CHANGED: the organisation alone
-$boundaries->remove($user, tenant: $organisation, actor: $admin);   // true: it had one there
+$boundaries->remove($user, tenant: $organisation);                  // true: it had one there
 
 $user->givePermission('posts:update');
 
@@ -848,9 +862,11 @@ $platformCap = Policy::create([
 
 $guardrails = app(GuardrailService::class);
 
-$guardrails->set($organisationCap, $organisation, $platformAdmin); // GrantOutcome::GRANTED, here and below
-$guardrails->set($organisationCap, $organisation, $platformAdmin); // UNCHANGED: it is already there
-$guardrails->set($platformCap, null, $platformAdmin);              // GRANTED, on the platform
+$actor = ActingContext::for($platformAdmin);
+
+$guardrails->set($organisationCap, $organisation, $actor); // GrantOutcome::GRANTED, here and below
+$guardrails->set($organisationCap, $organisation, $actor); // UNCHANGED: it is already there
+$guardrails->set($platformCap, null, $actor);              // GRANTED, on the platform
 
 // $post belongs to $organisation, and $editor is checked in it, so both guardrails apply.
 $editor->givePermission('billing:view');
@@ -858,7 +874,7 @@ $editor->givePermission('billing:view');
 Authorization::for($editor)->can('posts:export', $post); // false: organisation-cap denies it, whatever the editor holds
 Authorization::for($editor)->can('billing:view');        // false: platform-cap allows it, but organisation-cap does not
 
-$guardrails->remove($organisationCap, $organisation, $platformAdmin); // true: the organisation had it
+$guardrails->remove($organisationCap, $organisation, $actor); // true: the organisation had it
 
 Authorization::for($editor)->can('billing:view'); // true: platform-cap, the one guardrail left, allows it
 ```
@@ -895,36 +911,39 @@ check's policies alone, so the guardrails still apply: an override never lifts a
 authentication requirement is unmet does not allow the check, and the denial is `guardrail`, never
 `insufficient_authentication`. A guardrail statement that cannot be evaluated denies as `invalid_policy` at the
 `guardrail` stage, and a guardrail whose document cannot be read denies, as `invalid_policy`, every check in its scope,
-so a broken guardrail never lifts the cap. The one check no guardrail caps is that of `authorization:guardrails:manage`
+so a broken guardrail never lifts the cap. The one check no guardrail caps is that of `authorization:guardrail.manage`
 (see **Who may change them** below).
 
-**Who may change them.** Only an actor that holds `authorization:guardrails:manage` from above the scope. The right is
-decided through `check()`, so it must be held effectively: every deny and boundary that applies to the actor counts, and
-an inactive actor holds nothing. The guardrails never count: a check of exactly `authorization:guardrails:manage`,
-whoever makes it, is exempt from the guardrail stage, so no guardrail is read for it, neither its denies nor its allows
-apply, and the trace records the stage as `[guardrail] guardrails: exempt`. For a tenant's guardrails it is decided just
-below the tenant's parent, so a grant held at an ancestor of the tenant counts when it reaches the tenants below it, a
-platform-wide grant counts, and a grant held within the tenant itself never does: a tenant's own administrators never
-lift the guardrails their tenant is set under. A tenant with no parent, and the platform, are changed only through a
-platform-wide grant. The check keeps the request's application and is recorded and reported like any other decision. An
-actor without the right is refused with `GuardrailException`, whose `getReason()` is `not_permitted` and `getActor()`
-the actor, before anything is read or written.
+**Who may change them.** Only an acting subject that holds `authorization:guardrail.manage` from above the scope: the
+acting context is required, so there is no trusted guardrail change. The right is decided through `check()`, as the
+acting context's subject with its session and caps, inside the change's transaction, so it must be held effectively:
+every deny and boundary that applies to the actor counts, and an inactive actor holds nothing. The guardrails never
+count: a check of exactly `authorization:guardrail.manage`, whoever makes it, is exempt from the guardrail stage, so no
+guardrail is read for it, neither its denies nor its allows apply, and the trace records the stage as `[guardrail]
+guardrails: exempt`. For a tenant's guardrails it is decided just below the tenant's parent, so a grant held at an
+ancestor of the tenant counts when it reaches the tenants below it, a platform-wide grant counts, and a grant held
+within the tenant itself never does: a tenant's own administrators never lift the guardrails their tenant is set under.
+A tenant with no parent, and the platform, are changed only through a platform-wide grant. The check keeps the request's
+application and is recorded and reported like any other decision. An actor without the right is refused with
+`GuardrailException`, whose `getReason()` is `not_permitted` and `getActor()` the actor's principal, before anything is
+read or written. An impersonated actor is refused with `AuthorizationException` as `administration.impersonating` unless
+`authorization:administration.impersonated` is allowed it from above the scope too.
 
 ```php
 // Every scope, the platform included.
-$platformAdmin->givePermission('authorization:guardrails:manage');
+$platformAdmin->givePermission('authorization:guardrail.manage');
 
 // The tenants below the organisation, never the organisation itself.
-$organisationAdmin->givePermission('authorization:guardrails:manage', tenant: $organisation);
+$organisationAdmin->givePermission('authorization:guardrail.manage', tenant: $organisation);
 ```
 
-So no guardrail can lock the guardrails: one that does not allow `authorization:guardrails:manage`, one that denies it,
+So no guardrail can lock the guardrails: one that does not allow `authorization:guardrail.manage`, one that denies it,
 and one whose document cannot be read, a platform guardrail included, keep no actor from changing the guardrails of
 any scope, and each can still be removed through the service. Nothing else is exempt: every other source's denies, the
 actor's permission boundaries and the session caps still apply to the check, and the grant must still reach the scope
 from above.
 
-**The permission.** The package declares `authorization:guardrails:manage` in its own permission catalogue, whatever
+**The permission.** The package declares `authorization:guardrail.manage` in its own permission catalogue, whatever
 the application configures: guard-agnostic and under the `authorization` category. `authorization:sync` writes it with
 the application's permissions, so it can be granted as any permission can, and a policy naming it validates, even
 before the application declares any permission of its own. It is decided through `check()`, exempt from the
@@ -1104,6 +1123,149 @@ The registry reads the catalogue the first time it is asked, and keeps it for it
 the database: a check a cap covers runs the same queries as one with no cap, and one a cap refuses never reads the
 permissions.
 
+### Delegated administration
+
+Granting, revoking and editing roles, permissions and policies are themselves actions this package checks (AUTHZ-11.1).
+A management service called with an acting context decides each change it makes as that actor, through `check()`, the
+one decision path, and refuses it when the decision does not allow it. Your administration screens call the same
+services with the acting context of the signed-in administrator; seeders, migrations and console commands call them
+without one.
+
+```php
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Services\GrantService;
+
+$actor = ActingContext::current(); // the request's subject, its session kept
+
+app(GrantService::class)->revokeRole($user, 'editor', actor: $actor); // decided under authorization:role.revoke
+app(GrantService::class)->grantRole($user, 'editor', actor: $actor);  // refused in this release: see below
+```
+
+**The actions.** The package declares each administration action as a permission of its own, spelt
+`authorization:<noun>.<verb>`, guard-agnostic and filed under the `authorization` category, so `authorization:sync`
+writes them and a policy naming them validates:
+
+| Actions                                                                            | What they cover                                                      |
+|------------------------------------------------------------------------------------|----------------------------------------------------------------------|
+| `role.grant`, `role.revoke`                                                        | A role granted to or revoked from a principal or identity            |
+| `permission.grant`, `permission.revoke`                                            | A permission granted directly, or added to or removed from a role    |
+| `policy.attach`, `policy.detach`                                                   | A policy attached to or detached from an identity, principal or role |
+| `role.create`, `role.rename`, `role.update`, `role.delete`, `role.parent.set`      | A role's lifecycle, its description and rank, and its parent         |
+| `permission.create`, `permission.rename`, `permission.update`, `permission.delete` | A permission's lifecycle, its description and category               |
+| `policy.create`, `policy.rename`, `policy.update`, `policy.delete`                 | A policy's lifecycle, an inline one included, and its document       |
+| `boundary.set`, `boundary.remove`                                                  | A permission boundary set, replaced or removed                       |
+| `guardrail.manage`                                                                 | A guardrail set or removed, from above the scope it caps             |
+| `resource-policy.attach`, `resource-policy.detach`                                 | A policy attached to or detached from a record or a resource type    |
+| `role.read`, `permission.read`, `policy.read`                                      | Reading and listing through the services; not decided yet            |
+| `permission.grantable`, `policy.grantable`                                         | Delegating what the actor does not hold; not decided yet             |
+| `administration.self`, `administration.impersonated`                               | A change that benefits the actor; a change made while impersonating  |
+
+Each is prefixed with `authorization:`. A sync, `revokeAll()`, `removeAll()` and `detachAll()` decide each change they
+make under its own action (there is no blanket action), and every change is decided before any is written, so a batch is
+atomic: one refusal leaves nothing written and dispatches no change event, and no change is decided on authority an
+earlier one would have handed out. `revokeAll()` removes the grantee's boundaries too, so it decides
+`authorization:boundary.remove` for each. A sync decides a grant of each listed row the grantee does not hold live and a
+revocation of each it drops; a row it holds live decides nothing. A grant, an attachment or a set is decided whether or
+not it changes anything; a revocation by name decides each held row of the name.
+
+**The acting context.** `ActingContext` holds the resolved subject making the call: its principal, the identity behind
+it, its guard, its session and, for a machine, the scopes of its credential, which cap what it may administer as they
+cap its other checks. `ActingContext::current()` takes the request's subject as `check()` resolves it, keeping its
+session, so a step-up met in the session counts; `ActingContext::for($model)` names another model as
+`Authorization::for()` names it, with no session, so an authentication requirement is never met for it, and
+`ActingContext::for($subject)` keeps a resolved `Subject` as it is. `capped($actions)` caps the call further, as
+`Authorization::capped()` caps a check, and `impersonatedBy($impersonator)` says the actor is being impersonated, which
+the package cannot tell by itself. An acting context is never built from a bare reference: a subject that cannot be
+resolved, or whose principal is not a saved model, is refused with `AuthorizationException` as `subject_unresolved`, and
+never falls back to a trusted call.
+
+| Method                                 | What it does                                                                                         |
+|----------------------------------------|------------------------------------------------------------------------------------------------------|
+| `ActingContext::current()`             | Returns the acting context of the request's subject, its session kept                                |
+| `ActingContext::for($actor)`           | Returns the acting context of the model named, with no session, or of a `Subject` as it is           |
+| `capped($actions)`                     | Returns the acting context with the call capped by the actions as well                               |
+| `impersonatedBy($impersonator)`        | Returns the acting context marked as impersonated by the model or reference given                    |
+| `isImpersonating()`                    | Returns whether someone is impersonating the acting subject                                          |
+| `principal()`, `identity()`            | Return the references to the acting principal and to its identity, null for none                     |
+| `check($operationResource)`            | Decides the resource's action on it, as the service decides it, and returns the `Decision`           |
+| `decide($action, $resource)`           | Decides any action as the acting subject, with the call's caps, and returns the `Decision`           |
+| `authorize($operationResource)`        | Decides as `check()` does and throws when the decision does not allow                                |
+| `authorizeIn($operation, ...$changes)` | Decides each change of the operation in order, correlated by its id, and throws at the first refused |
+| `ActingContext::refusal($decision)`    | Returns the `AuthorizationException`, with the one `denied` line, the decision refuses with          |
+
+**Trusted calls and delegated calls.** A call with no acting context is trusted system work (N75): nothing is decided,
+every structural rule, system-record protection, transaction and event still applies, and its operation is marked
+trusted with no actor. Treat it as an integration surface for your own code, never as an endpoint for user-controlled
+administration. A call with an acting context is delegated: each change is decided inside the call's transaction, before
+anything is written, and its operation carries the actor. `GuardrailService` always takes an acting context.
+
+**The operation resource.** Each change is decided on an `OperationResource`, a resource of type
+`authorization:operation` whose id is the operation's id and whose tenant is the change's intended tenant (a
+definition's owner for a change to a role, permission or policy), so a change in a tenant is decided in that tenant's
+scope and one in a tenant outside the actor's scope is refused as `tenant_scope`. A screen that builds the same resource
+through the same named constructor (`OperationResource::grant()`, `revoke()` or `definition()`) and checks it with
+`$actor->check($resource)` gets the decision the service makes. The resource offers what the change names to your
+policies, under `resource`:
+
+| Key                                                                                          | Type   | What it holds                                                         |
+|----------------------------------------------------------------------------------------------|--------|-----------------------------------------------------------------------|
+| `resource.id`, `resource.type`, `resource.tenant.type`, `resource.tenant.id`                 | string | The operation's id, `authorization:operation` and the intended tenant |
+| `resource.action`                                                                            | string | The administration action                                             |
+| `resource.narrowing`                                                                         | bool   | Whether the change can only narrow what anyone may do                 |
+| `resource.target_type`, `resource.target_id`                                                 | string | The record acted on                                                   |
+| `resource.role`, `resource.permission`, `resource.policy`                                    | string | The record's name, under its kind                                     |
+| `resource.grantee_type`, `resource.grantee_id`                                               | string | The grantee, or the resource type and key (`*`) a policy attaches to  |
+| `resource.application`                                                                       | string | The application a grant holds in; missing for every application       |
+| `resource.subtree`                                                                           | bool   | Whether a grant reaches the tenants below its tenant                  |
+| `resource.expires_at`                                                                        | time   | When a grant expires; missing for one that never does                 |
+| `resource.change.name`, `.description`, `.rank`, `.parent`, `.guard`, `.category`, `.digest` | mixed  | A definition's proposed change, a document by its digest alone        |
+| `resource.change.owner_type`, `resource.change.owner_id`                                     | string | The grantee an inline policy is created for                           |
+| `resource.impersonated`, `resource.impersonator_type`, `resource.impersonator_id`            | mixed  | Whether the actor is impersonated, and by whom                        |
+
+`resource.change.rank` is a number and the rest of `resource.change` strings. An attribute provider you register that
+declares one of these keys must declare it with the same type.
+
+```php
+// Editors may revoke roles in their own tenant, for the admin application only.
+['effect' => 'allow', 'actions' => ['authorization:role.revoke'], 'resources' => ['authorization:operation:*'],
+    'conditions' => ['eq' => ['resource.application' => 'admin']]]
+```
+
+**What this release enforces.** Every change is decided under its action, through every deny, guardrail, boundary and
+session cap, and in its intended tenant. Then an administration stage, after the allow and inside the same decision,
+weighs the operation's constraints, and can only refuse:
+
+- a change made while impersonating is refused as `administration.impersonating` unless the actor is also allowed
+  `authorization:administration.impersonated` on the same operation;
+- a change that can only narrow what anyone may do is allowed on its action's decision alone: revoking a permission
+  (directly or from a role), revoking a role no policy attached to it or its ancestors denies anything in, and
+  detaching a policy, from a grantee or a resource, with no deny statement;
+- every other change, which could widen what someone may do, is refused as `administration.unprovable`: grants and
+  attachments, setting or removing a boundary, detaching a policy that denies, and every change to a role, permission
+  or policy definition. The rules that would prove them permitted arrive in later releases: the scope, owner, rank,
+  self, expiry and possession rules of direct grants; then grantable rights, role and definition edits and their impact
+  on existing holders; then guardrail integration and the concurrency protocol (see
+  [the design note](docs/design/delegated-administration.md)).
+
+`canActOn($target)` on an identity compares rank alone (strictly senior, an unranked target the most junior, an unranked
+actor acting on no one, rank turned off passing every comparison) and grants nothing by itself; the later releases weigh
+it beside every other rule.
+
+**Reasons and errors.** A refusal throws `AuthorizationException`, or `InsufficientAuthenticationException` for a
+step-up, carrying the decision (`getDecision()`), its stage and its trace, for audit; the client sees the one `denied`
+line. The administration stage refuses with these reasons, each at the `administration` stage with a trace step naming
+it: `administration.scope`, `administration.owner`, `administration.rank_uncomparable`, `administration.rank`,
+`administration.self`, `administration.not_grantable`, `administration.unprovable` and `administration.impersonating`.
+This release refuses with the last two; the others are reserved for the rules to come.
+
+**Audit.** Every decision is reported with `DecisionEvaluated`, and a refusal with `AuthorizationFailed`, as
+`authorize()` reports one, each naming the operation resource `authorization:operation:{operation id}`. The change
+events of a write are dispatched only after it commits, and their operation carries the same id, the actor's principal
+and identity, whether the call was trusted or delegated, any impersonator and the actions it was decided under, so a
+decision and the write it allowed are correlated. A refusal happens inside a transaction that rolls back, so an audit
+store that persists denials must write them outside that transaction, on another connection or from a listener of the
+decision event that queues the write, or the rollback takes them too.
+
 ### How a check is decided
 
 `Authorization::check()` is the one decision behind `can()`, `cannot()`, `any()`, `all()`, `authorize()`, `explain()`,
@@ -1128,7 +1290,7 @@ Within each stage, the policies are assessed in a fixed order (name, stored key,
 statement by its position, so the decision and its trace never depend on the order the policies were read in. The
 decision records the stage that decided it and every step it took: each statement assessed, each guardrail and boundary
 that refused the check as `refused`, naming it, each session cap as `covered` or `refused`, naming it, a cap stage that
-capped nothing as `uncapped`, the guardrail stage as `exempt` for a check of `authorization:guardrails:manage`, whose
+capped nothing as `uncapped`, the guardrail stage as `exempt` for a check of `authorization:guardrail.manage`, whose
 deny stage weighs no guardrail's denies either, and the permission step, which is asked only when no allow statement
 matched and none was invalid:
 
@@ -1706,8 +1868,11 @@ Event::listen(static function (AuthorizationEvent $event): void {
 Event::listen(static function (RoleDeleted $event): void {
     $event->role;               // Reference: the role's morph type and key
     $event->grantees;           // a Reference to every grantee that held it
-    $event->operation->actor;   // the actor the caller passed, or null
-    $event->operation->id;      // the same for every event of the call
+    $event->operation->actor;      // the acting principal's Reference, or null for trusted work
+    $event->operation->identity;   // the identity behind the acting principal, or null
+    $event->operation->isTrusted;  // true for a call made without an acting context
+    $event->operation->actions;    // the administration actions the call was decided under
+    $event->operation->id;         // the same for every event of the call, and every decision made for it
 });
 ```
 
@@ -1721,11 +1886,11 @@ expiries and times. An update carries the fields it changed, before and after. A
 version and SHA-256 digest, never the document. A delete lists every grantee that held the role, permission or policy,
 so the evidence says who lost access.
 
-Each is dispatched only once its write commits on the package's connection: inside your own transaction it waits for
-the outermost commit, and a transaction that rolls back dispatches nothing. Every event of one service call carries
-the same operation id and the call's actor; a write made through a model outside the services is an operation of its
-own with no actor. A change `forceSystem()` unlocked dispatches `SystemOverrideUsed`, naming the record, the change and
-the actor.
+Each is dispatched only once its write commits on the package's connection: inside your own transaction it waits for the
+outermost commit, and a transaction that rolls back dispatches nothing. Every event of one service call carries the same
+operation, with its id, its actor and identity, whether it was trusted, any impersonator and its actions; a write made
+through a model outside the services is a trusted operation of its own with no actor. A change `forceSystem()` unlocked
+dispatches `SystemOverrideUsed`, naming the record, the change and the actor.
 
 `DecisionEvaluated` and `AuthorizationFailed` implement the marker too, but are dispatched when the decision is made,
 not after a commit, and still carry the principal, the context and the decision as they were evaluated.
@@ -1736,25 +1901,25 @@ Every check goes through `SineMacula\Laravel\Authorization\AuthorizationManager`
 proxies and the container injects. Each method decides about the current subject, as the subject resolver gives it,
 or about the subject of the scoped manager it is called on:
 
-| Method                                            | What it does                                                                                                    |
-|---------------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
-| `can($action, $resource, $context)`               | Decides the action and returns whether it is allowed                                                            |
-| `cannot($action, $resource, $context)`            | Returns the opposite of `can()`                                                                                 |
-| `authorize($action, $resource, $context)`         | Decides the action and throws when it is not allowed                                                            |
-| `check($action, $resource, $context)`             | Decides the action and returns the full `Decision`                                                              |
-| `any($actions, $resource, $context)`              | Returns whether at least one of the actions is allowed                                                          |
-| `all($actions, $resource, $context)`              | Returns whether every one of the actions is allowed                                                             |
-| `checkMany($checks)`                              | Decides each `CheckInput` and returns its `Decision`, keyed as the checks are (see [Bulk checks](#bulk-checks)) |
-| `canEach($action, $resources, $context)`          | Decides the action on each resource and returns whether each is allowed, keyed as the resources are             |
-| `filterAuthorized($action, $resources, $context)` | Returns the resources the action is allowed on, with their keys and order, a `Collection` as its own class      |
-| `explain($action, $resource, $context)`           | Decides the action and returns its explanation as text                                                          |
-| `lastDecision()`                                  | Returns the latest decision of the request or job, whichever manager made it                                    |
-| `permissionsFor($subject, $scope, $context)`      | Lists the actions of the permission catalogue the subject may take in the scope                                 |
-| `for($subject)`                                   | Returns a scoped manager deciding about the model named, in the request's tenant and application                |
-| `forUser($user)`                                  | Returns a scoped manager deciding about the subject the resolver translates the user into                       |
-| `capped($actions)`                                | Returns a scoped manager whose checks are capped by the actions given                                           |
-| `withPolicies($policies)`                         | Returns a scoped manager that evaluates only the policies given                                                 |
-| `queryScope($model, $action, $context)`           | Returns the scope `whereAuthorized()` puts on a query (see [Query scoping](#query-scoping))                     |
+| Method                                            | What it does                                                                                                              |
+|---------------------------------------------------|---------------------------------------------------------------------------------------------------------------------------|
+| `can($action, $resource, $context)`               | Decides the action and returns whether it is allowed                                                                      |
+| `cannot($action, $resource, $context)`            | Returns the opposite of `can()`                                                                                           |
+| `authorize($action, $resource, $context)`         | Decides the action and throws when it is not allowed                                                                      |
+| `check($action, $resource, $context)`             | Decides the action and returns the full `Decision`                                                                        |
+| `any($actions, $resource, $context)`              | Returns whether at least one of the actions is allowed                                                                    |
+| `all($actions, $resource, $context)`              | Returns whether every one of the actions is allowed                                                                       |
+| `checkMany($checks)`                              | Decides each `CheckInput` and returns its `Decision`, keyed as the checks are (see [Bulk checks](#bulk-checks))           |
+| `canEach($action, $resources, $context)`          | Decides the action on each resource and returns whether each is allowed, keyed as the resources are                       |
+| `filterAuthorized($action, $resources, $context)` | Returns the resources the action is allowed on, with their keys and order, a `Collection` as its own class                |
+| `explain($action, $resource, $context)`           | Decides the action and returns its explanation as text                                                                    |
+| `lastDecision()`                                  | Returns the latest decision of the request or job, whichever manager made it                                              |
+| `permissionsFor($subject, $scope, $context)`      | Lists the actions of the permission catalogue the subject may take in the scope                                           |
+| `for($subject)`                                   | Returns a scoped manager deciding about the model named, in the request's tenant and application, or a `Subject` as it is |
+| `forUser($user)`                                  | Returns a scoped manager deciding about the subject the resolver translates the user into                                 |
+| `capped($actions)`                                | Returns a scoped manager whose checks are capped by the actions given                                                     |
+| `withPolicies($policies)`                         | Returns a scoped manager that evaluates only the policies given                                                           |
+| `queryScope($model, $action, $context)`           | Returns the scope `whereAuthorized()` puts on a query (see [Query scoping](#query-scoping))                               |
 
 `check()` is the one decision, and `checkMany()` the same decision over many checks, `check()` deciding as `checkMany()`
 decides a batch of one: every other method but `queryScope()` and `permissionsFor()` adapts one of them, and each
@@ -2141,7 +2306,7 @@ The scope compiles every statement it can compare with each row's key in SQL exa
   provider or one marked `ScopeInvariant`, and on the namespaces of sources marked `ScopeInvariant`, the package's
   defaults included, and authentication requirements a checker so marked judges;
 - the permissions held, the subject's and its identity's policies, its roles' policies, permission boundaries,
-  guardrails (except for `authorization:guardrails:manage`), session caps and the policies attached to the model's
+  guardrails (except for `authorization:guardrail.manage`), session caps and the policies attached to the model's
   type or to its records, whose allows apply to the subjects their `principals` name, by reference or by role, and
   whose denies apply to everyone; a policy attached to a record weighs on that record alone, compared in SQL under
   the attachment column's own collation, and a `withPolicies()` override reads no attachment;
@@ -2275,7 +2440,7 @@ and a refusal for record attachments names no policy, however many there are.
 
 The package is the authority of Laravel's Gate for the abilities it declares. Booting registers one `Gate::before`
 hook, and defines no ability. The hook answers every ability whose exact name a permission enum, a permission provider
-or the package itself (`authorization:guardrails:manage`) declares, with the package's decision: true for an allow,
+or the package itself (`authorization:guardrail.manage`) declares, with the package's decision: true for an allow,
 false for a deny. Laravel stops at the first before-callback that answers, so both stand: no `Gate::define` callback,
 Laravel policy class or `Gate::after` callback can override either. `Gate::allows()`, `Gate::forUser($user)`,
 `$user->can()`, `@can`, the `can:` middleware, `Gate::authorize()` and a controller's `authorize()` all go through it,
@@ -2521,8 +2686,8 @@ From the command line, naming an identity as `{morph type}:{key}`, where the typ
 
 ```bash
 php artisan authorization:grant user:1 editor
-php artisan authorization:grant user:1 editor --actor=user:7
 php artisan authorization:revoke user:1 editor
+php artisan authorization:revoke user:1 editor --actor=user:7
 php artisan authorization:list-roles
 php artisan authorization:list-permissions
 php artisan authorization:why-can user:1 posts:delete posts/42
@@ -2545,8 +2710,11 @@ alike, and show each one's owner. `grant` and `revoke` write through the grant s
 tenant scope, so without a resolved tenant they find platform-wide roles only. A role the identity already holds with
 no expiry, or does not hold, is reported as such and nothing is written. `grant` gives no expiry, so a role the
 identity holds on a temporary or expired grant is made permanent and reported as granted. `grant`, `revoke` and
-`authorization:sync` take `--actor={morph type}:{key}` to name who made the change, which their events carry and the
-grant rows record; it must name a row that exists, and without it they record no actor.
+`authorization:sync` take `--actor={morph type}:{key}` to name who made the change; it must name a row that exists, and
+without it the change is trusted work that records no actor. For `authorization:grant` and `authorization:revoke` the
+actor makes the change as delegated administration, decided as that actor, with no session (see
+[Delegated administration](#delegated-administration)), so a grant is refused as `administration.unprovable` in this
+release; for `authorization:sync` it is recorded on the trusted operation's events alone.
 
 `authorization:prune` removes the grants that no longer count: expired grants, reported as `RoleExpired`,
 `PermissionExpired` or `PolicyExpired` with no actor, a role's expired grants of permissions, reported as
@@ -2596,7 +2764,8 @@ The contracts behind the evaluator, for maintainers and reviewers, are in [docs/
 | [Spatie compatibility](docs/design/spatie-compatibility.md)                                 | The import from `spatie/laravel-permission` and its aliases   |
 | [Permission catalogue sync](docs/design/permission-catalogue-sync.md)                       | Declaring permissions in code and `authorization:sync`        |
 | [Management services](docs/design/management-services.md)                                   | The services every role, permission and grant write uses      |
-| [Events](docs/design/events.md)                                                             | The marker, the snapshots, the actor and after-commit         |
+| [Delegated administration](docs/design/delegated-administration.md)                         | The actions, the acting context and the administration stage  |
+| [Events](docs/design/events.md)                                                             | The marker, the snapshots, the operation and after-commit     |
 | [Gate authority](docs/design/gate-authority.md)                                             | The `Gate::before` hook, the switch and policy classes        |
 | [Query scoping](docs/design/query-scoping.md)                                               | `whereAuthorized()`, what it compiles and what it refuses     |
 | [Bulk checks](docs/design/bulk-checks.md)                                                   | `checkMany()`, what it reads once and in bulk, and its events |

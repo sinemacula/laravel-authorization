@@ -58,6 +58,11 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  * AUTHZ-7.1's order, the denies, the caps, the allows and the implicit deny,
  * each recorded in the decision's trace for audit consumers.
  *
+ * `scopedTo()` is called from the `BuildsScopedManagers` trait alone, which an
+ * analysis of this file by itself does not see (hence php:S1144).
+ *
+ * @SuppressWarnings("php:S1144")
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
@@ -217,7 +222,7 @@ final class AuthorizationManager
      * `InsufficientAuthenticationException`, with the requirements any one of
      * which met would allow the action, when the denial is
      * `insufficient_authentication`, and an `AuthorizationException` with the
-     * reason code otherwise.
+     * reason code otherwise. Either carries the decision that refused.
      *
      * @param  string  $action
      * @param  mixed  $resource
@@ -240,9 +245,10 @@ final class AuthorizationManager
         $this->events?->dispatch(new AuthorizationFailed($this->currentSubject()?->subject, $action, ResourceReferences::identifierOf($reference), $context, $decision));
 
         $reason = $decision->reason ?? DecisionReason::NO_MATCH;
-        $denial = $reason === DecisionReason::INSUFFICIENT_AUTHENTICATION ? InsufficientAuthenticationException::translated($decision->requirements, $this->translator) : null;
+        $stepUp = $reason === DecisionReason::INSUFFICIENT_AUTHENTICATION;
+        $denial = $stepUp ? InsufficientAuthenticationException::translated($decision->requirements, $this->translator, $decision) : null;
 
-        throw $denial ?? AuthorizationException::translated($reason, $this->translator);
+        throw $denial ?? AuthorizationException::translated($reason, $this->translator, $decision);
     }
 
     /**

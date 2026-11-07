@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Support;
 
 use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Contracts\AuthorizableResource;
 
 /**
  * The resource a check is about (AUTHZ-4.2): its type, its id and, where it has
@@ -17,7 +18,10 @@ use Illuminate\Database\Eloquent\Model;
  * an opaque identifier, used as given, with no type, id or tenant (N7).
  *
  * A reference made from a model keeps the model, so the resource attribute
- * provider of its type can read it rather than query for it (N30).
+ * provider of its type can read it rather than query for it (N30). A resource
+ * that identifies itself and is no model can hand itself on as its source in
+ * the same way, as an administration operation resource does, so its own
+ * attribute provider and the constraints of the operation can read it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -32,6 +36,7 @@ final readonly class ResourceReference
      * @param  string|null  $id
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  \Illuminate\Database\Eloquent\Model|null  $model
+     * @param  \SineMacula\Laravel\Authorization\Contracts\AuthorizableResource|null  $source
      */
     public function __construct(
 
@@ -49,6 +54,9 @@ final readonly class ResourceReference
 
         /** The model the check was given; null when it named the resource some other way. */
         public ?Model $model = null,
+
+        /** The resource that identified itself with this reference, when it hands itself on; null otherwise. */
+        public ?AuthorizableResource $source = null,
     ) {}
 
     /**

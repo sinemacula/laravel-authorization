@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
 
 use Illuminate\Auth\Access\AuthorizationException as LaravelAuthorizationException;
 use Illuminate\Contracts\Translation\Translator;
+use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Support\Messages;
 
@@ -35,6 +36,7 @@ final class AuthorizationException extends LaravelAuthorizationException
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason  $reason
      * @param  string|null  $message
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision|null  $decision
      */
     public function __construct(
 
@@ -43,6 +45,9 @@ final class AuthorizationException extends LaravelAuthorizationException
 
         // Translated message; null keeps Laravel's English default.
         ?string $message = null,
+
+        /** The decision that denied the request; null when none was made. */
+        private readonly ?Decision $decision = null,
     ) {
         parent::__construct($message, 403);
     }
@@ -56,11 +61,12 @@ final class AuthorizationException extends LaravelAuthorizationException
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason  $reason
      * @param  \Illuminate\Contracts\Translation\Translator|null  $translator
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision|null  $decision
      * @return self
      */
-    public static function translated(DecisionReason $reason, ?Translator $translator): self
+    public static function translated(DecisionReason $reason, ?Translator $translator, ?Decision $decision = null): self
     {
-        return new self($reason, Messages::line(Messages::DENIED, $translator));
+        return new self($reason, Messages::line(Messages::DENIED, $translator), $decision);
     }
 
     /**
@@ -71,5 +77,18 @@ final class AuthorizationException extends LaravelAuthorizationException
     public function getReason(): DecisionReason
     {
         return $this->reason;
+    }
+
+    /**
+     * Return the decision that denied the request, with its stage, statements
+     * and trace, for audit; null when the refusal was made before any decision,
+     * such as an acting subject that could not be resolved. Its detail is not
+     * for the client, which sees the one `denied` line.
+     *
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision|null
+     */
+    public function getDecision(): ?Decision
+    {
+        return $this->decision;
     }
 }

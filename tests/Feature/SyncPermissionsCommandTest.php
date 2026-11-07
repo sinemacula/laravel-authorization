@@ -17,6 +17,7 @@ use SineMacula\Laravel\Authorization\Events\Permission\Deleted as PermissionDele
 use SineMacula\Laravel\Authorization\Events\Permission\Updated as PermissionUpdated;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\PermissionCatalogue;
 use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use SineMacula\Laravel\Authorization\Support\PermissionMetadataReader;
@@ -93,12 +94,12 @@ final class SyncPermissionsCommandTest extends TestCase
         self::assertMatchesRegularExpression('/\|\s+Action\s+\|\s+Name\s+\|\s+Guard\s+\|\s+Category\s+\|\s+Description\s+\|/', $output);
         self::assertMatchesRegularExpression('/\|\s+add\s+\|\s+media:upload\s+\|\s+web\s+\|\s+Media\s+\|\s+Upload media\s+\|/', $output);
         self::assertMatchesRegularExpression('/\|\s+add\s+\|\s+posts:archive\s+\|\s+\(any\)\s+\|\s+\|\s+\|/', $output);
-        self::assertMatchesRegularExpression('/\|\s+add\s+\|\s+authorization:guardrails:manage\s+\|\s+\(any\)\s+\|\s+authorization\s+\|/', $output);
-        self::assertStringContainsString("\nadd: 6, update: 0, stale: 0, prune: 0, protected: 0, unchanged: 0.", $output);
+        self::assertMatchesRegularExpression('/\|\s+add\s+\|\s+authorization:guardrail.manage\s+\|\s+\(any\)\s+\|\s+authorization\s+\|/', $output);
+        self::assertStringContainsString("\nadd: " . (5 + self::packageCount()) . ', update: 0, stale: 0, prune: 0, protected: 0, unchanged: 0.', $output);
 
         self::assertSame(
             [
-                ['authorization:guardrails:manage', null, 'Set and remove guardrails from above the scope they cap.', 'authorization', false],
+                ...self::packageRows(),
                 ['media:upload', 'web', 'Upload media', 'Media', false],
                 ['posts.publish', 'api', 'Publish posts', 'Posts', false],
                 ['posts.publish', 'web', 'Publish posts', 'Posts', false],
@@ -108,7 +109,7 @@ final class SyncPermissionsCommandTest extends TestCase
             self::platformRows(),
         );
 
-        Event::assertDispatchedTimes(PermissionCreated::class, 6);
+        Event::assertDispatchedTimes(PermissionCreated::class, 5 + self::packageCount());
     }
 
     /**
@@ -123,7 +124,7 @@ final class SyncPermissionsCommandTest extends TestCase
         Event::fake([PermissionCreated::class, PermissionUpdated::class, PermissionDeleted::class]);
 
         self::assertSame(0, Artisan::call(self::COMMAND, ['--prune' => true]));
-        self::assertStringContainsString('add: 0, update: 0, stale: 0, prune: 0, protected: 0, unchanged: 5.', Artisan::output());
+        self::assertStringContainsString('add: 0, update: 0, stale: 0, prune: 0, protected: 0, unchanged: ' . (4 + self::packageCount()) . '.', Artisan::output());
 
         Event::assertNothingDispatched();
     }
@@ -187,7 +188,7 @@ final class SyncPermissionsCommandTest extends TestCase
         $output = Artisan::output();
 
         self::assertMatchesRegularExpression('/\|\s+stale\s+\|\s+posts:purge\s+\|\s+\(any\)\s+\|\s+\|\s+Purge posts\s+\|/', $output);
-        self::assertStringContainsString('add: 5, update: 0, stale: 1, prune: 0, protected: 0, unchanged: 0.', $output);
+        self::assertStringContainsString('add: ' . (4 + self::packageCount()) . ', update: 0, stale: 1, prune: 0, protected: 0, unchanged: 0.', $output);
         self::assertTrue(Permission::query()->whereKey($stale->getKey())->exists());
     }
 
@@ -248,7 +249,7 @@ final class SyncPermissionsCommandTest extends TestCase
         $output = Artisan::output();
 
         self::assertStringNotContainsString('tenant:only', $output);
-        self::assertStringContainsString('add: 5, update: 0, stale: 0, prune: 0, protected: 0, unchanged: 0.', $output);
+        self::assertStringContainsString('add: ' . (4 + self::packageCount()) . ', update: 0, stale: 0, prune: 0, protected: 0, unchanged: 0.', $output);
 
         $tenantRows = Permission::query()->withoutGlobalScope(TenantScope::class)->whereNotNull('tenant_type');
 
@@ -265,7 +266,9 @@ final class SyncPermissionsCommandTest extends TestCase
     public function testDryRunWithAdditionsWritesNothingAndExitsWithDrift(): void
     {
         self::assertSame(1, Artisan::call(self::COMMAND, ['--dry-run' => true]));
-        self::assertStringContainsString('Dry run, nothing was written. add: 5, update: 0, stale: 0, prune: 0, protected: 0, unchanged: 0.', Artisan::output());
+        $summary = 'add: ' . (4 + self::packageCount()) . ', update: 0, stale: 0, prune: 0, protected: 0, unchanged: 0.';
+
+        self::assertStringContainsString('Dry run, nothing was written. ' . $summary, Artisan::output());
         self::assertSame([], self::platformRows());
     }
 
@@ -334,15 +337,9 @@ final class SyncPermissionsCommandTest extends TestCase
         $expected = [
             'dry_run'     => true,
             'prune'       => true,
-            'summary'     => ['add' => 2, 'update' => 0, 'stale' => 0, 'prune' => 1, 'protected' => 0, 'unchanged' => 0],
+            'summary'     => ['add' => 1 + self::packageCount(), 'update' => 0, 'stale' => 0, 'prune' => 1, 'protected' => 0, 'unchanged' => 0],
             'permissions' => [
-                [
-                    'action'      => 'add',
-                    'name'        => 'authorization:guardrails:manage',
-                    'guard'       => null,
-                    'description' => 'Set and remove guardrails from above the scope they cap.',
-                    'category'    => 'authorization',
-                ],
+                ...\array_map(static fn (array $row): array => \array_combine(['action', 'name', 'guard', 'description', 'category'], $row), self::packageListed()),
                 ['action' => 'add', 'name' => 'media:upload', 'guard' => 'web', 'description' => 'Read/write media', 'category' => 'Media'],
                 ['action' => 'prune', 'name' => 'media:purge', 'guard' => null, 'description' => null, 'category' => null],
             ],
@@ -367,7 +364,7 @@ final class SyncPermissionsCommandTest extends TestCase
         Permission::create(['name' => 'posts:empty']);
 
         $expected = [
-            ['add', 'authorization:guardrails:manage', null, 'Set and remove guardrails from above the scope they cap.', 'authorization'],
+            ...self::packageListed(),
             ['add', 'posts.publish', 'api', 'Publish posts', 'Posts'],
             ['update', 'posts:create', null, 'Create posts', 'Posts'],
             ['prune', 'posts:empty', null, null, null],
@@ -380,8 +377,8 @@ final class SyncPermissionsCommandTest extends TestCase
         self::assertSame(1, Artisan::call(self::COMMAND, ['--format' => 'json', '--dry-run' => true, '--prune' => true]));
         self::assertSame($expected, self::listedRows());
 
-        $expected[3][0] = 'stale';
-        $expected[4][0] = 'stale';
+        $expected[self::packageCount() + 2][0] = 'stale';
+        $expected[self::packageCount() + 3][0] = 'stale';
 
         self::assertSame(1, Artisan::call(self::COMMAND, ['--format' => 'json', '--dry-run' => true]));
         self::assertSame($expected, self::listedRows());
@@ -406,9 +403,7 @@ final class SyncPermissionsCommandTest extends TestCase
 
         self::assertFalse($payload['dry_run']);
         self::assertFalse($payload['prune']);
-        $package = ['add', 'authorization:guardrails:manage', null, 'Set and remove guardrails from above the scope they cap.', 'authorization'];
-
-        self::assertSame([$package], self::listedRows($output));
+        self::assertSame(self::packageListed(), self::listedRows($output));
     }
 
     /**
@@ -509,7 +504,7 @@ final class SyncPermissionsCommandTest extends TestCase
 
         self::assertSame(0, Artisan::call(self::COMMAND));
 
-        self::assertSame(5, self::authorizationConnection()->table('permissions')->count());
+        self::assertSame(4 + self::packageCount(), self::authorizationConnection()->table('permissions')->count());
         self::assertSame(0, DB::connection('testing')->table('permissions')->count());
     }
 
@@ -558,11 +553,12 @@ final class SyncPermissionsCommandTest extends TestCase
 
         $created = self::dispatchedEvents(PermissionCreated::class);
 
-        self::assertCount(5, $created);
+        self::assertCount(4 + self::packageCount(), $created);
         self::assertCount(1, \array_unique(\array_map(static fn (PermissionCreated $event): string => $event->operation->id, $created)));
 
         foreach ($created as $event) {
             self::assertTrue(self::refersTo($event->operation->actor, new Reference(StubIdentity::class, 'admin-1')));
+            self::assertTrue($event->operation->isTrusted);
         }
 
         $this->configure('authorization.permission_enums', []);
@@ -641,6 +637,45 @@ final class SyncPermissionsCommandTest extends TestCase
             ->all();
 
         \usort($rows, static fn (array $left, array $right): int => \strcmp($left[0], $right[0]) ?: \strcmp($left[1] ?? '', $right[1] ?? ''));
+
+        return $rows;
+    }
+
+    /**
+     * Return how many permissions the package declares.
+     *
+     * @return int
+     */
+    private static function packageCount(): int
+    {
+        return \count((new PackagePermissions)->permissions());
+    }
+
+    /**
+     * Return the package's permissions as platform rows, `[name, guard,
+     * description, category, system]`, ordered by name by byte value.
+     *
+     * @return list<array{string, null, string|null, string|null, false}>
+     */
+    private static function packageRows(): array
+    {
+        return \array_map(static fn (array $row): array => [$row[1], null, $row[3], $row[4], false], self::packageListed());
+    }
+
+    /**
+     * Return the package's permissions as the command lists them under the
+     * action, `[action, name, guard, description, category]`, ordered by name
+     * by byte value.
+     *
+     * @param  string  $action
+     * @return list<array{string, string, null, string|null, string|null}>
+     */
+    private static function packageListed(string $action = 'add'): array
+    {
+        $listed = static fn (PermissionDefinition $definition): array => [$action, $definition->name, null, $definition->description, $definition->category];
+        $rows   = \array_map($listed, (new PackagePermissions)->permissions());
+
+        \usort($rows, static fn (array $left, array $right): int => \strcmp($left[1], $right[1]));
 
         return $rows;
     }

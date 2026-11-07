@@ -19,9 +19,11 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
  * reported as held, and nothing is written; a role it holds on a temporary or
  * expired grant is made permanent and reported as granted.
  *
- * `--actor={morphType}:{key}` names the actor making the change, which the
- * grant's event carries and its row records; without it the grant records no
- * actor.
+ * `--actor={morphType}:{key}` names the actor making the change: the grant is
+ * then delegated administration, decided as that actor under
+ * `authorization:role.grant` (see `GrantService`), and its event carries the
+ * actor and its row records it. Without it the grant is trusted system work and
+ * records no actor (N75).
  *
  * The role name is looked up within the tenant scope, like any other query: a
  * tenant-owned role is found only when the application's subject resolver
@@ -41,7 +43,7 @@ final class GrantRoleCommand extends Command
         authorization:grant
                                     {identity : Identity in morphType:key format (e.g. user:123)}
                                     {role : Role name to assign}
-                                    {--actor= : The actor making the change, in morphType:key format (e.g. user:1); none for system work}
+                                    {--actor= : The actor the change is decided as, in morphType:key format (e.g. user:1); none for trusted system work}
         EOD;
 
     /** @var string The console command description. */
@@ -68,7 +70,7 @@ final class GrantRoleCommand extends Command
         }
 
         try {
-            $outcome = $grants->grantRole($model, $roleName, actor: ActorOption::parse($this->option('actor')));
+            $outcome = $grants->grantRole($model, $roleName, actor: ActorOption::acting($this->option('actor')));
         } catch (\Throwable $e) {
             $this->error($e->getMessage());
 

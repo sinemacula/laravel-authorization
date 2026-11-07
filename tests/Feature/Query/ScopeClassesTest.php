@@ -9,6 +9,7 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException;
@@ -191,13 +192,13 @@ final class ScopeClassesTest extends TestCase
         [$user, $tenants] = $this->tree();
         $admin            = StubIdentity::create(['id' => 'admin']);
 
-        $admin->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAILS_MANAGE]));
+        $admin->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
         $user->givePermission(Permission::create(['name' => 'posts:view']));
         $user->givePermission(Permission::create(['name' => 'posts:edit']), null, null, true, 'other');
 
         $guardrail = self::storedPolicy('only-view', [['effect' => 'allow', 'actions' => ['posts:edit']]]);
 
-        app(GuardrailService::class)->set($guardrail, $tenants['o2'], $admin);
+        app(GuardrailService::class)->set($guardrail, $tenants['o2'], ActingContext::for($admin));
 
         foreach ([null, 'a1'] as $active) {
             $manager = $this->resolveRequest($user, $active === null ? null : $tenants[$active]);

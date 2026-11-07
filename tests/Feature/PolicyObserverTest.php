@@ -6,6 +6,7 @@ namespace Tests\Feature;
 
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Events\Policy\Created as PolicyCreated;
 use SineMacula\Laravel\Authorization\Events\Policy\Deleted as PolicyDeleted;
 use SineMacula\Laravel\Authorization\Events\Policy\Updated as PolicyUpdated;
@@ -260,8 +261,8 @@ final class PolicyObserverTest extends TestCase
         self::assertNotNull($guardrails);
         self::assertNotNull($policies);
 
-        $actor->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAILS_MANAGE]));
-        $guardrails->set($policy, null, $actor);
+        $actor->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
+        $guardrails->set($policy, null, ActingContext::for($actor));
 
         Event::fake([PolicyUpdated::class, PolicyDeleted::class]);
 
@@ -278,7 +279,7 @@ final class PolicyObserverTest extends TestCase
         Event::assertNotDispatched(PolicyUpdated::class);
         Event::assertNotDispatched(PolicyDeleted::class);
 
-        $guardrails->remove($policy, null, $actor);
+        $guardrails->remove($policy, null, ActingContext::for($actor));
 
         self::assertTrue($policy->refresh()->update(['document' => $rewrite]));
         self::assertTrue($policy->delete());

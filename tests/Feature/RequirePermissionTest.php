@@ -10,6 +10,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\TestWith;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
@@ -314,7 +315,7 @@ final class RequirePermissionTest extends TestCase
         $identity = StubIdentity::create(['id' => 'editor-1']);
         $actor    = StubIdentity::create(['id' => 'guardrail-admin']);
 
-        foreach (['posts:create', 'posts:delete', 'posts:publish', 'posts:archive', PackagePermissions::GUARDRAILS_MANAGE] as $name) {
+        foreach (['posts:create', 'posts:delete', 'posts:publish', 'posts:archive', PackagePermissions::GUARDRAIL_MANAGE] as $name) {
             Permission::create(['name' => $name]);
         }
 
@@ -322,7 +323,7 @@ final class RequirePermissionTest extends TestCase
         $identity->givePermission('posts:delete', null, $sibling);
         $identity->givePermission('posts:publish');
         $identity->givePermission('posts:archive');
-        $actor->givePermission(PackagePermissions::GUARDRAILS_MANAGE);
+        $actor->givePermission(PackagePermissions::GUARDRAIL_MANAGE);
 
         $guardrails = GuardrailService::instance();
 
@@ -330,7 +331,7 @@ final class RequirePermissionTest extends TestCase
 
         $statement = ['effect' => 'allow', 'actions' => ['posts:create', 'posts:delete', 'posts:publish']];
 
-        $guardrails->set(Policy::create(['name' => 'no-archive', 'document' => ['statements' => [$statement]]]), $account, $actor);
+        $guardrails->set(Policy::create(['name' => 'no-archive', 'document' => ['statements' => [$statement]]]), $account, ActingContext::for($actor));
 
         $this->actingAsIdentity($identity, $account);
         $this->app?->forgetInstance(ResolvedTenant::class);

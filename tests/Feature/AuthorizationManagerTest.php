@@ -12,6 +12,7 @@ use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\Gate;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\CoversTrait;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\AuthorizationServiceProvider;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
@@ -1385,6 +1386,7 @@ final class AuthorizationManagerTest extends TestCase
             self::fail('The check was allowed.');
         } catch (InsufficientAuthenticationException $exception) {
             self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $exception->getReason());
+            self::assertSame(DecisionReason::INSUFFICIENT_AUTHENTICATION, $exception->getDecision()?->reason);
             self::assertSame(403, $exception->getCode());
             self::assertSame('This action is unauthorized.', $exception->getMessage());
             self::assertEquals([new UnmetRequirement(self::requirement(), ['multifactor'])], $exception->requirements());
@@ -2342,7 +2344,7 @@ final class AuthorizationManagerTest extends TestCase
         $rail  = self::resourcePolicy('read-only', [['effect' => 'allow', 'actions' => ['posts:read']]]);
         $actor = self::guardrailManager();
 
-        self::guardrails()->set($rail, null, $actor);
+        self::guardrails()->set($rail, null, ActingContext::for($actor));
 
         foreach (['posts:edit', 'posts:review', 'posts:archive', 'posts:publish', 'posts:delete'] as $action) {
             $decision = Authorization::for($user)->check($action, $post);
@@ -2361,7 +2363,7 @@ final class AuthorizationManagerTest extends TestCase
 
         self::assertSame(DecisionReason::GUARDRAIL, $override->reason);
 
-        self::guardrails()->remove($rail, null, $actor);
+        self::guardrails()->remove($rail, null, ActingContext::for($actor));
 
         foreach (['posts:edit', 'posts:review', 'posts:archive', 'posts:publish', 'posts:delete'] as $action) {
             self::assertTrue(Authorization::for($user)->can($action, $post), $action);
@@ -2396,9 +2398,9 @@ final class AuthorizationManagerTest extends TestCase
             $user->givePermission(Permission::create(['name' => $action]));
         }
 
-        self::guardrails()->set(self::resourcePolicy('platform', [['effect' => 'allow', 'actions' => $actions]]), null, $actor);
-        self::guardrails()->set(self::resourcePolicy('org', [['effect' => 'allow', 'actions' => ['posts:read', 'posts:edit', 'posts:publish']]]), $org, $actor);
-        self::guardrails()->set(self::resourcePolicy('account', [['effect' => 'allow', 'actions' => ['posts:read', 'posts:edit']]]), $account, $actor);
+        self::guardrails()->set(self::resourcePolicy('platform', [['effect' => 'allow', 'actions' => $actions]]), null, ActingContext::for($actor));
+        self::guardrails()->set(self::resourcePolicy('org', [['effect' => 'allow', 'actions' => ['posts:read', 'posts:edit', 'posts:publish']]]), $org, ActingContext::for($actor));
+        self::guardrails()->set(self::resourcePolicy('account', [['effect' => 'allow', 'actions' => ['posts:read', 'posts:edit']]]), $account, ActingContext::for($actor));
 
         $allowed = function (?StubTenant $tenant) use ($user, $actions): array {
             $this->resolveInTenant($user, $tenant);
@@ -2441,7 +2443,7 @@ final class AuthorizationManagerTest extends TestCase
         $user->givePermission(Permission::create(['name' => 'posts:delete']));
         $user->givePermission(Permission::create(['name' => 'posts:read']));
 
-        self::guardrails()->set(self::resourcePolicy('b-read-only', [['effect' => 'allow', 'actions' => ['posts:read']]]), $tenantB, self::guardrailManager());
+        self::guardrails()->set(self::resourcePolicy('b-read-only', [['effect' => 'allow', 'actions' => ['posts:read']]]), $tenantB, ActingContext::for(self::guardrailManager()));
 
         $this->resolveInTenant($user, $tenantA);
 
@@ -2476,7 +2478,7 @@ final class AuthorizationManagerTest extends TestCase
         self::guardrails()->set(self::resourcePolicy('rail', [
             ['effect' => 'allow', 'actions' => ['posts:*']],
             ['effect' => 'deny', 'actions' => ['posts:delete']],
-        ]), null, self::guardrailManager());
+        ]), null, ActingContext::for(self::guardrailManager()));
 
         $denied = Authorization::for($user)->check('posts:delete');
         $unheld = Authorization::for($user)->check('posts:read');
@@ -2525,7 +2527,7 @@ final class AuthorizationManagerTest extends TestCase
         $rail = self::resourcePolicy('rail', [['effect' => 'allow', 'actions' => ['posts:edit']]]);
 
         $user->givePermission(Permission::create(['name' => 'posts:edit']));
-        self::guardrails()->set($rail, null, self::guardrailManager());
+        self::guardrails()->set($rail, null, ActingContext::for(self::guardrailManager()));
 
         DB::table('policies')->where('id', $rail->getKey())->update(['document' => '{"statements": "broken"}']);
 
@@ -2536,7 +2538,7 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * A check of exactly `authorization:guardrails:manage` is exempt from the
+     * A check of exactly `authorization:guardrail.manage` is exempt from the
      * guardrails: none is read for it, so a guardrail that does not allow it,
      * one that denies it and one that cannot be read leave it allowed, and the
      * guardrail stage records it as exempt. Any other action is still capped,
@@ -2551,19 +2553,19 @@ final class AuthorizationManagerTest extends TestCase
         $user = self::guardrailManager();
         $rail = self::resourcePolicy('posts-only', [
             ['effect' => 'allow', 'actions' => ['posts:*']],
-            ['effect' => 'deny', 'actions' => [PackagePermissions::GUARDRAILS_MANAGE]],
+            ['effect' => 'deny', 'actions' => [PackagePermissions::GUARDRAIL_MANAGE]],
         ]);
 
         $user->givePermission(Permission::create(['name' => 'authorization:roles:manage']));
-        self::guardrails()->set($rail, null, $user);
-        self::guardrails()->set(self::resourcePolicy('broken', [['effect' => 'allow', 'actions' => ['*']]]), null, $user);
+        self::guardrails()->set($rail, null, ActingContext::for($user));
+        self::guardrails()->set(self::resourcePolicy('broken', [['effect' => 'allow', 'actions' => ['*']]]), null, ActingContext::for($user));
 
         DB::table('policies')->where('name', 'broken')->update(['document' => '{"statements": "broken"}']);
 
         DB::enableQueryLog();
         DB::flushQueryLog();
 
-        $exempt = Authorization::for($user)->check(PackagePermissions::GUARDRAILS_MANAGE);
+        $exempt = Authorization::for($user)->check(PackagePermissions::GUARDRAIL_MANAGE);
         $read   = \array_filter(DB::getQueryLog(), static fn (array $query): bool => \str_contains($query['query'], 'guardrails'));
 
         DB::disableQueryLog();
@@ -2579,13 +2581,13 @@ final class AuthorizationManagerTest extends TestCase
 
         self::assertSame(DecisionReason::GUARDRAIL, Authorization::for($user)->check('authorization:roles:manage')->reason);
 
-        $user->attachPolicy(self::resourcePolicy('no-guardrails', [['effect' => 'deny', 'actions' => [PackagePermissions::GUARDRAILS_MANAGE]]]));
+        $user->attachPolicy(self::resourcePolicy('no-guardrails', [['effect' => 'deny', 'actions' => [PackagePermissions::GUARDRAIL_MANAGE]]]));
 
-        self::assertSame(DecisionReason::EXPLICIT_DENY, Authorization::for($user)->check(PackagePermissions::GUARDRAILS_MANAGE)->reason);
+        self::assertSame(DecisionReason::EXPLICIT_DENY, Authorization::for($user)->check(PackagePermissions::GUARDRAIL_MANAGE)->reason);
 
         $other = self::boundedGuardrailManager();
 
-        self::assertSame(DecisionReason::BOUNDARY, Authorization::for($other)->check(PackagePermissions::GUARDRAILS_MANAGE)->reason);
+        self::assertSame(DecisionReason::BOUNDARY, Authorization::for($other)->check(PackagePermissions::GUARDRAIL_MANAGE)->reason);
     }
 
     /**
@@ -2614,7 +2616,7 @@ final class AuthorizationManagerTest extends TestCase
 
         self::assertTrue($check());
 
-        self::guardrails()->set($rail, null, $actor);
+        self::guardrails()->set($rail, null, ActingContext::for($actor));
 
         self::assertFalse($check());
 
@@ -2631,7 +2633,7 @@ final class AuthorizationManagerTest extends TestCase
 
         self::assertSame([], $read);
 
-        self::guardrails()->remove($rail, null, $actor);
+        self::guardrails()->remove($rail, null, ActingContext::for($actor));
 
         self::assertTrue($check());
     }
@@ -2655,9 +2657,9 @@ final class AuthorizationManagerTest extends TestCase
         $actor = self::guardrailManager();
 
         $user->givePermission(Permission::create(['name' => 'posts:edit']));
-        self::guardrails()->set(self::resourcePolicy('account', [['effect' => 'allow', 'actions' => ['posts:edit']]]), $account, $actor);
-        self::guardrails()->set(self::resourcePolicy('org', [['effect' => 'allow', 'actions' => ['posts:*']]]), $org, $actor);
-        self::guardrails()->set(self::resourcePolicy('platform', [['effect' => 'allow', 'actions' => ['posts:*']]]), null, $actor);
+        self::guardrails()->set(self::resourcePolicy('account', [['effect' => 'allow', 'actions' => ['posts:edit']]]), $account, ActingContext::for($actor));
+        self::guardrails()->set(self::resourcePolicy('org', [['effect' => 'allow', 'actions' => ['posts:*']]]), $org, ActingContext::for($actor));
+        self::guardrails()->set(self::resourcePolicy('platform', [['effect' => 'allow', 'actions' => ['posts:*']]]), null, ActingContext::for($actor));
 
         $this->resolveInTenant($user, $account);
         $this->app?->forgetInstance(ResolutionCache::class);
@@ -3043,9 +3045,9 @@ final class AuthorizationManagerTest extends TestCase
         $refused(Authorization::for($user)->check('posts:edit'), DecisionReason::EXPLICIT_DENY, DecisionStage::DENY);
         $user->detachPolicy($deny);
 
-        self::guardrails()->set($rail, null, $actor);
+        self::guardrails()->set($rail, null, ActingContext::for($actor));
         $refused(Authorization::for($user)->check('posts:edit'), DecisionReason::GUARDRAIL, DecisionStage::GUARDRAIL);
-        self::guardrails()->remove($rail, null, $actor);
+        self::guardrails()->remove($rail, null, ActingContext::for($actor));
 
         self::boundaries()->set($user, self::resourcePolicy('bounded', [['effect' => 'allow', 'actions' => ['posts:read']]]));
         $refused(Authorization::for($user)->check('posts:edit'), DecisionReason::BOUNDARY, DecisionStage::BOUNDARY);
@@ -3139,7 +3141,7 @@ final class AuthorizationManagerTest extends TestCase
         $user->givePermission(Permission::create(['name' => 'posts:delete']));
         $user->givePermission(Permission::create(['name' => 'posts:archive']), null, $sibling);
 
-        self::guardrails()->set(self::resourcePolicy('sibling-cap', [['effect' => 'allow', 'actions' => ['posts:edit']]]), $sibling, self::guardrailManager());
+        self::guardrails()->set(self::resourcePolicy('sibling-cap', [['effect' => 'allow', 'actions' => ['posts:edit']]]), $sibling, ActingContext::for(self::guardrailManager()));
 
         foreach ([$account, null] as $active) {
             $this->resolveInTenant($user, $active);
@@ -3263,7 +3265,7 @@ final class AuthorizationManagerTest extends TestCase
         $user->givePermission(Permission::create(['name' => PermissionEnum::POSTS_CREATE->value]));
         $user->givePermission(Permission::create(['name' => PermissionEnum::POSTS_DELETE->value]), null, $sibling);
 
-        self::guardrails()->set(self::resourcePolicy('no-create', [['effect' => 'allow', 'actions' => ['posts:delete']]]), $account, self::guardrailManager());
+        self::guardrails()->set(self::resourcePolicy('no-create', [['effect' => 'allow', 'actions' => ['posts:delete']]]), $account, ActingContext::for(self::guardrailManager()));
 
         $expected = [
             'account' => [],
@@ -3803,7 +3805,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $actor = StubIdentity::create(['id' => 'guardrail-admin']);
 
-        $actor->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAILS_MANAGE]));
+        $actor->givePermission(Permission::create(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
 
         return $actor;
     }
@@ -3820,7 +3822,7 @@ final class AuthorizationManagerTest extends TestCase
     {
         $actor = StubIdentity::create(['id' => 'bounded-admin']);
 
-        $actor->givePermission(Permission::query()->firstOrCreate(['name' => PackagePermissions::GUARDRAILS_MANAGE]));
+        $actor->givePermission(Permission::query()->firstOrCreate(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
         self::boundaries()->set($actor, self::resourcePolicy('posts-cap', [['effect' => 'allow', 'actions' => ['posts:*']]]));
 
         return $actor;

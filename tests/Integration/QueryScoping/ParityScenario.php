@@ -12,6 +12,7 @@ use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Random\Engine\Mt19937;
 use Random\Randomizer;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
@@ -453,11 +454,11 @@ final class ParityScenario
     {
         $admin = StubIdentity::create(['id' => 'guardrail-admin']);
 
-        $admin->givePermission(Permission::query()->firstOrCreate(['name' => PackagePermissions::GUARDRAILS_MANAGE]));
+        $admin->givePermission(Permission::query()->firstOrCreate(['name' => PackagePermissions::GUARDRAIL_MANAGE]));
 
         $tenant = $this->pick($this->tenants);
 
-        self::service(GuardrailService::class)->set($this->policy('guardrail', $this->capStatements()), self::scopeOf($tenant), $admin);
+        self::service(GuardrailService::class)->set($this->policy('guardrail', $this->capStatements()), self::scopeOf($tenant), ActingContext::for($admin));
 
         $this->log[] = 'guardrail in ' . self::nameOf($tenant);
     }

@@ -5,6 +5,8 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Context;
 
 use Illuminate\Contracts\Container\Container;
+use SineMacula\Laravel\Authorization\Administration\OperationAttributes;
+use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Contracts\ResourceAttributeProvider;
 use SineMacula\Laravel\Authorization\Contracts\SubjectAttributeProvider;
 use SineMacula\Laravel\Authorization\Enums\ContextKeyType;
@@ -74,7 +76,9 @@ final class AttributeProviders
 
     /**
      * Return the providers `authorization.attributes` registers, which the
-     * service provider validated at boot.
+     * service provider validated at boot, with the package's own provider of
+     * the administration operation resources (see `OperationAttributes`), which
+     * a provider configured for their type never replaces.
      *
      * @param  \Illuminate\Contracts\Container\Container  $container
      * @return self
@@ -88,6 +92,8 @@ final class AttributeProviders
 
         /** @var array<string, class-string<\SineMacula\Laravel\Authorization\Contracts\ResourceAttributeProvider>> $resources */
         $resources = (array) $config->get('authorization.attributes.resources', []);
+
+        $resources[OperationResource::TYPE] = OperationAttributes::class;
 
         /** @var array<string, class-string<\SineMacula\Laravel\Authorization\Contracts\SubjectAttributeProvider>> $subjects */
         $subjects = (array) $config->get('authorization.attributes.subjects', []);
