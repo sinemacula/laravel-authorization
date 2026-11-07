@@ -20,7 +20,7 @@ use SineMacula\Laravel\Authorization\Support\RoleGraph;
  * AUTHZ-7.3): the permissions it carries live, the policies attached to it
  * live, each with its ancestors' when the hierarchy is enabled, and the allows
  * of every policy attached to a resource that name the role, or one of its
- * ancestors, by a `role:<key>` principal selector, since such an allow reaches
+ * ancestors, by a `role:KEY` principal selector, since such an allow reaches
  * whoever holds the role, now or later. A delegated role grant, or a new
  * parent, is judged on everything a holder would get (see
  * `DefinitionConstraints` and `OperationConstraints`).
@@ -56,7 +56,7 @@ final readonly class RoleAuthority
      *
      * @param  list<\SineMacula\Laravel\Authorization\Models\Permission>  $permissions
      * @param  list<\SineMacula\Laravel\Authorization\Models\Policy>  $policies
-     * @param  list<array{\SineMacula\Laravel\Authorization\Models\Policy, non-empty-list<\SineMacula\Laravel\Authorization\Evaluation\Statement>}>  $selecting
+     * @param  list<array{\SineMacula\Laravel\Authorization\Models\Policy, non-empty-array<array-key, \SineMacula\Laravel\Authorization\Evaluation\Statement>}>  $selecting
      */
     private function __construct(
 
@@ -127,7 +127,7 @@ final readonly class RoleAuthority
      * read whole.
      *
      * @param  list<string>  $keys
-     * @return list<string>|null
+     * @return array<array-key, string>|null
      */
     public static function chainsOf(array $keys): ?array
     {
@@ -144,7 +144,7 @@ final readonly class RoleAuthority
             $chain = [...$chain, ...$walked];
         }
 
-        return \array_values(\array_unique($chain));
+        return \array_unique($chain);
     }
 
     /**
@@ -177,7 +177,7 @@ final readonly class RoleAuthority
      * Return the permissions the roles of the chain carry live, each once, in
      * one query.
      *
-     * @param  list<string>  $chain
+     * @param  array<array-key, string>  $chain
      * @return list<\SineMacula\Laravel\Authorization\Models\Permission>
      */
     private static function permissionsOf(array $chain): array
@@ -206,7 +206,7 @@ final readonly class RoleAuthority
      * Return the policies attached live to the roles of the chain, in any
      * scope, as stored, in two queries.
      *
-     * @param  list<string>  $chain
+     * @param  array<array-key, string>  $chain
      * @return list<\SineMacula\Laravel\Authorization\Models\Policy>
      */
     private static function policiesOf(array $chain): array
@@ -244,9 +244,9 @@ final readonly class RoleAuthority
      * the reach cannot be read, it holds more of them than the impact limit
      * allows, or a document cannot be read.
      *
-     * @param  list<string>  $chain
+     * @param  array<array-key, string>  $chain
      * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $reach
-     * @return list<array{\SineMacula\Laravel\Authorization\Models\Policy, non-empty-list<\SineMacula\Laravel\Authorization\Evaluation\Statement>}>|null
+     * @return list<array{\SineMacula\Laravel\Authorization\Models\Policy, non-empty-array<array-key, \SineMacula\Laravel\Authorization\Evaluation\Statement>}>|null
      */
     private static function selectingOf(array $chain, GrantScope $reach): ?array
     {
@@ -263,7 +263,7 @@ final readonly class RoleAuthority
 
         foreach ($class::query()->withoutGlobalScopes()->useWritePdo()->whereKey($keys)->get() as $policy) {
             $allows = PolicyRoute::allowsOf(DocumentComparison::read($policy->document));
-            $named  = \array_values(\array_filter($allows ?? [], static fn (Statement $allow): bool => \array_intersect($allow->principals ?? [], $selectors) !== []));
+            $named  = \array_filter($allows ?? [], static fn (Statement $allow): bool => \array_intersect($allow->principals ?? [], $selectors) !== []);
 
             if ($allows === null) {
                 return null;
@@ -300,7 +300,8 @@ final readonly class RoleAuthority
             return null;
         }
 
-        $keys = \array_values(\array_map(\strval(...), $query->distinct()->limit($limit + 1)->pluck($table . '.policy_id')->all()));
+        /** @var list<string> $keys */
+        $keys = $query->distinct()->limit($limit + 1)->pluck($table . '.policy_id')->all();
 
         return \count($keys) > $limit ? null : $keys;
     }

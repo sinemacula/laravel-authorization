@@ -159,6 +159,28 @@ final class ImpactTest extends TestCase
     }
 
     /**
+     * The rules are weighed in order, the first that fails refusing: the scope
+     * before rank, and rank before the self rule.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheScopeThenRankThenTheSelfRuleRefuse(): void
+    {
+        $actor   = self::user('admin', 2);
+        $holders = [Reference::of($actor), Reference::of(self::user('peer', 2))];
+        $denying = $this->checks($actor, static fn (): Decision => Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT));
+        $noSelf  = $this->checks($actor, static fn (string $action): Decision => $action === PackagePermissions::ADMINISTRATION_SELF
+            ? Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT)
+            : Decision::allow(DecisionStage::ALLOW));
+
+        self::assertSame(DecisionReason::ADMINISTRATION_SCOPE, Impact::refusal(self::operation(), self::resource(), Impact::reachOf(null), $holders, $denying));
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, Impact::refusal(self::operation(), self::resource(), Impact::reachOf(null), $holders, $noSelf));
+        self::assertSame(DecisionReason::ADMINISTRATION_SELF, Impact::refusal(self::operation(), self::resource(), Impact::reachOf(null), [Reference::of($actor)], $noSelf));
+    }
+
+    /**
      * A role is created or ranked only junior to the actor in the operation's
      * tenant: an equal or more senior rank is refused, an unranked actor ranks
      * no role, an actor whose rank cannot be read cannot be compared, and an

@@ -176,8 +176,7 @@ final class OperationConstraints
         $change = $operation->change;
 
         return self::scope($operation, $change, $resource, $checks)
-            ?? self::rank($operation, $change, $checks)
-            ?? self::self($operation, $resource, $checks)
+            ?? self::rank($operation, $change, $resource, $checks)
             ?? self::widening($operation, $change, $resource, $checks);
     }
 
@@ -209,16 +208,21 @@ final class OperationConstraints
      * Return `administration.rank_uncomparable` or `administration.rank` when
      * the actor is not strictly senior to the grantee, as the grant would leave
      * it, anywhere the change reaches; a change to the actor itself is weighed
-     * by the self rule instead.
+     * by the self rule instead (see `self()`).
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $change
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
      * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
      * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
      */
-    private static function rank(OperationResource $operation, OperationChange $change, FurtherChecks $checks): ?DecisionReason
+    private static function rank(OperationResource $operation, OperationChange $change, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
     {
-        if (!RankComparison::isEnabled() || OperationGrantee::isSelf($operation, $checks->subject)) {
+        if (OperationGrantee::isSelf($operation, $checks->subject)) {
+            return self::self($operation, $resource, $checks);
+        }
+
+        if (!RankComparison::isEnabled()) {
             return null;
         }
 
@@ -262,8 +266,9 @@ final class OperationConstraints
     }
 
     /**
-     * Return `administration.self` when a change to the actor itself that may
-     * widen authority is not also allowed `authorization:administration.self`.
+     * Return `administration.self` when a change to the actor itself, which
+     * this is, that may widen authority is not also allowed
+     * `authorization:administration.self`.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
@@ -272,9 +277,7 @@ final class OperationConstraints
      */
     private static function self(OperationResource $operation, ResourceReference $resource, FurtherChecks $checks): ?DecisionReason
     {
-        $isRefused = !$operation->isNarrowing
-            && OperationGrantee::isSelf($operation, $checks->subject)
-            && !$checks->decide(PackagePermissions::ADMINISTRATION_SELF, $resource)->isAllowed();
+        $isRefused = !$operation->isNarrowing && !$checks->decide(PackagePermissions::ADMINISTRATION_SELF, $resource)->isAllowed();
 
         return $isRefused ? DecisionReason::ADMINISTRATION_SELF : null;
     }

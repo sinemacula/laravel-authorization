@@ -74,7 +74,7 @@ final readonly class OperationResource implements AuthorizableResource
      * @param  bool  $isNarrowing
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
      * @param  array<string, mixed>  $attributes
-     * @param  \SineMacula\Laravel\Authorization\Administration\DefinitionChange|\SineMacula\Laravel\Authorization\Administration\OperationChange|null  $change
+     * @param  \SineMacula\Laravel\Authorization\Administration\DefinitionChange|\SineMacula\Laravel\Authorization\Administration\OperationChange|null  $made
      * @param  string  $id
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $impersonator
      */
@@ -92,9 +92,8 @@ final readonly class OperationResource implements AuthorizableResource
         /** What the change names, as policies read it under `resource`. */
         private array $attributes,
 
-        // The grant or removal the change makes, or the change to a definition,
-        // as values.
-        DefinitionChange|OperationChange|null $change = null,
+        /** The grant or removal the change makes, or the change to a definition, as values. */
+        private DefinitionChange|OperationChange|null $made = null,
 
         /** The id of the operation that makes the change, or `proposed`. */
         public string $id = self::PROPOSED,
@@ -102,8 +101,8 @@ final readonly class OperationResource implements AuthorizableResource
         /** Who is impersonating the actor making the change, or null when no one is. */
         public ?Reference $impersonator = null,
     ) {
-        $this->change     = $change instanceof OperationChange ? $change : null;
-        $this->definition = $change instanceof DefinitionChange ? $change : null;
+        $this->change     = $made instanceof OperationChange ? $made : null;
+        $this->definition = $made instanceof DefinitionChange ? $made : null;
     }
 
     /**
@@ -230,7 +229,7 @@ final readonly class OperationResource implements AuthorizableResource
      */
     public function actedBy(?Reference $impersonator, ?string $id = null): self
     {
-        return new self($this->action, $this->isNarrowing, $this->tenant, $this->attributes, $this->change ?? $this->definition, $id ?? $this->id, $impersonator);
+        return new self($this->action, $this->isNarrowing, $this->tenant, $this->attributes, $this->made, $id ?? $this->id, $impersonator);
     }
 
     /**
@@ -334,7 +333,7 @@ final readonly class OperationResource implements AuthorizableResource
     {
         $named = [...$this->attributes, ...$attributes, 'unchanged' => null];
 
-        return new self($right, false, $this->tenant, $named, $this->change ?? $this->definition, $this->id, $this->impersonator);
+        return new self($right, false, $this->tenant, $named, $this->made, $this->id, $this->impersonator);
     }
 
     /**

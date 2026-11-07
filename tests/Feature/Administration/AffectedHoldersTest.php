@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Administration;
 
+use Illuminate\Database\QueryException;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\AffectedHolders;
@@ -16,6 +17,7 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\CatchesRefusals;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -31,6 +33,8 @@ use Tests\TestCase;
 #[CoversClass(AffectedHolders::class)]
 final class AffectedHoldersTest extends TestCase
 {
+    use CatchesRefusals;
+
     /**
      * A role reaches its grantees and those of every role below it, in any
      * tenant, each once; with the hierarchy disabled, its own alone.
@@ -56,6 +60,7 @@ final class AffectedHoldersTest extends TestCase
         config(['authorization.hierarchy.enabled' => false]);
 
         self::assertSame(['one'], self::ids(AffectedHolders::none()->ofRoles([$role->id])->holders()));
+        self::assertSame(['one', 'two'], self::ids(AffectedHolders::none()->ofRoles([$role->id, $least->id])->holders()));
     }
 
     /**
@@ -77,6 +82,13 @@ final class AffectedHoldersTest extends TestCase
         self::grants()->grantRole(self::user('other'), Role::query()->create(['name' => 'other']));
 
         self::assertSame(['direct', 'through'], self::ids(AffectedHolders::none()->ofPermission($edit)->holders()));
+
+        $writer = Role::query()->create(['name' => 'writer']);
+
+        RoleService::instance()?->grantPermission($writer, $edit);
+        self::grants()->grantRole(self::user('writing'), $writer);
+
+        self::assertSame(['direct', 'through', 'writing'], self::ids(AffectedHolders::none()->ofPermission($edit)->holders()));
     }
 
     /**
@@ -118,21 +130,25 @@ final class AffectedHoldersTest extends TestCase
     }
 
     /**
-     * The principals a document's allows name are read as references, a deny
-     * naming none; a document that cannot be read cannot be bounded.
+     * The principals a document's allows name are read as references, each by
+     * its type and key, past any role a selector names, a deny naming none; a
+     * document that cannot be read cannot be bounded.
      *
      * @return void
+     *
+     * @throws \Throwable
      */
     public function testThePrincipalsOfADocumentAreItsAllowsSelectors(): void
     {
+        $role     = Role::query()->create(['name' => 'editor']);
         $document = DocumentComparison::read(['statements' => [
-            ['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1', 'machine:a:b']],
+            ['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1', 'role:' . $role->id, 'machine:1', 'machine:a:b']],
             ['effect' => 'deny', 'actions' => ['posts:read']],
         ]]);
 
         $holders = AffectedHolders::none()->ofPrincipals($document)->holders() ?? [];
 
-        self::assertEquals([new Reference('user', '1'), new Reference('machine', 'a:b')], $holders);
+        self::assertEquals([new Reference('user', '1'), new Reference('machine', '1'), new Reference('machine', 'a:b')], $holders);
         self::assertNull(AffectedHolders::none()->ofPrincipals(null)->holders());
     }
 
@@ -266,8 +282,9 @@ final class AffectedHoldersTest extends TestCase
 
     /**
      * At the edges of the limit: a limit of one holds one role, and no holder
-     * at all, without being over; a set over it reads nothing more; a limit
-     * that is no positive whole number is the default.
+     * at all, without being over; each read asks for one row more than the
+     * limit, and a set over it reads nothing more; a limit that is no positive
+     * whole number is the default.
      *
      * @return void
      *
@@ -296,13 +313,22 @@ final class AffectedHoldersTest extends TestCase
         DB::enableQueryLog();
 
         $over->ofRoles([$role->id]);
+        $over->ofPermission($lone);
         AffectedHolders::none()->ofRoles([]);
 
         $queries = \count(DB::getQueryLog());
 
+        AffectedHolders::none()->ofPermission($lone);
+
+        $reads = \array_column(DB::getQueryLog(), 'query');
+
         DB::disableQueryLog();
 
         self::assertSame(0, $queries);
+        self::assertCount(4, $reads);
+        self::assertStringEndsWith('limit 2', $reads[0]);
+        self::assertStringEndsWith('limit 2', $reads[1]);
+        self::assertStringEndsWith('limit 2', $reads[3]);
 
         foreach ([0, -1] as $limit) {
             config(['authorization.administration.max_impact' => $limit]);
@@ -310,6 +336,25 @@ final class AffectedHoldersTest extends TestCase
             self::assertSame(AffectedHolders::DEFAULT_LIMIT, AffectedHolders::limit());
             self::assertCount(3, self::holdersOf($role) ?? []);
         }
+    }
+
+    /**
+     * Each set is read from the table `authorization.tables` names under its
+     * key, so a table named there that does not exist cannot be read.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEachSetIsReadFromTheTableTheConfigNames(): void
+    {
+        $role = Role::query()->create(['name' => 'editor']);
+
+        self::grants()->grantRole(self::user('one'), $role);
+
+        config(['authorization.tables.authorizable_roles' => 'missing_authorizable_roles']);
+
+        self::assertInstanceOf(QueryException::class, self::refusalOf(static fn (): ?array => self::holdersOf($role)));
     }
 
     /**

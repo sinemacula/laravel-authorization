@@ -23,8 +23,11 @@ use SineMacula\Laravel\Authorization\Subject;
  */
 final class HeldLifetimes
 {
-    /** @var array<string, int|null> The lifetimes read so far, by what is held. */
-    private array $read = [];
+    /** @var array<string, int|null> The lifetimes of the rights read so far, by right. */
+    private array $rights = [];
+
+    /** @var array<string, int|null> The lifetimes of the policies read so far, by key. */
+    private array $policies = [];
 
     /**
      * Create the lifetimes of the subject.
@@ -46,13 +49,11 @@ final class HeldLifetimes
      */
     public function of(string $right): ?int
     {
-        $key = 'right:' . $right;
-
-        if (!\array_key_exists($key, $this->read)) {
-            $this->read[$key] = HeldLifetime::of($this->subject, $right);
+        if (!\array_key_exists($right, $this->rights)) {
+            $this->rights[$right] = HeldLifetime::of($this->subject, $right);
         }
 
-        return $this->read[$key];
+        return $this->rights[$right];
     }
 
     /**
@@ -64,12 +65,10 @@ final class HeldLifetimes
      */
     public function ofPolicy(string $policy): ?int
     {
-        $key = 'policy:' . $policy;
-
-        if (!\array_key_exists($key, $this->read)) {
-            $this->read[$key] = HeldLifetime::ofPolicy($this->subject, $policy);
+        if (!\array_key_exists($policy, $this->policies)) {
+            $this->policies[$policy] = HeldLifetime::ofPolicy($this->subject, $policy);
         }
 
-        return $this->read[$key];
+        return $this->policies[$policy];
     }
 }

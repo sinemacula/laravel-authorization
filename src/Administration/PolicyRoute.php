@@ -78,7 +78,7 @@ final class PolicyRoute
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $change
      * @param  \SineMacula\Laravel\Authorization\Models\Policy  $policy
      * @param  mixed  $document
-     * @param  list<\SineMacula\Laravel\Authorization\Evaluation\Statement>|null  $allows
+     * @param  array<array-key, \SineMacula\Laravel\Authorization\Evaluation\Statement>|null  $allows
      * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
      * @param  bool  $isSelected
      * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
@@ -92,10 +92,6 @@ final class PolicyRoute
         FurtherChecks $checks,
         bool $isSelected = false,
     ): ?DecisionReason {
-        if ($allows === []) {
-            return null;
-        }
-
         $principals = $isSelected || $operation->action === PackagePermissions::RESOURCE_POLICY_ATTACH;
 
         $refusal = $allows === null ? DecisionReason::ADMINISTRATION_UNPROVABLE : self::uncontained($operation, $change, $allows, $principals, $checks);
@@ -109,13 +105,13 @@ final class PolicyRoute
      * read.
      *
      * @param  \SineMacula\Laravel\Authorization\Evaluation\Policy|null  $document
-     * @return list<\SineMacula\Laravel\Authorization\Evaluation\Statement>|null
+     * @return array<array-key, \SineMacula\Laravel\Authorization\Evaluation\Statement>|null
      */
     public static function allowsOf(?EvaluationPolicy $document): ?array
     {
         $isAllow = static fn (Statement $statement): bool => $statement->effect === PolicyEffect::ALLOW;
 
-        return $document === null ? null : \array_values(\array_filter($document->statements, $isAllow));
+        return $document === null ? null : \array_filter($document->statements, $isAllow);
     }
 
     /**
@@ -126,7 +122,7 @@ final class PolicyRoute
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $change
-     * @param  list<\SineMacula\Laravel\Authorization\Evaluation\Statement>  $allows
+     * @param  array<array-key, \SineMacula\Laravel\Authorization\Evaluation\Statement>  $allows
      * @param  bool  $principals
      * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
      * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
@@ -143,7 +139,7 @@ final class PolicyRoute
             $actions = [...$actions, ...$statement->actions ?? []];
         }
 
-        $permissions = \array_map(static fn (string $action): Permission => new Permission(['name' => $action]), \array_values(\array_unique($actions)));
+        $permissions = \array_map(static fn (string $action): Permission => new Permission(['name' => $action]), $actions);
 
         return Possession::refusalOfEach($operation, $change, $permissions, $checks);
     }

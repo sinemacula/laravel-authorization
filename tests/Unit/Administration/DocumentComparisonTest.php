@@ -96,6 +96,57 @@ final class DocumentComparisonTest extends TestCase
     }
 
     /**
+     * Two statements are the same only when they say the same thing: an allow
+     * that differs from the old one in its excluded actions, its resources, its
+     * excluded resources, its principals or its conditions is a new allow.
+     *
+     * @return void
+     */
+    public function testAStatementIsKeyedByAllItSays(): void
+    {
+        $pairs = [
+            [['effect' => 'allow', 'not_actions' => ['posts:a']], ['effect' => 'allow', 'not_actions' => ['posts:b']]],
+            [[...self::READ, 'resources' => ['posts:1']], [...self::READ, 'resources' => ['posts:2']]],
+            [[...self::READ, 'not_resources' => ['posts:1']], [...self::READ, 'not_resources' => ['posts:2']]],
+            [[...self::READ, 'principals' => ['user:1']], [...self::READ, 'principals' => ['user:2']]],
+            [[...self::READ, 'conditions' => ['eq' => ['resource.owner' => 'a']]], [...self::READ, 'conditions' => ['eq' => ['resource.owner' => 'b']]]],
+        ];
+
+        foreach ($pairs as [$old, $new]) {
+            self::assertTrue(DocumentComparison::isNarrower(self::document([$old]), self::document([$old])));
+            self::assertFalse(DocumentComparison::isNarrower(self::document([$old]), self::document([$new])));
+        }
+    }
+
+    /**
+     * A comparison with no document on either side reads nothing of the one
+     * that is missing: it is never narrower, and keeps no deny, without a
+     * warning.
+     *
+     * @return void
+     */
+    public function testAMissingDocumentIsNeverRead(): void
+    {
+        $document = self::document([self::DENY]);
+
+        /** @var list<array{\SineMacula\Laravel\Authorization\Evaluation\Policy|null, \SineMacula\Laravel\Authorization\Evaluation\Policy|null}> $pairs */
+        $pairs = [[null, $document], [$document, null], [null, null]];
+
+        \set_error_handler(static function (int $level, string $message): never {
+            throw new \ErrorException($message, 0, $level);
+        });
+
+        try {
+            foreach ($pairs as [$old, $new]) {
+                self::assertFalse(DocumentComparison::isNarrower($old, $new));
+                self::assertFalse(DocumentComparison::keepsDenies($old, $new));
+            }
+        } finally {
+            \restore_error_handler();
+        }
+    }
+
+    /**
      * The allows a document adds are those the old one did not hold, every
      * allow when there is no old one, never a deny.
      *

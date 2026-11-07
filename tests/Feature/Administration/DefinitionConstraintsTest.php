@@ -149,6 +149,31 @@ final class DefinitionConstraintsTest extends TestCase
     }
 
     /**
+     * A rank made more senior than the actor's is refused as such before its
+     * holders are weighed, and one whose holders are more than the impact limit
+     * allows cannot be weighed, so it is unprovable.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARankBeyondTheImpactLimitIsUnprovable(): void
+    {
+        $role = Role::query()->create(['name' => 'editor', 'rank' => 8]);
+
+        foreach (['one', 'two'] as $id) {
+            self::grants()->grantRole(StubIdentity::query()->create(['id' => $id]), $role);
+        }
+
+        config(['authorization.administration.max_impact' => 1]);
+
+        $rank = static fn (int $rank): OperationResource => OperationResource::definition(Actions::ROLE_UPDATE, $role, ['rank' => $rank]);
+
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, self::refusal($rank(2), null));
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::refusal($rank(4), null));
+    }
+
+    /**
      * A rank that cannot be read as a whole number cannot be compared, so it is
      * refused, created or given, whatever rank holds; and a rank is changed
      * only on a role junior to the actor, so a senior or peer role is never
@@ -224,6 +249,29 @@ final class DefinitionConstraintsTest extends TestCase
     }
 
     /**
+     * A permission's new name is what its holders would hold, so a rename that
+     * reaches holders is weighed by the permission route on the new name: one
+     * the actor neither holds nor may grant is refused, though it holds the old
+     * one.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARenameIsWeighedByTheNewName(): void
+    {
+        $write = self::permission('posts:write');
+
+        self::grants()->grantPermission(StubIdentity::query()->firstOrCreate(['id' => 'admin']), $write);
+        self::grants()->grantPermission(StubIdentity::query()->create(['id' => 'writer']), $write);
+
+        $rename = OperationResource::definition(Actions::PERMISSION_RENAME, $write, ['name' => 'posts:publish']);
+
+        self::assertNull(self::refusal($rename, null));
+        self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, self::refusal($rename, null, self::refusing(Actions::PERMISSION_GRANTABLE)));
+    }
+
+    /**
      * A role's parent is weighed by what the new parent hands the role's
      * holders: keeping none is no change, and a parent carrying a permission
      * the actor can neither hold nor grant is refused, its route deciding.
@@ -239,14 +287,21 @@ final class DefinitionConstraintsTest extends TestCase
 
         RoleService::instance()?->grantPermission($top, self::permission('billing:refund'));
 
+        $parent    = OperationResource::definition(Actions::ROLE_PARENT_SET, $role, ['parent' => $top->id]);
+        $ungranted = self::refusing(Actions::PERMISSION_GRANTABLE);
+
         self::assertNull(self::refusal(OperationResource::definition(Actions::ROLE_PARENT_SET, $role, ['parent' => null]), null));
+        self::assertNull(self::refusal($parent, null, $ungranted));
 
         self::grants()->grantRole(StubIdentity::query()->create(['id' => 'holder']), $role);
 
-        $parent = OperationResource::definition(Actions::ROLE_PARENT_SET, $role, ['parent' => $top->id]);
-
         self::assertNull(self::refusal($parent, null));
-        self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, self::refusal($parent, null, self::refusing(Actions::PERMISSION_GRANTABLE)));
+        self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, self::refusal($parent, null, $ungranted));
+
+        self::grants()->grantRole(StubIdentity::query()->create(['id' => 'peer']), Role::query()->create(['name' => 'peer', 'rank' => 1]));
+        self::grants()->grantRole(StubIdentity::query()->findOrFail('peer'), $role);
+
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, self::refusal($parent, null, $ungranted));
     }
 
     /**
@@ -326,6 +381,9 @@ final class DefinitionConstraintsTest extends TestCase
         $posts = new Reference('posts', '7');
 
         self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::refusal(OperationResource::grant(Actions::ROLE_GRANT, $role, $other, GrantScope::platform()), null));
+        $roleAsPermission = OperationResource::grant(Actions::PERMISSION_GRANT, $role, $other, GrantScope::platform());
+
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::refusal($roleAsPermission, null));
         $notAPolicy = OperationResource::grant(Actions::RESOURCE_POLICY_ATTACH, $posts, $edit, GrantScope::platform());
 
         self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::refusal($notAPolicy, null));

@@ -172,7 +172,7 @@ final class RankComparison
      * connection, however many holders there are, so the impact of a change on
      * every holder of a definition is read at a fixed cost (see `Impact`).
      *
-     * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>  $holders
+     * @param  array<array-key, \SineMacula\Laravel\Authorization\Support\Reference>  $holders
      * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
      * @return int|null
      *
@@ -239,13 +239,13 @@ final class RankComparison
     {
         $class = Relation::getMorphedModel($type) ?? $type;
 
-        return \class_exists($class) && \is_subclass_of($class, Model::class) && self::isComparable(new $class);
+        return \is_subclass_of($class, Model::class) && self::isComparable(new $class);
     }
 
     /**
      * Return the keys of the holders, grouped by morph type.
      *
-     * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>  $holders
+     * @param  array<array-key, \SineMacula\Laravel\Authorization\Support\Reference>  $holders
      * @return array<string, list<string>>
      */
     private static function byType(array $holders): array

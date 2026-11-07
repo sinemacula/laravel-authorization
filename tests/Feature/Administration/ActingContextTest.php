@@ -29,6 +29,7 @@ use SineMacula\Laravel\Authorization\Support\Operation;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\SessionScopes;
+use Tests\Concerns\ActsAsTenant;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\StubIdentity;
@@ -47,7 +48,7 @@ use Tests\TestCase;
 #[CoversClass(ActingContext::class)]
 final class ActingContextTest extends TestCase
 {
-    use CatchesRefusals;
+    use ActsAsTenant, CatchesRefusals;
 
     /**
      * Turn rank off: these tests are about the acting context, and name
@@ -373,7 +374,54 @@ final class ActingContextTest extends TestCase
         }
 
         self::assertSame(DecisionReason::NO_MATCH, $firstRefusal($role, $revoke('posts:b', 'admin')));
+        self::assertSame(DecisionReason::NO_MATCH, $firstRefusal($role, $revoke('posts:b', 'admin'), $role));
         self::assertSame(DecisionReason::EXPLICIT_DENY, $firstRefusal($revoke('posts:b', 'admin'), $role));
+    }
+
+    /**
+     * Changes of one kind in different tenants are decided tenant by tenant,
+     * and changes to definitions, which name no grant, are ordered as grants
+     * are, so the first refusal of either never depends on the order the
+     * changes were read in.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testABatchIsDecidedTenantByTenant(): void
+    {
+        $admin = StubIdentity::create(['id' => 'admin-1']);
+
+        $admin->attachPolicy(Policy::create(['name' => 'denier', 'document' => ['statements' => [[
+            'effect'    => 'deny',
+            'actions'   => [PackagePermissions::PERMISSION_REVOKE, PackagePermissions::ROLE_UPDATE],
+            'resources' => [OperationResource::TYPE . ':*'],
+        ]]]]));
+
+        [$first, $second] = \array_map(self::createTenant(...), ['a', 'b']);
+
+        $this->actAsTenant($first);
+
+        $actor      = ActingContext::for($admin);
+        $operation  = Operation::begin($actor);
+        $permission = Permission::create(['name' => 'posts:edit']);
+        $revoke     = static fn (object $tenant): OperationResource => OperationResource::revoke(
+            PackagePermissions::PERMISSION_REVOKE,
+            new Reference('user', '1'),
+            $permission,
+            new GrantScope(Reference::of($tenant)),
+        );
+        $update = static fn (string $name): OperationResource => OperationResource::definition(
+            PackagePermissions::ROLE_UPDATE,
+            Role::create(['name' => $name]),
+            ['description' => 'x'],
+        );
+        $reason = static fn (OperationResource ...$changes): ?DecisionReason => self::reasonOf(static fn () => $actor->authorizeIn($operation, ...$changes));
+
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $reason($revoke($first)));
+        self::assertSame(DecisionReason::TENANT_SCOPE, $reason($revoke($second)));
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $reason($revoke($second), $revoke($first)));
+        self::assertSame(DecisionReason::EXPLICIT_DENY, $reason($update('editor'), $update('author')));
     }
 
     /**

@@ -35,7 +35,7 @@ final readonly class GrantReach
     /**
      * Create a new grant reach.
      *
-     * @param  list<array{string, list<string>}>|null  $tenants
+     * @param  array<array-key, array{string, list<string>}>|null  $tenants
      */
     private function __construct(
 
@@ -66,12 +66,12 @@ final readonly class GrantReach
         $tenants = [];
 
         foreach ($reached as $reference) {
-            $type = 'type:' . $reference->type;
+            $type = $reference->type;
 
-            $tenants[$type] = [$reference->type, [...($tenants[$type][1] ?? []), $reference->id]];
+            $tenants[$type] = [$type, [...($tenants[$type][1] ?? []), $reference->id]];
         }
 
-        return new self(\array_values($tenants));
+        return new self($tenants);
     }
 
     /**
@@ -104,8 +104,10 @@ final readonly class GrantReach
     }
 
     /**
-     * Return the tenant and every tenant below it, as the tree's subtree query
-     * selects them; for a flat tree, the tenant alone, without a query.
+     * Return the tenants below the tenant, as the tree's subtree query selects
+     * them, the tenant itself among them when the query selects it; for a flat
+     * tree, none, without a query, since the tenant's chain already holds the
+     * tenant.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
      * @param  \SineMacula\Laravel\Authorization\Contracts\TenantTree  $tree
@@ -116,7 +118,7 @@ final readonly class GrantReach
     private static function below(Reference $tenant, TenantTree $tree): array
     {
         if ($tree instanceof FlatTenantTree) {
-            return [$tenant];
+            return [];
         }
 
         $subtree = $tree->subtree($tenant);

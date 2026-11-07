@@ -12,11 +12,11 @@ use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
  * always holds, whatever the application configures, so `authorization:sync`
  * writes them, they can be granted, and a policy naming them validates.
  *
- * Each is spelt `authorization:<noun>.<verb>`, is guard-agnostic and is filed
- * under the `authorization` category. They are the package's, not the
- * application's: the action catalogue holds what the application declares, and
- * the policy validator accepts a pattern that covers one of these whatever the
- * catalogue holds.
+ * Each is spelt `authorization:NOUN.VERB`, is guard-agnostic and is filed under
+ * the `authorization` category. They are the package's, not the application's:
+ * the action catalogue holds what the application declares, and the policy
+ * validator accepts a pattern that covers one of these whatever the catalogue
+ * holds.
  *
  * A service called with an acting context decides the action of each change it
  * makes through `check()`, on the change's operation resource (see

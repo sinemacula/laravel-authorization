@@ -163,10 +163,10 @@ final class Narrowing
 
         $row = $query->first(['policy_id', 'include_subtree']);
 
-        /** @var array{policy_id: int|string, include_subtree: bool|int|string}|null $columns */
+        /** @var array{policy_id: string, include_subtree: bool|int|string}|null $columns */
         $columns = $row === null ? null : (array) $row;
 
-        return $columns === null ? null : [(string) $columns['policy_id'], (bool) $columns['include_subtree']];
+        return $columns === null ? null : [$columns['policy_id'], (bool) $columns['include_subtree']];
     }
 
     /**

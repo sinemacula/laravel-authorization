@@ -118,7 +118,8 @@ final class RoleAuthorityTest extends TestCase
 
     /**
      * The authority is read in the same number of queries however deep the
-     * chain runs and however much it carries.
+     * chain runs and however much it carries, and a chain with no policy
+     * attached reads none of them.
      *
      * @return void
      *
@@ -130,6 +131,7 @@ final class RoleAuthorityTest extends TestCase
         $deep    = self::chain('deep', 6);
 
         self::assertSame(self::queriesOf($shallow), self::queriesOf($deep));
+        self::assertSame(self::queriesOf($shallow) - 1, self::queriesOf(Role::query()->create(['name' => 'bare'])->id));
     }
 
     /**
@@ -206,9 +208,9 @@ final class RoleAuthorityTest extends TestCase
 
     /**
      * The resource policies are never guessed: a reach whose tenants cannot be
-     * read, more of them in the reach than the impact limit allows, or one
-     * whose document cannot be read, reads as no authority at all; no roles
-     * read none of them, and nothing at all.
+     * read, more of them in the reach than the impact limit allows, of which
+     * one more than it is read, or one whose document cannot be read, reads as
+     * no authority at all; no roles read none of them, and nothing at all.
      *
      * @return void
      *
@@ -229,7 +231,17 @@ final class RoleAuthorityTest extends TestCase
 
         config(['authorization.administration.max_impact' => 1]);
 
+        DB::flushQueryLog();
+        DB::enableQueryLog();
+
         self::assertNull(RoleAuthority::of([$role->id]));
+
+        $reads = \array_filter(\array_column(DB::getQueryLog(), 'query'), static fn (string $query): bool => \str_contains($query, 'resource_policies'));
+
+        DB::disableQueryLog();
+
+        self::assertCount(1, $reads);
+        self::assertStringEndsWith('limit 2', \current($reads));
 
         config(['authorization.administration.max_impact' => 2]);
 
@@ -254,7 +266,8 @@ final class RoleAuthorityTest extends TestCase
      * An allow a resource policy hands a role's holders is weighed by the
      * policy route, its principals no bar to containment: one naming an action
      * the actor cannot hand out is refused as not grantable, and one with a
-     * condition, which cannot be contained, as unprovable.
+     * condition, which cannot be contained, as unprovable, unless a permission
+     * the role carries is refused first.
      *
      * @return void
      *
@@ -286,6 +299,10 @@ final class RoleAuthorityTest extends TestCase
         ]]);
 
         self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::authorityOf($role->id)->refusal($grant, $change, $checks));
+
+        self::roles()->grantPermission($role, self::permission('posts:edit'));
+
+        self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, self::authorityOf($role->id)->refusal($grant, $change, $checks));
     }
 
     /**
@@ -385,7 +402,7 @@ final class RoleAuthorityTest extends TestCase
      * actions of each allow it hands out.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\RoleAuthority  $authority
-     * @return list<array{string, list<array<int, string>|null>}>
+     * @return list<array{string, array<array-key, array<int, string>|null>}>
      */
     private static function selected(RoleAuthority $authority): array
     {

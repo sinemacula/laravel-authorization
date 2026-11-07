@@ -125,6 +125,12 @@ final class HeldLifetimeTest extends TestCase
         self::assertSame(self::queriesOf($user, ['posts:read']), self::queriesOf($user, $names));
         self::assertSame([], HeldLifetime::ofEach(self::subject($user), []));
         self::assertSame(['posts:read' => null], HeldLifetime::ofEach(new Subject(new \stdClass), ['posts:read']));
+
+        $writer = StubIdentity::create(['id' => 'writer-1']);
+
+        self::grants()->grantPermission($writer, self::permission('posts:write'));
+
+        self::assertSame(['posts:archive' => null, 'posts:write' => \PHP_INT_MAX], HeldLifetime::ofEach(self::subject($writer), ['posts:archive', 'posts:write']));
     }
 
     /**
@@ -207,6 +213,7 @@ final class HeldLifetimeTest extends TestCase
         self::grants()->grantPermission($machine, self::permission('posts:edit'));
 
         self::assertSame(\PHP_INT_MAX, HeldLifetime::of(new Subject($principal, $identity), 'posts:edit'));
+        self::assertSame(\PHP_INT_MAX, HeldLifetime::of(new Subject(new \stdClass, $identity), 'posts:edit'));
         self::assertNull(HeldLifetime::of(new Subject($principal, $machine), 'posts:edit'));
         self::assertNull(HeldLifetime::of(new Subject(new \stdClass), 'posts:edit'));
 
@@ -219,6 +226,7 @@ final class HeldLifetimeTest extends TestCase
         $suspended->suspended = true;
 
         self::assertNull(HeldLifetime::of(self::subject($suspended), 'posts:edit'));
+        self::assertSame(['posts:edit' => null, 'posts:read' => null], HeldLifetime::ofEach(self::subject($suspended), ['posts:edit', 'posts:read']));
     }
 
     /**
@@ -263,6 +271,7 @@ final class HeldLifetimeTest extends TestCase
 
         self::assertSame(2, DB::table('authorizable_permissions')->count() + DB::table('authorizable_roles')->count());
         self::assertNull(HeldLifetime::of(self::subject($bare), 'posts:edit'));
+        self::assertSame(['posts:edit' => null, 'posts:read' => null], HeldLifetime::ofEach(self::subject($bare), ['posts:edit', 'posts:read']));
         self::assertNull(HeldLifetime::ofPolicy(self::subject($bare), $policy->id));
     }
 

@@ -7,8 +7,11 @@ namespace Tests\Unit\Administration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Administration\FurtherChecks;
+use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
+use SineMacula\Laravel\Authorization\Evaluation\CheckSources;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
+use SineMacula\Laravel\Authorization\Evaluation\SessionCaps;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
@@ -72,5 +75,19 @@ final class FurtherChecksTest extends TestCase
         $checks = new FurtherChecks(new Subject(new \stdClass), static fn (): Decision => Decision::allow(DecisionStage::ALLOW), static fn (): null => null, $tenant);
 
         self::assertSame($tenant, $checks->from);
+    }
+
+    /**
+     * The sources the pipeline gathers for a further check are handed back as
+     * they are.
+     *
+     * @return void
+     */
+    public function testItHandsBackTheSourcesThePipelineGathers(): void
+    {
+        $sources = new CheckSources([], null, [], new CheckContext, static fn (): ?string => null, new SessionCaps);
+        $checks  = new FurtherChecks(new Subject(new \stdClass), static fn (): Decision => Decision::allow(DecisionStage::ALLOW), static fn (): CheckSources => $sources);
+
+        self::assertSame($sources, $checks->sources('posts:edit'));
     }
 }

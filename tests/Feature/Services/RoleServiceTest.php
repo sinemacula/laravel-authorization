@@ -189,6 +189,29 @@ final class RoleServiceTest extends TestCase
     }
 
     /**
+     * A change made without an actor is not judged, so the permission in hand
+     * is granted as it is given, by its key, and reported by the name it holds,
+     * never read again.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAChangeWithoutAnActorGrantsThePermissionAsGiven(): void
+    {
+        Event::fake([PermissionGranted::class]);
+
+        $editor        = self::role('editor');
+        $delete        = Permission::query()->create(['name' => 'posts:delete']);
+        $renamed       = Permission::query()->whereKey($delete->getKey())->firstOrFail();
+        $renamed->name = 'posts:purge';
+
+        self::assertSame(GrantOutcome::GRANTED, self::service()->grantPermission($editor, $renamed));
+        self::assertSame($delete->getKey(), DB::table('role_permissions')->value('permission_id'));
+        Event::assertDispatched(PermissionGranted::class, static fn (PermissionGranted $event): bool => $event->permissionName === 'posts:purge');
+    }
+
+    /**
      * A role is created owned by the tenant given, as a model or a reference,
      * and by the platform for none.
      *

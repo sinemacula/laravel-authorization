@@ -47,6 +47,12 @@ final class AdministrationConfigValidatorTest extends TestCase
 
         yield 'not an array' => ['1000', 'authorization.administration', 'expected an array of limits, got \'1000\' (string).'];
         yield 'an unknown limit' => [['max_holders' => 4], 'authorization.administration', 'unknown limit \'max_holders\'; expected one of max_impact.'];
+        yield 'an unknown limit after one' => [
+            ['max_impact' => 5, 'max_holders' => 4],
+            'authorization.administration',
+            'unknown limit \'max_holders\'; expected one of max_impact.',
+        ];
+        yield 'a list of limits' => [[5], 'authorization.administration', 'unknown limit \'0\'; expected one of max_impact.'];
         yield 'zero' => [['max_impact' => 0], 'authorization.administration.max_impact', $whole . '0 (int).'];
         yield 'negative' => [['max_impact' => -1], 'authorization.administration.max_impact', $whole . '-1 (int).'];
         yield 'a string' => [['max_impact' => '1000'], 'authorization.administration.max_impact', $whole . '\'1000\' (string).'];

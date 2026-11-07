@@ -50,13 +50,8 @@ final class DocumentComparison
      */
     public static function read(mixed $document): ?Policy
     {
-        if (!\is_array($document)) {
-            return null;
-        }
-
         try {
-            /** @var array<string, mixed> $document */
-            return Policy::fromArray(PolicyDocument::named($document, PolicyDocument::UNNAMED));
+            return \is_array($document) ? Policy::fromArray(PolicyDocument::named($document, PolicyDocument::UNNAMED)) : null;
         } catch (\Throwable) {
             return null;
         }
@@ -74,11 +69,7 @@ final class DocumentComparison
      */
     public static function isNarrower(?Policy $old, ?Policy $new): bool
     {
-        if ($old === null || $new === null || $old->version !== $new->version) {
-            return false;
-        }
-
-        return self::added($old, $new) === [] && self::keepsDenies($old, $new);
+        return $new !== null && self::keepsDenies($old, $new) && self::added($old, $new) === [];
     }
 
     /**

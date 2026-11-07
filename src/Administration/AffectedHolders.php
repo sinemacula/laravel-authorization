@@ -168,7 +168,7 @@ final class AffectedHolders
 
         foreach ($document === null ? [] : $document->statements as $statement) {
             foreach ($statement->effect === PolicyEffect::ALLOW ? $statement->principals ?? [] : [] as $selector) {
-                [$type, $id] = \array_pad(\explode(':', $selector, 2), 2, '');
+                [$type, $id] = \explode(':', $selector, 2);
 
                 if ($type === StatementValidator::ROLE_SELECTOR) {
                     $roles[] = $id;
@@ -182,7 +182,7 @@ final class AffectedHolders
 
         $this->isOver = $this->isOver || $document === null;
 
-        return $this->ofRoles(\array_values(\array_unique($roles)));
+        return $this->ofRoles($roles);
     }
 
     /**
@@ -223,7 +223,8 @@ final class AffectedHolders
 
     /**
      * Return the keys in the column the query selects, each once, at most one
-     * more than the limit, so a set reaching that many roles is over its limit.
+     * more than the limit, so a set reaching that many roles is over its limit;
+     * a set already over it reads none.
      *
      * @param  \Illuminate\Database\Query\Builder  $query
      * @param  string  $column
@@ -231,9 +232,14 @@ final class AffectedHolders
      */
     private function keysFrom(Builder $query, string $column): array
     {
-        $keys = \array_values(\array_map(\strval(...), $query->distinct()->limit($this->limit + 1)->pluck($column)->all()));
+        if ($this->isOver) {
+            return [];
+        }
 
-        $this->isOver = $this->isOver || \count($keys) > $this->limit;
+        /** @var list<string> $keys */
+        $keys = $query->distinct()->limit($this->limit + 1)->pluck($column)->all();
+
+        $this->isOver = \count($keys) > $this->limit;
 
         return $keys;
     }
@@ -247,25 +253,30 @@ final class AffectedHolders
      */
     private function add(Reference $holder): void
     {
-        $this->holders[\strlen($holder->type) . ':' . $holder->type . ':' . $holder->id] = $holder;
+        $this->holders[\serialize([$holder->type, $holder->id])] = $holder;
 
         $this->isOver = $this->isOver || \count($this->holders) > $this->limit;
     }
 
     /**
-     * Return the keys of the roles and of every role below them, in one
-     * recursive query that ignores the tenant scope; with the hierarchy
-     * disabled, the roles alone, without a query.
+     * Return the keys of the roles and of every role below them, each once, as
+     * one recursive query that ignores the tenant scope reads them; with the
+     * hierarchy disabled, the roles alone, without a query. A key that names no
+     * role names no grant either, so the query, which reads the roles that
+     * exist, leaves it out.
      *
      * `union` rather than `union all` drops a row already produced, so a cycle
      * in the stored hierarchy ends the recursion.
      *
      * @param  list<string>  $keys
-     * @return list<string>
+     * @return list<mixed>
      */
     private static function withRolesBelow(array $keys): array
     {
-        if (!(bool) config('authorization.hierarchy.enabled', true)) {
+        /** @var bool $hierarchy */
+        $hierarchy = config('authorization.hierarchy.enabled', true);
+
+        if (!$hierarchy) {
             return $keys;
         }
 
@@ -280,17 +291,16 @@ final class AffectedHolders
         $below      = $grammar->wrap(self::BELOW);
         $marks      = \implode(', ', \array_map(static fn (): string => '?', $keys));
 
-        $rows = $connection->select(
+        $rows = $connection->selectFromWriteConnection(
             "with recursive {$below} ({$key}) as ("
                 . "select {$key} from {$table} where {$key} in ({$marks})"
                 . " union select {$table}.{$key} from {$table}"
                 . " inner join {$below} on {$table}.{$parent} = {$below}.{$key}"
                 . ") select {$key} from {$below}",
             $keys,
-            false,
         );
 
-        return \array_values(\array_unique([...$keys, ...\array_map(\strval(...), \array_column($rows, $model->getKeyName()))]));
+        return \array_column($rows, $model->getKeyName());
     }
 
     /**

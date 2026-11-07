@@ -462,6 +462,39 @@ final class OperationConstraintsTest extends TestCase
     }
 
     /**
+     * The constraints are weighed in order, the first that fails refusing: rank
+     * before what the change hands out, and, for a change to the actor itself,
+     * the self rule before it; an action whose record is of another kind than
+     * the one it hands out is unprovable.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRankAndTheSelfRuleComeBeforeWhatTheChangeHandsOut(): void
+    {
+        $allowed = Decision::allow(DecisionStage::ALLOW);
+        $denied  = Decision::deny(DecisionReason::NO_MATCH, DecisionStage::IMPLICIT);
+        $admin   = self::rankedUser('admin', 2);
+        $refused = [PackagePermissions::PERMISSION_GRANTABLE, PackagePermissions::ADMINISTRATION_SELF];
+        $refuse  = static fn (string $action): Decision => \in_array($action, $refused, true) ? $denied : $allowed;
+        $checks  = $this->checks($admin, $refuse);
+        $peer    = self::permissionGrant(self::rankedUser('peer', 2))->toResourceReference();
+        $self    = self::permissionGrant($admin)->toResourceReference();
+
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, self::weigh(PackagePermissions::PERMISSION_GRANT, $peer, $checks)->reason);
+        self::assertSame(DecisionReason::ADMINISTRATION_SELF, self::weigh(PackagePermissions::PERMISSION_GRANT, $self, $checks)->reason);
+
+        $senior     = $this->checks(self::senior('chief-admin'), static fn (): Decision => $allowed);
+        $user       = self::user('user');
+        $role       = OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $user, Role::query()->create(['name' => 'empty']), GrantScope::platform());
+        $permission = OperationResource::grant(PackagePermissions::POLICY_ATTACH, $user, Permission::query()->firstOrCreate(['name' => 'posts:edit']), GrantScope::platform());
+
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::weigh(PackagePermissions::PERMISSION_GRANT, $role->toResourceReference(), $senior)->reason);
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::weigh(PackagePermissions::POLICY_ATTACH, $permission->toResourceReference(), $senior)->reason);
+    }
+
+    /**
      * A change to a subject is weighed by what it hands out: a role whose chain
      * cannot be read is unprovable, a policy by the policy route, and a
      * boundary replaced by a wider one, or removed, only with

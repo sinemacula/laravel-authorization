@@ -151,7 +151,7 @@ final class Impact
      */
     private static function rank(OperationResource $operation, GrantScope $reach, array $holders, FurtherChecks $checks, ?int $granted): ?DecisionReason
     {
-        $others = \array_values(\array_filter($holders, static fn (Reference $holder): bool => !OperationGrantee::isActor($holder, $checks->subject)));
+        $others = \array_filter($holders, static fn (Reference $holder): bool => !OperationGrantee::isActor($holder, $checks->subject));
 
         if (!RankComparison::isEnabled() || $others === []) {
             return null;
@@ -174,14 +174,14 @@ final class Impact
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
      * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $reach
-     * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>  $holders
+     * @param  array<array-key, \SineMacula\Laravel\Authorization\Support\Reference>  $holders
      * @param  \SineMacula\Laravel\Authorization\Administration\FurtherChecks  $checks
      * @return array{int|null, int}|null
      */
     private static function ranks(OperationResource $operation, GrantScope $reach, array $holders, FurtherChecks $checks): ?array
     {
-        $types        = \array_unique(\array_map(static fn (Reference $holder): string => $holder->type, $holders));
-        $isComparable = RankComparison::isComparable($checks->subject) && \array_filter($types, static fn (string $type): bool => !RankComparison::isComparableType($type)) === [];
+        $uncomparable = \array_filter($holders, static fn (Reference $holder): bool => !RankComparison::isComparableType($holder->type));
+        $isComparable = RankComparison::isComparable($checks->subject) && $uncomparable === [];
 
         try {
             $held = $isComparable ? RankComparison::rankAcrossAll($holders, $reach) : null;

@@ -91,8 +91,12 @@ final class PossessionLimits
      */
     public static function limitedEach(Subject $subject, GrantScope $scope, array $sources): array
     {
+        if ($sources === []) {
+            return [];
+        }
+
         try {
-            [$denying, $capping] = $sources === [] ? [[], []] : self::stored($subject, GrantReach::of($scope));
+            [$denying, $capping] = self::stored($subject, GrantReach::of($scope));
         } catch (\Throwable) {
             return \array_map(static fn (): bool => true, $sources);
         }

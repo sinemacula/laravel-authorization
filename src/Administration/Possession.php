@@ -95,12 +95,7 @@ final class Possession
 
         /** @var array<array-key, \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason> $refusals */
         $refusals = $names === [] ? [] : TenantScope::within($operation->tenant, $change->scope->application, $prove, self::isBelow($operation, $change));
-
-        if ($refusals === []) {
-            return null;
-        }
-
-        $first = static fn (): ?DecisionReason => self::firstUngrantable($operation, $change, $permissions, $refusals, $checks);
+        $first    = static fn (): ?DecisionReason => self::firstUngrantable($operation, $change, $permissions, $refusals, $checks);
 
         return TenantScope::within($operation->tenant, $change->scope->application, $first, self::isBelow($operation, $change));
     }

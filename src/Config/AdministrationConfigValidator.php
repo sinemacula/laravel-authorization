@@ -45,7 +45,7 @@ final class AdministrationConfigValidator
             throw new InvalidAuthorizationConfigException(self::KEY, 'expected an array of limits, got ' . self::describe($config) . '.');
         }
 
-        $unknown = \array_values(\array_diff(\array_map(\strval(...), \array_keys($config)), self::LIMITS));
+        $unknown = \array_values(\array_diff(\array_keys($config), self::LIMITS));
 
         if ($unknown !== []) {
             throw new InvalidAuthorizationConfigException(self::KEY, "unknown limit '{$unknown[0]}'; expected one of " . \implode(', ', self::LIMITS) . '.');

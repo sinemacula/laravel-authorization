@@ -233,9 +233,10 @@ final class PossessionTest extends TestCase
 
     /**
      * Many permissions are handed out in one pass: each name is proved once,
-     * the grantable right is asked only of those the actor cannot be proved to
-     * hold, and the refusal is that of the first, in order, that neither route
-     * passes; none to hand out passes without asking anything.
+     * whatever the others before it, the grantable right is asked only of those
+     * the actor cannot be proved to hold, and the refusal is that of the first,
+     * in order, that neither route passes; none to hand out passes without
+     * asking anything.
      *
      * @return void
      *
@@ -270,6 +271,18 @@ final class PossessionTest extends TestCase
 
         self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, Possession::refusalOfEach($operation, $change, [$edit, $delete], $checks));
         self::assertSame(['posts:edit', PackagePermissions::PERMISSION_GRANTABLE], $this->actionsAsked());
+
+        $this->forgetAsked();
+
+        self::assertSame(DecisionReason::ADMINISTRATION_NOT_GRANTABLE, Possession::refusalOfEach($operation, $change, [$delete, $edit], $checks));
+        self::assertSame(['posts:edit', PackagePermissions::PERMISSION_GRANTABLE], $this->actionsAsked());
+
+        [$operation, $change, , $refused] = $this->grant($actor, GrantScope::platform(), allowed: false);
+
+        $this->forgetAsked();
+
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, Possession::refusalOfEach($operation, $change, [$edit, $read], $refused));
+        self::assertSame(['posts:edit', 'posts:read', PackagePermissions::PERMISSION_GRANTABLE], $this->actionsAsked());
 
         [$operation, $change, , $limited] = $this->grant($actor, GrantScope::platform(), sources: $denies);
 

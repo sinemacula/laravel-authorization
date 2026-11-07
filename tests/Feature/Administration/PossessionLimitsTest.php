@@ -379,6 +379,32 @@ final class PossessionLimitsTest extends TestCase
     }
 
     /**
+     * What the subject's identity holds limits it even when its principal is no
+     * model, and what is stored is read from the tables `authorization.tables`
+     * names, so one named there that cannot be read limits every permission.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheIdentitysPoliciesAndTheConfiguredTablesAreRead(): void
+    {
+        $user    = StubIdentity::query()->create(['id' => 'user-1']);
+        $sources = new CheckSources([], null, [], new CheckContext, static fn (): ?string => null, new SessionCaps);
+
+        self::grants()->attachPolicy($user, self::denying('no-edit', 'posts:edit'));
+
+        $identity = new Subject(new \stdClass, $user);
+        $each     = ['posts:edit' => $sources, 'posts:view' => $sources];
+
+        self::assertSame(['posts:edit' => true, 'posts:view' => false], PossessionLimits::limitedEach($identity, GrantScope::platform(), $each));
+
+        config(['authorization.tables.authorizable_roles' => 'missing_authorizable_roles']);
+
+        self::assertSame(['posts:view' => true], PossessionLimits::limitedEach(new Subject($user, $user), GrantScope::platform(), ['posts:view' => $sources]));
+    }
+
+    /**
      * Determine whether anything limits the permission for the subject, given
      * the check's sources, for a grant in the scope, platform-wide unless one
      * is given.

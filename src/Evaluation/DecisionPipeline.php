@@ -352,18 +352,30 @@ final class DecisionPipeline
     ): Decision {
         $decision = $this->decideAlone($subject, $action, $resource, $context, $attributes);
 
-        if (!$resource?->source instanceof OperationResource) {
-            return $decision;
-        }
+        return $resource?->source instanceof OperationResource
+            ? OperationConstraints::weigh($decision, $action, $resource, $this->furtherChecks($subject, $context, $attributes, $from))
+            : $decision;
+    }
 
-        $checks = new FurtherChecks(
+    /**
+     * Return the further checks the administration stage may need for the
+     * subject, each decided as `decideGrants()` decides its own check up to the
+     * allow, in the scope in place when it is asked.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @param  array<string, mixed>  $context
+     * @param  \SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch|null  $attributes
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $from
+     * @return \SineMacula\Laravel\Authorization\Administration\FurtherChecks
+     */
+    private function furtherChecks(Subject $subject, array $context, ?ResourceAttributeBatch $attributes, ?Reference $from): FurtherChecks
+    {
+        return new FurtherChecks(
             $subject,
             fn (string $further, ?ResourceReference $on): Decision => $this->decideAlone($subject, $further, $on, $context, $attributes),
             fn (string $further): ?CheckSources => $this->sourcesOrNone($subject, $further, $context),
             $from,
         );
-
-        return OperationConstraints::weigh($decision, $action, $resource, $checks);
     }
 
     /**

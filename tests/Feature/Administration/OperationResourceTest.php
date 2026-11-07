@@ -379,8 +379,8 @@ final class OperationResourceTest extends TestCase
     /**
      * A policy given a document is offered it as it would be stored, named as
      * the policy is, or by the name the change gives it, unless it names
-     * itself, and by that document's digest; one that cannot be read is offered
-     * as none, with no digest.
+     * itself, and by that document's digest beside the other changes it
+     * proposes; one that cannot be read is offered as none, with no digest.
      *
      * @return void
      *
@@ -399,6 +399,9 @@ final class OperationResourceTest extends TestCase
         self::assertSame(['statements' => [], 'name' => 'viewers'], OperationResource::rewrite($policy, \json_encode($document), ['name' => 'viewers'])->definition?->document);
         self::assertSame(['name' => 'own', 'statements' => []], OperationResource::rewrite($policy, ['name' => 'own', 'statements' => []])->definition?->document);
         self::assertSame(PackagePermissions::POLICY_CREATE, OperationResource::rewrite($policy, $document, [], PackagePermissions::POLICY_CREATE)->action);
+        $described = OperationResource::rewrite($policy, $document, ['description' => 'Reads']);
+
+        self::assertSame(['description' => 'Reads', 'digest' => DocumentDigest::of($stored)->digest], $described->definition?->values);
 
         $unreadable = OperationResource::rewrite($policy, '{not json');
 

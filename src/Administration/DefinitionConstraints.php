@@ -257,9 +257,10 @@ final class DefinitionConstraints
      * Return why updating the role with the values is refused: a rank that
      * cannot be read as a whole number cannot be compared; a rank change is
      * made only to a role junior to the actor, so a senior role is never
-     * demoted, and must leave it junior to the actor; and a rank more senior
-     * than the role's is weighed by the impact check over the role's holders,
-     * the rank counting as theirs. Any other update widens no one.
+     * demoted, and must leave it junior to the actor, so the more senior of the
+     * two ranks is weighed against the actor's; and a rank more senior than the
+     * role's is weighed by the impact check over the role's holders, the rank
+     * counting as theirs. Any other update widens no one.
      *
      * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $operation
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
@@ -283,10 +284,9 @@ final class DefinitionConstraints
         $isMoreSenior = $rank !== null && $rank < ($role->rank ?? \PHP_INT_MAX);
         $holders      = $isMoreSenior ? AffectedHolders::none()->ofRoles([$role->id])->holders() : [];
         $reach        = Impact::reachOf($operation->tenant);
+        $senior       = $rank === null ? $role->rank : \min($rank, $role->rank ?? $rank);
 
-        return Impact::juniorRank($operation, $role->rank, $checks)
-            ?? Impact::juniorRank($operation, $rank, $checks)
-            ?? Impact::refusal($operation, $resource, $reach, $holders, $checks, $rank);
+        return Impact::juniorRank($operation, $senior, $checks) ?? Impact::refusal($operation, $resource, $reach, $holders, $checks, $rank);
     }
 
     /**

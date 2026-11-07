@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Administration;
 
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\FurtherChecks;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
@@ -19,9 +20,11 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
+use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -97,6 +100,35 @@ final class PolicyRewriteTest extends TestCase
         self::assertNotContains('posts:edit', $this->asked);
         self::assertContains(PackagePermissions::ADMINISTRATION_UNBOUNDED, $this->asked);
         self::assertNull($this->refusal($policy, [self::READ, self::EDIT, self::DENY], true));
+    }
+
+    /**
+     * A rewrite that only narrows passes whoever holds the policy; one that
+     * adds allows to a policy attached to a resource reaches the principals the
+     * old document names as well as those of the new; and the rewrite of a
+     * policy that is gone cannot be compared, so it is unprovable.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheHoldersOfBothDocumentsAreWeighed(): void
+    {
+        $peer = StubIdentity::query()->create(['id' => 'peer']);
+
+        self::grants()->grantRole($peer, Role::query()->create(['name' => 'peer', 'rank' => 0]));
+
+        $named  = Reference::of($peer);
+        $policy = self::policy([[...self::READ, 'principals' => [$named->type . ':' . $named->id]], self::DENY]);
+
+        ResourcePolicyService::instance()?->attach($policy, ['posts', 7]);
+
+        self::assertNull($this->refusal($policy, [self::DENY]));
+        self::assertSame(DecisionReason::ADMINISTRATION_RANK, $this->refusal($policy, [self::EDIT, self::DENY]));
+
+        DB::table('policies')->where('id', $policy->getKey())->delete();
+
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, $this->refusal($policy, [self::DENY]));
     }
 
     /**

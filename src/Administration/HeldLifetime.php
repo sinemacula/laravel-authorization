@@ -269,7 +269,7 @@ final class HeldLifetime
 
         $carried = [];
 
-        $columns = [$pivot . '.role_id as role_id', $model->qualifyColumn('name') . ' as name', $pivot . '.expires_at as expires_at'];
+        $columns = [$pivot . '.role_id as role_id', $model->qualifyColumn('name'), $pivot . '.expires_at as expires_at'];
 
         foreach (LiveGrants::only($query, $pivot)->toBase()->get($columns) as $row) {
             /** @var array{role_id: string, name: string, expires_at: string|null} $read */
@@ -319,10 +319,10 @@ final class HeldLifetime
             $read  = (array) $row;
             $until = UtcDateTime::toUtc($read['expires_at'])?->getTimestamp() ?? \PHP_INT_MAX;
 
-            $attached[$read['role_id']] = \max($attached[$read['role_id']] ?? $until, $until);
+            $attached[$read['role_id']][] = $until;
         }
 
-        return $attached;
+        return \array_map(static fn (array $untils): int => \max($untils), $attached);
     }
 
     /**
@@ -374,6 +374,6 @@ final class HeldLifetime
      */
     private static function later(?int ...$times): ?int
     {
-        return \max([null, ...$times]);
+        return \max($times);
     }
 }

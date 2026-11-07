@@ -6,6 +6,7 @@ namespace Tests\Feature\Administration;
 
 use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Database\Eloquent\Relations\Relation;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -410,7 +411,7 @@ final class RankComparisonTest extends TestCase
     /**
      * An actor is ranked in the tenant and application given, or at platform
      * scope for none; a holder's type can be ranked when it names a model whose
-     * roles can be read.
+     * roles can be read, by its class or by its morph alias.
      *
      * @return void
      *
@@ -431,6 +432,14 @@ final class RankComparisonTest extends TestCase
         self::assertFalse(RankComparison::isComparableType('stub-other'));
         self::assertFalse(RankComparison::isComparableType(\stdClass::class));
         self::assertFalse(RankComparison::isComparableType((new Role)->getMorphClass()));
+
+        Relation::morphMap(['ranked-member' => StubIdentity::class]);
+
+        try {
+            self::assertTrue(RankComparison::isComparableType('ranked-member'));
+        } finally {
+            Relation::morphMap([], false);
+        }
     }
 
     /**

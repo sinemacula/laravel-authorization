@@ -34,9 +34,10 @@ use Tests\TestCase;
 final class RoleParentTest extends TestCase
 {
     /**
-     * Keeping the parent changes nothing; clearing one whose chain carries no
-     * deny only narrows; replacing or clearing one whose chain does, or one
-     * that is gone, lifts what cannot be bounded.
+     * Keeping the parent changes nothing, even one whose chain carries a deny;
+     * clearing one whose chain carries no deny only narrows; replacing or
+     * clearing one whose chain does, or one that is gone, lifts what cannot be
+     * bounded.
      *
      * @return void
      *
@@ -58,6 +59,7 @@ final class RoleParentTest extends TestCase
         self::assertNull(self::refusal($underPlain, $plain->id));
         self::assertNull(self::refusal($underPlain, null));
         self::assertNull(self::refusal($underPlain, ''));
+        self::assertNull(self::refusal($underGuarded, $guarded->id));
         self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::refusal($underGuarded, null));
         self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::refusal($underGuarded, $plain->id));
         self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::refusal($orphan, null));
