@@ -84,11 +84,14 @@ final class ConfigValidator
      * `PermissionEnum` contract and is backed by strings: an entry of
      * `permission_enums` the validation accepts.
      *
-     * The manager reads the configured enums at run time, after boot, so it
-     * skips an entry for which this is false rather than fail on it.
+     * The permission catalogue reads the configured enums at run time, after
+     * boot, so it skips an entry for which this is false rather than fail on
+     * it.
      *
      * @param  mixed  $class
      * @return bool
+     *
+     * @phpstan-assert-if-true class-string<\SineMacula\Laravel\Authorization\Contracts\PermissionEnum> $class
      */
     public static function isStringBackedPermissionEnum(mixed $class): bool
     {

@@ -27,11 +27,13 @@ use SineMacula\Laravel\Authorization\Support\TenantChain;
  *
  * The scope keeps no tenant of its own. It reads the tenant from the
  * `ResolvedTenant` holder, which the service provider binds with `scoped()`, so
- * a single request or job (the `effectivePermissions()` enum sweep, relation
- * walks, cache-miss paths) pays the resolver cost once, and the next request or
- * job resolves its own tenant. While a resolution is under way it marks it in
- * the container, rather than on the scope, since each scoped model holds its
- * own instance of the scope.
+ * a single request or job (relation walks, cache-miss paths, a run of `can()`
+ * checks) pays the resolver cost once, and the next request or job resolves its
+ * own tenant. `permissionsFor()` in another scope than the request's, and every
+ * other caller of `within()`, decides under the tenant it passes in, and the
+ * request's tenant is resolved again once it returns. While a resolution is
+ * under way it marks it in the container, rather than on the scope, since each
+ * scoped model holds its own instance of the scope.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited

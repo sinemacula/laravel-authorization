@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization;
 
+use Illuminate\Container\Container;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Translation\Translator;
 use Illuminate\Database\Eloquent\Model;
@@ -11,7 +12,6 @@ use Illuminate\Support\Collection;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Concerns\BuildsScopedManagers;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
-use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
@@ -32,6 +32,9 @@ use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\ActionList;
+use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
+use SineMacula\Laravel\Authorization\Support\PermissionCatalogue;
+use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 
@@ -40,17 +43,19 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  *
  * Coordinates subject resolution, the decision and its recording into a single
  * API (AUTHZ-9.5): `can`, `cannot`, `authorize`, `check`, `any`, `all` and
- * `explain`, and, over many resources at once (AUTHZ-10.3), `checkMany`,
- * `canEach` and `filterAuthorized`, on the current subject or on a scoped clone
- * from `for()`, `forUser()`, `withPolicies()` or `capped()`. `check()` is the
- * one decision entry point (D22) and `checkMany()` the one bulk entry point,
- * `check()` deciding as `checkMany()` decides a batch of one, so a check is
- * decided the same way however it is asked: every other form adapts one of
- * them, and they alone record each decision and report it (see `CheckBatch`).
- * The decision itself is made by the manager's `DecisionPipeline`, which admits
- * the check (the subject, resource and tenant stages) and gathers every source,
- * the session caps included; the policy evaluator runs the rest of the stages
- * in AUTHZ-7.1's order, the denies, the caps, the allows and the implicit deny,
+ * `explain`, over many resources at once (AUTHZ-10.3), `checkMany`, `canEach`
+ * and `filterAuthorized`, on the current subject or on a scoped clone from
+ * `for()`, `forUser()`, `withPolicies()` or `capped()`, and the actions a
+ * subject may take in a scope, `permissionsFor` (AUTHZ-10.4), decided through
+ * the same path but recording nothing. `check()` is the one decision entry
+ * point (D22) and `checkMany()` the one bulk entry point, `check()` deciding as
+ * `checkMany()` decides a batch of one, so a check is decided the same way
+ * however it is asked: every other form adapts one of them, and they alone
+ * record each decision and report it (see `CheckBatch`). The decision itself is
+ * made by the manager's `DecisionPipeline`, which admits the check (the
+ * subject, resource and tenant stages) and gathers every source, the session
+ * caps included; the policy evaluator runs the rest of the stages in
+ * AUTHZ-7.1's order, the denies, the caps, the allows and the implicit deny,
  * each recorded in the decision's trace for audit consumers.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -59,12 +64,6 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
 final class AuthorizationManager
 {
     use BuildsScopedManagers, HasContainerInstance;
-
-    /** @var \SineMacula\Laravel\Authorization\Subject|null The subject named through `for()` or `forUser()`, null for a guest. */
-    private ?Subject $subjectOverride = null;
-
-    /** @var bool Whether `for()` or `forUser()` named the subject; until one does, the bound resolver resolves it. */
-    private bool $isSubjectNamed = false;
 
     /** @var \SineMacula\Laravel\Authorization\Evaluation\DecisionPipeline Decides each check, with the policy override and the caps of this scope. */
     private DecisionPipeline $pipeline;
@@ -435,48 +434,72 @@ final class AuthorizationManager
     }
 
     /**
-     * Return a map of every registered permission to its effective decision for
-     * the current subject.
+     * Return the actions the subject may take in the scope (AUTHZ-10.4, N69),
+     * for a UI to show or hide its controls: every action the permission
+     * catalogue declares (the package's own permissions, the cases of the
+     * configured enums and the definitions of the configured providers), each
+     * name once, in the catalogue's order, whose `check()` on the scope's
+     * resource, with the context, would allow, in the scope, about the subject.
      *
-     * Walks every case of every configured `PermissionEnum` and decides each
-     * through the full decision. The result is an associative array keyed by
-     * permission string with boolean values indicating whether the subject is
-     * allowed.
+     * A resolved `Subject` is taken as it is, its identity, guard and session
+     * kept; any other object is named as `for()` names it; and null is the
+     * subject this manager's checks are about, as `check()` takes it: the
+     * request's, or the one `for()` or `forUser()` named, so
+     * `forUser(null)->permissionsFor(null, ...)` lists a guest's actions, which
+     * are none. The scope's tenant and application are put in place of the
+     * request's, both as the subject's and as the scope of the grants that
+     * count, and the request's are restored once the actions are decided, even
+     * when deciding one throws, with what the resolution cache held for them
+     * (see `AuthorizationScope`).
      *
-     * Performance note: this method performs N evaluations where N is the total
-     * number of registered enum cases. Callers should cache the result when
-     * rendering permission-picker UIs or capability checklists rather than
-     * calling this on every request.
+     * The listing is exact: each action is decided through the one decision
+     * path `checkMany()` takes, over what the checks share read once, the
+     * resource's tenant and attributes among it, so its denies, conditions,
+     * boundaries, guardrails, caps and authentication requirements are weighed
+     * exactly as `check()` weighs them, never as the allows less the denies. An
+     * action whose check would be `insufficient_authentication` is not listed,
+     * and one whose check would throw makes the listing throw what it throws,
+     * so nothing is ever listed that the check would not allow. A listing for
+     * one resource can differ from a listing for none, and the action is still
+     * to be authorized when it is taken.
      *
+     * Listing is introspection, not a check (N70): it records no last decision
+     * and dispatches no `DecisionEvaluated` and no `AuthorizationFailed`. The
+     * break-glass reporting of BL-70 is to define how it treats it. A catalogue
+     * that cannot be read, such as one declaring a name twice with different
+     * metadata, throws `InvalidPermissionCatalogueException`.
+     *
+     * @param  object|null  $subject
+     * @param  \SineMacula\Laravel\Authorization\Support\AuthorizationScope  $scope
      * @param  array<string, mixed>  $context
-     * @return array<string, bool>
+     * @return list<string>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueException
+     *
+     * @phpstan-ignore throws.unusedType
      */
-    public function effectivePermissions(array $context = []): array
+    public function permissionsFor(?object $subject, AuthorizationScope $scope, array $context = []): array
     {
-        /** @var array<int, mixed> $enums */
-        $enums = \function_exists('config')
-            ? (array) config('authorization.permission_enums', [])
-            : []; // @codeCoverageIgnore
+        $named = match (true) {
+            $subject === null           => $this->currentSubject(),
+            $subject instanceof Subject => $subject,
+            default                     => $this->for($subject)->currentSubject(),
+        };
 
-        $permissions = [];
+        /** @var \SineMacula\Laravel\Authorization\Support\PermissionCatalogue $catalogue */
+        $catalogue = Container::getInstance()->make(PermissionCatalogue::class);
+        $actions   = \array_unique(\array_map(static fn (PermissionDefinition $definition): string => $definition->name, $catalogue->definitions()));
 
-        foreach ($enums as $enumClass) {
-            if (!ConfigValidator::isStringBackedPermissionEnum($enumClass)) {
-                continue;
-            }
+        return $scope->within(function () use ($named, $scope, $actions, $context): array {
+            // Every action is decided on the one reference, so the resource is
+            // told, and its attributes read, once for the listing.
+            $resource  = ResourceReferences::of($scope->resource);
+            $checks    = \array_map(static fn (string $action): CheckInput => new CheckInput($action, $resource, $context), $actions);
+            $decisions = $this->batch(false)->decide($scope->subjectIn($named), $checks);
 
-            /** @var class-string<\SineMacula\Laravel\Authorization\Contracts\PermissionEnum> $className */
-            $className = $enumClass;
-
-            foreach ($className::cases() as $case) {
-                // Only enums backed by strings get this far.
-                /** @var string $action */
-                $action               = $case->value;
-                $permissions[$action] = $this->can($action, null, $context);
-            }
-        }
-
-        return $permissions;
+            return \array_values(\array_filter($actions, static fn (int $key): bool => $decisions[$key]->isAllowed(), \ARRAY_FILTER_USE_KEY));
+        });
     }
 
     /**
@@ -520,12 +543,14 @@ final class AuthorizationManager
 
     /**
      * Return the batch that decides this manager's checks, through its
-     * pipeline, so `check()` and `checkMany()` take the one path.
+     * pipeline, so `check()`, `checkMany()` and `permissionsFor()` take the one
+     * path, recording each decision, or, for introspection, none.
      *
+     * @param  bool  $isRecording
      * @return \SineMacula\Laravel\Authorization\Evaluation\CheckBatch
      */
-    private function batch(): CheckBatch
+    private function batch(bool $isRecording = true): CheckBatch
     {
-        return new CheckBatch($this->pipeline, $this->lastDecisionStore, $this->subjectResolver, $this->events);
+        return new CheckBatch($this->pipeline, $this->lastDecisionStore, $this->subjectResolver, $this->events, $isRecording);
     }
 }

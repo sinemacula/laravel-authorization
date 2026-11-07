@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Support;
 
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Contracts\Container\Container;
+use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidPermissionCatalogueException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 
@@ -24,7 +25,12 @@ use SineMacula\Laravel\Authorization\Models\Permission;
  * and refused when their description or category differ.
  *
  * Nothing here touches the database. The configured classes are assumed to have
- * passed the config validation.
+ * passed the config validation, but the configuration is read when the
+ * catalogue is, after boot, so an entry of `authorization.permission_enums` the
+ * validation would refuse (anything but an enum implementing `PermissionEnum`
+ * backed by strings) is skipped rather than failing with a `TypeError`. A
+ * definition that breaks the rules above is refused with
+ * `InvalidPermissionCatalogueException`.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -91,7 +97,8 @@ final readonly class PermissionCatalogue
 
     /**
      * Return the definitions every case of every configured enum declares, each
-     * with the case that declares it.
+     * with the case that declares it, skipping an entry that is not an enum
+     * implementing `PermissionEnum` backed by strings.
      *
      * @return list<array{string, \SineMacula\Laravel\Authorization\Support\PermissionDefinition}>
      *
@@ -99,11 +106,14 @@ final readonly class PermissionCatalogue
      */
     private function enumDefinitions(): array
     {
-        /** @var list<class-string<\SineMacula\Laravel\Authorization\Contracts\PermissionEnum>> $enums */
-        $enums       = $this->config->get('authorization.permission_enums', []);
+        $enums       = (array) $this->config->get('authorization.permission_enums', []);
         $definitions = [];
 
         foreach ($enums as $enum) {
+            if (!ConfigValidator::isStringBackedPermissionEnum($enum)) {
+                continue;
+            }
+
             foreach ($enum::cases() as $case) {
                 foreach ($this->reader->definitions($case) as $definition) {
                     $definitions[] = [$enum . '::' . $case->name, $definition];

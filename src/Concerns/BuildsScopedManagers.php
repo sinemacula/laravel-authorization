@@ -19,6 +19,12 @@ use SineMacula\Laravel\Authorization\Subject;
  */
 trait BuildsScopedManagers
 {
+    /** @var \SineMacula\Laravel\Authorization\Subject|null The subject named through `for()` or `forUser()`, null for a guest. */
+    private ?Subject $subjectOverride = null;
+
+    /** @var bool Whether `for()` or `forUser()` named the subject; until one does, the bound resolver resolves it. */
+    private bool $isSubjectNamed = false;
+
     /**
      * Return a scoped manager deciding about the supplied subject.
      *

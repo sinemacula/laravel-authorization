@@ -65,7 +65,9 @@ the boundary within which a batch sees a write.
    read ahead is left to its checks (`ResourceScope::prepare()`), so the checks before it are decided, recorded and
    reported first. A bulk attribute answer may be an item's exception: it is thrown only when that item's own check
    reads `resource`, so it never changes another item's decision. Two models with the same key are two items, since each
-   may hold other attributes in memory.
+   may hold other attributes in memory, while one `ResourceReference` given to several checks is one item, as every
+   action of `permissionsFor()` shares its resource: its answer, values or failure, bulk or from a provider that reads
+   one record at a time, is read once and kept for every check on it.
 
 8. **One event per check, in order.** Each check is recorded as the last decision and dispatches its own
    `DecisionEvaluated`, with the payload `check()` gives it, as soon as it is decided and before the next is decided.
@@ -78,12 +80,14 @@ the boundary within which a batch sees a write.
    it the tenant tree's answers, so every later check reads it; so does a change to the tree reported through
    `treeChanged()`. A change to the tree that is not reported is seen from the next batch. The resources' tenants are
    read as a chunk starts and their attributes when the chunk's first check on a type reads them, so a change to a
-   resource's tenant or attributes made after it was read is seen from the next chunk.
+   resource's tenant or attributes made after it was read is seen from the next chunk. The attributes of a
+   `ResourceReference` several checks share are the exception: they are read once for the whole batch, so a change
+   made after they were read is seen from the next batch.
 
 10. **Bounded chunks.** The checks are decided in chunks of `authorization.bulk.chunk_size` (500 by default, a whole
     number of at least 1, validated at boot by `BulkConfigValidator`), and what a chunk read is released once it is
-    decided; each decided item's attributes are released as it is decided. The decisions are all returned at once,
-    so the result is not streamed: a caller deciding a very large set pages it.
+    decided; each item's attributes are released once the last check on it is decided. The decisions are all returned
+    at once, so the result is not streamed: a caller deciding a very large set pages it.
 
 ## Success Path
 
@@ -168,4 +172,5 @@ before the next. The 100 checks cost the queries one costs.
 - Reading a record's attributes outside the scope its check is decided in breaks invariant 5 for any provider that
   reads through the tenant scope.
 - A single check that opens a batch or reads ahead breaks the single-check lane of invariant 5, and its cost.
-- `permissionsFor()` (AUTHZ-10.4) introspects without recording; it must not change how `checkMany()` records.
+- `permissionsFor()` (AUTHZ-10.4) decides through `CheckBatch` with recording turned off (see
+  `effective-permissions.md`); it must not change how `checkMany()` records.

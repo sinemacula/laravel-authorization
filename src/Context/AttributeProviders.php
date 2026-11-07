@@ -121,9 +121,10 @@ final class AttributeProviders
      * Return the attributes the provider of the resource's type supplies for
      * it, the declared ones only, given the model the check was given. A type
      * alone, an opaque identifier and a type with no provider have none. In a
-     * bulk check, the values the provider gave for the record in bulk are taken
-     * from the batch, and its failure for the record thrown, as the provider's
-     * own; a record the batch holds none for is asked about on its own.
+     * bulk check, the record's values are taken from the batch, which asks the
+     * provider for them in bulk, or about the record on its own, once for every
+     * check on it, and its failure for the record is thrown as the provider's
+     * own.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
      * @param  \SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch|null  $batch
@@ -137,7 +138,7 @@ final class AttributeProviders
 
         return $this->read(self::RESOURCE, $type, function (string $class) use ($resource, $batch): array {
             $provider = $this->resolve($class, ResourceAttributeProvider::class);
-            $values   = $batch?->valuesFor($resource, $provider) ?? $provider->values($resource, $resource->model);
+            $values   = $batch === null ? $provider->values($resource, $resource->model) : $batch->valuesFor($resource, $provider);
 
             return self::declaredOnly($values, $provider->attributes());
         });

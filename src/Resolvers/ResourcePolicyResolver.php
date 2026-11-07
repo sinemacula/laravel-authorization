@@ -383,11 +383,13 @@ final readonly class ResourcePolicyResolver
     {
         $records = [];
         $read    = [];
+        $queued  = [];
 
         foreach ($resources as $resource) {
             $entry = self::entryOf($resource);
 
-            if ($entry === null || $resource === null || isset($read[$entry])) {
+            // A record named more than once is read for once.
+            if ($entry === null || $resource === null || isset($read[$entry]) || isset($queued[$entry])) {
                 continue;
             }
 
@@ -398,6 +400,7 @@ final readonly class ResourcePolicyResolver
             if (self::isReadInBulk($resource->id)) {
                 $records["#{$type}"][0]   = $type;
                 $records["#{$type}"][1][] = $resource->id;
+                $queued[$entry]           = true;
 
                 continue;
             }

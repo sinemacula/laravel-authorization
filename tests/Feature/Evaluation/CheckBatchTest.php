@@ -5,20 +5,26 @@ declare(strict_types = 1);
 namespace Tests\Feature\Evaluation;
 
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
+use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
+use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\CheckBatch;
 use SineMacula\Laravel\Authorization\Evaluation\CheckInput;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
+use SineMacula\Laravel\Authorization\Evaluation\DecisionPipeline;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
+use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
+use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed;
 use SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException;
@@ -26,7 +32,9 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Resolvers\DeclaredResourceTenant;
+use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\NoResourceTenant;
+use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
@@ -161,6 +169,43 @@ final class CheckBatchTest extends TestCase
 
         self::assertSame($decisions[1], Authorization::lastDecision());
         self::assertTrue($decisions[1]->isAllowed());
+    }
+
+    /**
+     * A batch made not to record decides each check as a recording one does,
+     * one check on its own or many, but leaves the last decision as it was and
+     * dispatches no decision event.
+     *
+     * @return void
+     */
+    public function testABatchThatDoesNotRecordDecidesAlikeAndRecordsNothing(): void
+    {
+        $user = $this->subject();
+
+        $user->givePermission(Permission::create(['name' => self::ACTION]));
+
+        $posts  = $this->posts(3);
+        $checks = ['a' => new CheckInput(self::ACTION, $posts[0]), 'b' => new CheckInput('posts:edit', $posts[1]), 'c' => new CheckInput(self::ACTION, $posts[2])];
+        $first  = Authorization::check('posts:edit', $posts[0]);
+
+        /** @var \Illuminate\Foundation\Application $app */
+        $app      = $this->app;
+        $contexts = $app->make(CheckContextFactory::class);
+        $pipeline = new DecisionPipeline($app->make(PolicyEvaluator::class), $app->make(PolicyResolver::class), $contexts, new ResourcePolicyResolver, new GuardrailResolver);
+        $batch    = new CheckBatch($pipeline, $app->make(LastDecisionStore::class), $app->make(SubjectResolver::class), $app->make(Dispatcher::class), false);
+
+        Event::fake([DecisionEvaluated::class]);
+
+        $subject = Authorization::currentSubject();
+        $silent  = $batch->decide($subject, $checks);
+        $one     = $batch->decideOne($subject, $checks['b']);
+
+        self::assertSame($first, Authorization::lastDecision());
+        Event::assertNotDispatched(DecisionEvaluated::class);
+
+        self::assertEquals(Authorization::checkMany($checks), $silent);
+        self::assertEquals(Authorization::check('posts:edit', $posts[1]), $one);
+        self::assertSame([true, false, true], \array_values(\array_map(static fn (Decision $decision): bool => $decision->isAllowed(), $silent)));
     }
 
     /**
@@ -472,6 +517,48 @@ final class CheckBatchTest extends TestCase
 
         self::assertSame([[self::key($posts[1])]], $provider->bulkCalls);
         self::assertSame(500, CheckBatch::CHUNK_SIZE);
+    }
+
+    /**
+     * A reference several checks share is read for once, across chunks too,
+     * whether its provider reads in bulk or one record at a time, and kept
+     * until the last check on it is decided; a record its own check alone holds
+     * is still read for on its own.
+     *
+     * @return void
+     */
+    public function testAReferenceSharedByChecksIsReadForOnce(): void
+    {
+        $posts  = $this->posts(2);
+        $shared = ResourceReference::record((new ScopedPost)->getMorphClass(), self::key($posts[0]), null, $posts[0]);
+        $checks = [
+            'a' => new CheckInput('posts:list', $shared),
+            'b' => new CheckInput(self::ACTION, $shared),
+            'c' => new CheckInput(self::ACTION, $posts[1]),
+            'd' => new CheckInput(self::ACTION, $shared),
+            'e' => new CheckInput(self::ACTION, $shared),
+        ];
+
+        $this->subject();
+        $this->config()->set('authorization.bulk.chunk_size', 2);
+
+        $single  = $this->attributes(new StatusAttributes);
+        $allowed = ['a' => false, 'b' => true, 'c' => false, 'd' => true, 'e' => true];
+
+        self::assertSame($allowed, \array_map(self::isAllowed(...), Authorization::withPolicies([$this->statusPolicy()])->checkMany($checks)));
+        self::assertSame([self::key($posts[0]), self::key($posts[1])], $single->calls);
+
+        $bulk = $this->attributes(new BulkStatusAttributes);
+
+        foreach ([CheckContextFactory::class, AuthorizationManager::class, 'authorization'] as $abstract) {
+            $this->app?->forgetInstance($abstract);
+        }
+
+        Authorization::clearResolvedInstance('authorization');
+
+        self::assertSame($allowed, \array_map(self::isAllowed(...), Authorization::withPolicies([$this->statusPolicy()])->checkMany($checks)));
+        self::assertSame([[self::key($posts[0])], [self::key($posts[1])]], $bulk->bulkCalls);
+        self::assertSame([], $bulk->calls);
     }
 
     /**

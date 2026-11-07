@@ -189,6 +189,100 @@ final class ResolutionMemoTest extends TestCase
     }
 
     /**
+     * A callback run aside, in another scope, gets back what it returns, and
+     * the entries of the scope it is run from are put back once it returns,
+     * however it ends; a flush within it drops them for good, while one before
+     * it does not stop them being put back.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testEntriesSetAsideArePutBackUnlessAFlushDropsThem(): void
+    {
+        $memo = new ResolutionMemo;
+
+        $memo->put(self::KEY, ['stale'], null);
+        $memo->flush();
+        $memo->put(self::KEY, ['editor'], null);
+
+        $result = $memo->aside(static function () use ($memo): string {
+            $memo->scopeChanged();
+            $memo->put(self::KEY, ['viewer'], null);
+            $memo->scopeChanged();
+
+            return 'listed';
+        });
+
+        self::assertSame('listed', $result);
+        self::assertSame(['editor'], $memo->get(self::KEY));
+
+        try {
+            $memo->aside(static function () use ($memo): never {
+                $memo->scopeChanged();
+
+                throw new \RuntimeException('failed');
+            });
+        } catch (\RuntimeException) {
+            // The entries are put back however the callback ends.
+        }
+
+        self::assertSame(['editor'], $memo->get(self::KEY));
+
+        $memo->aside(static function () use ($memo): void {
+            $memo->flush();
+            $memo->put(self::KEY, ['viewer'], null);
+        });
+
+        self::assertSame(['viewer'], $memo->get(self::KEY));
+    }
+
+    /**
+     * Within a batch, the entries set aside are put back as the current
+     * scope's, taken under its key, so the batch closing keeps them and a later
+     * change of scope sets them aside under that key.
+     *
+     * @return void
+     */
+    public function testEntriesSetAsideInABatchArePutBackAsTheCurrentScopes(): void
+    {
+        $scope = new ScopeKeyHolder;
+        $memo  = new ResolutionMemo(static fn (): string => $scope->key);
+
+        $memo->open();
+        $memo->put(self::KEY, ['editor'], null);
+
+        $memo->aside(static function () use ($memo, $scope): void {
+            $scope->key = 'tenant-b';
+            $memo->scopeChanged();
+            $memo->put(self::KEY, ['viewer'], null);
+            $scope->key = 'tenant-a';
+            $memo->scopeChanged();
+        });
+
+        $scope->key = 'tenant-b';
+        $memo->scopeChanged();
+
+        self::assertSame(['viewer'], $memo->get(self::KEY));
+
+        $scope->key = 'tenant-a';
+        $memo->scopeChanged();
+
+        self::assertSame(['editor'], $memo->get(self::KEY));
+
+        $memo->aside(static function () use ($memo, $scope): void {
+            $scope->key = 'tenant-b';
+            $memo->scopeChanged();
+            $scope->key = 'tenant-a';
+            $memo->scopeChanged();
+        });
+
+        $memo->close();
+
+        self::assertSame(['editor'], $memo->get(self::KEY));
+    }
+
+    /**
      * Within a batch, each scope keeps its own entries: those of the scope left
      * are set aside and taken back when the scope is read again, and the scope
      * entered starts with its own, not the one left's.

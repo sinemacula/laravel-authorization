@@ -302,20 +302,31 @@ final readonly class ResolutionCache
      * closes, however the callback ends, the memo holds what it would have held
      * without one.
      *
+     * Given `$isAside`, the callback runs in another scope and returns to the
+     * one it is called in, so the entries the memo holds as the batch opens are
+     * put back once it closes, unless a write dropped them meanwhile (see
+     * `ResolutionMemo::aside()`): `AuthorizationScope` runs `permissionsFor()`
+     * this way, so listing in another scope keeps what the request resolved.
+     *
      * @template TResult
      *
      * @param  \Closure(): TResult  $callback
+     * @param  bool  $isAside
      * @return TResult
      */
-    public function batch(\Closure $callback): mixed
+    public function batch(\Closure $callback, bool $isAside = false): mixed
     {
-        $this->memo->open();
+        $run = function () use ($callback): mixed {
+            $this->memo->open();
 
-        try {
-            return $callback();
-        } finally {
-            $this->memo->close();
-        }
+            try {
+                return $callback();
+            } finally {
+                $this->memo->close();
+            }
+        };
+
+        return $isAside ? $this->memo->aside($run) : $run();
     }
 
     /**

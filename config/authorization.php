@@ -136,10 +136,10 @@ return [
     | boot when the session scope map names a scope, to check its patterns (see
     | Session policies below), and, while the Gate hook is enabled, on the first
     | Gate check of each request or job, to learn which abilities the package
-    | answers (see Gate below). A provider's permissions are answered through
+    | answers (see Gate below), and by `permissionsFor()`, which lists the ones
+    | a subject may take. A provider's permissions are answered through
     | Laravel's Gate like an enum's, and checked through the `Authorization`
-    | facade and `hasPermission()`, but they do not appear in
-    | `effectivePermissions()`.
+    | facade and `hasPermission()`.
     |
     */
 

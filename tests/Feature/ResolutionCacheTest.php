@@ -1193,6 +1193,56 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
+     * A batch run aside, in another scope, puts back the entries of the scope
+     * it is called in once it closes, however it ends, so they are not resolved
+     * again; one that is not drops them, as a change of scope does, and a write
+     * within one drops them for good.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testABatchRunAsideKeepsTheEntriesOfTheScopeItIsCalledIn(): void
+    {
+        $cache  = new ResolutionCache;
+        $tenant = self::createTenant('tenant-a');
+        $other  = fn (): array => TenantScope::within($tenant, null, fn (): array => $this->permissions($cache));
+
+        $this->app?->instance(ResolutionCache::class, $cache);
+
+        $this->permissions($cache);
+
+        self::assertNotSame([], $cache->batch($other, true));
+
+        $this->permissions($cache);
+
+        self::assertSame(2, $this->resolutions);
+
+        $cache->batch($other);
+        $this->permissions($cache);
+
+        self::assertSame(4, $this->resolutions);
+
+        $cache->batch(static function () use ($cache): void {
+            $cache->invalidate([]);
+        }, true);
+
+        $this->permissions($cache);
+
+        self::assertSame(5, $this->resolutions);
+
+        try {
+            $cache->batch(fn (): never => TenantScope::within($tenant, null, self::failing(...)), true);
+        } catch (\RuntimeException) {
+            // The entries are put back however the batch ends.
+        }
+
+        $this->permissions($cache);
+
+        self::assertSame(5, $this->resolutions);
+    }
+
+    /**
      * Resolve the grantee's permissions through the cache, pinning the given
      * roles as a resolution does.
      *

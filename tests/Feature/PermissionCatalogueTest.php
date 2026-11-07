@@ -13,7 +13,9 @@ use SineMacula\Laravel\Authorization\Support\PermissionDefinition;
 use SineMacula\Laravel\Authorization\Support\PermissionMetadataReader;
 use Tests\Feature\Stubs\ConfigurablePermissionProvider;
 use Tests\Feature\Stubs\Enums\CataloguePermission;
+use Tests\Feature\Stubs\Enums\IntBackedPermissionEnum;
 use Tests\Feature\Stubs\Enums\InvalidNamePermission;
+use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\InjectedPermissionProvider;
 use Tests\Feature\Stubs\StubPermissionProvider;
 use Tests\TestCase;
@@ -235,6 +237,50 @@ final class PermissionCatalogueTest extends TestCase
             ConfigurablePermissionProvider::class,
             'permissions() must return ' . PermissionDefinition::class . ' instances, got string.',
         );
+    }
+
+    /**
+     * The configuration is read after boot, so an entry of the configured enums
+     * the boot validation would refuse is skipped, whatever it is, and the
+     * enums around it are read.
+     *
+     * @return void
+     */
+    public function testSkipsAnEnumEntryTheValidationWouldRefuse(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make(ConfigRepository::class);
+
+        $config->set('authorization.permission_enums', [123, \stdClass::class, IntBackedPermissionEnum::class, ['nested'], null, PermissionEnum::class]);
+
+        self::assertEquals(
+            [...(new PackagePermissions)->permissions(), new PermissionDefinition('posts:create'), new PermissionDefinition('posts:delete')],
+            $this->catalogue()->definitions(),
+        );
+    }
+
+    /**
+     * The configuration is read after boot, so configured enums that are not a
+     * list are read as one: a single enum class as the list holding it, and
+     * none as no enum.
+     *
+     * @return void
+     */
+    public function testReadsConfiguredEnumsThatAreNotAList(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make(ConfigRepository::class);
+
+        $config->set('authorization.permission_enums', PermissionEnum::class);
+
+        self::assertEquals(
+            [...(new PackagePermissions)->permissions(), new PermissionDefinition('posts:create'), new PermissionDefinition('posts:delete')],
+            $this->catalogue()->definitions(),
+        );
+
+        $config->set('authorization.permission_enums', null);
+
+        self::assertEquals((new PackagePermissions)->permissions(), $this->catalogue()->definitions());
     }
 
     /**

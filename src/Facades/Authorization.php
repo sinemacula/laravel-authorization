@@ -15,6 +15,9 @@ use Illuminate\Support\Facades\Facade;
  * `for()`, `forUser()`, `withPolicies()` and `capped()` never change it: each
  * returns a new scoped clone, which shares the lifecycle's last-decision store,
  * so `lastDecision()` reads the latest decision of any of them.
+ * `permissionsFor()` takes a null subject as the manager's checks take it: the
+ * request's subject on the facade, the named one on a clone from `for()`, and a
+ * guest on `forUser(null)`.
  *
  * @phpcs:disable Generic.Files.LineLength.TooLong
  *
@@ -34,7 +37,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static \SineMacula\Laravel\Authorization\Evaluation\Decision|null lastDecision()
  * @method static void forgetLastDecision()
  * @method static string explain(string $action, mixed $resource = null, array<string, mixed> $context = [])
- * @method static array<string, bool> effectivePermissions(array<string, mixed> $context = [])
+ * @method static list<string> permissionsFor(object|null $subject, \SineMacula\Laravel\Authorization\Support\AuthorizationScope $scope, array<string, mixed> $context = [])
  * @method static \SineMacula\Laravel\Authorization\Subject|null currentSubject()
  * @method static void treeChanged(\Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant|\SineMacula\Laravel\Authorization\Support\Reference $tenant)
  *

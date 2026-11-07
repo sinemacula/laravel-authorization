@@ -14,6 +14,7 @@ use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Pivots\AuthorizablePermissionPivot;
 use SineMacula\Laravel\Authorization\Resolvers\GrantResolver;
+use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\HeldPermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 
@@ -27,7 +28,8 @@ use SineMacula\Laravel\Authorization\Support\Reference;
  * consults both direct grants and role-inherited permissions, so a consumer
  * does not need to branch on assignment style. `canEach` and `filterAuthorized`
  * decide the model's checks over many resources through the authorization
- * manager.
+ * manager, and `permissionsFor` lists the actions the model may take in a
+ * scope.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -180,8 +182,8 @@ trait HasPermissions // @phpstan-ignore trait.unused
      * policy, deny, guardrail, boundary or session cap, and no resource's
      * tenant. To ask whether the subject may perform an action, decide it with
      * `Authorization::check()` or `can()`, through which the Gate, the Blade
-     * permission directives, the `permission:` middleware and
-     * `effectivePermissions()` all decide.
+     * permission directives and the `permission:` middleware decide, and as
+     * which `permissionsFor()` decides each action it lists.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Permission|string  $permission
      * @return bool
@@ -257,6 +259,21 @@ trait HasPermissions // @phpstan-ignore trait.unused
     public function filterAuthorized(string $action, iterable $resources, array $context = []): array|Collection
     {
         return Authorization::for($this)->filterAuthorized($action, $resources, $context);
+    }
+
+    /**
+     * Return the actions this model may take in the scope, those of the
+     * permission catalogue whose check would allow, in its order: a delegate to
+     * `Authorization::permissionsFor($this, ...)`, deciding every action
+     * through the full decision and recording none.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\AuthorizationScope  $scope
+     * @param  array<string, mixed>  $context
+     * @return list<string>
+     */
+    public function permissionsFor(AuthorizationScope $scope, array $context = []): array
+    {
+        return Authorization::permissionsFor($this, $scope, $context);
     }
 
     // ------------------------------------------------------------------

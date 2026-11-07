@@ -11,6 +11,7 @@ use SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
+use Tests\Feature\Stubs\FailingResourceAttributes;
 use Tests\Feature\Stubs\RecordingResourceAttributes;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Fixtures\BulkChecks\AnsweringBulkAttributes;
@@ -86,8 +87,7 @@ final class ResourceAttributeBatchTest extends TestCase
         self::assertSame($first, $provider->calls[0]['item-0']['resource']);
         self::assertSame($model, $provider->calls[0]['item-0']['model']);
         self::assertNull($provider->calls[0]['item-2']['model']);
-        self::assertNull($batch->valuesFor(ResourceReference::record('posts', '1'), $provider));
-        self::assertNull($batch->valuesFor($first, new RecordingResourceAttributes));
+        self::assertSame([], $batch->valuesFor(ResourceReference::record('posts', '1'), $provider));
     }
 
     /**
@@ -107,13 +107,13 @@ final class ResourceAttributeBatchTest extends TestCase
         $batch->forget('opaque');
         $batch->forget(ResourceReference::record('posts', '3'));
 
-        self::assertNull($batch->valuesFor($first, $provider));
+        self::assertSame([], $batch->valuesFor($first, $provider));
         self::assertSame(['status' => 'draft'], $batch->valuesFor($second, $provider));
         self::assertSame([['item-1']], \array_map(array_keys(...), $provider->calls));
 
         $batch->forget($second);
 
-        self::assertNull($batch->valuesFor($second, $provider));
+        self::assertSame([], $batch->valuesFor($second, $provider));
     }
 
     /**
@@ -133,8 +133,8 @@ final class ResourceAttributeBatchTest extends TestCase
         $batch    = new ResourceAttributeBatch($refs);
 
         self::assertSame(['status' => 'published'], $batch->valuesFor($refs[0], $provider));
-        self::assertNull($batch->valuesFor($refs[2], $provider));
-        self::assertNull($batch->valuesFor($refs[3], $provider));
+        self::assertSame([], $batch->valuesFor($refs[2], $provider));
+        self::assertSame([], $batch->valuesFor($refs[3], $provider));
 
         try {
             $batch->valuesFor($refs[1], $provider);
@@ -147,8 +147,8 @@ final class ResourceAttributeBatchTest extends TestCase
         $broken = new AnsweringBulkAttributes([], true);
         $batch  = new ResourceAttributeBatch($refs);
 
-        self::assertNull($batch->valuesFor($refs[0], $broken));
-        self::assertNull($batch->valuesFor($refs[1], $broken));
+        self::assertSame([], $batch->valuesFor($refs[0], $broken));
+        self::assertSame([], $batch->valuesFor($refs[1], $broken));
         self::assertCount(1, $broken->calls);
     }
 
@@ -253,9 +253,86 @@ final class ResourceAttributeBatchTest extends TestCase
         $provider = new AnsweringBulkAttributes(['1' => ['status' => 'published']]);
         $batch    = new ResourceAttributeBatch($refs);
 
-        self::assertNull($batch->valuesFor($refs[0], $provider));
+        self::assertSame([], $batch->valuesFor($refs[0], $provider));
         self::assertSame(['status' => 'published'], $batch->valuesFor($refs[1], $provider));
         self::assertCount(1, $provider->calls);
+    }
+
+    /**
+     * A reference tracked again, by a later chunk say, stays the item it is,
+     * read once; a record tracked after it was forgotten is an item of its own,
+     * under a token never given before.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAReferenceTrackedAgainStaysOneItem(): void
+    {
+        $shared   = ResourceReference::record('posts', '1');
+        $other    = ResourceReference::record('posts', '2');
+        $provider = new AnsweringBulkAttributes(['1' => ['status' => 'published'], '2' => ['status' => 'draft']]);
+        $batch    = new ResourceAttributeBatch([$shared]);
+
+        self::assertSame(['status' => 'published'], $batch->valuesFor($shared, $provider));
+
+        $batch->track([$shared, 'opaque', ResourceReference::type('posts'), $other, $shared]);
+
+        self::assertSame(['status' => 'published'], $batch->valuesFor($shared, $provider));
+        self::assertSame(['status' => 'draft'], $batch->valuesFor($other, $provider));
+
+        $batch->forget($shared);
+        $batch->track([$shared]);
+
+        self::assertSame(['status' => 'published'], $batch->valuesFor($shared, $provider));
+        self::assertSame([['item-0'], ['item-1'], ['item-2']], \array_map(array_keys(...), $provider->calls));
+    }
+
+    /**
+     * A provider that does not read in bulk is asked about a tracked record
+     * once, its values or its failure kept for every check on it until the
+     * record is forgotten; a record the batch does not track is asked about
+     * every time.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAProviderThatDoesNotReadInBulkIsAskedOnceForEachItem(): void
+    {
+        $model    = new StubIdentity(['id' => '1']);
+        $record   = ResourceReference::record('posts', '1', null, $model);
+        $loose    = ResourceReference::record('posts', '2');
+        $provider = new RecordingResourceAttributes('published');
+        $batch    = new ResourceAttributeBatch([$record]);
+
+        self::assertSame('published', $batch->valuesFor($record, $provider)['status']);
+        self::assertSame('published', $batch->valuesFor($record, $provider)['status']);
+        $calls = $provider->calls;
+
+        self::assertSame([[$record, $model]], $calls);
+
+        $batch->valuesFor($loose, $provider);
+        $batch->valuesFor($loose, $provider);
+        $batch->forget($record);
+        $batch->valuesFor($record, $provider);
+
+        self::assertSame([$record, $loose, $loose, $record], \array_column($provider->calls, 0));
+
+        $failing = new FailingResourceAttributes;
+        $batch   = new ResourceAttributeBatch([$record]);
+
+        foreach ([1, 2] as $attempt) {
+            try {
+                $batch->valuesFor($record, $failing);
+
+                self::fail("Attempt {$attempt} fails.");
+            } catch (\RuntimeException $exception) {
+                self::assertSame(FailingResourceAttributes::MESSAGE, $exception->getMessage());
+            }
+        }
+
+        self::assertSame(1, $failing->calls);
     }
 
     /**
