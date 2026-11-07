@@ -108,10 +108,11 @@ final class InlinedQuery
         $frames = \debug_backtrace(\DEBUG_BACKTRACE_PROVIDE_OBJECT | \DEBUG_BACKTRACE_IGNORE_ARGS);
 
         // A cursor compiles the query in a generator of its own, the only
-        // closure of the builder that compiles it, which PHP names `{closure}`,
-        // or after the method defining it.
+        // closure of the builder that compiles it. PHP 8.3 names it with its
+        // namespace (`Illuminate\Database\Query\{closure}`), later versions
+        // `{closure}` or after the method defining it.
         $isRun = static fn (array $frame): bool => ($frame['object'] ?? null) === $query
-            && (\in_array($frame['function'], self::RUNS, true) || (\str_starts_with($frame['function'], '{closure') && ($frame['class'] ?? null) === Builder::class));
+            && (\in_array($frame['function'], self::RUNS, true) || (\str_contains($frame['function'], '{closure') && ($frame['class'] ?? null) === Builder::class));
 
         return \array_filter($frames, $isRun) !== [];
     }
