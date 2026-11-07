@@ -196,7 +196,7 @@ final class ScopeAnchors
         $tenants = [];
 
         foreach (\array_merge(...$lists) as $tenant) {
-            $tenants[$tenant->type . "\0" . $tenant->id] ??= $tenant;
+            $tenants[\serialize($tenant)] = $tenant;
         }
 
         return \array_values($tenants);

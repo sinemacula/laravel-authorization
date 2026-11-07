@@ -377,6 +377,7 @@ final class AuthorizedQueryTest extends TestCase
                 self::fail("The {$shape} query was not refused.");
             } catch (QueryScopeRefusedException $exception) {
                 self::assertSame([RefusalReason::READ_REPLICA], $exception->reasons(), $shape);
+                self::assertSame('a query that is not run itself cannot be put on the write connection', $exception->refusals[0]->detail, $shape);
             }
         }
 

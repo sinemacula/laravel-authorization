@@ -141,8 +141,7 @@ final class RecordAttachments
      */
     private function policiesIn(TenantChain $chain, ?string $application, string $action): ?array
     {
-        $scope = [$application, $chain->isBelow, ...\array_map(static fn (Reference $tenant): array => [$tenant->type, $tenant->id], $chain->tenants)];
-        $key   = \serialize($scope);
+        $key = \serialize([$application, $chain->isBelow, $chain->tenants]);
 
         if (!\array_key_exists($key, $this->read)) {
             $this->read[$key] = $this->resolver->recordPoliciesFor($this->shape->type, $action, $this->limit);
@@ -220,7 +219,7 @@ final class RecordAttachments
 
         $query = $connection->query()->from("{$table} as {$alias}")->selectRaw('1')
             ->where("{$alias}.resource_type", $this->shape->type)
-            ->where("{$alias}.policy_id", (string) $policy->id)
+            ->where("{$alias}.policy_id", $policy->id)
             ->whereRaw($keyText)
             ->where(static function (Builder $query) use ($chain, $application, $alias): void {
                 $chain->grants($query, $alias);

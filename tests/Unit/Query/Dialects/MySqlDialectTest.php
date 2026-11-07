@@ -215,6 +215,8 @@ final class MySqlDialectTest extends TestCase
         self::assertSame('0', $dialect->parameter(false));
         self::assertSame('42', $dialect->parameter(42));
         self::assertSame('(-42)', $dialect->parameter(-42));
+        self::assertSame('0', $dialect->parameter(0));
+        self::assertSame('(-1)', $dialect->parameter(-1));
         self::assertSame('_utf8mb4 X\'613f3f27625c00\'', $dialect->parameter("a??'b\\\0"));
         self::assertSame('_utf8mb4 X\'\'', $dialect->parameter(''));
         self::assertNull($dialect->parameter("\xff"));

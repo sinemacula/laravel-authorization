@@ -124,7 +124,7 @@ final class ScopeClasses
      * @param  string  $action
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $active
      * @param  bool  $isAdmitted
-     * @return array{list<\SineMacula\Laravel\Authorization\Support\Reference>, list<\SineMacula\Laravel\Authorization\Support\Reference>}
+     * @return array{list<\SineMacula\Laravel\Authorization\Support\Reference>, array<int, \SineMacula\Laravel\Authorization\Support\Reference>}
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\QueryScopeRefusedException
      */
@@ -133,14 +133,14 @@ final class ScopeClasses
         $isGrantRead           = !(TenantChain::tree() instanceof FlatTenantTree) && $active !== null;
         [$sources, $admitting] = $isGrantRead || $isAdmitted ? ScopeAnchors::read($subject, $shape->type, $isGrantRead) : [[], []];
 
-        $others = \array_values(\array_filter($sources, static fn (Reference $tenant): bool => $active === null || !self::isSame($tenant, $active)));
+        $others = \array_filter($sources, static fn (Reference $tenant): bool => $active === null || !self::isSame($tenant, $active));
 
         if (\count($others) + ($active === null ? 0 : 1) > self::limit('max_anchors', self::MAX_ANCHORS)) {
             self::refuse($shape, $action, 'max_anchors');
         }
 
-        $inScope = $active === null ? [] : [$active, ...\array_values(\array_filter($others, static fn (Reference $tenant): bool => TenantChain::isWithin($tenant, $active)))];
-        $outside = \array_values(\array_filter($admitting, static fn (Reference $tenant): bool => $active === null || !TenantChain::isWithin($tenant, $active)));
+        $inScope = $active === null ? [] : [$active, ...\array_filter($others, static fn (Reference $tenant): bool => TenantChain::isWithin($tenant, $active))];
+        $outside = \array_filter($admitting, static fn (Reference $tenant): bool => $active === null || !TenantChain::isWithin($tenant, $active));
 
         return [$inScope, $outside];
     }
@@ -151,7 +151,7 @@ final class ScopeClasses
      * meeting the further conditions given too.
      *
      * @param  \SineMacula\Laravel\Authorization\Query\TenantMembership  $membership
-     * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>  $anchors
+     * @param  array<int, \SineMacula\Laravel\Authorization\Support\Reference>  $anchors
      * @param  bool  $isFlat
      * @param  bool  $isAdmitted
      * @param  list<string>  $outside
@@ -172,7 +172,7 @@ final class ScopeClasses
             }
 
             $lower = \array_filter($anchors, static fn (Reference $other): bool => !self::isSame($other, $anchor) && self::isOnChain($anchor, $chains[self::keyOf($other)] ?? []));
-            $apart = \array_map(static fn (Reference $other): string => Conditions::not($membership->within($other)), \array_values($lower));
+            $apart = \array_map(static fn (Reference $other): string => Conditions::not($membership->within($other)), $lower);
 
             $below     = Conditions::all([$membership->present(), $membership->within($anchor), Conditions::not($membership->equalTo($anchor)), ...$apart, ...$outside]);
             $classes[] = new ScopeClass($below, $anchor, true, $isAdmitted);
@@ -186,7 +186,7 @@ final class ScopeClasses
      * through the bound tree, keyed by the anchor: an anchor lies within
      * another exactly when the other is on its chain.
      *
-     * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>  $anchors
+     * @param  array<int, \SineMacula\Laravel\Authorization\Support\Reference>  $anchors
      * @return array<string, list<\SineMacula\Laravel\Authorization\Support\Reference>>
      */
     private static function chainsOf(array $anchors): array
@@ -195,7 +195,7 @@ final class ScopeClasses
         $chains = [];
 
         foreach ($anchors as $anchor) {
-            $chains[self::keyOf($anchor)] ??= [$anchor, ...$tree->ancestors($anchor)];
+            $chains[self::keyOf($anchor)] = [$anchor, ...$tree->ancestors($anchor)];
         }
 
         return $chains;
@@ -219,7 +219,7 @@ final class ScopeClasses
      * each anchor outside it, and those on no anchor's chain.
      *
      * @param  \SineMacula\Laravel\Authorization\Query\TenantMembership  $membership
-     * @param  list<\SineMacula\Laravel\Authorization\Support\Reference>  $anchors
+     * @param  array<int, \SineMacula\Laravel\Authorization\Support\Reference>  $anchors
      * @param  bool  $isFlat
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $active
      * @return list<\SineMacula\Laravel\Authorization\Query\ScopeClass>

@@ -7,6 +7,7 @@ namespace Tests\Feature\Query;
 use Illuminate\Contracts\Config\Repository as ConfigRepository;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
@@ -244,14 +245,18 @@ final class ScopeClassesTest extends TestCase
      * At exactly the limits the classes are cut: four anchors (the active
      * tenant and three others) under `max_anchors` of four, and the nine
      * classes they make under `max_scopes` of nine; one fewer of either is
-     * refused, naming the limit.
+     * refused, naming the limit. A platform-wide grant counts two classes more
+     * for each tenant a row admitted from outside reads, and one more for the
+     * rows of none.
      *
      * @return void
+     *
+     * @throws \Throwable
      */
     public function testTheLimitsHoldAtTheirBoundaries(): void
     {
         [$user, $tenants] = $this->tree();
-        $config           = $this->app?->make(ConfigRepository::class);
+        $config           = config();
 
         foreach (['a1', 'a2', 's1'] as $id) {
             $user->givePermission(Permission::firstOrCreate(['name' => 'posts:view']), null, $tenants[$id]);
@@ -259,20 +264,32 @@ final class ScopeClassesTest extends TestCase
 
         $manager = $this->resolveRequest($user, $tenants['o1']);
 
-        $config?->set('authorization.query_scoping.max_anchors', 4);
+        $config->set('authorization.query_scoping.max_anchors', 4);
 
         self::assertCount(9, self::classes($manager, new TenantScopedPost));
 
-        $config?->set('authorization.query_scoping.max_anchors', 3);
+        $config->set('authorization.query_scoping.max_anchors', 3);
 
         self::assertSame('authorization.query_scoping.max_anchors', self::refusal($manager)->refusals[0]->key);
 
-        $config?->set('authorization.query_scoping.max_anchors', 4);
-        $config?->set('authorization.query_scoping.max_scopes', 9);
+        $config->set('authorization.query_scoping.max_anchors', 4);
+        $config->set('authorization.query_scoping.max_scopes', 9);
 
         self::assertCount(9, self::classes($manager, new TenantScopedPost));
 
-        $config?->set('authorization.query_scoping.max_scopes', 8);
+        $config->set('authorization.query_scoping.max_scopes', 8);
+
+        self::assertSame('authorization.query_scoping.max_scopes', self::refusal($manager)->refusals[0]->key);
+
+        $user->givePermission(Permission::firstOrCreate(['name' => 'posts:view']));
+        self::railAt(['o2']);
+
+        $config->set('authorization.query_scoping.max_anchors', 5);
+        $config->set('authorization.query_scoping.max_scopes', 12);
+
+        self::assertCount(12, self::classes($manager, new TenantScopedPost));
+
+        $config->set('authorization.query_scoping.max_scopes', 11);
 
         self::assertSame('authorization.query_scoping.max_scopes', self::refusal($manager)->refusals[0]->key);
     }
@@ -373,6 +390,91 @@ final class ScopeClassesTest extends TestCase
 
         self::assertNotContains('long', $kept);
         self::assertContains('s1', $kept);
+    }
+
+    /**
+     * Under the flat tree each anchor makes one class: an active tenant's
+     * request makes two, its own and none; a platform-wide grant with no active
+     * tenant makes one for each tenant a row admitted from outside reads, and
+     * one for the rows of no such tenant. The limits hold at their boundaries,
+     * and one not set to a whole number takes its default: at most 16 classes
+     * and 64 anchors.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheFlatTreesClassesAreCountedOneForEachAnchor(): void
+    {
+        $user   = StubIdentity::create(['id' => 'u1']);
+        $config = config();
+        $active = $this->resolveRequest($user, new Reference(self::tenantType(), 'o1'));
+
+        $config->set('authorization.query_scoping.max_scopes', 2);
+
+        self::assertCount(2, self::classes($active, new TenantScopedPost));
+
+        $config->set('authorization.query_scoping.max_scopes', 1);
+
+        self::assertSame('authorization.query_scoping.max_scopes', self::refusal($active)->refusals[0]->key);
+
+        $user->givePermission(Permission::create(['name' => 'posts:view']));
+        self::railAt(['o2', 'b1']);
+
+        $platform = $this->resolveRequest($user);
+
+        $config->set('authorization.query_scoping.max_scopes', 4);
+        $config->set('authorization.query_scoping.max_anchors', 2);
+
+        self::assertEqualsCanonicalizing([[null, false, false], ['o2', false, true], ['b1', false, true], [null, false, true]], \array_map(
+            static fn (array $class): array => \array_slice($class, 1),
+            self::described(self::classes($platform, new TenantScopedPost)),
+        ));
+
+        $config->set('authorization.query_scoping.max_anchors', 1);
+
+        self::assertSame('authorization.query_scoping.max_anchors', self::refusal($platform)->refusals[0]->key);
+
+        $config->set('authorization.query_scoping.max_anchors', 2);
+        $config->set('authorization.query_scoping.max_scopes', 3);
+
+        self::assertSame('authorization.query_scoping.max_scopes', self::refusal($platform)->refusals[0]->key);
+
+        $config->set('authorization.query_scoping', ['max_scopes' => 'many', 'max_anchors' => 'many']);
+
+        $rails = \array_map(static fn (int $index): string => "t{$index}", \range(1, 63));
+
+        self::railAt(\array_slice($rails, 0, 12));
+
+        self::assertCount(16, self::classes($platform, new TenantScopedPost));
+
+        self::railAt([$rails[12]]);
+
+        self::assertSame('authorization.query_scoping.max_scopes', self::refusal($platform)->refusals[0]->key);
+
+        $config->set('authorization.query_scoping.max_scopes', 100);
+        self::railAt(\array_slice($rails, 13, 49));
+
+        self::assertCount(66, self::classes($platform, new TenantScopedPost));
+
+        self::railAt([$rails[62]]);
+
+        self::assertSame('authorization.query_scoping.max_anchors', self::refusal($platform)->refusals[0]->key);
+    }
+
+    /**
+     * Put a guardrail at each tenant, so a row admitted from outside reads it.
+     *
+     * @param  list<string>  $ids
+     * @return void
+     */
+    private static function railAt(array $ids): void
+    {
+        $policy = self::storedPolicy('rail-' . Str::random(6), [])->getKey();
+
+        foreach ($ids as $id) {
+            DB::table('guardrails')->insert(['policy_id' => $policy, 'tenant_type' => self::tenantType(), 'tenant_id' => $id]);
+        }
     }
 
     /**

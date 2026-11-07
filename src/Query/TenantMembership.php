@@ -134,7 +134,7 @@ final class TenantMembership
             return $this->equalTo($tenant);
         }
 
-        return $this->subtrees[$tenant->type . "\0" . $tenant->id] ??= $this->subtreeOf($tree->subtree($tenant));
+        return $this->subtrees[\serialize($tenant)] ??= $this->subtreeOf($tree->subtree($tenant));
     }
 
     /**
@@ -149,11 +149,16 @@ final class TenantMembership
      */
     private function subtreeOf(mixed $subtree): string
     {
-        $shape      = $this->shape;
-        $query      = $subtree instanceof EloquentBuilder ? $subtree->toBase() : $subtree;
-        $connection = $query instanceof Builder ? $query->getConnection() : null;
+        $shape = $this->shape;
+        $query = $subtree instanceof EloquentBuilder ? $subtree->toBase() : $subtree;
 
-        if (!$query instanceof Builder || !$connection instanceof Connection || $connection->getName() !== $shape->connection?->getName()) {
+        if (!$query instanceof Builder) {
+            throw $this->refusal(RefusalReason::SUBTREE_CONNECTION);
+        }
+
+        $connection = $query->getConnection();
+
+        if (!$connection instanceof Connection || $connection->getName() !== $shape->connection?->getName()) {
             throw $this->refusal(RefusalReason::SUBTREE_CONNECTION);
         }
 
@@ -165,10 +170,10 @@ final class TenantMembership
 
         $grammar = $connection->getQueryGrammar();
         $dialect = $shape->dialect;
-        $type    = $shape->typeColumn === null ? $dialect->bytes((string) $shape->tenancy->type) : $dialect->textImage($shape->typeColumn);
+        $type    = $shape->typeColumn === null ? $dialect->bytes($shape->tenancy->type ?? '') : $dialect->textImage($shape->typeColumn);
 
         $isType = $dialect->textImage($grammar->wrap(self::ALIAS . '.tenant_type')) . ' = ' . $type;
-        $isId   = $dialect->textImage($grammar->wrap(self::ALIAS . '.tenant_id')) . ' = ' . $dialect->textImage((string) $shape->idColumn);
+        $isId   = $dialect->textImage($grammar->wrap(self::ALIAS . '.tenant_id')) . ' = ' . $dialect->textImage($shape->idColumn ?? '');
 
         return 'EXISTS (SELECT 1 FROM (' . $raw . ') AS ' . $grammar->wrap(self::ALIAS) . " WHERE {$isType} AND {$isId})";
     }
@@ -202,10 +207,10 @@ final class TenantMembership
     /**
      * Return the model's tenant columns, qualified and wrapped.
      *
-     * @return list<string>
+     * @return array<int, string>
      */
     private function columns(): array
     {
-        return \array_values(\array_filter([$this->shape->typeColumn, $this->shape->idColumn], static fn (?string $column): bool => $column !== null));
+        return \array_filter([$this->shape->typeColumn, $this->shape->idColumn], static fn (?string $column): bool => $column !== null);
     }
 }

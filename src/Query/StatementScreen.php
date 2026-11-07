@@ -275,9 +275,19 @@ final class StatementScreen
      */
     private function resolvedPatternsOf(array $patterns, InterpolationScope $scope): array
     {
-        $resolved = \array_map(static fn (string $pattern): ?string => $scope->pattern($pattern), $patterns);
+        $resolved = [];
 
-        return \array_values(\array_filter($resolved, static fn (?string $pattern): bool => $pattern !== null && !\str_contains($pattern, "\0")));
+        foreach ($patterns as $pattern) {
+            $value = $scope->pattern($pattern);
+
+            if ($value === null || \str_contains($value, "\0")) {
+                continue;
+            }
+
+            $resolved[] = $value;
+        }
+
+        return $resolved;
     }
 
     /**
