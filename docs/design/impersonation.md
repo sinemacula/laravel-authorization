@@ -27,7 +27,7 @@ identity.
    `for($user)->withPolicies($policies)` to evaluate a hypothetical policy set against a specific principal, and
    `capped($actions)` to cap its checks as well. Each method returns a fresh clone, so the chain produces a scope with
    every override active and no mutation of intermediaries, and every method of the programmatic API (`can()`,
-   `cannot()`, `authorize()`, `check()`, `any()`, `all()`, `explain()` and `effectivePermissions()`) works on it.
+   `cannot()`, `authorize()`, `check()`, `any()`, `all()`, `explain()` and `permissionsFor()`) works on it.
 
 ## Usage
 
@@ -35,6 +35,7 @@ identity.
 
 ```php
 use SineMacula\Laravel\Authorization\Facades\Authorization;
+use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 
 // Resolve the target user (the subject being previewed).
 $targetUser = User::findOrFail($id);
@@ -42,15 +43,17 @@ $targetUser = User::findOrFail($id);
 // Evaluate a single check as that user.
 $canEdit = Authorization::for($targetUser)->can('posts:edit');
 
-// Build the full effective-permissions map for a UI.
-$permissions = Authorization::for($targetUser)->effectivePermissions();
+// List the actions the user may take in the request's tenant and application, for a UI.
+$permissions = Authorization::permissionsFor($targetUser, AuthorizationScope::current());
 ```
 
-`effectivePermissions()` walks every case of every configured `PermissionEnum` through the full staged evaluation (the
-subject, resource and tenant, the explicit denies, the guardrails, the permission boundaries, the session caps, the
-allows and the implicit deny; see [Evaluation order and deny precedence](evaluation-order-and-deny-precedence.md)) and
-returns an associative array keyed by permission string with boolean values -- suitable for rendering permission-picker
-UIs or capability checklists.
+`permissionsFor()` decides every action of the permission catalogue through the full staged evaluation (the subject,
+resource and tenant, the explicit denies, the guardrails, the permission boundaries, the session caps, the allows and
+the implicit deny; see [Evaluation order and deny precedence](evaluation-order-and-deny-precedence.md)) and returns the
+names of those allowed, in the catalogue's order -- suitable for rendering permission-picker UIs or capability
+checklists. A model named this way has no session, as with `for()`, so an action that needs a step-up is not listed for
+it; pass the resolved `Subject` to keep its session. Listing records no last decision and dispatches no event (see
+[Effective permissions](effective-permissions.md)).
 
 ### Hypothetical policy evaluation
 
@@ -103,7 +106,8 @@ it hands over.
   `Evaluation\DecisionPipeline::withPolicies()` and `capped()`.
 - `AuthorizationManager::forUser()` -- the scoped clone for a user the subject resolver translates.
 - `AuthorizationManager::currentSubject()` -- the override-aware resolution method.
-- `AuthorizationManager::effectivePermissions()` -- the full permission map used for UI rendering.
+- `AuthorizationManager::permissionsFor()` -- the actions listed for UI rendering, the subject named as `for()` names
+  it.
 
 ## Authoritative Tests
 
@@ -112,9 +116,11 @@ it hands over.
 - `AuthorizationManagerTest::testForReturnsCloneNotSelf` (Unit) -- `for()` returns a distinct instance.
 - `AuthorizationManagerTest::testForKeepsTheRequestsTenantApplicationAndGuard` (Unit) -- `for()` keeps the request's
   tenant, application and guard.
-- `EffectivePermissionsTest::testDirectGrantShowsTrueInEffectiveMap` -- direct grant appears in the map.
-- `EffectivePermissionsTest::testExplicitDenyPolicyOverridesDirectGrant` -- deny policy wins over RBAC in the map.
-- `EffectivePermissionsTest::testAnonymousPrincipalReturnsAllFalse` -- null principal yields all-false.
+- `AuthorizationManagerTest::testGrantsRolesAndDeniesAreWeighedAsTheCheckWeighsThem` (Feature, `PermissionsFor`) -- a
+  direct grant and a role's permission are listed, and a deny policy wins over RBAC.
+- `AuthorizationManagerTest::testAModelIsNamedAsForNamesIt` (Feature, `PermissionsFor`) -- a model is listed as
+  `for()` names it.
+- `AuthorizationManagerTest::testAGuestIsAllowedNothing` (Feature, `PermissionsFor`) -- a guest is listed nothing.
 
 ## Change Triggers
 

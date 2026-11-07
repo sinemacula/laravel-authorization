@@ -61,6 +61,7 @@ use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GuardrailService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
@@ -498,12 +499,12 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * `effectivePermissions()` keys its map by each case's value, the
-     * permission name.
+     * `permissionsFor()` lists each case's value, the permission name, of those
+     * the subject is allowed, in the catalogue's order.
      *
      * @return void
      */
-    public function testEffectivePermissionsAreKeyedByCaseValue(): void
+    public function testPermissionsForListsTheCaseValuesAllowed(): void
     {
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make('config'); // @phpstan-ignore method.nonObject
@@ -514,20 +515,17 @@ final class AuthorizationManagerTest extends TestCase
         $user = StubIdentity::create(['id' => '7c3e9f12-55a4-4b8e-b0a7-2d1c6e8f9a03']);
         $user->givePermission(PermissionEnum::POSTS_CREATE->value);
 
-        self::assertSame(
-            [PermissionEnum::POSTS_CREATE->value => true, PermissionEnum::POSTS_DELETE->value => false],
-            Authorization::for($user)->effectivePermissions(),
-        );
+        self::assertSame([PermissionEnum::POSTS_CREATE->value], Authorization::permissionsFor($user, AuthorizationScope::current()));
     }
 
     /**
-     * `effectivePermissions()` reads the configured enums at call time, after
-     * the boot validation, so it skips an enum not backed by strings rather
-     * than fail with a TypeError mid-request.
+     * The permission catalogue reads the configured enums when it is read,
+     * after the boot validation, so `permissionsFor()` skips an enum not backed
+     * by strings rather than fail with a TypeError mid-request.
      *
      * @return void
      */
-    public function testEffectivePermissionsSkipAnEnumNotBackedByStrings(): void
+    public function testPermissionsForSkipsAnEnumNotBackedByStrings(): void
     {
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app->make('config'); // @phpstan-ignore method.nonObject
@@ -535,10 +533,9 @@ final class AuthorizationManagerTest extends TestCase
 
         $user = StubIdentity::create(['id' => '5b0f6c1e-8d2a-4f3b-9e7c-1a4d2c6b8e90']);
 
-        self::assertSame(
-            [PermissionEnum::POSTS_CREATE->value => false, PermissionEnum::POSTS_DELETE->value => false],
-            Authorization::for($user)->effectivePermissions(),
-        );
+        $user->givePermission(Permission::create(['name' => PermissionEnum::POSTS_DELETE->value]));
+
+        self::assertSame([PermissionEnum::POSTS_DELETE->value], Authorization::permissionsFor($user, AuthorizationScope::current()));
     }
 
     /**
@@ -1090,7 +1087,7 @@ final class AuthorizationManagerTest extends TestCase
         self::assertTrue($manager->can('posts:create', null, $caller));
         self::assertTrue($manager->check('posts:create', null, $caller)->isAllowed());
         self::assertStringContainsString('allow', $manager->explain('posts:create', null, $caller));
-        self::assertSame(['posts:create' => true, 'posts:delete' => false], $manager->effectivePermissions($caller));
+        self::assertSame(['posts:create'], $manager->permissionsFor($user, AuthorizationScope::current(), $caller));
         self::assertFalse($manager->can('posts:delete', null, $caller));
         self::assertFalse($manager->can('posts:delete', null, ['request.ip' => '10.0.0.1']));
 
@@ -3244,16 +3241,16 @@ final class AuthorizationManagerTest extends TestCase
     }
 
     /**
-     * `effectivePermissions()` decides each permission through `check()`, so it
-     * reports what the decision allows, not what is granted: a permission held
-     * that a guardrail caps is reported as not allowed, and one held only in
-     * another tenant is reported as allowed in that tenant alone.
+     * `permissionsFor()` decides each permission through the decision `check()`
+     * makes, so it lists what the decision allows, not what is granted: a
+     * permission held that a guardrail caps is not listed, and one held only in
+     * another tenant is listed in that tenant alone.
      *
      * @return void
      *
      * @throws \Throwable
      */
-    public function testEffectivePermissionsAgreeWithTheDecision(): void
+    public function testPermissionsForAgreesWithTheDecision(): void
     {
         /** @var \Illuminate\Config\Repository $config */
         $config = $this->app?->make(ConfigRepository::class);
@@ -3269,19 +3266,19 @@ final class AuthorizationManagerTest extends TestCase
         self::guardrails()->set(self::resourcePolicy('no-create', [['effect' => 'allow', 'actions' => ['posts:delete']]]), $account, self::guardrailManager());
 
         $expected = [
-            'account' => [PermissionEnum::POSTS_CREATE->value => false, PermissionEnum::POSTS_DELETE->value => false],
-            'sibling' => [PermissionEnum::POSTS_CREATE->value => true, PermissionEnum::POSTS_DELETE->value => true],
+            'account' => [],
+            'sibling' => [PermissionEnum::POSTS_CREATE->value, PermissionEnum::POSTS_DELETE->value],
         ];
 
         foreach (['account' => $account, 'sibling' => $sibling] as $name => $tenant) {
             $this->resolveInTenant($user, $tenant);
 
-            $effective = Authorization::effectivePermissions();
+            $listed = Authorization::permissionsFor($user, AuthorizationScope::current());
 
-            self::assertSame($expected[$name], $effective, $name);
+            self::assertSame($expected[$name], $listed, $name);
 
-            foreach ($effective as $action => $allowed) {
-                self::assertSame(Authorization::check($action)->isAllowed(), $allowed, "{$name} {$action}");
+            foreach (PermissionEnum::cases() as $case) {
+                self::assertSame(Authorization::check($case->value)->isAllowed(), \in_array($case->value, $listed, true), "{$name} {$case->value}");
             }
         }
 

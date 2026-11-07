@@ -168,4 +168,5 @@ before the next. The 100 checks cost the queries one costs.
 - Reading a record's attributes outside the scope its check is decided in breaks invariant 5 for any provider that
   reads through the tenant scope.
 - A single check that opens a batch or reads ahead breaks the single-check lane of invariant 5, and its cost.
-- `permissionsFor()` (AUTHZ-10.4) introspects without recording; it must not change how `checkMany()` records.
+- `permissionsFor()` (AUTHZ-10.4) decides through `CheckBatch` with recording turned off (see
+  `effective-permissions.md`); it must not change how `checkMany()` records.

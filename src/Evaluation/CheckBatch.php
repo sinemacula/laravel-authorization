@@ -56,6 +56,12 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  * The checks are decided in chunks of `authorization.bulk.chunk_size` (500 by
  * default), and what a chunk read is released once it is decided.
  *
+ * A batch made not to record decides its checks the same way, through the same
+ * stages, but records nothing: the last decision is left untouched and no
+ * `DecisionEvaluated` is dispatched. `permissionsFor()` lists a subject's
+ * actions through one, since listing them is introspection, not a check (N70);
+ * the break-glass reporting of BL-70 is to define how it treats it.
+ *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  *
@@ -73,6 +79,7 @@ final readonly class CheckBatch
      * @param  \SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore  $lastDecisionStore
      * @param  \SineMacula\Laravel\Authorization\Contracts\SubjectResolver  $subjectResolver
      * @param  \Illuminate\Contracts\Events\Dispatcher|null  $events
+     * @param  bool  $isRecording
      */
     public function __construct(
 
@@ -87,6 +94,9 @@ final readonly class CheckBatch
 
         /** Dispatches each check's decision event; null dispatches none. */
         private ?Dispatcher $events = null,
+
+        /** Whether each decision is recorded as the last decision and reported; false for introspection, which records nothing. */
+        private bool $isRecording = true,
     ) {}
 
     /**
@@ -268,7 +278,7 @@ final readonly class CheckBatch
     /**
      * Record the decision as the last decision, with the session of the request
      * when it read an authentication requirement, and dispatch its decision
-     * event when a dispatcher is available.
+     * event when a dispatcher is available, unless the batch records nothing.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @param  \SineMacula\Laravel\Authorization\Evaluation\CheckInput  $check
@@ -278,6 +288,10 @@ final readonly class CheckBatch
      */
     private function record(?Subject $subject, CheckInput $check, false|ResourceReference|null $reference, Decision $decision): Decision
     {
+        if (!$this->isRecording) {
+            return $decision;
+        }
+
         $this->lastDecisionStore->put($decision, $decision->freshness === null ? null : $this->subjectResolver->resolve()?->session);
         $this->events?->dispatch(new DecisionEvaluated($subject?->subject, $check->action, ResourceReferences::identifierOf($reference), $check->context, $decision));
 

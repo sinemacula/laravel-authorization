@@ -89,9 +89,11 @@ final class BillingPermissions implements PermissionProvider
 ```
 
 Providers are resolved through the container, so they can take dependencies. A provider's permissions are answered
-through the Gate like an enum's, since the Gate hook reads the catalogue (see `gate-authority.md`), but they do not
-appear in `effectivePermissions()`, which reads only the enums. A permission declared twice for the same guard is kept
-once when both declarations agree, and refused when their description or category differ.
+through the Gate like an enum's, since the Gate hook reads the catalogue (see `gate-authority.md`), and listed by
+`permissionsFor()` like an enum's, since it lists the catalogue (see `effective-permissions.md`). A permission declared
+twice for the same guard is kept once when both declarations agree, and refused when their description or category
+differ. The configuration is read when the catalogue is, after boot, so an entry of `authorization.permission_enums`
+the boot validation would refuse is skipped rather than failing mid-request.
 
 ## Sync Command
 

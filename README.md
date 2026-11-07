@@ -112,6 +112,10 @@ must each allow the check, then an explicit allow or a permission held allows it
   each scope and the resources' tenants, attached policies and attributes in bulk, so with the package's resolvers and
   bulk-reading attribute providers a check over many resources does not cost a query per resource, outside the few cases
   the [bulk checks](#bulk-checks) section names.
+- **Effective permissions**: `permissionsFor()` lists the actions of the permission catalogue a subject may take in a
+  scope (a tenant or the platform, an application and a resource, named with `AuthorizationScope`), exactly those
+  `check()` would allow there, for a UI to show or hide its controls. The actions share one read of the subject's
+  grants and policies, and listing them records no decision and dispatches no event.
 - **A permission catalogue in code**: enums and providers declare each permission with a description, a category and
   its guards, and `authorization:sync` writes them to the database on deploy, reporting stale rows rather than
   deleting them. Booting never touches the database.
@@ -284,7 +288,7 @@ enum PostPermission: string implements PermissionEnum
 
 A module that ships its own permissions can declare them with a provider. A provider's permissions are written to the
 catalogue, answered through the Gate, `@can` and the `can:` middleware like an enum's, and checked through the
-`Authorization` facade and `hasPermission()`, but they do not appear in `effectivePermissions()`:
+`Authorization` facade and `hasPermission()`, and listed by `permissionsFor()`:
 
 ```php
 use SineMacula\Laravel\Authorization\Contracts\PermissionProvider;
@@ -993,7 +997,7 @@ the subject's own or its roles' policies, and a resource policy's allow naming t
 the check's policies alone, so the caps still apply. An action a cap refuses is never a step-up: the denial is
 `session_policy`, never `insufficient_authentication`. A cap has no deny statements, so it adds nothing to the deny
 stage, and a deny decides before any cap is weighed. The credential's scopes cap every check about the subject: the
-Gate, the `permission:` and `authorize:` middleware, the permission directives and `effectivePermissions()` included.
+Gate, the `permission:` and `authorize:` middleware, the permission directives and `permissionsFor()` included.
 An explicit cap caps only the checks made through the manager `capped()` returned, so the Gate and the middleware never
 see it. `hasPermission()`, `hasRole()`, the `role:` middleware and `@role` report what is granted, not what a cap lets
 through, so a cap never stops a role check.
@@ -1177,8 +1181,8 @@ reaches its subtree, in the tenants below A, and never in a sibling of A or in a
 The grants are resolved for each scope a check is decided in and kept per scope (tenant and application) in the
 resolution cache, so the reach costs no query of its own: once each scope is warm, checks on its resources read none.
 
-`effectivePermissions()`, the Gate, the `permission:` and `authorize:` middleware and the permission directives all
-decide through `check()`, and the bulk checks decide as it does, so they answer what the decision allows, with every
+The Gate, the `permission:` and `authorize:` middleware and the permission directives all decide through `check()`,
+and the bulk checks and `permissionsFor()` decide as it does, so they answer what the decision allows, with every
 stage above. `hasPermission()` (and its alias `hasPermissionTo()`), `getPermissions()` and `assertHasPermission()` keep
 their meaning: they report what is granted in the current scope and decide nothing, so a permission held that a deny or
 a cap refuses is still reported as held.
@@ -1298,7 +1302,7 @@ attributes](#subject-and-resource-attributes).
 
 What the caller passes lands under `input`, and only there: the `$context` of `check()`, `can()`, `cannot()`, `any()`,
 `all()`, `authorize()`, `explain()`, `canEach()`, `filterAuthorized()`, each `CheckInput` of `checkMany()`,
-`effectivePermissions()` and a policy class's `decide()`, the string-keyed and associative arguments of a Gate check,
+`permissionsFor()` and a policy class's `decide()`, the string-keyed and associative arguments of a Gate check,
 and the context of `assertCan()` and `assertCannot()`. A caller can never supply a trusted value:
 
 ```php
@@ -1661,7 +1665,7 @@ until the earliest instant a met requirement it read stops being met. The decisi
 fingerprint of the session it was made in (its SHA-256 hash, never the session id, so the decision stays safe to log)
 and that instant, and `isFreshFor($session)` says whether it may be reused in a session. Nothing else keeps a decision:
 `can()`, `cannot()`, `any()`, `all()`, `checkMany()`, `canEach()`, `filterAuthorized()`, the Gate, a policy class's
-`decide()`, the Blade directives and `effectivePermissions()` decide afresh every time, and the resolution cache holds
+`decide()`, the Blade directives and `permissionsFor()` decide afresh every time, and the resolution cache holds
 grants and policies, never decisions.
 
 #### Under the suite
@@ -1745,7 +1749,7 @@ or about the subject of the scoped manager it is called on:
 | `filterAuthorized($action, $resources, $context)` | Returns the resources the action is allowed on, with their keys and order, a `Collection` as its own class      |
 | `explain($action, $resource, $context)`           | Decides the action and returns its explanation as text                                                          |
 | `lastDecision()`                                  | Returns the latest decision of the request or job, whichever manager made it                                    |
-| `effectivePermissions($context)`                  | Decides every permission the enums declare and returns whether each is allowed                                  |
+| `permissionsFor($subject, $scope, $context)`      | Lists the actions of the permission catalogue the subject may take in the scope                                 |
 | `for($subject)`                                   | Returns a scoped manager deciding about the model named, in the request's tenant and application                |
 | `forUser($user)`                                  | Returns a scoped manager deciding about the subject the resolver translates the user into                       |
 | `capped($actions)`                                | Returns a scoped manager whose checks are capped by the actions given                                           |
@@ -1753,9 +1757,11 @@ or about the subject of the scoped manager it is called on:
 | `queryScope($model, $action, $context)`           | Returns the scope `whereAuthorized()` puts on a query (see [Query scoping](#query-scoping))                     |
 
 `check()` is the one decision, and `checkMany()` the same decision over many checks, `check()` deciding as `checkMany()`
-decides a batch of one: every other method but `queryScope()` adapts one of them, and each decision they make is
-recorded as the last decision and reported with `DecisionEvaluated`; `queryScope()` compiles a scope from the same
-pipeline without deciding a check, so it records and reports nothing. The resource and the context take the same forms
+decides a batch of one: every other method but `queryScope()` and `permissionsFor()` adapts one of them, and each
+decision they make is recorded as the last decision and reported with `DecisionEvaluated`; `queryScope()` compiles a
+scope from the same pipeline without deciding a check, and `permissionsFor()` decides each action through the path
+`checkMany()` takes but as introspection, so both record and report nothing. `permissionsFor()` takes its subject as
+an argument (see [Effective permissions](#effective-permissions)). The resource and the context take the same forms
 everywhere: a model, a `[type, id]` pair, a `ResourceReference`, an `AuthorizableResource`, a model class or a string
 names the resource (see [Managing roles, permissions and grants](#managing-roles-permissions-and-grants)), and the
 context is the caller's values, read under `input` (see [The check's context](#the-checks-context)).
@@ -1938,6 +1944,81 @@ included, empties the resolution cache, so every later check reads it; so does a
 through `Authorization::treeChanged()`, after which the tree is asked again. The resources' tenants and attributes are
 read for each chunk, the tenants as it starts and the attributes when its first check on a type reads them, so a change
 to a resource's tenant or attributes made after it was read is seen from the next chunk.
+
+### Effective permissions
+
+`permissionsFor()` lists the actions a subject may take in a scope, for a UI to show or hide its controls. It returns
+the action names, a list:
+
+```php
+use SineMacula\Laravel\Authorization\Facades\Authorization;
+use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
+
+// In the request's tenant and application.
+$actions = Authorization::permissionsFor($user, AuthorizationScope::current()); // ['posts:create', 'posts:update']
+
+// In another tenant, on the admin application, or at platform scope.
+$actions = Authorization::permissionsFor($user, AuthorizationScope::tenant($account, 'admin'));
+$actions = Authorization::permissionsFor($user, AuthorizationScope::platform());
+
+// On one post, for its row's controls, with the caller's context.
+$actions = Authorization::permissionsFor($user, AuthorizationScope::current()->withResource($post), ['plan' => 'pro']);
+
+// The same from the model, through `HasPermissions`.
+$actions = $user->permissionsFor(AuthorizationScope::current());
+```
+
+**The scope.** An `AuthorizationScope` names the tenant, or none for the platform, the application, or none, and the
+resource, or none:
+
+- `AuthorizationScope::current()` captures the request's tenant and application, as the subject resolver reports them;
+- `AuthorizationScope::platform($application = null)` names no tenant;
+- `AuthorizationScope::tenant($tenant, $application = null)` names a tenant, as a model, an `AuthorizableTenant` or a
+  `Reference`; a tenant without a key is refused with `InvalidTenantException`;
+- `->withResource($resource)` returns the scope with a resource, in any form `check()` takes.
+
+A null tenant always means the platform, never "the request's tenant": capture that with `current()`. A null
+application means no application, so only grants for every application count. The scope's tenant and application are
+put in place of the request's while the actions are decided, both as the subject's and as the scope of the grants that
+count, and the request's are restored afterwards, even when deciding one throws. The resource's own tenant still goes
+through admission, as for `check()`: a resource of a tenant outside the scope's tenant and its subtree is refused as
+`tenant_scope` unless a platform-wide grant covers it, and naming a resource never moves the scope to its tenant.
+
+**The subject.** A resolved `Subject` is taken as it is, keeping its identity, guard and session, so a session that
+meets an authentication requirement still meets it. Any other object is named as `for()` names it, in the request's
+guard, with no session. `null` is a guest, who is allowed nothing, whatever manager the call is made on.
+
+**What a listed action means.** The listing is exact: it holds the actions the permission catalogue declares (the
+package's own permissions, the cases of the configured enums and the definitions of the configured providers), each
+name once, a name declared for two guards included, in the catalogue's order, for which
+`check($action, $scope->resource, $context)` would allow, in that scope, about that subject, as things stand. An action
+the catalogue does not declare is never listed, whatever a wildcard grant or a stored permission name covers. Each
+action is decided as `check()` decides it, never as the allows less the denies, so its denies, conditions, guardrails,
+boundaries, session caps (a `capped()` manager's included) and authentication requirements are weighed exactly as
+`check()` weighs them. An action whose check would be `insufficient_authentication` is not listed. An action whose check
+would throw, through a failing attribute provider say, makes the listing throw what it throws, so nothing is listed
+that the check would not allow. A catalogue that cannot be read, one declaring a name twice for a guard with different
+metadata say, throws `InvalidPermissionCatalogueException`; an entry of `authorization.permission_enums` the boot
+validation would refuse is skipped.
+
+**Generic and resource-specific listings differ.** A listing with no resource answers the check with no resource, so an
+allow limited to some records, or conditioned on a resource's attributes, does not list its action there; a listing
+for one resource answers for that resource. Use the resource-specific listing for a row's controls, and the generic one
+for the controls of a page.
+
+**The server still authorizes.** A listing tells the UI what to show. What is granted can change between rendering and
+the request, so authorize the action again when it is taken, with `authorize()`, the `authorize:` middleware or the
+Gate.
+
+**It records nothing.** Listing is introspection, not a check: it records no last decision and dispatches no
+`DecisionEvaluated` and no `AuthorizationFailed`. Break-glass grants, when they arrive, will define how a listing that
+relies on one is reported.
+
+**What it costs.** The actions are decided together, through the path `checkMany()` takes, so the subject is resolved
+once and its grants, roles, policies, boundaries and caps, the guardrails and the resource's tenant, attached policies
+and attributes are read once for the listing: listing fifty actions costs the queries listing five costs. The catalogue
+is read from code on each call and touches no database. See
+[Effective permissions](docs/design/effective-permissions.md) for the design.
 
 ### Query scoping
 
@@ -2504,6 +2585,7 @@ The contracts behind the evaluator, for maintainers and reviewers, are in [docs/
 | [Gate authority](docs/design/gate-authority.md)                                             | The `Gate::before` hook, the switch and policy classes        |
 | [Query scoping](docs/design/query-scoping.md)                                               | `whereAuthorized()`, what it compiles and what it refuses     |
 | [Bulk checks](docs/design/bulk-checks.md)                                                   | `checkMany()`, what it reads once and in bulk, and its events |
+| [Effective permissions](docs/design/effective-permissions.md)                               | `permissionsFor()`, its scope, exactness and introspection    |
 
 ## Requirements
 

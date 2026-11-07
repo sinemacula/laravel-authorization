@@ -248,7 +248,7 @@ The context a check's statements read is nested namespaces (N24), each made by o
   never allows anything. The message names the provider's class and the namespace, never a value, and nothing the
   provider returned or threw reaches the decision, an event or the trace (AUTHZ-8.8).
 - **Caller values** (N27). The `$context` of `check()` and every helper over it (`can()`, `cannot()`, `any()`, `all()`,
-  `authorize()`, `explain()`, `effectivePermissions()`, a policy class's `decide()`, the Gate's string-keyed and
+  `authorize()`, `explain()`, `permissionsFor()`, a policy class's `decide()`, the Gate's string-keyed and
   associative arguments and the testing assertions) is wrapped under `input` once, where the manager builds the check's
   context. A caller passing `['request' => ['ip' => '10.0.0.1']]` supplies `input.request.ip`, never `request.ip`.
 - **Application namespaces** (N26). A `ContextSource` names one namespace and returns its values, nested by key. A

@@ -422,7 +422,7 @@ refuses never reads the permissions, since the session stage runs before the all
    decision was about, and until the earliest instant a met requirement it read stops being met. The checker is asked
    for every requirement of every check and nothing it answers is remembered, so an unmet or undecidable result is never
    reused. Every other entry point (`can()`, `cannot()`, `any()`, `all()`, the Gate, a policy class's `decide()`, the
-   Blade directives and `effectivePermissions()`) decides afresh, and the resolution cache holds grants and policies,
+   Blade directives and `permissionsFor()`) decides afresh, and the resolution cache holds grants and policies,
    never decisions.
 
 9. **An allow applies only to the subjects its source admits (AUTHZ-7.3, N39).** A resource policy's allow applies only
@@ -483,9 +483,9 @@ refuses never reads the permissions, since the session stage runs before the all
     on a resource therefore costs no query beyond the first resolution of its scope, and none once that is warm. A
     resource admitted at platform scope is still capped by its own tenant's guardrails (invariant 11).
 
-    `can()`, `cannot()`, `any()`, `all()`, `effectivePermissions()`, the Gate, a policy class's `decide()`, the
-    `permission:` and `authorize:` middleware and the permission directives decide through `check()` (D22), so they
-    apply this invariant and every other. `hasPermission()`, `hasPermissionTo()`, `getPermissions()` and
+    `can()`, `cannot()`, `any()`, `all()`, the Gate, a policy class's `decide()`, the `permission:` and `authorize:`
+    middleware and the permission directives decide through `check()` (D22), and `permissionsFor()` through the same
+    path, so they apply this invariant and every other. `hasPermission()`, `hasPermissionTo()`, `getPermissions()` and
     `assertHasPermission()` keep their documented meaning: they report what is granted in the current scope and decide
     nothing.
 
@@ -744,7 +744,7 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   `invalid_policy` over a held permission, and the caller's values under `input` and nowhere else; the Feature
   `AuthorizationManagerTest` -- a permission held allowing only after every deny and cap, with its step naming it, a
   grant's reach over a tenant's resources, its subtree, a sibling and another tree, platform-wide grants, tenantless
-  checks with and without an active tenant, applications and expiry, and `effectivePermissions()` agreeing with
+  checks with and without an active tenant, applications and expiry, and `permissionsFor()` agreeing with
   `check()`; `RequirePermissionTest` -- the middleware agreeing with `check()` in a tenant; `RbacQueryBudgetTest` -- no
   query once each scope a check reads is warm; `HeldPermissionsTest`, `SubjectGrantsTest` and `HasPermissionsTest` --
   the match, the permission named, and `hasPermission()` reporting what is granted without deciding.

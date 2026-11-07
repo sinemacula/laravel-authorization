@@ -64,6 +64,9 @@ The planned note set (populated during implementation — see `ISSUES.md` item #
   path, the keys and occurrences they keep, what a batch reads once in each scope and what it reads in bulk for each
   chunk, the bulk tenant and attribute contracts and their fallbacks, one decision event per check and the last
   decision, and the consistency boundary within which a batch sees a write.
+- `effective-permissions.md`: `permissionsFor()` listing exactly the catalogue's actions `check()` would allow in an
+  `AuthorizationScope`, through the one decision path over data read once, the scope applied and restored, the
+  subject forms, and why a listing records no decision and dispatches no event.
 
 These documents are secondary to the code and tests, not a replacement for them. If a note and a cited test disagree,
 the test should be treated as authoritative until the mismatch is resolved.

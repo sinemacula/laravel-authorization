@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature;
 
+use Illuminate\Config\Repository as ConfigRepository;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
@@ -20,9 +21,11 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
+use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ChecksGrantExpiry;
 use Tests\Concerns\ChecksGrantsByName;
+use Tests\Feature\Stubs\Enums\PermissionEnum;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenant;
 use Tests\TestCase;
@@ -287,6 +290,36 @@ final class HasPermissionsTest extends TestCase
         self::assertSame(['a' => false], $user->canEach('posts:edit', ['a' => 'posts:1'], ['flag' => 'on']));
         self::assertSame([0 => 'posts:1'], $user->filterAuthorized('posts:read', collect(['posts:1', 'posts:2']))->all());
         self::assertFalse(Authorization::lastDecision()?->isAllowed());
+    }
+
+    /**
+     * `permissionsFor()` lists the model's actions in the scope through the
+     * authorization manager, as the facade lists them for the model.
+     *
+     * @return void
+     */
+    public function testPermissionsForListsThroughTheManager(): void
+    {
+        /** @var \Illuminate\Config\Repository $config */
+        $config = $this->app?->make(ConfigRepository::class);
+        $config->set('authorization.permission_enums', [PermissionEnum::class]);
+
+        $tenant = StubTenant::query()->create(['id' => 'listing-tenant', 'name' => 'listing-tenant']);
+        $user   = StubIdentity::create(['id' => 'listing-delegate']);
+
+        $user->givePermission(Permission::create(['name' => 'posts:create']));
+        $user->givePermission(Permission::create(['name' => 'posts:delete']), null, $tenant);
+        $flagged = ['effect' => 'deny', 'actions' => ['posts:create'], 'conditions' => ['eq' => ['input.flag' => 'on']]];
+
+        $user->attachPolicy(Policy::create(['name' => 'flagged', 'document' => ['statements' => [$flagged]]]));
+
+        $scope = AuthorizationScope::tenant($tenant);
+
+        self::assertSame(['posts:create', 'posts:delete'], $user->permissionsFor($scope, ['flag' => 'off']));
+        self::assertSame(['posts:delete'], $user->permissionsFor($scope, ['flag' => 'on']));
+        self::assertSame(['posts:create'], $user->permissionsFor(AuthorizationScope::platform(), ['flag' => 'off']));
+        self::assertSame(Authorization::permissionsFor($user, $scope), $user->permissionsFor($scope));
+        self::assertNull(Authorization::lastDecision());
     }
 
     /**
