@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Database;
 
+use Illuminate\Database\Query\Builder;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
@@ -66,5 +67,33 @@ final class LiveGrantsTest extends TestCase
 
         self::assertSame($query, LiveGrants::only($query, 'role_permissions'));
         self::assertEqualsCanonicalizing(['posts:forever', 'posts:ahead'], $query->pluck('permissions.name')->all());
+    }
+
+    /**
+     * Given an instant, the rows that count are those whose expiry is after it,
+     * whatever the clock says.
+     *
+     * @return void
+     */
+    public function testTheRowsThatCountAreJudgedAtTheInstantGiven(): void
+    {
+        Carbon::setTestNow('2026-07-01 12:00:00');
+
+        $role = Role::query()->create(['name' => 'editor']);
+
+        foreach (['early' => '2026-07-01 11:00:00', 'late' => '2026-07-01 13:00:00'] as $name => $expiresAt) {
+            DB::table('role_permissions')->insert([
+                'role_id'       => $role->id,
+                'permission_id' => Permission::query()->create(['name' => "posts:{$name}"])->id,
+                'expires_at'    => $expiresAt,
+            ]);
+        }
+
+        $query = static fn (): Builder => DB::table('role_permissions')->join('permissions', 'permissions.id', '=', 'role_permissions.permission_id');
+        $at    = static fn (string $instant): array => LiveGrants::only($query(), 'role_permissions', Carbon::parse($instant, 'UTC'))->pluck('permissions.name')->all();
+
+        self::assertEqualsCanonicalizing(['posts:early', 'posts:late'], $at('2026-07-01 10:00:00'));
+        self::assertSame(['posts:late'], $at('2026-07-01 12:30:00'));
+        self::assertSame([], $at('2026-07-01 13:00:00'));
     }
 }

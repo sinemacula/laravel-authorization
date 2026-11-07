@@ -11,8 +11,11 @@ use SineMacula\Laravel\Authorization\Administration\ActingContext;
 /**
  * One call that changes the package's records, as every event it dispatches
  * reports it: an id shared by those events, for correlation, who made the call
- * and how, the administration actions it was decided under, and when it was
- * made.
+ * and how, the administration actions its changes fall under, and when it was
+ * made. The actions are decided through `check()` only for a delegated call: a
+ * trusted call names them too, though nothing was decided, a sync names both
+ * its grant and its revoke action, whichever it made, and a write made through
+ * a model outside the services names none.
  *
  * A call made with an acting context is delegated: its actor is the acting
  * subject's principal, with the identity behind it and, while impersonating,
@@ -61,7 +64,7 @@ final readonly class Operation
         /** Who was impersonating the acting subject, or null when no one was. */
         public ?Reference $impersonator = null,
 
-        /** The administration actions the call's changes are decided under, each once. */
+        /** The administration actions the call's changes fall under, each once, decided through `check()` only when the call is not trusted. */
         public array $actions = [],
     ) {}
 

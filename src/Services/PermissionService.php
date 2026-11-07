@@ -66,14 +66,12 @@ final class PermissionService
         ?ActingContext $actor = null,
     ): Permission {
         $class = self::permissionClass();
-        $model = new $class;
 
-        return RecordWriter::save($actor, PackagePermissions::PERMISSION_CREATE, static fn (): Permission => $model, [
-            $model->getKeyName() => $id,
-            'name'               => $name,
-            'guard'              => $guard,
-            'description'        => $description,
-            'category'           => $category,
+        return RecordWriter::create($actor, PackagePermissions::PERMISSION_CREATE, new $class, $id, [
+            'name'        => $name,
+            'guard'       => $guard,
+            'description' => $description,
+            'category'    => $category,
         ]);
     }
 

@@ -4,6 +4,7 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Support;
 
+use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
@@ -61,7 +62,7 @@ final class ResourceScope
         $tenant = $resource->tenant;
 
         if ($tenant === null) {
-            return $decide();
+            return $resource->source instanceof OperationResource ? TenantScope::within(null, TenantScope::currentApplication(), $decide) : $decide();
         }
 
         $application = TenantScope::currentApplication();
@@ -76,13 +77,14 @@ final class ResourceScope
 
     /**
      * Run the callback with each group of the resources, in the scope a check
-     * on them is decided in: those with no tenant where the request is, those
-     * of the decision's tenant or below it in their own tenant, and those of
-     * any other tenant at platform scope, admitted or not. Nothing is decided,
-     * and nothing thrown: what is read ahead only supplies data, so a resource
-     * whose place in the tree cannot be read is left out, and a group whose
-     * callback throws is left to its checks, each of which reads its own, and
-     * fails alone, when it is reached.
+     * on them is decided in: those with no tenant where the request is, but an
+     * operation resource with none at platform scope, those of the decision's
+     * tenant or below it in their own tenant, and those of any other tenant at
+     * platform scope, admitted or not. Nothing is decided, and nothing thrown:
+     * what is read ahead only supplies data, so a resource whose place in the
+     * tree cannot be read is left out, and a group whose callback throws is
+     * left to its checks, each of which reads its own, and fails alone, when it
+     * is reached.
      *
      * @param  array<array-key, \SineMacula\Laravel\Authorization\Support\ResourceReference>  $resources
      * @param  \Closure(array<array-key, \SineMacula\Laravel\Authorization\Support\ResourceReference>): mixed  $prepare
@@ -104,10 +106,10 @@ final class ResourceScope
     /**
      * Return the key of the scope a check on the resource is decided in, for a
      * decision whose tenant is the one given: `HERE` for a resource with no
-     * tenant, the resource's tenant for one of that tenant or below it, and
-     * `PLATFORM` for one of any other tenant, every tenant-owned resource when
-     * no tenant is given included. Two resources with the same key are decided
-     * in the same scope.
+     * tenant, `PLATFORM` for an operation resource with none, the resource's
+     * tenant for one of that tenant or below it, and `PLATFORM` for one of any
+     * other tenant, every tenant-owned resource when no tenant is given
+     * included. Two resources with the same key are decided in the same scope.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
      * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $active
@@ -118,7 +120,7 @@ final class ResourceScope
         $tenant = $resource->tenant;
 
         if ($tenant === null) {
-            return self::HERE;
+            return $resource->source instanceof OperationResource ? self::PLATFORM : self::HERE;
         }
 
         return self::isWithinActive($tenant, $active) ? 'tenant:' . \strlen($tenant->type) . ':' . $tenant->type . ':' . $tenant->id : self::PLATFORM;

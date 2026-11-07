@@ -178,20 +178,27 @@ the subject resolver. The events themselves are described in [Events](events.md)
 ## Success Path
 
 ```php
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\RoleService;
 
 $roles  = app(RoleService::class);
 $grants = app(GrantService::class);
 
-$editor = $roles->create('editor', 'web', 'Edits posts', actor: $admin);
-$roles->grantPermission($editor, 'posts:update', actor: $admin);
+// Trusted system work, as a seeder or a command makes it: no acting context.
+$editor = $roles->create('editor', 'web', 'Edits posts');
+$roles->grantPermission($editor, 'posts:update');
 
-$grants->grantRole($user, $editor, now()->addMonth(), actor: $admin); // GrantOutcome::GRANTED
-$grants->grantRole($user, $editor, now()->addMonth(), actor: $admin); // UNCHANGED if the expiry is the same
-$grants->syncPermissions($user, ['posts:delete'], actor: $admin);     // SyncResult
-$grants->revokeRole($user, 'editor', actor: $admin);                  // 1
+$grants->grantRole($user, $editor, now()->addMonth()); // GrantOutcome::GRANTED
+$grants->grantRole($user, $editor, now()->addMonth()); // UNCHANGED if the expiry is the same
+$grants->syncPermissions($user, ['posts:delete']);     // SyncResult
+
+// Delegated administration: decided as the request's subject under authorization:role.revoke.
+$grants->revokeRole($user, 'editor', actor: ActingContext::current()); // 1
 ```
+
+A call with an acting context that could widen authority, a grant, an attachment or a definition edit, is refused as
+`administration.unprovable` in this release (see [Delegated administration](delegated-administration.md)).
 
 The trait methods (`assignRole()`, `givePermission()`, `attachPolicy()`, `$role->givePermission()` and the rest) keep
 working: each forwards to the matching service method with no actor.
@@ -273,5 +280,6 @@ working: each forwards to the matching service method with no actor.
 
 - Scoped grants (tenant and application): the services gain scope arguments, and revocation narrows to the scope it
   names.
-- Delegated administration: the services check the actor before they write, as `GuardrailService` already does.
+- Delegated administration parts 2 to 4: the unprovable refusals give way to the scope, owner, rank, grantable and
+  impact rules (see [Delegated administration](delegated-administration.md)).
 - The permission catalogue sync moves onto `PermissionService`.

@@ -38,14 +38,16 @@ and how it fails.
    that model's connection (`authorization.connection`, else the default). A failure part-way rolls back every write.
 
 8. **The package's own permissions are always declared.** `Support\PackagePermissions`, the package's own provider,
-   comes first in every catalogue, whatever the application configures: today `authorization:guardrail.manage`, the
-   right `GuardrailService` checks (AUTHZ-7.6), guard-agnostic and under the `authorization` category. The sync adds and
-   updates it as any declared permission, so it can be granted, and the policy validator accepts a pattern covering it,
-   so a policy naming it validates. The action catalogue the validator asks (`DeclaredActionCatalogue`) leaves it out,
-   so it holds the application's declarations alone, and with none a policy needing any other action is still refused
-   because nothing is declared (N50). The Gate asks the package about it as about every declared permission. An
-   application declaration of the same name, also guard-agnostic, is merged with it as any duplicate is, and refused
-   when its description or category differ.
+   comes first in every catalogue, whatever the application configures: the administration actions of delegated
+   administration (AUTHZ-11.1, see [Delegated administration](delegated-administration.md)), `authorization:role.grant`,
+   `authorization:guardrail.manage`, the right `GuardrailService` checks (AUTHZ-7.6), and the rest, each guard-agnostic
+   and under the `authorization` category. The sync adds and updates them as any declared permission, so they can be
+   granted, and the policy validator accepts a pattern covering any of them, so a policy naming them validates. The
+   action catalogue the validator asks (`DeclaredActionCatalogue`) leaves them out, so it holds the application's
+   declarations alone, and with none a policy needing any other action is still refused because nothing is declared
+   (N50). The Gate asks the package about them as about every declared permission. An application declaration of the
+   same name, also guard-agnostic, is merged with it as any duplicate is, and refused when its description or category
+   differ.
 
 ## Declaring the Catalogue
 

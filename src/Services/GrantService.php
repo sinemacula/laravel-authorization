@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Services;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
@@ -358,7 +359,9 @@ final class GrantService
      * revoked, detached or removed event for each, and return how many there
      * were. The `HasAuthorization` trait calls this once a grantee is deleted,
      * `RoleObserver` once a role is deleted, and the grant pruner for a grantee
-     * that no longer exists.
+     * that no longer exists. For an acting context and a grantee that holds
+     * nothing, each of the call's actions is decided unchanged at platform
+     * scope, so an actor that may not take them is refused either way.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
@@ -373,7 +376,9 @@ final class GrantService
         $operation = Operation::begin($actor, $actions);
 
         $revoked = OperationScope::run($operation, static function (Operation $operation) use ($actor, $reference): int {
-            $actor?->authorizeIn($operation, ...GrantChanges::everything($reference));
+            $unchanged = static fn (string $action): OperationResource => OperationResource::unchanged($action, $reference, null, GrantScope::platform());
+
+            $actor?->authorizeChanges($operation, GrantChanges::everything($reference), ...\array_map($unchanged, $operation->actions));
 
             $events = [];
 
@@ -493,7 +498,7 @@ final class GrantService
 
         $revoked = OperationScope::run($operation, static function (Operation $operation) use ($actor, $kind, $grantee, $reference, $named, $target, $application): int {
             $candidates = \is_string($target) ? $kind->named($target, GrantChanges::guard($grantee), $named) : [$kind->assertTarget($target)];
-            $rows       = GrantChanges::revocations($kind, $reference, $operation->actor, $candidates, new GrantScope($named, $application), \is_string($target));
+            $rows       = GrantChanges::revocations($kind, $reference, $operation->actor, $candidates, new GrantScope($named, $application));
             $events     = [];
 
             $action = $kind->revokeAction();
@@ -558,14 +563,16 @@ final class GrantService
             $events  = [];
 
             $reaches = $table->reaches($revoked);
+            $now     = Carbon::now('UTC');
+            $liveAt  = static fn (): array => $table->live(\array_map(\strval(...), \array_keys($keep)), $now);
 
-            $actor?->authorizeIn($operation, ...GrantChanges::ofSync($kind, $reference, $table, $keep, $reaches, $written, $expiresAt));
+            $actor?->authorizeIn($operation, ...GrantChanges::ofSync($kind, $reference, $liveAt(), $keep, $reaches, $written, $expiresAt));
 
             $table->revoke($revoked);
 
             foreach ($keep as $model) {
                 $id     = GrantChanges::key($model);
-                $change = $table->rearm($id, $expiresAt);
+                $change = $table->rearm($id, $expiresAt, $now);
                 $events = [...$events, ...$kind->changeEvents($operation, $reference, $model, $written, $change, $expiresAt)];
 
                 $changed[$change->outcome->value][] = $id;

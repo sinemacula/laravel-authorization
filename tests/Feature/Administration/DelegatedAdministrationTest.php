@@ -418,6 +418,110 @@ final class DelegatedAdministrationTest extends TestCase
     }
 
     /**
+     * Every delegated call that finds nothing to change, as a setup that
+     * returns the call, and the actions it decides, in order: a revocation of
+     * what the grantee does not hold, a removal of a boundary it does not have,
+     * a revocation or removal of everything from a grantee that holds nothing,
+     * a detachment of everything from a record with nothing attached, and a
+     * sync whose kept rows are all held live.
+     *
+     * @return iterable<string, array{Setup, list<string>}>
+     */
+    public static function noChanges(): iterable
+    {
+        yield 'revokeRole by name, not held' => [
+            self::directly(static fn (ActingContext $actor): mixed => self::grants()->revokeRole(self::user(), 'editor', $actor)),
+            [Actions::ROLE_REVOKE],
+        ];
+        yield 'revokePermission, not held' => [
+            self::directly(static fn (ActingContext $actor): mixed => self::grants()->revokePermission(self::user(), self::permission('posts:edit'), $actor)),
+            [Actions::PERMISSION_REVOKE],
+        ];
+        yield 'RoleService::revokePermission by name, not carried' => [
+            self::directly(static fn (ActingContext $actor): mixed => self::roles()->revokePermission(self::role('editor'), 'posts:edit', $actor)),
+            [Actions::PERMISSION_REVOKE],
+        ];
+        yield 'BoundaryService::remove, none set' => [
+            self::directly(static fn (ActingContext $actor): mixed => self::boundaries()->remove(self::user(), actor: $actor)),
+            [Actions::BOUNDARY_REMOVE],
+        ];
+        yield 'BoundaryService::removeAll, none set' => [
+            self::directly(static fn (ActingContext $actor): mixed => self::boundaries()->removeAll(self::user(), $actor)),
+            [Actions::BOUNDARY_REMOVE],
+        ];
+        yield 'revokeAll, nothing held' => [
+            self::directly(static fn (ActingContext $actor): mixed => self::grants()->revokeAll(self::user(), $actor)),
+            [Actions::ROLE_REVOKE, Actions::PERMISSION_REVOKE, Actions::POLICY_DETACH, Actions::BOUNDARY_REMOVE],
+        ];
+        yield 'ResourcePolicyService::detachAll, nothing attached' => [
+            self::directly(static fn (ActingContext $actor): mixed => self::resourcePolicies()->detachAll(['posts', 7], $actor)),
+            [Actions::RESOURCE_POLICY_DETACH],
+        ];
+        yield 'syncRoles keeping what is held live' => [static function (): \Closure {
+            self::grants()->grantRole(self::user(), self::role('editor'));
+
+            return static fn (ActingContext $actor): mixed => self::grants()->syncRoles(self::user(), ['editor'], actor: $actor);
+        }, [Actions::ROLE_GRANT]];
+        yield 'syncRoles of nothing, nothing held' => [
+            self::directly(static fn (ActingContext $actor): mixed => self::grants()->syncRoles(self::user(), [], actor: $actor)),
+            [Actions::ROLE_REVOKE],
+        ];
+        yield 'RoleService::syncPermissions keeping what is carried live' => [static function (): \Closure {
+            self::roles()->grantPermission(self::role('editor'), self::permission('posts:edit'));
+
+            return static fn (ActingContext $actor): mixed => self::roles()->syncPermissions(self::role('editor'), ['posts:edit'], actor: $actor);
+        }, [Actions::PERMISSION_GRANT]];
+    }
+
+    /**
+     * A delegated call that finds nothing to change is still decided on its
+     * actions, before it returns: an actor without them is refused, whether or
+     * not anything was there to change, so it cannot learn what the grantee
+     * holds by asking.
+     *
+     * @param  Setup  $setup
+     * @param  list<string>  $actions
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    #[DataProvider('noChanges')]
+    public function testACallThatChangesNothingIsRefusedWithoutItsAction(\Closure $setup, array $actions): void
+    {
+        $actor = self::administrator([]);
+        $call  = $setup();
+
+        self::assertRefusedWithNothingWritten($call, $actor, DecisionReason::NO_MATCH, $actions[0]);
+    }
+
+    /**
+     * A delegated call that finds nothing to change, made by an actor allowed
+     * every action, decides each of its actions, writes nothing and reports no
+     * change.
+     *
+     * @param  Setup  $setup
+     * @param  list<string>  $actions
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    #[DataProvider('noChanges')]
+    public function testACallThatChangesNothingDecidesItsActions(\Closure $setup, array $actions): void
+    {
+        $actor     = self::administrator();
+        $call      = $setup();
+        $before    = self::snapshot();
+        $decisions = \count(self::dispatched(DecisionEvaluated::class));
+        $changes   = \count(self::changes());
+
+        $call($actor);
+
+        self::assertSame($before, self::snapshot());
+        self::assertSame($actions, self::actionsSince($decisions));
+        self::assertCount($changes, self::changes());
+    }
+
+    /**
      * A screen that checks the same action on the same operation resource gets
      * the decision the service makes.
      *

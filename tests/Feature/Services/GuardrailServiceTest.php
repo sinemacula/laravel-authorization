@@ -158,6 +158,7 @@ final class GuardrailServiceTest extends TestCase
         self::assertTrue(self::refersTo($events[0]->policy, $policy));
         self::assertTrue(self::refersTo($events[0]->operation->actor, $actor));
         self::assertSame('tenant-cap', $events[0]->name);
+        self::assertSame([PackagePermissions::GUARDRAIL_MANAGE], $events[0]->operation->actions);
         self::assertTrue(self::refersTo($events[0]->scope->tenant, $tenant));
         self::assertTrue($events[0]->scope->includeSubtree);
     }

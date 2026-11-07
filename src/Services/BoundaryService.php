@@ -147,7 +147,9 @@ final class BoundaryService
 
     /**
      * Remove the grantee's boundary in the scope, and report whether it had one
-     * there.
+     * there. For an acting context, the removal is decided before anything is
+     * removed, and when the grantee has no boundary there, the removal it was
+     * asked for is decided unchanged, so its action is decided either way.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
@@ -163,10 +165,11 @@ final class BoundaryService
 
         /** @var bool */
         return OperationScope::run(Operation::begin($actor, [PackagePermissions::BOUNDARY_REMOVE]), static function (Operation $operation) use ($actor, $reference, $named): bool {
-            $table = self::table($reference, $operation, new GrantScope($named));
-            $held  = $actor === null ? null : $table->held();
+            $scope = new GrantScope($named);
+            $table = self::table($reference, $operation, $scope);
+            $held  = static fn (): array => self::removals($reference, self::heldIn($table, $named));
 
-            $actor?->authorizeIn($operation, ...self::removals($reference, $held === null ? [] : [[$held[0], new GrantScope($named, null, $held[1] || $named === null)]]));
+            $actor?->authorizeChanges($operation, $held(), OperationResource::unchanged(PackagePermissions::BOUNDARY_REMOVE, $reference, null, $scope));
 
             $removed = $table->remove();
 
@@ -182,7 +185,9 @@ final class BoundaryService
      * Remove the grantee's boundaries in every scope, in one transaction and as
      * one operation, dispatching `BoundaryRemoved` for each once it commits,
      * and return how many there were: what the grant pruner does for a grantee
-     * that no longer exists.
+     * that no longer exists. For an acting context, each removal is decided
+     * before any is made, and when the grantee has none, the removal is decided
+     * unchanged at platform scope, so its action is decided either way.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
@@ -196,7 +201,10 @@ final class BoundaryService
 
         /** @var int<0, max> */
         return OperationScope::run(Operation::begin($actor, [PackagePermissions::BOUNDARY_REMOVE]), static function (Operation $operation) use ($actor, $reference): int {
-            $actor?->authorizeIn($operation, ...self::removals($reference, self::table($reference, $operation, GrantScope::platform())->everywhere()));
+            $boundaries = self::table($reference, $operation, GrantScope::platform());
+            $unchanged  = OperationResource::unchanged(PackagePermissions::BOUNDARY_REMOVE, $reference, null, GrantScope::platform());
+
+            $actor?->authorizeChanges($operation, self::removals($reference, $boundaries->everywhere()), $unchanged);
 
             $events = self::removeEverywhere($reference, $operation);
 
@@ -240,8 +248,10 @@ final class BoundaryService
      * @return list<\SineMacula\Laravel\Authorization\Administration\OperationResource>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException
+     *
+     * @internal
      */
-    private static function removals(Reference $grantee, array $boundaries): array
+    public static function removals(Reference $grantee, array $boundaries): array
     {
         $removals = [];
 
@@ -251,6 +261,23 @@ final class BoundaryService
         }
 
         return $removals;
+    }
+
+    /**
+     * Return the boundary the grantee holds in the scope the table writes, by
+     * the key of its policy and its scope, which reaches the tenants below the
+     * tenant when its row says so, as a platform boundary's always does; none
+     * when it holds none there.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Services\Support\BoundaryTable  $table
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $tenant
+     * @return list<array{string, \SineMacula\Laravel\Authorization\Support\GrantScope}>
+     */
+    private static function heldIn(BoundaryTable $table, ?Reference $tenant): array
+    {
+        $held = $table->held();
+
+        return $held === null ? [] : [[$held[0], new GrantScope($tenant, null, $held[1])]];
     }
 
     /**

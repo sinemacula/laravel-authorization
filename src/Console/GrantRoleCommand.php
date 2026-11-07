@@ -21,9 +21,11 @@ use SineMacula\Laravel\Authorization\Services\GrantService;
  *
  * `--actor={morphType}:{key}` names the actor making the change: the grant is
  * then delegated administration, decided as that actor under
- * `authorization:role.grant` (see `GrantService`), and its event carries the
- * actor and its row records it. Without it the grant is trusted system work and
- * records no actor (N75).
+ * `authorization:role.grant` (see `GrantService`). A grant can widen authority,
+ * so in this release it is refused as `administration.unprovable` once the
+ * action is allowed, and nothing is written. Once the later parts of BL-65
+ * allow it, its event carries the actor and its row records it. Without it the
+ * grant is trusted system work and records no actor (N75).
  *
  * The role name is looked up within the tenant scope, like any other query: a
  * tenant-owned role is found only when the application's subject resolver

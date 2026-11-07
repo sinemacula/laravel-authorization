@@ -164,17 +164,17 @@ final class ResourcePolicyService
         return OperationScope::run($operation, static function (Operation $operation) use ($actor, $policy, $reference, $named, $application): int {
             $stored = self::stored($policy);
 
-            $detach = OperationResource::revoke(PackagePermissions::RESOURCE_POLICY_DETACH, self::granteeOf($reference), $stored, new GrantScope($named, $application));
+            $scope = new GrantScope($named, $application);
 
-            $actor?->authorizeIn($operation, $detach);
+            $actor?->authorizeIn($operation, OperationResource::revoke(PackagePermissions::RESOURCE_POLICY_DETACH, self::granteeOf($reference), $stored, $scope));
 
-            $scope = self::table($reference, new GrantScope($named, $application))->detach(self::key($stored));
+            $detached = self::table($reference, $scope)->detach(self::key($stored));
 
-            if ($scope === null) {
+            if ($detached === null) {
                 return 0;
             }
 
-            OperationScope::dispatch(new PolicyDetached($operation, (string) $reference->type, $reference->id, Reference::of($stored), self::name($stored), $scope));
+            OperationScope::dispatch(new PolicyDetached($operation, (string) $reference->type, $reference->id, Reference::of($stored), self::name($stored), $detached));
 
             return 1;
         });
@@ -185,7 +185,9 @@ final class ResourcePolicyService
      * how many attachments were detached, reporting each with `PolicyDetached`:
      * what the pruner does for a record that no longer exists. The attachments
      * of a whole type are never detached this way, so a type is refused with
-     * `InvalidResourceException`.
+     * `InvalidResourceException`. For an acting context and a record with
+     * nothing attached, the detachment is decided unchanged at platform scope,
+     * so its action is decided either way.
      *
      * @param  mixed  $resource
      * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
@@ -205,9 +207,10 @@ final class ResourcePolicyService
 
             $grantee = self::granteeOf($reference);
 
-            $detach = static fn (array $attachment): OperationResource => OperationResource::revoke(PackagePermissions::RESOURCE_POLICY_DETACH, $grantee, ...$attachment);
+            $action = PackagePermissions::RESOURCE_POLICY_DETACH;
+            $detach = static fn (array $attachment): OperationResource => OperationResource::revoke($action, $grantee, ...$attachment);
 
-            $actor?->authorizeIn($operation, ...\array_map($detach, $attachments));
+            $actor?->authorizeChanges($operation, \array_map($detach, $attachments), OperationResource::unchanged($action, $grantee, null, GrantScope::platform()));
 
             foreach ($attachments as [$policy, $scope]) {
                 $held = self::table($reference, $scope)->detach(self::key($policy));

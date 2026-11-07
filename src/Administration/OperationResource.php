@@ -31,11 +31,17 @@ use SineMacula\Laravel\Authorization\Support\ResourceReference;
  * Its reference is a record of type `authorization:operation` whose id is the
  * id of the operation the service runs, which every event of the write shares,
  * so a decision is correlated with the write it allowed (`proposed` for one a
- * screen builds), and whose tenant is the intended tenant: a change in a tenant
- * is decided in that tenant's scope, and one in a tenant outside the actor's
- * scope is denied as `tenant_scope`, as any resource of that tenant is. A
- * definition's tenant is its owner's. The reference hands the resource on as
- * its source, so the package's attribute provider (see `OperationAttributes`)
+ * screen builds), and whose tenant is the scope of what the change changes,
+ * never the tenant the request is in: a change in a tenant is decided in that
+ * tenant's scope, and one in a tenant outside the actor's scope, an ancestor's
+ * included, is denied as `tenant_scope`, as any resource of that tenant is; a
+ * change with no tenant, to a platform-wide grant, a platform role or a
+ * platform-owned record, is decided at platform scope, where only a
+ * platform-wide grant of the action counts (see `ResourceScope`). A
+ * definition's tenant is its owner's. Nothing is ever attached to one
+ * operation, so only the policies attached to the operation type are read for
+ * it (see `ResourcePolicyResolver`). The reference hands the resource on as its
+ * source, so the package's attribute provider (see `OperationAttributes`)
  * offers its attributes to policies under `resource`, and the constraints of
  * the operation (see `OperationConstraints`) read it.
  *
@@ -118,6 +124,25 @@ final readonly class OperationResource implements AuthorizableResource
     }
 
     /**
+     * Return the operation resource of a change a call asks for that changes
+     * nothing: a target the grantee holds live that a sync keeps, or, with no
+     * target, a call that finds nothing to change, such as a removal of what
+     * the grantee does not hold. It writes nothing, so it only narrows, and is
+     * decided on its action alone, so an actor that may not take the action is
+     * refused whether or not the grantee holds anything.
+     *
+     * @param  string  $action
+     * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
+     * @param  \Illuminate\Database\Eloquent\Model|null  $target
+     * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
+     * @return self
+     */
+    public static function unchanged(string $action, Model|Reference $grantee, ?Model $target, GrantScope $scope): self
+    {
+        return new self($action, true, $scope->tenant, [...self::grantAttributes($grantee, $target, $scope), 'unchanged' => true]);
+    }
+
+    /**
      * Return the operation resource of a change to a definition: creating,
      * renaming, updating, re-parenting or deleting a role, permission or
      * policy, with the proposed change, each value a scalar or null. It is
@@ -181,20 +206,20 @@ final readonly class OperationResource implements AuthorizableResource
     }
 
     /**
-     * Return what a grant or a removal names: the target, the grantee, and the
-     * scope's application and reach.
+     * Return what a grant or a removal names: the target, when there is one,
+     * the grantee, and the scope's application and reach.
      *
      * @param  \Illuminate\Database\Eloquent\Model|\SineMacula\Laravel\Authorization\Support\Reference  $grantee
-     * @param  \Illuminate\Database\Eloquent\Model  $target
+     * @param  \Illuminate\Database\Eloquent\Model|null  $target
      * @param  \SineMacula\Laravel\Authorization\Support\GrantScope  $scope
      * @return array<string, mixed>
      */
-    private static function grantAttributes(Model|Reference $grantee, Model $target, GrantScope $scope): array
+    private static function grantAttributes(Model|Reference $grantee, ?Model $target, GrantScope $scope): array
     {
         $reference = Reference::of($grantee);
 
         return [
-            ...self::targetAttributes($target),
+            ...($target === null ? [] : self::targetAttributes($target)),
             'grantee_type' => $reference->type,
             'grantee_id'   => $reference->id,
             'application'  => $scope->application,

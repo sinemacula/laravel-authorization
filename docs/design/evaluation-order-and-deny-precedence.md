@@ -313,7 +313,8 @@ refuses never reads the permissions, since the session stage runs before the all
 
 1. **The stages run in order, and the first that decides ends the decision (AUTHZ-7.1).** No allow of any source is
    weighed before every deny and every cap has run, so a deny, or a cap that does not allow the check, beats every
-   allow: a policy's, a resource policy's, a permission held and an `insufficient_authentication` candidate alike.
+   allow: a policy's, a resource policy's, a permission held and an `insufficient_authentication` candidate alike. An
+   allow is final except where the administration stage (7) refuses it.
    1. *Admission*, three stages that run before any policy is read:
       - *Subject*: no subject denies as `subject_unresolved`; an inactive subject, or one whose identity is inactive,
         denies as `subject_inactive`. Nothing else is read.
@@ -357,7 +358,18 @@ refuses never reads the permissions, since the session stage runs before the all
       statement matched and none was invalid, and its step names the held permission that allowed. This is the only
       place a permission held is weighed: no stage, and no entry point, answers a check from the permissions before
       every deny and cap has run, and the tenant stage's platform-wide grant only admits a resource, never allows it.
-   7. *Implicit*: nothing allowed. The denial is `insufficient_authentication` when an allow statement names the action
+   7. *Administration* (AUTHZ-11.1): runs only for a check of an administration action whose resource is that action's
+      own operation resource (`authorization:operation:*`, see [Delegated administration](delegated-administration.md)),
+      and only once the allow stage allowed. It weighs the operation's constraints and can only refuse, never allow:
+      the first that fails denies with its `administration.*` reason (`administration.impersonating`, then
+      `administration.unprovable` in this release; `administration.scope`, `administration.owner`,
+      `administration.rank_uncomparable`, `administration.rank`, `administration.self` and
+      `administration.not_grantable` are reserved for the later parts) and adds a `refused` step naming it; when every
+      one holds, it adds one `satisfied` step and the allow stands. A further check a constraint needs, such as
+      `authorization:administration.impersonated`, is decided through `decideGrants()` in the same scope, on the same
+      resource. A check of an administration action with no operation resource, or with another action's, passes the
+      stage untouched and records nothing.
+   8. *Implicit*: nothing allowed. The denial is `insufficient_authentication` when an allow statement names the action
       and the resource and only its authentication requirement is unmet (invariant 7); `condition_failed` when an allow
       statement names them but its conditions do not hold or cannot be decided; and `no_match` otherwise.
 
@@ -372,8 +384,9 @@ refuses never reads the permissions, since the session stage runs before the all
    assessed with the deny stage's, after every policy's, the guardrails' before the boundaries', and each cap's allow
    statements together at its own stage, the guardrails and the boundaries each in the same order. A stage that decides
    ends the decision: once a deny decided, no cap and no allow statement is assessed (N4), and once a cap denied, no
-   allow is. What each policy gives (its statements split by effect, their references and its sort key) is worked out
-   once per policy object (`StatementEntries`), not once a check.
+   allow is; an allow is final except where the administration stage refuses it. What each policy gives (its statements
+   split by effect, their references and its sort key) is worked out once per policy object (`StatementEntries`), not
+   once a check.
 
 3. **RBAC is additive / allow-only, and an allow source at the allow stage alone (AUTHZ-7.7, N43).** Direct
    permission grants and role-inherited permissions are unioned on read. There is no RBAC-layer deny: every permission
@@ -640,11 +653,11 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   still denies it.
 - **A session policy source that throws**: the check is aborted with the exception, and no decision is made, recorded
   or dispatched.
-- **Nothing declared**: the package declares `authorization:guardrail.manage` whatever the application configures,
-  but the shipped `DeclaredActionCatalogue` holds the application's declarations alone. With none, a policy whose
-  patterns need any action but the package's own is refused with the one reason that nothing is declared
-  (`PolicyValidator::NOTHING_DECLARED`), and one naming only the package's own, such as `authorization:*`, is
-  written (N50).
+- **Nothing declared**: the package declares its own administration actions, `authorization:guardrail.manage` among
+  them, whatever the application configures, but the shipped `DeclaredActionCatalogue` holds the application's
+  declarations alone. With none, a policy whose patterns need any action but the package's own is refused with the one
+  reason that nothing is declared (`PolicyValidator::NOTHING_DECLARED`), and one naming only the package's own, such
+  as `authorization:*`, is written (N50).
 
 ## Implementation Anchors
 
@@ -652,7 +665,10 @@ Policy names in the trace are the stored policy's name: when a policy row is hyd
   and resource stages; `DecisionPipeline::sources()` -- the check's context (`CheckContextFactory::make()`), the
   policies, the guardrails (none at all, `null`, for the exempt `authorization:guardrail.manage`), the boundaries, the
   permission callback and the session caps; `DecisionPipeline::weigh()` -- the evaluator given those sources under the
-  session caps; `DecisionPipeline::decideGrants()` -- `invalid_policy` when the sources cannot be gathered;
+  session caps; `DecisionPipeline::decideGrants()` -- `invalid_policy` when the sources cannot be gathered, and the
+  weighed decision passed through `Administration\OperationConstraints::weigh()`;
+  `Administration\OperationConstraints::weigh()` -- the administration stage, which can only refuse an allow of an
+  administration action on its own operation resource;
   `AuthorizationManager::capped()` and `DecisionPipeline::capped()` -- the scoped manager carrying the explicit caps;
   `AuthorizationManager::any()` and `all()`, over `Support\ActionList` -- several actions decided in order, stopping at
   the first that settles the answer.

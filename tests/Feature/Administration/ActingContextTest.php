@@ -308,6 +308,41 @@ final class ActingContextTest extends TestCase
     }
 
     /**
+     * The changes of an operation are decided as `authorizeIn()` decides them,
+     * and, when it makes none, the changes it was asked for that change
+     * nothing, so an actor without the action is refused either way.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnOperationThatChangesNothingDecidesWhatItWasAskedFor(): void
+    {
+        Event::fake([DecisionEvaluated::class]);
+
+        $admin = StubIdentity::create(['id' => 'admin-1']);
+
+        $admin->givePermission(Permission::create(['name' => PackagePermissions::ROLE_REVOKE]));
+
+        $actor     = ActingContext::for($admin);
+        $operation = Operation::begin($actor);
+        $role      = Role::create(['name' => 'editor']);
+        $revoke    = OperationResource::revoke(PackagePermissions::ROLE_REVOKE, new Reference('user', '1'), $role, GrantScope::platform());
+        $kept      = OperationResource::unchanged(PackagePermissions::ROLE_REVOKE, new Reference('user', '1'), null, GrantScope::platform());
+        $removal   = OperationResource::unchanged(PackagePermissions::BOUNDARY_REMOVE, new Reference('user', '1'), null, GrantScope::platform());
+
+        $actor->authorizeChanges($operation, [$revoke], $removal);
+        $actor->authorizeChanges($operation, [], $kept, $kept);
+
+        Event::assertDispatchedTimes(DecisionEvaluated::class, 3);
+        Event::assertNotDispatched(DecisionEvaluated::class, static fn (DecisionEvaluated $event): bool => $event->action !== PackagePermissions::ROLE_REVOKE);
+
+        $refusal = self::refusalOf(static fn () => $actor->authorizeChanges($operation, [], $removal));
+
+        self::assertSame(DecisionReason::NO_MATCH, $refusal instanceof AuthorizationException ? $refusal->getReason() : null);
+    }
+
+    /**
      * A refusal is the decision's `AuthorizationException`, its reason the
      * decision's, its message the translated `denied` line, and no reason a
      * refusal names reads as `no_match`.

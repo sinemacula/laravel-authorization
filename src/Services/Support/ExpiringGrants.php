@@ -49,7 +49,7 @@ abstract readonly class ExpiringGrants
             return new GrantChange(GrantOutcome::UNCHANGED, $previous);
         }
 
-        return $this->rewrite($id, $previous, $expiresAt);
+        return $this->rewrite($id, $previous, $expiresAt, Carbon::now('UTC'));
     }
 
     /**
@@ -57,13 +57,20 @@ abstract readonly class ExpiringGrants
      * already: a live grant is left as it is, and only a grant that has expired
      * is re-armed. Used by a sync, which keeps what the grantee holds.
      *
+     * Whether the grant is live is judged at the instant given, else now, so a
+     * sync that judged which of its rows are live at one instant, and decided
+     * only those that were not, re-arms exactly those: a row live then is left
+     * as it is even when it expires before it is written.
+     *
      * @param  string  $id
      * @param  \DateTimeInterface|null  $expiresAt
+     * @param  \Illuminate\Support\Carbon|null  $now
      * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange
      */
-    public function rearm(string $id, ?\DateTimeInterface $expiresAt): GrantChange
+    public function rearm(string $id, ?\DateTimeInterface $expiresAt, ?Carbon $now = null): GrantChange
     {
         $expiresAt = UtcDateTime::toUtc($expiresAt);
+        $now ??= Carbon::now('UTC');
 
         if ($this->store($id, $expiresAt)) {
             return new GrantChange(GrantOutcome::GRANTED);
@@ -71,11 +78,11 @@ abstract readonly class ExpiringGrants
 
         $previous = $this->lockedExpiry($id);
 
-        if (!self::hasExpired($previous) || self::isSameInstant($previous, $expiresAt)) {
+        if (!self::hasExpired($previous, $now) || self::isSameInstant($previous, $expiresAt)) {
             return new GrantChange(GrantOutcome::UNCHANGED, $previous);
         }
 
-        return $this->rewrite($id, $previous, $expiresAt);
+        return $this->rewrite($id, $previous, $expiresAt, $now);
     }
 
     /**
@@ -107,18 +114,19 @@ abstract readonly class ExpiringGrants
 
     /**
      * Write the new expiry and report the change: a re-armed grant when the
-     * previous expiry had passed, else a changed one.
+     * previous expiry had passed at the instant given, else a changed one.
      *
      * @param  string  $id
      * @param  \Illuminate\Support\Carbon|null  $previous
      * @param  \Illuminate\Support\Carbon|null  $expiresAt
+     * @param  \Illuminate\Support\Carbon  $now
      * @return \SineMacula\Laravel\Authorization\Services\Support\GrantChange
      */
-    private function rewrite(string $id, ?Carbon $previous, ?Carbon $expiresAt): GrantChange
+    private function rewrite(string $id, ?Carbon $previous, ?Carbon $expiresAt, Carbon $now): GrantChange
     {
         $this->writeExpiry($id, $expiresAt);
 
-        return new GrantChange(self::hasExpired($previous) ? GrantOutcome::REARMED : GrantOutcome::EXPIRY_CHANGED, $previous);
+        return new GrantChange(self::hasExpired($previous, $now) ? GrantOutcome::REARMED : GrantOutcome::EXPIRY_CHANGED, $previous);
     }
 
     /**
@@ -135,14 +143,15 @@ abstract readonly class ExpiringGrants
     }
 
     /**
-     * Determine whether an expiry has passed. A grant with no expiry never
-     * expires.
+     * Determine whether an expiry has passed at the instant given: it is not
+     * after it. A grant with no expiry never expires.
      *
      * @param  \Illuminate\Support\Carbon|null  $expiresAt
+     * @param  \Illuminate\Support\Carbon  $now
      * @return bool
      */
-    private static function hasExpired(?Carbon $expiresAt): bool
+    private static function hasExpired(?Carbon $expiresAt, Carbon $now): bool
     {
-        return $expiresAt !== null && !$expiresAt->isFuture();
+        return $expiresAt !== null && $expiresAt->lessThanOrEqualTo($now);
     }
 }

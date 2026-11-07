@@ -6,6 +6,7 @@ namespace Tests\Feature\Support;
 
 use Illuminate\Database\Eloquent\Model;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
 use SineMacula\Laravel\Authorization\Contracts\TenantTree;
@@ -20,6 +21,8 @@ use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResolvedTenant;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
@@ -104,6 +107,33 @@ final class ResourceScopeTest extends TestCase
 
         self::assertSame($allowed, $decision);
         self::assertEquals([[Reference::of($this->account), Reference::of($this->org)], 'web'], $seen);
+    }
+
+    /**
+     * An administration operation with no tenant changes something of the
+     * platform, so it is decided at platform scope, in the request's
+     * application, never in the tenant the request is in; one with a tenant is
+     * decided as any resource of that tenant is.
+     *
+     * @return void
+     */
+    public function testAnOperationWithNoTenantIsDecidedAtPlatformScope(): void
+    {
+        $subject  = $this->request($this->account, 'admin');
+        $platform = self::platformOperation();
+        $own      = OperationResource::unchanged(PackagePermissions::ROLE_REVOKE, new Reference('user', '1'), null, new GrantScope(Reference::of($this->account)));
+        $seen     = [];
+
+        foreach ([$platform, $own] as $operation) {
+            ResourceScope::decide($subject, PackagePermissions::ROLE_REVOKE, $operation->toResourceReference(), function () use (&$seen): Decision {
+                $seen[] = $this->scope();
+
+                return Decision::allow(DecisionStage::ALLOW);
+            });
+        }
+
+        self::assertEquals([[[], 'admin'], [[Reference::of($this->account), Reference::of($this->org)], 'admin']], $seen);
+        self::assertEquals([Reference::of($this->account), Reference::of($this->org)], $this->scope()[0]);
     }
 
     /**
@@ -441,7 +471,8 @@ final class ResourceScopeTest extends TestCase
         $before   = $this->scope();
         $prepared = [];
 
-        $resources = ['none' => $none, 'own' => $own, 'child' => $below, 'sibling' => $sibling, 'again' => $again, 'org' => $org];
+        $platform  = self::platformOperation()->toResourceReference();
+        $resources = ['none' => $none, 'own' => $own, 'child' => $below, 'sibling' => $sibling, 'again' => $again, 'org' => $org, 'platform' => $platform];
 
         ResourceScope::prepare($resources, function (array $group) use (&$prepared): void {
             $prepared[] = [\array_keys($group), ...$this->scope()];
@@ -451,7 +482,7 @@ final class ResourceScopeTest extends TestCase
             [['none'], [Reference::of($this->account), Reference::of($this->org)], 'admin'],
             [['own', 'again'], [Reference::of($this->account), Reference::of($this->org)], 'admin'],
             [['child'], [Reference::of($child), Reference::of($this->account), Reference::of($this->org)], 'admin'],
-            [['sibling', 'org'], [], 'admin'],
+            [['sibling', 'org', 'platform'], [], 'admin'],
         ], $prepared);
         self::assertEquals($before, $this->scope());
 
@@ -517,6 +548,7 @@ final class ResourceScopeTest extends TestCase
         self::assertSame('tenant:' . \strlen($org->type) . ':' . $org->type . ':org', ResourceScope::scopeOf(ResourceReference::record('post', '1', $org), $org));
         self::assertSame(ResourceScope::PLATFORM, ResourceScope::scopeOf(ResourceReference::record('post', '1', $org), $account));
         self::assertSame(ResourceScope::PLATFORM, ResourceScope::scopeOf(ResourceReference::record('post', '1', $account), null));
+        self::assertSame(ResourceScope::PLATFORM, ResourceScope::scopeOf(self::platformOperation()->toResourceReference(), $org));
         self::assertNotSame(ResourceScope::HERE, ResourceScope::PLATFORM);
     }
 
@@ -570,6 +602,17 @@ final class ResourceScopeTest extends TestCase
     private function scope(): array
     {
         return [TenantScope::currentChain()->tenants, TenantScope::currentApplication()];
+    }
+
+    /**
+     * Return an administration operation that changes something of the
+     * platform.
+     *
+     * @return \SineMacula\Laravel\Authorization\Administration\OperationResource
+     */
+    private static function platformOperation(): OperationResource
+    {
+        return OperationResource::unchanged(PackagePermissions::ROLE_REVOKE, new Reference('user', '1'), null, GrantScope::platform());
     }
 
     /**

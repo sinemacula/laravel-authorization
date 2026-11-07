@@ -13,6 +13,9 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\Attributes\DataProvider;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
+use SineMacula\Laravel\Authorization\Administration\OperationResource;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Enums\GrantOutcome;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Events\Identity\BoundaryRemoved;
@@ -39,10 +42,12 @@ use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\SyncResult;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\AssertsDelegatedRefusals;
 use Tests\Concerns\AssertsTransactions;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\ComparesReferences;
@@ -52,6 +57,7 @@ use Tests\Feature\Stubs\ApiGuardedUser;
 use Tests\Feature\Stubs\CustomPermission;
 use Tests\Feature\Stubs\CustomRole;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
 /**
@@ -69,7 +75,7 @@ use Tests\TestCase;
 #[CoversClass(SyncResult::class)]
 final class GrantServiceTest extends TestCase
 {
-    use ActsAsAdministrator, ActsAsTenant, AssertsTransactions, CatchesRefusals, ComparesReferences, ReadsDispatchedEvents, UsesAnAuthorizationConnection;
+    use ActsAsAdministrator, ActsAsTenant, AssertsDelegatedRefusals, AssertsTransactions, CatchesRefusals, ComparesReferences, ReadsDispatchedEvents, UsesAnAuthorizationConnection;
 
     /** @var string The instant every test starts at. */
     private const string NOW = '2026-07-01 12:00:00';
@@ -321,6 +327,10 @@ final class GrantServiceTest extends TestCase
         $operations = \array_unique(\array_map(static fn (BoundaryRemoved|PermissionRevoked|PolicyDetached|RoleRevoked $event): string => $event->operation->id, $events));
 
         self::assertCount(1, $operations);
+        self::assertSame(
+            [PackagePermissions::ROLE_REVOKE, PackagePermissions::PERMISSION_REVOKE, PackagePermissions::POLICY_DETACH, PackagePermissions::BOUNDARY_REMOVE],
+            $events[0]->operation->actions,
+        );
         self::assertSame([], $user->getRoles());
         self::assertSame(0, self::service()->revokeAll($user));
     }
@@ -1426,6 +1436,284 @@ final class GrantServiceTest extends TestCase
                 && $event->name               === 'author'
                 && $event->operation->actions === [PackagePermissions::ROLE_GRANT, PackagePermissions::ROLE_REVOKE],
         );
+    }
+
+    /**
+     * A delegated revocation is decided under its action before anything is
+     * written: an actor that may not take it is refused, whether it names what
+     * it revokes by name or by model, and whether or not the grantee holds it,
+     * so a refusal tells it nothing about what the grantee holds.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedRevocationIsRefusedWithoutItsAction(): void
+    {
+        $actor  = self::administrator([]);
+        $user   = self::user();
+        $author = self::role('author');
+        $other  = self::policy('other');
+
+        self::service()->grantRole($user, self::role('editor'));
+        self::service()->grantPermission($user, Permission::query()->create(['name' => 'posts:edit']));
+        self::service()->attachPolicy($user, self::policy('audit'));
+
+        $noMatch = DecisionReason::NO_MATCH;
+
+        self::assertDelegatedRefusal($noMatch, static fn (): int => self::service()->revokeRole($user, 'editor', $actor));
+        self::assertDelegatedRefusal($noMatch, static fn (): int => self::service()->revokePermission($user, 'posts:edit', $actor));
+        self::assertDelegatedRefusal($noMatch, static fn (): int => self::service()->detachPolicy($user, $other, $actor));
+        self::assertDelegatedRefusal($noMatch, static fn (): int => self::service()->revokeRole($user, 'author', $actor));
+        self::assertDelegatedRefusal($noMatch, static fn (): int => self::service()->revokeRole($user, $author, $actor));
+        self::assertSame([PackagePermissions::ROLE_REVOKE], self::actionsDecided());
+    }
+
+    /**
+     * A delegated revocation of what the grantee does not hold is still
+     * decided, on the revocation asked for, so an actor that may take it
+     * revokes nothing and is told so.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedRevocationOfWhatIsNotHeldIsStillDecided(): void
+    {
+        $actor = self::administrator([PackagePermissions::ROLE_REVOKE]);
+        $user  = self::user();
+        $role  = self::role('author');
+
+        self::fakePackageEvents();
+
+        self::assertSame(0, self::service()->revokeRole($user, 'author', $actor));
+        self::assertSame(0, self::service()->revokeRole($user, $role, $actor));
+        self::assertSame([PackagePermissions::ROLE_REVOKE, PackagePermissions::ROLE_REVOKE], self::actionsDecided());
+        self::assertSame([], self::changesDispatched());
+    }
+
+    /**
+     * A delegated sync is decided whole before anything is written: one that
+     * grants is refused as unprovable, one that only revokes is refused to an
+     * actor without the revoke action, and one that changes nothing is still
+     * decided on its action, so it is refused to an actor without it too.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedSyncIsDecidedBeforeAnythingIsWritten(): void
+    {
+        $admin  = self::administrator();
+        $nobody = self::administrator([], 'nobody');
+        $user   = self::user();
+
+        self::service()->grantRole($user, self::role('editor'));
+        self::service()->grantPermission($user, Permission::query()->create(['name' => 'posts:edit']));
+        self::role('author');
+
+        $read       = Permission::query()->create(['name' => 'posts:read']);
+        $audit      = self::policy('audit');
+        $unprovable = DecisionReason::ADMINISTRATION_UNPROVABLE;
+
+        self::assertDelegatedRefusal($unprovable, static fn (): SyncResult => self::service()->syncRoles($user, ['editor', 'author'], actor: $admin));
+        self::assertDelegatedRefusal($unprovable, static fn (): SyncResult => self::service()->syncPermissions($user, [$read], actor: $admin));
+        self::assertDelegatedRefusal($unprovable, static fn (): SyncResult => self::service()->syncPolicies($user, [$audit], actor: $admin));
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): SyncResult => self::service()->syncRoles($user, [], actor: $nobody));
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): SyncResult => self::service()->syncRoles($user, ['editor'], actor: $nobody));
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): SyncResult => self::service()->syncPolicies($user, [], actor: $nobody));
+    }
+
+    /**
+     * A delegated sync that keeps what the grantee holds live decides each kept
+     * row unchanged, so an actor that may grant keeps it, and writes nothing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedSyncKeepingWhatIsLiveChangesNothing(): void
+    {
+        $actor = self::administrator([PackagePermissions::ROLE_GRANT]);
+        $user  = self::user();
+
+        self::service()->grantRole($user, self::role('editor'), Carbon::now()->addHour());
+
+        $before = self::expiries();
+        $result = self::service()->syncRoles($user, ['editor'], actor: $actor);
+
+        self::assertFalse($result->isChange());
+        self::assertSame($before, self::expiries());
+    }
+
+    /**
+     * A delegated sync re-arms a kept row as of the instant it judged the row's
+     * liveness at, so a row it decided as live and unchanged is never re-armed,
+     * even when it expires before it is written.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedSyncNeverReArmsARowItJudgedLive(): void
+    {
+        $actor = self::administrator([PackagePermissions::ROLE_GRANT]);
+        $user  = self::user();
+
+        self::service()->grantRole($user, self::role('editor'), Carbon::now()->addSecond());
+
+        $before = self::expiries();
+
+        DB::listen(static function (QueryExecuted $query): void {
+            if (\preg_match('/expires_at\W*\s*>/', $query->sql) !== 1) {
+                return;
+            }
+
+            Carbon::setTestNow(Carbon::now()->addMinute());
+        });
+
+        $result = self::service()->syncRoles($user, ['editor'], actor: $actor);
+
+        self::assertSame([], $result->rearmed);
+        self::assertSame($before, self::expiries());
+    }
+
+    /**
+     * Revoking everything is decided item by item before anything is written: a
+     * boundary among the grants, whose removal widens, is refused as
+     * unprovable; an actor without an action is refused; and a grantee that
+     * holds nothing still has every action the call covers decided.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRevokingEverythingDelegatedIsDecidedFirst(): void
+    {
+        $admin  = self::administrator();
+        $nobody = self::administrator([], 'nobody');
+        $user   = self::user();
+        $empty  = StubIdentity::create(['id' => 'user-2']);
+
+        self::service()->grantPermission($user, Permission::query()->create(['name' => 'posts:edit']));
+        BoundaryService::instance()?->set($user, Policy::create(['name' => 'cap', 'document' => ['version' => 1, 'statements' => []]]));
+
+        self::assertDelegatedRefusal(DecisionReason::ADMINISTRATION_UNPROVABLE, static fn (): int => self::service()->revokeAll($user, $admin));
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::service()->revokeAll($user, $nobody));
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::service()->revokeAll($empty, $nobody));
+
+        self::fakePackageEvents();
+
+        self::assertSame(0, self::service()->revokeAll($empty, $admin));
+        self::assertSame(
+            [PackagePermissions::ROLE_REVOKE, PackagePermissions::PERMISSION_REVOKE, PackagePermissions::POLICY_DETACH, PackagePermissions::BOUNDARY_REMOVE],
+            self::actionsDecided(),
+        );
+    }
+
+    /**
+     * A change to a platform-wide grant is decided at platform scope, so an
+     * actor that holds the action only in the tenant the request is in is
+     * refused it, a revocation of a role that denies nothing included, as a
+     * screen asking the same is, and one that holds it platform-wide makes it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAChangeToAPlatformGrantIsDecidedAtPlatformScope(): void
+    {
+        $tenant = self::createTenant('tenant-a');
+        $user   = self::user();
+        $edit   = Permission::query()->create(['name' => 'posts:edit']);
+        $local  = StubIdentity::create(['id' => 'tenant-admin']);
+        $wide   = StubIdentity::create(['id' => 'platform-admin']);
+        $revoke = Permission::query()->create(['name' => PackagePermissions::PERMISSION_REVOKE]);
+
+        $role = self::role('editor');
+
+        self::service()->grantPermission($user, $edit);
+        self::service()->grantRole($user, $role);
+        self::service()->grantPermission($local, $revoke, tenant: $tenant, includeSubtree: false);
+        self::service()->grantPermission($local, Permission::query()->create(['name' => PackagePermissions::ROLE_REVOKE]), tenant: $tenant, includeSubtree: false);
+        self::service()->grantPermission($wide, $revoke);
+
+        $this->actAsTenant($tenant);
+
+        $screen = ActingContext::for($local)->check(OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, $user, $edit, GrantScope::platform()));
+        $refuse = self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::service()->revokePermission($user, $edit, ActingContext::for($local)));
+
+        self::assertSame([$screen->effect, $screen->reason], [$refuse->getDecision()?->effect, $refuse->getDecision()?->reason]);
+        self::assertDelegatedRefusal(DecisionReason::NO_MATCH, static fn (): int => self::service()->revokeRole($user, $role, ActingContext::for($local)));
+        self::assertSame(1, self::service()->revokePermission($user, $edit, ActingContext::for($wide)));
+    }
+
+    /**
+     * A change to a grant held in a tenant above the one the request is in is
+     * decided in that tenant, which is outside the request's scope, so an actor
+     * holding the action only in the request's tenant is refused it as out of
+     * scope.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAChangeToAnAncestorsGrantIsOutOfScope(): void
+    {
+        [$parent, $child] = \array_map(self::createTenant(...), ['parent', 'child']);
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($child), Reference::of($parent)));
+
+        $user   = self::user();
+        $admin  = StubIdentity::create(['id' => 'child-admin']);
+        $editor = self::role('editor');
+
+        self::service()->grantRole($user, $editor, tenant: $parent);
+        self::service()->grantPermission($admin, Permission::query()->create(['name' => PackagePermissions::ROLE_REVOKE]), tenant: $child);
+
+        $this->actAsTenant($child);
+
+        self::assertDelegatedRefusal(DecisionReason::TENANT_SCOPE, static fn (): int => self::service()->revokeRole($user, $editor, ActingContext::for($admin), $parent));
+    }
+
+    /**
+     * Revoking a role whose ancestor, owned by a tenant the request's scope
+     * does not show, has a deny attached is not narrowing, so it is refused as
+     * unprovable however the actor's scope hides the ancestor.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testRevokingARoleWithAHiddenDenyingAncestorIsUnprovable(): void
+    {
+        [$parent, $child] = \array_map(self::createTenant(...), ['parent', 'child']);
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($child), Reference::of($parent)));
+
+        $user       = self::user();
+        $admin      = StubIdentity::create(['id' => 'parent-admin']);
+        $restricted = Role::query()->withoutGlobalScopes()->create(['name' => 'restricted', ...self::ownedBy($child)]);
+        $editor     = Role::query()->withoutGlobalScopes()->create(['name' => 'editor', 'parent_id' => $restricted->id, ...self::ownedBy($child)]);
+        $deny       = Policy::create(['name' => 'deny', 'document' => ['statements' => [['effect' => 'deny', 'actions' => ['posts:*']]]]]);
+        $revoke     = Permission::query()->create(['name' => PackagePermissions::ROLE_REVOKE]);
+
+        self::service()->attachPolicy($restricted, $deny, tenant: $child);
+        self::service()->grantRole($user, $editor, tenant: $child);
+        self::service()->grantPermission($admin, $revoke, tenant: $parent);
+        self::service()->grantPermission($admin, $revoke);
+
+        $unprovable = DecisionReason::ADMINISTRATION_UNPROVABLE;
+
+        $this->actAsTenant($parent);
+
+        self::assertDelegatedRefusal($unprovable, static fn (): int => self::service()->revokeRole($user, $editor, ActingContext::for($admin), $child));
+        self::assertDelegatedRefusal($unprovable, static fn (): SyncResult => self::service()->syncRoles($user, [], actor: ActingContext::for($admin), tenant: $child));
+
+        $this->actAsTenant(null);
+
+        self::assertDelegatedRefusal($unprovable, static fn (): int => self::service()->revokeRole($user, $editor, ActingContext::for($admin), $child));
+        self::assertDelegatedRefusal($unprovable, static fn (): int => self::service()->revokeAll($user, ActingContext::for($admin)));
     }
 
     /**

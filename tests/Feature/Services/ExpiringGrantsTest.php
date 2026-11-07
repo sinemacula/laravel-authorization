@@ -165,6 +165,27 @@ final class ExpiringGrantsTest extends TestCase
     }
 
     /**
+     * A re-arm judges whether a grant has expired at the instant it is given,
+     * not by the clock: a grant live then is left as it is though the clock has
+     * passed its expiry, one that expired by then, its expiry at that instant
+     * included, is re-armed though the clock has not reached it.
+     *
+     * @return void
+     */
+    public function testARearmJudgesExpiryAtTheInstantGiven(): void
+    {
+        [$table, $permission, $other] = self::grants();
+
+        $table->grant($permission->id, Carbon::parse('2026-07-01 11:00:00'));
+        $table->grant($other->id, Carbon::parse('2026-07-01 13:00:00'));
+
+        self::assertSame(GrantOutcome::UNCHANGED, $table->rearm($permission->id, null, Carbon::parse('2026-07-01 10:00:00'))->outcome);
+        self::assertSame(GrantOutcome::REARMED, $table->rearm($other->id, null, Carbon::parse('2026-07-01 13:00:00'))->outcome);
+        self::assertSame('2026-07-01 11:00:00', DB::table('role_permissions')->where('permission_id', $permission->id)->value('expires_at'));
+        self::assertNull(DB::table('role_permissions')->where('permission_id', $other->id)->value('expires_at'));
+    }
+
+    /**
      * Re-arming an expired grant with the expiry it already carries changes
      * nothing.
      *

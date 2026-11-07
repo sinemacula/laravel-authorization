@@ -10,6 +10,7 @@ use Illuminate\Database\Events\QueryExecuted;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
 use SineMacula\Laravel\Authorization\Cache\ResolutionPins;
 use SineMacula\Laravel\Authorization\Cache\VersionedStore;
@@ -19,6 +20,8 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
+use SineMacula\Laravel\Authorization\Support\GrantScope;
+use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use Tests\Concerns\ActsAsTenant;
@@ -110,6 +113,32 @@ final class ResourcePolicyResolverTest extends TestCase
 
         self::assertSame(['locked@posts:*'], self::read(ResourceReference::type('posts')));
         self::assertSame(['locked@posts:*', 'record@posts:7'], self::read(ResourceReference::record('posts', '7')));
+    }
+
+    /**
+     * An administration operation's id names one operation alone, so nothing
+     * attached to it is read, alone or among many: only the policies attached
+     * to the operation type are, under the one entry every operation shares.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnOperationReadsOnlyItsTypesPolicies(): void
+    {
+        self::service()->attach(self::sharing('record'), [OperationResource::TYPE, 'operation-1']);
+        self::service()->attach(self::sharing('type'), OperationResource::TYPE);
+        self::service()->attach(self::sharing('post'), ['posts', '7']);
+
+        $operation = OperationResource::unchanged(PackagePermissions::ROLE_REVOKE, new Reference('user', '1'), null, GrantScope::platform())->actedBy(null, 'operation-1');
+        $reference = $operation->toResourceReference();
+        $many      = (new ResourcePolicyResolver)->policiesForMany(['operation' => $reference, 'post' => ResourceReference::record('posts', '7')]);
+
+        $named = static fn (array $policies): array => \array_map(static fn (EvaluationPolicy $policy): string => $policy->name . '@' . $policy->resource, $policies);
+
+        self::assertSame(['type@' . OperationResource::TYPE . ':*'], self::read($reference));
+        self::assertSame(['type@' . OperationResource::TYPE . ':*'], $named($many['operation']));
+        self::assertSame(['post@posts:7'], $named($many['post']));
     }
 
     /**

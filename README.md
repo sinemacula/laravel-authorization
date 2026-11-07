@@ -41,7 +41,9 @@ Every check runs the same stages (see [How a check is decided](#how-a-check-is-d
 its tenant are checked first, then an explicit deny in any policy that applies (the principal's, its roles', the
 resource's, the guardrails' and its boundaries') wins, then the caps (the guardrails on the tenant, its ancestors and
 the platform, then its permission boundaries, then the session caps: its credential's scopes and any the caller passes)
-must each allow the check, then an explicit allow or a permission held allows it, and anything left is denied.
+must each allow the check, then an explicit allow or a permission held allows it, and anything left is denied. A check
+of an administration action on its own operation resource then passes the operation's constraints, which can only
+refuse what the allow permitted (see [Delegated administration](#delegated-administration)).
 
 ## Features
 
@@ -204,8 +206,9 @@ about every permission either declares:
 
 The same declarations are the actions a policy may name: a policy is refused when it is saved if one of its `actions` or
 `not_actions` patterns matches no declared permission. Until you declare yours, a policy is refused with the reason
-that no permissions are declared, unless it names only the package's own permission, `authorization:guardrail.manage`
-(see [Guardrails](#guardrails)), which a policy may always name.
+that no permissions are declared, unless it names only the package's own actions, the administration actions of
+[Delegated administration](#delegated-administration), `authorization:guardrail.manage` among them (see
+[Guardrails](#guardrails)), which a policy may always name.
 
 Booting the package never queries or writes the database, so `config:cache`, `route:cache` and `migrate` run before
 the tables exist. The permissions the enums and providers declare reach the database when you sync them, which belongs
@@ -510,8 +513,10 @@ applicable policy, a guardrail's and a permission boundary's included (`explicit
 statement that cannot be evaluated), then the caps: the [guardrails](#guardrails) and the [permission
 boundaries](#permission-boundaries), each of which must allow the check (`guardrail` or `boundary`, or `invalid_policy`
 for a cap's statement that cannot be evaluated), and the [session caps](#session-caps-and-machines), every one of which
-must cover the action (`session_policy`), then the allows (an allow statement, then a permission held), then the
-implicit deny (`insufficient_authentication` when an allow statement names the check and only its [authentication
+must cover the action (`session_policy`), then the allows (an allow statement, then a permission held), then, for an
+administration action on its own operation resource, the operation's constraints, which can only refuse an allow (the
+`administration.*` reasons, see [Delegated administration](#delegated-administration)), then the implicit deny
+(`insufficient_authentication` when an allow statement names the check and only its [authentication
 requirement](#authentication-requirements) is unmet, `condition_failed` when an allow statement names the check but its
 conditions do not hold, else `no_match`). [How a check is decided](#how-a-check-is-decided) sets the stages out in full.
 Each stage assesses its statements in a fixed order, so the decision is the same whatever order the policies are read
@@ -1164,9 +1169,18 @@ Each is prefixed with `authorization:`. A sync, `revokeAll()`, `removeAll()` and
 make under its own action (there is no blanket action), and every change is decided before any is written, so a batch is
 atomic: one refusal leaves nothing written and dispatches no change event, and no change is decided on authority an
 earlier one would have handed out. `revokeAll()` removes the grantee's boundaries too, so it decides
-`authorization:boundary.remove` for each. A sync decides a grant of each listed row the grantee does not hold live and a
-revocation of each it drops; a row it holds live decides nothing. A grant, an attachment or a set is decided whether or
-not it changes anything; a revocation by name decides each held row of the name.
+`authorization:boundary.remove` for each. A sync decides a grant of each listed row the grantee does not hold live, the
+row kept unchanged for each it does hold live, and a revocation of each it drops; it judges which rows are live at one
+instant and re-arms as of the same instant, so a row decided as kept unchanged is never re-armed, even when it expires
+before it is written. A grant, an attachment or a set is decided whether or not it changes anything; a revocation by
+name decides each held row of the name, or, when none is held, the row the lookup ranks first.
+
+A delegated call that finds nothing to change is still decided, on the change it was asked for: a revocation, detach or
+removal of what the grantee does not hold, a sync of what it already holds live, and `revokeAll()`, `removeAll()` or
+`detachAll()` of a grantee or record that holds nothing, which decide each of their actions at platform scope, since
+they reach every scope. A change that changes nothing only narrows, so an actor allowed the action makes it, writing
+nothing; an actor not allowed it is refused whether or not there was anything to change, so a refusal never tells it
+what a grantee holds.
 
 **The acting context.** `ActingContext` holds the resolved subject making the call: its principal, the identity behind
 it, its guard, its session and, for a machine, the scopes of its credential, which cap what it may administer as they
@@ -1179,19 +1193,20 @@ the package cannot tell by itself. An acting context is never built from a bare 
 resolved, or whose principal is not a saved model, is refused with `AuthorizationException` as `subject_unresolved`, and
 never falls back to a trusted call.
 
-| Method                                 | What it does                                                                                         |
-|----------------------------------------|------------------------------------------------------------------------------------------------------|
-| `ActingContext::current()`             | Returns the acting context of the request's subject, its session kept                                |
-| `ActingContext::for($actor)`           | Returns the acting context of the model named, with no session, or of a `Subject` as it is           |
-| `capped($actions)`                     | Returns the acting context with the call capped by the actions as well                               |
-| `impersonatedBy($impersonator)`        | Returns the acting context marked as impersonated by the model or reference given                    |
-| `isImpersonating()`                    | Returns whether someone is impersonating the acting subject                                          |
-| `principal()`, `identity()`            | Return the references to the acting principal and to its identity, null for none                     |
-| `check($operationResource)`            | Decides the resource's action on it, as the service decides it, and returns the `Decision`           |
-| `decide($action, $resource)`           | Decides any action as the acting subject, with the call's caps, and returns the `Decision`           |
-| `authorize($operationResource)`        | Decides as `check()` does and throws when the decision does not allow                                |
-| `authorizeIn($operation, ...$changes)` | Decides each change of the operation in order, correlated by its id, and throws at the first refused |
-| `ActingContext::refusal($decision)`    | Returns the `AuthorizationException`, with the one `denied` line, the decision refuses with          |
+| Method                                                  | What it does                                                                                         |
+|---------------------------------------------------------|------------------------------------------------------------------------------------------------------|
+| `ActingContext::current()`                              | Returns the acting context of the request's subject, its session kept                                |
+| `ActingContext::for($actor)`                            | Returns the acting context of the model named, with no session, or of a `Subject` as it is           |
+| `capped($actions)`                                      | Returns the acting context with the call capped by the actions as well                               |
+| `impersonatedBy($impersonator)`                         | Returns the acting context marked as impersonated by the model or reference given                    |
+| `isImpersonating()`                                     | Returns whether someone is impersonating the acting subject                                          |
+| `principal()`, `identity()`                             | Return the references to the acting principal and to its identity, null for none                     |
+| `check($operationResource)`                             | Decides the resource's action on it, as the service decides it, and returns the `Decision`           |
+| `decide($action, $resource)`                            | Decides any action as the acting subject, with the call's caps, and returns the `Decision`           |
+| `authorize($operationResource)`                         | Decides as `check()` does and throws when the decision does not allow                                |
+| `authorizeIn($operation, ...$changes)`                  | Decides each change of the operation in order, correlated by its id, and throws at the first refused |
+| `authorizeChanges($operation, $changes, ...$unchanged)` | Decides the changes as `authorizeIn()` does, or the unchanged ones when there are none               |
+| `ActingContext::refusal($decision)`                     | Returns the `AuthorizationException`, with the one `denied` line, the decision refuses with          |
 
 **Trusted calls and delegated calls.** A call with no acting context is trusted system work (N75): nothing is decided,
 every structural rule, system-record protection, transaction and event still applies, and its operation is marked
@@ -1200,18 +1215,23 @@ administration. A call with an acting context is delegated: each change is decid
 anything is written, and its operation carries the actor. `GuardrailService` always takes an acting context.
 
 **The operation resource.** Each change is decided on an `OperationResource`, a resource of type
-`authorization:operation` whose id is the operation's id and whose tenant is the change's intended tenant (a
-definition's owner for a change to a role, permission or policy), so a change in a tenant is decided in that tenant's
-scope and one in a tenant outside the actor's scope is refused as `tenant_scope`. A screen that builds the same resource
-through the same named constructor (`OperationResource::grant()`, `revoke()` or `definition()`) and checks it with
-`$actor->check($resource)` gets the decision the service makes. The resource offers what the change names to your
-policies, under `resource`:
+`authorization:operation` whose id is the operation's id and whose tenant is the scope of what the change changes, never
+the tenant the request is in: the tenant a grant is held in, or a definition's owner for a change to a role, permission
+or policy. A change in a tenant is decided in that tenant's scope, and one in a tenant outside the actor's scope, an
+ancestor of the request's tenant included, is refused as `tenant_scope`. A change with no tenant, to a platform-wide
+grant, a platform role or a platform-owned record, is decided at platform scope, where only a platform-wide grant of the
+action counts, so an actor that holds the action only in a tenant is refused it. A screen that builds the same resource
+through the same named constructor (`OperationResource::grant()`, `revoke()`, `unchanged()` or `definition()`) and
+checks it with `$actor->check($resource)` gets the decision the service makes. Nothing is ever attached to one
+operation, so a check on it reads only the resource policies attached to the type `authorization:operation`. The
+resource offers what the change names to your policies, under `resource`:
 
 | Key                                                                                          | Type   | What it holds                                                         |
 |----------------------------------------------------------------------------------------------|--------|-----------------------------------------------------------------------|
 | `resource.id`, `resource.type`, `resource.tenant.type`, `resource.tenant.id`                 | string | The operation's id, `authorization:operation` and the intended tenant |
 | `resource.action`                                                                            | string | The administration action                                             |
 | `resource.narrowing`                                                                         | bool   | Whether the change can only narrow what anyone may do                 |
+| `resource.unchanged`                                                                         | bool   | Set when the change changes nothing; missing otherwise                |
 | `resource.target_type`, `resource.target_id`                                                 | string | The record acted on                                                   |
 | `resource.role`, `resource.permission`, `resource.policy`                                    | string | The record's name, under its kind                                     |
 | `resource.grantee_type`, `resource.grantee_id`                                               | string | The grantee, or the resource type and key (`*`) a policy attaches to  |
@@ -1249,7 +1269,10 @@ weighs the operation's constraints, and can only refuse:
 
 `canActOn($target)` on an identity compares rank alone (strictly senior, an unranked target the most junior, an unranked
 actor acting on no one, rank turned off passing every comparison) and grants nothing by itself; the later releases weigh
-it beside every other rule.
+it beside every other rule. When neither side holds a ranked role, the comparison still refuses: both count as the most
+junior, so their ranks are equal, and strict seniority refuses equal rank (N76). An application that leaves rank on but
+ranks no role should turn rank off (`authorization.rank.enabled`), or no delegated grant will pass it once the later
+releases weigh it.
 
 **Reasons and errors.** A refusal throws `AuthorizationException`, or `InsufficientAuthenticationException` for a
 step-up, carrying the decision (`getDecision()`), its stage and its trace, for audit; the client sees the one `denied`
@@ -1261,38 +1284,55 @@ This release refuses with the last two; the others are reserved for the rules to
 **Audit.** Every decision is reported with `DecisionEvaluated`, and a refusal with `AuthorizationFailed`, as
 `authorize()` reports one, each naming the operation resource `authorization:operation:{operation id}`. The change
 events of a write are dispatched only after it commits, and their operation carries the same id, the actor's principal
-and identity, whether the call was trusted or delegated, any impersonator and the actions it was decided under, so a
-decision and the write it allowed are correlated. A refusal happens inside a transaction that rolls back, so an audit
-store that persists denials must write them outside that transaction, on another connection or from a listener of the
-decision event that queues the write, or the rollback takes them too.
+and identity, whether the call was trusted or delegated, any impersonator and the actions its changes fall under, so a
+decision and the write it allowed are correlated. The actions are decided through `check()` only when `isTrusted` is
+false: a trusted call names its actions too, though nothing was decided, and a sync names both its grant and its revoke
+action whichever it made.
+
+A refusal is reported synchronously, inside the operation's transaction, and that transaction then rolls back, taking
+with it anything written on the same connection. An audit store that persists denials must therefore write them on a
+connection with no part in that transaction:
+
+- write directly, from a listener of `AuthorizationFailed` or `DecisionEvaluated`, on a database connection of its own,
+  one that is not `authorization.connection` nor the default connection the package writes through, for example
+  `DB::connection('audit')->table('denials')->insert([...])`; or
+- queue the write on a queue whose backend shares nothing with the transaction: a non-database driver (Redis, SQS,
+  Beanstalkd), or the `database` driver with a `connection` of its own in `config/queue.php`, with `after_commit` off
+  for that queue connection and for the listener (`$afterCommit = false`, the default), since a job held until the
+  transaction commits is dropped when it rolls back.
+
+The stock `database` queue on the default connection inserts its job inside the same transaction, and the `sync` driver
+runs the job inside it, so both are rolled back with the refusal and lose every delegated denial.
 
 ### How a check is decided
 
 `Authorization::check()` is the one decision behind `can()`, `cannot()`, `any()`, `all()`, `authorize()`, `explain()`,
 the Gate, a Laravel policy class deciding through the package's trait, the `permission:` and `authorize:` middleware and
 the permission directives (`role:` and `@role` check membership only, so no stage applies to them, guardrails and
-boundaries included). It runs these stages in order, and the first that decides ends it; no allow
-is weighed before every deny and every cap has run:
+boundaries included). It runs these stages in order, and the first that decides ends it, except that the
+administration stage can still refuse an allow; no allow is weighed before every deny and every cap has run:
 
-| Stage       | What it weighs                                                                                                    | Denies as                                                     |
-|-------------|-------------------------------------------------------------------------------------------------------------------|---------------------------------------------------------------|
-| `subject`   | Whether there is a subject, and whether it and its identity are active                                            | `subject_unresolved`, `subject_inactive`                      |
-| `resource`  | Whether the resource argument can be identified                                                                   | `resource_unresolved`                                         |
-| `tenant`    | Whether the resource's tenant is within the check's, or a platform-wide grant of the permission admits it         | `tenant_scope`                                                |
-| `deny`      | Every deny: the subject's, its identity's of either kind, their roles', the resource's, guardrails', boundaries'  | `explicit_deny`, `invalid_policy`                             |
-| `guardrail` | Every guardrail on the check's tenant, its ancestors and the platform must allow the check, unless it is exempt   | `guardrail`, `invalid_policy`                                 |
-| `boundary`  | Every permission boundary of the principal and of its identity that applies must allow the check                  | `boundary`, `invalid_policy`                                  |
-| `session`   | Every session cap, the credential's scopes and each set of actions `capped()` was given, must cover the action    | `session_policy`                                              |
-| `allow`     | Every allow statement that applies to the subject, a resource policy's naming it included, then a permission held | `invalid_policy`                                              |
-| `implicit`  | Nothing allowed                                                                                                   | `insufficient_authentication`, `condition_failed`, `no_match` |
+| Stage            | What it weighs                                                                                                    | Denies as                                                                                                                                                                                                                     |
+|------------------|-------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `subject`        | Whether there is a subject, and whether it and its identity are active                                            | `subject_unresolved`, `subject_inactive`                                                                                                                                                                                      |
+| `resource`       | Whether the resource argument can be identified                                                                   | `resource_unresolved`                                                                                                                                                                                                         |
+| `tenant`         | Whether the resource's tenant is within the check's, or a platform-wide grant of the permission admits it         | `tenant_scope`                                                                                                                                                                                                                |
+| `deny`           | Every deny: the subject's, its identity's of either kind, their roles', the resource's, guardrails', boundaries'  | `explicit_deny`, `invalid_policy`                                                                                                                                                                                             |
+| `guardrail`      | Every guardrail on the check's tenant, its ancestors and the platform must allow the check, unless it is exempt   | `guardrail`, `invalid_policy`                                                                                                                                                                                                 |
+| `boundary`       | Every permission boundary of the principal and of its identity that applies must allow the check                  | `boundary`, `invalid_policy`                                                                                                                                                                                                  |
+| `session`        | Every session cap, the credential's scopes and each set of actions `capped()` was given, must cover the action    | `session_policy`                                                                                                                                                                                                              |
+| `allow`          | Every allow statement that applies to the subject, a resource policy's naming it included, then a permission held | `invalid_policy`                                                                                                                                                                                                              |
+| `administration` | The operation's constraints, for an administration action on its own operation resource; refuses only             | `administration.scope`, `administration.owner`, `administration.rank_uncomparable`, `administration.rank`, `administration.self`, `administration.not_grantable`, `administration.unprovable`, `administration.impersonating` |
+| `implicit`       | Nothing allowed                                                                                                   | `insufficient_authentication`, `condition_failed`, `no_match`                                                                                                                                                                 |
 
 Within each stage, the policies are assessed in a fixed order (name, stored key, resource, then document) and each
 statement by its position, so the decision and its trace never depend on the order the policies were read in. The
 decision records the stage that decided it and every step it took: each statement assessed, each guardrail and boundary
 that refused the check as `refused`, naming it, each session cap as `covered` or `refused`, naming it, a cap stage that
 capped nothing as `uncapped`, the guardrail stage as `exempt` for a check of `authorization:guardrail.manage`, whose
-deny stage weighs no guardrail's denies either, and the permission step, which is asked only when no allow statement
-matched and none was invalid:
+deny stage weighs no guardrail's denies either, the permission step, which is asked only when no allow statement
+matched and none was invalid, and the administration stage as `satisfied` when the operation's constraints hold, or
+`refused`, naming the reason, when one does not:
 
 ```text
 DENY (boundary: a permission boundary does not allow it) at the boundary stage.
@@ -1871,7 +1911,7 @@ Event::listen(static function (RoleDeleted $event): void {
     $event->operation->actor;      // the acting principal's Reference, or null for trusted work
     $event->operation->identity;   // the identity behind the acting principal, or null
     $event->operation->isTrusted;  // true for a call made without an acting context
-    $event->operation->actions;    // the administration actions the call was decided under
+    $event->operation->actions;    // the administration actions its changes fall under, decided only when not trusted
     $event->operation->id;         // the same for every event of the call, and every decision made for it
 });
 ```
@@ -2440,11 +2480,11 @@ and a refusal for record attachments names no policy, however many there are.
 
 The package is the authority of Laravel's Gate for the abilities it declares. Booting registers one `Gate::before`
 hook, and defines no ability. The hook answers every ability whose exact name a permission enum, a permission provider
-or the package itself (`authorization:guardrail.manage`) declares, with the package's decision: true for an allow,
-false for a deny. Laravel stops at the first before-callback that answers, so both stand: no `Gate::define` callback,
-Laravel policy class or `Gate::after` callback can override either. `Gate::allows()`, `Gate::forUser($user)`,
-`$user->can()`, `@can`, the `can:` middleware, `Gate::authorize()` and a controller's `authorize()` all go through it,
-whatever Laravel policy class the resource's model has:
+or the package itself (its administration actions, `authorization:guardrail.manage` among them) declares, with the
+package's decision: true for an allow, false for a deny. Laravel stops at the first before-callback that answers, so
+both stand: no `Gate::define` callback, Laravel policy class or `Gate::after` callback can override either.
+`Gate::allows()`, `Gate::forUser($user)`, `$user->can()`, `@can`, the `can:` middleware, `Gate::authorize()` and a
+controller's `authorize()` all go through it, whatever Laravel policy class the resource's model has:
 
 ```php
 Gate::define('posts:update', fn (User $user) => true);  // never consulted: posts:update is declared

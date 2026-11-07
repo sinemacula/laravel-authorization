@@ -74,6 +74,27 @@ final class RecordWriter
     }
 
     /**
+     * Create the record of the model given, keyed by the id, or a new key when
+     * none is given, with the given attributes, once the acting context, when
+     * there is one, is allowed the action on it, as `save()` saves it.
+     *
+     * @template TModel of \Illuminate\Database\Eloquent\Model
+     *
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext|null  $actor
+     * @param  string  $action
+     * @param  TModel  $model
+     * @param  string|null  $id
+     * @param  array<string, mixed>  $attributes
+     * @return TModel
+     *
+     * @throws \Throwable
+     */
+    public static function create(?ActingContext $actor, string $action, Model $model, ?string $id, array $attributes): Model
+    {
+        return self::save($actor, $action, static fn (): Model => $model, [$model->getKeyName() => $id, ...$attributes]);
+    }
+
+    /**
      * Delete the model the callback returns, once the acting context, when
      * there is one, is allowed the action on it.
      *

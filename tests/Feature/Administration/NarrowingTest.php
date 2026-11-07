@@ -7,12 +7,17 @@ namespace Tests\Feature\Administration;
 use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\Narrowing;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
+use SineMacula\Laravel\Authorization\Support\Reference;
+use Tests\Concerns\ActsAsTenant;
+use Tests\Concerns\UsesAnAuthorizationConnection;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\StubTenantTree;
 use Tests\TestCase;
 
 /**
@@ -27,6 +32,8 @@ use Tests\TestCase;
 #[CoversClass(Narrowing::class)]
 final class NarrowingTest extends TestCase
 {
+    use ActsAsTenant, UsesAnAuthorizationConnection;
+
     /**
      * Revoking a permission always narrows; removing a boundary never does, nor
      * does any action that is not a removal, nor a removal of a target of
@@ -114,6 +121,110 @@ final class NarrowingTest extends TestCase
         self::assertFalse(Narrowing::isNarrowing(PackagePermissions::ROLE_REVOKE, $role));
         self::assertFalse(Narrowing::isNarrowing(PackagePermissions::ROLE_REVOKE, $parent));
         self::assertTrue(Narrowing::isNarrowing(PackagePermissions::ROLE_REVOKE, $other));
+    }
+
+    /**
+     * The role's ancestors and their attachments are read outside every tenant
+     * scope, so a deny attached to an ancestor owned by a tenant the check's
+     * scope does not show, a tenant below the one active, or any tenant when
+     * none is, still keeps the revocation from narrowing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testAnAncestorTheTenantScopeHidesStillCounts(): void
+    {
+        [$parent, $child] = \array_map(self::createTenant(...), ['parent', 'child']);
+
+        $this->app?->instance(TenantTree::class, (new StubTenantTree)->put(Reference::of($child), Reference::of($parent)));
+
+        $restricted = Role::query()->withoutGlobalScopes()->create(['name' => 'restricted', ...self::ownedBy($child)]);
+        $editor     = Role::query()->withoutGlobalScopes()->create(['name' => 'editor', 'parent_id' => $restricted->id, ...self::ownedBy($child)]);
+
+        GrantService::instance()?->attachPolicy($restricted, self::policy('denying', 'deny'), tenant: $child);
+
+        $this->actAsTenant($parent);
+
+        self::assertFalse(Narrowing::isNarrowing(PackagePermissions::ROLE_REVOKE, $editor));
+
+        $this->actAsTenant(null);
+
+        self::assertFalse(Narrowing::isNarrowing(PackagePermissions::ROLE_REVOKE, $editor));
+    }
+
+    /**
+     * With the role hierarchy disabled, a role holds nothing of its ancestors,
+     * so only a deny attached to the role itself keeps its revocation from
+     * narrowing.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testWithTheHierarchyDisabledOnlyTheRoleCounts(): void
+    {
+        $parent = Role::create(['name' => 'staff']);
+        $role   = Role::create(['name' => 'editor', 'parent_id' => $parent->id]);
+
+        GrantService::instance()?->attachPolicy($parent, self::policy('denying', 'deny'));
+        config()->set('authorization.hierarchy.enabled', false);
+
+        self::assertTrue(Narrowing::isNarrowing(PackagePermissions::ROLE_REVOKE, $role));
+
+        GrantService::instance()?->attachPolicy($role, self::policy('own', 'deny'));
+
+        self::assertFalse(Narrowing::isNarrowing(PackagePermissions::ROLE_REVOKE, $role));
+    }
+
+    /**
+     * A chain that cannot be read whole is taken to deny: one that returns to a
+     * role it has passed, and a role that is not stored.
+     *
+     * @return void
+     */
+    public function testAChainThatCannotBeReadWholeIsTakenToDeny(): void
+    {
+        $first  = Role::create(['name' => 'first']);
+        $second = Role::create(['name' => 'second', 'parent_id' => $first->id]);
+
+        DB::table('roles')->where('id', $first->id)->update(['parent_id' => $second->id]);
+
+        self::assertFalse(Narrowing::isNarrowing(PackagePermissions::ROLE_REVOKE, $second));
+        self::assertFalse(Narrowing::isNarrowing(PackagePermissions::ROLE_REVOKE, (new Role)->forceFill(['id' => '01a1b0c0-0000-7000-8000-00000000dead'])));
+    }
+
+    /**
+     * The attachments are read on the write connection, as the decision reads
+     * them, so a replica that has not caught up never hides a deny, and a
+     * screen judges what the service judges.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheAttachmentsAreReadOnTheWriteConnection(): void
+    {
+        $this->useAnAuthorizationConnection();
+
+        $config = config();
+
+        $config->set('database.connections.split', [
+            'driver' => 'sqlite',
+            'prefix' => '',
+            'read'   => ['database' => ':memory:'],
+            'write'  => ['database' => ':memory:'],
+        ]);
+
+        DB::purge('split');
+        DB::connection('split')->setPdo(self::authorizationConnection()->getPdo());
+        $config->set('authorization.connection', 'split');
+
+        $role = Role::create(['name' => 'editor']);
+
+        GrantService::instance()?->attachPolicy($role, self::policy('denying', 'deny'));
+
+        self::assertFalse(Narrowing::isNarrowing(PackagePermissions::ROLE_REVOKE, $role));
     }
 
     /**

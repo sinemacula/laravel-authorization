@@ -7,6 +7,7 @@ namespace Tests\Feature\Services;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Event;
 use PHPUnit\Framework\Attributes\CoversClass;
+use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionStage;
@@ -21,7 +22,9 @@ use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Services\GrantService;
 use SineMacula\Laravel\Authorization\Services\Support\RecordWriter;
+use SineMacula\Laravel\Authorization\Support\DocumentDigest;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
+use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use Tests\Concerns\ActsAsAdministrator;
 use Tests\Concerns\CatchesRefusals;
 use Tests\Concerns\UsesAnAuthorizationConnection;
@@ -65,6 +68,33 @@ final class RecordWriterTest extends TestCase
         self::assertTrue($role->exists);
         self::assertSame(['editor', 2], [$role->name, $role->rank]);
         self::assertSame(1, self::authorizationConnection()->table('roles')->where('name', 'editor')->count());
+    }
+
+    /**
+     * A record is created keyed by the id given, or by a new key when none is
+     * given, with the attributes, and a delegated creation is decided before it
+     * writes, as a save is.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testCreatesARecordKeyedByTheIdGiven(): void
+    {
+        $keyed = RecordWriter::create(null, PackagePermissions::ROLE_CREATE, new Role, '01a1b0c0-0000-7000-8000-000000000001', ['name' => 'editor']);
+        $fresh = RecordWriter::create(null, PackagePermissions::ROLE_CREATE, new Role, null, ['name' => 'author', 'rank' => 4]);
+
+        self::assertSame('01a1b0c0-0000-7000-8000-000000000001', $keyed->id);
+        self::assertTrue($fresh->exists);
+        self::assertNotSame($keyed->id, $fresh->id);
+        self::assertSame(['editor', 'author'], [$keyed->name, Role::query()->findOrFail($fresh->id)->name]);
+        self::assertSame(4, $fresh->rank);
+        $admin = self::administrator();
+
+        $create = static fn (): Role => RecordWriter::create($admin, PackagePermissions::ROLE_CREATE, new Role, null, ['name' => 'writer']);
+
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::reasonOf($create));
+        self::assertSame(2, Role::query()->count());
     }
 
     /**
@@ -221,6 +251,70 @@ final class RecordWriterTest extends TestCase
     }
 
     /**
+     * A delegated save offers each proposed attribute to policies under its
+     * name, whatever attributes come before it unset, so a policy conditioned
+     * on a later one decides on it: the right value is allowed, and refused as
+     * unprovable at the administration stage, and any other is refused as the
+     * condition refuses it.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedSaveOffersEveryProposedAttribute(): void
+    {
+        $admin = self::administrator([]);
+        $role  = Role::query()->create(['name' => 'editor']);
+
+        self::allow($admin, PackagePermissions::ROLE_UPDATE, ['resource.change.guard' => 'web', 'resource.change.rank' => 3]);
+
+        $find = static fn (): Role => $role;
+        $save = static fn (array $attributes): \Closure => static fn (): Role => RecordWriter::save($admin, PackagePermissions::ROLE_UPDATE, $find, $attributes);
+
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::reasonOf($save(['name' => 'editor', 'rank' => 3, 'guard' => 'web'])));
+        self::assertSame(DecisionReason::CONDITION_FAILED, self::reasonOf($save(['name' => 'editor', 'rank' => 3, 'guard' => 'api'])));
+        self::assertSame('editor', Role::query()->sole()->name);
+    }
+
+    /**
+     * A delegated save of a policy document offers the document by its digest,
+     * so a policy can bind the right to one exact document.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testADelegatedSaveOffersTheDocumentsDigest(): void
+    {
+        $admin    = self::administrator([]);
+        $policy   = Policy::query()->create(['name' => 'readers', 'document' => ['statements' => []]]);
+        $document = ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]];
+        $digest   = DocumentDigest::of(PolicyDocument::decode($document, ''))->digest;
+
+        self::allow($admin, PackagePermissions::POLICY_UPDATE, ['resource.change.digest' => $digest]);
+
+        $find = static fn (): Policy => $policy;
+        $save = static fn (mixed $document): \Closure => static fn (): Policy => RecordWriter::save($admin, PackagePermissions::POLICY_UPDATE, $find, ['document' => $document]);
+
+        self::assertSame(DecisionReason::ADMINISTRATION_UNPROVABLE, self::reasonOf($save($document)));
+        self::assertSame(DecisionReason::CONDITION_FAILED, self::reasonOf($save(['statements' => []])));
+    }
+
+    /**
+     * The proposed change offers a document that cannot be read with no digest,
+     * and leaves out an attribute that is not a scalar.
+     *
+     * @return void
+     */
+    public function testTheChangeOfAnUnreadableDocumentHasNoDigest(): void
+    {
+        $changeOf = new \ReflectionMethod(RecordWriter::class, 'changeOf');
+
+        self::assertSame(['name' => 'readers', 'digest' => null], $changeOf->invoke(null, ['name' => 'readers', 'description' => ['not' => 'scalar'], 'document' => '{not json']));
+        self::assertSame(['rank' => 2], $changeOf->invoke(null, ['rank' => 2]));
+    }
+
+    /**
      * Return the grant service.
      *
      * @return \SineMacula\Laravel\Authorization\Services\GrantService|null
@@ -228,5 +322,36 @@ final class RecordWriterTest extends TestCase
     private static function grants(): ?GrantService
     {
         return GrantService::instance();
+    }
+
+    /**
+     * Allow the administrator the action on any operation, when the conditions
+     * hold.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Administration\ActingContext  $admin
+     * @param  string  $action
+     * @param  array<string, mixed>  $conditions
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    private static function allow(ActingContext $admin, string $action, array $conditions): void
+    {
+        $statement = ['effect' => 'allow', 'actions' => [$action], 'resources' => [OperationResource::TYPE . ':*'], 'conditions' => ['eq' => $conditions]];
+
+        self::grants()?->attachPolicy($admin->subject->subject, Policy::query()->create(['name' => 'allows-' . $action, 'document' => ['statements' => [$statement]]]));
+    }
+
+    /**
+     * Return the reason the call is refused for.
+     *
+     * @param  \Closure(): mixed  $call
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason|null
+     */
+    private static function reasonOf(\Closure $call): ?DecisionReason
+    {
+        $refusal = self::refusalOf($call);
+
+        return $refusal instanceof AuthorizationException ? $refusal->getReason() : null;
     }
 }

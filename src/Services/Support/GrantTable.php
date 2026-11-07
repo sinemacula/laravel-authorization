@@ -120,14 +120,15 @@ final readonly class GrantTable extends ExpiringGrants
 
     /**
      * Return the keys of the rows the grantee holds in the scope, among the
-     * given ones, whose grant has not expired.
+     * given ones, whose grant has not expired at the instant given, else now.
      *
      * @param  list<string>  $ids
+     * @param  \Illuminate\Support\Carbon|null  $now
      * @return list<string>
      */
-    public function live(array $ids): array
+    public function live(array $ids, ?Carbon $now = null): array
     {
-        return self::keys(LiveGrants::only($this->inScope(), $this->table)->distinct(), $this->column, $ids);
+        return self::keys(LiveGrants::only($this->inScope(), $this->table, $now)->distinct(), $this->column, $ids);
     }
 
     /**

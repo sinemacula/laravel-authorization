@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Enums\GrantTarget;
+use SineMacula\Laravel\Authorization\Exceptions\InvalidGrantTargetException;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
@@ -21,6 +22,7 @@ use SineMacula\Laravel\Authorization\Support\Reference;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\ApiGuardedUser;
 use Tests\Feature\Stubs\StubIdentity;
+use Tests\Feature\Stubs\VanishedPolicy;
 use Tests\TestCase;
 
 /**
@@ -52,8 +54,10 @@ final class GrantChangesTest extends TestCase
 
     /**
      * A sync's changes are a grant of each kept row the grantee does not hold
-     * live in the scope, a new one or an expired one, and a revocation of each
-     * dropped row with the reach it had; a row held live decides nothing.
+     * live in the scope, a new one or an expired one, the row kept unchanged
+     * for each it holds live, and a revocation of each dropped row with the
+     * reach it had; a sync that changes nothing decides its revocation
+     * unchanged.
      *
      * @return void
      *
@@ -77,14 +81,54 @@ final class GrantChangesTest extends TestCase
         $scope     = GrantScope::platform();
         $table     = GrantChanges::table(GrantTarget::ROLE, $reference, null, $scope);
         $keep      = [$live->id => $live, $expired->id => $expired, $fresh->id => $fresh];
-        $changes   = GrantChanges::ofSync(GrantTarget::ROLE, $reference, $table, $keep, [$dropped->id => true], $scope, null);
+        $live      = $table->live(\array_map(\strval(...), \array_keys($keep)));
+        $changes   = GrantChanges::ofSync(GrantTarget::ROLE, $reference, $live, $keep, [$dropped->id => false], $scope, null);
 
-        self::assertSame(
-            [[PackagePermissions::ROLE_GRANT, 'expired', false], [PackagePermissions::ROLE_GRANT, 'fresh', false], [PackagePermissions::ROLE_REVOKE, 'dropped', true]],
-            \array_map(static fn (OperationResource $change): array => [$change->action, $change->attributes()['role'] ?? null, $change->isNarrowing], $changes),
-        );
-        self::assertTrue($changes[2]->attributes()['subtree']);
-        self::assertSame([], GrantChanges::ofSync(GrantTarget::ROLE, $reference, $table, [$live->id => $live], [], $scope, null));
+        self::assertSame([
+            [PackagePermissions::ROLE_GRANT, 'live', true, true],
+            [PackagePermissions::ROLE_GRANT, 'expired', false, null],
+            [PackagePermissions::ROLE_GRANT, 'fresh', false, null],
+            [PackagePermissions::ROLE_REVOKE, 'dropped', true, null],
+        ], \array_map(self::summary(...), $changes));
+        self::assertFalse($changes[3]->attributes()['subtree']);
+
+        $none = GrantChanges::ofSync(GrantTarget::ROLE, $reference, [], [], [], $scope, null);
+
+        self::assertSame([[PackagePermissions::ROLE_REVOKE, null, true, true]], \array_map(self::summary(...), $none));
+        self::assertSame([$reference->type, 'user-1'], [$none[0]->attributes()['grantee_type'], $none[0]->attributes()['grantee_id']]);
+    }
+
+    /**
+     * A revocation removes the candidates the grantee holds, each with the
+     * reach it holds it with; of a name it holds none of, the candidate the
+     * lookup ranks first, held by no row, so the revocation asked for is still
+     * decided; and a candidate named by model whether or not it is held.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testARevocationDecidesWhatIsHeldElseTheFirstCandidate(): void
+    {
+        $tenant  = self::createTenant('tenant-a');
+        $user    = StubIdentity::create(['id' => 'user-1']);
+        $first   = Role::create(['name' => 'editor']);
+        $second  = Role::create(['name' => 'editor', ...self::ownedBy($tenant)]);
+        $grantee = Reference::of($user);
+        $named   = new GrantScope(Reference::of($tenant));
+
+        $none = GrantChanges::revocations(GrantTarget::ROLE, $grantee, null, [$first, $second], $named);
+
+        self::assertCount(1, $none);
+        self::assertSame([$first->id, null, true], [$none[0][2], $none[0][3], $none[0][4]->includeSubtree]);
+
+        self::grants()->grantRole($user, $second, tenant: $tenant, includeSubtree: false);
+
+        $held = GrantChanges::revocations(GrantTarget::ROLE, $grantee, null, [$first, $second], $named);
+
+        self::assertCount(1, $held);
+        self::assertSame([$second->id, false, false], [$held[0][2], $held[0][3], $held[0][4]->includeSubtree]);
+        self::assertEquals(Reference::of($tenant), $held[0][4]->tenant);
     }
 
     /**
@@ -122,6 +166,28 @@ final class GrantChangesTest extends TestCase
     }
 
     /**
+     * The removal of a boundary whose policy cannot be read cannot be named, so
+     * revoking everything is refused before anything is decided.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testABoundaryWhosePolicyIsGoneRefusesEverything(): void
+    {
+        $user = StubIdentity::create(['id' => 'user-1']);
+        $cap  = Policy::create(['name' => 'cap', 'document' => ['statements' => [['effect' => 'allow', 'actions' => ['posts:*']]]]]);
+
+        BoundaryService::instance()?->set($user, $cap);
+
+        config()->set('authorization.models.policy', VanishedPolicy::class);
+
+        $this->expectException(InvalidGrantTargetException::class);
+
+        GrantChanges::everything(Reference::of($user));
+    }
+
+    /**
      * The writer of a grantee's rows records the actor given on each row it
      * writes, in the scope.
      *
@@ -154,6 +220,20 @@ final class GrantChangesTest extends TestCase
         self::assertSame('api', GrantChanges::guard(new ApiGuardedUser));
         self::assertNull(GrantChanges::guard(new Reference('user', '1')));
         self::assertNull(GrantChanges::guard(StubIdentity::create(['id' => 'user-1'])));
+    }
+
+    /**
+     * Return the action of the change, the name of its role, whether it only
+     * narrows, and whether it changes nothing.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  $change
+     * @return array{string, mixed, bool, mixed}
+     */
+    private static function summary(OperationResource $change): array
+    {
+        $attributes = $change->attributes();
+
+        return [$change->action, $attributes['role'] ?? null, $change->isNarrowing, $attributes['unchanged'] ?? null];
     }
 
     /**

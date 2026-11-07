@@ -61,7 +61,9 @@ named and the operation they belong to, and are dispatched only once the write c
 4. **The call's actor and mode.** Every change event carries `operation`: `actor`, the acting context's principal, or
    null for trusted work (a reference a trusted command names for the record alone); `identity`, the identity behind
    it; `isTrusted`, true for a call made without an acting context; `impersonator`, whoever was impersonating the
-   actor; and `actions`, the administration actions the call was decided under. The actor is never read from
+   actor; and `actions`, the administration actions the call's changes fall under, decided through `check()` only when
+   `isTrusted` is false (a trusted call names them too, a sync names both its grant and its revoke action, and a write
+   made through a model outside the services, or `authorization:sync`, names none). The actor is never read from
    `Auth::user()` or the subject resolver. Every grant row the call writes records it in `granted_by_type` and
    `granted_by_id`. The commands that write take `--actor={morphType}:{key}`. A delegated call's decisions name the
    operation resource `authorization:operation:{operation id}`, so a decision and the write it allowed share the id.

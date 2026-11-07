@@ -6,6 +6,7 @@ namespace SineMacula\Laravel\Authorization\Services;
 
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Collection;
+use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Administration\ActingContext;
 use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
@@ -99,16 +100,9 @@ final class RoleService
      */
     public function create(string $name, ?string $guard = null, ?string $description = null, ?int $rank = null, ?string $id = null, ?ActingContext $actor = null): Role
     {
-        $class = self::roleClass();
-        $model = new $class;
+        $attributes = ['name' => $name, 'guard' => $guard, 'description' => $description, 'rank' => $rank];
 
-        return RecordWriter::save($actor, PackagePermissions::ROLE_CREATE, static fn (): Role => $model, [
-            $model->getKeyName() => $id,
-            'name'               => $name,
-            'guard'              => $guard,
-            'description'        => $description,
-            'rank'               => $rank,
-        ]);
+        return RecordWriter::create($actor, PackagePermissions::ROLE_CREATE, new (self::roleClass()), $id, $attributes);
     }
 
     /**
@@ -284,10 +278,10 @@ final class RoleService
             $model = self::resolve($role);
             $held  = self::heldPermissionIds($model);
 
-            /** @var list<\SineMacula\Laravel\Authorization\Models\Permission> $candidates */
+            /** @var non-empty-list<\SineMacula\Laravel\Authorization\Models\Permission> $candidates */
             $candidates = \is_string($permission) ? GrantTarget::PERMISSION->named($permission, $model->guard) : [self::permissionFor($model, $permission)];
             $revoked    = \array_values(\array_filter($candidates, static fn (Permission $target): bool => \in_array($target->id, $held, true)));
-            $checked    = \is_string($permission) ? $revoked : $candidates;
+            $checked    = $revoked === [] ? [$candidates[0]] : $revoked;
 
             $scope = self::scopeOf($model);
 
@@ -330,16 +324,17 @@ final class RoleService
             $desired = self::desired($model, $permissions, $held);
             $revoked = \array_values(\array_diff($held, \array_map(static fn (Permission $target): string => $target->id, $desired)));
             $table   = new RolePermissionTable($model);
+            $now     = Carbon::now('UTC');
             $changed = [];
             $events  = [];
 
-            $actor?->authorizeIn($operation, ...self::syncChanges($model, $desired, $revoked, $expiresAt));
+            $actor?->authorizeIn($operation, ...self::syncChanges($model, $desired, $revoked, $expiresAt, $now));
 
             $model->unsetRelation('permissions');
             $model->permissions()->detach($revoked);
 
             foreach ($desired as $target) {
-                $change = $table->rearm($target->id, $expiresAt);
+                $change = $table->rearm($target->id, $expiresAt, $now);
                 $events = [...$events, ...self::changeEvents($operation, $model, $target, $change, $expiresAt)];
 
                 $changed[$change->outcome->value][] = $target->id;
@@ -361,30 +356,31 @@ final class RoleService
     /**
      * Return the changes a sync of the role's permissions makes, each to be
      * decided before any is written: a grant of each listed permission the role
-     * does not carry live (a new one, or one whose grant has expired and is
-     * re-armed), and a revocation of each it carries and the list leaves out. A
-     * listed permission the role carries live is left as it is, and decides
-     * nothing.
+     * does not carry live at the instant given (a new one, or one whose grant
+     * has expired and is re-armed), the same permission kept unchanged for each
+     * it does carry live then, and a revocation of each it carries and the list
+     * leaves out. The sync re-arms as of the same instant, so a permission
+     * decided as kept unchanged is never re-armed; a sync that changes nothing
+     * at all decides its revocation unchanged, so its action is still decided.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @param  array<array-key, \SineMacula\Laravel\Authorization\Models\Permission>  $desired
      * @param  list<string>  $revoked
      * @param  \DateTimeInterface|null  $expiresAt
-     * @return list<\SineMacula\Laravel\Authorization\Administration\OperationResource>
+     * @param  \Illuminate\Support\Carbon  $now
+     * @return non-empty-list<\SineMacula\Laravel\Authorization\Administration\OperationResource>
      */
-    private static function syncChanges(Role $role, array $desired, array $revoked, ?\DateTimeInterface $expiresAt): array
+    private static function syncChanges(Role $role, array $desired, array $revoked, ?\DateTimeInterface $expiresAt, Carbon $now): array
     {
         $scope   = self::scopeOf($role);
-        $pivot   = LiveGrants::only($role->permissions()->newPivotQuery(), $role->permissions()->getTable());
+        $pivot   = LiveGrants::only($role->permissions()->newPivotQuery(), $role->permissions()->getTable(), $now);
         $live    = \array_map(static fn (mixed $key): string => \is_scalar($key) ? (string) $key : '', $pivot->pluck('permission_id')->all());
         $changes = [];
 
         foreach ($desired as $target) {
-            if (\in_array($target->id, $live, true)) {
-                continue;
-            }
-
-            $changes[] = OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $role, $target, $scope, $expiresAt);
+            $changes[] = \in_array($target->id, $live, true)
+                ? OperationResource::unchanged(PackagePermissions::PERMISSION_GRANT, $role, $target, $scope)
+                : OperationResource::grant(PackagePermissions::PERMISSION_GRANT, $role, $target, $scope, $expiresAt);
         }
 
         /** @var list<\SineMacula\Laravel\Authorization\Models\Permission> $removed */
@@ -394,7 +390,7 @@ final class RoleService
             $changes[] = OperationResource::revoke(PackagePermissions::PERMISSION_REVOKE, $role, $target, $scope);
         }
 
-        return $changes;
+        return $changes === [] ? [OperationResource::unchanged(PackagePermissions::PERMISSION_REVOKE, $role, null, $scope)] : $changes;
     }
 
     /**

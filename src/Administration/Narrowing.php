@@ -23,11 +23,15 @@ use SineMacula\Laravel\Authorization\Support\RoleGraph;
  *
  * Removing something narrows only when it took nothing away: revoking a
  * permission always does; revoking a role does when no policy attached to the
- * role or to any of its ancestors denies anything, since removing a deny can
- * widen what the grantee may do; detaching a policy, from a grantee or from a
- * resource, does when the policy, as stored, has no deny statement. Removing a
- * permission boundary always widens. A document that cannot be read is taken to
- * deny, so its removal is never judged narrowing.
+ * role or, with the hierarchy enabled, to any of its ancestors denies anything,
+ * since removing a deny can widen what the grantee may do; detaching a policy,
+ * from a grantee or from a resource, does when the policy, as stored, has no
+ * deny statement. Removing a permission boundary always widens. Everything is
+ * read as stored, outside every tenant scope and on the write connection, so
+ * the judgement is the same whatever tenant the check is decided in, and a
+ * screen judges what the service judges. A document that cannot be read, and a
+ * chain of roles that cannot be read whole, is taken to deny, so its removal is
+ * never judged narrowing.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -86,21 +90,31 @@ final class Narrowing
 
     /**
      * Determine whether a policy attached to the role, or to one of its
-     * ancestors, in any scope, has a deny statement.
+     * ancestors, in any scope, has a deny statement. The chain and the
+     * attachments are read outside every tenant scope, on the write connection,
+     * so an ancestor of any tenant counts, whichever tenant the check is
+     * decided in, and a screen reads what the service reads. A chain that
+     * cannot be read whole, a role or a parent missing from it, or one that
+     * returns to a role it has passed, is taken to deny.
      *
      * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
      * @return bool
      */
     private static function doesRoleDeny(Role $role): bool
     {
-        $roles = [$role, ...RoleGraph::ancestorsOf([$role])[$role->id] ?? []];
+        $chain = self::chainOf($role->id, RoleGraph::reach([$role->id]));
+
+        if ($chain === null) {
+            return true;
+        }
 
         /** @var string $table */
         $table = config('authorization.tables.authorizable_policies', 'authorizable_policies');
 
         $keys = AuthorizationConnection::connection()->table($table)
+            ->useWritePdo()
             ->where('authorizable_type', $role->getMorphClass())
-            ->whereIn('authorizable_id', \array_map(static fn (Role $held): string => $held->id, $roles))
+            ->whereIn('authorizable_id', $chain)
             ->distinct()
             ->pluck('policy_id')
             ->all();
@@ -112,5 +126,31 @@ final class Narrowing
         }
 
         return false;
+    }
+
+    /**
+     * Return the keys of the role and of each role above it, walking the links
+     * from the role up to the root, or null when the walk reaches a role the
+     * links do not hold, or one it has passed already.
+     *
+     * @param  string  $key
+     * @param  array<string, string|null>  $links
+     * @return list<string>|null
+     */
+    private static function chainOf(string $key, array $links): ?array
+    {
+        $chain   = [];
+        $current = $key;
+
+        while ($current !== null) {
+            if (!\array_key_exists($current, $links) || \in_array($current, $chain, true)) {
+                return null;
+            }
+
+            $chain[] = $current;
+            $current = $links[$current];
+        }
+
+        return $chain;
     }
 }

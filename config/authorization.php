@@ -113,9 +113,10 @@ return [
     | `not_actions` pattern in a policy document must match at least one
     | permission declared here, by a provider or by the package itself, so a
     | misspelt action is refused rather than stored. The package always declares
-    | `authorization:guardrail.manage`, the right to set and remove guardrails,
-    | so the sync writes it, it can be granted, and the Gate asks the package
-    | about it.
+    | its own administration actions (`authorization:role.grant`,
+    | `authorization:guardrail.manage` and the rest, see `PackagePermissions`),
+    | so the sync writes them, they can be granted, a policy may name them, and
+    | the Gate asks the package about them.
     |
     */
 

@@ -754,6 +754,7 @@ final class GrantTableTest extends TestCase
         self::assertSame($expected, $live);
         self::assertSame([], self::table(tenant: self::tenant())->live([$forever->id]));
         self::assertSame([], $table->live([]));
+        self::assertSame([$forever->id], $table->live([$forever->id, $later->id], Carbon::parse(self::NOW)->addDays(2)));
     }
 
     /**

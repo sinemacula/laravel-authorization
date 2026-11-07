@@ -5,12 +5,14 @@ declare(strict_types = 1);
 namespace Tests\Feature\Administration;
 
 use Illuminate\Config\Repository as ConfigRepository;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Carbon;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\RankComparison;
 use SineMacula\Laravel\Authorization\Models\Role;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use Tests\Concerns\ActsAsTenant;
+use Tests\Feature\Stubs\RolesOnlyPrincipal;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\TestCase;
 
@@ -103,6 +105,68 @@ final class RankComparisonTest extends TestCase
         self::assertNull(RankComparison::rankOf(new \stdClass));
         self::assertFalse(RankComparison::canActOn($ranked, new \stdClass));
         self::assertFalse(RankComparison::canActOn(new \stdClass, $ranked));
+    }
+
+    /**
+     * A holder's rank is the most senior of its ranked roles, whatever unranked
+     * roles it holds as well, before or after them, so an actor that holds a
+     * ranked role among unranked ones acts on an unranked target.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testUnrankedRolesAmongRankedOnesAreSkipped(): void
+    {
+        $mixed = self::holding('mixed', null, 3, null);
+
+        self::assertSame(3, RankComparison::rankOf($mixed));
+        self::assertTrue(RankComparison::canActOn($mixed, self::holding('unranked', null)));
+    }
+
+    /**
+     * A holder is compared only when it both supports roles and holds them
+     * through the package's role relation: one that supports roles without the
+     * relation, and one with a `roles()` method that does not support roles,
+     * have no rank and cannot be compared, whatever that method returns.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testOnlyAHolderOfThePackagesRolesIsCompared(): void
+    {
+        $ranked = self::holding('ranked', 0);
+        $boss   = Role::create(['name' => 'boss', 'rank' => 0]);
+        $roles  = new class ($boss) {
+            /**
+             * Create a holder of the role, which does not support roles.
+             *
+             * @param  \SineMacula\Laravel\Authorization\Models\Role  $role
+             */
+            public function __construct(
+
+                /** The role its query finds. */
+                private readonly Role $role,
+            ) {}
+
+            /**
+             * Return a query whose results are the role.
+             *
+             * @return \Illuminate\Database\Eloquent\Builder<\SineMacula\Laravel\Authorization\Models\Role>
+             */
+            public function roles(): Builder
+            {
+                return Role::query()->whereKey($this->role->id);
+            }
+        };
+
+        foreach ([new RolesOnlyPrincipal, $roles] as $holder) {
+            self::assertFalse(RankComparison::isComparable($holder));
+            self::assertNull(RankComparison::rankOf($holder));
+            self::assertFalse(RankComparison::canActOn($ranked, $holder));
+            self::assertFalse(RankComparison::canActOn($holder, $ranked));
+        }
     }
 
     /**

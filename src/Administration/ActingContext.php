@@ -232,6 +232,26 @@ final readonly class ActingContext
     }
 
     /**
+     * Decide every change the operation makes, as `authorizeIn()` does, or,
+     * when it makes none, the changes it was asked for that change nothing, so
+     * a call that finds nothing to change is still decided on its actions: an
+     * actor that may not take them is refused whether or not there was anything
+     * to change, and cannot learn what a grantee holds by asking.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Support\Operation  $operation
+     * @param  list<\SineMacula\Laravel\Authorization\Administration\OperationResource>  $changes
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationResource  ...$unchanged
+     * @return void
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AuthorizationException
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException
+     */
+    public function authorizeChanges(Operation $operation, array $changes, OperationResource ...$unchanged): void
+    {
+        $this->authorizeIn($operation, ...($changes === [] ? $unchanged : $changes));
+    }
+
+    /**
      * Return the refusal the decision makes: an `AuthorizationException` with
      * its reason and the one `denied` line the bound translator words, carrying
      * the decision.

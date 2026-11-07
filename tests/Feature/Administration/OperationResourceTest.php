@@ -130,6 +130,53 @@ final class OperationResourceTest extends TestCase
     }
 
     /**
+     * A record that is neither a role, a permission nor a policy is never named
+     * under a kind, whatever name it has.
+     *
+     * @return void
+     */
+    public function testOnlyAPackageRecordsNameIsNamed(): void
+    {
+        $named = OperationResource::definition(PackagePermissions::ROLE_DELETE, new StubIdentity(['id' => 'x', 'name' => 'Ann']))->attributes();
+
+        self::assertArrayNotHasKey('', $named);
+        self::assertSame([], \array_intersect_key($named, ['role' => true, 'permission' => true, 'policy' => true]));
+    }
+
+    /**
+     * A change that changes nothing names the grantee, the scope and, when
+     * there is one, the target, only narrows, and is decided in the scope's
+     * tenant.
+     *
+     * @return void
+     */
+    public function testAnUnchangedOperationOnlyNarrows(): void
+    {
+        $tenant = new Reference('stub_tenant', 'tenant-a');
+        $role   = Role::create(['name' => 'editor']);
+        $kept   = OperationResource::unchanged(PackagePermissions::ROLE_GRANT, new Reference('user', '1'), $role, new GrantScope($tenant, 'admin', false));
+        $none   = OperationResource::unchanged(PackagePermissions::BOUNDARY_REMOVE, new Reference('user', '1'), null, GrantScope::platform());
+
+        self::assertTrue($kept->isNarrowing);
+        self::assertSame($tenant, $kept->tenant);
+        self::assertSame([
+            'action'       => PackagePermissions::ROLE_GRANT,
+            'narrowing'    => true,
+            'impersonated' => false,
+            'target_type'  => $role->getMorphClass(),
+            'target_id'    => $role->id,
+            'role'         => 'editor',
+            'grantee_type' => 'user',
+            'grantee_id'   => '1',
+            'application'  => 'admin',
+            'subtree'      => false,
+            'unchanged'    => true,
+        ], $kept->attributes());
+        self::assertNull($none->tenant);
+        self::assertSame(['action', 'narrowing', 'impersonated', 'grantee_type', 'grantee_id', 'subtree', 'unchanged'], \array_keys($none->attributes()));
+    }
+
+    /**
      * A resource acted on by an operation with an id, while impersonated,
      * carries both, and offers the impersonator to policies; the rest is kept.
      *
