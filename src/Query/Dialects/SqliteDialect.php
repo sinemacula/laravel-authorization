@@ -9,7 +9,7 @@ use SineMacula\Laravel\Authorization\Query\Contracts\Dialect;
 use SineMacula\Laravel\Authorization\Query\Enums\ColumnKind;
 
 /**
- * The SQL `whereAuthorized()` writes on SQLite.
+ * The SQL an authorized scope writes on SQLite.
  *
  * SQLite stores any value in any column, whatever its declared type, so nothing
  * here relies on the declared type: a value is compared through its bytes,
@@ -137,5 +137,127 @@ final readonly class SqliteDialect implements Dialect
         $hex = \bin2hex($value);
 
         return "{$column} IN (CAST(X'{$hex}' AS TEXT), X'{$hex}')";
+    }
+
+    /**
+     * Determine whether the column compares byte for byte: it declares no
+     * collation, or `BINARY`.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  string  $table
+     * @param  array<string, mixed>  $column
+     * @return bool
+     */
+    #[\Override]
+    public function isExactCollation(Connection $connection, string $table, array $column): bool
+    {
+        $collation = $column['collation'] ?? null;
+
+        return $collation === null || (\is_string($collation) && \strtolower($collation) === 'binary');
+    }
+
+    /**
+     * Determine whether an integer key column is the table's rowid, declared
+     * `INTEGER PRIMARY KEY` on a table with a rowid: any other column of an
+     * integer type may hold a real number or text, which PHP reads otherwise. A
+     * column declared `INTEGER PRIMARY KEY DESC` is not the rowid, and SQLite
+     * gives it an index of its own, as it gives every primary key but the
+     * rowid, so a table whose primary key has an index is refused.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  string  $table
+     * @param  array<string, mixed>  $column
+     * @return bool
+     */
+    #[\Override]
+    public function isExactInteger(Connection $connection, string $table, array $column): bool
+    {
+        if (($column['auto_increment'] ?? false) !== true) {
+            return false;
+        }
+
+        $table   = $connection->getTablePrefix() . $table;
+        $row     = (array) $connection->selectOne('select sql from sqlite_master where type = \'table\' and name = ?', [$table]);
+        $sql     = $row['sql'] ?? null;
+        $indexes = $connection->select('PRAGMA index_list("' . \str_replace('"', '""', $table) . '")');
+        $isKeyed = \array_filter($indexes, static fn (mixed $index): bool => (((array) $index)['origin'] ?? null) === 'pk') !== [];
+
+        return \is_string($sql) && \preg_match('/\bwithout\s+rowid\b/i', $sql) !== 1 && !$isKeyed;
+    }
+
+    /**
+     * Return the bytes of the expression's text: an integer's decimal digits,
+     * and the bytes of text or a blob.
+     *
+     * @param  string  $expression
+     * @return string
+     */
+    #[\Override]
+    public function textImage(string $expression): string
+    {
+        return "CAST({$expression} AS BLOB)";
+    }
+
+    /**
+     * Return a blob literal of the value's bytes.
+     *
+     * @param  string  $value
+     * @return string
+     */
+    #[\Override]
+    public function bytes(string $value): string
+    {
+        return 'X\'' . \bin2hex($value) . '\'';
+    }
+
+    /**
+     * Return the condition a row's column meets when its bytes start with the
+     * value's.
+     *
+     * @param  string  $column
+     * @param  string  $value
+     * @return string
+     */
+    #[\Override]
+    public function startsWith(string $column, string $value): string
+    {
+        return 'substr(' . $this->textImage($column) . ', 1, ' . \strlen($value) . ') = ' . $this->bytes($value);
+    }
+
+    /**
+     * Return the condition an attachment's key column meets when it holds the
+     * key's text, compared byte for byte, as the column's `BINARY` collation
+     * compares it; or null when the column declares another collation.
+     *
+     * @param  string  $attached
+     * @param  string  $key
+     * @param  array<string, mixed>  $column
+     * @param  bool  $isExact
+     * @return string|null
+     */
+    #[\Override]
+    public function equalsKeyText(string $attached, string $key, array $column, bool $isExact): ?string
+    {
+        return $isExact ? "{$attached} = CAST({$key} AS TEXT) COLLATE BINARY" : null;
+    }
+
+    /**
+     * Return a literal SQLite reads as it reads the value bound: null, an
+     * integer's digits (a boolean as Laravel binds it, `1` or `0`), and a
+     * string as text of its bytes with no affinity, as a bound string has.
+     *
+     * @param  mixed  $value
+     * @return string|null
+     */
+    #[\Override]
+    public function parameter(mixed $value): ?string
+    {
+        return match (true) {
+            $value === null    => 'NULL',
+            \is_bool($value)   => $value ? '1' : '0',
+            \is_int($value)    => $value < 0 ? "({$value})" : (string) $value,
+            \is_string($value) => '+CAST(' . $this->bytes($value) . ' AS TEXT)',
+            default            => null,
+        };
     }
 }

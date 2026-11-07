@@ -5,6 +5,7 @@ declare(strict_types = 1);
 namespace Tests\Unit\Query\Dialects;
 
 use Illuminate\Database\Connection;
+use Illuminate\Database\SQLiteConnection;
 use Mockery\Adapter\Phpunit\MockeryPHPUnitIntegration;
 use PHPUnit\Framework\Attributes\CoversClass;
 use PHPUnit\Framework\TestCase;
@@ -122,6 +123,119 @@ final class SqliteDialectTest extends TestCase
         foreach ([ColumnKind::STRING, ColumnKind::INTEGER] as $kind) {
             self::assertSame('"c" IN (CAST(X\'612762\' AS TEXT), X\'612762\')', $dialect->equalsIndexed('"c"', $kind, 'a\'b'));
         }
+    }
+
+    /**
+     * A column compares bytes when it declares no collation or `BINARY`.
+     *
+     * @return void
+     */
+    public function testAnExactCollationIsNoneOrBinary(): void
+    {
+        $dialect    = new SqliteDialect;
+        $connection = \Mockery::mock(Connection::class);
+
+        self::assertTrue($dialect->isExactCollation($connection, 'posts', ['collation' => null]));
+        self::assertTrue($dialect->isExactCollation($connection, 'posts', ['collation' => 'BINARY']));
+        self::assertFalse($dialect->isExactCollation($connection, 'posts', ['collation' => 'nocase']));
+        self::assertFalse($dialect->isExactCollation($connection, 'posts', ['collation' => 'rtrim']));
+    }
+
+    /**
+     * An integer key is exact only as the rowid of a table that has one,
+     * however its `WITHOUT ROWID` is cased, its primary key given no index of
+     * its own; a column not marked auto-incrementing never is.
+     *
+     * @return void
+     */
+    public function testAnExactIntegerKeyIsTheRowid(): void
+    {
+        $dialect = new SqliteDialect;
+        $table   = static function (string $sql, array $indexes = []): Connection {
+            $connection = \Mockery::mock(Connection::class);
+
+            $connection->shouldReceive('getTablePrefix')->andReturn('app_');
+            $connection->shouldReceive('selectOne')->with('select sql from sqlite_master where type = \'table\' and name = ?', ['app_posts'])->andReturn((object) ['sql' => $sql]);
+            $connection->shouldReceive('select')->with('PRAGMA index_list("app_posts")')->andReturn($indexes);
+
+            return $connection;
+        };
+
+        self::assertTrue($dialect->isExactInteger($table('create table posts (id integer primary key)'), 'posts', ['auto_increment' => true]));
+        self::assertTrue($dialect->isExactInteger($table('create table posts (id integer primary key)', [(object) ['origin' => 'u']]), 'posts', ['auto_increment' => true]));
+        self::assertFalse($dialect->isExactInteger($table('create table posts (id integer primary key desc)', [(object) ['origin' => 'pk']]), 'posts', ['auto_increment' => true]));
+        self::assertFalse($dialect->isExactInteger($table('create table posts (id integer primary key) without rowid'), 'posts', ['auto_increment' => true]));
+        self::assertFalse($dialect->isExactInteger($table('CREATE TABLE posts (id INTEGER PRIMARY KEY) WITHOUT ROWID'), 'posts', ['auto_increment' => true]));
+        self::assertFalse($dialect->isExactInteger(\Mockery::mock(Connection::class), 'posts', ['auto_increment' => false]));
+        self::assertFalse($dialect->isExactInteger(\Mockery::mock(Connection::class), 'posts', []));
+    }
+
+    /**
+     * Against SQLite itself, only a key that is the rowid is exact: one
+     * declared `INTEGER PRIMARY KEY DESC`, which holds reals and text, is not,
+     * however it is named.
+     *
+     * @return void
+     */
+    public function testOnlyARowidAliasIsAnExactIntegerKey(): void
+    {
+        $dialect = new SqliteDialect;
+        $forms   = [
+            'id integer primary key'                   => true,
+            'id integer primary key asc'               => true,
+            'id integer, primary key (id desc)'        => true,
+            'id integer primary key desc'              => false,
+            'id integer constraint k primary key desc' => false,
+            'id integer primary key, x text unique'    => true,
+        ];
+
+        foreach ($forms as $columns => $isExact) {
+            $connection = new SQLiteConnection(new \PDO('sqlite::memory:'));
+
+            $connection->statement("create table \"po\"\"sts\" ({$columns})");
+
+            self::assertSame($isExact, $dialect->isExactInteger($connection, 'po"sts', ['auto_increment' => true]), $columns);
+        }
+    }
+
+    /**
+     * A value is inlined as SQLite reads it bound: null, an integer's digits, a
+     * boolean as `1` or `0`, and a string as text of its bytes with no
+     * affinity; anything else is not inlined.
+     *
+     * @return void
+     */
+    public function testAValueIsInlinedAsSqliteReadsItBound(): void
+    {
+        $dialect = new SqliteDialect;
+
+        self::assertSame('NULL', $dialect->parameter(null));
+        self::assertSame('1', $dialect->parameter(true));
+        self::assertSame('0', $dialect->parameter(false));
+        self::assertSame('42', $dialect->parameter(42));
+        self::assertSame('(-42)', $dialect->parameter(-42));
+        self::assertSame('0', $dialect->parameter(0));
+        self::assertSame('(-1)', $dialect->parameter(-1));
+        self::assertSame('+CAST(X\'613f3f27625c00ff\' AS TEXT)', $dialect->parameter("a??'b\\\0\xff"));
+        self::assertNull($dialect->parameter(1.5));
+    }
+
+    /**
+     * Text images, byte literals, a prefix and an attached key's text are
+     * compared through blobs and `BINARY`.
+     *
+     * @return void
+     */
+    public function testTheTextFragments(): void
+    {
+        $dialect = new SqliteDialect;
+
+        self::assertSame('CAST(k AS BLOB)', $dialect->textImage('k'));
+        self::assertSame('X\'6162\'', $dialect->bytes('ab'));
+        self::assertSame('X\'\'', $dialect->bytes(''));
+        self::assertSame('substr(CAST(k AS BLOB), 1, 2) = X\'6162\'', $dialect->startsWith('k', 'ab'));
+        self::assertSame('a = CAST(k AS TEXT) COLLATE BINARY', $dialect->equalsKeyText('a', 'k', [], true));
+        self::assertNull($dialect->equalsKeyText('a', 'k', [], false));
     }
 
     /**

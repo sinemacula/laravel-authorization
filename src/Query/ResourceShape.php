@@ -16,10 +16,12 @@ use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
 use SineMacula\Laravel\Authorization\Support\ResourceTenancy;
 
 /**
- * What `whereAuthorized()` knows of the model it scopes, checked before
+ * What an authorized scope knows of the model it scopes, checked before
  * anything is compiled (AUTHZ-10.1, N68): its morph type, its table and
  * connection, the dialect it is written in, its key and its tenant columns,
- * wrapped and qualified, and their kinds.
+ * wrapped and qualified, and their kinds, and whether its key can be compared
+ * with a value exactly: an integer key holds only integers PHP reads as they
+ * are, and a string key's collation compares bytes.
  *
  * A model is refused, at once, when the scope cannot prove that what the
  * database compares is what `check()` reads from a loaded record: it does not
@@ -63,6 +65,10 @@ final readonly class ResourceShape
      * @param  string|null  $typeColumn
      * @param  string|null  $idColumn
      * @param  \SineMacula\Laravel\Authorization\Query\Enums\ColumnKind|null  $idKind
+     * @param  \Illuminate\Database\Connection|null  $connection
+     * @param  string  $keyName
+     * @param  \SineMacula\Laravel\Authorization\Query\Enums\RefusalReason|null  $keyRefusal
+     * @param  bool  $isKeyCollationExact
      */
     private function __construct(
 
@@ -95,6 +101,18 @@ final readonly class ResourceShape
 
         /** The tenant id column's kind, or null for a tenantless model. */
         public ?ColumnKind $idKind = null,
+
+        /** The model's connection, or null when it is not known. */
+        public ?Connection $connection = null,
+
+        /** The key column's bare name, which refusals name. */
+        public string $keyName = '',
+
+        /** Why the key cannot be compared with a value at all (an integer key that may hold what PHP reads otherwise), or null when it can. */
+        public ?RefusalReason $keyRefusal = null,
+
+        /** Whether the key column's collation compares bytes, so a comparison with its text is exact under it too. */
+        public bool $isKeyCollationExact = true,
     ) {}
 
     /**
@@ -144,9 +162,16 @@ final readonly class ResourceShape
         $key = $wrap($model->getKeyName());
 
         $idKind  = $tenancy->isTenantless() ? null : $kinds[\count($kinds) - 1];
-        $columns = [$wrap($tenancy->typeColumn), $wrap($tenancy->idColumn), $idKind];
+        $table   = $model->getTable();
+        $keyName = $model->getKeyName();
+        $columns = [$wrap($tenancy->typeColumn), $wrap($tenancy->idColumn), $idKind, $connection, $keyName];
 
-        return new self($type, $model->getTable(), $dialect, $key, $kinds[0], self::isIntegerCast($model), $tenancy, ...$columns);
+        // Whether the key can be compared with a value is asked only when a
+        // comparison is material, so it is kept rather than refused here.
+        $keyRefusal  = $kinds[0] === ColumnKind::INTEGER && !$inspector->isExactInteger($connection, $dialect, $table, $keyName) ? RefusalReason::COLUMN_TYPE : null;
+        $isCollation = $kinds[0] !== ColumnKind::STRING || $inspector->isExactCollation($connection, $dialect, $table, $keyName);
+
+        return new self($type, $table, $dialect, $key, $kinds[0], self::isIntegerCast($model), $tenancy, ...[...$columns, $keyRefusal, $isCollation]);
     }
 
     /**

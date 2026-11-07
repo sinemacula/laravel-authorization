@@ -16,11 +16,13 @@ use SineMacula\Laravel\Authorization\AuthorizationManager;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Contracts\TenantTree;
 use SineMacula\Laravel\Authorization\Evaluation\Policy as EvaluationPolicy;
 use SineMacula\Laravel\Authorization\Facades\Authorization;
 use SineMacula\Laravel\Authorization\Models\Permission;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Resolvers\FlatTenantTree;
 use SineMacula\Laravel\Authorization\Services\BoundaryService;
 use SineMacula\Laravel\Authorization\Services\GuardrailService;
 use SineMacula\Laravel\Authorization\Services\ResourcePolicyService;
@@ -31,20 +33,29 @@ use Tests\Feature\Stubs\FixedSubjectResolver;
 use Tests\Feature\Stubs\PlanContextSource;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubTenant;
+use Tests\Fixtures\QueryScoping\ClosureTenantTree;
+use Tests\Fixtures\QueryScoping\GuardedPost;
 use Tests\Fixtures\QueryScoping\InvariantRequirementChecker;
+use Tests\Fixtures\QueryScoping\KeyedPost;
 use Tests\Fixtures\QueryScoping\NumberedTenantPost;
 use Tests\Fixtures\QueryScoping\ScopedDocument;
 use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\Fixtures\QueryScoping\ScopedTicket;
 use Tests\Fixtures\QueryScoping\TenantScopedDocument;
 use Tests\Fixtures\QueryScoping\TenantScopedPost;
+use Tests\Fixtures\QueryScoping\UuidScopedDocument;
 
 /**
  * One random scenario of the query scoping parity property: a model, its rows,
  * the subject's grants, policies, boundaries, guardrails and resource policies,
  * the request's tenant, application and session, the manager the query is
  * scoped through, the caller's context and the query itself, drawn from a seed
- * within the constructs this release compiles. Every choice is logged, so a
+ * within the constructs this release compiles: a flat tenant tree or a closure
+ * table of organisations, accounts and sub-accounts, grants that reach a
+ * tenant's subtree or not, for an application or every one, live or expired,
+ * platform-wide grants, policies attached to the type and to records, and
+ * resource patterns naming records by their key or the start of it. A model may
+ * scope itself, through the model-level scope. Every choice is logged, so a
  * failure names the scenario.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
@@ -57,7 +68,22 @@ use Tests\Fixtures\QueryScoping\TenantScopedPost;
 final class ParityScenario
 {
     /** @var list<class-string<\Illuminate\Database\Eloquent\Model>> The models a scenario queries. */
-    private const array MODELS = [ScopedPost::class, ScopedDocument::class, TenantScopedPost::class, TenantScopedDocument::class, ScopedTicket::class, NumberedTenantPost::class];
+    private const array MODELS = [
+        ScopedPost::class, ScopedDocument::class, TenantScopedPost::class, TenantScopedDocument::class,
+        ScopedTicket::class, NumberedTenantPost::class, KeyedPost::class, GuardedPost::class,
+    ];
+
+    /** @var list<string> The string keys a document may have, and a pattern name, a long key's start included. */
+    private const array STRING_KEYS = ['abc', 'ABC', 'abc ', ' abc', 'ábc', "e\u{0301}", '*', 'x:*', 'a\b', 'kkkkk'];
+
+    /** @var list<string> The given integer keys a keyed post may have: zero, negatives and the edges of 64 bits. */
+    private const array INTEGER_KEYS = ['0', '-1', '1', '2', '7', '42', '-9223372036854775808', '9223372036854775807'];
+
+    /** @var list<string> The uuid keys a uuid document may have. */
+    private const array UUID_KEYS = ['0b1d2c3e-4f50-4a6b-8c7d-9e0f1a2b3c4d', 'a0000000-0000-4000-8000-000000000001', 'ffffffff-ffff-4fff-bfff-ffffffffffff'];
+
+    /** @var list<string> Integer ids no record can have, as PHP reads keys. */
+    private const array NON_CANONICAL = ['-0', '+1', '01', '1.0', ' 1'];
 
     /** @var list<string> The actions a scenario scopes to and grants. */
     private const array ACTIONS = ['posts:view', 'posts:edit'];
@@ -89,6 +115,9 @@ final class ParityScenario
     /** @var list<string> The keys of the roles created. */
     private array $roles = [];
 
+    /** @var bool Whether the tenant tree is the closure table, rather than the flat tree. */
+    private bool $isClosure = false;
+
     /** @var \Tests\Feature\Stubs\StubIdentity The subject. */
     private StubIdentity $user;
 
@@ -110,8 +139,8 @@ final class ParityScenario
         private readonly Application $app,
     ) {
         $this->random  = new Randomizer(new Mt19937($seed));
-        $this->model   = $this->pick(self::MODELS);
-        $this->action  = $this->pick(self::ACTIONS);
+        $this->model   = $this->pick(DB::connection()->getDriverName() === 'pgsql' ? [...self::MODELS, UuidScopedDocument::class] : self::MODELS);
+        $this->action  = $this->model === GuardedPost::class ? GuardedPost::ACTION : $this->pick(self::ACTIONS);
         $this->user    = StubIdentity::create(['id' => 'u1']);
         $this->manager = self::service(AuthorizationManager::class);
     }
@@ -134,10 +163,14 @@ final class ParityScenario
 
         StubIdentity::create(['id' => 'u2']);
 
+        // Enough classes for the deepest tree and every anchor admitted.
+        self::service(ConfigRepository::class)->set('authorization.query_scoping.max_scopes', 64);
+
         $this->request();
         $this->grants();
         $this->policies();
         $this->rows();
+        $this->recordAttachments();
 
         if ($isOutside) {
             $this->addOutsideConstruct();
@@ -206,7 +239,18 @@ final class ParityScenario
      */
     public function identity(): string
     {
-        return \in_array($this->model, [ScopedDocument::class, TenantScopedDocument::class], true) ? 'row_id' : 'id';
+        return $this->isDocument() ? 'row_id' : 'id';
+    }
+
+    /**
+     * Determine whether the model scopes itself, through the model-level scope,
+     * rather than through `whereAuthorized()`.
+     *
+     * @return bool
+     */
+    public function isModelScoped(): bool
+    {
+        return $this->model === GuardedPost::class;
     }
 
     /**
@@ -232,31 +276,27 @@ final class ParityScenario
     {
         $deny       = ['effect' => $this->pick(['allow', 'deny']), 'actions' => ['*']];
         $constructs = [
-            'literal-id'         => [...$deny, 'resources' => [$this->type . ':1']],
-            'escaped-star'       => [...$deny, 'resources' => [$this->type . ':\*']],
-            'longer-prefix'      => [...$deny, 'resources' => [$this->type . ':4*']],
             'question'           => [...$deny, 'resources' => [$this->type . ':?']],
-            'other-type'         => [...$deny, 'resources' => ['other:*']],
-            'other-record'       => [...$deny, 'resources' => ['other:5']],
+            'bracket'            => [...$deny, 'resources' => [$this->type . ':[ab]']],
+            'inner-star'         => [...$deny, 'resources' => [$this->type . ':*b']],
+            'two-stars'          => [...$deny, 'resources' => [$this->type . ':a**']],
             'resource-pattern'   => [...$deny, 'resources' => ['${resource.type}:*']],
             'resource-condition' => [...$deny, 'conditions' => ['eq' => ['resource.title' => 'a1']]],
             'unmarked-source'    => [...$deny, 'conditions' => ['eq' => ['plan.tier' => 'pro']]],
-            'record-attachment'  => ['effect' => 'deny', 'actions' => ['*']],
         ];
+
+        if ($this->isIntegerKeyed()) {
+            $constructs['beyond-64-bits'] = [...$deny, 'resources' => [$this->type . ':9223372036854775808']];
+        }
+
         $construct = $this->pick(\array_keys($constructs));
-        $statement = $constructs[$construct];
+        $statement = $constructs[$construct] ?? $deny;
 
         $this->log[] = "outside construct {$construct}";
 
         if ($construct === 'unmarked-source') {
             self::service(ConfigRepository::class)->set('authorization.context.sources', [PlanContextSource::class]);
             $this->app->forgetInstance(CheckContextFactory::class);
-        }
-
-        if ($construct === 'record-attachment') {
-            self::service(ResourcePolicyService::class)->attach($this->policy('record', [$statement]), [$this->model, '1']);
-
-            return;
         }
 
         $this->user->attachPolicy($this->policy('outside', [$statement]));
@@ -271,10 +311,13 @@ final class ParityScenario
      */
     private function request(): void
     {
-        $isTeam        = \in_array($this->model, [ScopedTicket::class, NumberedTenantPost::class], true);
-        $this->tenants = $isTeam
-            ? [null, new Reference('teams', '5'), new Reference('teams', '7')]
-            : [null, StubTenant::query()->create(['id' => 't1']), StubTenant::query()->create(['id' => 't2'])];
+        $isTeam          = \in_array($this->model, [ScopedTicket::class, NumberedTenantPost::class], true);
+        $this->isClosure = $this->random->getInt(0, 2) > 0;
+        $this->tenants   = $isTeam
+            ? [null, new Reference('teams', '5'), new Reference('teams', '7'), new Reference('teams', '8'), new Reference('teams', '9')]
+            : [null, ...\array_map(static fn (string $id): Model => StubTenant::query()->create(['id' => $id]), ['o1', 'a1', 'a2', 's1', 'o2', 'b1'])];
+
+        $this->tree();
 
         $active      = $this->pick($isTeam ? [...$this->tenants, new Reference('teams', '05')] : $this->tenants);
         $application = $this->pick([null, 'admin']);
@@ -286,6 +329,40 @@ final class ParityScenario
 
         $this->log[] = 'tenant ' . self::nameOf($active) . ', application ' . ($application ?? 'none') . ', session ' . ($session ?? 'none');
         $this->log[] = 'requirements ' . ($isMet ? 'met' : 'unmet');
+    }
+
+    /**
+     * Bind the tenant tree: the flat one, or a closure table in which the first
+     * tenant is an organisation above two accounts, the first of them above a
+     * sub-account, and the next organisation, a sibling, above an account of
+     * its own.
+     *
+     * @return void
+     *
+     * @throws \LogicException
+     */
+    private function tree(): void
+    {
+        $this->app->instance(TenantTree::class, $this->isClosure ? new ClosureTenantTree : new FlatTenantTree);
+
+        $this->log[] = $this->isClosure ? 'closure tree' : 'flat tree';
+
+        if (!$this->isClosure) {
+            return;
+        }
+
+        /** @var list<\SineMacula\Laravel\Authorization\Support\Reference> $tenants */
+        $tenants = \array_map(
+            static fn (object $tenant): Reference => Reference::of(self::scopeOf($tenant) ?? throw new \LogicException('A tenant is a model or a reference.')),
+            \array_values(\array_filter($this->tenants)),
+        );
+        $parents = \count($tenants) === 4 ? [null, 0, 1, null] : [null, 0, 0, 1, null, 4];
+
+        foreach ($tenants as $index => $tenant) {
+            $parent = $parents[$index];
+
+            ClosureTenantTree::add($tenant, $parent === null ? null : $tenants[$parent]);
+        }
     }
 
     /**
@@ -303,12 +380,14 @@ final class ParityScenario
             $expiry     = $this->pick([null, null, Carbon::parse(self::START)->addDay(), Carbon::parse(self::START)->addMinutes(10)]);
             $app        = $this->pick([null, null, 'admin', 'mobile']);
             $kind       = $this->pick(['permission', 'role', 'inherited-role']);
+            $isSubtree  = $this->random->getInt(0, 2) > 0;
 
             $until       = $expiry === null ? '' : ' until ' . $expiry->format('H:i');
-            $this->log[] = "grant {$kind} {$permission->name} in " . self::nameOf($tenant) . ' for ' . ($app ?? 'every application') . $until;
+            $reach       = $isSubtree ? ' and below' : ' alone';
+            $this->log[] = "grant {$kind} {$permission->name} in " . self::nameOf($tenant) . $reach . ' for ' . ($app ?? 'every application') . $until;
 
             if ($kind === 'permission') {
-                $this->user->givePermission($permission, $expiry, self::scopeOf($tenant), true, $app);
+                $this->user->givePermission($permission, $expiry, self::scopeOf($tenant), $isSubtree, $app);
 
                 continue;
             }
@@ -317,7 +396,7 @@ final class ParityScenario
             $role   = $kind === 'role' ? $holder : Role::create(['name' => 'child-' . $index, 'parent_id' => $holder->id]);
 
             $holder->givePermission($permission);
-            $this->user->assignRole($role, $expiry, self::scopeOf($tenant), true, $app);
+            $this->user->assignRole($role, $expiry, self::scopeOf($tenant), $isSubtree, $app);
 
             $this->roles[] = $role->id;
         }
@@ -334,9 +413,12 @@ final class ParityScenario
     private function policies(): void
     {
         for ($index = $this->random->getInt(0, 2); $index > 0; $index--) {
-            $tenant = $this->pick($this->tenants);
+            $tenant    = $this->pick($this->tenants);
+            $isSubtree = $this->random->getInt(0, 2) > 0;
 
-            $this->user->attachPolicy($this->policy('identity-' . $index, $this->statements(false)), null, self::scopeOf($tenant));
+            $this->log[] = 'identity policy in ' . self::nameOf($tenant) . ($isSubtree ? ' and below' : ' alone');
+
+            $this->user->attachPolicy($this->policy('identity-' . $index, $this->statements(false)), null, self::scopeOf($tenant), $isSubtree);
         }
 
         if ($this->random->getInt(0, 3) === 0) {
@@ -348,11 +430,15 @@ final class ParityScenario
         }
 
         for ($index = $this->random->getInt(0, 2); $index > 0; $index--) {
-            $tenant = $this->pick($this->tenants);
+            $tenant    = $this->pick($this->tenants);
+            $isSubtree = $this->random->getInt(0, 2) > 0;
+            $app       = $this->pick([null, 'admin']);
 
             $policy = $this->policy('resource-' . $index, $this->statements(true));
 
-            self::service(ResourcePolicyService::class)->attach($policy, $this->model, self::scopeOf($tenant), true, $this->pick([null, 'admin']));
+            $this->log[] = 'attached to the type in ' . self::nameOf($tenant) . ($isSubtree ? ' and below' : ' alone') . ' for ' . ($app ?? 'every application');
+
+            self::service(ResourcePolicyService::class)->attach($policy, $this->model, self::scopeOf($tenant), $isSubtree, $app);
         }
     }
 
@@ -369,9 +455,11 @@ final class ParityScenario
 
         $admin->givePermission(Permission::query()->firstOrCreate(['name' => PackagePermissions::GUARDRAILS_MANAGE]));
 
-        self::service(GuardrailService::class)->set($this->policy('guardrail', $this->capStatements()), null, $admin);
+        $tenant = $this->pick($this->tenants);
 
-        $this->log[] = 'platform guardrail';
+        self::service(GuardrailService::class)->set($this->policy('guardrail', $this->capStatements()), self::scopeOf($tenant), $admin);
+
+        $this->log[] = 'guardrail in ' . self::nameOf($tenant);
     }
 
     /**
@@ -382,19 +470,104 @@ final class ParityScenario
      */
     private function rows(): void
     {
-        $keys    = ['abc', 'ABC', 'abc ', ' abc', 'ábc', "e\u{0301}", '*', 'x:*', 'a\b', '', null, $this->longKey(1), $this->longKey(0)];
-        $keys    = DB::connection()->getDriverName() === 'pgsql' ? $keys : [...$keys, "a\0b"];
-        $isKeyed = \in_array($this->model, [ScopedDocument::class, TenantScopedDocument::class], true);
+        $keys  = [...self::STRING_KEYS, '', null, $this->longKey(1), $this->longKey(0)];
+        $keys  = DB::connection()->getDriverName() === 'pgsql' ? $keys : [...$keys, "a\0b"];
+        $given = $this->givenKeys();
+        $count = $given === [] ? 10 : \count($given);
 
-        for ($index = 0; $index < 10; $index++) {
-            $attributes = ['title' => $this->pick(['a1', 'a2', 'b1', 'b2'])];
+        for ($index = 0; $index < $count; $index++) {
+            $attributes = ['title' => $this->pick(['a1', 'a2', 'b1', 'b2']), ...$this->tenantColumns()];
 
-            if ($isKeyed) {
+            if ($this->isDocument()) {
                 $attributes['code'] = $this->pick($keys);
             }
 
-            $this->model::query()->create([...$attributes, ...$this->tenantColumns()]);
+            $this->model::query()->create($given === [] ? $attributes : [...$attributes, 'id' => $given[$index]]);
         }
+    }
+
+    /**
+     * Return the keys the model's records are given, in the order they are
+     * created: shuffled integers at the edges for a keyed post, uuids for a
+     * uuid document, none for a model whose keys are generated.
+     *
+     * @return list<int|string>
+     */
+    private function givenKeys(): array
+    {
+        $uuids = \array_map(static fn (int $index): string => \sprintf('c0000000-0000-4000-8000-%012d', $index), \range(1, 7));
+
+        return match ($this->model) {
+            KeyedPost::class          => \array_map(static fn (string $key): int => (int) $key, $this->random->shuffleArray(self::INTEGER_KEYS)),
+            UuidScopedDocument::class => [...self::UUID_KEYS, ...$uuids],
+            default                   => [],
+        };
+    }
+
+    /**
+     * Attach policies to some of the model's records, each in a tenant or the
+     * platform, reaching its subtree or not, for an application or every one; a
+     * key no attachment can name is skipped.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    private function recordAttachments(): void
+    {
+        for ($index = $this->random->getInt(0, 2); $index > 0; $index--) {
+            $key       = $this->pick($this->keys());
+            $tenant    = $this->pick($this->tenants);
+            $isSubtree = $this->random->getInt(0, 2) > 0;
+            $app       = $this->pick([null, null, 'admin']);
+            $policy    = $this->policy('record-' . $index, $this->statements(true));
+
+            $reach       = $isSubtree ? ' and below' : ' alone';
+            $this->log[] = 'attached to record ' . \json_encode($key) . ' in ' . self::nameOf($tenant) . $reach . ' for ' . ($app ?? 'every application');
+
+            try {
+                self::service(ResourcePolicyService::class)->attach($policy, [$this->model, $key], self::scopeOf($tenant), $isSubtree, $app);
+            } catch (\InvalidArgumentException) {
+                $this->log[] = 'the key cannot be attached to';
+            }
+        }
+    }
+
+    /**
+     * Return the keys a pattern or an attachment may name: the keys the model's
+     * records may have, and ids no record can have.
+     *
+     * @return non-empty-list<string>
+     */
+    private function keys(): array
+    {
+        return match (true) {
+            $this->isDocument()                        => self::STRING_KEYS,
+            $this->model === KeyedPost::class          => [...self::INTEGER_KEYS, ...self::NON_CANONICAL],
+            $this->model === UuidScopedDocument::class => [...self::UUID_KEYS, \strtoupper(self::UUID_KEYS[0]), 'not-a-uuid'],
+            default                                    => ['1', '2', '3', '5', '10', ...self::NON_CANONICAL],
+        };
+    }
+
+    /**
+     * Determine whether the model's key is an integer.
+     *
+     * @return bool
+     */
+    private function isIntegerKeyed(): bool
+    {
+        return !$this->isDocument() && $this->model !== UuidScopedDocument::class;
+    }
+
+    /**
+     * Determine whether the model is a document, keyed by a string that is not
+     * its table's primary key.
+     *
+     * @return bool
+     */
+    private function isDocument(): bool
+    {
+        return \in_array($this->model, [ScopedDocument::class, TenantScopedDocument::class], true);
     }
 
     /**
@@ -471,7 +644,7 @@ final class ParityScenario
 
         /** @var \SineMacula\Laravel\Authorization\AuthorizationManager $manager */
         $manager = $this->app->make(AuthorizationManager::class);
-        $choice  = $this->pick($isOutside ? ['current', 'for', 'forUser', 'capped'] : ['current', 'for', 'forUser', 'withPolicies', 'capped']);
+        $choice  = $this->isModelScoped() ? 'current' : $this->pick($isOutside ? ['current', 'for', 'forUser', 'capped'] : ['current', 'for', 'forUser', 'withPolicies', 'capped']);
         $user    = $this->user;
 
         $this->manager = match ($choice) {
@@ -482,8 +655,11 @@ final class ParityScenario
             default        => $manager,
         };
 
-        $this->context = $this->pick([[], ['flag' => 'on'], ['flag' => 'off'], ['t' => $this->type]]);
-        $this->log[]   = "manager {$choice}";
+        $this->context = $this->isModelScoped() ? [] : $this->pick([
+            [], ['flag'                                                   => 'on'], ['flag' => 'off'], ['t' => $this->type],
+            ['t' => $this->type, 'k' => $this->pick($this->keys())], ['k' => '*'], ['k' => 'x:*'], ['k' => $this->pick($this->keys())],
+        ]);
+        $this->log[] = "manager {$choice}";
     }
 
     /**
@@ -561,7 +737,13 @@ final class ParityScenario
             ? ['not_actions' => [$this->pick(['posts:edit', 'posts:view', 'other:*'])]]
             : ['actions' => [$this->pick([...self::ACTIONS, 'posts:*', '*'])]];
 
-        $prefix    = \substr($this->type . ':', 0, $this->random->getInt(0, \strlen($this->type) + 1)) . '*';
+        $prefix = \substr($this->type . ':', 0, $this->random->getInt(0, \strlen($this->type) + 1)) . '*';
+        // A document's backslashes are literal; a star, a question mark or a
+        // bracket is literal only once substituted, so a key holding one is
+        // named through the caller's input.
+        $key       = $this->pick($this->keys());
+        $literal   = $this->type . ':' . $key;
+        $start     = $this->type . ':' . \explode('*', \mb_substr($key, 0, $this->random->getInt(1, \max(1, \mb_strlen($key)))))[0] . '*';
         $resources = $this->pick([
             [],
             ['resources' => ['*']],
@@ -571,6 +753,17 @@ final class ParityScenario
             ['resources' => ['${input.t}:*']],
             ['not_resources' => [$prefix]],
             ['not_resources' => [$this->type . ':*']],
+            ['resources' => [$literal]],
+            ['resources' => [$literal]],
+            ['resources' => [$start]],
+            ['resources' => [$start, $literal]],
+            ['not_resources' => [$literal]],
+            ['not_resources' => [$start]],
+            ['resources' => [$this->type . ':${input.k}']],
+            ['resources' => ['${input.t}:${input.k}']],
+            ['not_resources' => [$this->type . ':${input.k}']],
+            ['resources' => ['${input.t}:${input.k}*']],
+            ['resources' => ['other:' . $key]],
         ]);
 
         return [...$actions, ...$resources];

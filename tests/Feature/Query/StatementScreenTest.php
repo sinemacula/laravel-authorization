@@ -4,28 +4,30 @@ declare(strict_types = 1);
 
 namespace Tests\Feature\Query;
 
+use Illuminate\Support\Facades\DB;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationRequirementChecker;
 use SineMacula\Laravel\Authorization\Evaluation\CheckContext;
-use SineMacula\Laravel\Authorization\Evaluation\CheckSources;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
-use SineMacula\Laravel\Authorization\Evaluation\Policy;
 use SineMacula\Laravel\Authorization\Evaluation\PrincipalSelectors;
-use SineMacula\Laravel\Authorization\Evaluation\SessionCaps;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Evaluation\StatementReference;
 use SineMacula\Laravel\Authorization\Query\Enums\RefusalReason;
+use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
 use SineMacula\Laravel\Authorization\Query\Refusal;
+use SineMacula\Laravel\Authorization\Query\ResourceShape;
+use SineMacula\Laravel\Authorization\Query\SchemaInspector;
 use SineMacula\Laravel\Authorization\Query\StatementScreen;
 use SineMacula\Laravel\Authorization\Subject;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Fixtures\QueryScoping\InvariantRequirementChecker;
+use Tests\Fixtures\QueryScoping\ScopedPost;
 use Tests\TestCase;
 
 /**
- * Feature tests for the screen that tells whether the statements one class of
- * rows is decided from can be compiled.
+ * Feature tests for the screen that compiles each statement one class of rows
+ * is decided from, or refuses it.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -37,130 +39,124 @@ use Tests\TestCase;
 #[CoversClass(StatementScreen::class)]
 final class StatementScreenTest extends TestCase
 {
-    /** @var string The type the screened query is about. */
-    private const string TYPE = 'posts';
-
     /**
-     * A statement a check would not weigh is never screened: one naming another
-     * action, an allow of a resource policy not naming the subject, one of a
-     * policy attached otherwise naming principals, and a guardrail's when the
-     * check is exempt from them.
+     * A statement with no resources matches and applies to every row, its
+     * conditions holding, and matches none when they do not.
      *
      * @return void
      */
-    public function testAStatementACheckWouldNotWeighIsNotScreened(): void
+    public function testAStatementWithoutResourcesNamesEveryRow(): void
     {
         [$screen, $subject] = $this->screen();
-        $record             = ['posts:1'];
 
-        $sources = $this->sources($subject, [
-            new Policy('other-action', [new Statement(PolicyEffect::DENY, ['posts:edit'], $record)]),
-            (new Policy('shared', [new Statement(PolicyEffect::ALLOW, ['posts:view'], $record, principals: ['user:someone-else'])]))->withResource('posts:*'),
-            new Policy('named', [new Statement(PolicyEffect::ALLOW, ['posts:view'], $record, principals: [$this->reference($subject)])]),
-        ], null);
+        self::assertSame([QueryAuthorizer::EVERY_ROW, QueryAuthorizer::EVERY_ROW, false], $this->terms($screen, $subject, new Statement(PolicyEffect::ALLOW, ['posts:view'])));
+        $failing = new Statement(PolicyEffect::ALLOW, ['posts:view'], null, ['eq' => ['input.type' => 'other']]);
 
-        self::assertSame([], $screen->screen($sources, 'posts:*'));
+        self::assertSame([QueryAuthorizer::NO_ROW, QueryAuthorizer::NO_ROW, false], $this->terms($screen, $subject, $failing));
         self::assertSame([], $screen->refusals());
     }
 
     /**
-     * Every statement a check would weigh is screened: a deny, a resource
-     * policy's allow naming the subject, a guardrail's and a boundary's allows;
-     * each refusal is kept once however often it is found.
+     * A literal id compares the key, a longer prefix the start of its text, a
+     * pattern of another type names no row, and `not_resources` names, both
+     * matching and applying to, the rows none of its patterns covers.
      *
      * @return void
      */
-    public function testEveryStatementACheckWouldWeighIsScreened(): void
+    public function testPatternsCompareTheKey(): void
     {
         [$screen, $subject] = $this->screen();
-        $record             = ['posts:1'];
-        $cap                = static fn (string $name): Policy => new Policy($name, [new Statement(PolicyEffect::ALLOW, ['*'], $record)]);
+        $key                = DB::connection()->getQueryGrammar()->wrap('scoped_posts.id');
 
-        $sources = $this->sources($subject, [
-            new Policy('deny', [new Statement(PolicyEffect::DENY, ['posts:*'], $record)]),
-            (new Policy('shared', [new Statement(PolicyEffect::ALLOW, ['posts:view'], $record, principals: [$this->reference($subject)])]))->withResource('posts:*'),
-        ], [$cap('guardrail')], [$cap('boundary')]);
+        [$matches, $applies, $isPatterned] = $this->terms($screen, $subject, new Statement(PolicyEffect::ALLOW, ['posts:view'], [self::type() . ':5']));
 
-        self::assertCount(4, $screen->screen($sources, 'posts:*'));
-        self::assertCount(4, $screen->screen($sources, 'posts:*'));
-        $refusals = $screen->refusals();
+        self::assertSame("{$key} = 5", $matches);
+        self::assertSame($matches, $applies);
+        self::assertTrue($isPatterned);
+        $prefixed = new Statement(PolicyEffect::ALLOW, ['posts:view'], [self::type() . ':1*']);
 
-        self::assertSame(['deny#0', 'shared#0 on "posts:*"', 'guardrail#0', 'boundary#0'], \array_map(static fn (Refusal $refusal): ?string => $refusal->statement, $refusals));
-        self::assertSame(\array_fill(0, 4, RefusalReason::RESOURCE_PATTERN), \array_map(static fn (Refusal $refusal): RefusalReason => $refusal->reason, $refusals));
-    }
+        self::assertSame(self::shape()->dialect->startsWith($key, '1'), $this->terms($screen, $subject, $prefixed)[0]);
+        self::assertSame(QueryAuthorizer::NO_ROW, $this->terms($screen, $subject, new Statement(PolicyEffect::DENY, ['posts:view'], ['other:5']))[1]);
+        $negated = new Statement(PolicyEffect::DENY, ['posts:view'], null, notResources: [self::type() . ':5']);
 
-    /**
-     * A weighed statement naming another type, or a record of it, is refused
-     * even though it covers no record of the type: only patterns covering every
-     * record compile.
-     *
-     * @return void
-     */
-    public function testAnotherTypesPatternIsRefused(): void
-    {
-        [$screen, $subject] = $this->screen();
-
-        $screen->screen($this->sources($subject, [new Policy('other', [
-            new Statement(PolicyEffect::DENY, ['posts:view'], ['other:*']),
-            new Statement(PolicyEffect::DENY, ['posts:view'], ['other:5']),
-            new Statement(PolicyEffect::DENY, ['posts:view'], null, notResources: ['po*', 'x*']),
-            new Statement(PolicyEffect::DENY, ['posts:view'], ['p*', 'posts:*', '*']),
-        ])]), 'posts:*');
-
-        self::assertSame(['other#0', 'other#1', 'other#2'], \array_map(static fn (Refusal $refusal): ?string => $refusal->statement, $screen->refusals()));
-        self::assertSame(\array_fill(0, 3, RefusalReason::RESOURCE_PATTERN), \array_map(static fn (Refusal $refusal): RefusalReason => $refusal->reason, $screen->refusals()));
-    }
-
-    /**
-     * The screen says a statement matches a pattern against the identifier only
-     * when a pattern of a weighed statement resolves: not one whose reference
-     * cannot be resolved or resolves to a NUL byte, and not one with no
-     * pattern; neither is refused.
-     *
-     * @return void
-     */
-    public function testAPatternCountsOnlyWhenItResolves(): void
-    {
-        [$screen, $subject] = $this->screen();
-        $unresolved         = $this->sources($subject, [new Policy('unresolved', [
-            new Statement(PolicyEffect::DENY, ['posts:view'], ['${input.missing}:*', '${input.nul}']),
-            new Statement(PolicyEffect::ALLOW, ['posts:view']),
-        ])]);
-
-        self::assertSame([], $screen->screen($unresolved, 'posts:*'));
-        $typed   = $this->sources($subject, [new Policy('typed', [new Statement(PolicyEffect::ALLOW, ['posts:view'], ['${input.type}:*'])])]);
-        $negated = $this->sources($subject, [new Policy('negated', [new Statement(PolicyEffect::DENY, ['posts:view'], null, notResources: ['posts:*'])])]);
-
-        self::assertSame(['typed#0'], \array_map(static fn (StatementReference $reference): string => $reference->toString(), $screen->screen($typed, 'posts:*')));
-        self::assertCount(1, $screen->screen($negated, 'posts:*'));
+        self::assertSame(["NOT COALESCE({$key} = 5, 1 = 1)", "NOT COALESCE({$key} = 5, 1 = 1)", true], $this->terms($screen, $subject, $negated));
+        self::assertSame(QueryAuthorizer::NO_ROW, $this->terms($screen, $subject, new Statement(PolicyEffect::DENY, ['posts:view'], null, notResources: ['*']))[1]);
         self::assertSame([], $screen->refusals());
     }
 
     /**
-     * A weighed statement that cannot be evaluated is refused; one whose
-     * resources cover no record of the type is not, since a check never reaches
-     * its conditions.
+     * A pattern whose reference cannot be resolved, or resolves to a NUL byte,
+     * makes the target undecidable unless another pattern covers the row: a
+     * deny applies, an allow does not match, and no pattern is matched against
+     * the identifier when none resolves.
      *
      * @return void
      */
-    public function testAnInvalidStatementIsRefusedWhenItsConditionsAreReached(): void
+    public function testAnUnresolvedPatternIsUndecidable(): void
+    {
+        [$screen, $subject] = $this->screen();
+        $unresolved         = new Statement(PolicyEffect::DENY, ['posts:view'], ['${input.missing}:*', '${input.nul}']);
+        $negated            = new Statement(PolicyEffect::ALLOW, ['posts:view'], null, notResources: ['${input.missing}']);
+
+        self::assertSame([QueryAuthorizer::NO_ROW, QueryAuthorizer::EVERY_ROW, false], $this->terms($screen, $subject, $unresolved));
+        self::assertSame([QueryAuthorizer::NO_ROW, QueryAuthorizer::EVERY_ROW, false], $this->terms($screen, $subject, $negated));
+        self::assertSame(QueryAuthorizer::EVERY_ROW, $this->terms($screen, $subject, new Statement(PolicyEffect::ALLOW, ['posts:view'], ['${input.type}:*']))[0]);
+
+        $key   = DB::connection()->getQueryGrammar()->wrap('scoped_posts.id');
+        $mixed = new Statement(PolicyEffect::ALLOW, ['posts:view'], ['${input.missing}', self::type() . ':5']);
+
+        self::assertSame(["{$key} = 5", QueryAuthorizer::EVERY_ROW, true], $this->terms($screen, $subject, $mixed));
+        self::assertSame([], $screen->refusals());
+    }
+
+    /**
+     * Conditions that cannot be decided keep an allow from matching but let a
+     * deny apply, wherever its target does.
+     *
+     * @return void
+     */
+    public function testUndecidableConditionsApplyADeny(): void
+    {
+        [$screen, $subject] = $this->screen();
+        $statement          = new Statement(PolicyEffect::DENY, ['posts:view'], [self::type() . ':5'], ['eq' => ['input.absent' => 'x']]);
+
+        [$matches, $applies] = $this->terms($screen, $subject, $statement);
+
+        self::assertSame(QueryAuthorizer::NO_ROW, $matches);
+        self::assertStringEndsWith('= 5', $applies);
+    }
+
+    /**
+     * A pattern no key can be compared with is refused, naming no row though a
+     * pattern resolved, and so is a statement that cannot be evaluated once its
+     * target names a row; one whose target names none is not.
+     *
+     * @return void
+     */
+    public function testWhatCannotBeCompiledIsRefused(): void
     {
         [$screen, $subject] = $this->screen();
         $broken             = ['no_such_operator' => ['input.x' => 1]];
 
-        $screen->screen($this->sources($subject, [new Policy('broken', [
-            new Statement(PolicyEffect::ALLOW, ['posts:view'], null, $broken, notResources: ['*']),
-            new Statement(PolicyEffect::ALLOW, ['posts:view'], null, $broken),
-        ])]), 'posts:*');
+        $question = $this->terms($screen, $subject, new Statement(PolicyEffect::DENY, ['posts:view'], [self::type() . ':?']), 'question');
+        $this->terms($screen, $subject, new Statement(PolicyEffect::ALLOW, ['posts:view'], null, $broken, notResources: ['*']), 'unreached');
+        $this->terms($screen, $subject, new Statement(PolicyEffect::ALLOW, ['posts:view'], ['other:1'], $broken), 'elsewhere');
+        $this->terms($screen, $subject, new Statement(PolicyEffect::ALLOW, ['posts:view'], null, $broken), 'broken');
+        $this->terms($screen, $subject, new Statement(PolicyEffect::ALLOW, ['posts:view'], [self::type() . ':9223372036854775808']), 'beyond');
 
-        self::assertSame(['broken#1'], \array_map(static fn (Refusal $refusal): ?string => $refusal->statement, $screen->refusals()));
-        self::assertSame(RefusalReason::INVALID_STATEMENT, $screen->refusals()[0]->reason);
+        $refused = \array_map(static fn (Refusal $refusal): array => [$refusal->statement, $refusal->reason], $screen->refusals());
+
+        $expected = [['question#0', RefusalReason::RESOURCE_PATTERN], ['broken#0', RefusalReason::INVALID_STATEMENT], ['beyond#0', RefusalReason::RESOURCE_PATTERN]];
+
+        self::assertSame($expected, $refused);
+        self::assertSame([QueryAuthorizer::NO_ROW, QueryAuthorizer::NO_ROW, true], $question);
     }
 
     /**
      * Without a context factory a check reads only what the caller passes and
      * the subject's built-ins, so only a read of the resource is refused,
-     * whether in a condition's key, a string operand or a pattern.
+     * whether in a condition's key, a string operand or a pattern; a refused
+     * statement names no row, and no pattern is matched for it.
      *
      * @return void
      */
@@ -168,16 +164,15 @@ final class StatementScreenTest extends TestCase
     {
         [$screen, $subject] = $this->screen();
 
-        $screen->screen($this->sources($subject, [new Policy('reads', [
-            new Statement(PolicyEffect::DENY, ['posts:view'], null, ['eq' => ['plan.tier' => 'pro', 'subject.id' => '${request.ip}']]),
-            new Statement(PolicyEffect::DENY, ['posts:view'], null, ['eq' => ['input.owner' => '${resource.owner}']]),
-            new Statement(PolicyEffect::DENY, ['posts:view'], ['posts:${resource.id}']),
-        ])]), 'posts:*');
+        $this->terms($screen, $subject, new Statement(PolicyEffect::DENY, ['posts:view'], null, ['eq' => ['plan.tier' => 'pro', 'subject.id' => '${request.ip}']]));
+        $owner = $this->terms($screen, $subject, new Statement(PolicyEffect::DENY, ['posts:view'], null, ['eq' => ['input.owner' => '${resource.owner}']]));
+        $this->terms($screen, $subject, new Statement(PolicyEffect::DENY, ['posts:view'], [self::type() . ':${resource.id}']));
 
         self::assertSame(['resource.owner', 'resource.id'], \array_map(static fn (Refusal $refusal): ?string => $refusal->key, $screen->refusals()));
         $reasons = \array_map(static fn (Refusal $refusal): RefusalReason => $refusal->reason, $screen->refusals());
 
         self::assertSame([RefusalReason::RESOURCE_NAMESPACE, RefusalReason::RESOURCE_NAMESPACE], $reasons);
+        self::assertSame([QueryAuthorizer::NO_ROW, QueryAuthorizer::NO_ROW, false], $owner);
     }
 
     /**
@@ -198,8 +193,8 @@ final class StatementScreenTest extends TestCase
         $factory    = $this->app?->make(CheckContextFactory::class);
         $conditions = ['authentication_requirement' => ['authentication' => ['multifactor' => []]], 'eq' => ['resource.status' => 'draft']];
 
-        foreach ([$screen, new StatementScreen('posts:view', self::TYPE, $subject, $factory)] as $screening) {
-            $screening->screen($this->sources($subject, [new Policy('step-up', [new Statement(PolicyEffect::DENY, ['posts:view'], null, $conditions)])]), 'posts:*');
+        foreach ([$screen, new StatementScreen('posts:view', self::shape(), $subject, $factory)] as $screening) {
+            $this->terms($screening, $subject, new Statement(PolicyEffect::DENY, ['posts:view'], null, $conditions));
 
             $refused = \array_map(static fn (Refusal $refusal): array => [$refusal->key, $refusal->reason], $screening->refusals());
 
@@ -209,7 +204,8 @@ final class StatementScreenTest extends TestCase
 
     /**
      * Without a context factory a check judges no requirement through a seam,
-     * so a statement whose only condition is one compiles.
+     * so a statement whose only condition is one compiles, unmet on every row,
+     * its pattern still matched against the identifier.
      *
      * @return void
      */
@@ -218,10 +214,9 @@ final class StatementScreenTest extends TestCase
         [$screen, $subject] = $this->screen();
 
         $requirement = ['authentication_requirement' => ['authentication' => ['multifactor' => []]]];
-        $statement   = new Statement(PolicyEffect::ALLOW, ['posts:view'], ['posts:*'], $requirement);
-        $patterned   = $screen->screen($this->sources($subject, [new Policy('step-up', [$statement])]), 'posts:*');
+        $statement   = new Statement(PolicyEffect::ALLOW, ['posts:view'], [self::type() . ':*'], $requirement);
 
-        self::assertCount(1, $patterned);
+        self::assertSame([QueryAuthorizer::NO_ROW, QueryAuthorizer::NO_ROW, true], $this->terms($screen, $subject, $statement));
         self::assertSame([], $screen->refusals());
     }
 
@@ -235,37 +230,43 @@ final class StatementScreenTest extends TestCase
         $user    = StubIdentity::create(['id' => 'u1']);
         $subject = new Subject($user, $user);
 
-        return [new StatementScreen('posts:view', self::TYPE, $subject), $subject];
+        return [new StatementScreen('posts:view', self::shape(), $subject), $subject];
     }
 
     /**
-     * Return the sources of a check about the subject, with the policies,
-     * guardrails and boundaries given, and the caller's input.
+     * Return the terms the screen compiles for the statement, as a policy of
+     * the name given holds it, with the caller's input.
      *
+     * @param  \SineMacula\Laravel\Authorization\Query\StatementScreen  $screen
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
-     * @param  list<\SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
-     * @param  list<\SineMacula\Laravel\Authorization\Evaluation\Policy>|null  $guardrails
-     * @param  list<\SineMacula\Laravel\Authorization\Evaluation\Policy>  $boundaries
-     * @return \SineMacula\Laravel\Authorization\Evaluation\CheckSources
+     * @param  \SineMacula\Laravel\Authorization\Evaluation\Statement  $statement
+     * @param  string  $policy
+     * @return array{string, string, bool}
      */
-    private function sources(Subject $subject, array $policies, ?array $guardrails = [], array $boundaries = []): CheckSources
+    private function terms(StatementScreen $screen, Subject $subject, Statement $statement, string $policy = 'policy'): array
     {
-        $context = new CheckContext(['input' => ['type' => self::TYPE, 'nul' => "a\0b"]], [], null, new PrincipalSelectors($subject));
+        $context = new CheckContext(['input' => ['type' => self::type(), 'nul' => "a\0b"]], [], null, new PrincipalSelectors($subject));
 
-        return new CheckSources($policies, $guardrails, $boundaries, $context, static fn (): ?string => null, new SessionCaps);
+        return $screen->terms(new StatementReference($policy, 0), $statement, $context);
     }
 
     /**
-     * Return the subject's reference, as a selector names it.
+     * Return the shape of the posts screened.
      *
-     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @return \SineMacula\Laravel\Authorization\Query\ResourceShape
+     */
+    private static function shape(): ResourceShape
+    {
+        return ResourceShape::of(new ScopedPost, 'posts:view', new SchemaInspector);
+    }
+
+    /**
+     * Return the morph type of the posts screened.
+     *
      * @return string
      */
-    private function reference(Subject $subject): string
+    private static function type(): string
     {
-        /** @var \Tests\Feature\Stubs\StubIdentity $user */
-        $user = $subject->subject;
-
-        return $user->getMorphClass() . ':u1';
+        return (new ScopedPost)->getMorphClass();
     }
 }

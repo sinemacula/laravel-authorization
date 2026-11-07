@@ -50,6 +50,11 @@ interface TenantTree
      * `tenant_type` and `tenant_id`, for a scope to join or nest, never a list
      * of keys loaded into PHP.
      *
+     * `subtree(T)` selects exactly the string forms (`tenant_type`,
+     * `tenant_id`) of every R with `isWithin(R, T)`, and does not depend on
+     * `TenantScope`. `whereAuthorized()` nests it whole to tell the rows of a
+     * subtree, so it must run on the connection of the models it scopes.
+     *
      * @param  \SineMacula\Laravel\Authorization\Support\Reference  $tenant
      * @return \Illuminate\Contracts\Database\Query\Builder
      */

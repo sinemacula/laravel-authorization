@@ -109,4 +109,66 @@ final class SchemaInspectorTest extends TestCase
         self::assertTrue((new SchemaInspector)->isUtf8($connection, $real));
         self::assertInstanceOf(Connection::class, $connection);
     }
+
+    /**
+     * Whether a column compares bytes and whether an integer key holds only
+     * what PHP reads are asked of the dialect once per column; a column the
+     * table lacks is neither.
+     *
+     * @return void
+     */
+    public function testAColumnsExactnessIsAskedOnce(): void
+    {
+        $connection = DB::connection();
+        $dialect    = \Mockery::mock(Dialect::class);
+        $inspector  = new SchemaInspector;
+
+        $dialect->shouldReceive('isExactCollation')->once()->andReturn(false);
+        $dialect->shouldReceive('isExactInteger')->once()->andReturn(true);
+
+        self::assertFalse($inspector->isExactCollation($connection, $dialect, 'scoped_documents', 'code'));
+        self::assertFalse($inspector->isExactCollation($connection, $dialect, 'scoped_documents', 'code'));
+        self::assertTrue($inspector->isExactInteger($connection, $dialect, 'scoped_posts', 'id'));
+        self::assertTrue($inspector->isExactInteger($connection, $dialect, 'scoped_posts', 'id'));
+        self::assertFalse($inspector->isExactCollation($connection, $dialect, 'scoped_documents', 'missing'));
+        self::assertFalse($inspector->isExactInteger($connection, $dialect, 'scoped_posts', 'missing'));
+    }
+
+    /**
+     * On PostgreSQL a schema-qualified table is found with the connection's
+     * prefix before the table's own name, as Laravel finds it, so a
+     * nondeterministic column there is not exact; a table not found is not
+     * exact either.
+     *
+     * @return void
+     */
+    public function testAPrefixedTableInASchemaIsFoundOnPostgres(): void
+    {
+        if (DB::connection()->getDriverName() !== 'pgsql') {
+            self::markTestSkipped('The relation lookup is PostgreSQL\'s.');
+        }
+
+        DB::statement('CREATE COLLATION IF NOT EXISTS authz_folded (provider = icu, locale = \'und-u-ks-level2\', deterministic = false)');
+        DB::statement('CREATE SCHEMA IF NOT EXISTS authz_probe');
+        DB::statement('CREATE TABLE authz_probe.pre_docs (folded varchar(191) COLLATE authz_folded, plain varchar(191), id integer)');
+
+        // A copy of the connection, in the test's own transaction, with a
+        // prefix.
+        $prefixed = clone DB::connection();
+        $dialect  = Dialects::for('pgsql');
+
+        self::assertInstanceOf(Connection::class, $prefixed);
+
+        $prefixed->setTablePrefix('pre_');
+
+        self::assertNotNull($dialect);
+        self::assertFalse($dialect->isExactCollation($prefixed, 'authz_probe.docs', ['name' => 'folded']));
+        self::assertTrue($dialect->isExactCollation($prefixed, 'authz_probe.docs', ['name' => 'plain']));
+        self::assertTrue($dialect->isExactCollation($prefixed, 'authz_probe.docs', ['name' => 'id']));
+        self::assertFalse($dialect->isExactCollation($prefixed, 'authz_probe.missing', ['name' => 'plain']));
+        self::assertFalse($dialect->isExactCollation($prefixed, 'authz_probe.docs', ['name' => 'missing']));
+        self::assertFalse((new SchemaInspector)->isExactCollation($prefixed, $dialect, 'authz_probe.docs', 'folded'));
+
+        DB::statement('DROP SCHEMA authz_probe CASCADE');
+    }
 }

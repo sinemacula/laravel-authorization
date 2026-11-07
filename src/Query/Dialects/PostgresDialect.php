@@ -11,7 +11,7 @@ use SineMacula\Laravel\Authorization\Query\Enums\ColumnKind;
 use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
 
 /**
- * The SQL `whereAuthorized()` writes on PostgreSQL.
+ * The SQL an authorized scope writes on PostgreSQL.
  *
  * A value is compared through the UTF-8 bytes of its text, `convert_to(CAST(x
  * AS TEXT), 'UTF8')`, which for an integer are its decimal digits and for a
@@ -191,6 +191,141 @@ final readonly class PostgresDialect implements Dialect
             $kind === ColumnKind::INTEGER && (string) (int) $value === $value => "{$column} = {$value}",
             $kind === ColumnKind::UUID    && $isUuid                          => "{$column} = '{$value}'",
             default                                                           => QueryAuthorizer::NO_ROW,
+        };
+    }
+
+    /**
+     * Determine whether the column compares byte for byte: it has no collation,
+     * or a deterministic one, under which only equal bytes are equal. The table
+     * is found as Laravel finds it, its prefix put before the table's own name,
+     * after any schema; a table or column not found there is not exact.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  string  $table
+     * @param  array<string, mixed>  $column
+     * @return bool
+     */
+    #[\Override]
+    public function isExactCollation(Connection $connection, string $table, array $column): bool
+    {
+        $segments = \explode('.', $table);
+
+        if (\count($segments) > 2) {
+            return false;
+        }
+
+        $quoted   = static fn (string $part): string => '"' . \str_replace('"', '""', $part) . '"';
+        $name     = $connection->getTablePrefix() . \array_pop($segments);
+        $relation = \implode('.', \array_map($quoted, [...$segments, $name]));
+        $row      = $connection->selectOne(
+            'select a.attcollation = 0 or c.collisdeterministic as exact from pg_catalog.pg_attribute a'
+            . ' left join pg_catalog.pg_collation c on c.oid = a.attcollation'
+            . ' where a.attrelid = to_regclass(CAST(? AS text)) and a.attname = ? and a.attnum > 0 and not a.attisdropped',
+            [$relation, \is_string($column['name'] ?? null) ? $column['name'] : ''],
+        );
+
+        return $row !== null && (((array) $row)['exact'] ?? false) === true;
+    }
+
+    /**
+     * Determine whether an integer key column holds only integers PHP reads as
+     * they are, which every PostgreSQL integer type does.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  string  $table
+     * @param  array<string, mixed>  $column
+     * @return bool
+     */
+    #[\Override]
+    public function isExactInteger(Connection $connection, string $table, array $column): bool
+    {
+        return true;
+    }
+
+    /**
+     * Return the UTF-8 bytes of the expression's text: an integer's decimal
+     * digits, a uuid's canonical lower-case form, and text as it is.
+     *
+     * @param  string  $expression
+     * @return string
+     */
+    #[\Override]
+    public function textImage(string $expression): string
+    {
+        return "convert_to(CAST({$expression} AS TEXT), 'UTF8')";
+    }
+
+    /**
+     * Return a `bytea` of the value's bytes.
+     *
+     * @param  string  $value
+     * @return string
+     */
+    #[\Override]
+    public function bytes(string $value): string
+    {
+        return 'decode(\'' . \bin2hex($value) . '\', \'hex\')';
+    }
+
+    /**
+     * Return the condition a row's column meets when the UTF-8 bytes of its
+     * text start with the value's.
+     *
+     * @param  string  $column
+     * @param  string  $value
+     * @return string
+     */
+    #[\Override]
+    public function startsWith(string $column, string $value): string
+    {
+        return 'substring(' . $this->textImage($column) . ' from 1 for ' . \strlen($value) . ') = ' . $this->bytes($value);
+    }
+
+    /**
+     * Return the condition an attachment's key column meets when it holds the
+     * key's text, compared byte for byte, as its deterministic collation
+     * compares it; or null when the collation is nondeterministic, which no
+     * comparison here can follow without overriding it.
+     *
+     * @param  string  $attached
+     * @param  string  $key
+     * @param  array<string, mixed>  $column
+     * @param  bool  $isExact
+     * @return string|null
+     */
+    #[\Override]
+    public function equalsKeyText(string $attached, string $key, array $column, bool $isExact): ?string
+    {
+        return $isExact ? "convert_to({$attached}, 'UTF8') = " . $this->textImage($key) : null;
+    }
+
+    /**
+     * Return a literal PostgreSQL reads as it reads the value bound, which it
+     * receives as text of no type, given one by where it is used: null; the
+     * digits of an integer, or of a boolean as Laravel binds it, quoted; and a
+     * string of UTF-8 with no NUL byte, the only strings PostgreSQL takes
+     * bound, as a string of no type with every character escaped by its code
+     * point (`U&'\0061'`).
+     *
+     * @param  mixed  $value
+     * @return string|null
+     */
+    #[\Override]
+    public function parameter(mixed $value): ?string
+    {
+        $isText  = \is_string($value) && \mb_check_encoding($value, 'UTF-8') && !\str_contains($value, "\0");
+        $escaped = static function (string $character): string {
+            $point = \mb_ord($character, 'UTF-8');
+
+            return $point > 0xFFFF ? \sprintf('\+%06X', $point) : \sprintf('\%04X', $point);
+        };
+
+        return match (true) {
+            $value === null  => 'NULL',
+            \is_bool($value) => $value ? '\'1\'' : '\'0\'',
+            \is_int($value)  => "'{$value}'",
+            $isText          => 'U&\'' . \implode('', \array_map($escaped, \mb_str_split($value, 1, 'UTF-8'))) . '\'',
+            default          => null,
         };
     }
 }

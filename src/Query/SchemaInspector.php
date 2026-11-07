@@ -8,9 +8,11 @@ use Illuminate\Database\Connection;
 use SineMacula\Laravel\Authorization\Query\Contracts\Dialect;
 
 /**
- * Reads what `whereAuthorized()` needs to know about a model's table and
- * connection, once for each: the columns of the table, as the schema builder
- * describes them, and whether the connection is UTF-8.
+ * Reads what an authorized scope needs to know about a model's table and
+ * connection, and about the authorization tables, once for each: the columns of
+ * a table, as the schema builder describes them, whether a column compares byte
+ * for byte, whether an integer key holds only what PHP reads, and whether the
+ * connection is UTF-8.
  *
  * The service provider binds it scoped, so a request or job reads each table
  * and connection once however many queries it scopes, and the next one reads
@@ -28,6 +30,9 @@ final class SchemaInspector
 
     /** @var array<string, bool> Whether each connection read is UTF-8, by name. */
     private array $utf8 = [];
+
+    /** @var array<string, bool> Whether each column read is exact, keyed by what is asked, connection, table and column. */
+    private array $exact = [];
 
     /**
      * Return the columns of the table, keyed by name.
@@ -51,6 +56,40 @@ final class SchemaInspector
     public function isUtf8(Connection $connection, Dialect $dialect): bool
     {
         return $this->utf8[(string) $connection->getName()] ??= $dialect->isUtf8($connection);
+    }
+
+    /**
+     * Determine whether the column of the table compares byte for byte, as the
+     * dialect asks it; a missing column does not.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  \SineMacula\Laravel\Authorization\Query\Contracts\Dialect  $dialect
+     * @param  string  $table
+     * @param  string  $column
+     * @return bool
+     */
+    public function isExactCollation(Connection $connection, Dialect $dialect, string $table, string $column): bool
+    {
+        $described = $this->columns($connection, $table)[$column] ?? null;
+
+        return $this->exact["collation\0{$connection->getName()}\0{$table}\0{$column}"] ??= $described !== null && $dialect->isExactCollation($connection, $table, $described);
+    }
+
+    /**
+     * Determine whether the integer column of the table holds only integers PHP
+     * reads as they are, as the dialect asks it; a missing column does not.
+     *
+     * @param  \Illuminate\Database\Connection  $connection
+     * @param  \SineMacula\Laravel\Authorization\Query\Contracts\Dialect  $dialect
+     * @param  string  $table
+     * @param  string  $column
+     * @return bool
+     */
+    public function isExactInteger(Connection $connection, Dialect $dialect, string $table, string $column): bool
+    {
+        $described = $this->columns($connection, $table)[$column] ?? null;
+
+        return $this->exact["integer\0{$connection->getName()}\0{$table}\0{$column}"] ??= $described !== null && $dialect->isExactInteger($connection, $table, $described);
     }
 
     /**
