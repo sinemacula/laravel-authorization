@@ -7,20 +7,23 @@ namespace SineMacula\Laravel\Authorization;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Translation\Translator;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Collection;
 use SineMacula\Laravel\Authorization\Cache\ResolutionCache;
+use SineMacula\Laravel\Authorization\Concerns\BuildsScopedManagers;
 use SineMacula\Laravel\Authorization\Concerns\HasContainerInstance;
 use SineMacula\Laravel\Authorization\Config\ConfigValidator;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Contracts\AuthorizableTenant;
 use SineMacula\Laravel\Authorization\Contracts\PolicyResolver;
 use SineMacula\Laravel\Authorization\Contracts\SubjectResolver;
+use SineMacula\Laravel\Authorization\Evaluation\CheckBatch;
+use SineMacula\Laravel\Authorization\Evaluation\CheckInput;
 use SineMacula\Laravel\Authorization\Evaluation\Decision;
 use SineMacula\Laravel\Authorization\Evaluation\DecisionPipeline;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\DecisionReason;
 use SineMacula\Laravel\Authorization\Evaluation\LastDecisionStore;
 use SineMacula\Laravel\Authorization\Evaluation\PolicyEvaluator;
 use SineMacula\Laravel\Authorization\Events\AuthorizationFailed;
-use SineMacula\Laravel\Authorization\Events\DecisionEvaluated;
 use SineMacula\Laravel\Authorization\Exceptions\AuthorizationException;
 use SineMacula\Laravel\Authorization\Exceptions\InsufficientAuthenticationException;
 use SineMacula\Laravel\Authorization\Query\AuthorizedQuery;
@@ -37,22 +40,25 @@ use SineMacula\Laravel\Authorization\Support\ResourceReferences;
  *
  * Coordinates subject resolution, the decision and its recording into a single
  * API (AUTHZ-9.5): `can`, `cannot`, `authorize`, `check`, `any`, `all` and
- * `explain`, on the current subject or on a scoped clone from `for()`,
- * `forUser()`, `withPolicies()` or `capped()`. `check()` is the one decision
- * entry point (D22): every other form adapts it, and it alone records the
- * decision and reports it. The decision itself is made by the manager's
- * `DecisionPipeline`, which admits the check (the subject, resource and tenant
- * stages) and gathers every source, the session caps included; the policy
- * evaluator runs the rest of the stages in AUTHZ-7.1's order, the denies, the
- * caps, the allows and the implicit deny, each recorded in the decision's trace
- * for audit consumers.
+ * `explain`, and, over many resources at once (AUTHZ-10.3), `checkMany`,
+ * `canEach` and `filterAuthorized`, on the current subject or on a scoped clone
+ * from `for()`, `forUser()`, `withPolicies()` or `capped()`. `check()` is the
+ * one decision entry point (D22) and `checkMany()` the one bulk entry point,
+ * `check()` being a batch of one, so a check is decided the same way however it
+ * is asked: every other form adapts one of them, and they alone record each
+ * decision and report it (see `CheckBatch`). The decision itself is made by the
+ * manager's `DecisionPipeline`, which admits the check (the subject, resource
+ * and tenant stages) and gathers every source, the session caps included; the
+ * policy evaluator runs the rest of the stages in AUTHZ-7.1's order, the
+ * denies, the caps, the allows and the implicit deny, each recorded in the
+ * decision's trace for audit consumers.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
  */
 final class AuthorizationManager
 {
-    use HasContainerInstance;
+    use BuildsScopedManagers, HasContainerInstance;
 
     /** @var \SineMacula\Laravel\Authorization\Subject|null The subject named through `for()` or `forUser()`, null for a guest. */
     private ?Subject $subjectOverride = null;
@@ -238,8 +244,9 @@ final class AuthorizationManager
      * Decide the action for the current subject, the one core decision every
      * other form adapts (D22): `can()` and `cannot()` read whether it is
      * allowed, `any()` and `all()` read it for each action they decide, and
-     * `authorize()` throws when it is not. The decision is recorded as the last
-     * decision and reported with `DecisionEvaluated`.
+     * `authorize()` throws when it is not. It is `checkMany()` given one check,
+     * so a check is decided the same way on its own or in a batch. The decision
+     * is recorded as the last decision and reported with `DecisionEvaluated`.
      *
      * The context is what the caller passes, which a policy reads under `input`
      * (`['post' => ['status' => 'draft']]` is `input.post.status`) and never
@@ -263,10 +270,93 @@ final class AuthorizationManager
      */
     public function check(string $action, mixed $resource = null, array $context = []): Decision
     {
-        $subject   = $this->currentSubject();
-        $reference = ResourceReferences::of($resource);
+        return $this->checkMany([new CheckInput($action, $resource, $context)])[0];
+    }
 
-        return $this->record($subject, $action, ResourceReferences::identifierOf($reference), $context, $this->pipeline->decide($subject, $action, $reference, $context));
+    /**
+     * Decide each of the checks for the current subject, the one core bulk
+     * decision (D22, AUTHZ-10.3), and return the decisions keyed as the checks
+     * are, in their order, one for every check, a check repeated included.
+     *
+     * Each check is decided exactly as `check()` decides it, through the same
+     * stages, so its decision is the one `check()` would make, but what the
+     * checks share is read once: the subject, and what its grants, policies,
+     * boundaries, caps and the guardrails resolve to, once in each scope the
+     * checks are decided in, and the tenants, attached policies and attributes
+     * of the resources in bulk, a chunk of `authorization.bulk.chunk_size` at a
+     * time (see `CheckBatch`). Each decision is recorded as the last decision
+     * and reported with its own `DecisionEvaluated` as soon as it is made, in
+     * the order of the checks, so the last decision is the last check
+     * completed, and an empty list records nothing. A check that throws, as
+     * `check()` would, stops the batch there, the checks before it recorded.
+     * Every check is refused with `InvalidCheckArgumentException`, before any
+     * is decided, when one is not a `CheckInput`.
+     *
+     * @template TKey of array-key
+     *
+     * @param  array<TKey, \SineMacula\Laravel\Authorization\Evaluation\CheckInput>  $checks
+     * @return array<TKey, \SineMacula\Laravel\Authorization\Evaluation\Decision>
+     *
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed
+     * @throws \SineMacula\Laravel\Authorization\Exceptions\InvalidCheckArgumentException
+     *
+     * @phpstan-ignore throws.unusedType
+     */
+    public function checkMany(array $checks): array
+    {
+        return (new CheckBatch($this->pipeline, $this->lastDecisionStore, $this->subjectResolver, $this->events))->decide($this->currentSubject(), $checks);
+    }
+
+    /**
+     * Determine, for each resource, whether the current subject is allowed the
+     * action on it, keyed as the resources are, through `checkMany()`: every
+     * resource is decided, none stopping the rest, and recorded and reported as
+     * `check()` records it. An `insufficient_authentication` decision is a
+     * refusal. No resource gives none.
+     *
+     * @template TKey of array-key
+     *
+     * @param  string  $action
+     * @param  iterable<TKey, mixed>  $resources
+     * @param  array<string, mixed>  $context
+     * @return array<TKey, bool>
+     */
+    public function canEach(string $action, iterable $resources, array $context = []): array
+    {
+        $checks = [];
+
+        foreach ($resources as $key => $resource) {
+            $checks[$key] = new CheckInput($action, $resource, $context);
+        }
+
+        return \array_map(static fn (Decision $decision): bool => $decision->isAllowed(), $this->checkMany($checks));
+    }
+
+    /**
+     * Return the resources the current subject is allowed the action on, with
+     * their keys, in their order, as given, through `canEach()`: a collection
+     * of the same class for a collection, else an array. Every resource is
+     * decided, none stopping the rest, and recorded and reported as `check()`
+     * records it. An `insufficient_authentication` decision is a refusal. No
+     * resource gives none.
+     *
+     * @param  string  $action
+     * @param  iterable<array-key, mixed>  $resources
+     * @param  array<string, mixed>  $context
+     * @return ($resources is \Illuminate\Support\Collection<array-key, mixed> ? \Illuminate\Support\Collection<array-key, mixed> : array<array-key, mixed>)
+     */
+    public function filterAuthorized(string $action, iterable $resources, array $context = []): array|Collection
+    {
+        if ($resources instanceof Collection) {
+            $allowed = $this->canEach($action, $resources->all(), $context);
+
+            return $resources->filter(static fn (mixed $resource, int|string $key): bool => $allowed[$key]);
+        }
+
+        $items   = \is_array($resources) ? $resources : \iterator_to_array($resources);
+        $allowed = $this->canEach($action, $items, $context);
+
+        return \array_filter($items, static fn (int|string $key): bool => $allowed[$key], \ARRAY_FILTER_USE_KEY);
     }
 
     /**
@@ -388,76 +478,6 @@ final class AuthorizationManager
     }
 
     /**
-     * Return a scoped manager deciding about the supplied subject.
-     *
-     * The decisions keep the current request's tenant, application and guard,
-     * as the resolver reports them; with no subject resolved, they have none.
-     *
-     * @param  object  $subject
-     * @return self
-     */
-    public function for(object $subject): self
-    {
-        return $this->scopedTo($this->currentSubject()?->withSubject($subject) ?? new Subject($subject, $subject));
-    }
-
-    /**
-     * Return a scoped manager deciding about the subject the resolver
-     * translates the supplied user into: the user Laravel's Gate hands over,
-     * for example. A guest (no user) is no subject, so every check of the
-     * scoped manager denies as `subject_unresolved`, whoever the current
-     * request is about.
-     *
-     * @param  object|null  $user
-     * @return self
-     */
-    public function forUser(?object $user): self
-    {
-        return $this->scopedTo($user === null ? null : $this->subjectResolver->forUser($user));
-    }
-
-    /**
-     * Return a scoped manager that evaluates only the supplied policies,
-     * bypassing the principal's own attached policies, any configured policy
-     * store and the policies attached to the resource. A supplied policy given
-     * a resource (`Policy::withResource()`) is evaluated as a resource policy.
-     * The guardrails, the subject's permission boundaries, the session caps and
-     * its permissions still count, so an override never lifts a cap.
-     *
-     * @param  array<int, \SineMacula\Laravel\Authorization\Evaluation\Policy>  $policies
-     * @return self
-     */
-    public function withPolicies(array $policies): self
-    {
-        $scoped           = clone $this;
-        $scoped->pipeline = $this->pipeline->withPolicies($policies);
-
-        return $scoped;
-    }
-
-    /**
-     * Return a scoped manager whose checks are capped by the supplied actions,
-     * each an action or an action pattern, as a delegated or restricted call is
-     * (AUTHZ-7.5): an action none of them covers is denied at the session stage
-     * as `session_policy`, and an empty list allows nothing.
-     *
-     * A cap grants nothing, so an action it covers is still decided by every
-     * other stage. Capping a capped manager intersects the caps, and the
-     * credential's scopes cap the check too. For a machine without credential
-     * scopes, which is allowed nothing, a cap never stands in for them.
-     *
-     * @param  list<string>  $actions
-     * @return self
-     */
-    public function capped(array $actions): self
-    {
-        $scoped           = clone $this;
-        $scoped->pipeline = $this->pipeline->capped($actions);
-
-        return $scoped;
-    }
-
-    /**
      * Report a change to the application's tenant tree at the tenant: it moved
      * under another parent, or was deleted (AUTHZ-12.8).
      *
@@ -494,41 +514,5 @@ final class AuthorizationManager
     public function currentSubject(): ?Subject
     {
         return $this->isSubjectNamed ? $this->subjectOverride : $this->subjectResolver->resolve();
-    }
-
-    /**
-     * Return a clone of this manager deciding about the supplied subject, or
-     * about no subject when it is null.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
-     * @return self
-     */
-    private function scopedTo(?Subject $subject): self
-    {
-        $scoped                  = clone $this;
-        $scoped->subjectOverride = $subject;
-        $scoped->isSubjectNamed  = true;
-
-        return $scoped;
-    }
-
-    /**
-     * Record the result as the last decision, with the session of the request
-     * when it read an authentication requirement, and dispatch its decision
-     * event when a dispatcher is available.
-     *
-     * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
-     * @param  string  $action
-     * @param  string|null  $resource
-     * @param  array<string, mixed>  $context
-     * @param  \SineMacula\Laravel\Authorization\Evaluation\Decision  $decision
-     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
-     */
-    private function record(?Subject $subject, string $action, ?string $resource, array $context, Decision $decision): Decision
-    {
-        $this->lastDecisionStore->put($decision, $decision->freshness === null ? null : $this->subjectResolver->resolve()?->session);
-        $this->events?->dispatch(new DecisionEvaluated($subject?->subject, $action, $resource, $context, $decision));
-
-        return $decision;
     }
 }

@@ -413,6 +413,47 @@ final class ResourceScopeTest extends TestCase
     }
 
     /**
+     * Preparing groups the resources by the scope a check on each is decided
+     * in, admitting none: those with no tenant where the request is, those of
+     * the active tenant or below it in their own tenant, and those of any other
+     * tenant at platform scope, every group in the request's application; the
+     * request's scope is in place again afterwards.
+     *
+     * @return void
+     */
+    public function testPreparingGroupsTheResourcesByTheScopeEachIsDecidedIn(): void
+    {
+        $this->request($this->account, 'admin');
+
+        $none     = new ResourceReference('post:1');
+        $own      = ResourceReference::record('post', '2', Reference::of($this->account));
+        $again    = ResourceReference::record('post', '3', Reference::of($this->account));
+        $sibling  = ResourceReference::record('post', '4', Reference::of($this->sibling));
+        $org      = ResourceReference::record('post', '5', Reference::of($this->org));
+        $before   = $this->scope();
+        $prepared = [];
+
+        ResourceScope::prepare(['none' => $none, 'own' => $own, 'sibling' => $sibling, 'again' => $again, 'org' => $org], function (array $group) use (&$prepared): void {
+            $prepared[] = [\array_keys($group), ...$this->scope()];
+        });
+
+        self::assertEquals([
+            [['none'], [Reference::of($this->account), Reference::of($this->org)], 'admin'],
+            [['own', 'again'], [Reference::of($this->account), Reference::of($this->org)], 'admin'],
+            [['sibling', 'org'], [], 'admin'],
+        ], $prepared);
+        self::assertEquals($before, $this->scope());
+
+        $prepared = [];
+
+        ResourceScope::prepare([], static function () use (&$prepared): void {
+            $prepared[] = 'called';
+        });
+
+        self::assertSame([], $prepared);
+    }
+
+    /**
      * Make the request one in the given tenant, or none, and application, and
      * return the subject it resolves for the user.
      *

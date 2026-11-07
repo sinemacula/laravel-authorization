@@ -9,7 +9,8 @@ namespace SineMacula\Laravel\Authorization\Exceptions;
  * an argument it cannot honour: a guard that is not an authentication guard, a
  * guard that is also the name of a role, a guard on a check the full decision
  * makes, more arguments than it takes, or, for a middleware, no name to check;
- * and when the manager's `any()` or `all()` is given no action to decide.
+ * when the manager's `any()` or `all()` is given no action to decide; and when
+ * its `checkMany()` is given something other than a `CheckInput` to decide.
  *
  * The arguments come from the application's routes, views and code, so this is
  * a programming error rather than a denial, and Laravel renders it as a 500.
@@ -114,5 +115,16 @@ final class InvalidCheckArgumentException extends \InvalidArgumentException
     public static function noActions(string $method): self
     {
         return new self("{$method}() takes at least one action to decide, none given.");
+    }
+
+    /**
+     * Refuse a bulk check given something other than a check to decide.
+     *
+     * @param  int|string  $key
+     * @return self
+     */
+    public static function notACheck(int|string $key): self
+    {
+        return new self("checkMany() takes a CheckInput for each check to decide; the check at key '{$key}' is not one.");
     }
 }

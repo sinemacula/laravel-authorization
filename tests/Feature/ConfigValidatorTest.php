@@ -282,6 +282,29 @@ final class ConfigValidatorTest extends TestCase
     }
 
     /**
+     * The bulk check chunk size is validated with the rest: the package's
+     * default passes, and a size below 1 is refused under its key.
+     *
+     * @return void
+     */
+    public function testTheBulkChunkSizeIsValidated(): void
+    {
+        $config = $this->authorizationConfig();
+
+        self::assertSame(['chunk_size' => 500], $config['bulk']);
+
+        ConfigValidator::validate($config, $this->app);
+
+        $config['bulk']['chunk_size'] = 0;
+
+        $this->assertRejected(
+            fn () => ConfigValidator::validate($config, $this->app),
+            'authorization.bulk.chunk_size',
+            'expected a whole number of at least 1, got 0 (int).',
+        );
+    }
+
+    /**
      * A `models` block that is not an array is refused.
      *
      * @return void

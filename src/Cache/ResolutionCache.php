@@ -71,7 +71,7 @@ final readonly class ResolutionCache
         /** Namespace prefix for every key written by this cache. */
         private string $prefix = 'authorization',
     ) {
-        $this->memo  = new ResolutionMemo;
+        $this->memo  = new ResolutionMemo(static fn (): string => TenantScope::scopeKey());
         $this->store = $store === null ? null : new VersionedStore($store, $prefix);
     }
 
@@ -182,6 +182,59 @@ final readonly class ResolutionCache
     }
 
     /**
+     * Return the policies attached to each record of the type with the keys,
+     * and to the type, keyed by the record's key, resolving those missing
+     * together on a miss: an entry for each record, as
+     * `rememberResourcePolicies()` keeps it, so a check on any one of them then
+     * reads its own.
+     *
+     * The records missing are resolved in one resolution, which pins the
+     * versions their type's attachments and every resource policy share once
+     * before it reads, and each entry is kept with those versions.
+     *
+     * @param  string  $type
+     * @param  list<string>  $ids
+     * @param  \Closure(\SineMacula\Laravel\Authorization\Cache\ResolutionPins, list<string>): array<array-key, \SineMacula\Laravel\Authorization\Cache\Resolution<mixed>>  $resolve
+     * @return array<array-key, list<\SineMacula\Laravel\Authorization\Evaluation\Policy>>
+     */
+    public function rememberResourcePoliciesMany(string $type, array $ids, \Closure $resolve): array
+    {
+        $found   = [];
+        $missing = [];
+
+        foreach ($ids as $id) {
+            $record  = new Reference($type, $id);
+            $memoKey = 'resource-policies:' . PrincipalCacheKey::for($record);
+
+            /** @var list<\SineMacula\Laravel\Authorization\Evaluation\Policy>|null $policies */
+            $policies = $this->memo->get($memoKey) ?? $this->read($memoKey, $this->key('resource-policies', $record), ResolutionCodec::policies(...));
+
+            if ($policies === null) {
+                $missing[] = $id;
+
+                continue;
+            }
+
+            $found[$id] = $policies;
+        }
+
+        if ($missing === []) {
+            return $found;
+        }
+
+        $pins = new ResolutionPins($this->store);
+        $held = $this->isChainHeldOncePinned($pins);
+
+        foreach ($resolve($pins, $missing) as $id => $resolution) {
+            /** @var list<\SineMacula\Laravel\Authorization\Evaluation\Policy> $policies */
+            $policies   = $this->keep('resource-policies', new Reference($type, (string) $id), $resolution, $pins, $held, ResolutionCodec::encodePolicy(...));
+            $found[$id] = $policies;
+        }
+
+        return $found;
+    }
+
+    /**
      * Return the guardrails that apply in the current scope, resolving them on
      * a miss. The persistent tier holds their documents.
      *
@@ -201,7 +254,9 @@ final readonly class ResolutionCache
     }
 
     /**
-     * Empty the memo because the tenant the tenant scope applies has changed.
+     * Empty the memo because the tenant the tenant scope applies has changed,
+     * or, while a batch is open, set its entries aside for the scope left (see
+     * `batch()`).
      *
      * The memo is keyed without the tenant, so a hit costs no lookup of it: the
      * tenant is held for the request or job like the memo, and the service
@@ -212,7 +267,32 @@ final readonly class ResolutionCache
      */
     public function tenantChanged(): void
     {
-        $this->memo->flush();
+        $this->memo->scopeChanged();
+    }
+
+    /**
+     * Run the callback with a batch open, within which the memo keeps the
+     * entries of each scope apart rather than dropping them when the scope
+     * changes, so a batch of checks moving between scopes reads what each scope
+     * resolves to once. A write still drops every entry, in every scope, so a
+     * later check of the batch reads it afresh. Once the outermost batch
+     * closes, however the callback ends, the memo holds what it would have held
+     * without one.
+     *
+     * @template TResult
+     *
+     * @param  \Closure(): TResult  $callback
+     * @return TResult
+     */
+    public function batch(\Closure $callback): mixed
+    {
+        $this->memo->open();
+
+        try {
+            return $callback();
+        } finally {
+            $this->memo->close();
+        }
     }
 
     /**
@@ -312,11 +392,30 @@ final readonly class ResolutionCache
             $pins->grantee($grantee);
         }
 
-        $held       = $this->isChainHeldOncePinned($pins);
-        $resolution = $resolve($pins);
-        $lifetime   = $this->lifetime($resolution->expiresIn);
+        $held = $this->isChainHeldOncePinned($pins);
 
-        $this->memo->put($memoKey, $resolution->value, $lifetime);
+        return $this->keep($kind, $grantee, $resolve($pins), $pins, $held, $encode);
+    }
+
+    /**
+     * Keep what a resolution found as the entry of the kind for the grantee, in
+     * the memo, and in the store when nothing it read changed as it ran, for no
+     * longer than the configured maximum, or a second before the nearest expiry
+     * of a grant it counts, and return it.
+     *
+     * @param  string  $kind
+     * @param  object  $grantee
+     * @param  \SineMacula\Laravel\Authorization\Cache\Resolution<mixed>  $resolution
+     * @param  \SineMacula\Laravel\Authorization\Cache\ResolutionPins  $pins
+     * @param  bool  $held
+     * @param  (\Closure(mixed): mixed)|null  $encode
+     * @return list<mixed>
+     */
+    private function keep(string $kind, object $grantee, Resolution $resolution, ResolutionPins $pins, bool $held, ?\Closure $encode): array
+    {
+        $lifetime = $resolution->expiresIn === null ? $this->ttl : \min($this->ttl, $resolution->expiresIn - 1);
+
+        $this->memo->put($kind . ':' . PrincipalCacheKey::for($grantee), $resolution->value, $lifetime);
 
         if ($resolution->stable && $held && $pins->isComplete()) {
             $this->store?->put($this->key($kind, $grantee), [
@@ -423,25 +522,8 @@ final readonly class ResolutionCache
      */
     private function key(string $kind, object $grantee): string
     {
-        $tenant      = TenantScope::currentTenant();
-        $below       = TenantScope::isBelowTenant() ? ':below' : '';
-        $application = TenantScope::currentApplication();
-
         return "{$this->prefix}:{$kind}:" . PrincipalCacheKey::for($grantee)
-            . ':' . ($tenant === null ? 'platform' : \implode(':', $tenant) . $below)
-            . ':' . ($application === null ? 'every' : 'app:' . $application)
+            . ':' . TenantScope::scopeKey()
             . (\in_array($kind, self::POLICY_KINDS, true) ? ':limits:' . PolicyLimits::fromConfig()->fingerprint() : '');
-    }
-
-    /**
-     * Return how long an entry lives: the configured maximum, or less when a
-     * grant it counts expires sooner, a second before that grant does.
-     *
-     * @param  int|null  $expiresIn
-     * @return int
-     */
-    private function lifetime(?int $expiresIn): int
-    {
-        return $expiresIn === null ? $this->ttl : \min($this->ttl, $expiresIn - 1);
     }
 }

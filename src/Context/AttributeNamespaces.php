@@ -47,13 +47,16 @@ final readonly class AttributeNamespaces
 
     /**
      * Return the builder of the `subject` namespace when the check has a
-     * subject, and of the `resource` namespace when it names a resource.
+     * subject, and of the `resource` namespace when it names a resource: in a
+     * bulk check, from the values its batch read in bulk (see
+     * `ResourceAttributeBatch`).
      *
      * @param  \SineMacula\Laravel\Authorization\Subject|null  $subject
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
+     * @param  \SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch|null  $batch
      * @return array<string, \Closure(): array<array-key, mixed>>
      */
-    public function builders(?Subject $subject, ?ResourceReference $resource): array
+    public function builders(?Subject $subject, ?ResourceReference $resource, ?ResourceAttributeBatch $batch = null): array
     {
         $builders = [];
 
@@ -62,7 +65,7 @@ final readonly class AttributeNamespaces
         }
 
         if ($resource !== null) {
-            $builders[AttributeProviders::RESOURCE] = fn (): array => self::namespaced(AttributeProviders::RESOURCE, $this->resourceValues($resource));
+            $builders[AttributeProviders::RESOURCE] = fn (): array => self::namespaced(AttributeProviders::RESOURCE, $this->resourceValues($resource, $batch));
         }
 
         return $builders;
@@ -105,16 +108,17 @@ final readonly class AttributeNamespaces
      * attributes.
      *
      * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference  $resource
+     * @param  \SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch|null  $batch
      * @return array<string, mixed>
      *
      * @throws \SineMacula\Laravel\Authorization\Exceptions\AttributeProviderFailed
      */
-    private function resourceValues(ResourceReference $resource): array
+    private function resourceValues(ResourceReference $resource, ?ResourceAttributeBatch $batch): array
     {
         $tenant   = $resource->tenant === null ? null : ['type' => $resource->tenant->type, 'id' => $resource->tenant->id];
         $builtIns = self::present(['id' => $resource->id, 'type' => $resource->type, 'tenant' => $tenant]);
 
-        return $builtIns + ($this->providers?->resourceValues($resource) ?? []);
+        return $builtIns + ($this->providers?->resourceValues($resource, $batch) ?? []);
     }
 
     /**

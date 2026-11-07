@@ -11,6 +11,7 @@ use PHPUnit\Framework\TestCase;
 use SineMacula\Laravel\Authorization\Context\AttributeProviders;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Context\ClockEnvironmentContext;
+use SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch;
 use SineMacula\Laravel\Authorization\Context\RoutedRequestContext;
 use SineMacula\Laravel\Authorization\Contracts\AuthenticationContext;
 use SineMacula\Laravel\Authorization\Contracts\ContextSource;
@@ -28,6 +29,7 @@ use Tests\Feature\Stubs\RecordingResourceAttributes;
 use Tests\Feature\Stubs\RecordingSubjectAttributes;
 use Tests\Feature\Stubs\StubIdentity;
 use Tests\Feature\Stubs\StubRequirementChecker;
+use Tests\Fixtures\BulkChecks\FixedBulkAttributes;
 use Tests\Fixtures\QueryScoping\InvariantRequirementChecker;
 
 /**
@@ -416,6 +418,33 @@ final class CheckContextFactoryTest extends TestCase
         $invariant = new CheckContextFactory($this->authentication([], ['authentication']), $this->request([]), $this->environment([]), [], null, $checker);
 
         self::assertTrue($invariant->isRequirementCheckScopeInvariant());
+    }
+
+    /**
+     * A check of a bulk check reads its resource's attributes through the
+     * batch's bulk read.
+     *
+     * @return void
+     */
+    public function testABulkChecksResourceIsReadThroughItsBatch(): void
+    {
+        $container = new Container;
+        $provider  = new FixedBulkAttributes;
+        $record    = ResourceReference::record('post', '42');
+
+        $container->instance(FixedBulkAttributes::class, $provider);
+
+        $factory = new CheckContextFactory(
+            $this->authentication([], ['authentication']),
+            $this->request([]),
+            $this->environment([]),
+            [],
+            new AttributeProviders($container, ['post' => FixedBulkAttributes::class]),
+        );
+
+        self::assertSame([true, 'published'], $factory->make([], null, $record, new ResourceAttributeBatch([$record]))->lookup('resource.status'));
+        self::assertSame([true, 'draft'], $factory->make([], null, $record)->lookup('resource.status'));
+        self::assertCount(1, $provider->bulkCalls);
     }
 
     /**

@@ -965,6 +965,110 @@ final class ResolutionCacheTest extends TestCase
     }
 
     /**
+     * The records missing from the cache are resolved together, once, and each
+     * is kept under its own key, in the memo and the store, with the versions
+     * pinned once; a record found is not resolved again, and one the resolution
+     * leaves out is left out.
+     *
+     * @return void
+     */
+    public function testManyRecordsPoliciesAreResolvedTogetherAndKeptApart(): void
+    {
+        $sharing = ['effect' => 'allow', 'actions' => ['posts:read'], 'principals' => ['user:1']];
+        $policy  = EvaluationPolicy::fromArray(['name' => 'sharing', 'statements' => [$sharing]])->withId('policy-key');
+        $asked   = [];
+        $resolve = function (ResolutionPins $pins, array $missing) use ($policy, &$asked): array {
+            $asked[] = $missing;
+
+            $pins->resourcePolicies('posts');
+
+            $resolutions = [];
+
+            foreach (\array_diff($missing, ['9']) as $id) {
+                $resolutions[$id] = $this->resolve([$policy->withResource("posts:{$id}")]);
+            }
+
+            return $resolutions;
+        };
+
+        $cache = $this->request();
+
+        $cache->rememberResourcePolicies('posts', '1', fn (): Resolution => $this->resolve([]));
+
+        $found = $cache->rememberResourcePoliciesMany('posts', ['1', '7', '9', 'b'], $resolve);
+
+        self::assertSame([['7', '9', 'b']], $asked);
+        self::assertSame([1, 7, 'b'], \array_keys($found));
+        self::assertSame([], $found[1]);
+        self::assertSame('posts:7', $found[7][0]->resource);
+        self::assertSame('posts:b', $cache->rememberResourcePolicies('posts', 'b', fn (): Resolution => $this->resolve([]))[0]->resource);
+        self::assertIsArray($this->store->get('authorization-test:resource-policies:posts:7:platform:every:limits:65536.100.50.512'));
+
+        $next = $this->request();
+
+        self::assertEquals($found[7], $next->rememberResourcePoliciesMany('posts', ['7'], $resolve)[7]);
+        self::assertSame([], $next->rememberResourcePoliciesMany('posts', [], $resolve));
+        self::assertSame([['7', '9', 'b']], $asked);
+        self::assertSame(3, $this->resolutions);
+    }
+
+    /**
+     * Within a batch, the entries of each scope are kept apart as the scope
+     * moves between tenants, so each is resolved once; once the batch closes, a
+     * change of scope drops them again, as without one; a write within it drops
+     * every scope's.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testABatchKeepsEachScopesEntriesUntilItCloses(): void
+    {
+        $cache  = new ResolutionCache;
+        $tenant = self::createTenant('tenant-a');
+
+        $this->app?->instance(ResolutionCache::class, $cache);
+
+        $result = $cache->batch(function () use ($cache, $tenant): string {
+            $this->permissions($cache);
+
+            foreach ([1, 2] as $pass) {
+                TenantScope::within($tenant, null, fn (): array => $this->permissions($cache));
+                TenantScope::within(null, 'admin', fn (): array => $this->permissions($cache));
+                $this->permissions($cache);
+            }
+
+            self::assertSame(3, $this->resolutions);
+
+            $cache->invalidate([]);
+
+            TenantScope::within($tenant, null, fn (): array => $this->permissions($cache));
+
+            self::assertSame(4, $this->resolutions);
+
+            return 'done';
+        });
+
+        self::assertSame('done', $result);
+
+        TenantScope::within($tenant, null, fn (): array => $this->permissions($cache));
+
+        self::assertSame(5, $this->resolutions);
+
+        try {
+            $cache->batch(self::failing(...));
+        } catch (\RuntimeException) {
+            // The batch is closed however it ends.
+        }
+
+        $this->permissions($cache);
+        TenantScope::within($tenant, null, fn (): array => $this->permissions($cache));
+        $this->permissions($cache);
+
+        self::assertSame(8, $this->resolutions);
+    }
+
+    /**
      * Resolve the grantee's permissions through the cache, pinning the given
      * roles as a resolution does.
      *
@@ -1058,5 +1162,17 @@ final class ResolutionCacheTest extends TestCase
     private static function grantee(): Reference
     {
         return new Reference('user', 'user-1');
+    }
+
+    /**
+     * Fail, as a batch's callback may.
+     *
+     * @return never
+     *
+     * @throws \RuntimeException
+     */
+    private static function failing(): never
+    {
+        throw new \RuntimeException('failed');
     }
 }

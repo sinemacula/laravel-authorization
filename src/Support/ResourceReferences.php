@@ -44,18 +44,22 @@ final class ResourceReferences
      * middleware builds one for a raw parameter. It never reaches a pattern
      * match.
      *
+     * A bulk check gives the tenants it has read for its resources at once, in
+     * place of the bound resolver, which answers whatever they leave out.
+     *
      * @param  mixed  $value
+     * @param  \SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver|null  $tenants
      * @return false|\SineMacula\Laravel\Authorization\Support\ResourceReference|null
      */
-    public static function of(mixed $value): false|ResourceReference|null
+    public static function of(mixed $value, ?ResourceTenantResolver $tenants = null): false|ResourceReference|null
     {
         $reference = match (true) {
             $value === null                                            => null,
             $value instanceof ResourceReference                        => $value,
             $value instanceof AuthorizableResource                     => self::ofResource($value),
-            $value instanceof Model                                    => self::ofModel($value),
+            $value instanceof Model                                    => self::ofModel($value, $tenants),
             \is_string($value)                                         => self::ofString($value),
-            \is_array($value)                                          => self::ofPair($value),
+            \is_array($value)                                          => self::ofPair($value, $tenants),
             \is_object($value) && \method_exists($value, '__toString') => new ResourceReference((string) $value),
             default                                                    => false,
         };
@@ -129,9 +133,10 @@ final class ResourceReferences
      * itself, or false when it has no key.
      *
      * @param  \Illuminate\Database\Eloquent\Model  $model
+     * @param  \SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver|null  $tenants
      * @return false|\SineMacula\Laravel\Authorization\Support\ResourceReference
      */
-    private static function ofModel(Model $model): false|ResourceReference
+    private static function ofModel(Model $model, ?ResourceTenantResolver $tenants): false|ResourceReference
     {
         $key = $model->getKey();
 
@@ -139,7 +144,7 @@ final class ResourceReferences
             return false;
         }
 
-        return ResourceReference::record($model->getMorphClass(), (string) $key, self::resolver()->tenantOf($model), $model);
+        return ResourceReference::record($model->getMorphClass(), (string) $key, ($tenants ?? self::resolver())->tenantOf($model), $model);
     }
 
     /**
@@ -168,9 +173,10 @@ final class ResourceReferences
      * The resolver is never asked about a type or id holding a NUL byte.
      *
      * @param  array<mixed>  $pair
+     * @param  \SineMacula\Laravel\Authorization\Contracts\ResourceTenantResolver|null  $tenants
      * @return false|\SineMacula\Laravel\Authorization\Support\ResourceReference
      */
-    private static function ofPair(array $pair): false|ResourceReference
+    private static function ofPair(array $pair, ?ResourceTenantResolver $tenants): false|ResourceReference
     {
         $record = self::recordOf($pair);
 
@@ -181,7 +187,7 @@ final class ResourceReferences
         /** @var string $type */
         $type   = $record->type;
         $id     = (string) $record->id;
-        $tenant = self::resolver()->tenantOfRecord($type, $id);
+        $tenant = ($tenants ?? self::resolver())->tenantOfRecord($type, $id);
 
         return $tenant === false ? false : ResourceReference::record($type, $id, $tenant);
     }

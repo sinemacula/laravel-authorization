@@ -763,6 +763,64 @@ final class TenantScopeTest extends TestCase
     }
 
     /**
+     * The scope key names the tenant, whether checks are decided just below it,
+     * and the application, or the platform for every application, also while
+     * the subject is being resolved.
+     *
+     * @return void
+     */
+    public function testTheScopeKeyNamesTheTenantTheReachAndTheApplication(): void
+    {
+        $tenant = StubTenant::query()->create(['id' => 't1', 'name' => 't1']);
+        $type   = $tenant->getMorphClass();
+
+        self::assertSame('platform:every', TenantScope::scopeKey());
+
+        $this->app?->instance(SubjectResolver::class, new StubSubjectResolver(StubIdentity::create(['id' => 'u1']), $tenant, 'admin'));
+        $this->app?->forgetInstance(ResolvedTenant::class);
+
+        self::assertSame("{$type}:t1:app:admin", TenantScope::scopeKey());
+        self::assertSame("{$type}:t1:below:every", TenantScope::within($tenant, null, static fn (): string => TenantScope::scopeKey(), true));
+        self::assertSame('platform:app:mobile', TenantScope::within(null, 'mobile', static fn (): string => TenantScope::scopeKey()));
+
+        $resolver = new class implements SubjectResolver {
+            /** @var string|null The scope key read while the subject was resolved. */
+            public ?string $key = null;
+
+            /**
+             * Record the scope key, and resolve no subject.
+             *
+             * @return \SineMacula\Laravel\Authorization\Subject|null
+             */
+            #[\Override]
+            public function resolve(): ?Subject
+            {
+                $this->key = TenantScope::scopeKey();
+
+                return null;
+            }
+
+            /**
+             * Make the given user the subject.
+             *
+             * @param  object  $user
+             * @return \SineMacula\Laravel\Authorization\Subject
+             */
+            #[\Override]
+            public function forUser(object $user): Subject
+            {
+                return new Subject($user, $user);
+            }
+        };
+
+        $this->app?->instance(SubjectResolver::class, $resolver);
+        $this->app?->forgetInstance(ResolvedTenant::class);
+
+        self::assertSame('platform:every', TenantScope::scopeKey());
+        self::assertSame('platform:every', $resolver->key);
+    }
+
+    /**
      * Seed one platform-wide role and permission, and one of each owned by each
      * of two tenants.
      *

@@ -107,6 +107,10 @@ must each allow the check, then an explicit allow or a permission held allows it
 - **A programmatic API**: `can`, `cannot`, `authorize`, `check`, `any`, `all` and `explain`, through the
   `Authorization` facade or an injected `AuthorizationManager`, about the current subject or one named with `for()` or
   `forUser()`, and a trait through which a Laravel policy class decides the abilities the Gate hook leaves to it.
+- **Bulk checks**: `checkMany()`, `canEach()` and `filterAuthorized()` decide many resources at once, each exactly as
+  `check()` would decide it and reported with its own decision event, reading the subject's grants and policies once in
+  each scope and the resources' tenants, attached policies and attributes in bulk, so with the package's resolvers and
+  bulk-reading attribute providers a check over many resources never costs a query per resource.
 - **A permission catalogue in code**: enums and providers declare each permission with a description, a category and
   its guards, and `authorization:sync` writes them to the database on deploy, reporting stale rows rather than
   deleting them. Booting never touches the database.
@@ -207,9 +211,9 @@ AUTHORIZATION_LOG_CHANNEL=stderr
 ```
 
 `config/authorization.php` documents every other option: models, tables, the default guard, permission providers, the
-Gate switch, the policy store, the policy limits, the context keys and sources, the attribute providers, the
-subject resolver, the authentication requirement checker, the session policy source and the scope map, the cache, and
-the role hierarchy and rank.
+Gate switch, the policy store, the policy limits, the context keys and sources, the attribute providers, the subject
+resolver, the authentication requirement checker, the session policy source and the scope map, the cache, the bulk
+checks' chunk size, and the role hierarchy and rank.
 
 ## Usage
 
@@ -1173,10 +1177,10 @@ The grants are resolved for each scope a check is decided in and kept per scope 
 resolution cache, so the reach costs no query of its own: once each scope is warm, checks on its resources read none.
 
 `effectivePermissions()`, the Gate, the `permission:` and `authorize:` middleware and the permission directives all
-decide through `check()`, so they answer what the decision allows, with every stage above. `hasPermission()` (and its
-alias `hasPermissionTo()`), `getPermissions()` and `assertHasPermission()` keep their meaning: they report what is
-granted in the current scope and decide nothing, so a permission held that a deny or a cap refuses is still reported as
-held.
+decide through `check()`, and the bulk checks decide as it does, so they answer what the decision allows, with every
+stage above. `hasPermission()` (and its alias `hasPermissionTo()`), `getPermissions()` and `assertHasPermission()` keep
+their meaning: they report what is granted in the current scope and decide nothing, so a permission held that a deny or
+a cap refuses is still reported as held.
 
 ### Writing policies
 
@@ -1292,9 +1296,9 @@ check reads `environment`, then kept for the rest of the check, so `Carbon::setT
 attributes](#subject-and-resource-attributes).
 
 What the caller passes lands under `input`, and only there: the `$context` of `check()`, `can()`, `cannot()`, `any()`,
-`all()`, `authorize()`, `explain()`, `effectivePermissions()` and a policy class's `decide()`, the string-keyed and
-associative arguments of a Gate check, and the context of `assertCan()` and `assertCannot()`. A caller can never supply
-a trusted value:
+`all()`, `authorize()`, `explain()`, `canEach()`, `filterAuthorized()`, each `CheckInput` of `checkMany()`,
+`effectivePermissions()` and a policy class's `decide()`, the string-keyed and associative arguments of a Gate check,
+and the context of `assertCan()` and `assertCannot()`. A caller can never supply a trusted value:
 
 ```php
 Authorization::can('posts:publish', $post, ['post' => ['status' => 'draft']]); // input.post.status
@@ -1655,9 +1659,9 @@ in the session of the request that recorded it, whichever subject it was about (
 until the earliest instant a met requirement it read stops being met. The decision's own `$decision->freshness` keeps a
 fingerprint of the session it was made in (its SHA-256 hash, never the session id, so the decision stays safe to log)
 and that instant, and `isFreshFor($session)` says whether it may be reused in a session. Nothing else keeps a decision:
-`can()`, `cannot()`, `any()`, `all()`, the Gate, a policy class's `decide()`, the Blade directives and
-`effectivePermissions()` decide afresh every time, and the resolution cache
-holds grants and policies, never decisions.
+`can()`, `cannot()`, `any()`, `all()`, `checkMany()`, `canEach()`, `filterAuthorized()`, the Gate, a policy class's
+`decide()`, the Blade directives and `effectivePermissions()` decide afresh every time, and the resolution cache holds
+grants and policies, never decisions.
 
 #### Under the suite
 
@@ -1727,29 +1731,33 @@ Every check goes through `SineMacula\Laravel\Authorization\AuthorizationManager`
 proxies and the container injects. Each method decides about the current subject, as the subject resolver gives it,
 or about the subject of the scoped manager it is called on:
 
-| Method                                    | What it does                                                                                     |
-|-------------------------------------------|--------------------------------------------------------------------------------------------------|
-| `can($action, $resource, $context)`       | Decides the action and returns whether it is allowed                                             |
-| `cannot($action, $resource, $context)`    | Returns the opposite of `can()`                                                                  |
-| `authorize($action, $resource, $context)` | Decides the action and throws when it is not allowed                                             |
-| `check($action, $resource, $context)`     | Decides the action and returns the full `Decision`                                               |
-| `any($actions, $resource, $context)`      | Returns whether at least one of the actions is allowed                                           |
-| `all($actions, $resource, $context)`      | Returns whether every one of the actions is allowed                                              |
-| `explain($action, $resource, $context)`   | Decides the action and returns its explanation as text                                           |
-| `lastDecision()`                          | Returns the latest decision of the request or job, whichever manager made it                     |
-| `effectivePermissions($context)`          | Decides every permission the enums declare and returns whether each is allowed                   |
-| `for($subject)`                           | Returns a scoped manager deciding about the model named, in the request's tenant and application |
-| `forUser($user)`                          | Returns a scoped manager deciding about the subject the resolver translates the user into        |
-| `capped($actions)`                        | Returns a scoped manager whose checks are capped by the actions given                            |
-| `withPolicies($policies)`                 | Returns a scoped manager that evaluates only the policies given                                  |
-| `queryScope($model, $action, $context)`   | Returns the scope `whereAuthorized()` puts on a query (see [Query scoping](#query-scoping))      |
+| Method                                            | What it does                                                                                                    |
+|---------------------------------------------------|-----------------------------------------------------------------------------------------------------------------|
+| `can($action, $resource, $context)`               | Decides the action and returns whether it is allowed                                                            |
+| `cannot($action, $resource, $context)`            | Returns the opposite of `can()`                                                                                 |
+| `authorize($action, $resource, $context)`         | Decides the action and throws when it is not allowed                                                            |
+| `check($action, $resource, $context)`             | Decides the action and returns the full `Decision`                                                              |
+| `any($actions, $resource, $context)`              | Returns whether at least one of the actions is allowed                                                          |
+| `all($actions, $resource, $context)`              | Returns whether every one of the actions is allowed                                                             |
+| `checkMany($checks)`                              | Decides each `CheckInput` and returns its `Decision`, keyed as the checks are (see [Bulk checks](#bulk-checks)) |
+| `canEach($action, $resources, $context)`          | Decides the action on each resource and returns whether each is allowed, keyed as the resources are             |
+| `filterAuthorized($action, $resources, $context)` | Returns the resources the action is allowed on, with their keys and order, a collection as its own class        |
+| `explain($action, $resource, $context)`           | Decides the action and returns its explanation as text                                                          |
+| `lastDecision()`                                  | Returns the latest decision of the request or job, whichever manager made it                                    |
+| `effectivePermissions($context)`                  | Decides every permission the enums declare and returns whether each is allowed                                  |
+| `for($subject)`                                   | Returns a scoped manager deciding about the model named, in the request's tenant and application                |
+| `forUser($user)`                                  | Returns a scoped manager deciding about the subject the resolver translates the user into                       |
+| `capped($actions)`                                | Returns a scoped manager whose checks are capped by the actions given                                           |
+| `withPolicies($policies)`                         | Returns a scoped manager that evaluates only the policies given                                                 |
+| `queryScope($model, $action, $context)`           | Returns the scope `whereAuthorized()` puts on a query (see [Query scoping](#query-scoping))                     |
 
-`check()` is the one decision: every other method but `queryScope()` adapts it, and each decision it makes is recorded
-as the last decision and reported with `DecisionEvaluated`; `queryScope()` compiles a scope from the same pipeline
-without deciding a check, so it records and reports nothing. The resource and the context take the same forms
-everywhere: a model, a `[type, id]` pair, a `ResourceReference`, an `AuthorizableResource`, a model class or a string
-names the resource (see [Managing roles, permissions and grants](#managing-roles-permissions-and-grants)), and the
-context is the caller's values, read under `input` (see [The check's context](#the-checks-context)).
+`check()` is the one decision, and `checkMany()` the same decision over many checks, `check()` being `checkMany()` given
+one: every other method but `queryScope()` adapts one of them, and each decision they make is recorded as the last
+decision and reported with `DecisionEvaluated`; `queryScope()` compiles a scope from the same pipeline without deciding
+a check, so it records and reports nothing. The resource and the context take the same forms everywhere: a model, a
+`[type, id]` pair, a `ResourceReference`, an `AuthorizableResource`, a model class or a string names the resource (see
+[Managing roles, permissions and grants](#managing-roles-permissions-and-grants)), and the context is the caller's
+values, read under `input` (see [The check's context](#the-checks-context)).
 
 ```php
 use SineMacula\Laravel\Authorization\Facades\Authorization;
@@ -1801,6 +1809,119 @@ final class PublishPost
     }
 }
 ```
+
+### Bulk checks
+
+`checkMany()`, `canEach()` and `filterAuthorized()` decide many checks at once, a page of results or a list of rows,
+each exactly as `check()` would decide it on its own, but reading what the checks share once rather than once a check:
+
+```php
+use SineMacula\Laravel\Authorization\Evaluation\CheckInput;
+use SineMacula\Laravel\Authorization\Facades\Authorization;
+
+$decisions = Authorization::checkMany([
+    'edit'    => new CheckInput('posts:update', $post),
+    'publish' => new CheckInput('posts:publish', $post, ['channel' => 'web']),
+    'report'  => new CheckInput('reports:view', ['report', 42]),
+]);
+
+$decisions['publish']->isAllowed();
+
+Authorization::canEach('posts:update', $posts);         // [key => bool], one entry for each post
+Authorization::filterAuthorized('posts:view', $posts);  // the posts allowed, with their keys, in their order
+
+$user->canEach('posts:update', $posts);                 // Authorization::for($user)->canEach(...)
+$user->filterAuthorized('posts:view', $posts);          // Authorization::for($user)->filterAuthorized(...)
+```
+
+`checkMany()` takes an array of `CheckInput`s, each an action, a resource in any form `check()` takes and the caller's
+context, and returns one `Decision` for each, under the same key and in the same order, a check repeated decided and
+returned under each of its keys. A list holding anything other than a `CheckInput` is refused with an
+`InvalidCheckArgumentException` before any check is decided. `canEach()` decides one action, with one context, on each
+of the resources of an array, a collection or any other iterable, and returns whether each is allowed, keyed as the
+resources are; an `insufficient_authentication` decision is `false`, as it is for `can()`. `filterAuthorized()` returns
+the resources the action is allowed on, the very objects given, with their keys, in their order: a collection comes
+back as a collection of its own class (an Eloquent collection as an Eloquent collection), and anything else as an
+array, its keys kept, so call `values()` or `array_values()` for a list. Neither stops at a denial: every resource is
+decided. No checks or no resources return an empty result. A generator that yields a key twice keeps the last resource
+under it, as `iterator_to_array()` does. Models using `HasPermissions` get `canEach()` and `filterAuthorized()` too,
+deciding about the model through `Authorization::for($model)`.
+
+Each check goes through the same stages as `check()`, its own tenant, scope, policies, caps and attributes included, so
+its decision, reason, stage, trace and requirements are those `check()` would give. Each is recorded as the last
+decision and reported with its own `DecisionEvaluated` as soon as it is decided, before the next one, in the order of
+the checks; there is no event for the batch as a whole. `Authorization::lastDecision()` is then the last check
+decided, and an empty batch leaves it as it was. A check that throws where `check()` would throw (an attribute
+provider that fails, say) stops the batch there: the checks before it are recorded and reported, nothing is returned,
+and the tenant scope is restored however the batch ends.
+
+What the checks share is read once. The subject is resolved once for the batch, and its grants, roles, policies,
+permission boundaries, session caps and the guardrails are resolved once in each scope (tenant and application) the
+checks are decided in, through the resolution cache, which keeps each scope's apart. The resources' tenants, the
+policies attached to the records and the records' attributes are read in bulk, so deciding 100 records of one type and
+tenant costs the queries deciding one does: at most one for their tenants (none for a model that declares its tenant),
+one for the policies attached to them and one for their attributes. A check on its own reads exactly what it did
+before.
+
+Reading in bulk needs the resource tenant resolver and the attribute providers to read in bulk. The package's own
+resolvers do. A resolver of your own implements `Contracts\BulkResourceTenantResolver`: `tenantsOf($models)` and
+`tenantsOfRecords($type, $ids)` return each tenant, keyed as given, `null` for none and, for a record, `false` when it
+cannot tell. A resource attribute provider implements `Contracts\BulkResourceAttributeProvider`, whose
+`valuesMany($items)` is given each record's reference and model under a token and returns what `values()` would for
+each, keyed by token:
+
+```php
+use Illuminate\Database\Eloquent\Model;
+use SineMacula\Laravel\Authorization\Contracts\BulkResourceAttributeProvider;
+use SineMacula\Laravel\Authorization\Support\ResourceReference;
+
+final class PostAttributes implements BulkResourceAttributeProvider
+{
+    public function attributes(): array
+    {
+        return ['status' => 'string'];
+    }
+
+    public function values(ResourceReference $resource, ?Model $model): array
+    {
+        return $this->valuesOf($model ?? Post::query()->find($resource->id));
+    }
+
+    public function valuesMany(array $items): array
+    {
+        $ids   = array_map(fn (array $item): ?string => $item['resource']->id, $items);
+        $posts = Post::query()->findMany(array_values($ids))->getDictionary();
+
+        $model = fn (array $item): ?Model => $item['model'] ?? $posts[$item['resource']->id] ?? null;
+
+        return array_map(fn (array $item): array => $this->valuesOf($model($item)), $items);
+    }
+
+    private function valuesOf(?Model $post): array
+    {
+        return $post === null ? [] : ['status' => $post->status];
+    }
+}
+```
+
+An item's answer can be the exception `values()` would throw for it: it fails that item's check alone, and only if the
+check reads `resource`. An item left out of the answer, or every item when `valuesMany()` itself throws, is asked about
+through `values()`, and so is every item of a resolver or provider without the bulk contract. That keeps every decision
+correct, but costs one read for each resource that reads the database, so the one-query guarantee holds only with the
+bulk contracts. The first check on a type that reads `resource` asks its provider about every record of that type still
+to be decided in the chunk, so a provider can be asked about a record whose own check never reads `resource`; that
+answer is used by no check. Two models with the same key are two items, since each may hold other attributes in memory.
+
+The checks are decided in chunks of `authorization.bulk.chunk_size` (`AUTHORIZATION_BULK_CHUNK_SIZE`, 500 by default,
+a whole number of at least 1, checked at boot), and what a chunk read is released once it is decided. The decisions
+themselves, traces included, are all returned at once, so decide a very large set in pages of your own, with
+`chunkById()` say.
+
+A batch sees a write as a sequence of `check()` calls in the same request would. A grant, revocation, policy,
+attachment, boundary or guardrail written while the batch runs, by a listener reacting to one of its decisions
+included, empties the resolution cache, so every later check reads it. The resources' tenants and attributes are read
+for each chunk, the tenants as it starts and the attributes when its first check reads them, so a change to a
+resource's tenant or attributes made while a chunk is decided is seen from the next chunk.
 
 ### Query scoping
 
@@ -2352,20 +2473,21 @@ $this->actingAsSubject(new Subject($user, $user, session: 'session-1'));
 
 The contracts behind the evaluator, for maintainers and reviewers, are in [docs/design](docs/design/README.md):
 
-| Note                                                                                        | Covers                                                      |
-|---------------------------------------------------------------------------------------------|-------------------------------------------------------------|
-| [Evaluation order and deny precedence](docs/design/evaluation-order-and-deny-precedence.md) | The stages, policy sources and caps, and why a deny wins    |
-| [Wildcard and condition semantics](docs/design/wildcard-and-condition-semantics.md)         | Pattern matching, undecidable tests and condition operators |
-| [Polymorphic identity pivots](docs/design/polymorphic-identity-pivots.md)                   | Why grants work for integer, UUID and ULID keys             |
-| [Subject resolver contract](docs/design/subject-resolver-contract.md)                       | The default resolver and how an application binds its own   |
-| [Model extension](docs/design/model-extension.md)                                           | Swapping the shipped models for your own subclasses         |
-| [Impersonation](docs/design/impersonation.md)                                               | Checking as another principal                               |
-| [Spatie compatibility](docs/design/spatie-compatibility.md)                                 | The import from `spatie/laravel-permission` and its aliases |
-| [Permission catalogue sync](docs/design/permission-catalogue-sync.md)                       | Declaring permissions in code and `authorization:sync`      |
-| [Management services](docs/design/management-services.md)                                   | The services every role, permission and grant write uses    |
-| [Events](docs/design/events.md)                                                             | The marker, the snapshots, the actor and after-commit       |
-| [Gate authority](docs/design/gate-authority.md)                                             | The `Gate::before` hook, the switch and policy classes      |
-| [Query scoping](docs/design/query-scoping.md)                                               | `whereAuthorized()`, what it compiles and what it refuses   |
+| Note                                                                                        | Covers                                                        |
+|---------------------------------------------------------------------------------------------|---------------------------------------------------------------|
+| [Evaluation order and deny precedence](docs/design/evaluation-order-and-deny-precedence.md) | The stages, policy sources and caps, and why a deny wins      |
+| [Wildcard and condition semantics](docs/design/wildcard-and-condition-semantics.md)         | Pattern matching, undecidable tests and condition operators   |
+| [Polymorphic identity pivots](docs/design/polymorphic-identity-pivots.md)                   | Why grants work for integer, UUID and ULID keys               |
+| [Subject resolver contract](docs/design/subject-resolver-contract.md)                       | The default resolver and how an application binds its own     |
+| [Model extension](docs/design/model-extension.md)                                           | Swapping the shipped models for your own subclasses           |
+| [Impersonation](docs/design/impersonation.md)                                               | Checking as another principal                                 |
+| [Spatie compatibility](docs/design/spatie-compatibility.md)                                 | The import from `spatie/laravel-permission` and its aliases   |
+| [Permission catalogue sync](docs/design/permission-catalogue-sync.md)                       | Declaring permissions in code and `authorization:sync`        |
+| [Management services](docs/design/management-services.md)                                   | The services every role, permission and grant write uses      |
+| [Events](docs/design/events.md)                                                             | The marker, the snapshots, the actor and after-commit         |
+| [Gate authority](docs/design/gate-authority.md)                                             | The `Gate::before` hook, the switch and policy classes        |
+| [Query scoping](docs/design/query-scoping.md)                                               | `whereAuthorized()`, what it compiles and what it refuses     |
+| [Bulk checks](docs/design/bulk-checks.md)                                                   | `checkMany()`, what it reads once and in bulk, and its events |
 
 ## Requirements
 

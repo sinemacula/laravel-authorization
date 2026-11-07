@@ -119,4 +119,17 @@ final class InvalidCheckArgumentExceptionTest extends TestCase
     {
         self::assertSame('all() takes at least one action to decide, none given.', InvalidCheckArgumentException::noActions('all')->getMessage());
     }
+
+    /**
+     * A bulk check given something other than a check names its key.
+     *
+     * @return void
+     */
+    public function testNotACheckNamesTheKey(): void
+    {
+        $message = 'checkMany() takes a CheckInput for each check to decide; the check at key ';
+
+        self::assertSame($message . '\'posts\' is not one.', InvalidCheckArgumentException::notACheck('posts')->getMessage());
+        self::assertSame($message . '\'3\' is not one.', InvalidCheckArgumentException::notACheck(3)->getMessage());
+    }
 }
