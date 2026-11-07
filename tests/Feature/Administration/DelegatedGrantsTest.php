@@ -779,7 +779,7 @@ final class DelegatedGrantsTest extends TestCase
 
         self::assertTrue($screen->isAllowed(), 'The screen refused it as ' . $screen->reason?->value);
         $grant();
-        $rows = DB::table('authorizable_permissions')->where('authorizable_id', $user->id)->where('permission_id', $target->id);
+        $rows = DB::table('authorizable_permissions')->where('authorizable_id', $user->getKey())->where('permission_id', $target->id);
 
         self::assertSame(1, ($tenant === null ? $rows->whereNull('tenant_id') : $rows->where('tenant_id', $tenant->getKey()))->count());
     }
