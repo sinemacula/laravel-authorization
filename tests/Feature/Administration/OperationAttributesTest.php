@@ -97,6 +97,10 @@ final class OperationAttributesTest extends TestCase
     {
         $admin = StubIdentity::create(['id' => 'admin-1']);
 
+        // The grantee is named by a reference alone, whose rank cannot be read,
+        // so rank is off: the attributes are what this test is about.
+        config(['authorization.rank.enabled' => false]);
+
         $admin->attachPolicy(Policy::create(['name' => 'revoker', 'document' => ['statements' => [[
             'effect'     => PolicyEffect::ALLOW->value,
             'actions'    => [PackagePermissions::PERMISSION_REVOKE],

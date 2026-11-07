@@ -81,20 +81,31 @@ use SineMacula\Laravel\Authorization\Support\RoleParity;
  * of that name; one by model decides that row whether it is held or not.
  * `revokeAll()` decides the revocation of every row and the removal of every
  * permission boundary (`authorization:boundary.remove`) the grantee has. There
- * is no blanket action. A change that can only narrow (revoking a permission, a
- * role no deny is attached to, or detaching an allow-only policy, see
- * `Narrowing`) is allowed on its action alone; every other waits for the scope,
- * owner, rank, self and grantable rules of the later parts of BL-65 and is
- * refused as `administration.unprovable` once the action is allowed. Every
- * event the call dispatches carries the operation, with the actor, its mode and
- * the actions, and every grant row it writes records the actor in
- * `granted_by_type` and `granted_by_id`; the actor is never read from the
- * authenticated user. A grantee that is not a saved model with a key, or a
- * reference with a type and a key, throws `InvalidGranteeException` before
- * anything is read. A role or permission name that answers no row throws
- * `UnknownRoleException` or `UnknownPermissionException`; a target that is not
- * a saved model of the kind granted, such as a policy sync handed another
- * model, throws `InvalidGrantTargetException`.
+ * is no blanket action. Every change to an identity or a principal is then
+ * weighed by the administration stage (see `OperationConstraints`): it is made
+ * from the tenant that holds the grant row (`administration.owner`), and the
+ * actor must be strictly senior to the grantee (`administration.rank`); one
+ * that may widen authority must be allowed across its whole reach
+ * (`administration.scope`) and, made to the actor itself, also allowed
+ * `authorization:administration.self` (`administration.self`). A change that
+ * can only narrow (revoking a permission, a role no deny is attached to,
+ * detaching an allow-only policy, or a grant that only shortens one held, see
+ * `Narrowing`) is then allowed; a direct grant of a permission, a sync's
+ * additions included, is allowed when the actor provably holds it across its
+ * reach and lifetime, or may grant it explicitly (see `Possession`), and is
+ * otherwise refused as `administration.not_grantable` or
+ * `administration.unprovable`; every other change, a role grant or a policy
+ * attachment, waits for the later parts of BL-65 and is refused as
+ * `administration.unprovable`. Every event the call dispatches carries the
+ * operation, with the actor, its mode and the actions, and every grant row it
+ * writes records the actor in `granted_by_type` and `granted_by_id`; the actor
+ * is never read from the authenticated user. A grantee that is not a saved
+ * model with a key, or a reference with a type and a key, throws
+ * `InvalidGranteeException` before anything is read. A role or permission name
+ * that answers no row throws `UnknownRoleException` or
+ * `UnknownPermissionException`; a target that is not a saved model of the kind
+ * granted, such as a policy sync handed another model, throws
+ * `InvalidGrantTargetException`.
  *
  * A grantee is an identity or a role: a policy attached to a role applies to
  * whoever holds the role, within both grants' scopes, and to whoever holds a

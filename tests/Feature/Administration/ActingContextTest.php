@@ -49,6 +49,21 @@ final class ActingContextTest extends TestCase
     use CatchesRefusals;
 
     /**
+     * Turn rank off: these tests are about the acting context, and name
+     * grantees by references alone, whose rank cannot be read (see
+     * `OperationConstraintsTest` for rank).
+     *
+     * @return void
+     */
+    #[\Override]
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        config(['authorization.rank.enabled' => false]);
+    }
+
+    /**
      * The current acting context is the request's subject as `check()` resolves
      * it, its identity, guard and session kept.
      *

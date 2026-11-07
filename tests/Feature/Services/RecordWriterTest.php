@@ -89,7 +89,7 @@ final class RecordWriterTest extends TestCase
         self::assertNotSame($keyed->id, $fresh->id);
         self::assertSame(['editor', 'author'], [$keyed->name, Role::query()->findOrFail($fresh->id)->name]);
         self::assertSame(4, $fresh->rank);
-        $admin = self::administrator();
+        $admin = self::administrator(rank: null);
 
         $create = static fn (): Role => RecordWriter::create($admin, PackagePermissions::ROLE_CREATE, new Role, null, ['name' => 'writer']);
 
@@ -199,7 +199,7 @@ final class RecordWriterTest extends TestCase
     {
         Event::fake([RoleUpdated::class, AuthorizationFailed::class]);
 
-        $admin = self::administrator([]);
+        $admin = self::administrator([], rank: null);
         $role  = Role::query()->create(['name' => 'editor']);
         $level = null;
 
@@ -240,7 +240,7 @@ final class RecordWriterTest extends TestCase
      */
     public function testADelegatedDeleteIsDecidedBeforeItDeletes(): void
     {
-        $admin = self::administrator();
+        $admin = self::administrator(rank: null);
         $role  = Role::query()->create(['name' => 'editor']);
 
         $refusal = self::refusalOf(static fn () => RecordWriter::delete($admin, PackagePermissions::ROLE_DELETE, static fn (): Role => $role));
@@ -263,7 +263,7 @@ final class RecordWriterTest extends TestCase
      */
     public function testADelegatedSaveOffersEveryProposedAttribute(): void
     {
-        $admin = self::administrator([]);
+        $admin = self::administrator([], rank: null);
         $role  = Role::query()->create(['name' => 'editor']);
 
         self::allow($admin, PackagePermissions::ROLE_UPDATE, ['resource.change.guard' => 'web', 'resource.change.rank' => 3]);
@@ -286,7 +286,7 @@ final class RecordWriterTest extends TestCase
      */
     public function testADelegatedSaveOffersTheDocumentsDigest(): void
     {
-        $admin    = self::administrator([]);
+        $admin    = self::administrator([], rank: null);
         $policy   = Policy::query()->create(['name' => 'readers', 'document' => ['statements' => []]]);
         $document = ['statements' => [['effect' => 'allow', 'actions' => ['posts:read']]]];
         $digest   = DocumentDigest::of(PolicyDocument::decode($document, ''))->digest;

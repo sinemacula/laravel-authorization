@@ -5,21 +5,24 @@ declare(strict_types = 1);
 namespace SineMacula\Laravel\Authorization\Administration;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Carbon;
 use SineMacula\Laravel\Authorization\Database\AuthorizationConnection;
+use SineMacula\Laravel\Authorization\Enums\GrantTarget;
 use SineMacula\Laravel\Authorization\Evaluation\Enums\PolicyEffect;
 use SineMacula\Laravel\Authorization\Evaluation\InvalidPolicyDocumentException;
 use SineMacula\Laravel\Authorization\Evaluation\Statement;
 use SineMacula\Laravel\Authorization\Models\Policy;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Services\Support\GrantChanges;
 use SineMacula\Laravel\Authorization\Support\InlinePolicies;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
 use SineMacula\Laravel\Authorization\Support\PolicyDocument;
 use SineMacula\Laravel\Authorization\Support\RoleGraph;
 
 /**
- * Tells whether removing a grant can only narrow authority, so delegated
- * administration may allow it on its action's decision alone, before the
- * constraints of the later parts of BL-65 are evaluated.
+ * Tells whether removing a grant, or shortening one, can only narrow authority,
+ * so delegated administration need not prove it holds what it hands out (see
+ * `OperationConstraints`).
  *
  * Removing something narrows only when it took nothing away: revoking a
  * permission always does; revoking a role does when no policy attached to the
@@ -32,6 +35,14 @@ use SineMacula\Laravel\Authorization\Support\RoleGraph;
  * screen judges what the service judges. A document that cannot be read, and a
  * chain of roles that cannot be read whole, is taken to deny, so its removal is
  * never judged narrowing.
+ *
+ * A grant to an identity or a principal of what it holds live in the same scope
+ * (tenant and application) only shortens or narrows that grant when it lasts no
+ * longer and reaches no further: it takes part of the grant away, so it narrows
+ * exactly when revoking the whole grant would. Granting the same grant again,
+ * with the same expiry and reach, changes nothing and narrows too. An
+ * extension, a wider reach, a grant that has expired and is re-armed, and a
+ * grant of anything not held live in the scope may widen.
  *
  * @author      Ben Carey <bdmc@sinemacula.co.uk>
  * @copyright   2026 Sine Macula Limited
@@ -59,6 +70,30 @@ final class Narrowing
     }
 
     /**
+     * Determine whether the grant the change proposes can only shorten or
+     * narrow a role, permission or policy the grantee, an identity or a
+     * principal, holds live in the change's scope: it lasts no longer and
+     * reaches no further than the grant held, and revoking that grant would
+     * only narrow. The grant held is read on the write connection.
+     *
+     * @param  string  $action
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $change
+     * @return bool
+     */
+    public static function isShortening(string $action, OperationChange $change): bool
+    {
+        $kind = self::kindGranting($action);
+
+        if ($kind === null || $change->target === null || OperationGrantee::isRole($change->grantee)) {
+            return false;
+        }
+
+        $held = GrantChanges::table($kind, $change->grantee, null, $change->scope)->liveRow(GrantChanges::key($change->target));
+
+        return $held !== null && self::isWithin($change, ...$held) && self::isNarrowing($kind->revokeAction(), $change->target);
+    }
+
+    /**
      * Determine whether the policy, as stored, has no deny statement. A policy
      * that is gone, or whose document cannot be read, is taken to deny.
      *
@@ -68,6 +103,41 @@ final class Narrowing
     public static function isAllowOnly(Policy $policy): bool
     {
         return self::hasNoDeny(InlinePolicies::stored($policy->getKey()));
+    }
+
+    /**
+     * Return the kind of grant the action grants, or null for an action that
+     * grants none of the grant service's kinds.
+     *
+     * @param  string  $action
+     * @return \SineMacula\Laravel\Authorization\Enums\GrantTarget|null
+     */
+    private static function kindGranting(string $action): ?GrantTarget
+    {
+        foreach (GrantTarget::cases() as $kind) {
+            if ($kind->grantAction() === $action) {
+                return $kind;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Determine whether the change lasts no longer and reaches no further than
+     * the grant held: a held grant that never expires outlasts any, and one
+     * that reaches the tenants below covers one that does not.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Administration\OperationChange  $change
+     * @param  \Illuminate\Support\Carbon|null  $expiresAt
+     * @param  bool  $reachesBelow
+     * @return bool
+     */
+    private static function isWithin(OperationChange $change, ?Carbon $expiresAt, bool $reachesBelow): bool
+    {
+        $lastsNoLonger = $expiresAt === null || ($change->expiresAt !== null && $change->expiresAt->lessThanOrEqualTo($expiresAt));
+
+        return $lastsNoLonger && ($reachesBelow || !$change->scope->includeSubtree);
     }
 
     /**

@@ -10,6 +10,7 @@ use Illuminate\Support\Carbon;
 use PHPUnit\Framework\Attributes\CoversClass;
 use SineMacula\Laravel\Authorization\Administration\RankComparison;
 use SineMacula\Laravel\Authorization\Models\Role;
+use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\AuthorizationScope;
 use Tests\Concerns\ActsAsTenant;
 use Tests\Feature\Stubs\RolesOnlyPrincipal;
@@ -232,6 +233,69 @@ final class RankComparisonTest extends TestCase
         self::assertTrue($senior->canActOn($junior));
         self::assertFalse($junior->canActOn($senior));
         self::assertFalse($senior->canActOn(new \stdClass));
+    }
+
+    /**
+     * The rank of a role a change would grant the target counts as the
+     * target's: a grant leaving it equal to or senior to the actor is refused,
+     * and one leaving it junior is not.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testTheRankGrantedCountsAsTheTargets(): void
+    {
+        $actor  = self::holding('actor', 3);
+        $target = self::holding('target', 7);
+
+        self::assertTrue(RankComparison::canActOn($actor, $target));
+        self::assertTrue(RankComparison::canActOn($actor, $target, null, 4));
+        self::assertFalse(RankComparison::canActOn($actor, $target, null, 3));
+        self::assertFalse(RankComparison::canActOn($actor, $target, null, 1));
+        self::assertTrue(RankComparison::canActOn($actor, StubIdentity::create(['id' => 'bare']), null, 9));
+        self::assertFalse(RankComparison::canActOn($actor, StubIdentity::query()->findOrFail('bare'), null, 2));
+    }
+
+    /**
+     * An actor given as a resolved subject holds the roles that reach it in a
+     * check: its principal's, and its identity's when the identity grants to
+     * it, the most senior counting; it is comparable when either side is.
+     *
+     * @return void
+     *
+     * @throws \Throwable
+     */
+    public function testASubjectActorHoldsItsPrincipalsAndIdentitysRoles(): void
+    {
+        $principal = self::holding('principal', 6);
+        $identity  = self::holding('identity', 2);
+        $target    = self::holding('target', 4);
+        $subject   = new Subject($principal, $identity);
+
+        self::assertSame(2, RankComparison::rankOf($subject));
+        self::assertTrue(RankComparison::isComparable($subject));
+        self::assertTrue(RankComparison::canActOn($subject, $target));
+        self::assertFalse(RankComparison::canActOn($principal, $target));
+        self::assertSame(6, RankComparison::rankOf(new Subject($principal, $principal)));
+        self::assertSame(2, RankComparison::rankOf(new Subject(new \stdClass, $identity)));
+        self::assertTrue(RankComparison::isComparable(new Subject(new \stdClass, $identity)));
+        self::assertFalse(RankComparison::isComparable(new Subject(new \stdClass)));
+        self::assertNull(RankComparison::rankOf(new Subject(new \stdClass)));
+    }
+
+    /**
+     * Rank is a constraint unless `authorization.rank.enabled` turns it off.
+     *
+     * @return void
+     */
+    public function testRankIsEnabledUnlessTurnedOff(): void
+    {
+        self::assertTrue(RankComparison::isEnabled());
+
+        config(['authorization.rank.enabled' => false]);
+
+        self::assertFalse(RankComparison::isEnabled());
     }
 
     /**

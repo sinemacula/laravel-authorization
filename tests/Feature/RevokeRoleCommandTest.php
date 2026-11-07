@@ -181,8 +181,8 @@ final class RevokeRoleCommandTest extends TestCase
     /**
      * `--actor` names the actor making the revocation, which is then decided as
      * delegated administration: a revocation of a role no deny is attached to
-     * only narrows, so an actor allowed `authorization:role.revoke` makes it,
-     * and its event carries the actor.
+     * only narrows, so an actor allowed `authorization:role.revoke`, and senior
+     * to the identity, makes it, and its event carries the actor.
      *
      * @return void
      *
@@ -193,7 +193,10 @@ final class RevokeRoleCommandTest extends TestCase
         $role = Role::create(['name' => 'editor', 'guard' => 'web']);
         $user = StubIdentity::create(['id' => 'user-1']);
 
-        StubIdentity::create(['id' => 'admin-1'])->givePermission(Permission::create(['name' => PackagePermissions::ROLE_REVOKE]));
+        $admin = StubIdentity::create(['id' => 'admin-1']);
+
+        $admin->givePermission(Permission::create(['name' => PackagePermissions::ROLE_REVOKE]));
+        app(GrantService::class)->grantRole($admin, Role::create(['name' => 'administrator', 'guard' => 'web', 'rank' => 0]));
         app(GrantService::class)->grantRole($user, $role);
 
         Event::fake([RoleRevoked::class]);

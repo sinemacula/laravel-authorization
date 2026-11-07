@@ -2,9 +2,10 @@
 
 Granting, revoking and editing roles, permissions and policies are themselves actions this package checks (AUTHZ-11.1).
 This note gives the whole design of delegated administration, built in four parts (N78), and marks what this release
-enforces: the action catalogue, the acting context, the operation resources decided through `check()`, the refusal of
-everything the later parts are still to prove, and the audit correlation. Parts 2 to 4 are listed as **Not yet**: until
-each lands, what it would prove is refused, so delegated administration never grants anything it cannot justify.
+enforces: the action catalogue, the acting context, the operation resources decided through `check()` and the audit
+correlation (part 1), and the owner, scope, rank, self, expiry and possession rules of direct grants, with atomic
+batches (part 2). Parts 3 and 4 are listed as **Not yet**: until each lands, what it would prove is refused, so
+delegated administration never grants anything it cannot justify.
 
 ## Invariants
 
@@ -63,12 +64,15 @@ each lands, what it would prove is refused, so delegated administration never gr
    or not anything was there, so a refusal never tells it what a grantee holds.
 
 8. **What cannot be proved is refused (in this release).** Once the action is allowed, a change that may widen what
-   anyone may do is refused as `administration.unprovable`. A change that can only narrow (`Administration\Narrowing`)
-   is allowed on its action alone: revoking a permission, revoking a role no policy attached to it or its ancestors
-   denies anything in, read across every tenant on the write connection, so a screen and the service judge alike and an
-   ancestor the tenant scope hides still counts, and detaching a policy with no deny statement. A chain that cannot be
-   read whole is taken to deny. Every grant, attachment and boundary set, every boundary removal, every detach of a
-   denying policy and every change to a definition is unprovable until the parts below prove it.
+   anyone may do and that no rule of this release proves is refused as `administration.unprovable`. A change that can
+   only narrow (`Administration\Narrowing`) is allowed once the owner and rank rules pass: revoking a permission,
+   revoking a role no policy attached to it or its ancestors denies anything in, read across every tenant on the write
+   connection, so a screen and the service judge alike and an ancestor the tenant scope hides still counts, detaching a
+   policy with no deny statement, and a grant that only shortens or narrows one the grantee holds live in the same scope
+   (`Narrowing::isShortening()`). A chain that cannot be read whole is taken to deny. Every role grant, policy
+   attachment and boundary set, every boundary removal, every detach of a denying policy, every resource-policy
+   attachment, every change to a role's permissions or policies and every change to a definition is unprovable until
+   parts 3 and 4 prove it.
 
 9. **Impersonation (in this release).** A delegated change made while impersonating (`ActingContext::impersonatedBy()`)
    is refused as `administration.impersonating` unless the actor is also allowed
@@ -79,23 +83,45 @@ each lands, what it would prove is refused, so delegated administration never gr
     applications never counting): strictly senior, an unranked target the most junior, an unranked actor acting on no
     one, an uncomparable side failing closed, and rank turned off passing every comparison. When neither side holds a
     ranked role, the comparison refuses: both count as the most junior, so their ranks are equal, and strict seniority
-    refuses equal rank; an application that leaves rank on but ranks no role should turn it off. `canActOn()` returns
-    the comparison alone. Part 2 wires it into grants.
+    refuses equal rank; an application that leaves rank on but ranks no role should turn it off. An actor given as a
+    resolved `Subject` is ranked by the roles that reach it, its principal's and its granting identity's, and a rank
+    the change would grant the target counts as the target's. `canActOn()` returns the comparison alone.
 
-11. **Direct grants (part 2, Not yet).** A grant of a role, permission or policy to a grantee is allowed only when the
-    proposed authority is within the actor's effective authority (after denies, boundaries, guardrails and caps) over
-    the whole proposed reach (tenant, subtree, application) and lifetime (the grantable alternative arrives in part 3,
-    invariant 12); the scope it is written in is one the actor administers (`administration.scope`); the record is one
-    its owner allows there (D20, `administration.owner`); the target is junior to the actor (`administration.rank`,
-    `administration.rank_uncomparable`); and a change that benefits the actor needs `administration.self` too
-    (`administration.self`). What is not contained is `administration.not_grantable`.
+11. **Direct grants (part 2, in this release).** The administration stage (`Administration\OperationConstraints`)
+    weighs every change to an identity or a principal (`Administration\OperationGrantee`), in order, each further check
+    decided as the actor through every stage up to the allow but never through the stage again
+    (`Administration\FurtherChecks`):
+    - **owner** (D20): the tenant the check is made from, the request's, must be the tenant that holds the grant row
+      the change edits, the platform for a platform-wide row (`Administration\OwnerConstraint`, a reusable piece part 3
+      applies to definitions, role membership and policies), or the change is `administration.owner`; granting an
+      ancestor's record to a local grantee edits the local row alone; a call that changes nothing edits nothing;
+    - **scope**: a change that may widen authority decides its own action again in the grant's tenant, standing just
+      below it for a subtree grant (`TenantScope::within(..., isBelow: true)`), so only authority that itself reaches
+      below counts, and in the grant's application, so a grant to every application needs authority in every
+      application, or it is `administration.scope`; a platform-wide change already needs platform authority;
+    - **rank**: unless the grantee is the actor, the actor must be strictly senior to it in the grant's scope, and to
+      the rank a role grant would give it, or the change is `administration.rank` (`administration.rank_uncomparable`
+      when a side cannot be read), a revocation, a sync, `revokeAll()`, a boundary change and a call that changes
+      nothing included, so a refusal never depends on what the grantee holds;
+    - **self**: a change to the actor's principal or identity that may widen authority needs
+      `authorization:administration.self` on the same operation, or it is `administration.self`;
+    - **possession** (N77, `Administration\Possession`): a direct grant of a permission is allowed when the actor
+      provably holds it across the grant's reach (tenant, subtree, application) and lifetime
+      (`Administration\HeldLifetime`), its `check()` there allows it, and nothing that denies or caps the actor could
+      limit it anywhere in the reach (`Administration\PossessionLimits`: any deny statement naming an action it covers,
+      a boundary or guardrail not allowing it whole, unconditionally and on every resource, a cap not covering it, or a
+      document that cannot be read, the actor's policies, its roles', every resource's, its boundaries and the
+      guardrails read as stored whatever their application); or when `authorization:permission.grantable` is allowed on
+      the grant's descriptor (`OperationResource::grantable()`). Otherwise it is `administration.not_grantable` when the
+      actor does not hold the permission across the reach and lifetime, and `administration.unprovable` when it does but
+      cannot be proved contained. An extension needs authority lasting until the new expiry; a shortening only narrows.
 
 12. **Roles, grantable rights and impact (part 3, Not yet).** Granting a role covers its whole transitive authority:
-    direct and inherited permissions and policies. An explicit `permission.grantable` or `policy.grantable` decision can
-    allow an exact delegation the actor does not itself hold (N77). A policy right is bound to the policy's digest, so a
-    rewrite needs a new one. A change to a role's content or parent, a permission rename, a policy rewrite and a
-    boundary or resource policy change are re-checked against every holder they reach, as a new distribution of
-    authority. Definitions are edited only from their owner's tenant (D20).
+    direct and inherited permissions and policies. An explicit `policy.grantable` decision can allow an exact delegation
+    of a policy the actor does not itself hold (N77), as `permission.grantable` already does for a direct permission. A
+    policy right is bound to the policy's digest, so a rewrite needs a new one. A change to a role's content or parent,
+    a permission rename, a policy rewrite and a boundary or resource policy change are re-checked against every holder
+    they reach, as a new distribution of authority. Definitions are edited only from their owner's tenant (D20).
 
 13. **Guardrails and concurrency (part 4, Not yet).** Guardrail changes join the operation-resource path. Every
     authorization dependency of a change is locked or version-checked, so a concurrent revocation, role growth, policy
@@ -120,8 +146,9 @@ each lands, what it would prove is refused, so delegated administration never gr
 - **Not allowed.** A decision that refuses throws `AuthorizationException` (or `InsufficientAuthenticationException` for
   a step-up) with the decision, after `AuthorizationFailed` is dispatched; the transaction rolls back, nothing is
   written and no change event is dispatched. The client sees the one `denied` line.
-- **Allowed but unprovable.** The administration stage refuses as `administration.unprovable`, with a trace step naming
-  it; in this release this is every widening change.
+- **Allowed but refused by a constraint.** The administration stage refuses with the constraint's reason, with a trace
+  step naming it; in this release every widening change but a direct grant of a permission is
+  `administration.unprovable`.
 - **Rolled-back audit.** A denial is reported synchronously inside a transaction that rolls back, so an audit store that
   persists it must write on a connection with no part in that transaction: directly on a database connection of its own,
   or through a queue whose backend shares nothing with it (a non-database driver, or the `database` driver on a
@@ -131,7 +158,8 @@ each lands, what it would prove is refused, so delegated administration never gr
   whether to show the administration area at all, decides the action alone; the administration stage never runs, and the
   service's own decision is still made on the operation.
 - **Console.** `authorization:grant` and `authorization:revoke` with `--actor` make the change as that actor, delegated,
-  with no session, so a grant is refused as `administration.unprovable` in this release; without it they are trusted.
+  with no session, so a role grant is refused as `administration.unprovable` in this release; without it they are
+  trusted.
   `authorization:sync`'s `--actor` is recorded on its trusted operation alone.
 - **Attribute keys.** An application attribute provider declaring one of the operation resource's keys must declare it
   with the same type, or the context key catalogue refuses it.
@@ -146,9 +174,16 @@ each lands, what it would prove is refused, so delegated administration never gr
   `Resolvers\ResourcePolicyResolver` -- an operation's record attachments never read.
 - `Administration\OperationAttributes` -- the provider of the resource's attributes, registered by
   `Context\AttributeProviders::fromConfig()`.
-- `Administration\OperationConstraints` -- the administration stage, called from `DecisionPipeline::decideGrants()`.
-- `Administration\Narrowing` -- which removals only narrow.
+- `Administration\OperationConstraints` -- the administration stage, called from `DecisionPipeline::decideGrants()`,
+  with `Administration\FurtherChecks`, the further checks it asks of the pipeline and the tenant the check is made from.
+- `Administration\OperationChange` -- the grant or removal an operation proposes, as values;
+  `Administration\OperationGrantee` -- whether it is for a subject, whether that is the actor, and its model.
+- `Administration\Narrowing` -- which removals, and which grants, only narrow; `Services\Support\GrantTable::liveRow()`
+  -- the grant held live that a shortening is judged against.
 - `Administration\RankComparison` -- the rank comparison, behind `HasRoles::canActOn()`.
+- `Administration\OwnerConstraint` -- only the owner edits.
+- `Administration\Possession`, `Administration\HeldLifetime`, `Administration\PossessionLimits` -- the possession and
+  grantable routes of a direct permission grant.
 - `Support\Operation` -- the operation's actor, identity, impersonator, mode and actions.
 - `Services\Support\RecordWriter`, `Services\Support\GrantChanges` and every management service -- the changes they
   decide, before they write.
@@ -159,11 +194,17 @@ each lands, what it would prove is refused, so delegated administration never gr
 ## Authoritative Tests
 
 - `DelegatedAdministrationTest` -- every service method, called with an actor, refused without its action, deciding its
-  own action, and narrowing or refused as unprovable per this release; screens and services agreeing; atomic batches;
+  own action, and made or refused per this release; screens and services agreeing; atomic batches;
   impersonation; the audit fields and the correlation id.
 - `ActingContextTest` -- resolution, its failure, the session, caps, a machine's credential caps and refusals.
-- `OperationResourceTest`, `OperationAttributesTest`, `OperationConstraintsTest`, `NarrowingTest`, `RankComparisonTest`
-  -- the operation resource, its attributes, the administration stage, narrowing and rank.
+- `DelegatedGrantsTest` -- part 2 end to end: the rank table over grants, revocations and syncs, the resulting rank,
+  self, node-only and application-limited authority, platform grants, an ancestor's records edited from a descendant,
+  possession and its lifetime, every limit that fails it, explicit grantability, shortening, atomic batches decided on
+  the authority held before them, and a screen and the service agreeing over random grants.
+- `OperationResourceTest`, `OperationChangeTest`, `OperationGranteeTest`, `OperationAttributesTest`,
+  `OperationConstraintsTest`, `FurtherChecksTest`, `NarrowingTest`, `RankComparisonTest`, `OwnerConstraintTest`,
+  `PossessionTest`, `HeldLifetimeTest`, `PossessionLimitsTest` -- the operation resource, its change, its grantee, its
+  attributes, the administration stage and each of its constraints.
 - `GuardrailAuthorityTest`, `GuardrailServiceTest`, `DecisionPipelineTest` -- the guardrail right inside the
   transaction, impersonation, and the exemption of exactly `authorization:guardrail.manage`.
 - `PackagePermissionsTest`, `OperationTest`, `RecordWriterTest`, `GrantChangesTest` -- the catalogue, the operation and
@@ -176,10 +217,10 @@ each lands, what it would prove is refused, so delegated administration never gr
 
 ## Change Triggers
 
-- Part 2 replaces the `administration.unprovable` refusal of direct grants with the scope, owner, rank, self, expiry and
-  possession rules, wiring `RankComparison` in, and refuses with their reasons.
-- Part 3 does the same for roles, definition edits and impact, and decides `permission.grantable` and
-  `policy.grantable`.
+- Part 2 (in this release) replaced the `administration.unprovable` refusal of direct permission grants with the scope,
+  owner, rank, self, expiry and possession rules, wiring `RankComparison` into every change to a subject.
+- Part 3 does the same for roles, definition edits and impact, applies `OwnerConstraint` to definitions, role membership
+  and policies, and decides `policy.grantable`.
 - Part 4 moves guardrail changes onto the operation-resource path and adds the concurrency protocol.
 - Adding an administration action, or an attribute of the operation resource, changes `PackagePermissions` or
   `OperationAttributes` and their tests, and the README's tables.

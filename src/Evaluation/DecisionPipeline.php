@@ -4,7 +4,9 @@ declare(strict_types = 1);
 
 namespace SineMacula\Laravel\Authorization\Evaluation;
 
+use SineMacula\Laravel\Authorization\Administration\FurtherChecks;
 use SineMacula\Laravel\Authorization\Administration\OperationConstraints;
+use SineMacula\Laravel\Authorization\Administration\OperationResource;
 use SineMacula\Laravel\Authorization\Context\AttributeNamespaces;
 use SineMacula\Laravel\Authorization\Context\CheckContextFactory;
 use SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch;
@@ -15,8 +17,10 @@ use SineMacula\Laravel\Authorization\Query\QueryAuthorizer;
 use SineMacula\Laravel\Authorization\Resolvers\GuardrailResolver;
 use SineMacula\Laravel\Authorization\Resolvers\ResourcePolicyResolver;
 use SineMacula\Laravel\Authorization\Resolvers\SessionCapResolver;
+use SineMacula\Laravel\Authorization\Scopes\TenantScope;
 use SineMacula\Laravel\Authorization\Subject;
 use SineMacula\Laravel\Authorization\Support\PackagePermissions;
+use SineMacula\Laravel\Authorization\Support\Reference;
 use SineMacula\Laravel\Authorization\Support\ResourceReference;
 use SineMacula\Laravel\Authorization\Support\ResourceScope;
 use SineMacula\Laravel\Authorization\Support\SubjectGrants;
@@ -144,7 +148,10 @@ final class DecisionPipeline
             return Decision::deny(DecisionReason::RESOURCE_UNRESOLVED, DecisionStage::RESOURCE);
         }
 
-        $decide = fn (): Decision => $this->decideGrants($subject, $action, $resource, $context, $attributes);
+        // An administration check weighs the tenant it is made from, which the
+        // operation's own tenant replaces once the tenant stage admits it.
+        $origin = $resource?->source instanceof OperationResource ? TenantScope::currentChain()->tenant() : null;
+        $decide = fn (): Decision => $this->decideGrants($subject, $action, $resource, $context, $attributes, $origin);
 
         return $resource === null ? $decide() : ResourceScope::decide($subject, $action, $resource, $decide);
     }
@@ -322,8 +329,59 @@ final class DecisionPipeline
      *
      * An allow of an administration action on an operation resource of that
      * action then passes the operation's constraints, at the administration
-     * stage, which can only refuse it (see `OperationConstraints`); a further
-     * check they need is decided here, as this one is, in its scope.
+     * stage, which can only refuse it (see `OperationConstraints`), given the
+     * tenant the check is made from; a further check they need is decided here,
+     * as this one is up to the allow, in the scope in place when they ask, and
+     * never through the administration stage again.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @param  string  $action
+     * @param  \SineMacula\Laravel\Authorization\Support\ResourceReference|null  $resource
+     * @param  array<string, mixed>  $context
+     * @param  \SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch|null  $attributes
+     * @param  \SineMacula\Laravel\Authorization\Support\Reference|null  $origin
+     * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
+     */
+    private function decideGrants(Subject $subject, string $action, ?ResourceReference $resource, array $context, ?ResourceAttributeBatch $attributes, ?Reference $origin): Decision
+    {
+        $decision = $this->decideAlone($subject, $action, $resource, $context, $attributes);
+
+        if (!$resource?->source instanceof OperationResource) {
+            return $decision;
+        }
+
+        $checks = new FurtherChecks(
+            $subject,
+            $origin,
+            fn (string $further, ?ResourceReference $on): Decision => $this->decideAlone($subject, $further, $on, $context, $on === $resource ? $attributes : null),
+            fn (string $further): ?CheckSources => $this->sourcesOrNone($subject, $further, $context),
+        );
+
+        return OperationConstraints::weigh($decision, $action, $resource, $checks);
+    }
+
+    /**
+     * Gather the sources of a check of the action on no resource, in the scope
+     * in place, or none when a document among them cannot be read.
+     *
+     * @param  \SineMacula\Laravel\Authorization\Subject  $subject
+     * @param  string  $action
+     * @param  array<string, mixed>  $context
+     * @return \SineMacula\Laravel\Authorization\Evaluation\CheckSources|null
+     */
+    private function sourcesOrNone(Subject $subject, string $action, array $context): ?CheckSources
+    {
+        try {
+            return $this->sources($subject, $action, null, $context);
+        } catch (InvalidPolicyDocumentException) {
+            return null;
+        }
+    }
+
+    /**
+     * Decide the admitted action from every source, up to the allow, in the
+     * scope in place, without the administration stage: a document that cannot
+     * be read denies it as an invalid policy.
      *
      * @param  \SineMacula\Laravel\Authorization\Subject  $subject
      * @param  string  $action
@@ -332,7 +390,7 @@ final class DecisionPipeline
      * @param  \SineMacula\Laravel\Authorization\Context\ResourceAttributeBatch|null  $attributes
      * @return \SineMacula\Laravel\Authorization\Evaluation\Decision
      */
-    private function decideGrants(Subject $subject, string $action, ?ResourceReference $resource, array $context, ?ResourceAttributeBatch $attributes): Decision
+    private function decideAlone(Subject $subject, string $action, ?ResourceReference $resource, array $context, ?ResourceAttributeBatch $attributes): Decision
     {
         try {
             $sources = $this->sources($subject, $action, $resource, $context, $attributes);
@@ -340,9 +398,7 @@ final class DecisionPipeline
             return Decision::deny(DecisionReason::INVALID_POLICY, DecisionStage::DENY);
         }
 
-        $decide = fn (string $further): Decision => $this->decideGrants($subject, $further, $resource, $context, $attributes);
-
-        return OperationConstraints::weigh($this->weigh($sources, $action, $resource), $action, $resource, $decide);
+        return $this->weigh($sources, $action, $resource);
     }
 
     /**
